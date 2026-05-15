@@ -1,0 +1,9 @@
+node_modules/
+.backups/
+.atl/
+.env
+.env.*
+!.env.example
+dist/
+coverage/
+*.log

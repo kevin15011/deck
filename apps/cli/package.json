@@ -1,0 +1,16 @@
+{
+  "name": "@deck/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deck": "bun run src/main.tsx"
+  },
+  "dependencies": {
+    "@deck/adapter-opencode": "workspace:*",
+    "@deck/adapter-pi": "workspace:*",
+    "ink": "latest",
+    "picocolors": "latest",
+    "react": "latest"
+  }
+}

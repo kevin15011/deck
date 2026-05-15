@@ -1,0 +1,19 @@
+{
+  "name": "deck",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deck": "bun run --cwd apps/cli deck",
+    "test": "bun test"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "latest",
+    "typescript": "latest"
+  }
+}
