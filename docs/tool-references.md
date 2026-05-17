@@ -11,7 +11,7 @@ Future agents must prefer these references over package-name guesses.
 | RTK | https://github.com/rtk-ai/rtk | `rtk` | Token-optimized CLI proxy for verbose terminal commands. |
 | context-mode | https://github.com/mksglu/context-mode | `context-mode` | Context window optimization, sandboxed command execution, indexing/search tools. |
 | codebase-memory | https://github.com/DeusData/codebase-memory-mcp | `codebase-memory-mcp` | Code intelligence MCP server and codebase knowledge graph. |
-| Engram | https://github.com/Gentleman-Programming/engram | `engram` | Persistent memory system for AI coding agents. |
+| Engram | Persistent memory system for AI coding agents (see `engram` binary) | `engram` | Persistent memory system for AI coding agents. |
 
 ## Provider-specific notes
 

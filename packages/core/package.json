@@ -1,0 +1,17 @@
+{
+  "name": "@deck/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./developer-team-catalog": "./src/developer-team-catalog.ts",
+    "./team-catalog": "./src/team-catalog.ts",
+    "./explorer-prompt": "./src/explorer-prompt.ts",
+    "./orchestrator-prompt": "./src/orchestrator-prompt.ts",
+    "./teams/developer/catalog": "./src/teams/developer/catalog.ts",
+    "./teams/developer/content-registry": "./src/teams/developer/content-registry.ts",
+    "./teams/developer/orchestrator-content": "./src/teams/developer/orchestrator-content.ts",
+    "./teams/developer/explorer-content": "./src/teams/developer/explorer-content.ts"
+  }
+}

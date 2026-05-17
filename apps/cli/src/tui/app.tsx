@@ -13,11 +13,18 @@ import {
   type OpenCodeToolInstallResult,
 } from "@deck/adapter-opencode";
 import {
+  buildDeveloperTeamInstallPlan,
+  applyDeveloperTeamInstall,
+  backupDeveloperTeamFiles,
   buildPiInstallationPlan,
   getOptionalPiTools,
+  getTeamsForEnvironment,
   inspectPiEnvironment,
   installPiTools,
   reviewPiRequiredTools,
+  rollbackDeveloperTeamFiles,
+  verifyDeveloperTeamInstall,
+  type AgentApplyResult,
   type InstallablePiTool,
   type InstallablePiToolId,
   type PiPreflightResult,
@@ -25,10 +32,18 @@ import {
   type PiToolInstallResult,
 } from "@deck/adapter-pi";
 
+import {
+  getNextScreenAfterDeveloperTeamInstall,
+  getNextScreenAfterDeveloperTeamReview,
+  getNextScreenAfterPiToolInstall,
+  getNextScreenAfterTeamSelection,
+} from "../developer-team-flow";
 import { getEnvironmentOptions, getHomeMenuOptions } from "../menu-options";
+import { resolveProjectRoot } from "../project-root";
 import { detectSelectedRuntimes, type EnvironmentId, type RuntimeStatus } from "../runtime-detection";
 import { MenuList } from "./components/menu-list";
 import { ScreenFrame } from "./screen-frame";
+import { DeveloperTeamInstallingScreen, DeveloperTeamReviewScreen } from "./screens/developer-team-screens";
 import { HomeScreen } from "./screens/home-screen";
 
 type Screen =
@@ -41,6 +56,9 @@ type Screen =
   | "optional-tools"
   | "installation-review"
   | "installing"
+  | "team-selection"
+  | "developer-team-review"
+  | "developer-team-installing"
   | "opencode-preflight-checking"
   | "opencode-preflight"
   | "opencode-tools"
@@ -70,6 +88,11 @@ export function DeckApp() {
     getSelectableOpenCodeTools().map((tool) => tool.id),
   );
   const [installResults, setInstallResults] = useState<(PiToolInstallResult | OpenCodeToolInstallResult)[]>([]);
+  const [developerTeamResults, setDeveloperTeamResults] = useState<AgentApplyResult[]>([]);
+  const [developerTeamCursor, setDeveloperTeamCursor] = useState(0);
+  const [selectedTeams, setSelectedTeams] = useState<string[]>(
+    getTeamsForEnvironment("pi-development").map((team) => team.id),
+  );
 
   const installedPi = runtimeStatuses.find((status) => status.runtime === "pi" && status.installed && status.command);
   const installedOpenCode = runtimeStatuses.find((status) => status.runtime === "opencode" && status.installed && status.command);
@@ -232,9 +255,75 @@ export function DeckApp() {
     };
   }, [installedOpenCode?.command, openCodeInstallationPlan, screen]);
 
+  useEffect(() => {
+    if (screen !== "developer-team-installing") return;
+
+    let cancelled = false;
+
+    function runInstall() {
+      const projectRoot = resolveProjectRoot();
+      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      const backup = backupDeveloperTeamFiles(plan);
+
+      try {
+        const applyResult = applyDeveloperTeamInstall(plan);
+        const verifyResult = verifyDeveloperTeamInstall(plan);
+
+        if (!cancelled) {
+          if (!verifyResult.valid) {
+            rollbackDeveloperTeamFiles(backup);
+            setDeveloperTeamResults([]);
+            setInstallResults((current) => [
+              ...current,
+              { tool: "Developer Team", success: false, message: "Verification failed. Changes rolled back." },
+            ]);
+          } else {
+            setDeveloperTeamResults(applyResult.results);
+          }
+
+          const nextScreen = getNextScreenAfterDeveloperTeamInstall({
+            selectedEnvironments,
+            hasOpenCodeNext:
+              selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+          });
+
+          resetCursor(nextScreen);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          rollbackDeveloperTeamFiles(backup);
+          setDeveloperTeamResults([]);
+          setInstallResults((current) => [
+            ...current,
+            {
+              tool: "Developer Team",
+              success: false,
+              message: `Installation failed. Changes rolled back.${error instanceof Error ? ` ${error.message}` : ""}`,
+            },
+          ]);
+
+          const nextScreen = getNextScreenAfterDeveloperTeamInstall({
+            selectedEnvironments,
+            hasOpenCodeNext:
+              selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+          });
+
+          resetCursor(nextScreen);
+        }
+      }
+    }
+
+    runInstall();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [screen, selectedEnvironments, installedOpenCode?.command, openCodePreflight]);
+
   function resetCursor(nextScreen: Screen) {
     setScreen(nextScreen);
     setCursor(nextScreen === "home" ? homeCursor : 0);
+    if (nextScreen === "developer-team-review") setDeveloperTeamCursor(0);
   }
 
   function getCursorLimit(): number {
@@ -244,6 +333,8 @@ export function DeckApp() {
     if (screen === "opencode-tool-selection") return getSelectableOpenCodeTools().length - 1;
     if (screen === "installation-review") return 1;
     if (screen === "opencode-installation-review") return 1;
+    if (screen === "team-selection") return Math.max(0, getTeamsForEnvironment("pi-development").length - 1);
+    if (screen === "developer-team-review") return 1;
     return 0;
   }
 
@@ -252,6 +343,7 @@ export function DeckApp() {
     const next = Math.min(limit, Math.max(0, cursor + delta));
     setCursor(next);
     if (screen === "home") setHomeCursor(next);
+    if (screen === "developer-team-review") setDeveloperTeamCursor(next);
   }
 
   function toggleCurrent() {
@@ -261,6 +353,16 @@ export function DeckApp() {
       const id = option.value as EnvironmentId;
       setSelectedEnvironments((current) =>
         current.includes(id) ? current.filter((environment) => environment !== id) : [...current, id],
+      );
+      return;
+    }
+
+    if (screen === "team-selection") {
+      const teams = getTeamsForEnvironment("pi-development");
+      const team = teams[cursor];
+      if (!team) return;
+      setSelectedTeams((current) =>
+        current.includes(team.id) ? current.filter((id) => id !== team.id) : [...current, team.id],
       );
       return;
     }
@@ -291,7 +393,7 @@ export function DeckApp() {
     }
 
     if (screen === "environment-selection") {
-      const selected = selectedEnvironments.length > 0 ? selectedEnvironments : ["pi-development"];
+      const selected = selectedEnvironments.length > 0 ? selectedEnvironments : ["pi-development" as EnvironmentId];
       const statuses = detectSelectedRuntimes(selected);
       setRuntimeStatuses(statuses);
       resetCursor("environment-check");
@@ -317,6 +419,32 @@ export function DeckApp() {
       return;
     }
 
+    if (screen === "team-selection") {
+      const nextScreen = getNextScreenAfterTeamSelection({
+        selectedTeams,
+        hasOpenCodeNext:
+          selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+      });
+      resetCursor(nextScreen);
+      return;
+    }
+
+    if (screen === "developer-team-review") {
+      const nextScreen = getNextScreenAfterDeveloperTeamReview({
+        cursor: developerTeamCursor,
+        selectedEnvironments,
+        hasOpenCodeNext:
+          selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+      });
+
+      if (nextScreen === "developer-team-installing") {
+        resetCursor("developer-team-installing");
+      } else {
+        resetCursor(nextScreen);
+      }
+      return;
+    }
+
     if (screen === "opencode-preflight") return resetCursor("opencode-tools");
     if (screen === "opencode-tools") return resetCursor("opencode-tool-selection");
     if (screen === "opencode-tool-selection") return resetCursor("opencode-installation-review");
@@ -331,12 +459,19 @@ export function DeckApp() {
   }
 
   function goToNextEnvironmentOrComplete() {
-    if (selectedEnvironments.includes("opencode-development") && installedOpenCode?.command && !openCodePreflight) {
-      resetCursor("opencode-preflight-checking");
+    const nextScreen = getNextScreenAfterPiToolInstall({
+      selectedEnvironments,
+      hasPiCommand: Boolean(installedPi?.command),
+      hasOpenCodeNext: selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+    });
+
+    if (nextScreen === "developer-team-review") {
+      resetCursor("developer-team-review");
+      setDeveloperTeamCursor(0);
       return;
     }
 
-    resetCursor("complete");
+    resetCursor(nextScreen);
   }
 
   function goBack() {
@@ -348,11 +483,16 @@ export function DeckApp() {
       "required-tools": "pi-preflight",
       "optional-tools": "required-tools",
       "installation-review": "optional-tools",
+      "installing": "installation-review",
+      "team-selection": "installation-review",
+      "developer-team-review": "team-selection",
+      "developer-team-installing": "developer-team-review",
       "opencode-preflight-checking": "environment-check",
       "opencode-preflight": "environment-check",
       "opencode-tools": "opencode-preflight",
       "opencode-tool-selection": "opencode-tools",
       "opencode-installation-review": "opencode-tool-selection",
+      "opencode-installing": "opencode-installation-review",
       complete: "home",
     };
 
@@ -373,13 +513,18 @@ export function DeckApp() {
       {screen === "optional-tools" ? <OptionalToolsScreen cursor={cursor} selected={selectedOptionalTools} /> : null}
       {screen === "installation-review" ? <InstallationReviewScreen cursor={cursor} plan={installationPlan} /> : null}
       {screen === "installing" ? <Text>Installing selected tools...</Text> : null}
+      {screen === "team-selection" ? <TeamSelectionScreen cursor={cursor} selected={selectedTeams} /> : null}
+      {screen === "developer-team-review" ? (
+        <DeveloperTeamReviewScreen projectRoot={resolveProjectRoot()} cursor={developerTeamCursor} />
+      ) : null}
+      {screen === "developer-team-installing" ? <DeveloperTeamInstallingScreen /> : null}
       {screen === "opencode-preflight-checking" ? <OpenCodeCheckingScreen /> : null}
       {screen === "opencode-preflight" && openCodePreflight ? <OpenCodePreflightScreen preflight={openCodePreflight} /> : null}
       {screen === "opencode-tools" && openCodeToolsReview ? <OpenCodeToolsScreen review={openCodeToolsReview} /> : null}
       {screen === "opencode-tool-selection" ? <OpenCodeToolSelectionScreen cursor={cursor} selected={selectedOpenCodeTools} /> : null}
       {screen === "opencode-installation-review" ? <OpenCodeInstallationReviewScreen cursor={cursor} plan={openCodeInstallationPlan} /> : null}
       {screen === "opencode-installing" ? <Text>Installing selected OpenCode tools...</Text> : null}
-      {screen === "complete" ? <CompleteScreen results={installResults} /> : null}
+      {screen === "complete" ? <CompleteScreen results={installResults} developerTeamResults={developerTeamResults} /> : null}
     </ScreenFrame>
   );
 }
@@ -395,6 +540,9 @@ function screenTitle(screen: Screen): string {
     "optional-tools": "Select optional tools",
     "installation-review": "Installation review",
     installing: "Installing",
+    "team-selection": "Select teams",
+    "developer-team-review": "Developer Team",
+    "developer-team-installing": "Installing Developer Team",
     "opencode-preflight-checking": "Checking OpenCode environment",
     "opencode-preflight": "OpenCode Environment Preflight",
     "opencode-tools": "Review OpenCode tools",
@@ -564,6 +712,27 @@ function OpenCodeToolSelectionScreen({ cursor, selected }: { cursor: number; sel
   );
 }
 
+function TeamSelectionScreen({ cursor, selected }: { cursor: number; selected: string[] }) {
+  const teams = getTeamsForEnvironment("pi-development");
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>Select teams for Pi Development Environment.</Text>
+      <Box marginTop={1}>
+        <MenuList
+          cursor={cursor}
+          multiselect
+          items={teams.map((team) => ({
+            id: team.id,
+            label: team.displayName,
+            hint: team.description,
+            checked: selected.includes(team.id),
+          }))}
+        />
+      </Box>
+    </Box>
+  );
+}
+
 function renderToolReadiness(ready: "ready" | "available-unconfigured" | "missing") {
   if (ready === "ready") return <Text color="green">ready</Text>;
   if (ready === "available-unconfigured") return <Text color="yellow">available, not configured</Text>;
@@ -631,8 +800,10 @@ function OpenCodeInstallationReviewScreen({ cursor, plan }: { cursor: number; pl
   );
 }
 
-function CompleteScreen({ results }: { results: (PiToolInstallResult | OpenCodeToolInstallResult)[] }) {
-  if (results.length === 0) {
+export function CompleteScreen({ results, developerTeamResults }: { results: (PiToolInstallResult | OpenCodeToolInstallResult)[]; developerTeamResults: AgentApplyResult[] }) {
+  const hasResults = results.length > 0 || developerTeamResults.length > 0;
+
+  if (!hasResults) {
     return (
       <Box flexDirection="column">
         <Text>Nothing was changed.</Text>
@@ -651,6 +822,16 @@ function CompleteScreen({ results }: { results: (PiToolInstallResult | OpenCodeT
           {result.success ? "✓" : "✗"} {result.tool}{result.message ? ` — ${result.message}` : ""}
         </Text>
       ))}
+      {developerTeamResults.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold>Developer Team</Text>
+          {developerTeamResults.map((result) => (
+            <Text key={`${result.agentId}-${result.kind}`} color={result.status === "unchanged" ? "green" : result.status === "updated" ? "yellow" : "cyan"}>
+              {result.status === "unchanged" ? "✓" : result.status === "updated" ? "↻" : "+"} {result.agentId} <Text dimColor>({result.kind}, {result.status})</Text>
+            </Text>
+          ))}
+        </Box>
+      ) : null}
       <Box marginTop={1}>
         <Text dimColor>Press Enter to return to Home.</Text>
       </Box>

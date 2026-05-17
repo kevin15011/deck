@@ -58,15 +58,9 @@ packages/
   shared/                 # shared utilities and types
 ```
 
-## Gentle-AI reference
+## Implementation reference
 
-Gentle-AI is the main implementation inspiration and is available locally outside this project at:
-
-```txt
-/home/kevinlb/gentle-ai
-```
-
-Future agents may inspect that repository when Deck needs implementation reference for:
+Deck's implementation draws from an established SDD methodology and runtime configuration patterns available as a private development reference. Future agents may inspect that reference when Deck needs implementation guidance for:
 
 - installation flows;
 - runtime configuration generation;
@@ -77,7 +71,7 @@ Future agents may inspect that repository when Deck needs implementation referen
 - backups and safe config mutation;
 - golden tests for generated assets.
 
-Important: Gentle-AI is inspiration and reference material, not the target architecture. Deck should keep its own product model centered on environments, adapters, providers, workflows, and manifests.
+Important: The reference is inspiration and reference material, not the target architecture. Deck should keep its own product model centered on environments, adapters, providers, workflows, and manifests.
 
 ## Deferred decisions
 

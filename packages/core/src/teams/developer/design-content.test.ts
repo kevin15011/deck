@@ -1,0 +1,226 @@
+import { describe, expect, test } from "bun:test";
+
+import {
+  DESIGN_AGENT_BODY,
+  DESIGN_SKILL_BODY,
+} from "./design-content";
+
+// ---------------------------------------------------------------------------
+// Placeholder detection — these tests guard against trivial/empty content
+// ---------------------------------------------------------------------------
+
+const PLACEHOLDER_SIGNALS = [
+  "Placeholder",
+  "TODO",
+  "TBD",
+  "Not yet implemented",
+  "Coming soon",
+  "placeholder",
+];
+
+function assertNotPlaceholder(content: string, label: string) {
+  for (const signal of PLACEHOLDER_SIGNALS) {
+    expect(content).not.toContain(signal);
+  }
+  // Must have substantial content (>500 chars means real prompt, not a stub)
+  expect(content.length, `${label} should be >500 chars`).toBeGreaterThan(500);
+}
+
+// ---------------------------------------------------------------------------
+// DESIGN_AGENT_BODY
+// ---------------------------------------------------------------------------
+
+describe("DESIGN_AGENT_BODY", () => {
+  test("is not placeholder content", () => {
+    assertNotPlaceholder(DESIGN_AGENT_BODY, "DESIGN_AGENT_BODY");
+  });
+
+  test("contains identity header with Design Agent name", () => {
+    expect(DESIGN_AGENT_BODY).toContain("# Design Agent");
+  });
+
+  test("states it defines architecture, does not implement", () => {
+    expect(DESIGN_AGENT_BODY).toMatch(/design|architect/i);
+    expect(DESIGN_AGENT_BODY).toMatch(/do(es)? not implement/i);
+  });
+
+  test("contains team-scoped ID reference", () => {
+    expect(DESIGN_AGENT_BODY).toContain("deck-developer-design");
+  });
+
+  test("instructs to follow matching skill", () => {
+    expect(DESIGN_AGENT_BODY).toContain("Follow the matching skill");
+  });
+
+  test("does not reference Pi-specific launcher behavior", () => {
+    expect(DESIGN_AGENT_BODY).not.toContain("pi launcher");
+    expect(DESIGN_AGENT_BODY).not.toContain("deck pi");
+    expect(DESIGN_AGENT_BODY).not.toContain("/sdd-");
+  });
+
+  test("lists key non-goals: no code, no specs, no tasks", () => {
+    expect(DESIGN_AGENT_BODY).toMatch(/do(es)? not (implement|write|create|code)/i);
+    expect(DESIGN_AGENT_BODY).toMatch(/do(es)? not.*(spec|task|requirement)/i);
+  });
+
+  test("references structured output for downstream consumption", () => {
+    expect(DESIGN_AGENT_BODY).toMatch(/return contract|output format|downstream/i);
+  });
+
+  test("references relationship with Spec and Proposal", () => {
+    expect(DESIGN_AGENT_BODY).toMatch(/spec|proposal/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DESIGN_SKILL_BODY
+// ---------------------------------------------------------------------------
+
+describe("DESIGN_SKILL_BODY", () => {
+  test("is not placeholder content", () => {
+    assertNotPlaceholder(DESIGN_SKILL_BODY, "DESIGN_SKILL_BODY");
+  });
+
+  test("contains skill title", () => {
+    expect(DESIGN_SKILL_BODY).toContain("# Design Skill");
+  });
+
+  // --- Structured output format sections ---
+
+  test("defines design output with required architecture sections", () => {
+    // Current architecture context
+    expect(DESIGN_SKILL_BODY).toMatch(/current.*(state|architecture|context)/i);
+    // Proposed architecture / approach
+    expect(DESIGN_SKILL_BODY).toMatch(/proposed.*(architecture|approach|design)/i);
+    // Component/module boundaries
+    expect(DESIGN_SKILL_BODY).toMatch(/component|module|boundary|boundary/i);
+    // Data flow
+    expect(DESIGN_SKILL_BODY).toMatch(/data.*(flow|model|schema)/i);
+    // API/contract implications
+    expect(DESIGN_SKILL_BODY).toMatch(/api|contract|interface/i);
+    // Tradeoffs
+    expect(DESIGN_SKILL_BODY).toMatch(/tradeoff|alternative/i);
+    // Risks
+    expect(DESIGN_SKILL_BODY).toMatch(/risk/i);
+    // Open questions
+    expect(DESIGN_SKILL_BODY).toMatch(/open.*(question|issue|item|decision)/i);
+  });
+
+  test("covers file impact expectations", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/file.*(impact|change|affected|touched)/i);
+  });
+
+  test("covers testing strategy when relevant", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/test.*(strategy|approach|plan)/i);
+  });
+
+  test("covers state/persistence implications when relevant", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/state|persist|storage|database|migration/i);
+  });
+
+  test("covers backward compatibility when relevant", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/backward|compatib|migrat/i);
+  });
+
+  // --- Uncertainty preservation ---
+
+  test("instructs to preserve uncertainty and flag open questions", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/uncertainty|flag|ask/i);
+    expect(DESIGN_SKILL_BODY).toMatch(/do(es)? not.*(invent|assume|guess|fabricate)/i);
+  });
+
+  // --- Domain/stack awareness ---
+
+  test("is domain-aware and stack-aware", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/domain|stack|language|framework|convention/i);
+  });
+
+  // --- Downstream consumption ---
+
+  test("defines output structured for Task agent consumption", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/task|downstream|consum/i);
+  });
+
+  // --- Constraints ---
+
+  test("prohibits code implementation", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/do not (implement|write|create|code)/i);
+  });
+
+  test("prohibits writing detailed specs or task breakdowns", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/do not.*(write|create|produce).*(spec|task|requirement)/i);
+  });
+
+  // --- Artifact persistence ---
+
+  test("describes artifact persistence behavior", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/artifact|persist|store|openspec/i);
+  });
+
+  test("does not contain old artifact-store mode selection", () => {
+    expect(DESIGN_SKILL_BODY).not.toMatch(/engram \| openspec \| hybrid \| none/);
+    expect(DESIGN_SKILL_BODY).not.toContain("| engram |");
+    expect(DESIGN_SKILL_BODY).not.toContain("| hybrid |");
+    expect(DESIGN_SKILL_BODY).not.toContain("| none |");
+  });
+
+  test("requires OpenSpec artifact persistence", () => {
+    expect(DESIGN_SKILL_BODY).toContain("openspec/");
+  });
+
+  // --- Runtime neutrality ---
+
+  test("does not reference Pi-specific behavior", () => {
+    expect(DESIGN_SKILL_BODY).not.toContain("pi launcher");
+    expect(DESIGN_SKILL_BODY).not.toContain("deck pi");
+    expect(DESIGN_SKILL_BODY).not.toContain("/sdd-");
+    expect(DESIGN_SKILL_BODY).not.toContain("claude-sonnet");
+    expect(DESIGN_SKILL_BODY).not.toContain("openai");
+  });
+
+  // --- Materially different from placeholder ---
+
+  test("contains methodology steps that a placeholder would not have", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/step|phase|stage/i);
+  });
+
+  test("contains return format guidance for orchestrator consumption", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/return|output|report|summary/i);
+  });
+
+  // --- Proposal input ---
+
+  test("references reading proposal artifact as input", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/proposal|propose/i);
+  });
+
+  // --- Relationship with Spec ---
+
+  test("documents parallel relationship with Spec Agent", () => {
+    expect(DESIGN_SKILL_BODY).toMatch(/spec|parallel|independent/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-check: Design content is distinct from Proposal and Spec
+// ---------------------------------------------------------------------------
+
+describe("Design vs Proposal/Spec differentiation", () => {
+  test("Design agent body does not contain proposal output template", async () => {
+    const { PROPOSAL_SKILL_BODY } = await import("./proposal-content");
+    // Design should not contain proposal-specific sections
+    expect(DESIGN_AGENT_BODY).not.toContain("Rollback Plan");
+    expect(DESIGN_AGENT_BODY).not.toContain("Alternatives and Tradeoffs");
+    expect(DESIGN_AGENT_BODY).not.toContain("Affected Capabilities");
+    // Confirm proposal skill has them (sanity)
+    expect(PROPOSAL_SKILL_BODY).toContain("Rollback Plan");
+  });
+
+  test("Design agent body does not contain spec Given/When/Then sections", async () => {
+    const { SPEC_SKILL_BODY } = await import("./spec-content");
+    expect(DESIGN_AGENT_BODY).not.toContain("Given/When/Then");
+    expect(DESIGN_AGENT_BODY).not.toContain("REQ-");
+    // Confirm spec skill has them (sanity)
+    expect(SPEC_SKILL_BODY).toMatch(/Given.*When.*Then/i);
+  });
+});

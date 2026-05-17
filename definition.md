@@ -20,7 +20,7 @@ Deck es la capa que prepara, organiza y mantiene entornos de trabajo con IA. Su 
 
 Deck es un **AI Environment Harness**: una herramienta para crear, instalar, configurar y mantener entornos de trabajo con IA.
 
-Su propósito es que una persona pueda dejar listo su entorno de IA sin tener que configurar manualmente agentes, subagentes, prompts, memoria, MCPs, paquetes, permisos, workflows, perfiles de modelos y adaptadores por runtime.
+Su propósito es que un usuario pueda dejar listo su entorno de IA sin tener que configurar manualmente agentes, subagentes, prompts, memoria, MCPs, paquetes, permisos, workflows, perfiles de modelos y adaptadores por runtime.
 
 Deck funciona como una capa de configuración y operación encima de herramientas como Pi, OpenCode, Codex o Claude Code. El primer soporte real será para **Pi**, porque ofrece flexibilidad para trabajar con paquetes, subagentes, MCPs y extensiones.
 
@@ -28,11 +28,11 @@ La idea central:
 
 **Deck prepara un entorno de IA completo para que el usuario pueda trabajar con menos fricción y más estructura.**
 
-## 3. Inspiración principal: Gentle-AI
+## 3. Inspiración principal
 
-Deck nace inspirado en Gentle-AI porque Gentle-AI demuestra algo importante: el valor no está solo en tener un agente, sino en tener un entorno completo ya configurado.
+Deck nace inspirado en la experiencia de usar entornos de IA completos ya configurados. El valor no está solo en tener un agente, sino en tener un entorno listo que combine instalación, agentes, workflows, memoria, skills, MCPs, perfiles de modelos, permisos, backups, presets y compatibilidad con varias herramientas.
 
-Gentle-AI combina instalación, agentes, SDD, memoria, skills, MCPs, perfiles de modelos, permisos, backups, presets y compatibilidad con varias herramientas. Deck toma esa inspiración y la convierte en un concepto más general: environments configurables para distintos tipos de trabajo.
+Deck toma esa inspiración y la convierte en un concepto más general: environments configurables para distintos tipos de trabajo.
 
 Lo que Deck quiere conservar de esa inspiración:
 
@@ -243,9 +243,9 @@ El lenguaje principal de Deck se centra en conceptos entendibles para el usuario
 
 Los conceptos internos como orchestrators, sub-agents, adapters, providers y manifests existen como parte de la arquitectura, pero la experiencia principal se organiza alrededor de environments y setup.
 
-## 7. Persona packs y naming packs
+## 7. Identity packs y naming packs
 
-Deck tendrá capacidad de personalizar la identidad visible de agents, workflows y roles mediante packs.
+Deck tendrá capacidad de adaptar la identidad visible de agents, workflows y roles mediante packs.
 
 Un pack puede cambiar nombres, estilo de instrucciones, tono visual y convenciones de presentación sin alterar la arquitectura interna.
 
@@ -268,7 +268,7 @@ Esta capacidad permite que Deck sea flexible: un mismo environment puede present
 
 ## 9. Primer environment: Development
 
-El primer environment debe ser Development porque es donde ya existe experiencia real, necesidad clara y comparación directa con Gentle-AI.
+El primer environment debe ser Development porque es donde ya existe experiencia real, necesidad clara y validación directa con el primer runtime soportado.
 
 ### Objetivo del Development Environment
 
@@ -496,7 +496,7 @@ El MVP debe validar una sola cosa:
 - Interfaz base del MVP: CLI.
 - Interfaz visual de producto: Deck Console.
 - Arquitectura de expansión: adapters, environments, memory providers, prompt templates y packs.
-- Identidad personalizable: persona packs y naming packs, incluyendo Cyberdeck Pack.
+- Identidad adaptable: packs de identidad y naming packs, incluyendo Cyberdeck Pack.
 
 
 
