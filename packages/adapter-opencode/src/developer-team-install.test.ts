@@ -4,15 +4,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
-  buildDeveloperTeamInstallPlan,
-  readDeveloperTeamModelAssignments,
-  applyDeveloperTeamInstall,
+  buildOpenCodeDeveloperTeamInstallPlan,
+  applyOpenCodeDeveloperTeamInstall,
   backupDeveloperTeamFiles,
   rollbackDeveloperTeamFiles,
-  verifyDeveloperTeamInstall,
+  verifyOpenCodeDeveloperTeamInstall,
 } from "./developer-team-install";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
-import type { DeveloperTeamModelAssignments } from "./model-config";
 
 function createTempProject(): string {
   return mkdtempSync(join(tmpdir(), "deck-test-"));
@@ -22,18 +20,18 @@ function cleanup(dir: string) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-function ensurePiDirs(projectRoot: string) {
-  mkdirSync(join(projectRoot, ".pi", "agents"), { recursive: true });
-  mkdirSync(join(projectRoot, ".pi", "skills"), { recursive: true });
+function ensureOpenCodeDirs(projectRoot: string) {
+  mkdirSync(join(projectRoot, ".opencode", "agents"), { recursive: true });
+  mkdirSync(join(projectRoot, ".opencode", "skills"), { recursive: true });
 }
 
-describe("buildDeveloperTeamInstallPlan", () => {
-  test("includes all 12 agents, 12 skills, and project .pi paths", () => {
-    const plan = buildDeveloperTeamInstallPlan("/tmp/my-project");
+describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
+  test("includes all 12 agents, 12 skills, and project .opencode paths", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/my-project");
 
     expect(plan.projectRoot).toBe("/tmp/my-project");
-    expect(plan.agentsDir).toBe("/tmp/my-project/.pi/agents");
-    expect(plan.skillsDir).toBe("/tmp/my-project/.pi/skills");
+    expect(plan.agentsDir).toBe("/tmp/my-project/.opencode/agents");
+    expect(plan.skillsDir).toBe("/tmp/my-project/.opencode/skills");
     expect(plan.agents).toHaveLength(12);
     expect(plan.skills).toHaveLength(12);
 
@@ -48,11 +46,11 @@ describe("buildDeveloperTeamInstallPlan", () => {
     expect(skillIds).toEqual(agentIds);
   });
 
-  test("each planned agent has .pi/agents relative path with team-scoped ID and valid content", () => {
-    const plan = buildDeveloperTeamInstallPlan("/tmp/project");
+  test("each planned agent has .opencode/agents relative path with team-scoped ID and valid content", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
 
     for (const planned of plan.agents) {
-      expect(planned.relativePath).toMatch(/^\.pi\/agents\/deck-developer-.*\.md$/);
+      expect(planned.relativePath).toMatch(/^\.opencode\/agents\/deck-developer-.*\.md$/);
       expect(planned.absolutePath).toBe(join("/tmp/project", planned.relativePath));
       expect(planned.content).toContain("---");
       expect(planned.content).toContain(`name: ${planned.agent.name}`);
@@ -61,18 +59,18 @@ describe("buildDeveloperTeamInstallPlan", () => {
   });
 
   test("each agent prompt explicitly references its matching skillId", () => {
-    const plan = buildDeveloperTeamInstallPlan("/tmp/project");
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
 
     for (const planned of plan.agents) {
       expect(planned.content).toContain(`skill: ${planned.agent.skillId}`);
     }
   });
 
-  test("each planned skill has .pi/skills/<team-scoped-id>/SKILL.md path and valid content", () => {
-    const plan = buildDeveloperTeamInstallPlan("/tmp/project");
+  test("each planned skill has .opencode/skills/<team-scoped-id>/SKILL.md path and valid content", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
 
     for (const planned of plan.skills) {
-      expect(planned.relativePath).toMatch(/^\.pi\/skills\/deck-developer-[^/]+\/SKILL\.md$/);
+      expect(planned.relativePath).toMatch(/^\.opencode\/skills\/deck-developer-[^/]+\/SKILL\.md$/);
       expect(planned.absolutePath).toBe(join("/tmp/project", planned.relativePath));
       expect(planned.content).toContain("---");
       expect(planned.content).toContain(`description: ${planned.agent.description}`);
@@ -84,82 +82,26 @@ describe("buildDeveloperTeamInstallPlan", () => {
     }
   });
 
-  test("includes model frontmatter when modelAssignments are provided", () => {
-    const assignments: DeveloperTeamModelAssignments = {
-      "deck-developer-orchestrator": "anthropic/claude-opus-4",
-      "deck-developer-explorer": "openai/gpt-4o",
-    };
-    const plan = buildDeveloperTeamInstallPlan("/tmp/project", { modelAssignments: assignments });
-
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestrator.content).toContain("model: anthropic/claude-opus-4");
-
-    const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
-    expect(explorer.content).toContain("model: openai/gpt-4o");
-  });
-
-  test("omits model frontmatter when no model assignment exists for an agent", () => {
-    const assignments: DeveloperTeamModelAssignments = {
-      "deck-developer-orchestrator": "anthropic/claude-opus-4",
-    };
-    const plan = buildDeveloperTeamInstallPlan("/tmp/project", { modelAssignments: assignments });
-
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestrator.content).toContain("model: anthropic/claude-opus-4");
-
-    const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
-    expect(explorer.content).not.toContain("model:");
-  });
-
-  test("omits model frontmatter when modelAssignments is empty", () => {
-    const plan = buildDeveloperTeamInstallPlan("/tmp/project", { modelAssignments: {} });
+  test("does not contain .pi paths", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
 
     for (const planned of plan.agents) {
-      expect(planned.content).not.toContain("model:");
+      expect(planned.relativePath).not.toContain(".pi");
+      expect(planned.absolutePath).not.toContain(".pi");
+    }
+    for (const planned of plan.skills) {
+      expect(planned.relativePath).not.toContain(".pi");
+      expect(planned.absolutePath).not.toContain(".pi");
     }
   });
 });
 
-describe("readDeveloperTeamModelAssignments", () => {
-  test("reads existing model frontmatter from installed agent files", () => {
-    const files = new Map<string, string>();
-    files.set(
-      "/tmp/project/.pi/agents/deck-developer-orchestrator.md",
-      ["---", "name: deck-developer-orchestrator", "model: openai-codex/gpt-5.5", "---", "", "# Agent"].join("\n"),
-    );
-    files.set(
-      "/tmp/project/.pi/agents/deck-developer-explorer.md",
-      ["---", "name: deck-developer-explorer", "model: opencode-go/kimi-k2.6", "---", "", "# Agent"].join("\n"),
-    );
-
-    const assignments = readDeveloperTeamModelAssignments("/tmp/project", {
-      exists: (path) => files.has(String(path)),
-      readFile: (path) => files.get(String(path)) ?? "",
-    });
-
-    expect(assignments["deck-developer-orchestrator"]).toBe("openai-codex/gpt-5.5");
-    expect(assignments["deck-developer-explorer"]).toBe("opencode-go/kimi-k2.6");
-    expect(assignments["deck-developer-proposal"]).toBeUndefined();
-  });
-
-  test("returns empty assignments when no installed agent files exist", () => {
-    const assignments = readDeveloperTeamModelAssignments("/tmp/project", {
-      exists: () => false,
-      readFile: () => {
-        throw new Error("should not read missing files");
-      },
-    });
-
-    expect(assignments).toEqual({});
-  });
-});
-
-describe("applyDeveloperTeamInstall", () => {
+describe("applyOpenCodeDeveloperTeamInstall", () => {
   test("writes valid agent and skill files to temp directory", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      const result = applyDeveloperTeamInstall(plan);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
+      const result = applyOpenCodeDeveloperTeamInstall(plan);
 
       expect(result.results).toHaveLength(24);
       expect(result.results.filter((r) => r.kind === "agent")).toHaveLength(12);
@@ -199,14 +141,14 @@ describe("applyDeveloperTeamInstall", () => {
   test("re-applying unchanged files is idempotent", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
 
       // First apply
-      const first = applyDeveloperTeamInstall(plan);
+      const first = applyOpenCodeDeveloperTeamInstall(plan);
       expect(first.results.every((r) => r.status === "created")).toBe(true);
 
       // Second apply — same plan, same content
-      const second = applyDeveloperTeamInstall(plan);
+      const second = applyOpenCodeDeveloperTeamInstall(plan);
       expect(second.results.every((r) => r.status === "unchanged")).toBe(true);
     } finally {
       cleanup(projectRoot);
@@ -216,17 +158,17 @@ describe("applyDeveloperTeamInstall", () => {
   test("detects updated files when content differs", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
 
       // First apply
-      applyDeveloperTeamInstall(plan);
+      applyOpenCodeDeveloperTeamInstall(plan);
 
       // Corrupt one agent file
       const target = plan.agents[0];
       writeFileSync(target.absolutePath, "corrupted", "utf-8");
 
       // Re-apply
-      const result = applyDeveloperTeamInstall(plan);
+      const result = applyOpenCodeDeveloperTeamInstall(plan);
       const targetResult = result.results.find((r) => r.agentId === target.agent.id && r.kind === "agent");
       expect(targetResult?.status).toBe("updated");
 
@@ -239,14 +181,14 @@ describe("applyDeveloperTeamInstall", () => {
   });
 });
 
-describe("verifyDeveloperTeamInstall", () => {
+describe("verifyOpenCodeDeveloperTeamInstall", () => {
   test("passes when all agent and skill files exist with correct content", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      applyDeveloperTeamInstall(plan);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
+      applyOpenCodeDeveloperTeamInstall(plan);
 
-      const verifyResult = verifyDeveloperTeamInstall(plan);
+      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(true);
       expect(verifyResult.agentResults).toHaveLength(12);
       expect(verifyResult.agentResults.every((r) => r.valid)).toBe(true);
@@ -260,10 +202,10 @@ describe("verifyDeveloperTeamInstall", () => {
   test("catches missing agent files", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
 
       // Don't apply — verify should fail
-      const verifyResult = verifyDeveloperTeamInstall(plan);
+      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(false);
       expect(verifyResult.agentResults).toHaveLength(12);
       expect(verifyResult.agentResults.every((r) => !r.valid)).toBe(true);
@@ -285,15 +227,15 @@ describe("verifyDeveloperTeamInstall", () => {
   test("catches name/description mismatch in agent frontmatter", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      applyDeveloperTeamInstall(plan);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
+      applyOpenCodeDeveloperTeamInstall(plan);
 
       // Corrupt the name in one agent file
       const target = plan.agents[0];
       const content = readFileSync(target.absolutePath, "utf-8");
       writeFileSync(target.absolutePath, content.replace(`name: ${target.agent.name}`, "name: wrong-name"), "utf-8");
 
-      const verifyResult = verifyDeveloperTeamInstall(plan);
+      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(false);
 
       const targetResult = verifyResult.agentResults.find((r) => r.agentId === target.agent.id);
@@ -307,14 +249,14 @@ describe("verifyDeveloperTeamInstall", () => {
   test("catches corrupted skill files", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      applyDeveloperTeamInstall(plan);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
+      applyOpenCodeDeveloperTeamInstall(plan);
 
       // Corrupt one skill file
       const target = plan.skills[0];
       writeFileSync(target.absolutePath, "corrupted", "utf-8");
 
-      const verifyResult = verifyDeveloperTeamInstall(plan);
+      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(false);
 
       const targetResult = verifyResult.skillResults.find((r) => r.agentId === target.agent.id);
@@ -330,8 +272,8 @@ describe("backupDeveloperTeamFiles", () => {
   test("captures existing file content and records null for missing files", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      ensurePiDirs(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
+      ensureOpenCodeDirs(projectRoot);
 
       // Pre-create one agent file
       writeFileSync(plan.agents[0].absolutePath, "old-content", "utf-8");
@@ -354,7 +296,7 @@ describe("backupDeveloperTeamFiles", () => {
   test("captures all null when project is empty", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
       const backup = backupDeveloperTeamFiles(plan);
 
       expect(backup.entries.every((e) => e.previousContent === null)).toBe(true);
@@ -368,14 +310,14 @@ describe("rollbackDeveloperTeamFiles", () => {
   test("restores overwritten file content", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      ensurePiDirs(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
+      ensureOpenCodeDirs(projectRoot);
       writeFileSync(plan.agents[0].absolutePath, "original-content", "utf-8");
 
       const backup = backupDeveloperTeamFiles(plan);
 
       // Overwrite via apply
-      applyDeveloperTeamInstall(plan);
+      applyOpenCodeDeveloperTeamInstall(plan);
       expect(readFileSync(plan.agents[0].absolutePath, "utf-8")).not.toBe("original-content");
 
       // Rollback
@@ -389,11 +331,11 @@ describe("rollbackDeveloperTeamFiles", () => {
   test("removes newly-created agent and skill files", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
       const backup = backupDeveloperTeamFiles(plan);
 
       // Apply creates all files
-      applyDeveloperTeamInstall(plan);
+      applyOpenCodeDeveloperTeamInstall(plan);
       expect(existsSync(plan.agents[0].absolutePath)).toBe(true);
       expect(existsSync(plan.skills[0].absolutePath)).toBe(true);
 
@@ -409,11 +351,11 @@ describe("rollbackDeveloperTeamFiles", () => {
   test("returns tree to previous state after partial apply", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
-      ensurePiDirs(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
+      ensureOpenCodeDirs(projectRoot);
 
       // Also create the skill subdirectory for skills[0]
-      mkdirSync(join(projectRoot, ".pi", "skills", plan.skills[0].agent.id), { recursive: true });
+      mkdirSync(join(projectRoot, ".opencode", "skills", plan.skills[0].agent.id), { recursive: true });
 
       // Pre-create some files with known content
       writeFileSync(plan.agents[0].absolutePath, "agent-0-original", "utf-8");
@@ -422,7 +364,7 @@ describe("rollbackDeveloperTeamFiles", () => {
       const backup = backupDeveloperTeamFiles(plan);
 
       // Simulate partial apply: only write a few files
-      mkdirSync(join(projectRoot, ".pi", "skills", plan.skills[1].agent.id), { recursive: true });
+      mkdirSync(join(projectRoot, ".opencode", "skills", plan.skills[1].agent.id), { recursive: true });
       writeFileSync(plan.agents[0].absolutePath, "agent-0-new", "utf-8");
       writeFileSync(plan.agents[1].absolutePath, "agent-1-new", "utf-8");
       writeFileSync(plan.skills[1].absolutePath, "skill-1-new", "utf-8");

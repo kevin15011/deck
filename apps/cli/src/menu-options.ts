@@ -13,7 +13,7 @@ export function getHomeMenuOptions(): MenuOption[] {
   return [
     { value: "start-installation", label: "Start installation" },
     { value: "upgrade-tools", label: `Upgrade tools ${placeholder()}` },
-    { value: "configure-models", label: `Configure models ${placeholder()}` },
+    { value: "configure-models", label: "Configure models" },
     { value: "management-uninstall", label: `Management / uninstall ${placeholder()}` },
     { value: "doctor", label: `Doctor ${placeholder()}` },
     { value: "exit", label: "Exit" },

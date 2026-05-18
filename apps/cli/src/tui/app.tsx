@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import {
   buildOpenCodeInstallationPlan,
@@ -16,18 +19,26 @@ import {
   buildDeveloperTeamInstallPlan,
   applyDeveloperTeamInstall,
   backupDeveloperTeamFiles,
+  buildModelInventoryFromPiListModels,
   buildPiInstallationPlan,
+  detectConfiguredProviders,
   getOptionalPiTools,
   getTeamsForEnvironment,
   inspectPiEnvironment,
   installPiTools,
+  listModelsForProvider,
+  readDeveloperTeamModelAssignments,
   reviewPiRequiredTools,
   rollbackDeveloperTeamFiles,
   verifyDeveloperTeamInstall,
+  DEVELOPER_TEAM_AGENTS,
   type AgentApplyResult,
+  type DeveloperTeamModelAssignments,
   type InstallablePiTool,
   type InstallablePiToolId,
+  type PiModel,
   type PiPreflightResult,
+  type PiProvider,
   type PiRequiredToolsReview,
   type PiToolInstallResult,
 } from "@deck/adapter-pi";
@@ -43,11 +54,21 @@ import { resolveProjectRoot } from "../project-root";
 import { detectSelectedRuntimes, type EnvironmentId, type RuntimeStatus } from "../runtime-detection";
 import { MenuList } from "./components/menu-list";
 import { ScreenFrame } from "./screen-frame";
-import { DeveloperTeamInstallingScreen, DeveloperTeamReviewScreen } from "./screens/developer-team-screens";
+import {
+  AgentModelAssignmentScreen,
+  AgentModelConfigListScreen,
+  DeveloperTeamInstallingScreen,
+  DeveloperTeamReviewScreen,
+  ModelProviderSelectionScreen,
+  ModelSelectionScreen,
+  NoProvidersScreen,
+} from "./screens/developer-team-screens";
 import { HomeScreen } from "./screens/home-screen";
 
 type Screen =
   | "home"
+  | "model-environment-selection"
+  | "model-team-selection"
   | "environment-selection"
   | "environment-check"
   | "pi-preflight-checking"
@@ -57,6 +78,11 @@ type Screen =
   | "installation-review"
   | "installing"
   | "team-selection"
+  | "agent-model-config-list"
+  | "model-provider-selection"
+  | "model-selection"
+  | "agent-model-assignment"
+  | "no-providers"
   | "developer-team-review"
   | "developer-team-installing"
   | "opencode-preflight-checking"
@@ -93,6 +119,20 @@ export function DeckApp() {
   const [selectedTeams, setSelectedTeams] = useState<string[]>(
     getTeamsForEnvironment("pi-development").map((team) => team.id),
   );
+
+  // Model configuration state
+  const [detectedProviders, setDetectedProviders] = useState<PiProvider[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState<PiProvider | null>(null);
+  const [providerModels, setProviderModels] = useState<PiModel[]>([]);
+  const [modelsByProvider, setModelsByProvider] = useState<Record<string, PiModel[]>>({});
+  const [selectedModel, setSelectedModel] = useState<PiModel | null>(null);
+  const [modelAssignments, setModelAssignments] = useState<DeveloperTeamModelAssignments>({});
+  const [agentAssignmentIndex, setAgentAssignmentIndex] = useState(0);
+  const [agentConfigCursor, setAgentConfigCursor] = useState(0);
+  const [modelEnvironmentCursor, setModelEnvironmentCursor] = useState(0);
+  const [modelTeamCursor, setModelTeamCursor] = useState(0);
+  const [selectedModelEnvironment, setSelectedModelEnvironment] = useState<EnvironmentId | null>(null);
+  const [modelConfigSource, setModelConfigSource] = useState<"install" | "menu" | null>(null);
 
   const installedPi = runtimeStatuses.find((status) => status.runtime === "pi" && status.installed && status.command);
   const installedOpenCode = runtimeStatuses.find((status) => status.runtime === "opencode" && status.installed && status.command);
@@ -262,7 +302,7 @@ export function DeckApp() {
 
     function runInstall() {
       const projectRoot = resolveProjectRoot();
-      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments });
       const backup = backupDeveloperTeamFiles(plan);
 
       try {
@@ -323,11 +363,14 @@ export function DeckApp() {
   function resetCursor(nextScreen: Screen) {
     setScreen(nextScreen);
     setCursor(nextScreen === "home" ? homeCursor : 0);
+    if (nextScreen === "agent-model-config-list") setAgentConfigCursor(0);
     if (nextScreen === "developer-team-review") setDeveloperTeamCursor(0);
   }
 
   function getCursorLimit(): number {
     if (screen === "home") return getHomeMenuOptions().length - 1;
+    if (screen === "model-environment-selection") return getEnvironmentOptions().length - 1;
+    if (screen === "model-team-selection") return Math.max(0, getTeamsForEnvironment("pi-development").length - 1);
     if (screen === "environment-selection") return getEnvironmentOptions().length - 1;
     if (screen === "optional-tools") return getOptionalPiTools().length - 1;
     if (screen === "opencode-tool-selection") return getSelectableOpenCodeTools().length - 1;
@@ -335,6 +378,11 @@ export function DeckApp() {
     if (screen === "opencode-installation-review") return 1;
     if (screen === "team-selection") return Math.max(0, getTeamsForEnvironment("pi-development").length - 1);
     if (screen === "developer-team-review") return 1;
+    if (screen === "agent-model-config-list") return DEVELOPER_TEAM_AGENTS.length;
+    if (screen === "model-provider-selection") return Math.max(0, detectedProviders.length - 1);
+    if (screen === "model-selection") return Math.max(0, providerModels.length - 1);
+    if (screen === "agent-model-assignment") return 1;
+    if (screen === "no-providers") return 0;
     return 0;
   }
 
@@ -343,6 +391,9 @@ export function DeckApp() {
     const next = Math.min(limit, Math.max(0, cursor + delta));
     setCursor(next);
     if (screen === "home") setHomeCursor(next);
+    if (screen === "model-environment-selection") setModelEnvironmentCursor(next);
+    if (screen === "model-team-selection") setModelTeamCursor(next);
+    if (screen === "agent-model-config-list") setAgentConfigCursor(next);
     if (screen === "developer-team-review") setDeveloperTeamCursor(next);
   }
 
@@ -388,7 +439,45 @@ export function DeckApp() {
     if (screen === "home") {
       const action = getHomeMenuOptions()[homeCursor]?.value;
       if (action === "start-installation") resetCursor("environment-selection");
+      if (action === "configure-models") {
+        setModelConfigSource("menu");
+        resetCursor("model-environment-selection");
+        return;
+      }
       if (action === "exit") exit();
+      return;
+    }
+
+    if (screen === "model-environment-selection") {
+      const option = getEnvironmentOptions()[modelEnvironmentCursor];
+      if (!option) return;
+      const environment = option.value as EnvironmentId;
+      setSelectedModelEnvironment(environment);
+
+      if (environment === "pi-development") {
+        resetCursor("model-team-selection");
+      } else {
+        resetCursor("complete");
+      }
+      return;
+    }
+
+    if (screen === "model-team-selection") {
+      const teams = getTeamsForEnvironment("pi-development");
+      const team = teams[modelTeamCursor];
+      if (!team) return;
+
+      if (team.id === "developer-team") {
+        setModelAssignments(readDeveloperTeamModelAssignments(resolveProjectRoot()));
+        const inventory = detectPiModelInventoryForTui();
+        setDetectedProviders(inventory.providers);
+        setModelsByProvider(inventory.modelsByProvider);
+        if (inventory.providers.length === 0) {
+          resetCursor("no-providers");
+        } else {
+          resetCursor("agent-model-config-list");
+        }
+      }
       return;
     }
 
@@ -425,7 +514,68 @@ export function DeckApp() {
         hasOpenCodeNext:
           selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
       });
+
+      if (nextScreen === "developer-team-review") {
+        // Insert model configuration before review
+        setModelAssignments(readDeveloperTeamModelAssignments(resolveProjectRoot()));
+        const inventory = detectPiModelInventoryForTui();
+        setDetectedProviders(inventory.providers);
+        setModelsByProvider(inventory.modelsByProvider);
+        setModelConfigSource("install");
+        if (inventory.providers.length === 0) {
+          resetCursor("no-providers");
+        } else {
+          resetCursor("agent-model-config-list");
+        }
+        return;
+      }
+
       resetCursor(nextScreen);
+      return;
+    }
+
+    if (screen === "model-provider-selection") {
+      const provider = detectedProviders[cursor];
+      if (!provider) return;
+      setSelectedProvider(provider);
+      const models = modelsByProvider[provider.id] ?? listModelsForProvider(provider.id, { runCommand: runPiCommand });
+      setProviderModels(models);
+      setSelectedModel(null);
+      resetCursor("model-selection");
+      return;
+    }
+
+    if (screen === "agent-model-config-list") {
+      if (cursor === DEVELOPER_TEAM_AGENTS.length) {
+        // Finish button
+        if (modelConfigSource === "install") {
+          resetCursor("developer-team-review");
+        } else {
+          resetCursor("complete");
+        }
+      } else {
+        setAgentAssignmentIndex(cursor);
+        resetCursor("model-provider-selection");
+      }
+      return;
+    }
+
+    if (screen === "model-selection") {
+      const model = providerModels[cursor];
+      if (!model) return;
+      const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
+      if (!agent) return;
+      setModelAssignments((current) => ({ ...current, [agent.id]: model.id }));
+      resetCursor("agent-model-config-list");
+      return;
+    }
+
+    if (screen === "no-providers") {
+      if (modelConfigSource === "install") {
+        resetCursor("developer-team-review");
+      } else {
+        resetCursor("home");
+      }
       return;
     }
 
@@ -458,6 +608,42 @@ export function DeckApp() {
     if (screen === "complete") resetCursor("home");
   }
 
+  function detectPiProvidersForTui() {
+    return detectConfiguredProviders({
+      settingsPath: getPiSettingsPath(),
+      readFile: readFileSync,
+      runCommand: runPiCommand,
+    });
+  }
+
+  function detectPiModelInventoryForTui() {
+    const listModelsResult = runPiCommand("pi", ["--list-models"]);
+    const output = listModelsResult.stdout || listModelsResult.stderr || "";
+    if (listModelsResult.exitCode === 0 && output.trim().length > 0) {
+      const inventory = buildModelInventoryFromPiListModels(output);
+      if (inventory.providers.length > 0) return inventory;
+    }
+
+    const providers = detectPiProvidersForTui();
+    return {
+      providers,
+      modelsByProvider: Object.fromEntries(providers.map((provider) => [provider.id, listModelsForProvider(provider.id)])),
+    };
+  }
+
+  function runPiCommand(command: string, args: string[]) {
+    const result = Bun.spawnSync([command, ...args], { stdout: "pipe", stderr: "pipe" });
+    return {
+      stdout: new TextDecoder().decode(result.stdout),
+      stderr: new TextDecoder().decode(result.stderr),
+      exitCode: result.exitCode,
+    };
+  }
+
+  function getPiSettingsPath(): string {
+    return join(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"), "settings.json");
+  }
+
   function goToNextEnvironmentOrComplete() {
     const nextScreen = getNextScreenAfterPiToolInstall({
       selectedEnvironments,
@@ -465,44 +651,55 @@ export function DeckApp() {
       hasOpenCodeNext: selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
     });
 
-    if (nextScreen === "developer-team-review") {
-      resetCursor("developer-team-review");
-      setDeveloperTeamCursor(0);
-      return;
-    }
-
     resetCursor(nextScreen);
   }
 
   function goBack() {
-    const previous: Partial<Record<Screen, Screen>> = {
-      "environment-selection": "home",
-      "environment-check": "environment-selection",
-      "pi-preflight-checking": "environment-check",
-      "pi-preflight": "environment-check",
-      "required-tools": "pi-preflight",
-      "optional-tools": "required-tools",
-      "installation-review": "optional-tools",
-      "installing": "installation-review",
-      "team-selection": "installation-review",
-      "developer-team-review": "team-selection",
-      "developer-team-installing": "developer-team-review",
-      "opencode-preflight-checking": "environment-check",
-      "opencode-preflight": "environment-check",
-      "opencode-tools": "opencode-preflight",
-      "opencode-tool-selection": "opencode-tools",
-      "opencode-installation-review": "opencode-tool-selection",
-      "opencode-installing": "opencode-installation-review",
-      complete: "home",
-    };
+    let next: Screen | undefined;
 
-    const next = previous[screen];
+    if (screen === "agent-model-config-list" || screen === "no-providers") {
+      next = modelConfigSource === "install" ? "team-selection" : "model-team-selection";
+    } else {
+      const previous: Partial<Record<Screen, Screen>> = {
+        "model-environment-selection": "home",
+        "model-team-selection": "model-environment-selection",
+        "environment-selection": "home",
+        "environment-check": "environment-selection",
+        "pi-preflight-checking": "environment-check",
+        "pi-preflight": "environment-check",
+        "required-tools": "pi-preflight",
+        "optional-tools": "required-tools",
+        "installation-review": "optional-tools",
+        "installing": "installation-review",
+        "team-selection": "installation-review",
+        "agent-model-config-list": "team-selection",
+        "model-provider-selection": "agent-model-config-list",
+        "model-selection": "model-provider-selection",
+        "agent-model-assignment": "model-selection",
+        "no-providers": "team-selection",
+        "developer-team-review": "agent-model-config-list",
+        "developer-team-installing": "developer-team-review",
+        "opencode-preflight-checking": "environment-check",
+        "opencode-preflight": "environment-check",
+        "opencode-tools": "opencode-preflight",
+        "opencode-tool-selection": "opencode-tools",
+        "opencode-installation-review": "opencode-tool-selection",
+        "opencode-installing": "opencode-installation-review",
+        complete: "home",
+      };
+      next = previous[screen];
+    }
+
     if (next) resetCursor(next);
   }
 
   return (
     <ScreenFrame title={screenTitle(screen)} help={HELP} width={stdout.columns || 72} height={stdout.rows || undefined}>
       {screen === "home" ? <HomeScreen cursor={homeCursor} /> : null}
+      {screen === "model-environment-selection" ? <ModelEnvironmentSelectionScreen cursor={modelEnvironmentCursor} /> : null}
+      {screen === "model-team-selection" && selectedModelEnvironment ? (
+        <ModelTeamSelectionScreen cursor={modelTeamCursor} environment={selectedModelEnvironment} />
+      ) : null}
       {screen === "environment-selection" ? (
         <EnvironmentSelectionScreen cursor={cursor} selected={selectedEnvironments} />
       ) : null}
@@ -514,10 +711,30 @@ export function DeckApp() {
       {screen === "installation-review" ? <InstallationReviewScreen cursor={cursor} plan={installationPlan} /> : null}
       {screen === "installing" ? <Text>Installing selected tools...</Text> : null}
       {screen === "team-selection" ? <TeamSelectionScreen cursor={cursor} selected={selectedTeams} /> : null}
+      {screen === "agent-model-config-list" ? (
+        <AgentModelConfigListScreen cursor={agentConfigCursor} assignments={modelAssignments} />
+      ) : null}
+      {screen === "model-provider-selection" ? (
+        <ModelProviderSelectionScreen cursor={cursor} providers={detectedProviders} />
+      ) : null}
+      {screen === "model-selection" && selectedProvider ? (
+        <ModelSelectionScreen cursor={cursor} provider={selectedProvider} models={providerModels} />
+      ) : null}
+      {screen === "agent-model-assignment" && selectedModel ? (
+        <AgentModelAssignmentScreen
+          cursor={cursor}
+          agentIndex={agentAssignmentIndex}
+          totalAgents={DEVELOPER_TEAM_AGENTS.length}
+          modelId={selectedModel.id}
+        />
+      ) : null}
+      {screen === "no-providers" ? <NoProvidersScreen /> : null}
       {screen === "developer-team-review" ? (
         <DeveloperTeamReviewScreen projectRoot={resolveProjectRoot()} cursor={developerTeamCursor} />
       ) : null}
-      {screen === "developer-team-installing" ? <DeveloperTeamInstallingScreen /> : null}
+      {screen === "developer-team-installing" ? (
+        <DeveloperTeamInstallingScreen currentStep={agentAssignmentIndex} totalSteps={DEVELOPER_TEAM_AGENTS.length} />
+      ) : null}
       {screen === "opencode-preflight-checking" ? <OpenCodeCheckingScreen /> : null}
       {screen === "opencode-preflight" && openCodePreflight ? <OpenCodePreflightScreen preflight={openCodePreflight} /> : null}
       {screen === "opencode-tools" && openCodeToolsReview ? <OpenCodeToolsScreen review={openCodeToolsReview} /> : null}
@@ -532,6 +749,8 @@ export function DeckApp() {
 function screenTitle(screen: Screen): string {
   const titles: Record<Screen, string> = {
     home: "Deck",
+    "model-environment-selection": "Select runner for model config",
+    "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",
     "environment-check": "Environment check",
     "pi-preflight-checking": "Checking Pi environment",
@@ -541,6 +760,11 @@ function screenTitle(screen: Screen): string {
     "installation-review": "Installation review",
     installing: "Installing",
     "team-selection": "Select teams",
+    "agent-model-config-list": "Configure Developer Team models",
+    "model-provider-selection": "Select Pi provider",
+    "model-selection": "Select model",
+    "agent-model-assignment": "Assign model to agent",
+    "no-providers": "No providers detected",
     "developer-team-review": "Developer Team",
     "developer-team-installing": "Installing Developer Team",
     "opencode-preflight-checking": "Checking OpenCode environment",
@@ -586,6 +810,44 @@ function EnvironmentSelectionScreen({ cursor, selected }: { cursor: number; sele
             label: option.label,
             checked: selected.includes(option.value as EnvironmentId),
           }))}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+function ModelEnvironmentSelectionScreen({ cursor }: { cursor: number }) {
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>Select which runner/environment owns the model configuration.</Text>
+      <Box marginTop={1}>
+        <MenuList
+          cursor={cursor}
+          items={getEnvironmentOptions().map((option) => ({
+            id: option.value,
+            label: option.label,
+            hint: option.value === "pi-development" ? "available" : "not implemented yet",
+          }))}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+function ModelTeamSelectionScreen({ cursor, environment }: { cursor: number; environment: EnvironmentId }) {
+  const teams = environment === "pi-development" ? getTeamsForEnvironment("pi-development") : [];
+
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>Select which team you want to configure for {environment}.</Text>
+      <Box marginTop={1}>
+        <MenuList
+          cursor={cursor}
+          items={
+            teams.length > 0
+              ? teams.map((team) => ({ id: team.id, label: team.displayName, hint: team.description }))
+              : [{ id: "none", label: "No configurable teams yet", hint: "not implemented" }]
+          }
         />
       </Box>
     </Box>

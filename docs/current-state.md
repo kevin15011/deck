@@ -4,7 +4,7 @@ This document is the handoff point for continuing Deck work from another machine
 
 ## Status
 
-Deck is a Bun/TypeScript workspace for installing and launching AI development environments through runtime adapters. The current implementation focuses on Pi and keeps team/agent definitions runner-agnostic in `packages/core`.
+Deck is a Bun/TypeScript workspace for installing and launching AI development environments through runtime adapters. Team/agent definitions are runner-agnostic in `packages/core`. Both Pi and OpenCode adapters now materialize the full Developer Team.
 
 ## Architecture decisions
 
@@ -45,6 +45,7 @@ Real content exists for all 12 Developer Team agents:
 | `packages/core/src/teams/developer/` | Canonical Developer Team catalog, prompts, and content registry. |
 | `packages/core/src/spec-registry/` | Runtime-neutral Spec Registry types, OpenSpec path helpers, and event factory. |
 | `packages/adapter-pi/src/developer-team-install.ts` | Pi materializer for Developer Team agents/skills. |
+| `packages/adapter-opencode/src/developer-team-install.ts` | OpenCode materializer for Developer Team agents/skills. |
 | `packages/adapter-pi/src/pi-team-launch.ts` | Pi launch plan builder for team sessions. |
 | `packages/adapter-pi/src/pi-team-profile.ts` | Pi profile materialization for team session instructions. |
 | `apps/cli/src/cli-args.ts` | CLI command parsing for `deck pi developer`. |
@@ -54,25 +55,38 @@ Real content exists for all 12 Developer Team agents:
 
 ## Verification baseline
 
+In a fresh clone or session, run `bun install` first to install workspace dependencies.
+
 Latest verified checks:
 
 ```bash
+bun install
+bun test packages/core/src/teams/developer
+bun test packages/adapter-opencode
+bun test packages/core/
 bun test
 bunx tsc --noEmit
 ```
 
-Both passed after the OpenSpec/Spec Registry refactor and Design Agent implementation.
+## Model configuration
+
+Pi Developer Team installation now includes a model assignment flow:
+
+- Detects configured Pi providers from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `OLLAMA_HOST`, `MISTRAL_API_KEY`).
+- Presents detected providers first, then curated default models per provider.
+- Steps through each Developer Team agent to assign the selected model.
+- Writes `model: provider/model` into agent frontmatter when assigned.
+- Available both during installation (before Developer Team review) and from the main menu (`Configure models`).
 
 ## Next recommended task
 
-All Developer Team agents now have real content. Consider:
+All Developer Team agents now have real content, unit tests, and adapter materializers for both Pi and OpenCode. Consider:
 
 1. Reviewing agent/skill content against source methodology definitions for accuracy.
-2. Adding unit tests for the new content modules (task, apply-general, apply-backend, apply-frontend, verify, review, archive).
-3. Updating adapter-pi to ensure it correctly materializes all 12 agents without agent-specific production branches.
-4. Implementing Phase 5 features (project AI notes, `.deck/ai-notes/`).
-5. Adding skill injection resolution logic in the orchestrator.
-6. End-to-end testing of the full SDD workflow via `deck pi developer`.
+2. Implementing Phase 5 features (project AI notes, `.deck/ai-notes/`).
+3. Adding skill injection resolution logic in the orchestrator.
+4. End-to-end testing of the full SDD workflow via `deck pi developer`.
+5. Adding an OpenCode-specific team launch/session initialization path.
 
 ## Fresh-session bootstrap prompt
 

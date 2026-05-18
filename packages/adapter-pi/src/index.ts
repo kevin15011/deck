@@ -3,6 +3,7 @@ export * from "./developer-team-install";
 export * from "./explorer-prompt";
 export * from "./installation-plan";
 export * from "./install-tools";
+export * from "./model-config";
 export * from "./orchestrator-prompt";
 export * from "./pi-team-launch";
 export * from "./pi-team-profile";

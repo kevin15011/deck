@@ -7,3 +7,6 @@ node_modules/
 dist/
 coverage/
 *.log
+.pi/
+.deck/pi/profiles/
+.deck/pi/sessions/

@@ -7,6 +7,10 @@ import { ScreenFrame } from "./screen-frame";
 import {
   DeveloperTeamReviewScreen,
   DeveloperTeamInstallingScreen,
+  ModelProviderSelectionScreen,
+  ModelSelectionScreen,
+  AgentModelAssignmentScreen,
+  NoProvidersScreen,
 } from "./screens/developer-team-screens";
 
 import { getTeamsForEnvironment } from "@deck/adapter-pi";
@@ -152,6 +156,95 @@ describe("Developer Team TUI screens", () => {
       const cursorBeforeTeam = output.lastIndexOf("❯", teamIdx);
       expect(cursorBeforeTeam).toBeGreaterThan(-1);
       expect(cursorBeforeTeam).toBeLessThan(teamIdx);
+    });
+  });
+
+  describe("ModelProviderSelectionScreen", () => {
+    test("renders detected providers", () => {
+      const providers = [
+        { id: "anthropic", displayName: "Anthropic (Claude)", envVars: ["ANTHROPIC_API_KEY"] },
+        { id: "openai", displayName: "OpenAI (GPT)", envVars: ["OPENAI_API_KEY"] },
+      ];
+      const output = renderToString(<ModelProviderSelectionScreen cursor={0} providers={providers} />);
+
+      expect(output).toContain("Select a Pi provider");
+      expect(output).toContain("Anthropic (Claude)");
+      expect(output).toContain("OpenAI (GPT)");
+    });
+
+    test("shows cursor on first provider", () => {
+      const providers = [{ id: "anthropic", displayName: "Anthropic (Claude)", envVars: ["ANTHROPIC_API_KEY"] }];
+      const output = renderToString(<ModelProviderSelectionScreen cursor={0} providers={providers} />);
+
+      const idx = output.indexOf("Anthropic (Claude)");
+      const cursorBefore = output.lastIndexOf("❯", idx);
+      expect(cursorBefore).toBeGreaterThan(-1);
+      expect(cursorBefore).toBeLessThan(idx);
+    });
+  });
+
+  describe("ModelSelectionScreen", () => {
+    test("renders models for provider", () => {
+      const provider = { id: "anthropic", displayName: "Anthropic (Claude)", envVars: ["ANTHROPIC_API_KEY"] };
+      const models = [
+        { id: "anthropic/claude-opus-4", displayName: "Claude Opus 4", providerId: "anthropic" },
+        { id: "anthropic/claude-sonnet-4", displayName: "Claude Sonnet 4", providerId: "anthropic" },
+      ];
+      const output = renderToString(<ModelSelectionScreen cursor={0} provider={provider} models={models} />);
+
+      expect(output).toContain("Select a model for Anthropic (Claude)");
+      expect(output).toContain("Claude Opus 4");
+      expect(output).toContain("Claude Sonnet 4");
+    });
+  });
+
+  describe("AgentModelAssignmentScreen", () => {
+    test("renders agent assignment with progress", () => {
+      const output = renderToString(
+        <AgentModelAssignmentScreen cursor={0} agentIndex={0} totalAgents={12} modelId="anthropic/claude-opus-4" />,
+      );
+
+      expect(output).toContain("Assign model to Orchestrator Agent");
+      expect(output).toContain("1/12");
+      expect(output).toContain("anthropic/claude-opus-4");
+      expect(output).toContain("Assign anthropic/claude-opus-4 to Orchestrator Agent");
+      expect(output).toContain("Skip Orchestrator Agent");
+    });
+
+    test("renders skip option for last agent", () => {
+      const output = renderToString(
+        <AgentModelAssignmentScreen cursor={0} agentIndex={11} totalAgents={12} modelId="openai/gpt-4o" />,
+      );
+
+      expect(output).toContain("Assign model to Archive Agent");
+      expect(output).toContain("12/12");
+    });
+  });
+
+  describe("NoProvidersScreen", () => {
+    test("renders provider detection guidance", () => {
+      const output = renderToString(<NoProvidersScreen />);
+
+      expect(output).toContain("No Pi providers detected");
+      expect(output).toContain("~/.pi/agent/settings.json");
+      expect(output).toContain("pi --list-models");
+      expect(output).toContain("OPENCODE_API_KEY");
+    });
+  });
+
+  describe("DeveloperTeamInstallingScreen", () => {
+    test("renders progress when step props are provided", () => {
+      const output = renderToString(<DeveloperTeamInstallingScreen currentStep={5} totalSteps={12} currentItem="deck-developer-verify" />);
+
+      expect(output).toContain("Installing Developer Team");
+      expect(output).toContain("(5/12)");
+    });
+
+    test("renders without progress when no props provided", () => {
+      const output = renderToString(<DeveloperTeamInstallingScreen />);
+
+      expect(output).toContain("Installing Developer Team");
+      expect(output).not.toContain("(/");
     });
   });
 });

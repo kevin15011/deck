@@ -1,87 +1,84 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
+import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
-import type { DeveloperTeamAgent } from "./developer-team-catalog";
-import { DEVELOPER_TEAM_AGENTS } from "./developer-team-catalog";
-import type { DeveloperTeamModelAssignments } from "./model-config";
 
-// --- Types ---
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-export type PlannedAgentFile = {
+export type OpenCodePlannedAgentFile = {
   agent: DeveloperTeamAgent;
   relativePath: string;
   absolutePath: string;
   content: string;
 };
 
-export type PlannedSkillFile = {
+export type OpenCodePlannedSkillFile = {
   agent: DeveloperTeamAgent;
   relativePath: string;
   absolutePath: string;
   content: string;
 };
 
-export type DeveloperTeamInstallPlan = {
+export type OpenCodeDeveloperTeamInstallPlan = {
   projectRoot: string;
   agentsDir: string;
   skillsDir: string;
-  agents: PlannedAgentFile[];
-  skills: PlannedSkillFile[];
+  agents: OpenCodePlannedAgentFile[];
+  skills: OpenCodePlannedSkillFile[];
 };
 
-export type BundleApplyResult = {
+export type OpenCodeBundleApplyResult = {
   agentId: string;
   kind: "agent" | "skill";
   status: "created" | "unchanged" | "updated";
 };
 
-/** @deprecated Use BundleApplyResult — kept for backward compat */
-export type AgentApplyResult = BundleApplyResult;
-
-export type DeveloperTeamApplyResult = {
-  results: BundleApplyResult[];
+export type OpenCodeDeveloperTeamApplyResult = {
+  results: OpenCodeBundleApplyResult[];
 };
 
-export type BundleVerifyResult = {
+export type OpenCodeBundleVerifyResult = {
   agentId: string;
   valid: boolean;
   issues: string[];
 };
 
-/** @deprecated Use BundleVerifyResult — kept for backward compat */
-export type AgentVerifyResult = BundleVerifyResult;
-
-export type DeveloperTeamVerifyResult = {
+export type OpenCodeDeveloperTeamVerifyResult = {
   valid: boolean;
-  agentResults: BundleVerifyResult[];
-  skillResults: BundleVerifyResult[];
+  agentResults: OpenCodeBundleVerifyResult[];
+  skillResults: OpenCodeBundleVerifyResult[];
 };
 
-export type ReadDeveloperTeamModelAssignmentsOptions = {
-  exists?: typeof existsSync;
-  readFile?: (path: string, encoding: "utf-8") => string;
-};
+// ---------------------------------------------------------------------------
+// Plan
+// ---------------------------------------------------------------------------
 
-// --- Plan ---
+/**
+ * Build an OpenCode-specific installation plan for the Developer Team.
+ *
+ * OpenCode uses `.opencode/agents/` for agent markdown files and
+ * `.opencode/skills/<skill-id>/SKILL.md` for skill files. The adapter
+ * consumes canonical agent definitions and content from `@deck/core` and
+ * wraps them with minimal OpenCode-appropriate frontmatter.
+ */
+export function buildOpenCodeDeveloperTeamInstallPlan(projectRoot: string): OpenCodeDeveloperTeamInstallPlan {
+  const agentsDir = join(projectRoot, ".opencode", "agents");
+  const skillsDir = join(projectRoot, ".opencode", "skills");
 
-export function buildDeveloperTeamInstallPlan(
-  projectRoot: string,
-  options?: { modelAssignments?: DeveloperTeamModelAssignments },
-): DeveloperTeamInstallPlan {
-  const agentsDir = join(projectRoot, ".pi", "agents");
-  const skillsDir = join(projectRoot, ".pi", "skills");
-  const modelAssignments = options?.modelAssignments;
-
-  const agents: PlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
-    const relativePath = `.pi/agents/${agent.id}.md`;
+  const agents: OpenCodePlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
+    const relativePath = `.opencode/agents/${agent.id}.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const content = buildAgentFileContent(agent, modelAssignments?.[agent.id]);
+    const content = buildAgentFileContent(agent);
 
     return { agent, relativePath, absolutePath, content };
   });
 
-  const skills: PlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
-    const relativePath = `.pi/skills/${agent.skillId}/SKILL.md`;
+  const skills: OpenCodePlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
+    const relativePath = `.opencode/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
     const content = buildSkillFileContent(agent);
 
@@ -91,45 +88,14 @@ export function buildDeveloperTeamInstallPlan(
   return { projectRoot, agentsDir, skillsDir, agents, skills };
 }
 
-export function readDeveloperTeamModelAssignments(
-  projectRoot: string,
-  options?: ReadDeveloperTeamModelAssignmentsOptions,
-): DeveloperTeamModelAssignments {
-  const exists = options?.exists ?? existsSync;
-  const readFile = options?.readFile ?? readFileSync;
-  const assignments: DeveloperTeamModelAssignments = {};
+// ---------------------------------------------------------------------------
+// Apply
+// ---------------------------------------------------------------------------
 
-  for (const agent of DEVELOPER_TEAM_AGENTS) {
-    const absolutePath = join(projectRoot, ".pi", "agents", `${agent.id}.md`);
-    if (!exists(absolutePath)) continue;
-
-    const content = readFile(absolutePath, "utf-8");
-    const model = readFrontmatterModel(content);
-    if (model) assignments[agent.id] = model;
-  }
-
-  return assignments;
-}
-
-function readFrontmatterModel(content: string): string | undefined {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return undefined;
-
-  const modelLine = match[1]
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.startsWith("model:"));
-
-  const model = modelLine?.slice("model:".length).trim();
-  return model && model.length > 0 ? model : undefined;
-}
-
-// --- Apply ---
-
-export function applyDeveloperTeamInstall(
-  plan: DeveloperTeamInstallPlan,
+export function applyOpenCodeDeveloperTeamInstall(
+  plan: OpenCodeDeveloperTeamInstallPlan,
   options?: { writeFile?: typeof writeFileSync; exists?: typeof existsSync; mkdir?: typeof mkdirSync; readFile?: typeof readFileSync },
-): DeveloperTeamApplyResult {
+): OpenCodeDeveloperTeamApplyResult {
   const writeFile = options?.writeFile ?? writeFileSync;
   const exists = options?.exists ?? existsSync;
   const mkdir = options?.mkdir ?? mkdirSync;
@@ -153,7 +119,7 @@ export function applyDeveloperTeamInstall(
     }
   }
 
-  const agentResults: BundleApplyResult[] = plan.agents.map((planned) => {
+  const agentResults: OpenCodeBundleApplyResult[] = plan.agents.map((planned) => {
     if (exists(planned.absolutePath)) {
       const existing = readFile(planned.absolutePath, "utf-8");
       if (existing === planned.content) {
@@ -167,7 +133,7 @@ export function applyDeveloperTeamInstall(
     return { agentId: planned.agent.id, kind: "agent" as const, status: "created" as const };
   });
 
-  const skillResults: BundleApplyResult[] = plan.skills.map((planned) => {
+  const skillResults: OpenCodeBundleApplyResult[] = plan.skills.map((planned) => {
     if (exists(planned.absolutePath)) {
       const existing = readFile(planned.absolutePath, "utf-8");
       if (existing === planned.content) {
@@ -184,16 +150,18 @@ export function applyDeveloperTeamInstall(
   return { results: [...agentResults, ...skillResults] };
 }
 
-// --- Verify ---
+// ---------------------------------------------------------------------------
+// Verify
+// ---------------------------------------------------------------------------
 
-export function verifyDeveloperTeamInstall(
-  plan: DeveloperTeamInstallPlan,
+export function verifyOpenCodeDeveloperTeamInstall(
+  plan: OpenCodeDeveloperTeamInstallPlan,
   options?: { exists?: typeof existsSync; readFile?: typeof readFileSync },
-): DeveloperTeamVerifyResult {
+): OpenCodeDeveloperTeamVerifyResult {
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;
 
-  const agentResults: BundleVerifyResult[] = plan.agents.map((planned) => {
+  const agentResults: OpenCodeBundleVerifyResult[] = plan.agents.map((planned) => {
     const issues: string[] = [];
 
     if (!exists(planned.absolutePath)) {
@@ -215,7 +183,7 @@ export function verifyDeveloperTeamInstall(
     return { agentId: planned.agent.id, valid: issues.length === 0, issues };
   });
 
-  const skillResults: BundleVerifyResult[] = plan.skills.map((planned) => {
+  const skillResults: OpenCodeBundleVerifyResult[] = plan.skills.map((planned) => {
     const issues: string[] = [];
 
     if (!exists(planned.absolutePath)) {
@@ -230,11 +198,9 @@ export function verifyDeveloperTeamInstall(
       issues.push(`Description mismatch for skill ${planned.agent.skillId}.`);
     }
 
-    // Verify skill body contains a recognizable heading
+    // Verify skill body contains a recognizable heading from core registry
     const registryContent = getAgentContent(planned.agent.id);
     if (registryContent) {
-      // The skill body should be present in the file content
-      // Extract first heading from skill body as a check
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
       if (headingMatch && !content.includes(headingMatch[0])) {
         issues.push(`Missing expected heading "${headingMatch[0]}".`);
@@ -251,7 +217,59 @@ export function verifyDeveloperTeamInstall(
   };
 }
 
-// --- Backup ---
+// ---------------------------------------------------------------------------
+// Content builders (consume core registry)
+// ---------------------------------------------------------------------------
+
+/**
+ * OpenCode-specific frontmatter + body from the core registry.
+ *
+ * The adapter only adds minimal frontmatter (name, description, skill)
+ * and wraps the registry's runner-agnostic skill body.
+ */
+function buildSkillFileContent(agent: DeveloperTeamAgent): string {
+  const content = getAgentContent(agent.id);
+  if (!content) {
+    throw new Error(`No content found for agent ${agent.id} in core registry.`);
+  }
+
+  return [
+    "---",
+    `description: ${agent.description}`,
+    "---",
+    "",
+    content.skillBody,
+    "",
+  ].join("\n");
+}
+
+/**
+ * OpenCode-specific frontmatter + body from the core registry.
+ *
+ * The adapter only adds minimal frontmatter (name, description, skill)
+ * and wraps the registry's runner-agnostic agent body.
+ */
+function buildAgentFileContent(agent: DeveloperTeamAgent): string {
+  const content = getAgentContent(agent.id);
+  if (!content) {
+    throw new Error(`No content found for agent ${agent.id} in core registry.`);
+  }
+
+  return [
+    "---",
+    `name: ${agent.name}`,
+    `description: ${agent.description}`,
+    `skill: ${agent.skillId}`,
+    "---",
+    "",
+    content.agentBody,
+    "",
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Backup
+// ---------------------------------------------------------------------------
 
 export type FileBackupEntry = {
   absolutePath: string;
@@ -264,7 +282,7 @@ export type BackupManifest = {
 };
 
 export function backupDeveloperTeamFiles(
-  plan: DeveloperTeamInstallPlan,
+  plan: OpenCodeDeveloperTeamInstallPlan,
   options?: { exists?: typeof existsSync; readFile?: typeof readFileSync },
 ): BackupManifest {
   const exists = options?.exists ?? existsSync;
@@ -288,7 +306,9 @@ export function backupDeveloperTeamFiles(
   return { entries };
 }
 
-// --- Rollback ---
+// ---------------------------------------------------------------------------
+// Rollback
+// ---------------------------------------------------------------------------
 
 export function rollbackDeveloperTeamFiles(
   backup: BackupManifest,
@@ -310,57 +330,4 @@ export function rollbackDeveloperTeamFiles(
       writeFile(entry.absolutePath, entry.previousContent, "utf-8");
     }
   }
-}
-
-// --- Content builders (consume core registry) ---
-
-/**
- * Pi-specific frontmatter + body from the core registry.
- *
- * The adapter only adds Pi frontmatter (name, description, skill, tools, etc.)
- * and wraps the registry's runner-agnostic agent body.
- */
-function buildSkillFileContent(agent: DeveloperTeamAgent): string {
-  const content = getAgentContent(agent.id);
-  if (!content) {
-    throw new Error(`No content found for agent ${agent.id} in core registry.`);
-  }
-
-  return [
-    "---",
-    `description: ${agent.description}`,
-    "---",
-    "",
-    content.skillBody,
-    "",
-  ].join("\n");
-}
-
-/**
- * Pi-specific frontmatter + body from the core registry.
- *
- * The adapter only adds Pi frontmatter (name, description, skill, tools, etc.)
- * and wraps the registry's runner-agnostic agent body.
- */
-function buildAgentFileContent(agent: DeveloperTeamAgent, model?: string): string {
-  const content = getAgentContent(agent.id);
-  if (!content) {
-    throw new Error(`No content found for agent ${agent.id} in core registry.`);
-  }
-
-  const frontmatterLines = [
-    "---",
-    `name: ${agent.name}`,
-    `description: ${agent.description}`,
-    `skill: ${agent.skillId}`,
-    ...(model ? [`model: ${model}`] : []),
-    "tools: read,write,bash",
-    "thinking: low",
-    "systemPromptMode: replace",
-    "inheritProjectContext: true",
-    "inheritSkills: false",
-    "---",
-  ];
-
-  return [...frontmatterLines, "", content.agentBody, ""].join("\n");
 }

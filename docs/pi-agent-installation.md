@@ -381,15 +381,44 @@ This keeps agent roles stable while allowing stack-aware behavior.
 
 ## Model assignments
 
-The source runtime stores Pi model assignments under a runtime-owned path.
+Deck now configures model assignments as part of the Pi Developer Team install and configure flow.
 
-Deck should not blindly write that schema without validation.
+### Provider detection
 
-Recommended staged approach:
+Deck detects configured Pi providers by inspecting environment variables:
 
-1. Detect whether a Deck-owned model assignment file already exists.
-2. For direct-files backend, write a Deck-owned config path such as `.pi/deck/models.json` if Pi can consume it, or defer model assignment to manual setup until schema is confirmed.
-3. For `deck-pi-package`, let `deck-pi` own the model assignment schema and any Pi-native model UI.
+| Provider | Env var |
+|---|---|
+| Anthropic (Claude) | `ANTHROPIC_API_KEY` |
+| OpenAI (GPT) | `OPENAI_API_KEY` |
+| Google (Gemini) | `GEMINI_API_KEY` |
+| Groq | `GROQ_API_KEY` |
+| Ollama (local) | `OLLAMA_HOST` |
+| Mistral AI | `MISTRAL_API_KEY` |
+
+If no providers are detected, the UI explains which env vars are required and allows skipping.
+
+### Model selection flow
+
+1. **Provider selection** — user picks from detected providers.
+2. **Model selection** — user picks from curated defaults for that provider. Deck prefers `pi --list-models` output when available and testable; otherwise it falls back to a small default list.
+3. **Agent assignment** — Deck steps through each Developer Team agent and lets the user assign or skip the selected model.
+
+### Frontmatter embedding
+
+For the `direct-files` backend, assigned models are written into each agent file's frontmatter as:
+
+```yaml
+model: provider/model
+```
+
+Pi parses the `model` frontmatter field, so this is sufficient for project-local agents.
+
+`fallbackModels` is not written yet because the native Pi schema for it is not confirmed.
+
+### Configure from main menu
+
+`Configure models` in the Deck main menu routes directly to the Pi Developer Team model config path: Pi → Developer Team → provider → model → per-agent assignment.
 
 Suggested model tiers:
 
@@ -416,7 +445,7 @@ Before considering Pi Developer Team installation successful, Deck must verify:
 - Agent discovery works with Deck names.
 - Project-local `<project>/.pi/agents/deck-developer-*.md` files are preferred over global user agent directories (broad `deck-*` pattern reserved for future Deck teams).
 - No user-edited unrelated files were overwritten.
-- Model assignment strategy is either configured or explicitly marked as manual/pending.
+- Model assignments are configured during install or explicitly skipped (can be configured later from the main menu).
 - MCP setup is valid when memory/MCP tools are selected.
 - Project AI notes retrieval is planned for Phase 5 (exact path and schema pending).
 
@@ -430,11 +459,12 @@ Before considering Pi Developer Team installation successful, Deck must verify:
 
 ## Next implementation step
 
-Do not implement prompt installation yet.
+Pi agent and skill discovery are validated. The current implementation installs the Developer Team bundle through direct plan/apply/verify functions using the `direct-files` backend, including model assignment frontmatter and backup/rollback safety.
 
-Pi agent and skill discovery are validated. The current implementation installs the Developer Team bundle through direct plan/apply/verify functions using the `direct-files` backend.
-
-Next, add backup/rollback safety around the current direct-files backend before replacing placeholder prompts/skills with real source-derived content. Keep the fuller `PiDeveloperTeamInstaller` abstraction and `deck-pi-package` backend as follow-up architecture steps.
+Next steps:
+1. Replace placeholder prompts/skills with real source-derived content if any remain.
+2. Keep the fuller `PiDeveloperTeamInstaller` abstraction and `deck-pi-package` backend as follow-up architecture steps.
+3. Validate that Pi correctly consumes the `model` frontmatter field for all 12 Developer Team agents.
 
 ## Pi session launcher
 

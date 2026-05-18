@@ -3,17 +3,15 @@ import { describe, expect, test } from "bun:test";
 import { getEnvironmentOptions, getHomeMenuOptions, getPiInstalledNextSteps, placeholder } from "./menu-options";
 
 describe("home menu options", () => {
-  test("marks unfinished actions as yellow placeholders", () => {
+  test("marks unfinished actions as yellow placeholders except configure-models", () => {
     const options = getHomeMenuOptions();
 
     expect(options[0]).toEqual({ value: "start-installation", label: "Start installation" });
-    expect(options.slice(1).map((option) => option.label)).toEqual([
-      `Upgrade tools ${placeholder()}`,
-      `Configure models ${placeholder()}`,
-      `Management / uninstall ${placeholder()}`,
-      `Doctor ${placeholder()}`,
-      "Exit",
-    ]);
+    expect(options[1]).toEqual({ value: "upgrade-tools", label: `Upgrade tools ${placeholder()}` });
+    expect(options[2]).toEqual({ value: "configure-models", label: "Configure models" });
+    expect(options[3]).toEqual({ value: "management-uninstall", label: `Management / uninstall ${placeholder()}` });
+    expect(options[4]).toEqual({ value: "doctor", label: `Doctor ${placeholder()}` });
+    expect(options[5]).toEqual({ value: "exit", label: "Exit" });
   });
 });
 

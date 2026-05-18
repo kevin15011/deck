@@ -1,3 +1,4 @@
+export * from "./developer-team-install";
 export * from "./installation-plan";
 export * from "./install-tools";
 export * from "./preflight";
