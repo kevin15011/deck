@@ -58,7 +58,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
       expect(planned.absolutePath).toBe(join("/tmp/project", planned.relativePath));
       expect(planned.content).toContain("---");
       expect(planned.content).toContain(`name: ${planned.agent.name}`);
-      expect(planned.content).toContain(`description: ${planned.agent.description}`);
+      expect(planned.content).toContain(`description: ${JSON.stringify(planned.agent.description)}`);
     }
   });
 
@@ -77,7 +77,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
       expect(planned.relativePath).toMatch(/^\.pi\/skills\/deck-developer-[^/]+\/SKILL\.md$/);
       expect(planned.absolutePath).toBe(join("/tmp/project", planned.relativePath));
       expect(planned.content).toContain("---");
-      expect(planned.content).toContain(`description: ${planned.agent.description}`);
+      expect(planned.content).toContain(`description: ${JSON.stringify(planned.agent.description)}`);
       // Derive expected heading from core registry — no agent-specific branching needed
       const registryContent = getAgentContent(planned.agent.id)!;
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);

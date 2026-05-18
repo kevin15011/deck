@@ -239,7 +239,7 @@ export function verifyDeveloperTeamInstall(
 
     if (!content.includes(`description:`)) {
       issues.push("Missing description field in frontmatter.");
-    } else if (!content.includes(planned.agent.description)) {
+    } else if (!content.includes(JSON.stringify(planned.agent.description))) {
       issues.push(`Description mismatch for ${planned.agent.id}.`);
     }
 
@@ -257,7 +257,7 @@ export function verifyDeveloperTeamInstall(
 
     if (!content.includes(`description:`)) {
       issues.push("Missing description field in frontmatter.");
-    } else if (!content.includes(planned.agent.description)) {
+    } else if (!content.includes(JSON.stringify(planned.agent.description))) {
       issues.push(`Description mismatch for skill ${planned.agent.skillId}.`);
     }
 
@@ -359,7 +359,7 @@ function buildSkillFileContent(agent: DeveloperTeamAgent): string {
 
   return [
     "---",
-    `description: ${agent.description}`,
+    `description: ${toYamlScalar(agent.description)}`,
     "---",
     "",
     content.skillBody,
@@ -382,7 +382,7 @@ function buildAgentFileContent(agent: DeveloperTeamAgent, model?: string, thinki
   const frontmatterLines = [
     "---",
     `name: ${agent.name}`,
-    `description: ${agent.description}`,
+    `description: ${toYamlScalar(agent.description)}`,
     `skill: ${agent.skillId}`,
     ...(model ? [`model: ${model}`] : []),
     "tools: read,write,bash",
@@ -394,4 +394,8 @@ function buildAgentFileContent(agent: DeveloperTeamAgent, model?: string, thinki
   ];
 
   return [...frontmatterLines, "", content.agentBody, ""].join("\n");
+}
+
+function toYamlScalar(value: string): string {
+  return JSON.stringify(value);
 }
