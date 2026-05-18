@@ -7,10 +7,10 @@
  * Two registry functions:
  *
  * 1. getAgentContent(agentId) → { agentBody, skillBody }
- *    Returns the body content for a known agent. For agents with real
- *    content (orchestrator, explorer, proposal, spec, design), returns their detailed prompts.
- *    For other agents, returns a structured placeholder that includes
- *    the agent's display name and description from the catalog.
+ *    Returns the body content for a known agent. All current Developer Team
+ *    catalog agents have real content. Structured placeholders remain only
+ *    as a defensive fallback for future catalog entries that have not been
+ *    implemented yet.
  *
  * 2. getTeamSessionInstructions(teamId) → string | undefined
  *    Returns session-level instructions for a team. For the Developer Team,
@@ -29,6 +29,13 @@ import { EXPLORER_AGENT_BODY, EXPLORER_SKILL_BODY } from "./explorer-content";
 import { PROPOSAL_AGENT_BODY, PROPOSAL_SKILL_BODY } from "./proposal-content";
 import { SPEC_AGENT_BODY, SPEC_SKILL_BODY } from "./spec-content";
 import { DESIGN_AGENT_BODY, DESIGN_SKILL_BODY } from "./design-content";
+import { TASK_AGENT_BODY, TASK_SKILL_BODY } from "./task-content";
+import { APPLY_GENERAL_AGENT_BODY, APPLY_GENERAL_SKILL_BODY } from "./apply-general-content";
+import { APPLY_BACKEND_AGENT_BODY, APPLY_BACKEND_SKILL_BODY } from "./apply-backend-content";
+import { APPLY_FRONTEND_AGENT_BODY, APPLY_FRONTEND_SKILL_BODY } from "./apply-frontend-content";
+import { VERIFY_AGENT_BODY, VERIFY_SKILL_BODY } from "./verify-content";
+import { REVIEW_AGENT_BODY, REVIEW_SKILL_BODY } from "./review-content";
+import { ARCHIVE_AGENT_BODY, ARCHIVE_SKILL_BODY } from "./archive-content";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,6 +72,34 @@ const REAL_CONTENT: Record<string, { agentBody: string; skillBody: string }> = {
   "deck-developer-design": {
     agentBody: DESIGN_AGENT_BODY,
     skillBody: DESIGN_SKILL_BODY,
+  },
+  "deck-developer-task": {
+    agentBody: TASK_AGENT_BODY,
+    skillBody: TASK_SKILL_BODY,
+  },
+  "deck-developer-apply-general": {
+    agentBody: APPLY_GENERAL_AGENT_BODY,
+    skillBody: APPLY_GENERAL_SKILL_BODY,
+  },
+  "deck-developer-apply-backend": {
+    agentBody: APPLY_BACKEND_AGENT_BODY,
+    skillBody: APPLY_BACKEND_SKILL_BODY,
+  },
+  "deck-developer-apply-frontend": {
+    agentBody: APPLY_FRONTEND_AGENT_BODY,
+    skillBody: APPLY_FRONTEND_SKILL_BODY,
+  },
+  "deck-developer-verify": {
+    agentBody: VERIFY_AGENT_BODY,
+    skillBody: VERIFY_SKILL_BODY,
+  },
+  "deck-developer-review": {
+    agentBody: REVIEW_AGENT_BODY,
+    skillBody: REVIEW_SKILL_BODY,
+  },
+  "deck-developer-archive": {
+    agentBody: ARCHIVE_AGENT_BODY,
+    skillBody: ARCHIVE_SKILL_BODY,
   },
 };
 
@@ -111,9 +146,8 @@ function buildPlaceholderSkillBody(displayName: string, description: string): st
 /**
  * Returns the agent body and skill body content for a known agent.
  *
- * For agents with real content (orchestrator, explorer, proposal, spec, design), returns their
- * detailed prompts. For all other agents in the catalog, returns a
- * structured placeholder.
+ * For all agents in the Developer Team catalog, returns their detailed prompts.
+ * For unknown agent IDs not in the catalog, returns a structured placeholder.
  *
  * Returns undefined for agent IDs not in the Developer Team catalog.
  */

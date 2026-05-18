@@ -2,7 +2,7 @@
 
 The Developer Team is a runtime-installed bundle of agents for software delivery. It is based on an SDD workflow methodology, but Deck defines the team as a product-level concept that can be installed after tools in multiple environments such as Pi and OpenCode.
 
-This document describes the Developer Team roster and workflow decisions. The canonical agent catalog (IDs, display names, descriptions) lives in `packages/core/src/developer-team-catalog.ts` as a runtime-neutral source of truth. Prompt and skill implementation comes later: each agent prompt and matching skill must be reviewed one by one against the corresponding source methodology definition before being copied or adapted.
+This document describes the Developer Team roster and workflow decisions. The canonical agent catalog (IDs, display names, descriptions) lives in `packages/core/src/teams/developer/catalog.ts` as a runtime-neutral source of truth. All 12 Developer Team agents have real prompts and matching skills under `packages/core/src/teams/developer/`; each prompt adapts the source methodology to Deck rather than copying it blindly.
 
 ## Installation position
 
@@ -494,7 +494,7 @@ When implementing prompts and skills:
 
 ### Orchestrator prompt implementation
 
-The Orchestrator Agent is the first agent with a real (non-placeholder) prompt and skill. Its content lives in `packages/core/src/orchestrator-prompt.ts` and is derived from the source `sdd-orchestrator.md` with the following adaptations:
+The Orchestrator Agent has a real prompt and skill. Its content lives in `packages/core/src/teams/developer/orchestrator-content.ts` and is derived from the source `sdd-orchestrator.md` with the following adaptations:
 
 - **No slash commands**: Deck's Pi launcher uses `deck pi developer` to start a session. The user does not need `/sdd-new`, `/sdd-ff`, or `/sdd-continue` inside the session. The orchestrator responds to natural language.
 - **No OpenCode-specific model assignments**: Deck is runtime-agnostic. Model assignment is left to the adapter layer (Pi, OpenCode, etc.), not hardcoded in the orchestrator prompt.
@@ -513,7 +513,7 @@ The orchestrator content is exported as three constants:
 
 ### Explorer prompt implementation
 
-The Explorer Agent is the second agent with a real (non-placeholder) prompt and skill. Its content lives in `packages/core/src/explorer-prompt.ts` and is derived from the source `sdd-explore` skill with the following adaptations:
+The Explorer Agent has a real prompt and skill. Its content lives in `packages/core/src/teams/developer/explorer-content.ts` and is derived from the source `sdd-explore` skill with the following adaptations:
 
 - **Structured findings format**: Explorer produces a fixed output format with Goal, Current State, Relevant Files, Constraints, Risks, Options and Tradeoffs, Recommendation, and Open Questions — designed for consumption by Proposal, Spec, and Design agents.
 - **Tool preference**: Explicitly prefers codebase graph/search tools for structural discovery and documents filesystem fallback.
@@ -530,7 +530,7 @@ The explorer content is exported as two constants:
 
 Explorer does not have a system prompt surface — only the Orchestrator owns the session system prompt.
 
-Other agents still have placeholder prompts and skills, to be implemented one by one in future iterations.
+All remaining Developer Team agents also have real prompts and matching skills registered in `packages/core/src/teams/developer/content-registry.ts`.
 
 ### Proposal prompt implementation
 
@@ -591,7 +591,7 @@ The design content is exported as two constants:
 
 Design does not have a system prompt surface — only the Orchestrator owns the session system prompt.
 
-Other agents still have placeholder prompts and skills, to be implemented one by one in future iterations.
+All 12 Developer Team agents now have real prompts and matching skills. Placeholder generation remains only as a defensive fallback for future catalog entries that are not implemented yet.
 
 - The team is installed after tools.
 - The team installs as one user-facing Developer Team bundle.
@@ -620,5 +620,5 @@ Other agents still have placeholder prompts and skills, to be implemented one by
 - Archive is required and extracts project AI notes when useful.
 - Project AI notes are shared repo-owned notes, not Engram-only memory.
 - Project AI notes must be deduplicated and updated, not created per session.
-- Agent IDs use `deck-developer-` prefix as team-scoped namespace (e.g. `deck-developer-orchestrator`). The canonical catalog lives in `packages/core/src/developer-team-catalog.ts` as a runtime-neutral source of truth; adapters (Pi, OpenCode) consume it to materialize runtime-specific files.
+- Agent IDs use `deck-developer-` prefix as team-scoped namespace (e.g. `deck-developer-orchestrator`). The canonical catalog lives in `packages/core/src/teams/developer/catalog.ts` as a runtime-neutral source of truth; adapters (Pi, OpenCode) consume it to materialize runtime-specific files.
 - Orchestrator does not use slash commands — responds to natural language inside the session.

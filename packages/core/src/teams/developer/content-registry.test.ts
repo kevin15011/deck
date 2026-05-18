@@ -87,29 +87,30 @@ describe("getAgentContent", () => {
     expect(getAgentContent("deck-orchestrator")).toBeUndefined();
   });
 
-  test("orchestrator, explorer, proposal, spec, and design content are not placeholder", () => {
-    const orchestrator = getAgentContent("deck-developer-orchestrator")!;
-    expect(orchestrator.agentBody).not.toContain("Placeholder");
-    expect(orchestrator.skillBody).not.toContain("Placeholder");
+  test("all catalog agent content is not placeholder", () => {
+    const agentIds = [
+      "deck-developer-orchestrator",
+      "deck-developer-explorer",
+      "deck-developer-proposal",
+      "deck-developer-spec",
+      "deck-developer-design",
+      "deck-developer-task",
+      "deck-developer-apply-general",
+      "deck-developer-apply-backend",
+      "deck-developer-apply-frontend",
+      "deck-developer-verify",
+      "deck-developer-review",
+      "deck-developer-archive",
+    ];
 
-    const explorer = getAgentContent("deck-developer-explorer")!;
-    expect(explorer.agentBody).not.toContain("Placeholder");
-    expect(explorer.skillBody).not.toContain("Placeholder");
-
-    const proposal = getAgentContent("deck-developer-proposal")!;
-    expect(proposal.agentBody).not.toContain("Placeholder");
-    expect(proposal.skillBody).not.toContain("Placeholder");
-
-    const spec = getAgentContent("deck-developer-spec")!;
-    expect(spec.agentBody).not.toContain("Placeholder");
-    expect(spec.skillBody).not.toContain("Placeholder");
-
-    const design = getAgentContent("deck-developer-design")!;
-    expect(design.agentBody).not.toContain("Placeholder");
-    expect(design.skillBody).not.toContain("Placeholder");
+    for (const id of agentIds) {
+      const content = getAgentContent(id)!;
+      expect(content.agentBody).not.toContain("Placeholder");
+      expect(content.skillBody).not.toContain("Placeholder");
+    }
   });
 
-  test("placeholder agents contain their display name", () => {
+  test("real agents contain their display name", () => {
     const proposal = getAgentContent("deck-developer-proposal")!;
     expect(proposal.agentBody).toContain("Proposal Agent");
 
@@ -145,6 +146,9 @@ describe("getTeamSessionInstructions", () => {
     expect(instructions).toContain("deck-developer-spec");
     expect(instructions).toContain("deck-developer-design");
     expect(instructions).toContain("deck-developer-task");
+    expect(instructions).toContain("deck-developer-apply-general");
+    expect(instructions).toContain("deck-developer-apply-backend");
+    expect(instructions).toContain("deck-developer-apply-frontend");
     expect(instructions).toContain("deck-developer-verify");
     expect(instructions).toContain("deck-developer-review");
     expect(instructions).toContain("deck-developer-archive");

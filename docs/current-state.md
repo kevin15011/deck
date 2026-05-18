@@ -23,16 +23,13 @@ Deck is a Bun/TypeScript workspace for installing and launching AI development e
 
 ## Implemented Developer Team agents
 
-Real content exists for:
+Real content exists for all 12 Developer Team agents:
 
 - `deck-developer-orchestrator`
 - `deck-developer-explorer`
 - `deck-developer-proposal`
 - `deck-developer-spec`
 - `deck-developer-design`
-
-Still placeholders:
-
 - `deck-developer-task`
 - `deck-developer-apply-general`
 - `deck-developer-apply-backend`
@@ -68,14 +65,14 @@ Both passed after the OpenSpec/Spec Registry refactor and Design Agent implement
 
 ## Next recommended task
 
-Implement `deck-developer-task` using the current architecture:
+All Developer Team agents now have real content. Consider:
 
-1. Add real Task Agent content under `packages/core/src/teams/developer/`.
-2. Register it in `content-registry.ts`.
-3. Ensure adapter-pi materializes it through `getAgentContent()` without agent-specific production branches.
-4. Keep OpenSpec required and memory auxiliary.
-5. Do not introduce chained PR or delivery-strategy behavior.
-6. Preserve the peer-not-yes-person stance.
+1. Reviewing agent/skill content against source methodology definitions for accuracy.
+2. Adding unit tests for the new content modules (task, apply-general, apply-backend, apply-frontend, verify, review, archive).
+3. Updating adapter-pi to ensure it correctly materializes all 12 agents without agent-specific production branches.
+4. Implementing Phase 5 features (project AI notes, `.deck/ai-notes/`).
+5. Adding skill injection resolution logic in the orchestrator.
+6. End-to-end testing of the full SDD workflow via `deck pi developer`.
 
 ## Fresh-session bootstrap prompt
 
