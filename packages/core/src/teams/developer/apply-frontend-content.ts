@@ -35,6 +35,7 @@ export const APPLY_FRONTEND_AGENT_BODY = `# Frontend Apply Agent
 - Run frontend tests, build, and typecheck for the affected areas.
 - Report progress and any blockers or deviations found.
 - Update the apply-progress artifact with completed work and remaining work.
+- Update Spec Registry state/event entries for implementation progress.
 
 ## Scope
 
@@ -136,9 +137,16 @@ For each completed task, run verification:
 
 If verification fails, fix the issue or report it as a blocker.
 
-### Step 4: Update Apply-Progress
+### Step 4: Update Apply-Progress and Registry
 
 Update the apply-progress artifact (\`apply-progress.md\`) inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
+
+Update the Spec Registry for the change:
+- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
+- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
+- Record phase \`apply\`, agent \`frontend\`, status \`completed\`, \`in_progress\`, or \`blocked\`, and an event entry referencing \`apply-progress.md\`.
+
+If the registry update fails, report it as a blocker and do not silently continue.
 
 **Apply-progress format:**
 
@@ -187,6 +195,11 @@ Return EXACTLY this format to the orchestrator:
 
 **Change**: {change-name}
 **Agent**: Frontend Apply
+**Artifact Path**: \`openspec/changes/{change-name}/apply-progress.md\`
+**Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
+**Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Recorded**: phase \`apply\`, agent \`frontend\`, status \`{completed|in_progress|blocked}\`, event \`{event name}\`
+**Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Completed
 - Task {N}: {title} — ✅

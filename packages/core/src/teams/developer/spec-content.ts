@@ -38,6 +38,7 @@ export const SPEC_AGENT_BODY = `# Spec Agent
 - Define contracts, states, validation rules, error conditions, and edge cases.
 - Preserve uncertainty: flag open questions instead of inventing requirements or assuming unstated behavior.
 - Produce a structured spec artifact that Design and Task agents can consume.
+- Write the required OpenSpec spec artifact and Spec Registry state/event entries for this phase.
 
 ## Non-Goals
 
@@ -287,9 +288,16 @@ REQ-{cap}-{002}: {requirement statement}
 
 **Size budget:** Spec artifact MUST be under 800 words (excluding the template itself). Be concise.
 
-### Step 8: Persist Artifact
+### Step 8: Persist Artifact and Registry
 
 Write the spec as \`spec.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
+
+Update the Spec Registry for the change:
+- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
+- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
+- Record phase \`spec\`, status \`completed\` or \`blocked\`, and an event entry referencing \`spec.md\`.
+
+If the registry update fails, report it as a blocker and do not silently continue.
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
@@ -303,7 +311,11 @@ Return EXACTLY this format to the orchestrator:
 ## Spec Created
 
 **Change**: {change-name}
-**Location**: {openspec path, engram topic key, or "inline"}
+**Artifact Path**: \`openspec/changes/{change-name}/spec.md\`
+**Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
+**Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Recorded**: phase \`spec\`, status \`{completed|blocked}\`, event \`{event name}\`
+**Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Summary
 - **Capabilities Specified**: {N capabilities}

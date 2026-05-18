@@ -35,6 +35,7 @@ export const ARCHIVE_AGENT_BODY = `# Archive Agent
 - Merge delta specs into main specs when using file-based specs.
 - Move completed changes to archive under the OpenSpec directory.
 - Record follow-ups if any remain.
+- Update Spec Registry state/event entries before and after archiving.
 - Extract or update project AI notes when the session reveals reusable project knowledge.
 - Produce a structured archive-report artifact.
 
@@ -99,6 +100,8 @@ The orchestrator will give you:
 ### Step 1: Read All Artifacts
 
 Read every artifact for the change:
+- \`state.yaml\`
+- \`events.yaml\`
 - \`proposal.md\`
 - \`spec.md\`
 - \`design.md\`
@@ -136,12 +139,15 @@ If the project uses file-based specs and the change introduced delta specs:
 - Preserve the change history by referencing the archived change directory.
 - Do not lose requirements — merge, do not overwrite.
 
-### Step 4: Move to Archive
+### Step 4: Move to Archive and Update Registry
 
 Move the completed change to the archive:
 - Target: \`openspec/archive/{change-name}/\`
-- Include all artifacts: proposal, spec, design, tasks, apply-progress, verify-report, review-report, archive-report.
-- Update the change state to \`archived\`.
+- Include all artifacts: state, events, proposal, spec, design, tasks, apply-progress, verify-report, review-report, archive-report.
+- Update the Spec Registry state to phase \`archive\`, status \`archived\`.
+- Append an event to \`events.yaml\` referencing \`archive-report.md\` and the archive target.
+
+If the registry update fails, report it as a blocker and do not silently continue.
 
 ### Step 5: Record Follow-ups
 
@@ -237,6 +243,11 @@ Return EXACTLY this format to the orchestrator:
 **Change**: {change-name}
 **Status**: ✅ Archived
 **Location**: \`openspec/archive/{change-name}/\`
+**Artifact Path**: \`openspec/changes/{change-name}/archive-report.md\`
+**Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
+**Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Recorded**: phase \`archive\`, status \`archived\`, event \`{event name}\`
+**Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Summary
 - **Requirements**: {N} total

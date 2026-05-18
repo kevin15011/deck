@@ -39,10 +39,11 @@ export const DESIGN_AGENT_BODY = `# Design Agent
 - Record the chosen approach, rejected alternatives, and tradeoffs with rationale.
 - Flag risks, open decisions, and areas of uncertainty.
 - Produce a structured design artifact that the Task Agent can consume to break work into implementation tasks.
+- Write the required OpenSpec design artifact and Spec Registry state/event entries for this phase.
 
 ## Non-Goals
 
-- Does not implement code or modify any files.
+- Does not implement code or modify product files; writing required OpenSpec artifacts and Spec Registry files is allowed.
 - Does not write requirements, acceptance scenarios, or specs — that is Spec Agent's job.
 - Does not break work into implementation tasks — that is Task Agent's job.
 - Does not delegate further — you are the terminal design agent.
@@ -246,9 +247,16 @@ If none apply, state "None specific to this change."}
 Ready for Task (\`deck-developer-task\`) to break this design into implementation tasks, combined with Spec.
 \`\`\`
 
-### Step 4: Persist Artifact
+### Step 4: Persist Artifact and Registry
 
 Write the design as \`design.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
+
+Update the Spec Registry for the change:
+- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
+- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
+- Record phase \`design\`, status \`completed\` or \`blocked\`, and an event entry referencing \`design.md\`.
+
+If the registry update fails, report it as a blocker and do not silently continue.
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
@@ -262,7 +270,11 @@ Return EXACTLY this format to the orchestrator:
 ## Design Created
 
 **Change**: {change-name}
-**Location**: {openspec path, engram topic key, or "inline"}
+**Artifact Path**: \`openspec/changes/{change-name}/design.md\`
+**Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
+**Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Recorded**: phase \`design\`, status \`{completed|blocked}\`, event \`{event name}\`
+**Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Summary
 - **Approach**: {one-line summary of the chosen architecture}
@@ -282,7 +294,7 @@ Ready for Task (\`deck-developer-task\`) to combine with Spec and break into imp
 
 ## Rules
 
-- Do not implement, create, modify, or edit any code, configuration, or files.
+- Do not implement, create, modify, or edit product code, configuration, or files; writing required OpenSpec artifacts and Spec Registry files is allowed.
 - Do not write requirements, acceptance scenarios, or specs — that is Spec Agent's job.
 - Do not break work into implementation tasks — that is Task Agent's job.
 - Do not delegate further — you are the terminal design phase.

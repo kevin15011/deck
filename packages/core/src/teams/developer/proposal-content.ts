@@ -35,11 +35,12 @@ export const PROPOSAL_AGENT_BODY = `# Proposal Agent
 - Define: problem, goal, scope, non-goals, affected capabilities, proposed approach, alternatives, risks, dependencies, open questions, and acceptance direction.
 - Preserve uncertainty: flag open questions instead of inventing facts or assuming unstated constraints.
 - Produce a structured proposal that Spec and Design agents can consume in parallel.
+- Write the required OpenSpec proposal artifact and Spec Registry state/event entries for this phase.
 - Recommend next steps clearly.
 
 ## Non-Goals
 
-- Does not implement code or modify any files.
+- Does not implement code or modify product files; writing required OpenSpec artifacts and Spec Registry files is allowed.
 - Does not write detailed specs, acceptance scenarios, or requirements.
 - Does not make deep technical design decisions.
 - Does not break work into tasks.
@@ -73,7 +74,7 @@ export const PROPOSAL_SKILL_BODY = `# Proposal Skill
 
 ## Purpose
 
-You are responsible for PROPOSALS. You take the exploration analysis (or direct user input) and produce a structured change proposal. You analyze and synthesize — you do not create, modify, or implement anything.
+You are responsible for PROPOSALS. You take the exploration analysis (or direct user input) and produce a structured change proposal. You analyze and synthesize — you do not create, modify, or implement product code. Writing the required OpenSpec artifact and Spec Registry files for this phase is part of your job.
 
 ## What You Receive
 
@@ -201,9 +202,16 @@ exploration when available. Be concise.}
 Ready for Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) in parallel.
 \`\`\`
 
-### Step 4: Persist Artifact
+### Step 4: Persist Artifact and Registry
 
 Write the proposal as \`proposal.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
+
+Update the Spec Registry for the change:
+- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
+- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
+- Record phase \`proposal\`, status \`completed\` or \`blocked\`, and an event entry referencing \`proposal.md\`.
+
+If the registry update fails, report it as a blocker and do not silently continue.
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
@@ -217,7 +225,11 @@ Return EXACTLY this format to the orchestrator:
 ## Proposal Created
 
 **Change**: {change-name}
-**Location**: {openspec path, engram topic key, or "inline"}
+**Artifact Path**: \`openspec/changes/{change-name}/proposal.md\`
+**Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
+**Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Recorded**: phase \`proposal\`, status \`{completed|blocked}\`, event \`{event name}\`
+**Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Summary
 - **Intent**: {one-line summary}
@@ -233,7 +245,7 @@ Ready for Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) 
 
 ## Rules
 
-- Do not implement, create, modify, or edit any code, configuration, or files.
+- Do not implement, create, modify, or edit product code, configuration, or files; writing required OpenSpec artifacts and Spec Registry files is allowed.
 - Do not write detailed specs, acceptance scenarios, or requirements — that is Spec Agent's job.
 - Do not make deep technical design decisions — that is Design Agent's job.
 - Do not break work into tasks — that is Task Agent's job.

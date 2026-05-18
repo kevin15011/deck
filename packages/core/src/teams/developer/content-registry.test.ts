@@ -2,6 +2,21 @@ import { describe, expect, test } from "bun:test";
 
 import { getAgentContent, getTeamSessionInstructions } from "./content-registry";
 
+const DEVELOPER_AGENT_IDS = [
+  "deck-developer-orchestrator",
+  "deck-developer-explorer",
+  "deck-developer-proposal",
+  "deck-developer-spec",
+  "deck-developer-design",
+  "deck-developer-task",
+  "deck-developer-apply-general",
+  "deck-developer-apply-backend",
+  "deck-developer-apply-frontend",
+  "deck-developer-verify",
+  "deck-developer-review",
+  "deck-developer-archive",
+] as const;
+
 // ---------------------------------------------------------------------------
 // getAgentContent
 // ---------------------------------------------------------------------------
@@ -59,22 +74,7 @@ describe("getAgentContent", () => {
   });
 
   test("returns content for all 12 agents — no undefined gaps", () => {
-    const agentIds = [
-      "deck-developer-orchestrator",
-      "deck-developer-explorer",
-      "deck-developer-proposal",
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-apply-backend",
-      "deck-developer-apply-frontend",
-      "deck-developer-verify",
-      "deck-developer-review",
-      "deck-developer-archive",
-    ];
-
-    for (const id of agentIds) {
+    for (const id of DEVELOPER_AGENT_IDS) {
       const content = getAgentContent(id);
       expect(content).toBeDefined();
       expect(content!.agentBody).toBeTruthy();
@@ -88,25 +88,39 @@ describe("getAgentContent", () => {
   });
 
   test("all catalog agent content is not placeholder", () => {
-    const agentIds = [
-      "deck-developer-orchestrator",
-      "deck-developer-explorer",
-      "deck-developer-proposal",
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-apply-backend",
-      "deck-developer-apply-frontend",
-      "deck-developer-verify",
-      "deck-developer-review",
-      "deck-developer-archive",
-    ];
-
-    for (const id of agentIds) {
+    for (const id of DEVELOPER_AGENT_IDS) {
       const content = getAgentContent(id)!;
       expect(content.agentBody).not.toContain("Placeholder");
       expect(content.skillBody).not.toContain("Placeholder");
+    }
+  });
+
+  test("artifact-writing agents require Spec Registry state and events", () => {
+    for (const id of DEVELOPER_AGENT_IDS) {
+      const content = getAgentContent(id)!;
+      const combined = `${content.agentBody}\n${content.skillBody}`;
+      expect(combined, id).toContain("Spec Registry");
+      expect(combined, id).toContain("state.yaml");
+      expect(combined, id).toContain("events.yaml");
+    }
+  });
+
+  test("core prompts do not hardcode Engram topic-key artifact locations", () => {
+    for (const id of DEVELOPER_AGENT_IDS) {
+      const content = getAgentContent(id)!;
+      const combined = `${content.agentBody}\n${content.skillBody}`;
+      expect(combined, id).not.toMatch(/engram topic key/i);
+    }
+  });
+
+  test("old artifact-store modes remain absent across core prompts", () => {
+    for (const id of DEVELOPER_AGENT_IDS) {
+      const content = getAgentContent(id)!;
+      const combined = `${content.agentBody}\n${content.skillBody}`;
+      expect(combined, id).not.toMatch(/engram\s*\|\s*openspec\s*\|\s*hybrid\s*\|\s*none/i);
+      expect(combined, id).not.toContain("| engram |");
+      expect(combined, id).not.toContain("| hybrid |");
+      expect(combined, id).not.toContain("| none |");
     }
   });
 

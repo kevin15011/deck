@@ -35,11 +35,12 @@ export const EXPLORER_AGENT_BODY = `# Explorer Agent
 - Identify affected files, modules, coupling, existing tests, and potential risks.
 - Compare possible approaches with pros, cons, and effort estimates.
 - Produce compact structured findings that Proposal, Spec, and Design agents can consume.
+- Write the required OpenSpec exploration artifact and Spec Registry state/event entries for this phase.
 - Recommend a path forward or clearly state what is still unclear.
 
 ## Non-Goals
 
-- Does not modify, create, or edit any code or configuration files.
+- Does not modify, create, or edit any product code or configuration files; writing required OpenSpec artifacts and Spec Registry files is allowed.
 - Does not implement changes.
 - Does not create formal specs or proposals.
 - Does not delegate further — you are the terminal exploration agent.
@@ -73,7 +74,7 @@ export const EXPLORER_SKILL_BODY = `# Explorer Skill
 
 ## Purpose
 
-You are responsible for EXPLORATION. You investigate the codebase, analyze problems, compare approaches, and return a structured analysis. You research and report — you do not create, modify, or implement anything.
+You are responsible for EXPLORATION. You investigate the codebase, analyze problems, compare approaches, and return a structured analysis. You research and report — you do not create, modify, or implement product code. Writing the required OpenSpec artifact and Spec Registry files for this phase is part of your job.
 
 ## What You Receive
 
@@ -136,9 +137,16 @@ For each approach, consider:
 - Alignment with existing project patterns
 - Risk of regressions or side effects
 
-### Step 4: Persist Artifact
+### Step 4: Persist Artifact and Registry
 
 Write exploration findings as \`exploration.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
+
+Update the Spec Registry for the change:
+- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
+- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
+- Record phase \`explore\`, status \`completed\` or \`blocked\`, and an event entry referencing \`exploration.md\`.
+
+If the registry update fails, report it as a blocker and do not silently continue.
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
@@ -187,11 +195,18 @@ Return EXACTLY this format to the orchestrator:
 
 ### Ready for Proposal
 {Yes/No — and what the orchestrator should communicate to the user}
+
+### Registry
+- **Artifact Path**: \`openspec/changes/{change-name}/exploration.md\`
+- **State Path**: \`openspec/changes/{change-name}/state.yaml\`
+- **Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+- **Recorded**: phase \`explore\`, status \`{completed|blocked}\`, event \`{event name}\`
+- **Registry Blocker**: {none, or describe why state/events could not be updated}
 \`\`\`
 
 ## Rules
 
-- Do not modify, create, or edit any existing code, configuration, or files.
+- Do not modify, create, or edit product code or configuration; writing required OpenSpec artifacts and Spec Registry files is allowed.
 - Do not delegate further — you are the terminal exploration phase.
 - Always read real code. Never guess or assume about the codebase.
 - Keep analysis concise. The orchestrator needs a summary, not a novel.

@@ -474,7 +474,7 @@ Project-owned artifacts are persisted as OpenSpec files — this is required and
 Architecture:
 
 - **OpenSpec files** (required): source of truth for all SDD artifacts. Versionable, committable, full git history. Stored under `openspec/changes/{change-name}/`.
-- **Spec Registry** (required): operational authority and control plane. Tracks change lifecycle, artifact state, and events. See `docs/openspec-registry-roadmap.md`.
+- **Spec Registry** (required): operational authority and control plane. Tracks change lifecycle, artifact state, and events in `openspec/changes/{change-name}/state.yaml` and `events.yaml`. A phase is not complete until the artifact and matching registry entries exist. See `docs/openspec-registry-roadmap.md`.
 - **Memory adapters** (auxiliary): optional cache/index for local retrieval and cross-session convenience (e.g., Engram). Memory never replaces or overwrites official OpenSpec artifacts.
 - **Project AI notes** (planned, Phase 5): repo-owned shared knowledge under `.deck/ai-notes/`. Not yet active — deferred to Phase 5.
 
@@ -518,7 +518,7 @@ The Explorer Agent has a real prompt and skill. Its content lives in `packages/c
 - **Structured findings format**: Explorer produces a fixed output format with Goal, Current State, Relevant Files, Constraints, Risks, Options and Tradeoffs, Recommendation, and Open Questions — designed for consumption by Proposal, Spec, and Design agents.
 - **Tool preference**: Explicitly prefers codebase graph/search tools for structural discovery and documents filesystem fallback.
 - **Scope discipline**: Instructs the agent to start narrow and avoid reading too broadly, compressing findings as it goes.
-- **No code changes**: Explorer is prohibited from modifying, creating, or editing any files.
+- **No product code changes**: Explorer is prohibited from modifying product code or configuration; it may write `exploration.md` plus required Spec Registry files.
 - **No delegation**: Explorer is the terminal exploration phase and must not delegate further.
 - **Runtime-agnostic**: No references to Pi-specific launcher behavior, slash commands, or model assignments.
 - **Artifact persistence**: Writes `exploration.md` to the OpenSpec change directory. Memory is auxiliary only.

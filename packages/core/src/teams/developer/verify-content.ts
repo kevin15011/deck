@@ -37,6 +37,7 @@ export const VERIFY_AGENT_BODY = `# Verify Agent
 - Report PASS, PASS WITH WARNINGS, or FAIL.
 - Classify findings as CRITICAL, WARNING, or SUGGESTION.
 - Produce a structured verify-report artifact.
+- Update Spec Registry state/event entries for verification results.
 
 ## Non-Goals
 
@@ -210,9 +211,16 @@ Compile everything into the output template below.
 > If none, write "None."
 \`\`\`
 
-### Step 8: Persist Artifact
+### Step 8: Persist Artifact and Registry
 
 Write the verify report as \`verify-report.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
+
+Update the Spec Registry for the change:
+- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
+- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
+- Record phase \`verify\`, status \`passed\`, \`passed_with_warnings\`, or \`failed\`, and an event entry referencing \`verify-report.md\`.
+
+If the registry update fails, report it as a blocker and do not silently continue.
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
@@ -225,6 +233,11 @@ Return EXACTLY this format to the orchestrator:
 
 **Change**: {change-name}
 **Result**: PASS | PASS WITH WARNINGS | FAIL
+**Artifact Path**: \`openspec/changes/{change-name}/verify-report.md\`
+**Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
+**Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Recorded**: phase \`verify\`, status \`{passed|passed_with_warnings|failed}\`, event \`{event name}\`
+**Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Summary
 - **Tasks Complete**: {N} / {total}

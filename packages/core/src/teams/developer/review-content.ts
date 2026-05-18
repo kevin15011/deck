@@ -38,6 +38,7 @@ export const REVIEW_AGENT_BODY = `# Review Agent
 - Review integration concerns across boundaries.
 - Use strong skill injection based on scope and stack.
 - Produce a structured review report with actionable findings.
+- Update Spec Registry state/event entries for review results.
 
 ## Scope
 
@@ -240,11 +241,18 @@ Does the implementation match the Design artifact?
 > If none, write "None."
 \`\`\`
 
-### Step 6: Persist Artifact
+### Step 6: Persist Artifact and Registry
 
 Write the review report as \`review-report.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
 
 If multiple Review Agent scopes run in parallel, each scope writes its own report (e.g., \`review-report-backend.md\`). The Orchestrator merges them.
+
+Update the Spec Registry for the change:
+- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
+- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
+- Record phase \`review\`, status \`approved\`, \`approved_with_changes\`, or \`changes_requested\`, and an event entry referencing the review report path.
+
+If the registry update fails, report it as a blocker and do not silently continue.
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
@@ -258,6 +266,11 @@ Return EXACTLY this format to the orchestrator:
 **Change**: {change-name}
 **Scope**: {general | backend | frontend | integration}
 **Rating**: APPROVE | APPROVE WITH CHANGES | REQUEST CHANGES
+**Artifact Path**: \`openspec/changes/{change-name}/review-report{optional-scope}.md\`
+**Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
+**Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Recorded**: phase \`review\`, status \`{approved|approved_with_changes|changes_requested}\`, event \`{event name}\`
+**Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Summary
 - **Files Reviewed**: {N}
