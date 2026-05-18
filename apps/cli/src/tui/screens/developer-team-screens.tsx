@@ -1,8 +1,8 @@
 import React from "react";
 import { Box, Text } from "ink";
 
-import { DEVELOPER_TEAM_AGENTS } from "@deck/adapter-pi";
-import type { PiModel, PiProvider } from "@deck/adapter-pi";
+import { DEVELOPER_TEAM_AGENTS, PI_THINKING_LEVELS } from "@deck/adapter-pi";
+import type { PiModel, PiProvider, PiThinkingLevel } from "@deck/adapter-pi";
 import { MenuList } from "../components/menu-list";
 
 type DeveloperTeamReviewScreenProps = {
@@ -116,6 +116,7 @@ type AgentModelAssignmentScreenProps = {
   agentIndex: number;
   totalAgents: number;
   modelId: string;
+  defaultThinking: PiThinkingLevel;
 };
 
 export function AgentModelAssignmentScreen({
@@ -123,6 +124,7 @@ export function AgentModelAssignmentScreen({
   agentIndex,
   totalAgents,
   modelId,
+  defaultThinking,
 }: AgentModelAssignmentScreenProps) {
   const agent = DEVELOPER_TEAM_AGENTS[agentIndex];
   const progress = `${agentIndex + 1}/${totalAgents}`;
@@ -130,16 +132,18 @@ export function AgentModelAssignmentScreen({
   return (
     <Box flexDirection="column">
       <Text bold>
-        Assign model to {agent.displayName} <Text dimColor>({progress})</Text>
+        Select reasoning for {agent.displayName} <Text dimColor>({progress})</Text>
       </Text>
       <Text>Selected model: <Text color="cyan">{modelId}</Text></Text>
+      <Text dimColor>Choose Pi thinking/effort level for this agent.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
-          items={[
-            { id: "assign", label: `Assign ${modelId} to ${agent.displayName}` },
-            { id: "skip", label: `Skip ${agent.displayName}` },
-          ]}
+          items={PI_THINKING_LEVELS.map((level) => ({
+            id: level,
+            label: `thinking ${level}`,
+            hint: level === defaultThinking ? "recommended/default" : "",
+          }))}
         />
       </Box>
     </Box>
@@ -148,16 +152,18 @@ export function AgentModelAssignmentScreen({
 
 type AgentModelConfigListScreenProps = {
   cursor: number;
-  assignments: Record<string, string>;
+  modelAssignments: Record<string, string>;
+  thinkingAssignments: Record<string, PiThinkingLevel>;
 };
 
-export function AgentModelConfigListScreen({ cursor, assignments }: AgentModelConfigListScreenProps) {
+export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingAssignments }: AgentModelConfigListScreenProps) {
   const agentItems = DEVELOPER_TEAM_AGENTS.map((agent) => {
-    const assigned = assignments[agent.id];
+    const assigned = modelAssignments[agent.id];
+    const thinking = thinkingAssignments[agent.id];
     return {
       id: agent.id,
       label: agent.displayName,
-      hint: assigned ?? "not configured",
+      hint: assigned ? `${assigned} · thinking ${thinking ?? "default"}` : "not configured",
     };
   });
 
@@ -166,7 +172,7 @@ export function AgentModelConfigListScreen({ cursor, assignments }: AgentModelCo
   return (
     <Box flexDirection="column">
       <Text bold>Select an agent to configure</Text>
-      <Text dimColor>Current assignments are shown. Choose an agent to change its model.</Text>
+      <Text dimColor>Current assignments are shown. Choose an agent to change its model and reasoning level.</Text>
       <Box marginTop={1}>
         <MenuList cursor={cursor} items={items} />
       </Box>

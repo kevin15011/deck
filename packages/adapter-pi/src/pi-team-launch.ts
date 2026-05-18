@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { getDeveloperTeamCatalog } from "./developer-team-catalog";
+import { readDeveloperTeamModelConfigAssignments } from "./developer-team-install";
+import { getDefaultThinkingForModel } from "./model-config";
 import type { TeamId } from "./team-catalog";
 import { getTeamsForEnvironment } from "./team-catalog";
 
@@ -41,6 +43,8 @@ export type BuildPiTeamLaunchPlanOptions = {
   /** Pi command binary name/path (default: "pi") */
   piCommand?: string;
 };
+
+const DEVELOPER_ORCHESTRATOR_AGENT_ID = "deck-developer-orchestrator";
 
 // --- Helpers ---
 
@@ -121,6 +125,13 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
     "--session-dir", sessionDir,
     "--system-prompt", join(profileDir, "system-prompt.md"),
   ];
+
+  const assignments = readDeveloperTeamModelConfigAssignments(projectRoot);
+  const orchestratorModel = assignments.modelAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID];
+  if (orchestratorModel) {
+    args.push("--model", orchestratorModel);
+    args.push("--thinking", assignments.thinkingAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID] ?? getDefaultThinkingForModel(orchestratorModel));
+  }
 
   if (isContinue) {
     args.push("--continue");

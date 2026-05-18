@@ -10,6 +10,7 @@ import {
   ModelProviderSelectionScreen,
   ModelSelectionScreen,
   AgentModelAssignmentScreen,
+  AgentModelConfigListScreen,
   NoProvidersScreen,
 } from "./screens/developer-team-screens";
 
@@ -199,25 +200,40 @@ describe("Developer Team TUI screens", () => {
   });
 
   describe("AgentModelAssignmentScreen", () => {
-    test("renders agent assignment with progress", () => {
+    test("renders reasoning selection with progress", () => {
       const output = renderToString(
-        <AgentModelAssignmentScreen cursor={0} agentIndex={0} totalAgents={12} modelId="anthropic/claude-opus-4" />,
+        <AgentModelAssignmentScreen cursor={0} agentIndex={0} totalAgents={12} modelId="anthropic/claude-opus-4" defaultThinking="low" />,
       );
 
-      expect(output).toContain("Assign model to Orchestrator Agent");
+      expect(output).toContain("Select reasoning for Orchestrator Agent");
       expect(output).toContain("1/12");
       expect(output).toContain("anthropic/claude-opus-4");
-      expect(output).toContain("Assign anthropic/claude-opus-4 to Orchestrator Agent");
-      expect(output).toContain("Skip Orchestrator Agent");
+      expect(output).toContain("thinking off");
+      expect(output).toContain("thinking low");
+      expect(output).toContain("recommended/default");
     });
 
     test("renders skip option for last agent", () => {
       const output = renderToString(
-        <AgentModelAssignmentScreen cursor={0} agentIndex={11} totalAgents={12} modelId="openai/gpt-4o" />,
+        <AgentModelAssignmentScreen cursor={0} agentIndex={11} totalAgents={12} modelId="openai/gpt-4o" defaultThinking="low" />,
       );
 
-      expect(output).toContain("Assign model to Archive Agent");
+      expect(output).toContain("Select reasoning for Archive Agent");
       expect(output).toContain("12/12");
+    });
+  });
+
+  describe("AgentModelConfigListScreen", () => {
+    test("renders model and thinking inline", () => {
+      const output = renderToString(
+        <AgentModelConfigListScreen
+          cursor={0}
+          modelAssignments={{ "deck-developer-orchestrator": "openai-codex/gpt-5.5" }}
+          thinkingAssignments={{ "deck-developer-orchestrator": "high" }}
+        />,
+      );
+
+      expect(output).toContain("openai-codex/gpt-5.5 · thinking high");
     });
   });
 

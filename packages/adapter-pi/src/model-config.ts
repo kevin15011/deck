@@ -16,9 +16,20 @@ export type PiModel = {
   id: string;
   displayName: string;
   providerId: string;
+  thinking?: boolean;
 };
 
+export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+
 export type DeveloperTeamModelAssignments = Record<string, string>;
+export type DeveloperTeamThinkingAssignments = Record<string, PiThinkingLevel>;
+
+export type DeveloperTeamModelConfigAssignments = {
+  modelAssignments: DeveloperTeamModelAssignments;
+  thinkingAssignments: DeveloperTeamThinkingAssignments;
+};
 
 export type PiSettings = {
   defaultProvider?: string;
@@ -212,7 +223,31 @@ function parsePiListModelLine(line: string, requestedProviderId: string): PiMode
   const providerId = first;
   const modelName = columns[1];
   if (providerId !== requestedProviderId || !modelName) return [];
-  return [{ id: `${providerId}/${modelName}`, displayName: humanizeModelName(modelName), providerId }];
+  const thinking = parseThinkingCapability(columns[4]);
+  return [{ id: `${providerId}/${modelName}`, displayName: humanizeModelName(modelName), providerId, thinking }];
+}
+
+export function getDefaultThinkingForModel(model?: string): PiThinkingLevel {
+  if (!model) return "low";
+
+  // Pi's OpenCode Go provider currently rejects persisted assistant messages that
+  // include a `reasoning` field for some models even when `pi --list-models`
+  // advertises thinking support. Keep subagents compatible by disabling thinking
+  // for that provider unless/ until Pi exposes a safer per-model schema.
+  if (model.startsWith("opencode-go/")) return "off";
+
+  return "low";
+}
+
+export function parsePiThinkingLevel(value: string | undefined): PiThinkingLevel | undefined {
+  const normalized = value?.trim();
+  return PI_THINKING_LEVELS.includes(normalized as PiThinkingLevel) ? (normalized as PiThinkingLevel) : undefined;
+}
+
+function parseThinkingCapability(value: string | undefined): boolean | undefined {
+  if (value === "yes") return true;
+  if (value === "no") return false;
+  return undefined;
 }
 
 function resolveProvider(providerId: string): PiProvider | undefined {

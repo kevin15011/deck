@@ -379,9 +379,9 @@ Required behavior:
 
 This keeps agent roles stable while allowing stack-aware behavior.
 
-## Model assignments
+## Model and reasoning assignments
 
-Deck now configures model assignments as part of the Pi Developer Team install and configure flow.
+Deck now configures model and Pi reasoning/effort assignments as part of the Pi Developer Team install and configure flow.
 
 ### Provider detection
 
@@ -400,9 +400,12 @@ If no providers are detected, the UI explains which env vars are required and al
 
 ### Model selection flow
 
-1. **Provider selection** — user picks from detected providers.
-2. **Model selection** — user picks from curated defaults for that provider. Deck prefers `pi --list-models` output when available and testable; otherwise it falls back to a small default list.
-3. **Agent assignment** — Deck steps through each Developer Team agent and lets the user assign or skip the selected model.
+1. **Agent selection** — user starts from the full Developer Team agent list and can revisit any agent.
+2. **Provider selection** — user picks from detected providers.
+3. **Model selection** — user picks from Pi's `pi --list-models` output when available; otherwise Deck falls back to curated defaults.
+4. **Reasoning selection** — user picks a Pi `thinking` level: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`.
+
+The agent list shows current status inline as `model · thinking <level>`.
 
 ### Frontmatter embedding
 
@@ -410,15 +413,16 @@ For the `direct-files` backend, assigned models are written into each agent file
 
 ```yaml
 model: provider/model
+thinking: low
 ```
 
-Pi parses the `model` frontmatter field, so this is sufficient for project-local agents.
+Pi parses the `model` and `thinking` frontmatter fields for project-local agents. If a model is selected without an explicit thinking level, Deck uses a safe default: `opencode-go/*` defaults to `off`; `openai-codex/*` and other providers default to `low`.
 
 `fallbackModels` is not written yet because the native Pi schema for it is not confirmed.
 
 ### Configure from main menu
 
-`Configure models` in the Deck main menu routes directly to the Pi Developer Team model config path: Pi → Developer Team → provider → model → per-agent assignment.
+`Configure models` in the Deck main menu routes to the Pi Developer Team model config path: Pi → Developer Team → agent → provider → model → reasoning.
 
 Suggested model tiers:
 
@@ -492,6 +496,14 @@ deck pi developer --resume
 3. `materializeTeamProfile()` generates team profile artifacts under `.deck/pi/profiles/<team>/`.
 4. `buildPiTeamLaunchPlan()` builds the Pi command, args, env, and cwd.
 5. The CLI spawns Pi with the launch plan, inheriting stdio for interactive use.
+
+When `.pi/agents/deck-developer-orchestrator.md` has a model assignment, the launcher also passes the top-level session assignment to Pi:
+
+```txt
+pi --session-dir <dir> --system-prompt <file> --model <provider/model> --thinking <level>
+```
+
+This is required because the top-level Developer Team Orchestrator session is launched by Pi command flags and the generated system prompt, not as a subagent that consumes frontmatter. If `thinking` is missing in the installed orchestrator file, Deck applies the same safe default used for generated agents.
 
 ### Session isolation
 

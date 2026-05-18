@@ -5,14 +5,16 @@ import { tmpdir } from "node:os";
 
 import {
   buildDeveloperTeamInstallPlan,
+  readDeveloperTeamModelConfigAssignments,
   readDeveloperTeamModelAssignments,
+  readDeveloperTeamThinkingAssignments,
   applyDeveloperTeamInstall,
   backupDeveloperTeamFiles,
   rollbackDeveloperTeamFiles,
   verifyDeveloperTeamInstall,
 } from "./developer-team-install";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
-import type { DeveloperTeamModelAssignments } from "./model-config";
+import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "./model-config";
 
 function createTempProject(): string {
   return mkdtempSync(join(tmpdir(), "deck-test-"));
@@ -98,6 +100,45 @@ describe("buildDeveloperTeamInstallPlan", () => {
     expect(explorer.content).toContain("model: openai/gpt-4o");
   });
 
+  test("disables thinking for opencode-go model assignments", () => {
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
+      modelAssignments: {
+        "deck-developer-explorer": "opencode-go/kimi-k2.6",
+      },
+    });
+
+    const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
+    expect(explorer.content).toContain("model: opencode-go/kimi-k2.6");
+    expect(explorer.content).toContain("thinking: off");
+  });
+
+  test("keeps low thinking for non-opencode-go model assignments", () => {
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
+      modelAssignments: {
+        "deck-developer-orchestrator": "openai-codex/gpt-5.5",
+      },
+    });
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("model: openai-codex/gpt-5.5");
+    expect(orchestrator.content).toContain("thinking: low");
+  });
+
+  test("uses explicit thinking assignments when provided", () => {
+    const modelAssignments: DeveloperTeamModelAssignments = {
+      "deck-developer-orchestrator": "openai-codex/gpt-5.5",
+    };
+    const thinkingAssignments: DeveloperTeamThinkingAssignments = {
+      "deck-developer-orchestrator": "high",
+    };
+
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", { modelAssignments, thinkingAssignments });
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("model: openai-codex/gpt-5.5");
+    expect(orchestrator.content).toContain("thinking: high");
+  });
+
   test("omits model frontmatter when no model assignment exists for an agent", () => {
     const assignments: DeveloperTeamModelAssignments = {
       "deck-developer-orchestrator": "anthropic/claude-opus-4",
@@ -121,25 +162,43 @@ describe("buildDeveloperTeamInstallPlan", () => {
 });
 
 describe("readDeveloperTeamModelAssignments", () => {
-  test("reads existing model frontmatter from installed agent files", () => {
+  test("reads existing model and thinking frontmatter from installed agent files", () => {
     const files = new Map<string, string>();
     files.set(
       "/tmp/project/.pi/agents/deck-developer-orchestrator.md",
-      ["---", "name: deck-developer-orchestrator", "model: openai-codex/gpt-5.5", "---", "", "# Agent"].join("\n"),
+      ["---", "name: deck-developer-orchestrator", "model: openai-codex/gpt-5.5", "thinking: high", "---", "", "# Agent"].join("\n"),
     );
     files.set(
       "/tmp/project/.pi/agents/deck-developer-explorer.md",
-      ["---", "name: deck-developer-explorer", "model: opencode-go/kimi-k2.6", "---", "", "# Agent"].join("\n"),
+      ["---", "name: deck-developer-explorer", "model: opencode-go/kimi-k2.6", "thinking: off", "---", "", "# Agent"].join("\n"),
     );
 
-    const assignments = readDeveloperTeamModelAssignments("/tmp/project", {
+    const assignments = readDeveloperTeamModelConfigAssignments("/tmp/project", {
       exists: (path) => files.has(String(path)),
       readFile: (path) => files.get(String(path)) ?? "",
     });
 
-    expect(assignments["deck-developer-orchestrator"]).toBe("openai-codex/gpt-5.5");
-    expect(assignments["deck-developer-explorer"]).toBe("opencode-go/kimi-k2.6");
-    expect(assignments["deck-developer-proposal"]).toBeUndefined();
+    expect(assignments.modelAssignments["deck-developer-orchestrator"]).toBe("openai-codex/gpt-5.5");
+    expect(assignments.modelAssignments["deck-developer-explorer"]).toBe("opencode-go/kimi-k2.6");
+    expect(assignments.modelAssignments["deck-developer-proposal"]).toBeUndefined();
+    expect(assignments.thinkingAssignments["deck-developer-orchestrator"]).toBe("high");
+    expect(assignments.thinkingAssignments["deck-developer-explorer"]).toBe("off");
+  });
+
+  test("keeps legacy model-only reader and thinking-only reader", () => {
+    const files = new Map<string, string>();
+    files.set(
+      "/tmp/project/.pi/agents/deck-developer-orchestrator.md",
+      ["---", "name: deck-developer-orchestrator", "model: openai-codex/gpt-5.5", "thinking: medium", "---"].join("\n"),
+    );
+
+    const options = {
+      exists: (path: Parameters<typeof existsSync>[0]) => files.has(String(path)),
+      readFile: (path: string) => files.get(String(path)) ?? "",
+    };
+
+    expect(readDeveloperTeamModelAssignments("/tmp/project", options)["deck-developer-orchestrator"]).toBe("openai-codex/gpt-5.5");
+    expect(readDeveloperTeamThinkingAssignments("/tmp/project", options)["deck-developer-orchestrator"]).toBe("medium");
   });
 
   test("returns empty assignments when no installed agent files exist", () => {

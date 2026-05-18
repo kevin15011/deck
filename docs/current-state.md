@@ -70,12 +70,15 @@ bunx tsc --noEmit
 
 ## Model configuration
 
-Pi Developer Team installation now includes a model assignment flow:
+Pi Developer Team installation now includes a model and reasoning assignment flow:
 
 - Detects configured Pi providers from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `OLLAMA_HOST`, `MISTRAL_API_KEY`).
 - Presents detected providers first, then curated default models per provider.
-- Steps through each Developer Team agent to assign the selected model.
-- Writes `model: provider/model` into agent frontmatter when assigned.
+- Uses an agent-list-first flow: pick an agent, then provider, model, and Pi `thinking`/effort level.
+- Shows current assignments inline as `model · thinking <level>`.
+- Writes `model: provider/model` and `thinking: <level>` into agent frontmatter when assigned.
+- Defaults thinking safely: `opencode-go/*` defaults to `off`; other models, including `openai-codex/*`, default to `low` unless explicitly changed.
+- `deck pi developer` reads the installed `deck-developer-orchestrator` assignment and passes it to Pi as `--model <model> --thinking <level>` alongside the generated system prompt.
 - Available both during installation (before Developer Team review) and from the main menu (`Configure models`).
 
 ## Next recommended task

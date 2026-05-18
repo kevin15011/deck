@@ -22,18 +22,21 @@ import {
   buildModelInventoryFromPiListModels,
   buildPiInstallationPlan,
   detectConfiguredProviders,
+  getDefaultThinkingForModel,
   getOptionalPiTools,
   getTeamsForEnvironment,
   inspectPiEnvironment,
   installPiTools,
   listModelsForProvider,
-  readDeveloperTeamModelAssignments,
+  PI_THINKING_LEVELS,
+  readDeveloperTeamModelConfigAssignments,
   reviewPiRequiredTools,
   rollbackDeveloperTeamFiles,
   verifyDeveloperTeamInstall,
   DEVELOPER_TEAM_AGENTS,
   type AgentApplyResult,
   type DeveloperTeamModelAssignments,
+  type DeveloperTeamThinkingAssignments,
   type InstallablePiTool,
   type InstallablePiToolId,
   type PiModel,
@@ -127,6 +130,7 @@ export function DeckApp() {
   const [modelsByProvider, setModelsByProvider] = useState<Record<string, PiModel[]>>({});
   const [selectedModel, setSelectedModel] = useState<PiModel | null>(null);
   const [modelAssignments, setModelAssignments] = useState<DeveloperTeamModelAssignments>({});
+  const [thinkingAssignments, setThinkingAssignments] = useState<DeveloperTeamThinkingAssignments>({});
   const [agentAssignmentIndex, setAgentAssignmentIndex] = useState(0);
   const [agentConfigCursor, setAgentConfigCursor] = useState(0);
   const [modelEnvironmentCursor, setModelEnvironmentCursor] = useState(0);
@@ -302,7 +306,7 @@ export function DeckApp() {
 
     function runInstall() {
       const projectRoot = resolveProjectRoot();
-      const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments });
+      const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments });
       const backup = backupDeveloperTeamFiles(plan);
 
       try {
@@ -358,11 +362,11 @@ export function DeckApp() {
     return () => {
       cancelled = true;
     };
-  }, [screen, selectedEnvironments, installedOpenCode?.command, openCodePreflight]);
+  }, [screen, selectedEnvironments, installedOpenCode?.command, openCodePreflight, modelAssignments, thinkingAssignments]);
 
-  function resetCursor(nextScreen: Screen) {
+  function resetCursor(nextScreen: Screen, nextCursor = 0) {
     setScreen(nextScreen);
-    setCursor(nextScreen === "home" ? homeCursor : 0);
+    setCursor(nextScreen === "home" ? homeCursor : nextCursor);
     if (nextScreen === "agent-model-config-list") setAgentConfigCursor(0);
     if (nextScreen === "developer-team-review") setDeveloperTeamCursor(0);
   }
@@ -381,7 +385,7 @@ export function DeckApp() {
     if (screen === "agent-model-config-list") return DEVELOPER_TEAM_AGENTS.length;
     if (screen === "model-provider-selection") return Math.max(0, detectedProviders.length - 1);
     if (screen === "model-selection") return Math.max(0, providerModels.length - 1);
-    if (screen === "agent-model-assignment") return 1;
+    if (screen === "agent-model-assignment") return PI_THINKING_LEVELS.length - 1;
     if (screen === "no-providers") return 0;
     return 0;
   }
@@ -468,7 +472,7 @@ export function DeckApp() {
       if (!team) return;
 
       if (team.id === "developer-team") {
-        setModelAssignments(readDeveloperTeamModelAssignments(resolveProjectRoot()));
+        hydrateDeveloperTeamModelConfig();
         const inventory = detectPiModelInventoryForTui();
         setDetectedProviders(inventory.providers);
         setModelsByProvider(inventory.modelsByProvider);
@@ -517,7 +521,7 @@ export function DeckApp() {
 
       if (nextScreen === "developer-team-review") {
         // Insert model configuration before review
-        setModelAssignments(readDeveloperTeamModelAssignments(resolveProjectRoot()));
+        hydrateDeveloperTeamModelConfig();
         const inventory = detectPiModelInventoryForTui();
         setDetectedProviders(inventory.providers);
         setModelsByProvider(inventory.modelsByProvider);
@@ -551,6 +555,7 @@ export function DeckApp() {
         if (modelConfigSource === "install") {
           resetCursor("developer-team-review");
         } else {
+          applyDeveloperTeamModelConfig();
           resetCursor("complete");
         }
       } else {
@@ -563,9 +568,22 @@ export function DeckApp() {
     if (screen === "model-selection") {
       const model = providerModels[cursor];
       if (!model) return;
+      setSelectedModel(model);
+      const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
+      const existingThinking = agent ? thinkingAssignments[agent.id] : undefined;
+      const defaultThinking = existingThinking ?? getDefaultThinkingForModel(model.id);
+      resetCursor("agent-model-assignment", Math.max(0, PI_THINKING_LEVELS.indexOf(defaultThinking)));
+      return;
+    }
+
+    if (screen === "agent-model-assignment") {
+      if (!selectedModel) return;
       const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
       if (!agent) return;
-      setModelAssignments((current) => ({ ...current, [agent.id]: model.id }));
+      const thinking = getThinkingLevelByCursor(cursor);
+      setModelAssignments((current) => ({ ...current, [agent.id]: selectedModel.id }));
+      setThinkingAssignments((current) => ({ ...current, [agent.id]: thinking }));
+      setSelectedModel(null);
       resetCursor("agent-model-config-list");
       return;
     }
@@ -614,6 +632,50 @@ export function DeckApp() {
       readFile: readFileSync,
       runCommand: runPiCommand,
     });
+  }
+
+  function hydrateDeveloperTeamModelConfig() {
+    const assignments = readDeveloperTeamModelConfigAssignments(resolveProjectRoot());
+    setModelAssignments(assignments.modelAssignments);
+    setThinkingAssignments(assignments.thinkingAssignments);
+  }
+
+  function getThinkingLevelByCursor(index: number) {
+    return PI_THINKING_LEVELS[index] ?? "low";
+  }
+
+  function applyDeveloperTeamModelConfig() {
+    const projectRoot = resolveProjectRoot();
+    const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments });
+    const backup = backupDeveloperTeamFiles(plan);
+
+    try {
+      const applyResult = applyDeveloperTeamInstall(plan);
+      const verifyResult = verifyDeveloperTeamInstall(plan);
+
+      if (!verifyResult.valid) {
+        rollbackDeveloperTeamFiles(backup);
+        setDeveloperTeamResults([]);
+        setInstallResults((current) => [
+          ...current,
+          { tool: "Developer Team models", success: false, message: "Verification failed. Changes rolled back." },
+        ]);
+        return;
+      }
+
+      setDeveloperTeamResults(applyResult.results);
+    } catch (error) {
+      rollbackDeveloperTeamFiles(backup);
+      setDeveloperTeamResults([]);
+      setInstallResults((current) => [
+        ...current,
+        {
+          tool: "Developer Team models",
+          success: false,
+          message: `Model configuration failed. Changes rolled back.${error instanceof Error ? ` ${error.message}` : ""}`,
+        },
+      ]);
+    }
   }
 
   function detectPiModelInventoryForTui() {
@@ -712,7 +774,7 @@ export function DeckApp() {
       {screen === "installing" ? <Text>Installing selected tools...</Text> : null}
       {screen === "team-selection" ? <TeamSelectionScreen cursor={cursor} selected={selectedTeams} /> : null}
       {screen === "agent-model-config-list" ? (
-        <AgentModelConfigListScreen cursor={agentConfigCursor} assignments={modelAssignments} />
+        <AgentModelConfigListScreen cursor={agentConfigCursor} modelAssignments={modelAssignments} thinkingAssignments={thinkingAssignments} />
       ) : null}
       {screen === "model-provider-selection" ? (
         <ModelProviderSelectionScreen cursor={cursor} providers={detectedProviders} />
@@ -726,6 +788,7 @@ export function DeckApp() {
           agentIndex={agentAssignmentIndex}
           totalAgents={DEVELOPER_TEAM_AGENTS.length}
           modelId={selectedModel.id}
+          defaultThinking={getDefaultThinkingForModel(selectedModel.id)}
         />
       ) : null}
       {screen === "no-providers" ? <NoProvidersScreen /> : null}
@@ -763,7 +826,7 @@ function screenTitle(screen: Screen): string {
     "agent-model-config-list": "Configure Developer Team models",
     "model-provider-selection": "Select Pi provider",
     "model-selection": "Select model",
-    "agent-model-assignment": "Assign model to agent",
+    "agent-model-assignment": "Select reasoning level",
     "no-providers": "No providers detected",
     "developer-team-review": "Developer Team",
     "developer-team-installing": "Installing Developer Team",

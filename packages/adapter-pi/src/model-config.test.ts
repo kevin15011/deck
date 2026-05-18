@@ -4,6 +4,9 @@ import {
   listModelsForProvider,
   parsePiListModelsOutput,
   buildModelInventoryFromPiListModels,
+  getDefaultThinkingForModel,
+  parsePiThinkingLevel,
+  PI_THINKING_LEVELS,
   PI_PROVIDERS,
   DEFAULT_MODELS_BY_PROVIDER,
 } from "./model-config";
@@ -240,6 +243,33 @@ describe("buildModelInventoryFromPiListModels", () => {
       "opencode-go/kimi-k2.6",
       "opencode-go/qwen3.6-plus",
     ]);
+  });
+});
+
+describe("getDefaultThinkingForModel", () => {
+  test("disables thinking for opencode-go models", () => {
+    expect(getDefaultThinkingForModel("opencode-go/kimi-k2.6")).toBe("off");
+  });
+
+  test("keeps low thinking for openai-codex models", () => {
+    expect(getDefaultThinkingForModel("openai-codex/gpt-5.5")).toBe("low");
+  });
+
+  test("uses low thinking when no model is assigned", () => {
+    expect(getDefaultThinkingForModel()).toBe("low");
+  });
+});
+
+describe("parsePiThinkingLevel", () => {
+  test("accepts every Pi thinking level", () => {
+    for (const level of PI_THINKING_LEVELS) {
+      expect(parsePiThinkingLevel(level)).toBe(level);
+    }
+  });
+
+  test("rejects unknown thinking levels", () => {
+    expect(parsePiThinkingLevel("auto")).toBeUndefined();
+    expect(parsePiThinkingLevel(undefined)).toBeUndefined();
   });
 });
 

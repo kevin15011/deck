@@ -3,7 +3,14 @@ import { join } from "node:path";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 import type { DeveloperTeamAgent } from "./developer-team-catalog";
 import { DEVELOPER_TEAM_AGENTS } from "./developer-team-catalog";
-import type { DeveloperTeamModelAssignments } from "./model-config";
+import {
+  getDefaultThinkingForModel,
+  parsePiThinkingLevel,
+  type DeveloperTeamModelAssignments,
+  type DeveloperTeamModelConfigAssignments,
+  type DeveloperTeamThinkingAssignments,
+  type PiThinkingLevel,
+} from "./model-config";
 
 // --- Types ---
 
@@ -66,16 +73,19 @@ export type ReadDeveloperTeamModelAssignmentsOptions = {
 
 export function buildDeveloperTeamInstallPlan(
   projectRoot: string,
-  options?: { modelAssignments?: DeveloperTeamModelAssignments },
+  options?: { modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments },
 ): DeveloperTeamInstallPlan {
   const agentsDir = join(projectRoot, ".pi", "agents");
   const skillsDir = join(projectRoot, ".pi", "skills");
   const modelAssignments = options?.modelAssignments;
+  const thinkingAssignments = options?.thinkingAssignments;
 
   const agents: PlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.pi/agents/${agent.id}.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const content = buildAgentFileContent(agent, modelAssignments?.[agent.id]);
+    const model = modelAssignments?.[agent.id];
+    const thinking = thinkingAssignments?.[agent.id] ?? getDefaultThinkingForModel(model);
+    const content = buildAgentFileContent(agent, model, thinking);
 
     return { agent, relativePath, absolutePath, content };
   });
@@ -95,33 +105,54 @@ export function readDeveloperTeamModelAssignments(
   projectRoot: string,
   options?: ReadDeveloperTeamModelAssignmentsOptions,
 ): DeveloperTeamModelAssignments {
+  return readDeveloperTeamModelConfigAssignments(projectRoot, options).modelAssignments;
+}
+
+export function readDeveloperTeamThinkingAssignments(
+  projectRoot: string,
+  options?: ReadDeveloperTeamModelAssignmentsOptions,
+): DeveloperTeamThinkingAssignments {
+  return readDeveloperTeamModelConfigAssignments(projectRoot, options).thinkingAssignments;
+}
+
+export function readDeveloperTeamModelConfigAssignments(
+  projectRoot: string,
+  options?: ReadDeveloperTeamModelAssignmentsOptions,
+): DeveloperTeamModelConfigAssignments {
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;
-  const assignments: DeveloperTeamModelAssignments = {};
+  const modelAssignments: DeveloperTeamModelAssignments = {};
+  const thinkingAssignments: DeveloperTeamThinkingAssignments = {};
 
   for (const agent of DEVELOPER_TEAM_AGENTS) {
     const absolutePath = join(projectRoot, ".pi", "agents", `${agent.id}.md`);
     if (!exists(absolutePath)) continue;
 
     const content = readFile(absolutePath, "utf-8");
-    const model = readFrontmatterModel(content);
-    if (model) assignments[agent.id] = model;
+    const frontmatter = readFrontmatter(content);
+    if (!frontmatter) continue;
+
+    const model = readFrontmatterValue(frontmatter, "model");
+    const thinking = parsePiThinkingLevel(readFrontmatterValue(frontmatter, "thinking"));
+    if (model) modelAssignments[agent.id] = model;
+    if (thinking) thinkingAssignments[agent.id] = thinking;
   }
 
-  return assignments;
+  return { modelAssignments, thinkingAssignments };
 }
 
-function readFrontmatterModel(content: string): string | undefined {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return undefined;
+function readFrontmatter(content: string): string | undefined {
+  return content.match(/^---\n([\s\S]*?)\n---/)?.[1];
+}
 
-  const modelLine = match[1]
+function readFrontmatterValue(frontmatter: string, key: string): string | undefined {
+  const line = frontmatter
     .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.startsWith("model:"));
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${key}:`));
 
-  const model = modelLine?.slice("model:".length).trim();
-  return model && model.length > 0 ? model : undefined;
+  const value = line?.slice(`${key}:`.length).trim();
+  return value && value.length > 0 ? value : undefined;
 }
 
 // --- Apply ---
@@ -342,7 +373,7 @@ function buildSkillFileContent(agent: DeveloperTeamAgent): string {
  * The adapter only adds Pi frontmatter (name, description, skill, tools, etc.)
  * and wraps the registry's runner-agnostic agent body.
  */
-function buildAgentFileContent(agent: DeveloperTeamAgent, model?: string): string {
+function buildAgentFileContent(agent: DeveloperTeamAgent, model?: string, thinking: PiThinkingLevel = "low"): string {
   const content = getAgentContent(agent.id);
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
@@ -355,7 +386,7 @@ function buildAgentFileContent(agent: DeveloperTeamAgent, model?: string): strin
     `skill: ${agent.skillId}`,
     ...(model ? [`model: ${model}`] : []),
     "tools: read,write,bash",
-    "thinking: low",
+    `thinking: ${thinking}`,
     "systemPromptMode: replace",
     "inheritProjectContext: true",
     "inheritSkills: false",
