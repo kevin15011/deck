@@ -115,6 +115,9 @@ The Spec Registry is also required for every SDD phase:
 - Phase agents must read existing registry files before writing, merge new state without dropping prior artifacts/provenance, and append new events without dropping prior events.
 - Reject or request repair for phase outputs that reset registry history, overwrite previous artifacts, or drop previous events.
 - If an agent returns an artifact but registry state/events are missing or failed, repair the registry or request repair from that phase agent before continuing.
+- Parallel phase batches must not allow concurrent writes to shared Spec Registry files. When launching Spec+Design or Verify+Review in parallel, instruct each phase agent to run in **registry-deferred mode**: write only its phase artifact, report registry intent/status/event in the return contract, and do not write \`state.yaml\` or \`events.yaml\`.
+- After all agents in a parallel batch finish, the Orchestrator must serialize registry updates itself: read the returned artifacts plus current \`state.yaml\` and \`events.yaml\`, merge each phase status/artifact/provenance deterministically, append each event deterministically, and only then advance.
+- Reject/gate phase advancement if registry-deferred reconciliation fails, loses any artifact reference, drops previous state/provenance, drops previous events, or misses any required phase event from the parallel batch.
 
 If a memory adapter (e.g., Engram) is available, agents MAY optionally save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
 
@@ -255,6 +258,7 @@ proposal ──┬─ spec ────┐
 ### Spec and Design
 
 - Both depend on Proposal and can run in parallel.
+- When running them in parallel, launch both in **registry-deferred mode**: each writes only its artifact (\`spec.md\` or \`design.md\`) and returns registry intent; the Orchestrator serializes the shared \`state.yaml\`/\`events.yaml\` updates after both complete.
 - Design does not depend directly on Spec.
 - If Design discovers missing behavior, it reports an open question — does not silently change scope.
 
@@ -270,6 +274,7 @@ proposal ──┬─ spec ────┐
 - Verify checks compliance: all tasks complete, tests pass, build/typecheck pass.
 - Review checks engineering quality: architecture, security, maintainability.
 - Both run in parallel after Apply.
+- When running them in parallel, launch both in **registry-deferred mode**: each writes only its report artifact and returns registry intent; the Orchestrator serializes the shared \`state.yaml\`/\`events.yaml\` updates after both complete.
 - Apply agents receive combined findings for fixes.
 
 ## Artifact Persistence Policy
@@ -283,6 +288,7 @@ All SDD artifacts are persisted as OpenSpec files in the \`openspec/\` directory
 - Events are logged in \`openspec/changes/{change-name}/events.yaml\`.
 - Phase agents must read existing registry files before writing, merge new state without dropping prior artifacts/provenance, and append new events without dropping prior events.
 - Reject or request repair for phase outputs that reset registry history, overwrite previous artifacts, or drop previous events.
+- Parallel phase batches are a special case: do not let agents concurrently write \`state.yaml\` or \`events.yaml\`. Instruct Spec+Design and Verify+Review agents to use **registry-deferred mode**, then serialize the registry reconciliation after all agents in the batch complete.
 
 The Spec Registry is the phase gate. Before advancing to the next phase, verify:
 - The required OpenSpec artifact path exists.
@@ -291,8 +297,11 @@ The Spec Registry is the phase gate. Before advancing to the next phase, verify:
 - \`state.yaml\` preserves previous artifacts, provenance, and relevant fields after the phase update.
 - \`events.yaml\` preserves previous events and appends the new phase event.
 - The agent return contract includes artifact path, registry state path, registry events path, and the phase/status/event recorded.
+- For registry-deferred parallel batches, each agent return contract includes artifact path, intended phase/status/event, and \`Registry Write: deferred\`; the Orchestrator then records those intents in a deterministic serialized merge.
 
 If any registry file or entry is missing, or if a phase output reset/dropped prior registry history, do not continue to the next phase. Repair it directly when the expected state is unambiguous; otherwise request repair from the phase agent and report the blocker to the user.
+
+For registry-deferred parallel batches, do not advance until reconciliation proves that \`state.yaml\` preserves all prior artifact/provenance entries plus every parallel artifact, and \`events.yaml\` preserves all prior events plus every parallel phase event. If reconciliation cannot prove this, stop and report a Registry Blocker.
 
 If a memory adapter is available, agents MAY save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
 

@@ -38,7 +38,7 @@ export const REVIEW_AGENT_BODY = `# Review Agent
 - Review integration concerns across boundaries.
 - Use strong skill injection based on scope and stack.
 - Produce a structured review report with actionable findings.
-- Update Spec Registry state/event entries for review results.
+- Update Spec Registry state/event entries for review results, unless the Orchestrator explicitly launches you in registry-deferred mode.
 
 ## Scope
 
@@ -247,6 +247,8 @@ Write the review report as \`review-report.md\` inside the OpenSpec change direc
 
 If multiple Review Agent scopes run in parallel, each scope writes its own report (e.g., \`review-report-backend.md\`). The Orchestrator merges them.
 
+If the Orchestrator explicitly says **registry-deferred mode**, do not write shared \`state.yaml\` or \`events.yaml\`. In that mode, write the review report artifact only and return the intended registry phase/status/event so the Orchestrator can serialize the Spec Registry update after the parallel batch completes.
+
 Update the Spec Registry for the change:
 - Read existing \`openspec/changes/{change-name}/state.yaml\` and \`openspec/changes/{change-name}/events.yaml\` before writing if they exist.
 - Ensure \`state.yaml\` and \`events.yaml\` exist.
@@ -256,6 +258,8 @@ Update the Spec Registry for the change:
 - If the existing registry is malformed or conflicting, repair only when unambiguous; otherwise report a Registry Blocker.
 
 If the registry update fails, report it as a blocker and do not silently continue.
+
+In default/non-parallel mode, perform the merge/append registry update yourself. In registry-deferred mode, the registry write is intentionally deferred; do not treat the deferred write as a blocker unless the review report artifact itself could not be written or the registry intent cannot be reported.
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
@@ -272,7 +276,9 @@ Return EXACTLY this format to the orchestrator:
 **Artifact Path**: \`openspec/changes/{change-name}/review-report{optional-scope}.md\`
 **Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
 **Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Write**: performed | deferred
 **Registry Recorded**: phase \`review\`, status \`{approved|approved_with_changes|changes_requested}\`, event \`{event name}\`
+**Registry Intent**: artifact \`review-report{optional-scope}.md\`, phase \`review\`, status \`{approved|approved_with_changes|changes_requested}\`, event \`{event name}\`
 **Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Summary

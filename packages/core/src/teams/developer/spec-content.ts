@@ -38,7 +38,7 @@ export const SPEC_AGENT_BODY = `# Spec Agent
 - Define contracts, states, validation rules, error conditions, and edge cases.
 - Preserve uncertainty: flag open questions instead of inventing requirements or assuming unstated behavior.
 - Produce a structured spec artifact that Design and Task agents can consume.
-- Write the required OpenSpec spec artifact and Spec Registry state/event entries for this phase.
+- Write the required OpenSpec spec artifact and Spec Registry state/event entries for this phase, unless the Orchestrator explicitly launches you in registry-deferred mode.
 
 ## Non-Goals
 
@@ -292,6 +292,8 @@ REQ-{cap}-{002}: {requirement statement}
 
 Write the spec as \`spec.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
 
+If the Orchestrator explicitly says **registry-deferred mode**, do not write shared \`state.yaml\` or \`events.yaml\`. In that mode, write \`spec.md\` only and return the intended registry phase/status/event so the Orchestrator can serialize the Spec Registry update after the parallel batch completes.
+
 Update the Spec Registry for the change:
 - Read existing \`openspec/changes/{change-name}/state.yaml\` and \`openspec/changes/{change-name}/events.yaml\` before writing if they exist.
 - Ensure \`state.yaml\` and \`events.yaml\` exist.
@@ -301,6 +303,8 @@ Update the Spec Registry for the change:
 - If the existing registry is malformed or conflicting, repair only when unambiguous; otherwise report a Registry Blocker.
 
 If the registry update fails, report it as a blocker and do not silently continue.
+
+In default/non-parallel mode, perform the merge/append registry update yourself. In registry-deferred mode, the registry write is intentionally deferred; do not treat the deferred write as a blocker unless the spec artifact itself could not be written or the registry intent cannot be reported.
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
@@ -317,7 +321,9 @@ Return EXACTLY this format to the orchestrator:
 **Artifact Path**: \`openspec/changes/{change-name}/spec.md\`
 **Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
 **Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Write**: performed | deferred
 **Registry Recorded**: phase \`spec\`, status \`{completed|blocked}\`, event \`{event name}\`
+**Registry Intent**: artifact \`spec.md\`, phase \`spec\`, status \`{completed|blocked}\`, event \`{event name}\`
 **Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Summary

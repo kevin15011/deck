@@ -37,7 +37,7 @@ export const VERIFY_AGENT_BODY = `# Verify Agent
 - Report PASS, PASS WITH WARNINGS, or FAIL.
 - Classify findings as CRITICAL, WARNING, or SUGGESTION.
 - Produce a structured verify-report artifact.
-- Update Spec Registry state/event entries for verification results.
+- Update Spec Registry state/event entries for verification results, unless the Orchestrator explicitly launches you in registry-deferred mode.
 
 ## Non-Goals
 
@@ -215,6 +215,8 @@ Compile everything into the output template below.
 
 Write the verify report as \`verify-report.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
 
+If the Orchestrator explicitly says **registry-deferred mode**, do not write shared \`state.yaml\` or \`events.yaml\`. In that mode, write \`verify-report.md\` only and return the intended registry phase/status/event so the Orchestrator can serialize the Spec Registry update after the parallel batch completes.
+
 Update the Spec Registry for the change:
 - Read existing \`openspec/changes/{change-name}/state.yaml\` and \`openspec/changes/{change-name}/events.yaml\` before writing if they exist.
 - Ensure \`state.yaml\` and \`events.yaml\` exist.
@@ -224,6 +226,8 @@ Update the Spec Registry for the change:
 - If the existing registry is malformed or conflicting, repair only when unambiguous; otherwise report a Registry Blocker.
 
 If the registry update fails, report it as a blocker and do not silently continue.
+
+In default/non-parallel mode, perform the merge/append registry update yourself. In registry-deferred mode, the registry write is intentionally deferred; do not treat the deferred write as a blocker unless the verify report artifact itself could not be written or the registry intent cannot be reported.
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
@@ -239,7 +243,9 @@ Return EXACTLY this format to the orchestrator:
 **Artifact Path**: \`openspec/changes/{change-name}/verify-report.md\`
 **Registry State Path**: \`openspec/changes/{change-name}/state.yaml\`
 **Registry Events Path**: \`openspec/changes/{change-name}/events.yaml\`
+**Registry Write**: performed | deferred
 **Registry Recorded**: phase \`verify\`, status \`{passed|passed_with_warnings|failed}\`, event \`{event name}\`
+**Registry Intent**: artifact \`verify-report.md\`, phase \`verify\`, status \`{passed|passed_with_warnings|failed}\`, event \`{event name}\`
 **Registry Blocker**: {none, or describe why state/events could not be updated}
 
 ### Summary

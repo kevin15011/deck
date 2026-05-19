@@ -132,6 +132,37 @@ describe("getAgentContent", () => {
     expect(combined).toContain("reset/dropped prior registry history");
   });
 
+  test("orchestrator serializes registry reconciliation for parallel phases", () => {
+    const content = getAgentContent("deck-developer-orchestrator")!;
+    const combined = `${content.agentBody}\n${content.skillBody}`;
+    expect(combined).toContain("Spec+Design");
+    expect(combined).toContain("Verify+Review");
+    expect(combined).toContain("registry-deferred mode");
+    expect(combined).toContain("serializes the shared");
+    expect(combined).toContain("deterministic serialized merge");
+    expect(combined).toContain("do not advance until reconciliation proves");
+  });
+
+  test("parallel phase agents support registry-deferred mode", () => {
+    const parallelPhaseAgentIds = [
+      "deck-developer-spec",
+      "deck-developer-design",
+      "deck-developer-verify",
+      "deck-developer-review",
+    ] as const;
+
+    for (const id of parallelPhaseAgentIds) {
+      const content = getAgentContent(id)!;
+      const combined = `${content.agentBody}\n${content.skillBody}`;
+      expect(combined, id).toContain("registry-deferred mode");
+      expect(combined, id).toContain("do not write shared");
+      expect(combined, id).toContain("Registry Write");
+      expect(combined, id).toContain("Registry Intent");
+      expect(combined, id).toContain("In default/non-parallel mode, perform the merge/append registry update yourself");
+      expect(combined, id).toContain("Never overwrite or drop previous phase artifacts or events");
+    }
+  });
+
   test("core prompts do not hardcode Engram topic-key artifact locations", () => {
     for (const id of DEVELOPER_AGENT_IDS) {
       const content = getAgentContent(id)!;
