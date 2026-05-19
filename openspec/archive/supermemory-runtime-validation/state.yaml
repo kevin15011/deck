@@ -1,0 +1,91 @@
+change: supermemory-runtime-validation
+status: archived
+current_phase: archive
+archive_target: openspec/archive/supermemory-runtime-validation/
+artifacts:
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply: apply-progress.md
+  verify: verify-report.md
+  review: review-report.md
+  archive: archive-report.md
+phases:
+  proposal:
+    status: completed
+    artifact: proposal.md
+    completed_at: "2026-05-19T00:00:00Z"
+    updated_at: "2026-05-19T00:00:00Z"
+    provenance:
+      source: "user request and official exploration handoff"
+      created_by: deck-developer-proposal
+      note: "Proposal created for authenticated Supermemory runtime validation before MCP tool injection and duplicate/noisy diagnostic reduction."
+  spec:
+    status: completed
+    artifact: spec.md
+    completed_at: "2026-05-19T00:00:00Z"
+    updated_at: "2026-05-19T00:00:00Z"
+    provenance:
+      source: "proposal.md"
+      created_by: deck-developer-spec
+      registry_write: deferred-reconciled-by-orchestrator
+      note: "Spec completed in registry-deferred parallel phase with 17 requirements and 15 acceptance scenarios."
+  design:
+    status: completed
+    artifact: design.md
+    completed_at: "2026-05-19T00:00:00Z"
+    updated_at: "2026-05-19T00:00:00Z"
+    provenance:
+      source: "proposal.md"
+      created_by: deck-developer-design
+      registry_write: deferred-reconciled-by-orchestrator
+      note: "Design completed in registry-deferred parallel phase with launch-owned runtime validation and bundle reuse architecture."
+  tasks:
+    status: completed
+    artifact: tasks.md
+    completed_at: "2026-05-19T00:00:00Z"
+    updated_at: "2026-05-19T00:00:00Z"
+    provenance:
+      source: "spec.md + design.md"
+      created_by: deck-developer-task
+      note: "13 tasks across 3 groups (Shared/Contracts, Backend, Tests). 1 High-complexity task flagged for potential split. 2 open decisions proceeding with safe defaults. Complexity summary repaired by orchestrator: 9 Low, 3 Medium, 1 High."
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: "2026-05-19T00:00:00Z"
+    updated_at: "2026-05-19T00:00:00Z"
+    provenance:
+      source: "review-report.md + verify-report.md + tasks.md + spec.md + design.md"
+      created_by: deck-developer-apply-general
+      note: "Completed review repairs: internalized secret-bearing runtime extraction, scrubbed stale generated Supermemory Pi agents on validation failure via no-memory install plan, added exact-token-aware runtime redaction, and documented per-request timeout semantics. Targeted tests and TypeScript pass."
+  verify:
+    status: passed_with_warnings
+    artifact: verify-report.md
+    completed_at: "2026-05-19T00:00:00Z"
+    updated_at: "2026-05-19T00:00:00Z"
+    provenance:
+      source: "spec.md + tasks.md + apply-progress.md"
+      created_by: deck-developer-verify
+      registry_write: deferred-reconciled-by-orchestrator
+      note: "Re-verify after review fixes passed with warning: targeted tests 104/104 and typecheck pass; build skipped because no root build script exists."
+  review:
+    status: approved
+    artifact: review-report.md
+    completed_at: "2026-05-19T00:00:00Z"
+    updated_at: "2026-05-19T00:00:00Z"
+    provenance:
+      source: "design.md + tasks.md + apply-progress.md + code review"
+      created_by: deck-developer-review
+      registry_write: deferred-reconciled-by-orchestrator
+      note: "Re-review after fixes approved with 0 blockers, 0 major, 0 minor, and 0 nits."
+  archive:
+    status: archived
+    artifact: archive-report.md
+    archive_target: openspec/archive/supermemory-runtime-validation/
+    completed_at: "2026-05-19T00:00:00Z"
+    updated_at: "2026-05-19T00:00:00Z"
+    provenance:
+      source: "state.yaml + events.yaml + proposal.md + spec.md + design.md + tasks.md + apply-progress.md + verify-report.md + review-report.md"
+      created_by: deck-developer-archive
+      note: "Archive report produced, registry updated, and completed change moved to openspec/archive/supermemory-runtime-validation/."

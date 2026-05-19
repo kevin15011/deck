@@ -21,7 +21,7 @@ import {
 
 import { getTeamsForEnvironment } from "@deck/adapter-pi";
 import { MenuList } from "./components/menu-list";
-import { buildSupermemoryDeckConfig, handOffSupermemoryCredentialToPiMcp } from "./app";
+import { buildSupermemoryDeckConfig, createMemoryProviderForSelection, handOffSupermemoryCredentialToPiMcp } from "./app";
 
 function TeamSelectionScreen({ cursor, selected }: { cursor: number; selected: string[] }) {
   const teams = getTeamsForEnvironment("pi-development");
@@ -356,6 +356,16 @@ describe("Developer Team TUI screens", () => {
       expect(config.adaptiveMemory.supermemory).not.toHaveProperty("orgId");
       expect(serialized).not.toContain("super-secret-token");
       expect(serialized).not.toContain("token");
+    });
+
+    test("creates a Supermemory provider for immediate Developer Team install after setup", async () => {
+      const provider = createMemoryProviderForSelection("supermemory", { token: "redacted-token", userId: " user-1 ", teamId: " team-a ", orgId: "" });
+
+      expect(provider?.id).toBe("supermemory");
+      expect(JSON.stringify(provider)).not.toContain("redacted-token");
+      const health = await provider!.health!();
+      expect(health.status).toBe("degraded");
+      expect(() => provider!.buildInjection({ teamId: "developer-team" })).toThrow(/authenticated runtime validation/);
     });
 
     test("writes Supermemory credential through Pi MCP config writer without leaking token in status", () => {

@@ -23,6 +23,8 @@ export type MaterializeTeamProfileOptions = {
   memoryInjection?: MemoryInjectionBundle;
   /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
   memoryProvider?: AdaptiveMemoryProvider;
+  /** Launch-owned reason to render explicit adaptive-context unavailability without resolving a provider. */
+  memoryUnavailableReason?: string;
   /** Provider IDs accepted by this adapter/caller registry. */
   supportedMemoryProviderIds?: Iterable<string>;
   /** Injected fs functions for testability */
@@ -56,6 +58,7 @@ export type BuildTeamSystemPromptResult = {
 export type BuildTeamSystemPromptOptions = {
   memoryInjection?: MemoryInjectionBundle;
   memoryProvider?: AdaptiveMemoryProvider;
+  memoryUnavailableReason?: string;
   supportedMemoryProviderIds?: Iterable<string>;
 };
 
@@ -95,6 +98,14 @@ export function buildTeamSystemPrompt(
   });
 
   if (!bundle) {
+    if (options?.memoryUnavailableReason && !options?.memoryInjection) {
+      const reason = `Adaptive context was not loaded: ${options.memoryUnavailableReason}`;
+      return {
+        content: `${renderSddContextSections({ officialContext: base, adaptiveContextUnavailableReason: reason })}
+`,
+        memoryDiagnostics: diagnostics,
+      };
+    }
     if (options?.memoryProvider || options?.memoryInjection) {
       const reason = diagnostics.length > 0
         ? `Adaptive context was not loaded: ${diagnostics.map((diagnostic) => diagnostic.message).join("; ")}`
@@ -145,6 +156,7 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
     memoryInjection: options.memoryInjection,
     memoryProvider: options.memoryProvider,
     supportedMemoryProviderIds: options.supportedMemoryProviderIds,
+    memoryUnavailableReason: options.memoryUnavailableReason,
   });
 
   // Ensure directory exists

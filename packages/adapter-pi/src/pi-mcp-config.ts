@@ -238,6 +238,27 @@ export function validateSupermemoryPiMcpConfig(
   };
 }
 
+
+export type SupermemoryPiMcpPublicServer = {
+  path: string;
+  serverName: string;
+  endpoint: string;
+};
+
+export function extractValidatedSupermemoryPiMcpServer(
+  options?: ValidateSupermemoryPiMcpConfigOptions,
+): SupermemoryPiMcpPublicServer {
+  const validation = validateSupermemoryPiMcpConfig(options);
+  if (!validation.ok) {
+    throw new Error(validation.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
+  }
+
+  const parsed = JSON.parse(readFileSync(validation.path, "utf-8")) as JsonRecord;
+  const mcpServers = parsed.mcpServers as JsonRecord;
+  const server = mcpServers[validation.serverName] as JsonRecord;
+  return { path: validation.path, serverName: validation.serverName, endpoint: String(server.url) };
+}
+
 export function redactPiMcpConfigDiagnosticText(value: string): string {
   return redact(value);
 }
@@ -424,9 +445,16 @@ function redactDiagnostic(diagnostic: PiMcpConfigDiagnostic): PiMcpConfigDiagnos
 
 function redact(value: string): string {
   return value
-    .replace(new RegExp(`${SUPERMEMORY_API_KEY_HEADER}\\s*[:=]\\s*[^\\s,}]+`, "gi"), `${SUPERMEMORY_API_KEY_HEADER}: [REDACTED]`)
-    .replace(/(api[_-]?key|token|credential|secret|password)\s*[:=]\s*[^\s,}]+/gi, "$1: [REDACTED]")
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]");
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(
+      new RegExp(`([\"']?${SUPERMEMORY_API_KEY_HEADER}[\"']?\\s*[:=]\\s*[\"']?)([^\"'\\s,}]+)([\"']?)`, "gi"),
+      "$1[REDACTED]$3",
+    )
+    .replace(
+      /(["']?(?:api[_-]?key|token|credential|secret|password|authorization)["']?\s*[:=]\s*["']?)([^"',}]+)(["']?)/gi,
+      "$1[REDACTED]$3",
+    )
+    .replace(/(SUPERMEMORY_API_KEY\s*=\s*)[^\s]+/gi, "$1[REDACTED]");
 }
 
 function normalizeServerName(serverName: string | undefined): string {

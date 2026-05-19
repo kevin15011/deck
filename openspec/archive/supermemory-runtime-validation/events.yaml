@@ -1,0 +1,98 @@
+events:
+  - event: proposal.completed
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "user request and official exploration handoff"
+    actor: deck-developer-proposal
+    note: "Proposal created for authenticated Supermemory runtime validation before MCP tool injection and duplicate/noisy diagnostic reduction."
+  - event: spec.completed
+    phase: spec
+    status: completed
+    artifact: spec.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "proposal.md"
+    actor: deck-developer-spec
+    note: "Registry-deferred spec phase reconciled by orchestrator after parallel Spec+Design completion."
+  - event: design.completed
+    phase: design
+    status: completed
+    artifact: design.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "proposal.md"
+    actor: deck-developer-design
+    note: "Registry-deferred design phase reconciled by orchestrator after parallel Spec+Design completion."
+  - event: tasks.completed
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "spec.md + design.md"
+    actor: deck-developer-task
+    note: "13 tasks: 9 Low, 3 Medium, 1 High complexity. Task 5 (runPiLaunch async integration) flagged for potential split. 2 open decisions (probe sequence, timeout default) proceeding with safe defaults."
+  - event: apply.completed
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "tasks.md + spec.md + design.md"
+    actor: deck-developer-apply-general
+    note: "Implemented Tasks 1-13 and verified targeted adapter-pi/CLI tests plus TypeScript typecheck."
+  - event: apply.repair.completed
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "user runtime failure report + tasks.md + spec.md + design.md"
+    actor: deck-developer-apply-general
+    note: "Repaired Supermemory MCP runtime validation by sending required initialize params (protocolVersion, capabilities, clientInfo). Added failing request-body test first; targeted tests and TypeScript pass."
+  - event: verify.passed_with_warnings
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "spec.md + tasks.md + apply-progress.md"
+    actor: deck-developer-verify
+    note: "Registry-deferred verify reconciled by orchestrator. Targeted tests 99/99 and typecheck pass; build skipped because no root build script exists."
+  - event: review.changes_requested
+    phase: review
+    status: changes_requested
+    artifact: review-report.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "design.md + tasks.md + apply-progress.md + code review"
+    actor: deck-developer-review
+    note: "Registry-deferred review reconciled by orchestrator. Requested changes for 3 major findings and 1 minor finding."
+  - event: apply.review-fixes.completed
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "review-report.md + verify-report.md"
+    actor: deck-developer-apply-general
+    note: "Addressed review requested changes: removed public secret-bearing runtime extraction, regenerated no-memory Pi agents on Supermemory validation failure, redacted exact configured tokens in runtime diagnostics, and documented validation timeout as per-request. Targeted tests 104/104 and typecheck pass."
+  - event: verify.passed_with_warnings
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "spec.md + tasks.md + apply-progress.md + review fixes"
+    actor: deck-developer-verify
+    note: "Registry-deferred re-verify reconciled by orchestrator. Targeted tests 104/104 and typecheck pass; build skipped because no root build script exists."
+  - event: review.approved
+    phase: review
+    status: approved
+    artifact: review-report.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "design.md + tasks.md + apply-progress.md + review fixes"
+    actor: deck-developer-review
+    note: "Registry-deferred re-review reconciled by orchestrator. Approved with no findings."
+  - event: archive.archived
+    phase: archive
+    status: archived
+    artifact: archive-report.md
+    archive_target: openspec/archive/supermemory-runtime-validation/
+    timestamp: "2026-05-19T00:00:00Z"
+    source: "state.yaml + events.yaml + proposal.md + spec.md + design.md + tasks.md + apply-progress.md + verify-report.md + review-report.md"
+    actor: deck-developer-archive
+    note: "Archive report produced and completed change moved to openspec/archive/supermemory-runtime-validation/."

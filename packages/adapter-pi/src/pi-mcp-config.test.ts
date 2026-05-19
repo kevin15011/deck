@@ -3,10 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import * as adapterPi from "./index";
+
 import {
   SUPERMEMORY_API_KEY_HEADER,
   SUPERMEMORY_MCP_URL,
   defaultPiMcpConfigPath,
+  extractValidatedSupermemoryPiMcpServer,
   redactPiMcpConfigDiagnosticText,
   writeSupermemoryPiMcpConfig,
 } from "./pi-mcp-config";
@@ -207,9 +210,47 @@ describe("Pi global MCP config writer", () => {
     }
   });
 
+  test("does not export secret-bearing runtime server extraction from public adapter API", () => {
+    expect("extractValidatedSupermemoryPiMcpRuntimeServer" in adapterPi).toBe(false);
+  });
+
+  test("extracts validated Supermemory server endpoint without credentials", () => {
+    const home = tempHome();
+    try {
+      writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN });
+      const server = extractValidatedSupermemoryPiMcpServer({ homeDir: home });
+
+      expect(server).toEqual({
+        path: defaultPiMcpConfigPath(home),
+        serverName: "supermemory",
+        endpoint: SUPERMEMORY_MCP_URL,
+      });
+      expect(JSON.stringify(server)).not.toContain(SENTINEL_TOKEN);
+      expect(JSON.stringify(server)).not.toContain(SUPERMEMORY_API_KEY_HEADER);
+    } finally {
+      cleanup(home);
+    }
+  });
+
   test("redacts token-like diagnostic text and header values", () => {
     const redacted = redactPiMcpConfigDiagnosticText(
       `token=${SENTINEL_TOKEN} ${SUPERMEMORY_API_KEY_HEADER}: ${SENTINEL_TOKEN} Bearer ${SENTINEL_TOKEN}`,
+    );
+
+    expect(redacted).not.toContain(SENTINEL_TOKEN);
+    expect(redacted).toContain("[REDACTED]");
+  });
+
+  test("redacts quoted JSON, env-style, authorization, and bearer secrets", () => {
+    const redacted = redactPiMcpConfigDiagnosticText(
+      JSON.stringify({
+        headers: {
+          [SUPERMEMORY_API_KEY_HEADER]: SENTINEL_TOKEN,
+          Authorization: `Bearer ${SENTINEL_TOKEN}`,
+        },
+        token: SENTINEL_TOKEN,
+        apiKey: SENTINEL_TOKEN,
+      }) + ` SUPERMEMORY_API_KEY=${SENTINEL_TOKEN}`,
     );
 
     expect(redacted).not.toContain(SENTINEL_TOKEN);

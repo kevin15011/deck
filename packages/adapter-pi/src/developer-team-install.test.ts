@@ -100,7 +100,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
     expect(explorer.content).toContain("model: openai/gpt-4o");
   });
 
-  test("keeps Kimi model assignments with thinking off", () => {
+  test("keeps Kimi model assignments without thinking frontmatter", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
       modelAssignments: {
         "deck-developer-explorer": "opencode-go/kimi-k2.6",
@@ -109,10 +109,10 @@ describe("buildDeveloperTeamInstallPlan", () => {
 
     const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
     expect(explorer.content).toContain("model: opencode-go/kimi-k2.6");
-    expect(explorer.content).toContain("thinking: off");
+    expect(explorer.content).not.toContain("thinking:");
   });
 
-  test("keeps non-Kimi opencode-go model assignments with thinking off", () => {
+  test("keeps non-Kimi opencode-go model assignments without thinking frontmatter", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
       modelAssignments: {
         "deck-developer-explorer": "opencode-go/qwen3.6-plus",
@@ -121,7 +121,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
 
     const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
     expect(explorer.content).toContain("model: opencode-go/qwen3.6-plus");
-    expect(explorer.content).toContain("thinking: off");
+    expect(explorer.content).not.toContain("thinking:");
   });
 
   test("keeps low thinking for non-opencode-go model assignments", () => {
@@ -151,7 +151,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
     expect(orchestrator.content).toContain("thinking: high");
   });
 
-  test("forces unsupported model thinking assignments to off", () => {
+  test("omits unsupported model thinking assignments", () => {
     const modelAssignments: DeveloperTeamModelAssignments = {
       "deck-developer-apply-backend": "opencode-go/kimi-k2.6",
     };
@@ -163,7 +163,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
 
     const backendApply = plan.agents.find((a) => a.agent.id === "deck-developer-apply-backend")!;
     expect(backendApply.content).toContain("model: opencode-go/kimi-k2.6");
-    expect(backendApply.content).toContain("thinking: off");
+    expect(backendApply.content).not.toContain("thinking:");
   });
 
   test("omits model frontmatter when no model assignment exists for an agent", () => {
@@ -811,7 +811,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
             { surface: "skill", markdown: "Use validated Supermemory MCP tools only.", teamId: "developer-team" },
           ],
           toolBindings: [
-            { capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"] },
+            { capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"], metadata: { authenticatedRuntimeValidated: true } },
           ],
         }),
       };
@@ -821,10 +821,83 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
 
       expect(plan.memoryDiagnostics).toHaveLength(0);
       expect(orchestrator.content).toContain("Use Supermemory MCP as advisory context only.");
-      expect(orchestrator.content).toContain("execute");
-      expect(orchestrator.content).toContain("search_docs");
+      expect(orchestrator.content).toContain("supermemory.execute");
+      expect(orchestrator.content).toContain("supermemory.search_docs");
+      expect(orchestrator.content).not.toContain("tools: read,write,bash,execute");
       expect(orchestrator.content).not.toContain("context,recall,memory");
       expect(orchestrator.content).not.toContain("sentinel-token-install");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("plan with Supermemory provider qualifies generic tools with custom server name", () => {
+    const projectRoot = createTempProject();
+    try {
+      const mcpPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
+      mkdirSync(join(projectRoot, "home", ".pi", "agent"), { recursive: true });
+      writeFileSync(mcpPath, JSON.stringify({
+        mcpServers: {
+          customSupermemory: {
+            transport: "http",
+            url: "https://supermemory-new.stlmcp.com",
+            headers: { "x-supermemory-api-key": "sentinel-token-install" },
+          },
+        },
+      }), "utf-8");
+
+      const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+        id: "supermemory",
+        displayName: "Supermemory MCP",
+        buildInjection: () => ({
+          instructions: [{ surface: "agent", markdown: "Use custom Supermemory MCP server.", teamId: "developer-team" }],
+          toolBindings: [{ capability: "memory.search", serverName: "customSupermemory", toolNames: ["execute", "search_docs"], metadata: { authenticatedRuntimeValidated: true } }],
+        }),
+      };
+
+      const plan = buildDeveloperTeamInstallPlan(projectRoot, { memoryProvider: supermemoryProvider, piMcpConfigPath: mcpPath });
+      const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+
+      expect(plan.memoryDiagnostics).toHaveLength(0);
+      expect(orchestrator.content).toContain("customSupermemory.execute");
+      expect(orchestrator.content).toContain("customSupermemory.search_docs");
+      expect(orchestrator.content).not.toContain("tools: read,write,bash,execute");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("plan with Supermemory provider omits injection when authenticated runtime validation is absent", () => {
+    const projectRoot = createTempProject();
+    try {
+      const mcpPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
+      mkdirSync(join(projectRoot, "home", ".pi", "agent"), { recursive: true });
+      writeFileSync(mcpPath, JSON.stringify({
+        mcpServers: {
+          customSupermemory: {
+            transport: "http",
+            url: "https://supermemory-new.stlmcp.com",
+            headers: { "x-supermemory-api-key": "sentinel-token-install" },
+          },
+        },
+      }), "utf-8");
+
+      const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+        id: "supermemory",
+        displayName: "Supermemory MCP",
+        buildInjection: () => ({
+          instructions: [{ surface: "agent", markdown: "Should not be injected without authenticated runtime validation.", teamId: "developer-team" }],
+          toolBindings: [{ capability: "memory.search", serverName: "customSupermemory", toolNames: ["execute", "search_docs"] }],
+        }),
+      };
+
+      const plan = buildDeveloperTeamInstallPlan(projectRoot, { memoryProvider: supermemoryProvider, piMcpConfigPath: mcpPath });
+      const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+
+      expect(plan.memoryDiagnostics).toHaveLength(1);
+      expect(plan.memoryDiagnostics[0].code).toBe("memory_provider_unavailable");
+      expect(orchestrator.content).not.toContain("Should not be injected");
+      expect(orchestrator.content).not.toContain("customSupermemory.execute");
     } finally {
       cleanup(projectRoot);
     }

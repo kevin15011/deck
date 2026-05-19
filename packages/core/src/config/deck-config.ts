@@ -7,7 +7,7 @@ export const DECK_CONFIG_RELATIVE_PATH = join(".deck", "config.json");
 export const ADAPTIVE_MEMORY_ACTIVE_PROVIDERS = ["none", "engram", "supermemory"] as const;
 export type AdaptiveMemoryActiveProvider = (typeof ADAPTIVE_MEMORY_ACTIVE_PROVIDERS)[number];
 
-export const SUPERMEMORY_SEARCH_MODES = ["memories", "context", "hybrid"] as const;
+export const SUPERMEMORY_SEARCH_MODES = ["memories", "documents"] as const;
 export type SupermemorySearchMode = (typeof SUPERMEMORY_SEARCH_MODES)[number];
 
 export type DeckSupermemoryConfig = {

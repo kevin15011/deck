@@ -130,7 +130,9 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
   const orchestratorModel = assignments.modelAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID];
   if (orchestratorModel && supportsDeveloperTeamModel(orchestratorModel)) {
     args.push("--model", orchestratorModel);
-    args.push("--thinking", resolveThinkingForModel(orchestratorModel, assignments.thinkingAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID]));
+    const hasThinkingAssignment = Object.prototype.hasOwnProperty.call(assignments.thinkingAssignments, DEVELOPER_ORCHESTRATOR_AGENT_ID);
+    const thinking = hasThinkingAssignment ? resolveThinkingForModel(orchestratorModel, assignments.thinkingAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID]) : undefined;
+    if (thinking) args.push("--thinking", thinking);
   }
 
   if (isContinue) {

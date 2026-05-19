@@ -19,7 +19,7 @@ if (parsed.command === "error") {
 
 if (parsed.command === "pi-launch") {
   const projectRoot = resolveProjectRoot();
-  const result = runPiLaunch({
+  const result = await runPiLaunch({
     teamId: parsed.teamId,
     projectRoot,
     flags: parsed.flags,

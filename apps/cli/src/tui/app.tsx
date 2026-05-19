@@ -53,6 +53,7 @@ import {
 } from "@deck/adapter-pi";
 
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
+import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import { writeDeckConfig, type AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
 
@@ -144,8 +145,18 @@ export function buildMemoryProviderConfig(choice: MemoryProviderChoice, values: 
   return { version: 1, adaptiveMemory: { activeProvider: choice } };
 }
 
-export function createMemoryProviderForSelection(choice: MemoryProviderChoice): AdaptiveMemoryProvider | undefined {
+export function createMemoryProviderForSelection(choice: MemoryProviderChoice, values?: SupermemorySetupValues): AdaptiveMemoryProvider | undefined {
   if (choice === "engram") return createEngramMemoryProvider();
+  if (choice === "supermemory" && values) {
+    return createSupermemoryMemoryProvider({
+      userId: values.userId,
+      teamId: values.teamId.trim() || undefined,
+      orgId: values.orgId.trim() || undefined,
+      mcpServerName: "supermemory",
+      searchMode: "memories",
+      maxMemoriesPerSession: 7,
+    });
+  }
   return undefined;
 }
 
@@ -397,7 +408,7 @@ export function DeckApp() {
 
     function runInstall() {
       const projectRoot = resolveProjectRoot();
-      const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments, ...(memoryProvider ? { memoryProvider } : {}) });
+      const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments, preserveMissingThinkingAssignments: true, ...(memoryProvider ? { memoryProvider } : {}) });
       const backup = backupDeveloperTeamFiles(plan);
 
       try {
@@ -453,7 +464,7 @@ export function DeckApp() {
     return () => {
       cancelled = true;
     };
-  }, [screen, selectedEnvironments, installedOpenCode?.command, openCodePreflight, modelAssignments, thinkingAssignments]);
+  }, [screen, selectedEnvironments, installedOpenCode?.command, openCodePreflight, modelAssignments, thinkingAssignments, memoryProvider]);
 
   function resetCursor(nextScreen: Screen, nextCursor = 0) {
     setScreen(nextScreen);
@@ -670,13 +681,18 @@ export function DeckApp() {
       if (!supportsThinkingForModel(model)) {
         if (agent) {
           setModelAssignments((current) => ({ ...current, [agent.id]: model.id }));
-          setThinkingAssignments((current) => ({ ...current, [agent.id]: "off" }));
+          setThinkingAssignments((current) => {
+            const next = { ...current };
+            delete next[agent.id];
+            return next;
+          });
         }
         setSelectedModel(null);
         resetCursor("agent-model-config-list");
         return;
       }
       const defaultThinking = resolveThinkingForModel(model, existingThinking);
+      if (!defaultThinking) return;
       resetCursor("agent-model-assignment", Math.max(0, PI_THINKING_LEVELS.indexOf(defaultThinking)));
       return;
     }
@@ -687,7 +703,12 @@ export function DeckApp() {
       if (!agent) return;
       const thinking = resolveThinkingForModel(selectedModel, getThinkingLevelByCursor(cursor));
       setModelAssignments((current) => ({ ...current, [agent.id]: selectedModel.id }));
-      setThinkingAssignments((current) => ({ ...current, [agent.id]: thinking }));
+      setThinkingAssignments((current) => {
+        const next = { ...current };
+        if (thinking) next[agent.id] = thinking;
+        else delete next[agent.id];
+        return next;
+      });
       setSelectedModel(null);
       resetCursor("agent-model-config-list");
       return;
@@ -825,7 +846,7 @@ export function DeckApp() {
 
       const config = buildMemoryProviderConfig(choice, values);
       writeDeckConfig(resolveProjectRoot(), config);
-      setMemoryProvider(createMemoryProviderForSelection(choice));
+      setMemoryProvider(createMemoryProviderForSelection(choice, values));
       if (choice === "supermemory") {
         setMemoryStatus("Active adaptive-memory provider: Supermemory MCP. Token: [redacted]. Pi MCP config: ~/.pi/agent/mcp.json.");
       } else if (choice === "engram") {
@@ -861,7 +882,7 @@ export function DeckApp() {
 
   function applyDeveloperTeamModelConfig() {
     const projectRoot = resolveProjectRoot();
-    const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments, ...(memoryProvider ? { memoryProvider } : {}) });
+    const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments, preserveMissingThinkingAssignments: true, ...(memoryProvider ? { memoryProvider } : {}) });
     const backup = backupDeveloperTeamFiles(plan);
 
     try {

@@ -135,7 +135,7 @@ describe("buildPiTeamLaunchPlan", () => {
     }
   });
 
-  test("keeps Kimi orchestrator model with safe default thinking", () => {
+  test("keeps Kimi orchestrator model without thinking launch flag", () => {
     const projectRoot = createTempProject();
     try {
       writeAgent(projectRoot, "deck-developer-orchestrator", [
@@ -147,14 +147,14 @@ describe("buildPiTeamLaunchPlan", () => {
 
       expect(plan.args).toContain("--model");
       expect(plan.args).toContain("opencode-go/kimi-k2.6");
-      expect(plan.args).toContain("--thinking");
-      expect(plan.args).toContain("off");
+      expect(plan.args).not.toContain("--thinking");
+      expect(plan.args).not.toContain("off");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
 
-  test("forces Kimi orchestrator thinking to off", () => {
+  test("omits Kimi orchestrator thinking even when frontmatter requested it", () => {
     const projectRoot = createTempProject();
     try {
       writeAgent(projectRoot, "deck-developer-orchestrator", [
@@ -167,8 +167,8 @@ describe("buildPiTeamLaunchPlan", () => {
 
       expect(plan.args).toContain("--model");
       expect(plan.args).toContain("opencode-go/kimi-k2.6");
-      expect(plan.args).toContain("--thinking");
-      expect(plan.args).toContain("off");
+      expect(plan.args).not.toContain("--thinking");
+      expect(plan.args).not.toContain("off");
       expect(plan.args).not.toContain("high");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

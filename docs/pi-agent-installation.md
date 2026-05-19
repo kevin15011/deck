@@ -438,6 +438,109 @@ Suggested model tiers:
 | Review Agent | Strong fresh-context review model |
 | Archive Agent | Cheap structured summarization model |
 
+## Adaptive Memory Provider Setup — Supermemory MCP
+
+Deck supports Supermemory MCP as an adaptive-memory provider for the Pi runtime. This is the first supported runtime integration; non-Pi integrations are deferred.
+
+### Provider selection
+
+During TUI installation or reconfiguration, Deck offers exactly one active adaptive-memory provider at a time:
+
+- `None` — no adaptive memory.
+- `Engram` — existing experimental provider.
+- `Supermemory MCP` — Supermemory via HTTP MCP.
+
+Selection is stored in `.deck/config.json` as a non-secret scalar (`activeProvider`) plus optional identity/settings. Only one provider may be active; selecting a new provider replaces the previous one.
+
+### Supermemory credential boundary
+
+The Supermemory token is a runner-installation secret and must never be stored in `.deck/config.json`, generated Pi files, OpenSpec artifacts, tests, logs, or AI memory.
+
+The approved external secret boundary is Pi’s global MCP config:
+
+```txt
+~/.pi/agent/mcp.json
+```
+
+Deck writes or updates only the `supermemory` server entry in this file, preserving unrelated MCP servers. The entry uses:
+
+- HTTP transport URL: `https://supermemory-new.stlmcp.com`
+- Header: `x-supermemory-api-key` with the user-supplied token
+
+Example shape:
+
+```json
+{
+  "mcpServers": {
+    "supermemory": {
+      "transport": "http",
+      "url": "https://supermemory-new.stlmcp.com",
+      "headers": {
+        "x-supermemory-api-key": "<user-token>"
+      }
+    }
+  }
+}
+```
+
+Deck attempts restrictive permissions (`0700` for `~/.pi/agent`, `0600` for `~/.pi/agent/mcp.json`) on a best-effort basis and warns if hardening is not supported on the current platform.
+
+### Required and optional identity
+
+Supermemory configuration requires an explicit `userId`. Optional identity values enable additional scopes:
+
+| Field | Required | Purpose |
+|---|---|---|
+| `userId` | Yes | Personal scope and container tagging (`u:{userId}`). |
+| `teamId` | No | Team scope when available (`team:{teamId}:p:{projectId}`). |
+| `orgId` | No | Org scope when available (`org:{orgId}`). |
+
+`projectId` is optional and passive; Deck does not invent project identifiers. Project-scoped containers are used only when a project identity is explicitly configured.
+
+### Setup flow
+
+1. User selects `Supermemory MCP` in the TUI memory provider screen.
+2. Deck prompts for the Supermemory token, required `userId`, and optional `teamId`/`orgId`.
+3. Deck validates inputs and rejects empty `userId` or malformed values.
+4. Deck invokes the Pi MCP config writer to create or merge `~/.pi/agent/mcp.json` with the `supermemory` server entry and the supplied token.
+5. If the Pi MCP writer fails, Deck reports an actionable error and does not mark Supermemory as active.
+6. On success, Deck writes the non-secret config to `.deck/config.json` (active provider, `userId`, optional identities, server name, search defaults).
+7. The TUI confirms the active provider and uses the same Supermemory provider for the immediate Developer Team install plan. Tool injection remains fail-closed until authenticated runtime validation is available; static `~/.pi/agent/mcp.json` validation alone is not treated as proof of runtime availability.
+
+### Fallback and failure behavior
+
+If Supermemory configuration is incomplete, the Pi MCP config is missing or malformed, or authenticated runtime health validation fails, Deck fails closed:
+
+- Supermemory is not injected into Pi agent frontmatter or session prompts.
+- The phase continues with OpenSpec-only context.
+- A redacted warning indicates adaptive memory is unavailable without exposing credentials.
+
+This applies at install time and at every launch.
+
+### Active-provider switching
+
+Users can switch the active provider at any time through the TUI or by using the CLI override:
+
+```bash
+deck pi developer --memory=supermemory
+deck pi developer --memory=engram
+deck pi developer --memory=none
+```
+
+CLI override takes precedence over `.deck/config.json`, which takes precedence over the default `none`. Switching providers does not modify OpenSpec artifacts.
+
+### No Engram migration
+
+This change does not migrate existing Engram memories into Supermemory. Engram remains available and unchanged under the common contract.
+
+### Team memory governance
+
+Team-scoped memories saved through Supermemory are stored with `promotionStatus: candidate` unless an explicit approval flow is present. Deck does not build a review/promote UI in this change; candidate status prevents inferred conventions from becoming accepted rules.
+
+### OpenSpec authority
+
+Adaptive memory is advisory. Official OpenSpec artifacts (specs, designs, tasks, state, events) remain authoritative. Agents must not modify OpenSpec based solely on adaptive memory. Phase prompts separate `OFFICIAL CONTEXT` from `ADAPTIVE CONTEXT` and include the authority rule explicitly.
+
 ## Validation checklist
 
 Before considering Pi Developer Team installation successful, Deck must verify:
@@ -450,7 +553,9 @@ Before considering Pi Developer Team installation successful, Deck must verify:
 - Project-local `<project>/.pi/agents/deck-developer-*.md` files are preferred over global user agent directories (broad `deck-*` pattern reserved for future Deck teams).
 - No user-edited unrelated files were overwritten.
 - Model assignments are configured during install or explicitly skipped (can be configured later from the main menu).
-- MCP setup is valid when memory/MCP tools are selected.
+- MCP/Supermemory/Engram setup is valid when an adaptive-memory provider is selected.
+- Supermemory token is stored only in `~/.pi/agent/mcp.json`, not in `.deck/config.json` or repo files.
+- Supermemory `userId` is present when Supermemory is the active provider.
 - Project AI notes retrieval is planned for Phase 5 (exact path and schema pending).
 
 ## Open questions before implementation

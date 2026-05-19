@@ -125,7 +125,21 @@ function resolvePiMemoryInjection(
     homeDir: options.piMcpHomeDir,
   });
 
-  if (mcpValidation.ok) return resolved;
+  if (mcpValidation.ok && hasAuthenticatedSupermemoryToolBindings(resolved.bundle)) return resolved;
+
+  if (mcpValidation.ok) {
+    return {
+      bundle: undefined,
+      diagnostics: [
+        ...resolved.diagnostics,
+        {
+          code: "memory_provider_unavailable",
+          providerId: "supermemory",
+          message: "Supermemory authenticated runtime validation is required before MCP tool injection; omitted adaptive-memory injection.",
+        },
+      ],
+    };
+  }
 
   return {
     bundle: undefined,
@@ -157,11 +171,15 @@ function resolvePiMemoryInjection(
  * (matching fragments), their MCP tool names are appended to the base
  * tools list. Only tool bindings from surfaces that have matching instruction
  * fragments are included.
+ *
+ * Supermemory exposes generic MCP tool names (`execute`, `search_docs`), so
+ * preserve the binding server name in generated frontmatter to avoid granting
+ * or colliding with a different server's generic `execute` tool.
  */
 function buildPiToolsLine(baseTools: string, toolBindings: readonly import("@deck/core/memory/adaptive-memory").MemoryToolBinding[]): string {
   if (toolBindings.length === 0) return baseTools;
 
-  const memoryToolNames = toolBindings.flatMap((binding) => binding.toolNames);
+  const memoryToolNames = toolBindings.flatMap((binding) => binding.toolNames.map((toolName) => toPiMemoryToolName(binding.serverName, toolName)));
   // Deduplicate while preserving order
   const seen = new Set<string>();
   const allTools: string[] = [];
@@ -184,6 +202,21 @@ function buildPiToolsLine(baseTools: string, toolBindings: readonly import("@dec
   return allTools.join(",");
 }
 
+function toPiMemoryToolName(serverName: string | undefined, toolName: string): string {
+  if (serverName && (toolName === "execute" || toolName === "search_docs")) {
+    return `${serverName}.${toolName}`;
+  }
+  return toolName;
+}
+
+function hasAuthenticatedSupermemoryToolBindings(bundle: MemoryInjectionBundle): boolean {
+  const supermemoryBindings = bundle.toolBindings.filter((binding) =>
+    binding.toolNames.some((toolName) => toolName === "execute" || toolName === "search_docs"),
+  );
+
+  return supermemoryBindings.length > 0 && supermemoryBindings.every((binding) => binding.metadata?.authenticatedRuntimeValidated === true);
+}
+
 // --- Plan ---
 
 export function buildDeveloperTeamInstallPlan(
@@ -196,6 +229,7 @@ export function buildDeveloperTeamInstallPlan(
     supportedMemoryProviderIds?: Iterable<string>;
     piMcpConfigPath?: string;
     piMcpHomeDir?: string;
+    preserveMissingThinkingAssignments?: boolean;
   },
 ): DeveloperTeamInstallPlan & { memoryDiagnostics: MemoryDiagnostic[] } {
   const agentsDir = join(projectRoot, ".pi", "agents");
@@ -217,7 +251,10 @@ export function buildDeveloperTeamInstallPlan(
     const absolutePath = join(projectRoot, relativePath);
     const assignedModel = modelAssignments?.[agent.id];
     const model = supportsDeveloperTeamModel(assignedModel) ? assignedModel : undefined;
-    const thinking = model ? resolveThinkingForModel(model, thinkingAssignments?.[agent.id]) : resolveThinkingForModel(undefined);
+    const hasThinkingAssignment = thinkingAssignments ? Object.prototype.hasOwnProperty.call(thinkingAssignments, agent.id) : false;
+    const thinking = model && options?.preserveMissingThinkingAssignments && !hasThinkingAssignment
+      ? undefined
+      : model ? resolveThinkingForModel(model, thinkingAssignments?.[agent.id]) : resolveThinkingForModel(undefined);
     const content = buildAgentFileContent(agent, model, thinking, memoryBundle);
 
     return { agent, relativePath, absolutePath, content };
@@ -528,7 +565,7 @@ function buildSkillFileContent(
 function buildAgentFileContent(
   agent: DeveloperTeamAgent,
   model?: string,
-  thinking: PiThinkingLevel = "low",
+  thinking?: PiThinkingLevel,
   memoryBundle?: MemoryInjectionBundle,
 ): string {
   const content = getAgentContent(agent.id);
@@ -559,7 +596,7 @@ function buildAgentFileContent(
     `skill: ${agent.skillId}`,
     ...(model ? [`model: ${model}`] : []),
     `tools: ${toolsLine}`,
-    `thinking: ${thinking}`,
+    ...(thinking ? [`thinking: ${thinking}`] : []),
     "systemPromptMode: replace",
     "inheritProjectContext: true",
     "inheritSkills: false",

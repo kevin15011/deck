@@ -9,7 +9,7 @@ function createTempDir(prefix = "deck-test-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-function writeOrchestratorAssignment(projectRoot: string, model = "openai-codex/gpt-5.5", thinking = "medium") {
+function writeOrchestratorAssignment(projectRoot: string, model = "openai-codex/gpt-5.5", thinking: string | undefined = "medium") {
   mkdirSync(join(projectRoot, ".pi", "agents"), { recursive: true });
   writeFileSync(
     join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"),
@@ -17,7 +17,7 @@ function writeOrchestratorAssignment(projectRoot: string, model = "openai-codex/
       "---",
       "name: deck-developer-orchestrator",
       `model: ${model}`,
-      `thinking: ${thinking}`,
+      ...(thinking ? [`thinking: ${thinking}`] : []),
       "---",
       "",
       "# Agent",
@@ -27,8 +27,8 @@ function writeOrchestratorAssignment(projectRoot: string, model = "openai-codex/
 }
 
 describe("runPiLaunch", () => {
-  test("returns error when pi command is not found", () => {
-    const result = runPiLaunch({
+  test("returns error when pi command is not found", async () => {
+    const result = await runPiLaunch({
       teamId: "developer-team",
       projectRoot: "/tmp/project",
       flags: {},
@@ -41,10 +41,10 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("returns launch info without spawning when dryRun is true", () => {
+  test("returns launch info without spawning when dryRun is true", async () => {
     const projectRoot = createTempDir();
     try {
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -64,10 +64,10 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("materializes profile before returning dry-run plan", () => {
+  test("materializes profile before returning dry-run plan", async () => {
     const projectRoot = createTempDir();
     try {
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -81,11 +81,11 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("dry-run plan includes orchestrator model and thinking flags", () => {
+  test("dry-run plan includes orchestrator model and thinking flags", async () => {
     const projectRoot = createTempDir();
     try {
       writeOrchestratorAssignment(projectRoot);
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -105,7 +105,7 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("passes Engram memory provider to materializeTeamProfile", () => {
+  test("passes Engram memory provider to materializeTeamProfile", async () => {
     const projectRoot = createTempDir();
     try {
       const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
@@ -125,7 +125,7 @@ describe("runPiLaunch", () => {
         }),
       };
 
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -152,7 +152,7 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("reports memory_provider_unavailable diagnostic when provider buildInjection throws", () => {
+  test("reports memory_provider_unavailable diagnostic when provider buildInjection throws", async () => {
     const brokenProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
       id: "engram",
       displayName: "Broken",
@@ -163,7 +163,7 @@ describe("runPiLaunch", () => {
 
     const projectRoot = createTempDir();
     try {
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -184,10 +184,10 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("no memory diagnostics when no memory provider is provided", () => {
+  test("no memory diagnostics when no memory provider is provided", async () => {
     const projectRoot = createTempDir();
     try {
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -206,7 +206,7 @@ describe("runPiLaunch", () => {
 
   // --- Regression tests for verify/review findings ---
 
-  test("--memory=engram materializes agent and skill files with tool bindings (REQ-AMI-002)", () => {
+  test("--memory=engram materializes agent and skill files with tool bindings (REQ-AMI-002)", async () => {
     const projectRoot = createTempDir();
     try {
       const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
@@ -238,7 +238,7 @@ describe("runPiLaunch", () => {
         }),
       };
 
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -278,7 +278,7 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("--memory=engram preserves pre-existing orchestrator model and thinking assignments", () => {
+  test("--memory=engram preserves pre-existing orchestrator model and thinking assignments", async () => {
     const projectRoot = createTempDir();
     try {
       writeOrchestratorAssignment(projectRoot);
@@ -304,7 +304,7 @@ describe("runPiLaunch", () => {
         }),
       };
 
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -333,7 +333,7 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("--memory=engram materialization forces unsupported orchestrator thinking to off", () => {
+  test("--memory=engram materialization omits unsupported orchestrator thinking", async () => {
     const projectRoot = createTempDir();
     try {
       writeOrchestratorAssignment(projectRoot, "opencode-go/kimi-k2.6", "high");
@@ -346,7 +346,7 @@ describe("runPiLaunch", () => {
         }),
       };
 
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -358,21 +358,58 @@ describe("runPiLaunch", () => {
       expect(result.status).toBe("ready");
       if (result.status === "ready") {
         expect(result.plan.args).toContain("opencode-go/kimi-k2.6");
-        expect(result.plan.args).toContain("--thinking");
-        expect(result.plan.args).toContain("off");
+        expect(result.plan.args).not.toContain("--thinking");
+        expect(result.plan.args).not.toContain("off");
         expect(result.plan.args).not.toContain("high");
       }
 
       const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md");
       const orchestratorContent = readFileSync(orchestratorPath, "utf-8");
       expect(orchestratorContent).toContain("model: opencode-go/kimi-k2.6");
-      expect(orchestratorContent).toContain("thinking: off");
+      expect(orchestratorContent).not.toContain("thinking:");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
 
-  test("unsupported provider object cannot silently inject content (REQ-AMI-003)", () => {
+  test("--memory=engram materialization preserves missing thinking frontmatter", async () => {
+    const projectRoot = createTempDir();
+    try {
+      writeOrchestratorAssignment(projectRoot, "custom/no-reasoning", "");
+      const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+        id: "engram",
+        displayName: "Engram Memory",
+        buildInjection: () => ({
+          instructions: [{ surface: "agent" as const, markdown: "Agent Engram memory injection.", teamId: "developer-team" }],
+          toolBindings: [],
+        }),
+      };
+
+      const result = await runPiLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        flags: {},
+        commandExists: () => true,
+        dryRun: true,
+        memoryProvider: engramProvider,
+      });
+
+      expect(result.status).toBe("ready");
+      if (result.status === "ready") {
+        expect(result.plan.args).toContain("custom/no-reasoning");
+        expect(result.plan.args).not.toContain("--thinking");
+      }
+
+      const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md");
+      const orchestratorContent = readFileSync(orchestratorPath, "utf-8");
+      expect(orchestratorContent).toContain("model: custom/no-reasoning");
+      expect(orchestratorContent).not.toContain("thinking:");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("unsupported provider object cannot silently inject content (REQ-AMI-003)", async () => {
     const unsupportedProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
       id: "unknown-provider",
       displayName: "Unknown",
@@ -390,7 +427,7 @@ describe("runPiLaunch", () => {
 
     const projectRoot = createTempDir();
     try {
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
@@ -419,10 +456,10 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("without memory provider, agent/skill files are not re-materialized", () => {
+  test("without memory provider, agent/skill files are not re-materialized", async () => {
     const projectRoot = createTempDir();
     try {
-      const result = runPiLaunch({
+      const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},

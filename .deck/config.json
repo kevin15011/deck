@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "adaptiveMemory": {
+    "activeProvider": "supermemory",
+    "supermemory": {
+      "mcpServerName": "supermemory",
+      "searchMode": "memories",
+      "maxMemoriesPerSession": 7,
+      "userId": "kevin",
+      "teamId": "developer",
+      "orgId": "GCO"
+    }
+  }
+}

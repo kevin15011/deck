@@ -246,6 +246,25 @@
 - `.deck/config.json` persistence occurs only after the Pi MCP writer succeeds for Supermemory, so a failed writer surfaces an actionable setup error instead of marking Supermemory active.
 - Added TUI tests for real temp-path Pi MCP writer invocation, external-file header persistence, status redaction, mocked writer failure handling, and non-secret Deck config serialization.
 
+### Task 14: Documentation — Pi Agent Installation
+**Status**: ✅ Complete
+**Files Changed**
+- `docs/pi-agent-installation.md` — modify
+- `openspec/changes/add-supermemory-mcp-memory-provider/apply-progress.md` — modify
+- `openspec/changes/add-supermemory-mcp-memory-provider/state.yaml` — modify
+- `openspec/changes/add-supermemory-mcp-memory-provider/events.yaml` — modify
+
+**Verification**
+- Documentation review: pass — `docs/pi-agent-installation.md` covers Pi-first Supermemory setup, external `~/.pi/agent/mcp.json` credential boundary, required `userId`, optional `teamId`/`orgId`, fallback behavior, active-provider switching, no Engram migration, team-candidate status, and OpenSpec authority.
+- Tests: skipped — documentation/registry-only task; no product code changed.
+- Build: skipped — no product code changed.
+- Typecheck: skipped — no TypeScript changed.
+
+**Notes**
+- Added a dedicated Supermemory MCP adaptive-memory setup section to the Pi installation documentation.
+- Documented that the Supermemory token must not be stored in `.deck/config.json`, OpenSpec artifacts, generated repo files, logs, tests, or AI memory.
+- Documented fail-closed behavior: if Supermemory config/validation is unavailable, Pi sessions continue with OpenSpec-only context and a redacted adaptive-memory absence warning.
+
 ### Task 15: Pi Global MCP Config Writer for Supermemory
 **Status**: ✅ Complete
 **Files Changed**
@@ -267,6 +286,40 @@
 - Diagnostics and redaction helpers do not expose the token or header value. Tests use a sentinel token and assert it appears only in the temp external MCP config fixture.
 - Exported the module from `packages/adapter-pi/src/index.ts` for follow-up TUI/launch integration.
 
+## Review Remediation Pass
+
+**Status**: ✅ Complete
+**Files Changed**
+- `apps/cli/src/tui/app.tsx` — modify
+- `apps/cli/src/tui/developer-team-flow.test.tsx` — modify
+- `apps/cli/src/pi-launch-command.ts` — modify
+- `packages/adapter-pi/src/pi-mcp-config.ts` — modify
+- `packages/adapter-pi/src/pi-mcp-config.test.ts` — modify
+- `packages/adapter-pi/src/developer-team-install.ts` — modify
+- `packages/adapter-pi/src/developer-team-install.test.ts` — modify
+- `packages/adapter-supermemory/src/index.ts` — modify
+- `packages/adapter-supermemory/src/index.test.ts` — modify
+- `packages/core/src/config/deck-config.ts` — modify
+- `docs/pi-agent-installation.md` — modify
+- `openspec/changes/add-supermemory-mcp-memory-provider/apply-progress.md` — modify
+- `openspec/changes/add-supermemory-mcp-memory-provider/state.yaml` — modify
+- `openspec/changes/add-supermemory-mcp-memory-provider/events.yaml` — modify
+
+**Verification**
+- Tests: pass — `bun test packages/adapter-pi/src/pi-mcp-config.test.ts packages/adapter-pi/src/developer-team-install.test.ts`
+- Tests: pass — `bun test packages/adapter-supermemory`
+- Tests: pass — `bun test apps/cli/src/tui/developer-team-flow.test.tsx apps/cli/src/pi-launch-command.supermemory.test.ts`
+- Typecheck: pass — `bunx tsc --noEmit --pretty false`
+
+**Notes**
+- TUI Supermemory setup now constructs a Supermemory provider for the immediate Developer Team install after the external Pi MCP writer succeeds, while still persisting only non-secret `.deck/config.json` settings.
+- Launch no longer marks local/static Pi MCP config validation as authenticated runtime validation; Supermemory health remains degraded until an online runtime probe has passed, and tool injection fails closed without authenticated runtime validation.
+- Pi MCP diagnostics now redact quoted JSON secrets, token/API key fields, authorization values, bearer tokens, and env-style `SUPERMEMORY_API_KEY` values.
+- Supermemory tool materialization preserves the configured server name for generic MCP tools by generating server-qualified names such as `supermemory.execute` / `supermemory.search_docs` or `customSupermemory.execute` / `customSupermemory.search_docs` in Pi frontmatter.
+- Search modes were aligned to the adapter-supported `memories`/`documents` set, the Task 14 setup flow docs were reordered to persist `.deck/config.json` only after external MCP writer success, and the Developer Team install effect now depends on `memoryProvider`.
+- The previously blocking `.backups/pi-agent-before-agent-discovery-20260515-155018` secret-bearing backup directory was removed by the orchestrator before this remediation pass.
+- A generated `.deck/pi/sessions` directory containing sensitive session logs was also removed by the orchestrator after Verify identified it as a generated ignored repo artifact.
+
 ## In-Progress Tasks
 
 None.
@@ -277,4 +330,4 @@ None.
 
 ## Remaining Tasks
 
-- Task 14: Documentation — Pi Agent Installation — not assigned to this Frontend Apply pass.
+None.

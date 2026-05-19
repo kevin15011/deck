@@ -188,6 +188,20 @@ describe("buildTeamSystemPrompt", () => {
     expect(content).not.toContain("## Adaptive Memory (provider-injected)");
   });
 
+  test("renders launch-owned memoryUnavailableReason without resolving provider", () => {
+    const sentinel = "secret-token-do-not-leak";
+    const { content, memoryDiagnostics } = buildTeamSystemPrompt("developer-team", {
+      memoryUnavailableReason: "Supermemory runtime validation failed; check Pi MCP configuration.",
+    });
+
+    expect(memoryDiagnostics).toHaveLength(0);
+    expect(content).toContain("## OFFICIAL CONTEXT");
+    expect(content).toContain("## ADAPTIVE CONTEXT");
+    expect(content).toContain("Adaptive context was not loaded: Supermemory runtime validation failed");
+    expect(content).not.toContain("## Adaptive Memory (provider-injected)");
+    expect(content).not.toContain(sentinel);
+  });
+
 });
 
 describe("materializeTeamProfile", () => {

@@ -1,6 +1,6 @@
 change: add-supermemory-mcp-memory-provider
-status: in_progress
-current_phase: apply
+status: archived
+current_phase: archive
 artifacts:
   proposal: proposal.md
   spec: spec.md
@@ -10,6 +10,9 @@ artifacts:
   supporting_investigation: exploration.md
   apply_progress: apply-progress.md
   mcp_validation_report: mcp-validation-report.md
+  verify: verify.md
+  review: review.md
+  archive_report: archive-report.md
 phases:
   proposal:
     status: completed
@@ -63,18 +66,20 @@ phases:
       created_by: deck-developer-explorer
       note: "Supporting investigation only, not a formal workflow restart or phase rewind. Explored current Pi prompt/tool materialization, Deck config behavior, Supermemory TUI handoff stub, lack of MCP server config writer, and recommended a safe Pi MCP config slice pending confirmed Pi schema."
   apply:
-    status: in_progress
-    agent: frontend
+    status: completed
+    agent: general
     artifact: apply-progress.md
     artifacts:
       - apply-progress.md
       - mcp-validation-report.md
-    updated_at: "2026-05-19T23:55:00Z"
+    completed_at: "2026-05-20T00:05:00Z"
+    updated_at: "2026-05-20T00:20:00Z"
     provenance:
-      source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
-      created_by: deck-developer-apply-frontend
+      source: openspec/changes/add-supermemory-mcp-memory-provider/review.md
+      created_by: deck-developer-apply-general
       tasks:
-        - 12
+        - 14
+        - review-remediation
       completed_tasks:
         - 1
         - 2
@@ -89,9 +94,10 @@ phases:
         - 11
         - 12
         - 13
+        - 14
         - 15
       blocked_tasks: []
-      note: "Task 12 completed in this Frontend Apply pass: CLI/Pi launch resolves provider precedence CLI > .deck/config.json > none, constructs Engram or Supermemory providers, validates Supermemory Pi MCP config before injection, fails closed with redacted diagnostics, and preserves prior completed Tasks 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, and 15."
+      note: "Task 14 completed and review remediation applied: TUI immediate Supermemory provider construction, static-vs-authenticated runtime validation separation with fail-closed tool injection until authenticated runtime validation, stronger JSON/header/env secret redaction, configured server-qualified Supermemory tool names, aligned search modes, docs ordering, React hook dependency fix, and generated secret-bearing session log removal. All Apply tasks and remediation are complete pending rerun Verify/Review."
     agents:
       general:
         status: completed
@@ -99,7 +105,7 @@ phases:
         artifacts:
           - apply-progress.md
           - mcp-validation-report.md
-        updated_at: "2026-05-19T21:05:00Z"
+        updated_at: "2026-05-20T00:20:00Z"
         tasks:
           completed:
             - 1
@@ -107,11 +113,13 @@ phases:
             - 3
             - 4
             - 5
+            - 14
+            - review-remediation
           blocked: []
         provenance:
           source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
           created_by: deck-developer-apply-general
-          note: "Tasks 2, 3, and 5 completed: added provider-neutral adaptive-memory contracts, governance validation/audit helpers covering REQ-AMG-001 through REQ-AMG-010, context authority rendering for OFFICIAL/ADAPTIVE sections, adaptive-memory composition integration, and Developer Team prompt guidance via content registry. Task 1 and Task 4 remain preserved as previously completed."
+          note: "Tasks 2, 3, 5, and 14 completed, plus review remediation for TUI provider construction, fail-closed runtime validation semantics, redaction, configured server-qualified tool names, search modes, docs ordering, hook dependencies, and generated session log cleanup. Task 1 and Task 4 remain preserved as previously completed."
       frontend:
         status: completed
         artifact: apply-progress.md
@@ -147,6 +155,55 @@ phases:
           source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
           created_by: deck-developer-apply-backend
           note: "Tasks 9 and 10 completed: Pi Developer Team install supports Supermemory with Pi MCP config validation before injection, redacted fail-closed diagnostics, and execute/search_docs-only tool bindings; Pi team profile supports Supermemory adaptive context with OFFICIAL/ADAPTIVE authority sections and unavailable-context absence indicators. Tasks 6, 7, 8, and 15 remain preserved as previously completed."
+  verify:
+    status: passed
+    artifact: verify.md
+    updated_at: "2026-05-20T00:30:00Z"
+    provenance:
+      source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+      actor: deck-developer-orchestrator
+      registry_write: serialized
+      reconciled_by: deck-developer-orchestrator
+      result: PASS
+      remediation_verified:
+        review_blockers: passed
+        backup_secret_bearing_absent: passed
+        deck_pi_sessions_absent: passed
+        no_real_secrets_detected: passed
+      tests:
+        - command: "bun test packages/core/src/memory packages/core/src/config packages/adapter-supermemory packages/adapter-pi apps/cli"
+          result: "passed: 331, failed: 0"
+        - command: "bun test"
+          result: "passed: 722, failed: 0"
+        - command: "bunx tsc --noEmit --pretty false"
+          result: passed
+      note: "Subagent Verify recreated .deck/pi/sessions as a generated ignored runtime artifact; orchestrator removed it and verified absence inline."
+  review:
+    status: approved_with_changes
+    artifact: review.md
+    updated_at: "2026-05-20T00:30:00Z"
+    provenance:
+      source: openspec/changes/add-supermemory-mcp-memory-provider/{state.yaml,events.yaml,spec.md,design.md,tasks.md,apply-progress.md,mcp-validation-report.md,verify.md,review.md}
+      actor: deck-developer-review
+      registry_write: deferred
+      reconciled_by: deck-developer-orchestrator
+      result: PASS
+      blockers: []
+      non_blocking:
+        - "Authenticated availability plumbing remains a future improvement."
+        - "mcpServerName format validation is recommended as non-blocking hardening."
+  archive:
+    status: archived
+    artifact: archive-report.md
+    archive_target: openspec/archive/add-supermemory-mcp-memory-provider/
+    completed_at: "2026-05-19T00:00:00Z"
+    updated_at: "2026-05-19T00:00:00Z"
+    provenance:
+      source: openspec/changes/add-supermemory-mcp-memory-provider/{state.yaml,events.yaml,proposal.md,spec.md,design.md,tasks.md,apply-progress.md,mcp-validation-report.md,verify.md,review.md}
+      actor: deck-developer-archive
+      registry_write: performed
+      reconciled_by: deck-developer-archive
+      note: "Change fully closed. All 15 tasks completed, verify PASS, review APPROVED WITH CHANGES with no blockers. Two non-blocking follow-ups recorded. Archived to openspec/archive/add-supermemory-mcp-memory-provider/."
 registry:
-  version: 1
-  updated_at: "2026-05-19T23:55:00Z"
+  version: 2
+  updated_at: "2026-05-19T00:00:00Z"

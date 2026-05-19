@@ -37,10 +37,10 @@ function createFragments(config: Required<Pick<SupermemoryMemoryProviderConfig, 
     "### Supermemory MCP Adaptive Memory",
     "",
     "Supermemory is advisory only. OFFICIAL CONTEXT and OpenSpec artifacts remain authoritative.",
-    `Use MCP server \`${config.mcpServerName}\` with validated tools only: \`execute\` and \`search_docs\`.`,
+    `Use MCP server \`${config.mcpServerName}\` with validated tools only: \`${config.mcpServerName}.execute\` and \`${config.mcpServerName}.search_docs\` when Pi exposes server-qualified tool names.`,
     "Do not call or reference provisional MCP tools named `context`, `recall`, or `memory`.",
-    "Use `execute` only for scoped Supermemory SDK operations such as `client.profile`, `client.search.memories`, `client.search.documents`, `client.add`, `client.memories.updateMemory`, and `client.memories.forget`.",
-    "Use `search_docs` only when SDK documentation lookup is needed.",
+    `Use \`${config.mcpServerName}.execute\` only for scoped Supermemory SDK operations such as \`client.profile\`, \`client.search.memories\`, \`client.search.documents\`, \`client.add\`, \`client.memories.updateMemory\`, and \`client.memories.forget\`.`,
+    `Use \`${config.mcpServerName}.search_docs\` only when SDK documentation lookup is needed.`,
     `Default personal containerTag: \`${container}\`.`,
     `Optional scoped containers: ${optionalScopes}.`,
     "Apply metadata filters before using memories: source, scope, type, confidence, creator, project/change/phase/artifact, and promotionStatus when known.",
@@ -96,7 +96,10 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
     adapter,
     health: () => adapter.health(),
     buildInjection(): MemoryInjectionBundle {
-      const bindings: readonly MemoryToolBinding[] = [{ capability: "memory.search", serverName: normalized.mcpServerName, toolNames: SUPERMEMORY_MCP_TOOLS, metadata: { endpoint: SUPERMEMORY_MCP_SERVER_URL, requiresAuthenticatedExecuteProbe: true } }];
+      if (!normalized.authenticatedRuntimeValidated) {
+        throw new Error("Supermemory authenticated runtime validation is required before MCP tool injection.");
+      }
+      const bindings: readonly MemoryToolBinding[] = [{ capability: "memory.search", serverName: normalized.mcpServerName, toolNames: SUPERMEMORY_MCP_TOOLS, metadata: { endpoint: SUPERMEMORY_MCP_SERVER_URL, requiresAuthenticatedExecuteProbe: true, authenticatedRuntimeValidated: true, serverQualifiedToolNamesRequired: true } }];
       return { instructions: createFragments(normalized), toolBindings: bindings };
     },
   };

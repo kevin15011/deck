@@ -254,8 +254,8 @@ export function supportsDeveloperTeamModel(model?: string | PiModel): boolean {
   return true;
 }
 
-export function resolveThinkingForModel(model: string | PiModel | undefined, requested?: PiThinkingLevel): PiThinkingLevel {
-  if (!supportsThinkingForModel(model)) return "off";
+export function resolveThinkingForModel(model: string | PiModel | undefined, requested?: PiThinkingLevel): PiThinkingLevel | undefined {
+  if (!supportsThinkingForModel(model)) return undefined;
   return requested ?? getDefaultThinkingForModel(typeof model === "string" ? model : model?.id);
 }
 

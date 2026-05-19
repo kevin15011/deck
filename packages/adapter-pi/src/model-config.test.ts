@@ -259,9 +259,13 @@ describe("getDefaultThinkingForModel", () => {
     expect(getDefaultThinkingForModel("opencode-go/kimi-k2.6")).toBe("off");
   });
 
-  test("uses parsed Pi thinking capability when it is explicitly false", () => {
+  test("omits thinking when parsed Pi capability is explicitly false", () => {
     expect(supportsThinkingForModel({ id: "custom/no-reasoning", displayName: "No Reasoning", providerId: "custom", thinking: false })).toBe(false);
-    expect(resolveThinkingForModel({ id: "custom/no-reasoning", displayName: "No Reasoning", providerId: "custom", thinking: false }, "high")).toBe("off");
+    expect(resolveThinkingForModel({ id: "custom/no-reasoning", displayName: "No Reasoning", providerId: "custom", thinking: false }, "high")).toBeUndefined();
+  });
+
+  test("omits thinking for Kimi instead of sending off", () => {
+    expect(resolveThinkingForModel("opencode-go/kimi-k2.6", "high")).toBeUndefined();
   });
 
   test("keeps low thinking for openai-codex models", () => {
