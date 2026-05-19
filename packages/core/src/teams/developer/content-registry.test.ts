@@ -217,6 +217,14 @@ describe("getAgentContent", () => {
     }
   });
 
+  test("archive prompt requires moving archived changes out of changes", () => {
+    const content = getAgentContent("deck-developer-archive")!;
+    const combined = `${content.agentBody}\n${content.skillBody}`;
+    expect(combined).toContain("remove the source change directory");
+    expect(combined).toContain("Archive means move, not duplicate");
+    expect(combined).toContain("If cleanup fails");
+  });
+
   test("core prompts do not hardcode Engram topic-key artifact locations", () => {
     for (const id of DEVELOPER_AGENT_IDS) {
       const content = getAgentContent(id)!;
