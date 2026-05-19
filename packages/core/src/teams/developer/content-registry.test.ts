@@ -17,6 +17,10 @@ const DEVELOPER_AGENT_IDS = [
   "deck-developer-archive",
 ] as const;
 
+const REGISTRY_WRITER_AGENT_IDS = DEVELOPER_AGENT_IDS.filter(
+  (id) => id !== "deck-developer-orchestrator",
+);
+
 // ---------------------------------------------------------------------------
 // getAgentContent
 // ---------------------------------------------------------------------------
@@ -103,6 +107,29 @@ describe("getAgentContent", () => {
       expect(combined, id).toContain("state.yaml");
       expect(combined, id).toContain("events.yaml");
     }
+  });
+
+  test("artifact-writing agents require merge/append registry updates", () => {
+    for (const id of REGISTRY_WRITER_AGENT_IDS) {
+      const content = getAgentContent(id)!;
+      const combined = `${content.agentBody}\n${content.skillBody}`;
+      expect(combined, id).toContain("Read existing");
+      expect(combined, id).toContain("Merge phase");
+      expect(combined, id).toContain("preserve previous artifacts");
+      expect(combined, id).toContain("Append");
+      expect(combined, id).toContain("preserve previous events");
+      expect(combined, id).toContain("Never overwrite or drop previous phase artifacts or events");
+      expect(combined, id).toContain("Registry Blocker");
+    }
+  });
+
+  test("orchestrator rejects registry history resets", () => {
+    const content = getAgentContent("deck-developer-orchestrator")!;
+    const combined = `${content.agentBody}\n${content.skillBody}`;
+    expect(combined).toContain("merge new state without dropping prior artifacts/provenance");
+    expect(combined).toContain("append new events without dropping prior events");
+    expect(combined).toContain("Reject or request repair");
+    expect(combined).toContain("reset/dropped prior registry history");
   });
 
   test("core prompts do not hardcode Engram topic-key artifact locations", () => {

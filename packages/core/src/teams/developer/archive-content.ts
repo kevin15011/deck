@@ -144,8 +144,11 @@ If the project uses file-based specs and the change introduced delta specs:
 Move the completed change to the archive:
 - Target: \`openspec/archive/{change-name}/\`
 - Include all artifacts: state, events, proposal, spec, design, tasks, apply-progress, verify-report, review-report, archive-report.
-- Update the Spec Registry state to phase \`archive\`, status \`archived\`.
-- Append an event to \`events.yaml\` referencing \`archive-report.md\` and the archive target.
+- Read existing \`openspec/changes/{change-name}/state.yaml\` and \`openspec/changes/{change-name}/events.yaml\` before writing if they exist.
+- Merge phase \`archive\`, status \`archived\`, artifact reference \`archive-report.md\`, archive target, and provenance into \`state.yaml\`; preserve previous artifacts, provenance, and relevant fields.
+- Append the archive event referencing \`archive-report.md\` and the archive target to \`events.yaml\`; preserve previous events.
+- Never overwrite or drop previous phase artifacts or events.
+- If the existing registry is malformed or conflicting, repair only when unambiguous; otherwise report a Registry Blocker.
 
 If the registry update fails, report it as a blocker and do not silently continue.
 

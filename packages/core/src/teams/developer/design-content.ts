@@ -252,9 +252,12 @@ Ready for Task (\`deck-developer-task\`) to break this design into implementatio
 Write the design as \`design.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
 
 Update the Spec Registry for the change:
-- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
-- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
-- Record phase \`design\`, status \`completed\` or \`blocked\`, and an event entry referencing \`design.md\`.
+- Read existing \`openspec/changes/{change-name}/state.yaml\` and \`openspec/changes/{change-name}/events.yaml\` before writing if they exist.
+- Ensure \`state.yaml\` and \`events.yaml\` exist.
+- Merge phase \`design\`, status \`completed\` or \`blocked\`, artifact reference \`design.md\`, and provenance into \`state.yaml\`; preserve previous artifacts, provenance, and relevant fields.
+- Append the phase event referencing \`design.md\` to \`events.yaml\`; preserve previous events.
+- Never overwrite or drop previous phase artifacts or events.
+- If the existing registry is malformed or conflicting, repair only when unambiguous; otherwise report a Registry Blocker.
 
 If the registry update fails, report it as a blocker and do not silently continue.
 

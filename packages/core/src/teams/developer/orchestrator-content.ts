@@ -112,6 +112,8 @@ The Spec Registry is also required for every SDD phase:
 - \`openspec/changes/{change-name}/state.yaml\` tracks current phase, status, artifact references, and provenance.
 - \`openspec/changes/{change-name}/events.yaml\` logs phase events.
 - A phase is not complete unless its required artifact exists and both registry files contain the phase/status/event entry for that artifact.
+- Phase agents must read existing registry files before writing, merge new state without dropping prior artifacts/provenance, and append new events without dropping prior events.
+- Reject or request repair for phase outputs that reset registry history, overwrite previous artifacts, or drop previous events.
 - If an agent returns an artifact but registry state/events are missing or failed, repair the registry or request repair from that phase agent before continuing.
 
 If a memory adapter (e.g., Engram) is available, agents MAY optionally save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
@@ -279,14 +281,18 @@ All SDD artifacts are persisted as OpenSpec files in the \`openspec/\` directory
 - Artifact files follow the naming convention: \`proposal.md\`, \`spec.md\`, \`design.md\`, \`tasks.md\`, \`apply-progress.md\`, \`verify-report.md\`, \`review-report.md\`, \`archive-report.md\`.
 - Change state is tracked in \`openspec/changes/{change-name}/state.yaml\`.
 - Events are logged in \`openspec/changes/{change-name}/events.yaml\`.
+- Phase agents must read existing registry files before writing, merge new state without dropping prior artifacts/provenance, and append new events without dropping prior events.
+- Reject or request repair for phase outputs that reset registry history, overwrite previous artifacts, or drop previous events.
 
 The Spec Registry is the phase gate. Before advancing to the next phase, verify:
 - The required OpenSpec artifact path exists.
 - \`state.yaml\` exists and records the expected phase/status/artifact reference.
 - \`events.yaml\` exists and records a corresponding event for that phase.
+- \`state.yaml\` preserves previous artifacts, provenance, and relevant fields after the phase update.
+- \`events.yaml\` preserves previous events and appends the new phase event.
 - The agent return contract includes artifact path, registry state path, registry events path, and the phase/status/event recorded.
 
-If any registry file or entry is missing, do not continue to the next phase. Repair it directly when the expected state is unambiguous; otherwise request repair from the phase agent and report the blocker to the user.
+If any registry file or entry is missing, or if a phase output reset/dropped prior registry history, do not continue to the next phase. Repair it directly when the expected state is unambiguous; otherwise request repair from the phase agent and report the blocker to the user.
 
 If a memory adapter is available, agents MAY save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
 

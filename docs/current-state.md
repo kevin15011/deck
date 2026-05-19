@@ -14,7 +14,7 @@ Deck is a Bun/TypeScript workspace for installing and launching AI development e
 | Pi launcher | `deck pi developer` starts a Pi session shaped for the Developer Team. `--continue` resumes the latest team session; `--resume` opens Pi's native picker in the team session context. |
 | Team IDs | Developer Team agent IDs are team-scoped: `deck-developer-*`. |
 | Artifacts | OpenSpec is the required source of truth for SDD artifacts. Memory systems are auxiliary only. |
-| Spec Registry | A minimal registry/event model exists in core to track change state, artifact references, and provenance through `openspec/changes/{change-name}/state.yaml` and `events.yaml`. |
+| Spec Registry | A minimal registry/event model exists in core to track change state, artifact references, and provenance through `openspec/changes/{change-name}/state.yaml` and `events.yaml`. Phase agents must merge `state.yaml` and append `events.yaml` updates so prior artifacts/events are preserved. |
 | Future schema | Custom schema path is `openspec/schemas/developer-team/`. |
 | Memory/graph | Future memory and graph adapters must be event-driven and provenance-aware. They cannot overwrite official OpenSpec artifacts. |
 | Chained PRs | Chained PR / delivery-strategy behavior is intentionally omitted for now. |

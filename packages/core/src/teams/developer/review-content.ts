@@ -248,9 +248,12 @@ Write the review report as \`review-report.md\` inside the OpenSpec change direc
 If multiple Review Agent scopes run in parallel, each scope writes its own report (e.g., \`review-report-backend.md\`). The Orchestrator merges them.
 
 Update the Spec Registry for the change:
-- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
-- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
-- Record phase \`review\`, status \`approved\`, \`approved_with_changes\`, or \`changes_requested\`, and an event entry referencing the review report path.
+- Read existing \`openspec/changes/{change-name}/state.yaml\` and \`openspec/changes/{change-name}/events.yaml\` before writing if they exist.
+- Ensure \`state.yaml\` and \`events.yaml\` exist.
+- Merge phase \`review\`, status \`approved\`, \`approved_with_changes\`, or \`changes_requested\`, review report artifact reference, and provenance into \`state.yaml\`; preserve previous artifacts, provenance, and relevant fields.
+- Append the phase event referencing the review report path to \`events.yaml\`; preserve previous events.
+- Never overwrite or drop previous phase artifacts or events.
+- If the existing registry is malformed or conflicting, repair only when unambiguous; otherwise report a Registry Blocker.
 
 If the registry update fails, report it as a blocker and do not silently continue.
 

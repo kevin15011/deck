@@ -216,9 +216,12 @@ Compile everything into the output template below.
 Write the verify report as \`verify-report.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
 
 Update the Spec Registry for the change:
-- Ensure \`openspec/changes/{change-name}/state.yaml\` exists.
-- Ensure \`openspec/changes/{change-name}/events.yaml\` exists.
-- Record phase \`verify\`, status \`passed\`, \`passed_with_warnings\`, or \`failed\`, and an event entry referencing \`verify-report.md\`.
+- Read existing \`openspec/changes/{change-name}/state.yaml\` and \`openspec/changes/{change-name}/events.yaml\` before writing if they exist.
+- Ensure \`state.yaml\` and \`events.yaml\` exist.
+- Merge phase \`verify\`, status \`passed\`, \`passed_with_warnings\`, or \`failed\`, artifact reference \`verify-report.md\`, and provenance into \`state.yaml\`; preserve previous artifacts, provenance, and relevant fields.
+- Append the phase event referencing \`verify-report.md\` to \`events.yaml\`; preserve previous events.
+- Never overwrite or drop previous phase artifacts or events.
+- If the existing registry is malformed or conflicting, repair only when unambiguous; otherwise report a Registry Blocker.
 
 If the registry update fails, report it as a blocker and do not silently continue.
 
