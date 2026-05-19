@@ -154,6 +154,27 @@ describe("buildPiTeamLaunchPlan", () => {
     }
   });
 
+  test("forces unsupported orchestrator thinking launch flag to off", () => {
+    const projectRoot = createTempProject();
+    try {
+      writeAgent(projectRoot, "deck-developer-orchestrator", [
+        "name: deck-developer-orchestrator",
+        "model: opencode-go/kimi-k2.6",
+        "thinking: high",
+      ]);
+
+      const plan = buildPiTeamLaunchPlan({ teamId: "developer-team", projectRoot });
+
+      expect(plan.args).toContain("--model");
+      expect(plan.args).toContain("opencode-go/kimi-k2.6");
+      expect(plan.args).toContain("--thinking");
+      expect(plan.args).toContain("off");
+      expect(plan.args).not.toContain("high");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("omits model and thinking launch flags when orchestrator has no assignment", () => {
     const projectRoot = createTempProject();
     try {

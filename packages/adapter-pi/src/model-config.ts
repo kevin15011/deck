@@ -228,15 +228,30 @@ function parsePiListModelLine(line: string, requestedProviderId: string): PiMode
 }
 
 export function getDefaultThinkingForModel(model?: string): PiThinkingLevel {
-  if (!model) return "low";
+  return supportsThinkingForModel(model) ? "low" : "off";
+}
+
+export function supportsThinkingForModel(model?: string | PiModel): boolean {
+  if (!model) return true;
+
+  const modelId = typeof model === "string" ? model : model.id;
+  const providerId = typeof model === "string" ? model.split("/", 1)[0] : model.providerId;
+
+  if (typeof model !== "string" && model.thinking === false) return false;
 
   // Pi's OpenCode Go provider currently rejects persisted assistant messages that
   // include a `reasoning` field for some models even when `pi --list-models`
   // advertises thinking support. Keep subagents compatible by disabling thinking
-  // for that provider unless/ until Pi exposes a safer per-model schema.
-  if (model.startsWith("opencode-go/")) return "off";
+  // for that provider unless/until Pi exposes a safer per-model schema.
+  if (providerId === "opencode-go") return false;
+  if (modelId.endsWith("/kimi-k2.6") || modelId === "kimi-k2.6") return false;
 
-  return "low";
+  return true;
+}
+
+export function resolveThinkingForModel(model: string | PiModel | undefined, requested?: PiThinkingLevel): PiThinkingLevel {
+  if (!supportsThinkingForModel(model)) return "off";
+  return requested ?? getDefaultThinkingForModel(typeof model === "string" ? model : model?.id);
 }
 
 export function parsePiThinkingLevel(value: string | undefined): PiThinkingLevel | undefined {

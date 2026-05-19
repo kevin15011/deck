@@ -30,8 +30,10 @@ import {
   listModelsForProvider,
   PI_THINKING_LEVELS,
   readDeveloperTeamModelConfigAssignments,
+  resolveThinkingForModel,
   reviewPiRequiredTools,
   rollbackDeveloperTeamFiles,
+  supportsThinkingForModel,
   verifyDeveloperTeamInstall,
   DEVELOPER_TEAM_AGENTS,
   type AgentApplyResult,
@@ -45,6 +47,8 @@ import {
   type PiRequiredToolsReview,
   type PiToolInstallResult,
 } from "@deck/adapter-pi";
+
+import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 
 import {
   getNextScreenAfterDeveloperTeamInstall,
@@ -137,6 +141,7 @@ export function DeckApp() {
   const [modelTeamCursor, setModelTeamCursor] = useState(0);
   const [selectedModelEnvironment, setSelectedModelEnvironment] = useState<EnvironmentId | null>(null);
   const [modelConfigSource, setModelConfigSource] = useState<"install" | "menu" | null>(null);
+  const [memoryProvider, setMemoryProvider] = useState<AdaptiveMemoryProvider | undefined>(undefined);
 
   const installedPi = runtimeStatuses.find((status) => status.runtime === "pi" && status.installed && status.command);
   const installedOpenCode = runtimeStatuses.find((status) => status.runtime === "opencode" && status.installed && status.command);
@@ -306,7 +311,7 @@ export function DeckApp() {
 
     function runInstall() {
       const projectRoot = resolveProjectRoot();
-      const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments });
+      const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments, ...(memoryProvider ? { memoryProvider } : {}) });
       const backup = backupDeveloperTeamFiles(plan);
 
       try {
@@ -385,7 +390,7 @@ export function DeckApp() {
     if (screen === "agent-model-config-list") return DEVELOPER_TEAM_AGENTS.length;
     if (screen === "model-provider-selection") return Math.max(0, detectedProviders.length - 1);
     if (screen === "model-selection") return Math.max(0, providerModels.length - 1);
-    if (screen === "agent-model-assignment") return PI_THINKING_LEVELS.length - 1;
+    if (screen === "agent-model-assignment") return selectedModel && supportsThinkingForModel(selectedModel) ? PI_THINKING_LEVELS.length - 1 : 0;
     if (screen === "no-providers") return 0;
     return 0;
   }
@@ -571,7 +576,16 @@ export function DeckApp() {
       setSelectedModel(model);
       const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
       const existingThinking = agent ? thinkingAssignments[agent.id] : undefined;
-      const defaultThinking = existingThinking ?? getDefaultThinkingForModel(model.id);
+      if (!supportsThinkingForModel(model)) {
+        if (agent) {
+          setModelAssignments((current) => ({ ...current, [agent.id]: model.id }));
+          setThinkingAssignments((current) => ({ ...current, [agent.id]: "off" }));
+        }
+        setSelectedModel(null);
+        resetCursor("agent-model-config-list");
+        return;
+      }
+      const defaultThinking = resolveThinkingForModel(model, existingThinking);
       resetCursor("agent-model-assignment", Math.max(0, PI_THINKING_LEVELS.indexOf(defaultThinking)));
       return;
     }
@@ -580,7 +594,7 @@ export function DeckApp() {
       if (!selectedModel) return;
       const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
       if (!agent) return;
-      const thinking = getThinkingLevelByCursor(cursor);
+      const thinking = resolveThinkingForModel(selectedModel, getThinkingLevelByCursor(cursor));
       setModelAssignments((current) => ({ ...current, [agent.id]: selectedModel.id }));
       setThinkingAssignments((current) => ({ ...current, [agent.id]: thinking }));
       setSelectedModel(null);
@@ -646,7 +660,7 @@ export function DeckApp() {
 
   function applyDeveloperTeamModelConfig() {
     const projectRoot = resolveProjectRoot();
-    const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments });
+    const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments, ...(memoryProvider ? { memoryProvider } : {}) });
     const backup = backupDeveloperTeamFiles(plan);
 
     try {
@@ -789,6 +803,7 @@ export function DeckApp() {
           totalAgents={DEVELOPER_TEAM_AGENTS.length}
           modelId={selectedModel.id}
           defaultThinking={getDefaultThinkingForModel(selectedModel.id)}
+          supportsThinking={supportsThinkingForModel(selectedModel)}
         />
       ) : null}
       {screen === "no-providers" ? <NoProvidersScreen /> : null}

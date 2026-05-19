@@ -3,6 +3,15 @@ import { join } from "node:path";
 
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
+import {
+  composeAdaptiveMemory,
+  resolveMemoryInjection,
+  type AdaptiveMemoryCompositionResult,
+  type AdaptiveMemoryProvider,
+  type MemoryDiagnostic as CoreMemoryDiagnostic,
+  type MemoryInjectionBundle,
+  type MemoryToolBinding,
+} from "@deck/core/memory/adaptive-memory";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +38,7 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   skillsDir: string;
   agents: OpenCodePlannedAgentFile[];
   skills: OpenCodePlannedSkillFile[];
+  memoryDiagnostics: MemoryDiagnostic[];
 };
 
 export type OpenCodeBundleApplyResult = {
@@ -53,6 +63,75 @@ export type OpenCodeDeveloperTeamVerifyResult = {
   skillResults: OpenCodeBundleVerifyResult[];
 };
 
+/** Re-export MemoryDiagnostic from core for backward compatibility. */
+export type MemoryDiagnostic = CoreMemoryDiagnostic;
+
+const SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS = ["engram"] as const;
+
+/** Options for memory injection during OpenCode Developer Team install. */
+export type MemoryInjectionOptions = {
+  /** A pre-built memory injection bundle (takes precedence over provider). */
+  memoryInjection?: MemoryInjectionBundle;
+  /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
+  memoryProvider?: AdaptiveMemoryProvider;
+  /** Provider IDs accepted by this adapter/caller registry. */
+  supportedMemoryProviderIds?: Iterable<string>;
+};
+
+// ---------------------------------------------------------------------------
+// Memory injection resolution (delegated to core)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a memory injection bundle from options.
+ *
+ * Delegates to the centralized core resolver which validates provider IDs
+ * against the supported set and produces fail-closed diagnostics for
+ * unsupported or unavailable providers (REQ-AMI-003).
+ */
+function resolveOpenCodeMemoryInjection(
+  options?: MemoryInjectionOptions,
+): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
+  return resolveMemoryInjection({
+    memoryInjection: options?.memoryInjection,
+    memoryProvider: options?.memoryProvider,
+    supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS,
+    buildContext: { teamId: "developer-team" },
+  });
+}
+
+/**
+ * Map MemoryToolBinding entries to OpenCode tool format.
+ *
+ * OpenCode uses a simple array of MCP tool names in its frontmatter.
+ * When memory tool bindings are present and the agent content received
+ * a memory injection (matching fragments), their tool names are appended
+ * to the base tools list.
+ */
+function buildOpenCodeToolsLine(baseTools: string[], toolBindings: readonly MemoryToolBinding[]): string[] {
+  if (toolBindings.length === 0) return baseTools;
+
+  const memoryToolNames = toolBindings.flatMap((binding) => [...binding.toolNames]);
+  const seen = new Set<string>();
+  const allTools: string[] = [];
+
+  for (const tool of baseTools) {
+    if (!seen.has(tool)) {
+      seen.add(tool);
+      allTools.push(tool);
+    }
+  }
+
+  for (const tool of memoryToolNames) {
+    if (!seen.has(tool)) {
+      seen.add(tool);
+      allTools.push(tool);
+    }
+  }
+
+  return allTools;
+}
+
 // ---------------------------------------------------------------------------
 // Plan
 // ---------------------------------------------------------------------------
@@ -64,15 +143,25 @@ export type OpenCodeDeveloperTeamVerifyResult = {
  * `.opencode/skills/<skill-id>/SKILL.md` for skill files. The adapter
  * consumes canonical agent definitions and content from `@deck/core` and
  * wraps them with minimal OpenCode-appropriate frontmatter.
+ *
+ * When a memory provider or injection bundle is provided, memory instructions
+ * are composed per-surface (agent, skill) and memory tool names are added
+ * to the OpenCode tools list.
  */
-export function buildOpenCodeDeveloperTeamInstallPlan(projectRoot: string): OpenCodeDeveloperTeamInstallPlan {
+export function buildOpenCodeDeveloperTeamInstallPlan(
+  projectRoot: string,
+  options?: MemoryInjectionOptions,
+): OpenCodeDeveloperTeamInstallPlan {
   const agentsDir = join(projectRoot, ".opencode", "agents");
   const skillsDir = join(projectRoot, ".opencode", "skills");
+
+  // Resolve memory injection using centralized resolver with provider ID validation
+  const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options);
 
   const agents: OpenCodePlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.opencode/agents/${agent.id}.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const content = buildAgentFileContent(agent);
+    const content = buildAgentFileContent(agent, memoryBundle);
 
     return { agent, relativePath, absolutePath, content };
   });
@@ -80,12 +169,12 @@ export function buildOpenCodeDeveloperTeamInstallPlan(projectRoot: string): Open
   const skills: OpenCodePlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.opencode/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const content = buildSkillFileContent(agent);
+    const content = buildSkillFileContent(agent, memoryBundle);
 
     return { agent, relativePath, absolutePath, content };
   });
 
-  return { projectRoot, agentsDir, skillsDir, agents, skills };
+  return { projectRoot, agentsDir, skillsDir, agents, skills, memoryDiagnostics };
 }
 
 // ---------------------------------------------------------------------------
@@ -225,20 +314,33 @@ export function verifyOpenCodeDeveloperTeamInstall(
  * OpenCode-specific frontmatter + body from the core registry.
  *
  * The adapter only adds minimal frontmatter (name, description, skill)
- * and wraps the registry's runner-agnostic skill body.
+ * and wraps the registry's runner-agnostic skill body. When a memory bundle
+ * is provided, memory instructions are composed into the skill surface.
  */
-function buildSkillFileContent(agent: DeveloperTeamAgent): string {
+function buildSkillFileContent(
+  agent: DeveloperTeamAgent,
+  memoryBundle?: MemoryInjectionBundle,
+): string {
   const content = getAgentContent(agent.id);
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
+
+  // Compose memory instructions for skill surface
+  const skillResult = memoryBundle
+    ? composeAdaptiveMemory(content.skillBody, memoryBundle, {
+        surface: "skill",
+        teamId: "developer-team",
+        skillId: agent.skillId,
+      })
+    : { content: content.skillBody, toolBindings: [] as readonly MemoryToolBinding[] };
 
   return [
     "---",
     `description: ${agent.description}`,
     "---",
     "",
-    content.skillBody,
+    skillResult.content,
     "",
   ].join("\n");
 }
@@ -246,23 +348,51 @@ function buildSkillFileContent(agent: DeveloperTeamAgent): string {
 /**
  * OpenCode-specific frontmatter + body from the core registry.
  *
- * The adapter only adds minimal frontmatter (name, description, skill)
- * and wraps the registry's runner-agnostic agent body.
+ * The adapter only adds minimal frontmatter (name, description, skill, tools)
+ * and wraps the registry's runner-agnostic agent body. When a memory bundle
+ * is provided, memory instructions are composed into the agent surface and
+ * memory tool names are added to the OpenCode tools list.
+ *
+ * Tool bindings are only added when the composition found matching fragments
+ * for the agent surface, ensuring tools are scoped to surfaces that actually
+ * receive memory guidance.
  */
-function buildAgentFileContent(agent: DeveloperTeamAgent): string {
+function buildAgentFileContent(
+  agent: DeveloperTeamAgent,
+  memoryBundle?: MemoryInjectionBundle,
+): string {
   const content = getAgentContent(agent.id);
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
+
+  // Compose memory instructions for agent surface
+  const agentResult: AdaptiveMemoryCompositionResult = memoryBundle
+    ? composeAdaptiveMemory(content.agentBody, memoryBundle, {
+        surface: "agent",
+        teamId: "developer-team",
+        agentId: agent.id,
+      })
+    : { content: content.agentBody, toolBindings: [] as readonly MemoryToolBinding[] };
+
+  // Build tools list — only add memory tool bindings when the composition
+  // produced matching fragments (agentResult.toolBindings is empty otherwise)
+  const baseTools = ["read", "write", "bash"];
+  const toolsList = memoryBundle
+    ? buildOpenCodeToolsLine(baseTools, agentResult.toolBindings)
+    : baseTools;
+
+  const toolsYaml = toolsList.join(", ");
 
   return [
     "---",
     `name: ${agent.name}`,
     `description: ${agent.description}`,
     `skill: ${agent.skillId}`,
+    `tools: ${toolsYaml}`,
     "---",
     "",
-    content.agentBody,
+    agentResult.content,
     "",
   ].join("\n");
 }
@@ -283,7 +413,7 @@ export type BackupManifest = {
 
 export function backupDeveloperTeamFiles(
   plan: OpenCodeDeveloperTeamInstallPlan,
-  options?: { exists?: typeof existsSync; readFile?: typeof readFileSync },
+  options?: { exists?: typeof existsSync; readFile?: (path: string, encoding: "utf-8") => string },
 ): BackupManifest {
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;

@@ -5,10 +5,12 @@ import {
   parsePiListModelsOutput,
   buildModelInventoryFromPiListModels,
   getDefaultThinkingForModel,
+  resolveThinkingForModel,
   parsePiThinkingLevel,
   PI_THINKING_LEVELS,
   PI_PROVIDERS,
   DEFAULT_MODELS_BY_PROVIDER,
+  supportsThinkingForModel,
 } from "./model-config";
 
 describe("detectConfiguredProviders", () => {
@@ -251,7 +253,18 @@ describe("getDefaultThinkingForModel", () => {
     expect(getDefaultThinkingForModel("opencode-go/kimi-k2.6")).toBe("off");
   });
 
+  test("reports kimi-k2.6 as not supporting thinking", () => {
+    expect(supportsThinkingForModel("opencode-go/kimi-k2.6")).toBe(false);
+    expect(getDefaultThinkingForModel("opencode-go/kimi-k2.6")).toBe("off");
+  });
+
+  test("uses parsed Pi thinking capability when it is explicitly false", () => {
+    expect(supportsThinkingForModel({ id: "custom/no-reasoning", displayName: "No Reasoning", providerId: "custom", thinking: false })).toBe(false);
+    expect(resolveThinkingForModel({ id: "custom/no-reasoning", displayName: "No Reasoning", providerId: "custom", thinking: false }, "high")).toBe("off");
+  });
+
   test("keeps low thinking for openai-codex models", () => {
+    expect(supportsThinkingForModel("openai-codex/gpt-5.5")).toBe(true);
     expect(getDefaultThinkingForModel("openai-codex/gpt-5.5")).toBe("low");
   });
 

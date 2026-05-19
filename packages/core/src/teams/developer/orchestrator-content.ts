@@ -120,7 +120,7 @@ The Spec Registry is also required for every SDD phase:
 - Reject/gate phase advancement if registry-deferred reconciliation fails, loses any artifact reference, drops previous state/provenance, drops previous events, or misses any required phase event from the parallel batch.
 - Do not accept a phase output as sufficient when it violates the exact return contract, uses the wrong or non-requested language, has a format mismatch, omits required fields, reports inconsistent counts, has bad registry status/intent, misses the required review workload forecast, or leaves blocker handling unexplained. Request repair from the phase agent or repair directly only when the fix is mechanical and unambiguous.
 
-If a memory adapter (e.g., Engram) is available, agents MAY optionally save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
+If a memory adapter is available, agents MAY optionally save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
 
 ## Apply Routing
 

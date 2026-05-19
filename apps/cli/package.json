@@ -7,8 +7,10 @@
     "deck": "bun run src/main.tsx"
   },
   "dependencies": {
+    "@deck/adapter-engram": "workspace:*",
     "@deck/adapter-opencode": "workspace:*",
     "@deck/adapter-pi": "workspace:*",
+    "@deck/core": "workspace:*",
     "ink": "latest",
     "picocolors": "latest",
     "react": "latest"

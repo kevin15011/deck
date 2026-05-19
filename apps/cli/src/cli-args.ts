@@ -6,6 +6,8 @@
  * - `deck pi developer` → launch Pi with Developer Team
  * - `deck pi developer --continue` → continue Developer Team session
  * - `deck pi developer --resume` → resume picker for Developer Team session
+ * - `deck pi developer --memory=engram` → enable Engram memory provider (experimental)
+ * - `deck pi developer --memory=none` → explicitly disable memory provider (default)
  */
 
 export type ParsedArgs =
@@ -17,6 +19,8 @@ export type ParsedArgs =
         continue?: boolean;
         resume?: boolean;
       };
+      /** Memory provider selection, e.g. "engram". Undefined means no memory. */
+      memoryProvider?: string;
     }
   | {
       command: "error";
@@ -29,6 +33,16 @@ export type ParsedArgs =
 const TEAM_SLUGS: Record<string, string> = {
   developer: "developer-team",
 };
+
+/**
+ * Supported memory provider identifiers.
+ * Add new providers here as they are implemented and validated.
+ *
+ * Note: "engram" is experimental — its MCP tool bindings have not been
+ * validated against the Engram runtime and may change.
+ */
+export const SUPPORTED_MEMORY_PROVIDERS = ["engram"] as const;
+export type SupportedMemoryProvider = (typeof SUPPORTED_MEMORY_PROVIDERS)[number];
 
 function parseBooleanFlag(value: string | undefined): boolean | undefined {
   if (value === undefined || value === "") return true;
@@ -59,7 +73,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (rest.length === 0) {
     return {
       command: "error",
-      message: "Usage: deck pi <team> [--continue | --resume]\nAvailable teams: developer",
+      message: "Usage: deck pi <team> [--continue | --resume] [--memory=engram]\nAvailable teams: developer",
     };
   }
 
@@ -77,6 +91,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   // Parse flags
   let shouldContinue = false;
   let shouldResume = false;
+  let memoryProvider: string | undefined;
 
   for (const flag of flags) {
     if (flag === "--continue") {
@@ -89,6 +104,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (flag.startsWith("--resume=")) {
       const value = parseBooleanFlag(flag.slice("--resume=".length));
       shouldResume = value === true;
+    } else if (flag === "--memory") {
+      memoryProvider = "";
+    } else if (flag.startsWith("--memory=")) {
+      memoryProvider = flag.slice("--memory=".length);
     }
   }
 
@@ -100,6 +119,20 @@ export function parseArgs(argv: string[]): ParsedArgs {
     };
   }
 
+  // Validate memory provider if specified
+  if (memoryProvider !== undefined) {
+    if (memoryProvider === "" || memoryProvider === "none") {
+      // Explicitly disabled — treat as no provider
+      memoryProvider = undefined;
+    } else if (!SUPPORTED_MEMORY_PROVIDERS.includes(memoryProvider as SupportedMemoryProvider)) {
+      const available = SUPPORTED_MEMORY_PROVIDERS.join(", ");
+      return {
+        command: "error",
+        message: `Unsupported memory provider: ${memoryProvider}. Available providers: ${available}`,
+      };
+    }
+  }
+
   return {
     command: "pi-launch",
     teamId,
@@ -107,5 +140,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(shouldContinue ? { continue: true } : {}),
       ...(shouldResume ? { resume: true } : {}),
     },
+    ...(memoryProvider ? { memoryProvider } : {}),
   };
 }

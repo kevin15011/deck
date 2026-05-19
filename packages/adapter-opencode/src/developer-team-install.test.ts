@@ -387,3 +387,203 @@ describe("rollbackDeveloperTeamFiles", () => {
     }
   });
 });
+
+describe("buildOpenCodeDeveloperTeamInstallPlan with memory injection", () => {
+  const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+    id: "engram",
+    displayName: "Engram Memory",
+    buildInjection: () => ({
+      instructions: [
+        {
+          surface: "session" as const,
+          markdown: "Session-level Engram memory instructions.",
+          teamId: "developer-team",
+        },
+        {
+          surface: "agent" as const,
+          markdown: "Agent-level Engram memory instructions.",
+          teamId: "developer-team",
+        },
+        {
+          surface: "skill" as const,
+          markdown: "Skill-level Engram memory instructions.",
+          teamId: "developer-team",
+        },
+      ],
+      toolBindings: [
+        { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
+        { capability: "memory.read" as const, serverName: "engram", toolNames: ["memory_read"] },
+        { capability: "memory.write" as const, serverName: "engram", toolNames: ["memory_write"] },
+      ],
+    }),
+  };
+
+  test("default plan has no memory injection and no diagnostics", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+
+    expect(plan.memoryDiagnostics).toHaveLength(0);
+
+    // Agent content should NOT contain Adaptive Memory section
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).not.toContain("## Adaptive Memory (provider-injected)");
+
+    // Skill content should NOT contain Adaptive Memory section
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestratorSkill.content).not.toContain("## Adaptive Memory (provider-injected)");
+
+    // Default tools line remains unchanged: read, write, bash
+    expect(orchestrator.content).toContain("tools: read, write, bash");
+    expect(orchestrator.content).not.toContain("memory_search");
+  });
+
+  test("plan with Engram provider includes Adaptive Memory section in agent content", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      memoryProvider: engramProvider,
+    });
+
+    expect(plan.memoryDiagnostics).toHaveLength(0);
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("## Adaptive Memory (provider-injected)");
+    expect(orchestrator.content).toContain("Agent-level Engram memory instructions.");
+    expect(orchestrator.content).toContain("Memory is auxiliary");
+  });
+
+  test("plan with Engram provider includes Adaptive Memory section in skill content", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      memoryProvider: engramProvider,
+    });
+
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestratorSkill.content).toContain("## Adaptive Memory (provider-injected)");
+    expect(orchestratorSkill.content).toContain("Skill-level Engram memory instructions.");
+  });
+
+  test("plan with Engram provider adds memory tool names to OpenCode tools line", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      memoryProvider: engramProvider,
+    });
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    // OpenCode tools format: comma-separated in YAML
+    expect(orchestrator.content).toContain("tools:");
+    expect(orchestrator.content).toContain("memory_search");
+    expect(orchestrator.content).toContain("memory_read");
+    expect(orchestrator.content).toContain("memory_write");
+  });
+
+  test("plan with pre-built memoryInjection bundle includes Adaptive Memory section", () => {
+    const bundle: import("@deck/core/memory/adaptive-memory").MemoryInjectionBundle = {
+      instructions: [
+        {
+          surface: "agent" as const,
+          markdown: "Direct bundle injection for OpenCode agents.",
+          teamId: "developer-team",
+        },
+      ],
+      toolBindings: [
+        { capability: "memory.search" as const, serverName: "custom", toolNames: ["custom_search"] },
+      ],
+    };
+
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      memoryInjection: bundle,
+    });
+
+    expect(plan.memoryDiagnostics).toHaveLength(0);
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("Direct bundle injection for OpenCode agents.");
+    expect(orchestrator.content).toContain("custom_search");
+  });
+
+  test("unsupported provider ID produces diagnostic and no injection (REQ-AMI-003)", () => {
+    const unsupportedProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "unknown-provider",
+      displayName: "Unknown Provider",
+      buildInjection: () => ({
+        instructions: [
+          {
+            surface: "agent" as const,
+            markdown: "Should NOT be injected.",
+            teamId: "developer-team",
+          },
+        ],
+        toolBindings: [
+          { capability: "memory.search" as const, serverName: "unknown", toolNames: ["unknown_search"] },
+        ],
+      }),
+    };
+
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      memoryProvider: unsupportedProvider,
+    });
+
+    // Should produce unsupported_memory_provider diagnostic
+    expect(plan.memoryDiagnostics).toHaveLength(1);
+    expect(plan.memoryDiagnostics[0].code).toBe("unsupported_memory_provider");
+    expect(plan.memoryDiagnostics[0].providerId).toBe("unknown-provider");
+
+    // Should NOT inject memory content — fail-closed
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).not.toContain("## Adaptive Memory (provider-injected)");
+    expect(orchestrator.content).not.toContain("Should NOT be injected");
+    expect(orchestrator.content).not.toContain("unknown_search");
+    expect(orchestrator.content).toContain("tools: read, write, bash");
+  });
+
+  test("broken supported Engram provider produces memory_provider_unavailable diagnostic and no injection", () => {
+    const brokenEngram: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "engram", // Supported ID, but buildInjection throws
+      displayName: "Broken Engram",
+      buildInjection: () => {
+        throw new Error("provider init failed");
+      },
+    };
+
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      memoryProvider: brokenEngram,
+    });
+
+    // Should produce a memory_provider_unavailable diagnostic
+    expect(plan.memoryDiagnostics).toHaveLength(1);
+    expect(plan.memoryDiagnostics[0].code).toBe("memory_provider_unavailable");
+    expect(plan.memoryDiagnostics[0].providerId).toBe("engram");
+
+    // Should NOT inject memory content — fail-closed
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).not.toContain("## Adaptive Memory (provider-injected)");
+    expect(orchestrator.content).toContain("tools: read, write, bash");
+  });
+
+  test("tool bindings are scoped: no bindings added when no matching fragments for surface", () => {
+    const sessionOnlyWithTools: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "engram",
+      displayName: "Session-Only with Tools",
+      buildInjection: () => ({
+        instructions: [
+          {
+            surface: "session" as const,
+            markdown: "Session-level only.",
+            teamId: "developer-team",
+          },
+        ],
+        toolBindings: [
+          { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
+          { capability: "memory.read" as const, serverName: "engram", toolNames: ["memory_read"] },
+        ],
+      }),
+    };
+
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      memoryProvider: sessionOnlyWithTools,
+    });
+
+    // Agent content should NOT have memory tools since session-only fragment
+    // doesn't match the agent surface
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).not.toContain("memory_search");
+    expect(orchestrator.content).not.toContain("memory_read");
+    expect(orchestrator.content).toContain("tools: read, write, bash"); // default, no memory tools
+  });
+});

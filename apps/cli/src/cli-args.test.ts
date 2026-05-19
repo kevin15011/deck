@@ -108,3 +108,52 @@ describe("parseArgs", () => {
     });
   });
 });
+
+  // --- Memory provider flag tests ---
+
+  test("parses --memory=engram as memory provider", () => {
+    const result = parseArgs(["pi", "developer", "--memory=engram"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "pi-launch",
+      teamId: "developer-team",
+      flags: {},
+      memoryProvider: "engram",
+    });
+  });
+
+  test("parses --memory=none as no memory provider", () => {
+    const result = parseArgs(["pi", "developer", "--memory=none"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "pi-launch",
+      teamId: "developer-team",
+      flags: {},
+    });
+  });
+
+  test("returns error for unsupported memory provider", () => {
+    const result = parseArgs(["pi", "developer", "--memory=unknown"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("Unsupported memory provider: unknown"),
+    });
+  });
+
+  test("combines --memory=engram with --continue flag", () => {
+    const result = parseArgs(["pi", "developer", "--continue", "--memory=engram"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "pi-launch",
+      teamId: "developer-team",
+      flags: { continue: true },
+      memoryProvider: "engram",
+    });
+  });
+
+  test("omits memoryProvider when no --memory flag is provided", () => {
+    const result = parseArgs(["pi", "developer"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "pi-launch",
+      teamId: "developer-team",
+      flags: {},
+    });
+    expect("memoryProvider" in result).toBe(false);
+  });

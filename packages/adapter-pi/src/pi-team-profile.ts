@@ -1,14 +1,29 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getTeamSessionInstructions } from "@deck/core/teams/developer/content-registry";
+import {
+  composeAdaptiveMemory,
+  resolveMemoryInjection,
+  type AdaptiveMemoryProvider,
+  type MemoryInjectionBundle,
+} from "@deck/core/memory/adaptive-memory";
+import type { MemoryDiagnostic } from "./developer-team-install";
 import { buildTeamProfileDir } from "./pi-team-launch";
 import { getTeamsForEnvironment } from "./team-catalog";
 
 // --- Types ---
 
+const SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS = ["engram"] as const;
+
 export type MaterializeTeamProfileOptions = {
   teamId: string;
   projectRoot: string;
+  /** A pre-built memory injection bundle (takes precedence over provider). */
+  memoryInjection?: MemoryInjectionBundle;
+  /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
+  memoryProvider?: AdaptiveMemoryProvider;
+  /** Provider IDs accepted by this adapter/caller registry. */
+  supportedMemoryProviderIds?: Iterable<string>;
   /** Injected fs functions for testability */
   mkdir?: (path: string, options?: { recursive: boolean }) => void;
   writeFile?: (path: string, data: string, encoding?: BufferEncoding) => void;
@@ -30,28 +45,65 @@ function validateTeamForProfile(teamId: string): void {
 }
 
 /**
+ * Result of building a team system prompt, including any memory diagnostics.
+ */
+export type BuildTeamSystemPromptResult = {
+  content: string;
+  memoryDiagnostics: MemoryDiagnostic[];
+};
+
+export type BuildTeamSystemPromptOptions = {
+  memoryInjection?: MemoryInjectionBundle;
+  memoryProvider?: AdaptiveMemoryProvider;
+  supportedMemoryProviderIds?: Iterable<string>;
+};
+
+/**
  * Builds the system prompt content for a team.
  *
  * Uses the core registry to get runner-agnostic session instructions,
  * then maps the result to Pi's runtime: the content is written to
  * .deck/pi/profiles/<team>/system-prompt.md and passed via --system-prompt.
+ *
+ * When a memory provider or injection bundle is provided, session-surface
+ * memory instructions are composed into the system prompt.
+ *
+ * @returns An object with `content` (the prompt string) and `memoryDiagnostics`
+ *   (any diagnostics from memory injection resolution).
  */
-export function buildTeamSystemPrompt(teamId: string): string {
+export function buildTeamSystemPrompt(
+  teamId: string,
+  options?: BuildTeamSystemPromptOptions,
+): BuildTeamSystemPromptResult {
   validateTeamForProfile(teamId);
 
   const instructions = getTeamSessionInstructions(teamId);
-  if (instructions) {
-    return instructions;
-  }
-
-  // Fallback for teams that don't have session instructions yet
-  // (future teams that haven't been added to the registry)
-  return [
+  const base = instructions ?? [
     `# Deck ${teamId} Session`,
     "",
     "You are operating within a Deck team session.",
     "",
   ].join("\n");
+
+  // Resolve memory injection using adapter/caller-owned provider ID validation.
+  const { bundle, diagnostics } = resolveMemoryInjection({
+    memoryInjection: options?.memoryInjection,
+    memoryProvider: options?.memoryProvider,
+    supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS,
+    buildContext: { teamId },
+  });
+
+  if (!bundle) {
+    return { content: base, memoryDiagnostics: diagnostics };
+  }
+
+  // Compose session-surface memory into the system prompt
+  const result = composeAdaptiveMemory(base, bundle, {
+    surface: "session",
+    teamId,
+  });
+
+  return { content: result.content, memoryDiagnostics: diagnostics };
 }
 
 // --- Profile Materializer ---
@@ -61,8 +113,13 @@ export function buildTeamSystemPrompt(teamId: string): string {
  *
  * This is called before launching Pi to ensure the profile artifacts exist.
  * The function is idempotent — it won't overwrite unchanged files.
+ *
+ * When a memory provider or injection bundle is provided, session-surface
+ * memory instructions are composed into the system prompt.
+ *
+ * @returns Any memory diagnostics from injection resolution.
  */
-export function materializeTeamProfile(options: MaterializeTeamProfileOptions): void {
+export function materializeTeamProfile(options: MaterializeTeamProfileOptions): MemoryDiagnostic[] {
   const { teamId, projectRoot } = options;
 
   const mkdir = options.mkdir ?? mkdirSync;
@@ -73,7 +130,11 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
   const profileDir = buildTeamProfileDir(projectRoot, teamId);
   const systemPromptPath = join(profileDir, "system-prompt.md");
 
-  const content = buildTeamSystemPrompt(teamId);
+  const { content, memoryDiagnostics } = buildTeamSystemPrompt(teamId, {
+    memoryInjection: options.memoryInjection,
+    memoryProvider: options.memoryProvider,
+    supportedMemoryProviderIds: options.supportedMemoryProviderIds,
+  });
 
   // Ensure directory exists
   if (!exists(profileDir)) {
@@ -84,9 +145,10 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
   if (exists(systemPromptPath)) {
     const existing = readFile(systemPromptPath, "utf-8");
     if (existing === content) {
-      return;
+      return memoryDiagnostics;
     }
   }
 
   writeFile(systemPromptPath, content, "utf-8");
+  return memoryDiagnostics;
 }

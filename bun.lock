@@ -14,11 +14,20 @@
       "name": "@deck/cli",
       "version": "0.0.0",
       "dependencies": {
+        "@deck/adapter-engram": "workspace:*",
         "@deck/adapter-opencode": "workspace:*",
         "@deck/adapter-pi": "workspace:*",
+        "@deck/core": "workspace:*",
         "ink": "latest",
         "picocolors": "latest",
         "react": "latest",
+      },
+    },
+    "packages/adapter-engram": {
+      "name": "@deck/adapter-engram",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deck/core": "workspace:*",
       },
     },
     "packages/adapter-opencode": {
@@ -42,6 +51,8 @@
   },
   "packages": {
     "@alcalzone/ansi-tokenize": ["@alcalzone/ansi-tokenize@0.3.0", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-p+CMKJ93HFmLkjXKlXiVGlMQEuRb6H0MokBSwUsX+S6BRX8eV5naFZpQJFfJHjRZY0Hmnqy1/r6UWl3x+19zYA=="],
+
+    "@deck/adapter-engram": ["@deck/adapter-engram@workspace:packages/adapter-engram"],
 
     "@deck/adapter-opencode": ["@deck/adapter-opencode@workspace:packages/adapter-opencode"],
 

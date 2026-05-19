@@ -197,6 +197,17 @@ describe("Developer Team TUI screens", () => {
       expect(output).toContain("Claude Opus 4");
       expect(output).toContain("Claude Sonnet 4");
     });
+
+    test("shows unsupported thinking note for models that cannot use reasoning", () => {
+      const provider = { id: "opencode-go", displayName: "OpenCode Go", envVars: ["OPENCODE_API_KEY"] };
+      const models = [
+        { id: "opencode-go/kimi-k2.6", displayName: "Kimi K2.6", providerId: "opencode-go" },
+      ];
+      const output = renderToString(<ModelSelectionScreen cursor={0} provider={provider} models={models} />);
+
+      expect(output).toContain("Kimi K2.6");
+      expect(output).toContain("Thinking not supported; using off");
+    });
   });
 
   describe("AgentModelAssignmentScreen", () => {
@@ -220,6 +231,22 @@ describe("Developer Team TUI screens", () => {
 
       expect(output).toContain("Select reasoning for Archive Agent");
       expect(output).toContain("12/12");
+    });
+
+    test("does not render thinking options when unsupported", () => {
+      const output = renderToString(
+        <AgentModelAssignmentScreen
+          cursor={0}
+          agentIndex={0}
+          totalAgents={12}
+          modelId="opencode-go/kimi-k2.6"
+          defaultThinking="off"
+          supportsThinking={false}
+        />,
+      );
+
+      expect(output).toContain("Thinking not supported by this provider/model; using off.");
+      expect(output).not.toContain("thinking high");
     });
   });
 

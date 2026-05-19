@@ -82,10 +82,10 @@ describe("Adapter consumes core registry for agent content", () => {
 });
 
 describe("Adapter consumes core registry for team session instructions", () => {
-  test("developer-team system prompt matches core registry", () => {
-    const prompt = buildTeamSystemPrompt("developer-team");
+  test("developer-team system prompt matches core registry (without memory)", () => {
+    const { content } = buildTeamSystemPrompt("developer-team");
     const registry = getTeamSessionInstructions("developer-team")!;
 
-    expect(prompt).toBe(registry);
+    expect(content).toBe(registry);
   });
 });

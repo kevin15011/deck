@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 
-import { DEVELOPER_TEAM_AGENTS, PI_THINKING_LEVELS } from "@deck/adapter-pi";
+import { DEVELOPER_TEAM_AGENTS, PI_THINKING_LEVELS, supportsThinkingForModel } from "@deck/adapter-pi";
 import type { PiModel, PiProvider, PiThinkingLevel } from "@deck/adapter-pi";
 import { MenuList } from "../components/menu-list";
 
@@ -103,7 +103,7 @@ export function ModelSelectionScreen({ cursor, provider, models }: ModelSelectio
           items={models.map((m) => ({
             id: m.id,
             label: m.displayName,
-            hint: m.id,
+            hint: supportsThinkingForModel(m) ? m.id : `${m.id} · Thinking not supported; using off`,
           }))}
         />
       </Box>
@@ -117,6 +117,7 @@ type AgentModelAssignmentScreenProps = {
   totalAgents: number;
   modelId: string;
   defaultThinking: PiThinkingLevel;
+  supportsThinking?: boolean;
 };
 
 export function AgentModelAssignmentScreen({
@@ -125,6 +126,7 @@ export function AgentModelAssignmentScreen({
   totalAgents,
   modelId,
   defaultThinking,
+  supportsThinking = true,
 }: AgentModelAssignmentScreenProps) {
   const agent = DEVELOPER_TEAM_AGENTS[agentIndex];
   const progress = `${agentIndex + 1}/${totalAgents}`;
@@ -135,17 +137,23 @@ export function AgentModelAssignmentScreen({
         Select reasoning for {agent.displayName} <Text dimColor>({progress})</Text>
       </Text>
       <Text>Selected model: <Text color="cyan">{modelId}</Text></Text>
-      <Text dimColor>Choose Pi thinking/effort level for this agent.</Text>
-      <Box marginTop={1}>
-        <MenuList
-          cursor={cursor}
-          items={PI_THINKING_LEVELS.map((level) => ({
-            id: level,
-            label: `thinking ${level}`,
-            hint: level === defaultThinking ? "recommended/default" : "",
-          }))}
-        />
-      </Box>
+      {supportsThinking ? (
+        <>
+          <Text dimColor>Choose Pi thinking/effort level for this agent.</Text>
+          <Box marginTop={1}>
+            <MenuList
+              cursor={cursor}
+              items={PI_THINKING_LEVELS.map((level) => ({
+                id: level,
+                label: `thinking ${level}`,
+                hint: level === defaultThinking ? "recommended/default" : "",
+              }))}
+            />
+          </Box>
+        </>
+      ) : (
+        <Text color="yellow">Thinking not supported by this provider/model; using off.</Text>
+      )}
     </Box>
   );
 }
