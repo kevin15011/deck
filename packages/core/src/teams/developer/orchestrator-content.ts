@@ -95,6 +95,21 @@ proposal ──┬─ spec ────┐
 - Apply agents receive combined findings for fixes.
 - Archive runs after Verify and Review pass.
 
+## SDD Triage Gate
+
+Before asking for Execution Mode or launching SDD phases, classify the user request. SDD is a recommendation and execution path for meaningful change work, not a reflex triggered by words like "OpenSpec", "PRD", "requirements", or a long prompt.
+
+Use the smallest workflow that preserves quality:
+
+1. **Direct**: answer, inspect, or edit inline when the request is local, low-risk, already clear, or a single mechanical artifact.
+2. **Specialist only**: delegate one narrow role when the request is a bounded artifact or analysis task, such as writing a PRD/proposal, reviewing a prompt, or exploring a focused area.
+3. **Recommend SDD**: actively suggest SDD when the request has ambiguous scope, product requirements, architecture decisions, likely multi-file impact, testing strategy, migration risk, or cross-cutting behavior.
+4. **Run SDD**: start the full SDD pipeline when the user explicitly asks for SDD, accepts the recommendation, or requests implementation/planning that clearly needs Proposal → Spec/Design → Tasks → Apply → Verify/Review → Archive.
+
+Do not ask for Automatic vs Interactive until this triage says **Run SDD**. If triage says **Recommend SDD**, ask one question: "This looks like it would benefit from SDD; do you want to run the SDD flow for it?" Then stop and wait.
+
+Documentation-only requests are not automatically SDD. For example, "create a high-quality PRD from this information" should produce the PRD directly or delegate only a focused writing/review task unless the user also asks to run the full change lifecycle.
+
 ## Execution Mode
 
 On the first change request in a session, ask which execution mode the user prefers:
@@ -202,6 +217,7 @@ export const ORCHESTRATOR_AGENT_BODY = `# Orchestrator Agent
 ## Role
 
 - Receive user intent and decide the workflow (compact or full SDD).
+- Run SDD triage before asking for execution mode or launching phases.
 - Delegate work to the correct specialist agent.
 - Synthesize results and ask for user confirmation when risk requires it.
 - Enforce workflow safety and artifact traceability via OpenSpec.
@@ -240,6 +256,17 @@ export const ORCHESTRATOR_SKILL_BODY = `# Orchestrator Skill
 > Coordinates the Deck Developer Team: delegates work, enforces workflow safety, manages SDD pipeline, and synthesizes results.
 
 ## SDD Workflow
+
+### Triage Gate
+
+Before asking for execution mode or launching phases, classify the request as **Direct**, **Specialist only**, **Recommend SDD**, or **Run SDD**.
+
+- **Direct**: local, low-risk, already clear, or a single mechanical artifact.
+- **Specialist only**: bounded artifact or analysis task that benefits from one role, such as PRD writing, prompt review, or focused exploration.
+- **Recommend SDD**: ambiguous scope, product requirements, architecture decisions, likely multi-file impact, testing strategy, migration risk, or cross-cutting behavior.
+- **Run SDD**: explicit SDD request, accepted SDD recommendation, or implementation/planning that clearly needs the full phase pipeline.
+
+Do not infer full SDD from "OpenSpec", "PRD", "requirements", or prompt length alone. Do not ask for Automatic vs Interactive until triage says **Run SDD**. If triage says **Recommend SDD**, ask one question and wait.
 
 ### Dependency Graph
 

@@ -1,8 +1,9 @@
 import React from "react";
 import { Box, Text } from "ink";
 
-import { DEVELOPER_TEAM_AGENTS, PI_THINKING_LEVELS, supportsThinkingForModel } from "@deck/adapter-pi";
+import { DEVELOPER_TEAM_AGENTS, PI_THINKING_LEVELS, supportsDeveloperTeamModel, supportsThinkingForModel } from "@deck/adapter-pi";
 import type { PiModel, PiProvider, PiThinkingLevel } from "@deck/adapter-pi";
+import type { AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
 import { MenuList } from "../components/menu-list";
 
 type DeveloperTeamReviewScreenProps = {
@@ -61,6 +62,74 @@ export function DeveloperTeamInstallingScreen({
   );
 }
 
+export type SupermemorySetupValues = {
+  token: string;
+  userId: string;
+  teamId: string;
+  orgId: string;
+};
+
+type MemoryProviderSelectionScreenProps = {
+  cursor: number;
+  selectedProvider: AdaptiveMemoryActiveProvider;
+  status?: string;
+};
+
+export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status }: MemoryProviderSelectionScreenProps) {
+  return (
+    <Box flexDirection="column">
+      <Text bold>Select adaptive-memory provider</Text>
+      <Text dimColor>Exactly one provider can be active. Supermemory credentials are never written to .deck/config.json.</Text>
+      <Box marginTop={1}>
+        <MenuList
+          cursor={cursor}
+          items={[
+            { id: "none", label: "None", hint: selectedProvider === "none" ? "active" : "disable adaptive memory" },
+            { id: "engram", label: "Engram", hint: selectedProvider === "engram" ? "active" : "existing provider" },
+            { id: "supermemory", label: "Supermemory MCP", hint: selectedProvider === "supermemory" ? "active" : "requires token and userId" },
+          ]}
+        />
+      </Box>
+      {status ? <Text color="green">{status}</Text> : null}
+    </Box>
+  );
+}
+
+type SupermemorySetupScreenProps = {
+  screen: "supermemory-token" | "supermemory-user-id" | "supermemory-team-id" | "supermemory-org-id";
+  values: SupermemorySetupValues;
+  error?: string;
+};
+
+export function SupermemorySetupScreen({ screen, values, error }: SupermemorySetupScreenProps) {
+  const field = screen === "supermemory-token" ? "token" : screen === "supermemory-user-id" ? "userId" : screen === "supermemory-team-id" ? "teamId" : "orgId";
+  const label = field === "token" ? "Supermemory token" : field;
+  const required = field === "token" || field === "userId";
+  const value = values[field];
+  const displayValue = field === "token" && value.length > 0 ? "[redacted]" : value;
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>{label}{required ? " (required)" : " (optional)"}</Text>
+      <Text dimColor>
+        {field === "token"
+          ? "Token is written only to Pi's global MCP config (~/.pi/agent/mcp.json) and is never stored in Deck config."
+          : field === "userId"
+            ? "Required for scoped Supermemory memory."
+            : `Optional ${field}; leave blank to skip this scope.`}
+      </Text>
+      <Box marginTop={1}>
+        <Text>{label}: <Text color="cyan">{displayValue}</Text></Text>
+      </Box>
+      {field === "token" && value.length > 0 ? <Text dimColor>Summary will show token as [redacted].</Text> : null}
+      {error ? <Text color="yellow">{error}</Text> : null}
+      <Box marginTop={1}>
+        <Text dimColor>Type value, Backspace to edit, Enter to continue.</Text>
+      </Box>
+    </Box>
+  );
+}
+
 // --- Model configuration screens ---
 
 type ModelProviderSelectionScreenProps = {
@@ -103,7 +172,9 @@ export function ModelSelectionScreen({ cursor, provider, models }: ModelSelectio
           items={models.map((m) => ({
             id: m.id,
             label: m.displayName,
-            hint: supportsThinkingForModel(m) ? m.id : `${m.id} · Thinking not supported; using off`,
+            hint: !supportsDeveloperTeamModel(m)
+              ? `${m.id} · not compatible with Developer Team conversation history`
+              : supportsThinkingForModel(m) ? m.id : `${m.id} · Thinking not supported; using off`,
           }))}
         />
       </Box>

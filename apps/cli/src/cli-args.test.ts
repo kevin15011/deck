@@ -107,9 +107,6 @@ describe("parseArgs", () => {
       message: expect.stringContaining("--continue and --resume are mutually exclusive"),
     });
   });
-});
-
-  // --- Memory provider flag tests ---
 
   test("parses --memory=engram as memory provider", () => {
     const result = parseArgs(["pi", "developer", "--memory=engram"]);
@@ -118,6 +115,16 @@ describe("parseArgs", () => {
       teamId: "developer-team",
       flags: {},
       memoryProvider: "engram",
+    });
+  });
+
+  test("parses --memory=supermemory as memory provider", () => {
+    const result = parseArgs(["pi", "developer", "--memory=supermemory"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "pi-launch",
+      teamId: "developer-team",
+      flags: {},
+      memoryProvider: "supermemory",
     });
   });
 
@@ -148,6 +155,16 @@ describe("parseArgs", () => {
     });
   });
 
+  test("combines --memory=supermemory with --continue flag", () => {
+    const result = parseArgs(["pi", "developer", "--continue", "--memory=supermemory"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "pi-launch",
+      teamId: "developer-team",
+      flags: { continue: true },
+      memoryProvider: "supermemory",
+    });
+  });
+
   test("omits memoryProvider when no --memory flag is provided", () => {
     const result = parseArgs(["pi", "developer"]);
     expect(result).toEqual<ParsedArgs>({
@@ -157,3 +174,4 @@ describe("parseArgs", () => {
     });
     expect("memoryProvider" in result).toBe(false);
   });
+});

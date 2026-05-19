@@ -1,0 +1,212 @@
+events:
+  - event: proposal.completed
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: docs/prd-supermemory-mcp-adaptive-memory.md
+    actor: deck-developer-orchestrator
+    note: "Proposal artifact and registry created for SDD implementation of Supermemory MCP adaptive-memory provider."
+  - event: spec.completed
+    phase: spec
+    status: completed
+    artifact: spec.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/proposal.md
+    actor: deck-developer-spec
+    registry_write: deferred
+    reconciled_by: deck-developer-orchestrator
+  - event: design.completed
+    phase: design
+    status: completed
+    artifact: design.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/proposal.md
+    actor: deck-developer-design
+    registry_write: deferred
+    reconciled_by: deck-developer-orchestrator
+  - event: proposal.updated
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: user clarification on add-supermemory-mcp-memory-provider
+    actor: deck-developer-proposal
+    note: "Updated proposal with install-time token prompt/MCP configuration, Pi-first scope, accepted configuration defaults, deferred migration/review UI, candidate team memories, and real MCP validation blocker."
+  - event: spec.updated
+    phase: spec
+    status: completed
+    artifact: spec.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/proposal.md
+    actor: deck-developer-spec
+    registry_write: deferred
+    reconciled_by: deck-developer-orchestrator
+    note: "Spec updated from user clarification: token prompt, no secret config storage, required userId, Pi-first implementation, and MCP validation blocker."
+  - event: design.updated
+    phase: design
+    status: completed
+    artifact: design.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/proposal.md
+    actor: deck-developer-design
+    registry_write: deferred
+    reconciled_by: deck-developer-orchestrator
+    note: "Design updated from user clarification: Pi-first runtime integration, token prompt/external credential handling, and MCP validation first task."
+  - event: tasks.completed
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    timestamp: "2026-05-19T00:00:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/spec.md
+    actor: deck-developer-task
+    note: "14 atomic tasks created across Shared/Contracts (5), Backend (5), Frontend (3), General (1). MCP validation is the designated first blocker. Two High-complexity tasks flagged for potential splitting. Three open decisions: MCP validation (hard blocker), secret storage (allowed-with-placeholder), projectId derivation (allowed-with-placeholder)."
+  - event: apply.general.blocked
+    phase: apply
+    agent: general
+    status: blocked
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+      - mcp-validation-report.md
+    timestamp: "2026-05-19T18:16:03Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-general
+    note: "Task 1 validation report created. Real MCP endpoint, server info, actual tool schemas, and auth failure behavior were validated; authenticated metadata/container/write behavior remains blocked pending a valid Supermemory token supplied outside repo files."
+  - event: apply.general.task4.completed
+    phase: apply
+    agent: general
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+    timestamp: "2026-05-19T18:24:04Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-general
+    note: "Task 4 completed: added deck config module for non-secret .deck/config.json memory settings, secret-field rejection, Supermemory userId validation, provider resolution precedence, package export, and tests/typecheck. Task 1 remains blocked pending a real token."
+  - event: apply.frontend.task13.completed
+    phase: apply
+    agent: frontend
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+    timestamp: "2026-05-19T18:31:01Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-frontend
+    note: "Task 13 completed: added TUI memory provider selection, Supermemory token/userId/teamId/orgId prompts with token redaction, non-secret .deck/config.json persistence via deck-config, and an external Pi MCP credential handoff stub. TUI tests and typecheck pass."
+  - event: supporting_investigation.completed
+    phase: apply
+    status: completed
+    artifact: exploration.md
+    timestamp: "2026-05-19T19:00:00Z"
+    source: "user request: explore Supermemory token handoff path for Pi MCP"
+    actor: deck-developer-explorer
+    note: "Supporting investigation during Apply, not a formal workflow restart or phase rewind. Current Pi flow writes prompts, generated .pi agent/skill files, and non-secret .deck/config.json only; no MCP server/secret config writer exists. Recommended external Pi MCP config slice after confirming Pi schema, with no project/repo token persistence and no Supermemory injection until health succeeds."
+  - event: design.updated
+    phase: design
+    status: completed
+    artifact: design.md
+    timestamp: "2026-05-19T19:01:00Z"
+    source: "user decision: real Pi MCP credential/config handoff path"
+    actor: deck-developer-design
+    registry_write: performed
+    note: "Design updated to use Pi global MCP config ~/.pi/agent/mcp.json for the Supermemory server entry, HTTP transport URL https://supermemory-new.stlmcp.com, x-supermemory-api-key token header, non-secret .deck/config.json boundary, token redaction/permission guidance, and validated tools execute/search_docs instead of provisional context/recall/memory."
+  - event: tasks.updated
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    timestamp: "2026-05-19T19:10:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/design.md
+    actor: deck-developer-task
+    registry_write: performed
+    note: "Updated tasks for resolved Supermemory credential handoff: added Task 15 for Pi global MCP config writer at ~/.pi/agent/mcp.json, revised Task 13 to call the writer, specified the supermemory server name, URL https://supermemory-new.stlmcp.com, x-supermemory-api-key header, validated execute/search_docs tools, redaction and permission requirements, and marked prior secret-storage question resolved/unblocked. Task 1 remains blocked only for authenticated runtime validation with a real token."
+  - event: apply.backend.task15.completed
+    phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+    timestamp: "2026-05-19T19:45:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-backend
+    note: "Task 15 completed: added Pi global MCP config writer for ~/.pi/agent/mcp.json with Supermemory HTTP server entry, x-supermemory-api-key header redaction in diagnostics, unrelated-server preservation, fail-closed malformed/conflicting config handling, atomic writes, best-effort restrictive permissions, temp-home tests, package export, and typecheck. No real Supermemory token was written to repo files."
+  - event: apply.frontend.task13.completed
+    phase: apply
+    agent: frontend
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+    timestamp: "2026-05-19T20:10:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-frontend
+    note: "Task 13 re-applied after Task 15: replaced the Supermemory TUI handoff stub with writeSupermemoryPiMcpConfig, writes/updates external ~/.pi/agent/mcp.json using the supermemory server entry and x-supermemory-api-key header, persists only non-secret .deck/config.json settings after writer success, redacts token/header values in UI/errors/tests/apply progress, and covers real temp-path writer invocation plus mocked writer failure handling. Frontend TUI tests and typecheck pass."
+  - event: apply.general.task1.completed
+    phase: apply
+    agent: general
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+      - mcp-validation-report.md
+    timestamp: "2026-05-19T20:20:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-general
+    note: "Task 1 completed: recorded authenticated Supermemory MCP validation using the configured external Pi MCP header path without exposing the token. initialize returned HTTP 200 with session id, tools/list returned execute and search_docs only, .deck/config.json remained non-secret, and a read-only execute probe using client.search.memories for containerTag u:kevin passed."
+  - event: apply.general.tasks2-3-5.completed
+    phase: apply
+    agent: general
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+    timestamp: "2026-05-19T21:05:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-general
+    note: "Tasks 2, 3, and 5 completed: added provider-neutral adaptive-memory contract types and tests; governance validators/tests covering REQ-AMG-001 through REQ-AMG-010; context authority renderer/tests with OFFICIAL CONTEXT and ADAPTIVE CONTEXT sections; adaptive-memory composition integration; and Developer Team content-registry guidance. Core memory tests and typecheck pass."
+  - event: apply.frontend.task11.completed
+    phase: apply
+    agent: frontend
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+    timestamp: "2026-05-19T21:25:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-frontend
+    note: "Task 11 completed: CLI --memory parser accepts supermemory in addition to engram and none, preserves unsupported-provider errors and absent-flag defaults, and covers supermemory/engram/none/unsupported/no-flag behavior in apps/cli/src/cli-args.test.ts. Frontend CLI tests and typecheck pass."
+  - event: apply.backend.tasks6-7-8.completed
+    phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+    timestamp: "2026-05-19T22:10:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-backend
+    note: "Tasks 6, 7, and 8 completed: extended adaptive-memory resolution/composition for caller-allowlisted Supermemory, single active provider enforcement, and health diagnostics; updated Engram to the common contract with safe no-op unsupported operations and no migration path; added @deck/adapter-supermemory with required userId, optional teamId/orgId, validated execute/search_docs bindings only, governance-backed scoped guidance, max-7 high-signal commit guidance, candidate team status, and fail-closed authenticated availability diagnostics. Relevant backend tests and typecheck pass; no Supermemory token was stored or printed."
+  - event: apply.backend.tasks9-10.completed
+    phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+    timestamp: "2026-05-19T23:20:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-backend
+    note: "Tasks 9 and 10 completed: Pi Developer Team install now accepts Supermemory providers after validating the external Pi MCP config and omits injection with redacted diagnostics when unavailable; generated agent tools are limited to execute/search_docs. Pi team profile now accepts Supermemory providers, uses OFFICIAL/ADAPTIVE context rendering with OpenSpec authority, preserves Engram compatibility, and renders adaptive-context absence indicators when unavailable. Adapter-pi tests and typecheck pass; no Supermemory token was stored or printed."
+  - event: apply.frontend.task12.completed
+    phase: apply
+    agent: frontend
+    status: completed
+    artifact: apply-progress.md
+    artifacts:
+      - apply-progress.md
+    timestamp: "2026-05-19T23:55:00Z"
+    source: openspec/changes/add-supermemory-mcp-memory-provider/tasks.md
+    actor: deck-developer-apply-frontend
+    note: "Task 12 completed: CLI main delegates active-provider resolution to Pi launch; runPiLaunch resolves CLI > .deck/config.json > none, constructs Engram or Supermemory providers, validates Supermemory Pi MCP config before injection, fails closed with redacted diagnostics, and covers precedence, no double-provider cases, Supermemory construction, Pi MCP fallback, and token/header redaction. Frontend CLI tests and typecheck pass; no Supermemory token was stored or printed."

@@ -7,6 +7,7 @@
  * - `deck pi developer --continue` → continue Developer Team session
  * - `deck pi developer --resume` → resume picker for Developer Team session
  * - `deck pi developer --memory=engram` → enable Engram memory provider (experimental)
+ * - `deck pi developer --memory=supermemory` → enable Supermemory MCP memory provider
  * - `deck pi developer --memory=none` → explicitly disable memory provider (default)
  */
 
@@ -19,7 +20,7 @@ export type ParsedArgs =
         continue?: boolean;
         resume?: boolean;
       };
-      /** Memory provider selection, e.g. "engram". Undefined means no memory. */
+      /** Memory provider selection, e.g. "engram" or "supermemory". Undefined means no memory. */
       memoryProvider?: string;
     }
   | {
@@ -41,7 +42,7 @@ const TEAM_SLUGS: Record<string, string> = {
  * Note: "engram" is experimental — its MCP tool bindings have not been
  * validated against the Engram runtime and may change.
  */
-export const SUPPORTED_MEMORY_PROVIDERS = ["engram"] as const;
+export const SUPPORTED_MEMORY_PROVIDERS = ["engram", "supermemory"] as const;
 export type SupportedMemoryProvider = (typeof SUPPORTED_MEMORY_PROVIDERS)[number];
 
 function parseBooleanFlag(value: string | undefined): boolean | undefined {
@@ -73,7 +74,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (rest.length === 0) {
     return {
       command: "error",
-      message: "Usage: deck pi <team> [--continue | --resume] [--memory=engram]\nAvailable teams: developer",
+      message: "Usage: deck pi <team> [--continue | --resume] [--memory=engram|supermemory|none]\nAvailable teams: developer",
     };
   }
 
@@ -125,7 +126,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       // Explicitly disabled — treat as no provider
       memoryProvider = undefined;
     } else if (!SUPPORTED_MEMORY_PROVIDERS.includes(memoryProvider as SupportedMemoryProvider)) {
-      const available = SUPPORTED_MEMORY_PROVIDERS.join(", ");
+      const available = [...SUPPORTED_MEMORY_PROVIDERS, "none"].join(", ");
       return {
         command: "error",
         message: `Unsupported memory provider: ${memoryProvider}. Available providers: ${available}`,

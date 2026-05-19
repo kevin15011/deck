@@ -1,3 +1,5 @@
+import { renderDeveloperTeamContextAuthorityGuidance } from "../../memory/adaptive-context-renderer";
+
 /**
  * Runner-agnostic content registry for the Developer Team.
  *
@@ -103,6 +105,8 @@ const REAL_CONTENT: Record<string, { agentBody: string; skillBody: string }> = {
   },
 };
 
+const CONTEXT_AUTHORITY_GUIDANCE = renderDeveloperTeamContextAuthorityGuidance();
+
 // ---------------------------------------------------------------------------
 // Internal: placeholder builders
 // ---------------------------------------------------------------------------
@@ -139,6 +143,17 @@ function buildPlaceholderSkillBody(displayName: string, description: string): st
   ].join("\n");
 }
 
+function appendContextAuthorityGuidance(content: string): string {
+  return `${content.trimEnd()}\n\n${CONTEXT_AUTHORITY_GUIDANCE}\n`;
+}
+
+function withContextAuthorityGuidance(content: AgentContent): AgentContent {
+  return {
+    agentBody: appendContextAuthorityGuidance(content.agentBody),
+    skillBody: appendContextAuthorityGuidance(content.skillBody),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Registry: agent content
 // ---------------------------------------------------------------------------
@@ -154,7 +169,7 @@ function buildPlaceholderSkillBody(displayName: string, description: string): st
 export function getAgentContent(agentId: string): AgentContent | undefined {
   const real = REAL_CONTENT[agentId];
   if (real) {
-    return real;
+    return withContextAuthorityGuidance(real);
   }
 
   // Look up in catalog for placeholder
@@ -163,10 +178,10 @@ export function getAgentContent(agentId: string): AgentContent | undefined {
     return undefined;
   }
 
-  return {
+  return withContextAuthorityGuidance({
     agentBody: buildPlaceholderAgentBody(agent.displayName, agent.description),
     skillBody: buildPlaceholderSkillBody(agent.displayName, agent.description),
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +201,7 @@ export function getAgentContent(agentId: string): AgentContent | undefined {
  */
 export function getTeamSessionInstructions(teamId: string): string | undefined {
   if (teamId === "developer-team") {
-    return ORCHESTRATOR_SYSTEM_PROMPT;
+    return appendContextAuthorityGuidance(ORCHESTRATOR_SYSTEM_PROMPT);
   }
 
   return undefined;

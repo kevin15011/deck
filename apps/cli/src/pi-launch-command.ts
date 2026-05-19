@@ -5,12 +5,20 @@ import {
   applyDeveloperTeamInstall,
   buildDeveloperTeamInstallPlan,
   readDeveloperTeamModelConfigAssignments,
+  validateSupermemoryPiMcpConfig,
 } from "@deck/adapter-pi";
+import { createEngramMemoryProvider } from "@deck/adapter-engram";
+import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
+import {
+  DeckConfigError,
+  resolveActiveMemoryProvider,
+  type AdaptiveMemoryActiveProvider,
+} from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider, MemoryDiagnostic } from "@deck/core/memory/adaptive-memory";
 
 // --- Types ---
 
-const SUPPORTED_PI_LAUNCH_MEMORY_PROVIDER_IDS = ["engram"] as const;
+const SUPPORTED_PI_LAUNCH_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
 
 export type RunPiLaunchOptions = {
   teamId: string;
@@ -19,10 +27,18 @@ export type RunPiLaunchOptions = {
     continue?: boolean;
     resume?: boolean;
   };
-  /** Memory provider to inject into the team session prompt and agent/skill files. Undefined = no memory. */
+  /** Legacy/pre-constructed memory provider. Prefer cliMemoryProvider/config resolution for launch paths. */
   memoryProvider?: AdaptiveMemoryProvider;
-  /** Provider IDs accepted by this launch surface. Defaults to CLI-supported providers. */
+  /** Explicit CLI provider override from --memory. Precedence: CLI > .deck/config.json > none. */
+  cliMemoryProvider?: string;
+  /** Optional in-memory Deck config override for tests. Defaults to reading .deck/config.json from projectRoot. */
+  deckConfig?: unknown;
+  /** Provider IDs accepted by this launch surface. Defaults to Pi-supported providers. */
   supportedMemoryProviderIds?: Iterable<string>;
+  /** Override for validating Pi global MCP config before Supermemory injection. */
+  piMcpConfigPath?: string;
+  /** Override home directory used to resolve the default Pi global MCP config path. */
+  piMcpHomeDir?: string;
   /** Check if a command exists in PATH */
   commandExists?: (command: string) => boolean;
   /** Override the Pi command path */
@@ -32,7 +48,7 @@ export type RunPiLaunchOptions = {
 };
 
 export type MemoryProviderDiagnostic = {
-  code: "unsupported_memory_provider" | "memory_provider_unavailable";
+  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers";
   message: string;
   providerId?: string;
 };
@@ -41,6 +57,11 @@ export type PiLaunchResult =
   | { status: "error"; message: string; memoryDiagnostics: MemoryProviderDiagnostic[] }
   | { status: "ready"; plan: PiTeamLaunchPlan; profileDir: string; memoryDiagnostics: MemoryProviderDiagnostic[] }
   | { status: "launched"; plan: PiTeamLaunchPlan; memoryDiagnostics: MemoryProviderDiagnostic[] };
+
+type ResolvedLaunchMemory = {
+  provider?: AdaptiveMemoryProvider;
+  diagnostics: MemoryProviderDiagnostic[];
+};
 
 // --- Command ---
 
@@ -52,18 +73,13 @@ export type PiLaunchResult =
  *
  * In live mode, it spawns Pi as a child process with the correct args.
  *
- * When a memory provider is specified, this command:
- * 1. Materializes the team session profile with memory instructions composed
- *    into the system prompt (session-level injection).
- * 2. Materializes Developer Team agent and skill files with memory tool bindings
- *    in their frontmatter (agent/skill-level injection).
- *
- * This ensures that `--memory=engram` guarantees runtime binding metadata for
- * all materialized content, not just the session profile (REQ-AMI-002), while
- * preserving pre-existing Pi model/thinking assignments in `.pi/agents`.
+ * Memory provider resolution uses CLI > .deck/config.json > none and constructs
+ * exactly one provider. Supermemory injection is fail-closed: missing/incomplete
+ * non-secret config, missing/malformed Pi MCP config, or failing provider health
+ * launches without adaptive-memory injection and returns redacted diagnostics.
  */
 export function runPiLaunch(options: RunPiLaunchOptions): PiLaunchResult {
-  const { teamId, projectRoot, flags, memoryProvider, dryRun = false } = options;
+  const { teamId, projectRoot, flags, dryRun = false } = options;
   const commandExists = options.commandExists ?? defaultCommandExists;
   const piCommand = options.piCommand ?? "pi";
   const supportedMemoryProviderIds = options.supportedMemoryProviderIds ?? SUPPORTED_PI_LAUNCH_MEMORY_PROVIDER_IDS;
@@ -77,8 +93,11 @@ export function runPiLaunch(options: RunPiLaunchOptions): PiLaunchResult {
     };
   }
 
-  // Collect all memory diagnostics from both profile and install materialization
-  const allDiagnostics: MemoryProviderDiagnostic[] = [];
+  const resolvedMemory = resolveLaunchMemoryProvider(options);
+  const memoryProvider = resolvedMemory.provider;
+
+  // Collect all memory diagnostics from provider resolution, profile, and install materialization.
+  const allDiagnostics: MemoryProviderDiagnostic[] = [...resolvedMemory.diagnostics];
 
   // 1. Materialize the team profile (creates .deck/pi/profiles/<team>/system-prompt.md)
   //    Composes session-level memory instructions into the system prompt.
@@ -102,6 +121,8 @@ export function runPiLaunch(options: RunPiLaunchOptions): PiLaunchResult {
       supportedMemoryProviderIds,
       modelAssignments,
       thinkingAssignments,
+      piMcpConfigPath: options.piMcpConfigPath,
+      piMcpHomeDir: options.piMcpHomeDir,
     });
     applyDeveloperTeamInstall(installPlan);
     allDiagnostics.push(...installPlan.memoryDiagnostics.map(toLaunchMemoryDiagnostic));
@@ -131,6 +152,141 @@ export function runPiLaunch(options: RunPiLaunchOptions): PiLaunchResult {
     plan,
     memoryDiagnostics: allDiagnostics,
   };
+}
+
+function resolveLaunchMemoryProvider(options: RunPiLaunchOptions): ResolvedLaunchMemory {
+  const diagnostics: MemoryProviderDiagnostic[] = [];
+
+  if (options.memoryProvider && (options.cliMemoryProvider !== undefined || options.deckConfig !== undefined)) {
+    return {
+      diagnostics: [
+        {
+          code: "multiple_memory_providers",
+          providerId: options.memoryProvider.id,
+          message: "Exactly one adaptive-memory provider may be active; preconstructed provider cannot be combined with CLI/config resolution.",
+        },
+      ],
+    };
+  }
+
+  if (options.memoryProvider) {
+    return { provider: options.memoryProvider, diagnostics };
+  }
+
+  let resolved: ReturnType<typeof resolveActiveMemoryProvider>;
+  try {
+    resolved = resolveActiveMemoryProvider({
+      cliProvider: options.cliMemoryProvider,
+      projectRoot: options.projectRoot,
+      ...(options.deckConfig !== undefined ? { config: options.deckConfig } : {}),
+    });
+  } catch (error) {
+    return {
+      diagnostics: [
+        {
+          code: "memory_provider_unavailable",
+          providerId: inferProviderIdFromError(error) ?? inferProviderId(options.cliMemoryProvider, options.deckConfig),
+          message: redactedConfigErrorMessage(error),
+        },
+      ],
+    };
+  }
+
+  const activeProvider = resolved.activeProvider;
+  if (activeProvider === "none") {
+    return { diagnostics };
+  }
+
+  if (!supportsProvider(activeProvider, options.supportedMemoryProviderIds ?? SUPPORTED_PI_LAUNCH_MEMORY_PROVIDER_IDS)) {
+    return {
+      diagnostics: [
+        {
+          code: "unsupported_memory_provider",
+          providerId: activeProvider,
+          message: `Unsupported memory provider '${activeProvider}'; launched without adaptive-memory injection.`,
+        },
+      ],
+    };
+  }
+
+  if (activeProvider === "engram") {
+    return { provider: createEngramMemoryProvider(), diagnostics };
+  }
+
+  if (activeProvider === "supermemory") {
+    const supermemory = resolved.supermemory;
+    if (!supermemory?.userId) {
+      return {
+        diagnostics: [
+          {
+            code: "memory_provider_unavailable",
+            providerId: "supermemory",
+            message: "Supermemory configuration is incomplete; userId is required. Launched without adaptive-memory injection.",
+          },
+        ],
+      };
+    }
+
+    const mcpValidation = validateSupermemoryPiMcpConfig({
+      serverName: supermemory.mcpServerName,
+      configPath: options.piMcpConfigPath,
+      homeDir: options.piMcpHomeDir,
+    });
+
+    if (!mcpValidation.ok) {
+      return {
+        diagnostics: [
+          {
+            code: "memory_provider_unavailable",
+            providerId: "supermemory",
+            message: `Supermemory Pi MCP config is unavailable or invalid; launched without adaptive-memory injection. ${mcpValidation.diagnostics.map((diagnostic) => diagnostic.message).join(" ")}`,
+          },
+        ],
+      };
+    }
+
+    const provider = createSupermemoryMemoryProvider({
+      userId: supermemory.userId,
+      teamId: supermemory.teamId,
+      orgId: supermemory.orgId,
+      mcpServerName: mcpValidation.serverName,
+      searchMode: supermemory.searchMode === "memories" ? "memories" : undefined,
+      maxMemoriesPerSession: supermemory.maxMemoriesPerSession,
+      authenticatedRuntimeValidated: true,
+    });
+
+    return { provider, diagnostics };
+  }
+
+  return { diagnostics };
+}
+
+function supportsProvider(providerId: string, supportedProviderIds: Iterable<string>): boolean {
+  return new Set(supportedProviderIds).has(providerId);
+}
+
+function inferProviderId(cliProvider: string | undefined, deckConfig: unknown): AdaptiveMemoryActiveProvider | undefined {
+  if (cliProvider === "engram" || cliProvider === "supermemory" || cliProvider === "none") return cliProvider;
+  if (typeof deckConfig === "object" && deckConfig !== null && !Array.isArray(deckConfig)) {
+    const adaptiveMemory = (deckConfig as { adaptiveMemory?: unknown }).adaptiveMemory;
+    if (typeof adaptiveMemory === "object" && adaptiveMemory !== null && !Array.isArray(adaptiveMemory)) {
+      const activeProvider = (adaptiveMemory as { activeProvider?: unknown }).activeProvider;
+      if (activeProvider === "engram" || activeProvider === "supermemory" || activeProvider === "none") return activeProvider;
+    }
+  }
+  return undefined;
+}
+
+function inferProviderIdFromError(error: unknown): AdaptiveMemoryActiveProvider | undefined {
+  if (error instanceof DeckConfigError && error.code.startsWith("SUPERMEMORY_")) return "supermemory";
+  return undefined;
+}
+
+function redactedConfigErrorMessage(error: unknown): string {
+  if (error instanceof DeckConfigError) {
+    return `${error.message} Launched without adaptive-memory injection.`;
+  }
+  return "Adaptive-memory provider configuration could not be resolved; launched without adaptive-memory injection.";
 }
 
 function toLaunchMemoryDiagnostic(diagnostic: MemoryDiagnostic): MemoryProviderDiagnostic {

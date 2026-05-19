@@ -145,6 +145,49 @@ describe("buildTeamSystemPrompt", () => {
     expect(memoryDiagnostics[0].code).toBe("unsupported_memory_provider");
     expect(memoryDiagnostics[0].providerId).toBe("unknown-provider");
   });
+
+  test("composes Supermemory advisory context into explicit official/adaptive sections", () => {
+    const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "supermemory",
+      displayName: "Supermemory MCP",
+      buildInjection: () => ({
+        instructions: [
+          { surface: "session", markdown: "Use Supermemory MCP advisory context through execute and search_docs only.", teamId: "developer-team" },
+        ],
+        toolBindings: [{ capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"] }],
+      }),
+    };
+
+    const { content, memoryDiagnostics } = buildTeamSystemPrompt("developer-team", { memoryProvider: supermemoryProvider });
+
+    expect(memoryDiagnostics).toHaveLength(0);
+    expect(content).toContain("## OFFICIAL CONTEXT");
+    expect(content).toContain("## ADAPTIVE CONTEXT");
+    expect(content).toContain("OpenSpec artifacts and Spec Registry entries are authoritative");
+    expect(content).toContain("Use Supermemory MCP advisory context through execute and search_docs only.");
+    expect(content).toContain("## Adaptive Memory (provider-injected)");
+  });
+
+  test("renders adaptive-context absence indicator when Supermemory provider is unavailable", () => {
+    const brokenSupermemory: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "supermemory",
+      displayName: "Supermemory MCP",
+      buildInjection: () => {
+        throw new Error("Supermemory MCP validation is incomplete or failed.");
+      },
+    };
+
+    const { content, memoryDiagnostics } = buildTeamSystemPrompt("developer-team", { memoryProvider: brokenSupermemory });
+
+    expect(memoryDiagnostics).toHaveLength(1);
+    expect(memoryDiagnostics[0].providerId).toBe("supermemory");
+    expect(content).toContain("## OFFICIAL CONTEXT");
+    expect(content).toContain("## ADAPTIVE CONTEXT");
+    expect(content).toContain("Adaptive context was not loaded");
+    expect(content).toContain("OpenSpec artifacts and Spec Registry entries are authoritative");
+    expect(content).not.toContain("## Adaptive Memory (provider-injected)");
+  });
+
 });
 
 describe("materializeTeamProfile", () => {

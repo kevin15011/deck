@@ -10,6 +10,7 @@ import {
   PI_THINKING_LEVELS,
   PI_PROVIDERS,
   DEFAULT_MODELS_BY_PROVIDER,
+  supportsDeveloperTeamModel,
   supportsThinkingForModel,
 } from "./model-config";
 
@@ -266,6 +267,12 @@ describe("getDefaultThinkingForModel", () => {
   test("keeps low thinking for openai-codex models", () => {
     expect(supportsThinkingForModel("openai-codex/gpt-5.5")).toBe(true);
     expect(getDefaultThinkingForModel("openai-codex/gpt-5.5")).toBe("low");
+  });
+
+  test("keeps Kimi available for Developer Team with thinking handled separately", () => {
+    expect(supportsDeveloperTeamModel("opencode-go/kimi-k2.6")).toBe(true);
+    expect(supportsDeveloperTeamModel("opencode-go/qwen3.6-plus")).toBe(true);
+    expect(supportsDeveloperTeamModel("openai-codex/gpt-5.5")).toBe(true);
   });
 
   test("uses low thinking when no model is assigned", () => {

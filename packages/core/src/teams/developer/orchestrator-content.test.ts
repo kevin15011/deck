@@ -56,6 +56,16 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("archive");
   });
 
+  test("requires SDD triage before execution mode", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("SDD Triage Gate");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Direct");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Specialist only");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Recommend SDD");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Run SDD");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not ask for Automatic vs Interactive until this triage says **Run SDD**");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Documentation-only requests are not automatically SDD");
+  });
+
   test("contains apply routing to general, backend, or frontend", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("General");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Backend");
@@ -128,6 +138,10 @@ describe("ORCHESTRATOR_AGENT_BODY", () => {
     expect(ORCHESTRATOR_AGENT_BODY).toContain("Follow the matching skill");
   });
 
+  test("mentions SDD triage in agent body", () => {
+    expect(ORCHESTRATOR_AGENT_BODY).toContain("Run SDD triage before asking for execution mode");
+  });
+
   test("does not contain placeholder comment", () => {
     expect(ORCHESTRATOR_AGENT_BODY).not.toContain("Placeholder");
   });
@@ -140,6 +154,15 @@ describe("ORCHESTRATOR_SKILL_BODY", () => {
 
   test("contains SDD workflow methodology", () => {
     expect(ORCHESTRATOR_SKILL_BODY).toContain("SDD Workflow");
+  });
+
+  test("contains SDD triage categories in skill body", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Triage Gate");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Direct**");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Specialist only**");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Recommend SDD**");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Run SDD**");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do not infer full SDD from");
   });
 
   test("contains team-scoped agent IDs in phase routing table", () => {

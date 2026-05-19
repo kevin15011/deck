@@ -11,8 +11,14 @@ export {
   type AgentContent,
 } from "./teams/developer/content-registry";
 
-// Adaptive memory provider-neutral contracts and compositor
+// Deck project config contracts
+export * from "./config/deck-config";
+
+// Adaptive memory provider-neutral contracts, governance, rendering, and compositor
 export * from "./memory/adaptive-memory";
+export * from "./memory/adaptive-memory-contract";
+export * from "./memory/adaptive-memory-governance";
+export * from "./memory/adaptive-context-renderer";
 
 // Spec Registry — OpenSpec types, path helpers, and event model
 export * from "./spec-registry";

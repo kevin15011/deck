@@ -7,13 +7,14 @@ import {
   type AdaptiveMemoryProvider,
   type MemoryInjectionBundle,
 } from "@deck/core/memory/adaptive-memory";
+import { renderSddContextSections } from "@deck/core/memory/adaptive-context-renderer";
 import type { MemoryDiagnostic } from "./developer-team-install";
 import { buildTeamProfileDir } from "./pi-team-launch";
 import { getTeamsForEnvironment } from "./team-catalog";
 
 // --- Types ---
 
-const SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS = ["engram"] as const;
+const SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
 
 export type MaterializeTeamProfileOptions = {
   teamId: string;
@@ -94,6 +95,16 @@ export function buildTeamSystemPrompt(
   });
 
   if (!bundle) {
+    if (options?.memoryProvider || options?.memoryInjection) {
+      const reason = diagnostics.length > 0
+        ? `Adaptive context was not loaded: ${diagnostics.map((diagnostic) => diagnostic.message).join("; ")}`
+        : "Adaptive context was not loaded; continue with official OpenSpec context only.";
+      return {
+        content: `${renderSddContextSections({ officialContext: base, adaptiveContextUnavailableReason: reason })}
+`,
+        memoryDiagnostics: diagnostics,
+      };
+    }
     return { content: base, memoryDiagnostics: diagnostics };
   }
 

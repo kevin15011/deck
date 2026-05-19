@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { renderToString } from "ink";
 import React from "react";
@@ -12,10 +15,13 @@ import {
   AgentModelAssignmentScreen,
   AgentModelConfigListScreen,
   NoProvidersScreen,
+  MemoryProviderSelectionScreen,
+  SupermemorySetupScreen,
 } from "./screens/developer-team-screens";
 
 import { getTeamsForEnvironment } from "@deck/adapter-pi";
 import { MenuList } from "./components/menu-list";
+import { buildSupermemoryDeckConfig, handOffSupermemoryCredentialToPiMcp } from "./app";
 
 function TeamSelectionScreen({ cursor, selected }: { cursor: number; selected: string[] }) {
   const teams = getTeamsForEnvironment("pi-development");
@@ -198,7 +204,7 @@ describe("Developer Team TUI screens", () => {
       expect(output).toContain("Claude Sonnet 4");
     });
 
-    test("shows unsupported thinking note for models that cannot use reasoning", () => {
+    test("keeps Kimi selectable with thinking off note", () => {
       const provider = { id: "opencode-go", displayName: "OpenCode Go", envVars: ["OPENCODE_API_KEY"] };
       const models = [
         { id: "opencode-go/kimi-k2.6", displayName: "Kimi K2.6", providerId: "opencode-go" },
@@ -206,6 +212,17 @@ describe("Developer Team TUI screens", () => {
       const output = renderToString(<ModelSelectionScreen cursor={0} provider={provider} models={models} />);
 
       expect(output).toContain("Kimi K2.6");
+      expect(output).toContain("Thinking not supported; using off");
+    });
+
+    test("keeps non-Kimi opencode-go models selectable with thinking off note", () => {
+      const provider = { id: "opencode-go", displayName: "OpenCode Go", envVars: ["OPENCODE_API_KEY"] };
+      const models = [
+        { id: "opencode-go/qwen3.6-plus", displayName: "Qwen 3.6 Plus", providerId: "opencode-go" },
+      ];
+      const output = renderToString(<ModelSelectionScreen cursor={0} provider={provider} models={models} />);
+
+      expect(output).toContain("Qwen 3.6 Plus");
       expect(output).toContain("Thinking not supported; using off");
     });
   });
@@ -261,6 +278,137 @@ describe("Developer Team TUI screens", () => {
       );
 
       expect(output).toContain("openai-codex/gpt-5.5 · thinking high");
+    });
+  });
+
+
+  describe("MemoryProviderSelectionScreen", () => {
+    test("offers exactly one adaptive-memory provider choice including Supermemory MCP", () => {
+      const output = renderToString(<MemoryProviderSelectionScreen cursor={0} selectedProvider="none" />);
+
+      expect(output).toContain("Select adaptive-memory provider");
+      expect(output).toContain("None");
+      expect(output).toContain("Engram");
+      expect(output).toContain("Supermemory MCP");
+      expect(output).toContain("Exactly one provider can be active");
+    });
+
+    test("confirms selected provider status", () => {
+      const output = renderToString(
+        <MemoryProviderSelectionScreen cursor={2} selectedProvider="supermemory" status="Active adaptive-memory provider: Supermemory MCP. Token: [redacted]." />,
+      );
+
+      expect(output).toContain("active");
+      expect(output).toContain("Token: [redacted]");
+    });
+  });
+
+  describe("SupermemorySetupScreen", () => {
+    test("redacts token prompt values and explains external credential handoff", () => {
+      const output = renderToString(
+        <SupermemorySetupScreen
+          screen="supermemory-token"
+          values={{ token: "super-secret-token", userId: "", teamId: "", orgId: "" }}
+        />,
+      );
+
+      expect(output).toContain("Supermemory token (required)");
+      expect(output).toContain("[redacted]");
+      expect(output).not.toContain("super-secret-token");
+      expect(output).toContain("never stored");
+      expect(output).toContain("Deck config");
+    });
+
+    test("shows required userId configuration errors", () => {
+      const output = renderToString(
+        <SupermemorySetupScreen
+          screen="supermemory-user-id"
+          values={{ token: "", userId: "", teamId: "", orgId: "" }}
+          error="Supermemory configuration requires an explicit userId."
+        />,
+      );
+
+      expect(output).toContain("userId (required)");
+      expect(output).toContain("explicit userId");
+    });
+
+    test("supports optional teamId and orgId prompts", () => {
+      const teamOutput = renderToString(
+        <SupermemorySetupScreen screen="supermemory-team-id" values={{ token: "", userId: "u-1", teamId: "team-a", orgId: "" }} />,
+      );
+      const orgOutput = renderToString(
+        <SupermemorySetupScreen screen="supermemory-org-id" values={{ token: "", userId: "u-1", teamId: "", orgId: "org-a" }} />,
+      );
+
+      expect(teamOutput).toContain("teamId (optional)");
+      expect(teamOutput).toContain("team-a");
+      expect(orgOutput).toContain("orgId (optional)");
+      expect(orgOutput).toContain("org-a");
+    });
+
+    test("builds non-secret Supermemory Deck config only", () => {
+      const config = buildSupermemoryDeckConfig({ token: "super-secret-token", userId: " user-1 ", teamId: " team-1 ", orgId: "" });
+      const serialized = JSON.stringify(config);
+
+      expect(config.adaptiveMemory.activeProvider).toBe("supermemory");
+      expect(config.adaptiveMemory.supermemory.userId).toBe("user-1");
+      expect(config.adaptiveMemory.supermemory.teamId).toBe("team-1");
+      expect(config.adaptiveMemory.supermemory).not.toHaveProperty("orgId");
+      expect(serialized).not.toContain("super-secret-token");
+      expect(serialized).not.toContain("token");
+    });
+
+    test("writes Supermemory credential through Pi MCP config writer without leaking token in status", () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "deck-supermemory-tui-"));
+      const token = "sentinel-supermemory-token";
+      const configPath = join(tempDir, ".pi", "agent", "mcp.json");
+
+      try {
+        const result = handOffSupermemoryCredentialToPiMcp(
+          { token, userId: "user-1", teamId: "team-a", orgId: "" },
+          { configPath },
+        );
+
+        expect(result.success).toBe(true);
+        expect(result.message).toContain("Pi MCP config");
+        expect(result.message).toContain("[redacted]");
+        expect(result.message).not.toContain(token);
+
+        const externalConfig = JSON.parse(readFileSync(configPath, "utf-8"));
+        expect(externalConfig.mcpServers.supermemory.url).toBe("https://supermemory-new.stlmcp.com");
+        expect(externalConfig.mcpServers.supermemory.headers["x-supermemory-api-key"]).toBe(token);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    test("reports failed Pi MCP config writer errors without leaking token", () => {
+      const token = "sentinel-failing-token";
+      const result = handOffSupermemoryCredentialToPiMcp(
+        { token, userId: "user-1", teamId: "", orgId: "" },
+        {
+          writer: ({ token: receivedToken }) => ({
+            ok: false,
+            action: "failed",
+            path: "/tmp/mcp.json",
+            serverName: "supermemory",
+            diagnostics: [
+              {
+                code: "PI_MCP_CONFIG_WRITE_FAILED",
+                severity: "error",
+                path: "/tmp/mcp.json",
+                serverName: "supermemory",
+                message: `Unable to write Pi MCP config; token: ${receivedToken}`.replace(receivedToken, "[REDACTED]"),
+              },
+            ],
+          }),
+        },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Unable to configure Supermemory");
+      expect(result.message).toContain("[REDACTED]");
+      expect(result.message).not.toContain(token);
     });
   });
 

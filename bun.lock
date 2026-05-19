@@ -17,6 +17,7 @@
         "@deck/adapter-engram": "workspace:*",
         "@deck/adapter-opencode": "workspace:*",
         "@deck/adapter-pi": "workspace:*",
+        "@deck/adapter-supermemory": "workspace:*",
         "@deck/core": "workspace:*",
         "ink": "latest",
         "picocolors": "latest",
@@ -44,6 +45,13 @@
         "@deck/core": "workspace:*",
       },
     },
+    "packages/adapter-supermemory": {
+      "name": "@deck/adapter-supermemory",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deck/core": "workspace:*",
+      },
+    },
     "packages/core": {
       "name": "@deck/core",
       "version": "0.0.0",
@@ -57,6 +65,8 @@
     "@deck/adapter-opencode": ["@deck/adapter-opencode@workspace:packages/adapter-opencode"],
 
     "@deck/adapter-pi": ["@deck/adapter-pi@workspace:packages/adapter-pi"],
+
+    "@deck/adapter-supermemory": ["@deck/adapter-supermemory@workspace:packages/adapter-supermemory"],
 
     "@deck/cli": ["@deck/cli@workspace:apps/cli"],
 

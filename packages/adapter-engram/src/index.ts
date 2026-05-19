@@ -5,52 +5,24 @@ import type {
   MemoryInstructionFragment,
   MemoryToolBinding,
 } from "@deck/core/memory/adaptive-memory";
+import {
+  createAdaptiveMemoryDiagnostic,
+  type AdaptiveMemoryAdapter,
+  type AdaptiveMemoryCommitRequest,
+  type AdaptiveMemoryCommitResult,
+  type AdaptiveMemoryConfigureRequest,
+  type AdaptiveMemoryContextRequest,
+  type AdaptiveMemoryContextResult,
+  type AdaptiveMemoryHealthResult,
+  type AdaptiveMemorySearchRequest,
+  type AdaptiveMemorySearchResult,
+} from "@deck/core/memory/adaptive-memory-contract";
 
-// ---------------------------------------------------------------------------
-// Engram Memory Provider — EXPERIMENTAL
-// ---------------------------------------------------------------------------
-
-/**
- * ⚠️ EXPERIMENTAL: The Engram memory provider is experimental.
- *
- * Engram MCP tool names have NOT been validated against the Engram runtime.
- * The `--memory=engram` flag and this provider are provided for evaluation only.
- * Tool bindings may change once the actual Engram MCP server contract is confirmed.
- * Do not rely on these tool names in production configurations.
- */
-
-// ---------------------------------------------------------------------------
-// Engram MCP Tool Names
-// ---------------------------------------------------------------------------
-
-/**
- * Engram MCP tool names for memory operations.
- *
- * These names use the `memory_*` prefix convention and have NOT been validated
- * against the Engram MCP server runtime. Only the `memory_*` names are included;
- * generic aliases (such as "read", "write", "search") are intentionally excluded
- * to avoid collisions with built-in runtime tools.
- *
- * TODO: Validate exact tool names against the Engram MCP server runtime and
- * update these bindings accordingly. Once validated, remove the EXPERIMENTAL
- * marker from the provider.
- */
 const ENGRAM_MCP_SERVER = "engram";
 const ENGRAM_SEARCH_TOOLS = ["memory_search"] as const;
 const ENGRAM_READ_TOOLS = ["memory_read"] as const;
 const ENGRAM_WRITE_TOOLS = ["memory_write"] as const;
 
-// ---------------------------------------------------------------------------
-// Memory Safety Policy
-// ---------------------------------------------------------------------------
-
-/**
- * Shared memory safety guidance appended to every Engram instruction fragment.
- *
- * REQ-ENG-002 / REQ-OSA-001: Memory is auxiliary; OpenSpec remains authoritative.
- * Safety: Never store secrets, credentials, tokens, private keys, or PII/raw
- * customer data in external memory. Prefer redacted summaries.
- */
 const MEMORY_SAFETY_POLICY = [
   "**Memory Safety**: Never store secrets, API keys, credentials, tokens,",
   "private keys, raw customer/PII data, or other sensitive information in",
@@ -58,13 +30,6 @@ const MEMORY_SAFETY_POLICY = [
   "doubt, omit or redact before storing.",
 ].join("\n");
 
-// ---------------------------------------------------------------------------
-// Engram Instruction Fragments
-// ---------------------------------------------------------------------------
-
-/**
- * Session-level instruction for Engram memory.
- */
 const ENGRAM_SESSION_INSTRUCTION: MemoryInstructionFragment = {
   surface: "session",
   markdown: [
@@ -83,14 +48,13 @@ const ENGRAM_SESSION_INSTRUCTION: MemoryInstructionFragment = {
     "OpenSpec artifacts or Spec Registry entries. Always record proposals,",
     "specs, designs, and state updates in their canonical OpenSpec locations.",
     "",
+    "No Engram-to-Supermemory migration is provided by this adapter.",
+    "",
     MEMORY_SAFETY_POLICY,
   ].join("\n"),
   teamId: "developer-team",
 };
 
-/**
- * Agent-level instruction for Engram memory.
- */
 const ENGRAM_AGENT_INSTRUCTION: MemoryInstructionFragment = {
   surface: "agent",
   markdown: [
@@ -103,14 +67,13 @@ const ENGRAM_AGENT_INSTRUCTION: MemoryInstructionFragment = {
     "**Remember**: Memory is auxiliary. OpenSpec artifacts and Spec Registry",
     "entries remain the authoritative record.",
     "",
+    "No Engram-to-Supermemory migration is provided by this adapter.",
+    "",
     MEMORY_SAFETY_POLICY,
   ].join("\n"),
   teamId: "developer-team",
 };
 
-/**
- * Skill-level instruction for Engram memory.
- */
 const ENGRAM_SKILL_INSTRUCTION: MemoryInstructionFragment = {
   surface: "skill",
   markdown: [
@@ -122,78 +85,82 @@ const ENGRAM_SKILL_INSTRUCTION: MemoryInstructionFragment = {
     "**Remember**: Memory is auxiliary. Required artifacts and registry entries",
     "must still be written through OpenSpec flows.",
     "",
+    "No Engram-to-Supermemory migration is provided by this adapter.",
+    "",
     MEMORY_SAFETY_POLICY,
   ].join("\n"),
   teamId: "developer-team",
 };
 
-/**
- * Tool bindings mapping neutral capabilities to Engram MCP tool names.
- *
- * Only `memory_*` prefixed names are used. Generic tool name aliases
- * (e.g. "read", "write", "search") are intentionally excluded to avoid
- * collisions with built-in runtime tools.
- */
 const ENGRAM_TOOL_BINDINGS: readonly MemoryToolBinding[] = [
-  {
-    capability: "memory.search",
-    serverName: ENGRAM_MCP_SERVER,
-    toolNames: ENGRAM_SEARCH_TOOLS,
-  },
-  {
-    capability: "memory.read",
-    serverName: ENGRAM_MCP_SERVER,
-    toolNames: ENGRAM_READ_TOOLS,
-  },
-  {
-    capability: "memory.write",
-    serverName: ENGRAM_MCP_SERVER,
-    toolNames: ENGRAM_WRITE_TOOLS,
-  },
+  { capability: "memory.search", serverName: ENGRAM_MCP_SERVER, toolNames: ENGRAM_SEARCH_TOOLS },
+  { capability: "memory.read", serverName: ENGRAM_MCP_SERVER, toolNames: ENGRAM_READ_TOOLS },
+  { capability: "memory.write", serverName: ENGRAM_MCP_SERVER, toolNames: ENGRAM_WRITE_TOOLS },
 ];
 
-// ---------------------------------------------------------------------------
-// Provider Factory
-// ---------------------------------------------------------------------------
+function unsupportedEngramDiagnostic(operation: string) {
+  return createAdaptiveMemoryDiagnostic(
+    "ADAPTIVE_MEMORY_OPERATION_UNSUPPORTED",
+    `Engram adapter operation "${operation}" is not implemented in Deck; use existing Engram MCP tool bindings instead.`,
+    { severity: "info", providerId: "engram", recoverable: true },
+  );
+}
 
-/**
- * Creates an Engram memory provider implementing the AdaptiveMemoryProvider contract.
- *
- * This is the only package that holds Engram-specific names and instructions.
- * Core Developer Team prompts remain provider-neutral (REQ-DTC-001).
- *
- * EXPERIMENTAL: The provider and its tool bindings have not been validated
- * against the Engram MCP server runtime. Use `--memory=engram` for evaluation
- * only; tool names may change once the Engram server contract is confirmed.
- */
-export function createEngramMemoryProvider(): AdaptiveMemoryProvider {
+function createEngramAdapter(): AdaptiveMemoryAdapter {
   return {
-    id: "engram",
-    displayName: "Engram Memory (Experimental)",
-
-    buildInjection(context: AdaptiveMemoryBuildContext): MemoryInjectionBundle {
-      const fragments: MemoryInstructionFragment[] = [
-        ENGRAM_SESSION_INSTRUCTION,
-        ENGRAM_AGENT_INSTRUCTION,
-        ENGRAM_SKILL_INSTRUCTION,
-      ];
-
-      // Filter by team ID if specified — note this uses the context teamId,
-      // not a hardcoded value, so future teams can also receive fragments.
-      const contextTeamId = context.teamId;
-      const filteredFragments = contextTeamId
-        ? fragments.filter((f) => f.teamId === undefined || f.teamId === contextTeamId)
-        : fragments;
-
+    identity: { id: "engram", displayName: "Engram Memory (Experimental)" },
+    async loadContext(_request: AdaptiveMemoryContextRequest): Promise<AdaptiveMemoryContextResult> {
+      return { providerId: "engram", items: [], diagnostics: [unsupportedEngramDiagnostic("loadContext")] };
+    },
+    async search(_request: AdaptiveMemorySearchRequest): Promise<AdaptiveMemorySearchResult> {
+      return { providerId: "engram", items: [], diagnostics: [unsupportedEngramDiagnostic("search")] };
+    },
+    async commit(request: AdaptiveMemoryCommitRequest): Promise<AdaptiveMemoryCommitResult> {
       return {
-        instructions: filteredFragments,
-        toolBindings: ENGRAM_TOOL_BINDINGS,
+        savedCount: 0,
+        discardedCount: request.candidates.length,
+        decisions: request.candidates.map((candidate) => ({
+          accepted: false,
+          scope: candidate.scope.scope,
+          source: candidate.metadata.source,
+          reason: "Engram common-contract commit is a safe no-op; no migration or automatic write path is provided.",
+        })),
+        diagnostics: [unsupportedEngramDiagnostic("commit")],
+      };
+    },
+    async configure(_request: AdaptiveMemoryConfigureRequest): Promise<void> {},
+    async health(): Promise<AdaptiveMemoryHealthResult> {
+      return {
+        providerId: "engram",
+        status: "unknown",
+        diagnostics: [createAdaptiveMemoryDiagnostic(
+          "ADAPTIVE_MEMORY_HEALTH_UNKNOWN",
+          "Engram runtime health is not validated by Deck; existing MCP tool bindings are preserved.",
+          { severity: "warning", providerId: "engram", recoverable: true },
+        )],
       };
     },
   };
 }
 
-// Re-export types for consumer convenience
+export function createEngramMemoryProvider(): AdaptiveMemoryProvider {
+  const adapter = createEngramAdapter();
+  return {
+    id: "engram",
+    displayName: "Engram Memory (Experimental)",
+    adapter,
+    health: () => adapter.health(),
+    buildInjection(context: AdaptiveMemoryBuildContext): MemoryInjectionBundle {
+      const fragments = [ENGRAM_SESSION_INSTRUCTION, ENGRAM_AGENT_INSTRUCTION, ENGRAM_SKILL_INSTRUCTION];
+      const contextTeamId = context.teamId;
+      const filteredFragments = contextTeamId
+        ? fragments.filter((f) => f.teamId === undefined || f.teamId === contextTeamId)
+        : fragments;
+      return { instructions: filteredFragments, toolBindings: ENGRAM_TOOL_BINDINGS };
+    },
+  };
+}
+
 export type {
   AdaptiveMemoryProvider,
   AdaptiveMemoryBuildContext,

@@ -5,6 +5,7 @@ export * from "./installation-plan";
 export * from "./install-tools";
 export * from "./model-config";
 export * from "./orchestrator-prompt";
+export * from "./pi-mcp-config";
 export * from "./pi-team-launch";
 export * from "./pi-team-profile";
 export * from "./preflight";

@@ -33,8 +33,12 @@ import {
   resolveThinkingForModel,
   reviewPiRequiredTools,
   rollbackDeveloperTeamFiles,
+  supportsDeveloperTeamModel,
   supportsThinkingForModel,
   verifyDeveloperTeamInstall,
+  writeSupermemoryPiMcpConfig,
+  redactPiMcpConfigDiagnosticText,
+  type PiMcpConfigWriteResult,
   DEVELOPER_TEAM_AGENTS,
   type AgentApplyResult,
   type DeveloperTeamModelAssignments,
@@ -48,7 +52,9 @@ import {
   type PiToolInstallResult,
 } from "@deck/adapter-pi";
 
+import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
+import { writeDeckConfig, type AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
 
 import {
   getNextScreenAfterDeveloperTeamInstall,
@@ -69,6 +75,9 @@ import {
   ModelProviderSelectionScreen,
   ModelSelectionScreen,
   NoProvidersScreen,
+  MemoryProviderSelectionScreen,
+  SupermemorySetupScreen,
+  type SupermemorySetupValues,
 } from "./screens/developer-team-screens";
 import { HomeScreen } from "./screens/home-screen";
 
@@ -90,6 +99,11 @@ type Screen =
   | "model-selection"
   | "agent-model-assignment"
   | "no-providers"
+  | "memory-provider-selection"
+  | "supermemory-token"
+  | "supermemory-user-id"
+  | "supermemory-team-id"
+  | "supermemory-org-id"
   | "developer-team-review"
   | "developer-team-installing"
   | "opencode-preflight-checking"
@@ -101,6 +115,69 @@ type Screen =
   | "complete";
 
 const HELP = "j/k or ↑/↓: navigate • space: toggle • enter: continue • esc: back • q: quit";
+
+type MemoryProviderChoice = AdaptiveMemoryActiveProvider;
+
+function redactSecret(value: string): string {
+  return value.length > 0 ? "[redacted]" : "";
+}
+
+export function buildSupermemoryDeckConfig(values: SupermemorySetupValues) {
+  return {
+    version: 1,
+    adaptiveMemory: {
+      activeProvider: "supermemory" as const,
+      supermemory: {
+        mcpServerName: "supermemory",
+        userId: values.userId.trim(),
+        ...(values.teamId.trim() ? { teamId: values.teamId.trim() } : {}),
+        ...(values.orgId.trim() ? { orgId: values.orgId.trim() } : {}),
+        searchMode: "memories" as const,
+        maxMemoriesPerSession: 7,
+      },
+    },
+  };
+}
+
+export function buildMemoryProviderConfig(choice: MemoryProviderChoice, values: SupermemorySetupValues) {
+  if (choice === "supermemory") return buildSupermemoryDeckConfig(values);
+  return { version: 1, adaptiveMemory: { activeProvider: choice } };
+}
+
+export function createMemoryProviderForSelection(choice: MemoryProviderChoice): AdaptiveMemoryProvider | undefined {
+  if (choice === "engram") return createEngramMemoryProvider();
+  return undefined;
+}
+
+type SupermemoryPiMcpWriter = (options: { token: string; serverName?: string; configPath?: string; homeDir?: string }) => PiMcpConfigWriteResult;
+
+export function handOffSupermemoryCredentialToPiMcp(
+  values: SupermemorySetupValues,
+  options?: { writer?: SupermemoryPiMcpWriter; configPath?: string; homeDir?: string },
+): { success: boolean; message: string; path?: string } {
+  const token = values.token.trim();
+  if (!token) {
+    return { success: false, message: "Supermemory token is required and must be stored outside Deck config." };
+  }
+
+  const writer = options?.writer ?? writeSupermemoryPiMcpConfig;
+  const result = writer({ token, serverName: "supermemory", configPath: options?.configPath, homeDir: options?.homeDir });
+  const diagnosticText = redactPiMcpConfigDiagnosticText(result.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
+
+  if (!result.ok) {
+    return {
+      success: false,
+      path: result.path,
+      message: `Unable to configure Supermemory in Pi MCP config at ${result.path}. ${diagnosticText || "Check file permissions and existing MCP config JSON, then try again."}`,
+    };
+  }
+
+  return {
+    success: true,
+    path: result.path,
+    message: `Supermemory MCP server '${result.serverName}' configured in Pi MCP config at ${result.path}; credential value is ${redactSecret(token)}.`,
+  };
+}
 
 export function DeckApp() {
   const { exit } = useApp();
@@ -142,6 +219,10 @@ export function DeckApp() {
   const [selectedModelEnvironment, setSelectedModelEnvironment] = useState<EnvironmentId | null>(null);
   const [modelConfigSource, setModelConfigSource] = useState<"install" | "menu" | null>(null);
   const [memoryProvider, setMemoryProvider] = useState<AdaptiveMemoryProvider | undefined>(undefined);
+  const [memoryProviderChoice, setMemoryProviderChoice] = useState<MemoryProviderChoice>("none");
+  const [supermemorySetup, setSupermemorySetup] = useState<SupermemorySetupValues>({ token: "", userId: "", teamId: "", orgId: "" });
+  const [supermemoryError, setSupermemoryError] = useState<string | undefined>(undefined);
+  const [memoryStatus, setMemoryStatus] = useState<string | undefined>(undefined);
 
   const installedPi = runtimeStatuses.find((status) => status.runtime === "pi" && status.installed && status.command);
   const installedOpenCode = runtimeStatuses.find((status) => status.runtime === "opencode" && status.installed && status.command);
@@ -167,6 +248,11 @@ export function DeckApp() {
   );
 
   useInput((input, key) => {
+    if (isSupermemoryInputScreen(screen)) {
+      handleSupermemoryTextInput(input, key);
+      return;
+    }
+
     if (input === "q") {
       exit();
       return;
@@ -386,6 +472,7 @@ export function DeckApp() {
     if (screen === "installation-review") return 1;
     if (screen === "opencode-installation-review") return 1;
     if (screen === "team-selection") return Math.max(0, getTeamsForEnvironment("pi-development").length - 1);
+    if (screen === "memory-provider-selection") return 2;
     if (screen === "developer-team-review") return 1;
     if (screen === "agent-model-config-list") return DEVELOPER_TEAM_AGENTS.length;
     if (screen === "model-provider-selection") return Math.max(0, detectedProviders.length - 1);
@@ -558,7 +645,7 @@ export function DeckApp() {
       if (cursor === DEVELOPER_TEAM_AGENTS.length) {
         // Finish button
         if (modelConfigSource === "install") {
-          resetCursor("developer-team-review");
+          resetCursor("memory-provider-selection");
         } else {
           applyDeveloperTeamModelConfig();
           resetCursor("complete");
@@ -573,6 +660,10 @@ export function DeckApp() {
     if (screen === "model-selection") {
       const model = providerModels[cursor];
       if (!model) return;
+      if (!supportsDeveloperTeamModel(model)) {
+        resetCursor("agent-model-config-list");
+        return;
+      }
       setSelectedModel(model);
       const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
       const existingThinking = agent ? thinkingAssignments[agent.id] : undefined;
@@ -604,10 +695,29 @@ export function DeckApp() {
 
     if (screen === "no-providers") {
       if (modelConfigSource === "install") {
-        resetCursor("developer-team-review");
+        resetCursor("memory-provider-selection");
       } else {
         resetCursor("home");
       }
+      return;
+    }
+
+    if (screen === "memory-provider-selection") {
+      const choice = (["none", "engram", "supermemory"] as const)[cursor];
+      if (!choice) return;
+      setMemoryProviderChoice(choice);
+      setSupermemoryError(undefined);
+      if (choice === "supermemory") {
+        resetCursor("supermemory-token");
+        return;
+      }
+      persistMemoryProviderSelection(choice, supermemorySetup);
+      resetCursor("developer-team-review");
+      return;
+    }
+
+    if (isSupermemoryInputScreen(screen)) {
+      continueSupermemorySetup();
       return;
     }
 
@@ -638,6 +748,97 @@ export function DeckApp() {
     }
 
     if (screen === "complete") resetCursor("home");
+  }
+
+  function isSupermemoryInputScreen(value: Screen): value is "supermemory-token" | "supermemory-user-id" | "supermemory-team-id" | "supermemory-org-id" {
+    return value === "supermemory-token" || value === "supermemory-user-id" || value === "supermemory-team-id" || value === "supermemory-org-id";
+  }
+
+  function supermemoryFieldForScreen(value: Screen): keyof SupermemorySetupValues | undefined {
+    if (value === "supermemory-token") return "token";
+    if (value === "supermemory-user-id") return "userId";
+    if (value === "supermemory-team-id") return "teamId";
+    if (value === "supermemory-org-id") return "orgId";
+    return undefined;
+  }
+
+  function handleSupermemoryTextInput(input: string, key: { return?: boolean; backspace?: boolean; delete?: boolean; escape?: boolean }) {
+    if (key.escape) {
+      goBack();
+      return;
+    }
+    if (key.return) {
+      continueSupermemorySetup();
+      return;
+    }
+    const field = supermemoryFieldForScreen(screen);
+    if (!field) return;
+    if (key.backspace || key.delete) {
+      setSupermemorySetup((current) => ({ ...current, [field]: current[field].slice(0, -1) }));
+      return;
+    }
+    if (input && !input.includes("") && input !== "q") {
+      setSupermemorySetup((current) => ({ ...current, [field]: `${current[field]}${input}` }));
+    }
+  }
+
+  function continueSupermemorySetup() {
+    setSupermemoryError(undefined);
+    if (screen === "supermemory-token") {
+      if (!supermemorySetup.token.trim()) {
+        setSupermemoryError("Supermemory token is required and must be stored outside Deck config.");
+        return;
+      }
+      resetCursor("supermemory-user-id");
+      return;
+    }
+    if (screen === "supermemory-user-id") {
+      if (!supermemorySetup.userId.trim()) {
+        setSupermemoryError("Supermemory configuration requires an explicit userId.");
+        return;
+      }
+      resetCursor("supermemory-team-id");
+      return;
+    }
+    if (screen === "supermemory-team-id") {
+      resetCursor("supermemory-org-id");
+      return;
+    }
+    if (screen === "supermemory-org-id") {
+      if (persistMemoryProviderSelection("supermemory", supermemorySetup)) {
+        resetCursor("developer-team-review");
+      }
+    }
+  }
+
+  function persistMemoryProviderSelection(choice: MemoryProviderChoice, values: SupermemorySetupValues): boolean {
+    try {
+      if (choice === "supermemory") {
+        const handoff = handOffSupermemoryCredentialToPiMcp(values);
+        if (!handoff.success) {
+          setMemoryProvider(undefined);
+          setSupermemoryError(handoff.message);
+          setMemoryStatus(`Supermemory MCP setup failed: ${handoff.message}`);
+          return false;
+        }
+      }
+
+      const config = buildMemoryProviderConfig(choice, values);
+      writeDeckConfig(resolveProjectRoot(), config);
+      setMemoryProvider(createMemoryProviderForSelection(choice));
+      if (choice === "supermemory") {
+        setMemoryStatus("Active adaptive-memory provider: Supermemory MCP. Token: [redacted]. Pi MCP config: ~/.pi/agent/mcp.json.");
+      } else if (choice === "engram") {
+        setMemoryStatus("Active adaptive-memory provider: Engram.");
+      } else {
+        setMemoryStatus("Adaptive memory disabled.");
+      }
+      return true;
+    } catch (error) {
+      setMemoryProvider(undefined);
+      setSupermemoryError(error instanceof Error ? error.message : String(error));
+      return false;
+    }
   }
 
   function detectPiProvidersForTui() {
@@ -753,7 +954,12 @@ export function DeckApp() {
         "model-selection": "model-provider-selection",
         "agent-model-assignment": "model-selection",
         "no-providers": "team-selection",
-        "developer-team-review": "agent-model-config-list",
+        "memory-provider-selection": "agent-model-config-list",
+        "supermemory-token": "memory-provider-selection",
+        "supermemory-user-id": "supermemory-token",
+        "supermemory-team-id": "supermemory-user-id",
+        "supermemory-org-id": "supermemory-team-id",
+        "developer-team-review": "memory-provider-selection",
         "developer-team-installing": "developer-team-review",
         "opencode-preflight-checking": "environment-check",
         "opencode-preflight": "environment-check",
@@ -807,6 +1013,12 @@ export function DeckApp() {
         />
       ) : null}
       {screen === "no-providers" ? <NoProvidersScreen /> : null}
+      {screen === "memory-provider-selection" ? (
+        <MemoryProviderSelectionScreen cursor={cursor} selectedProvider={memoryProviderChoice} status={memoryStatus} />
+      ) : null}
+      {isSupermemoryInputScreen(screen) ? (
+        <SupermemorySetupScreen screen={screen} values={supermemorySetup} error={supermemoryError} />
+      ) : null}
       {screen === "developer-team-review" ? (
         <DeveloperTeamReviewScreen projectRoot={resolveProjectRoot()} cursor={developerTeamCursor} />
       ) : null}
@@ -843,6 +1055,11 @@ function screenTitle(screen: Screen): string {
     "model-selection": "Select model",
     "agent-model-assignment": "Select reasoning level",
     "no-providers": "No providers detected",
+    "memory-provider-selection": "Adaptive memory provider",
+    "supermemory-token": "Supermemory MCP token",
+    "supermemory-user-id": "Supermemory userId",
+    "supermemory-team-id": "Supermemory teamId",
+    "supermemory-org-id": "Supermemory orgId",
     "developer-team-review": "Developer Team",
     "developer-team-installing": "Installing Developer Team",
     "opencode-preflight-checking": "Checking OpenCode environment",

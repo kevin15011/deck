@@ -283,3 +283,72 @@ describe("resolveMemoryInjection", () => {
     expect(diagnostics[0].code).toBe("unsupported_memory_provider");
   });
 });
+describe("extended adaptive memory provider resolution", () => {
+  test("recognizes Supermemory when caller registry supports it", () => {
+    const provider: AdaptiveMemoryProvider = {
+      id: "supermemory",
+      displayName: "Supermemory MCP",
+      buildInjection: () => ({
+        instructions: [{ surface: "session", teamId: "developer-team", markdown: "Use Supermemory advisory context." }],
+        toolBindings: [{ capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"] }],
+      }),
+    };
+
+    const { bundle, diagnostics } = resolveMemoryInjection({
+      memoryProvider: provider,
+      supportedProviderIds: ["engram", "supermemory"],
+      buildContext: { teamId: "developer-team" },
+    });
+
+    expect(diagnostics).toEqual([]);
+    expect(bundle?.toolBindings[0].serverName).toBe("supermemory");
+  });
+
+  test("fails closed when more than one provider is active", () => {
+    const provider = createTestEngramProvider();
+    const supermemory: AdaptiveMemoryProvider = {
+      id: "supermemory",
+      displayName: "Supermemory MCP",
+      buildInjection: () => ({ instructions: [], toolBindings: [] }),
+    };
+
+    const { bundle, diagnostics } = resolveMemoryInjection({
+      memoryProviders: [provider, supermemory],
+      supportedProviderIds: ["engram", "supermemory"],
+    });
+
+    expect(bundle).toBeUndefined();
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].code).toBe("multiple_memory_providers");
+  });
+
+  test("collects provider health diagnostics without blocking injection", async () => {
+    const provider: AdaptiveMemoryProvider = {
+      id: "supermemory",
+      displayName: "Supermemory MCP",
+      buildInjection: () => ({ instructions: [], toolBindings: [] }),
+      health: () => ({
+        providerId: "supermemory",
+        status: "degraded",
+        diagnostics: [{
+          code: "ADAPTIVE_MEMORY_HEALTH_UNKNOWN",
+          severity: "warning",
+          message: "Authenticated runtime probe has not run.",
+          providerId: "supermemory",
+          recoverable: true,
+        }],
+      }),
+    };
+
+    const { bundle, diagnostics } = resolveMemoryInjection({
+      memoryProvider: provider,
+      supportedProviderIds: ["supermemory"],
+    });
+    expect(bundle).toBeDefined();
+    expect(diagnostics).toEqual([]);
+
+    const health = await import("./adaptive-memory").then((m) => m.collectMemoryProviderHealthDiagnostics(provider));
+    expect(health?.status).toBe("degraded");
+    expect(health?.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_HEALTH_UNKNOWN");
+  });
+});

@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { getDeveloperTeamCatalog } from "./developer-team-catalog";
 import { readDeveloperTeamModelConfigAssignments } from "./developer-team-install";
-import { resolveThinkingForModel } from "./model-config";
+import { resolveThinkingForModel, supportsDeveloperTeamModel } from "./model-config";
 import type { TeamId } from "./team-catalog";
 import { getTeamsForEnvironment } from "./team-catalog";
 
@@ -128,7 +128,7 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
 
   const assignments = readDeveloperTeamModelConfigAssignments(projectRoot);
   const orchestratorModel = assignments.modelAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID];
-  if (orchestratorModel) {
+  if (orchestratorModel && supportsDeveloperTeamModel(orchestratorModel)) {
     args.push("--model", orchestratorModel);
     args.push("--thinking", resolveThinkingForModel(orchestratorModel, assignments.thinkingAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID]));
   }

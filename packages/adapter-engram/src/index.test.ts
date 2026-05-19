@@ -202,3 +202,41 @@ describe("Engram provider integration with resolveMemoryInjection", () => {
     expect(diagnostics[0].providerId).toBe("unknown-provider");
   });
 });
+describe("Engram common adaptive memory contract", () => {
+  test("exposes adapter identity and safe unsupported-operation diagnostics", async () => {
+    const provider = createEngramMemoryProvider();
+    expect(provider.adapter?.identity.id).toBe("engram");
+
+    const search = await provider.adapter!.search({ query: "anything", scopes: [] });
+    expect(search.items).toEqual([]);
+    expect(search.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_OPERATION_UNSUPPORTED");
+
+    const health = await provider.adapter!.health();
+    expect(health.providerId).toBe("engram");
+    expect(health.status).toBe("unknown");
+  });
+
+  test("commit is a safe no-op and does not create a migration path", async () => {
+    const provider = createEngramMemoryProvider();
+    const result = await provider.adapter!.commit({
+      candidates: [{
+        content: "Prefer short status updates.",
+        containerTag: "u:test",
+        highSignal: true,
+        scope: { scope: "personal", userId: "test" },
+        metadata: {
+          source: "preference",
+          scope: "personal",
+          type: "preference",
+          confidence: 0.9,
+          createdBy: "user",
+        },
+      }],
+    });
+
+    expect(result.savedCount).toBe(0);
+    expect(result.discardedCount).toBe(1);
+    expect(result.decisions[0].accepted).toBe(false);
+    expect(result.decisions[0].reason.toLowerCase()).not.toContain("supermemory migration");
+  });
+});

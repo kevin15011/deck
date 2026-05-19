@@ -14,11 +14,13 @@ import { DEVELOPER_TEAM_AGENTS } from "./developer-team-catalog";
 import {
   parsePiThinkingLevel,
   resolveThinkingForModel,
+  supportsDeveloperTeamModel,
   type DeveloperTeamModelAssignments,
   type DeveloperTeamModelConfigAssignments,
   type DeveloperTeamThinkingAssignments,
   type PiThinkingLevel,
 } from "./model-config";
+import { validateSupermemoryPiMcpConfig } from "./pi-mcp-config";
 
 // --- Types ---
 
@@ -81,7 +83,7 @@ export type ReadDeveloperTeamModelAssignmentsOptions = {
 /** Re-export MemoryDiagnostic from core for backward compatibility. */
 export type MemoryDiagnostic = CoreMemoryDiagnostic;
 
-const SUPPORTED_PI_MEMORY_PROVIDER_IDS = ["engram"] as const;
+const SUPPORTED_PI_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
 
 /** Options for memory injection during Developer Team install. */
 export type MemoryInjectionOptions = {
@@ -91,6 +93,10 @@ export type MemoryInjectionOptions = {
   memoryProvider?: AdaptiveMemoryProvider;
   /** Provider IDs accepted by this adapter/caller registry. */
   supportedMemoryProviderIds?: Iterable<string>;
+  /** Override for validating Pi global MCP config before Supermemory tool injection. */
+  piMcpConfigPath?: string;
+  /** Override home directory used to resolve the default Pi global MCP config path. */
+  piMcpHomeDir?: string;
 };
 
 // --- Legacy local resolveMemoryInjection (delegated to core) ---
@@ -101,12 +107,46 @@ export type MemoryInjectionOptions = {
 function resolvePiMemoryInjection(
   options?: MemoryInjectionOptions,
 ): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
-  return resolveMemoryInjection({
+  const resolved = resolveMemoryInjection({
     memoryInjection: options?.memoryInjection,
     memoryProvider: options?.memoryProvider,
     supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_MEMORY_PROVIDER_IDS,
     buildContext: { teamId: "developer-team" },
   });
+
+  if (options?.memoryInjection || options?.memoryProvider?.id !== "supermemory" || !resolved.bundle) {
+    return resolved;
+  }
+
+  const serverName = resolved.bundle.toolBindings.find((binding) => binding.serverName)?.serverName;
+  const mcpValidation = validateSupermemoryPiMcpConfig({
+    serverName,
+    configPath: options.piMcpConfigPath,
+    homeDir: options.piMcpHomeDir,
+  });
+
+  if (mcpValidation.ok) return resolved;
+
+  return {
+    bundle: undefined,
+    diagnostics: [
+      ...resolved.diagnostics,
+      {
+        code: "memory_provider_unavailable",
+        providerId: "supermemory",
+        message: "Supermemory Pi MCP config is unavailable or invalid; omitted adaptive-memory injection with redacted diagnostics.",
+        details: {
+          path: mcpValidation.path,
+          serverName: mcpValidation.serverName,
+          diagnostics: mcpValidation.diagnostics.map((diagnostic) => ({
+            code: diagnostic.code,
+            severity: diagnostic.severity,
+            message: diagnostic.message,
+          })),
+        },
+      },
+    ],
+  };
 }
 
 /**
@@ -154,6 +194,8 @@ export function buildDeveloperTeamInstallPlan(
     memoryProvider?: AdaptiveMemoryProvider;
     memoryInjection?: MemoryInjectionBundle;
     supportedMemoryProviderIds?: Iterable<string>;
+    piMcpConfigPath?: string;
+    piMcpHomeDir?: string;
   },
 ): DeveloperTeamInstallPlan & { memoryDiagnostics: MemoryDiagnostic[] } {
   const agentsDir = join(projectRoot, ".pi", "agents");
@@ -166,13 +208,16 @@ export function buildDeveloperTeamInstallPlan(
     memoryInjection: options?.memoryInjection,
     memoryProvider: options?.memoryProvider,
     supportedMemoryProviderIds: options?.supportedMemoryProviderIds,
+    piMcpConfigPath: options?.piMcpConfigPath,
+    piMcpHomeDir: options?.piMcpHomeDir,
   });
 
   const agents: PlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.pi/agents/${agent.id}.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const model = modelAssignments?.[agent.id];
-    const thinking = resolveThinkingForModel(model, thinkingAssignments?.[agent.id]);
+    const assignedModel = modelAssignments?.[agent.id];
+    const model = supportsDeveloperTeamModel(assignedModel) ? assignedModel : undefined;
+    const thinking = model ? resolveThinkingForModel(model, thinkingAssignments?.[agent.id]) : resolveThinkingForModel(undefined);
     const content = buildAgentFileContent(agent, model, thinking, memoryBundle);
 
     return { agent, relativePath, absolutePath, content };

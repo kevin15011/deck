@@ -135,7 +135,7 @@ describe("buildPiTeamLaunchPlan", () => {
     }
   });
 
-  test("uses safe default thinking when orchestrator has a model but no thinking", () => {
+  test("keeps Kimi orchestrator model with safe default thinking", () => {
     const projectRoot = createTempProject();
     try {
       writeAgent(projectRoot, "deck-developer-orchestrator", [
@@ -154,7 +154,7 @@ describe("buildPiTeamLaunchPlan", () => {
     }
   });
 
-  test("forces unsupported orchestrator thinking launch flag to off", () => {
+  test("forces Kimi orchestrator thinking to off", () => {
     const projectRoot = createTempProject();
     try {
       writeAgent(projectRoot, "deck-developer-orchestrator", [
