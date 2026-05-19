@@ -89,12 +89,15 @@ The orchestrator will give you:
 - A change name (e.g., "add-dark-mode")
 - The Spec artifact (from Spec Agent)
 - The Design artifact (from Design Agent)
+- Any explicit current-state/context that the Orchestrator already gathered and wants you to use
 - Relevant project context and project AI notes (if available)
 - Stack-specific skill rules (if resolved)
 
 ## Task Steps
 
 ### Step 1: Read Spec and Design
+
+Do not perform broad exploration. You may rely only on the Spec, the Design, and explicit current-state/context provided by the Orchestrator. If those inputs are insufficient to plan safely, flag an open question or blocker instead of exploring the codebase yourself.
 
 Parse both artifacts to understand:
 - **Capabilities**: What the system must do (from Spec).
@@ -302,7 +305,17 @@ Task 4 (Shared) → Task 5 (Backend)
 > If none, write "None — tasks are ready for Apply."
 \`\`\`
 
-**Size budget:** Tasks artifact MUST be under 1000 words. Be concise.
+**Quality and conciseness:** Keep the tasks artifact as compact as possible without omitting required fields, acceptance/verification details, dependencies, blockers, risks, review workload forecast, or routing information. Do not merge unrelated tasks just to be brief.
+
+### Required Self-Check Before Return
+
+Before returning, verify and repair the artifact if needed:
+- Every task has **Owner**, **Priority**, **Complexity**, **Parallel**, **Depends on**, **Files**, and **Verification** fields.
+- Complexity Summary counts exactly match the task IDs listed for Low, Medium, and High.
+- Every dependency reference points to a valid task ID, or says \`none\`.
+- Review Workload Forecast is present and includes changed-line range, 400-line budget risk, scope reduction recommendation, sequential work slices recommendation, decision-needed status, and rationale.
+- Open Questions / Blockers are classified as implementation-blocking, allowed-with-stub, or non-blocking; explain any blocker handling.
+- If any self-check item fails, fix the tasks artifact before returning; do not report it as sufficient.
 
 ### Step 8: Persist Artifact and Registry
 

@@ -286,7 +286,7 @@ REQ-{cap}-{002}: {requirement statement}
 | REQ-{cap}-{002} | {scenario name} | Defined |
 \`\`\`
 
-**Size budget:** Spec artifact MUST be under 800 words (excluding the template itself). Be concise.
+**Quality and conciseness:** Keep the spec as compact as possible without omitting required fields, acceptance scenarios, validation/error contracts, dependencies, blockers, risks, or verification details. do not merge unrelated requirements or scenarios just to be brief.
 
 ### Step 8: Persist Artifact and Registry
 

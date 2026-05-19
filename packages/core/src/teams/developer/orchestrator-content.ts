@@ -118,10 +118,18 @@ The Spec Registry is also required for every SDD phase:
 - Parallel phase batches must not allow concurrent writes to shared Spec Registry files. When launching Spec+Design or Verify+Review in parallel, instruct each phase agent to run in **registry-deferred mode**: write only its phase artifact, report registry intent/status/event in the return contract, and do not write \`state.yaml\` or \`events.yaml\`.
 - After all agents in a parallel batch finish, the Orchestrator must serialize registry updates itself: read the returned artifacts plus current \`state.yaml\` and \`events.yaml\`, merge each phase status/artifact/provenance deterministically, append each event deterministically, and only then advance.
 - Reject/gate phase advancement if registry-deferred reconciliation fails, loses any artifact reference, drops previous state/provenance, drops previous events, or misses any required phase event from the parallel batch.
+- Do not accept a phase output as sufficient when it violates the exact return contract, uses the wrong or non-requested language, has a format mismatch, omits required fields, reports inconsistent counts, has bad registry status/intent, misses the required review workload forecast, or leaves blocker handling unexplained. Request repair from the phase agent or repair directly only when the fix is mechanical and unambiguous.
 
 If a memory adapter (e.g., Engram) is available, agents MAY optionally save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
 
 ## Apply Routing
+
+Before launching Apply, inspect the Tasks artifact's \`Review Workload Forecast\` and \`Open Questions / Blockers\` sections. Classify every task as **unblocked**, **blocked**, or **allowed-with-placeholder**:
+- **Unblocked**: dependencies and decisions are clear enough to implement.
+- **Blocked**: an open question affects the implementation plan, contract, data model, user-facing behavior, or verification strategy. Ask the user or request Task repair before Apply.
+- **Allowed-with-placeholder**: implementation can proceed only with an explicit placeholder/stub/fallback that is named in the task and verification plan.
+
+Do not launch Apply for blocked tasks. If blocker classification is missing, contradictory, or does not match the task dependencies/review forecast, request repair before Apply.
 
 When Tasks recommends an owner:
 
@@ -265,6 +273,9 @@ proposal ──┬─ spec ────┐
 ### Apply Routing
 
 - Task Agent recommends owner: General, Backend, or Frontend.
+- Before Apply, inspect the Tasks workload forecast and \`Open Questions / Blockers\`; classify tasks as unblocked, blocked, or allowed-with-placeholder.
+- Ask the user or request Task repair when blockers affect implementation plan, contracts, data model, behavior, or verification.
+- Do not launch Apply for blocked tasks.
 - Orchestrator executes owners according to dependencies.
 - Shared/contracts usually run before backend/frontend.
 - Backend and frontend may run in parallel only when contracts are clear.
@@ -298,8 +309,13 @@ The Spec Registry is the phase gate. Before advancing to the next phase, verify:
 - \`events.yaml\` preserves previous events and appends the new phase event.
 - The agent return contract includes artifact path, registry state path, registry events path, and the phase/status/event recorded.
 - For registry-deferred parallel batches, each agent return contract includes artifact path, intended phase/status/event, and \`Registry Write: deferred\`; the Orchestrator then records those intents in a deterministic serialized merge.
+- The output uses the requested language and exact return format, includes all required fields, has internally consistent counts, and explains blockers instead of hand-waving them.
+- Tasks output includes the required workload forecast and classified Open Questions / Blockers before Apply is allowed.
+- Do not accept a phase output that violates the exact return contract, uses the wrong or non-requested language, has a format mismatch, omits required fields, reports inconsistent counts, has bad registry status/intent, misses the required review workload forecast, or leaves blocker handling unexplained.
 
 If any registry file or entry is missing, or if a phase output reset/dropped prior registry history, do not continue to the next phase. Repair it directly when the expected state is unambiguous; otherwise request repair from the phase agent and report the blocker to the user.
+
+If a phase output looks directionally useful but violates contract, language, format, required-field, count, registry, review-forecast, or blocker-handling expectations, do not mark it sufficient. Request a focused repair and re-check the repaired output before advancing.
 
 For registry-deferred parallel batches, do not advance until reconciliation proves that \`state.yaml\` preserves all prior artifact/provenance entries plus every parallel artifact, and \`events.yaml\` preserves all prior events plus every parallel phase event. If reconciliation cannot prove this, stop and report a Registry Blocker.
 

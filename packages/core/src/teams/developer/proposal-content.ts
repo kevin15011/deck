@@ -112,12 +112,12 @@ Produce a structured proposal using the output template below.
 **Critical rules:**
 - Preserve uncertainty. If you do not know something, flag it as an open question.
 - Do not invent facts, assume constraints, or fabricate technical details.
-- Keep the proposal concise — it is a thinking tool, not a novel.
+- Keep the proposal as compact as possible without omitting required fields, acceptance direction, dependencies, blockers, risks, rollback plan, or verification details; do not merge unrelated items just to be brief.
 - Use bullet points and tables over prose. Headers organize, not explain.
 - Every proposal MUST have a rollback plan.
 - Every proposal MUST have success criteria or acceptance direction.
 - Use concrete file paths when you can; otherwise use module or area names.
-- Size budget: proposal artifact MUST be under 500 words.
+- Quality over artificial length: concise bullets and tables are preferred, but completeness beats brevity when a required section carries real information.
 
 **Output template:**
 

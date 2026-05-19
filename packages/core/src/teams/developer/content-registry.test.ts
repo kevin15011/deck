@@ -21,6 +21,13 @@ const REGISTRY_WRITER_AGENT_IDS = DEVELOPER_AGENT_IDS.filter(
   (id) => id !== "deck-developer-orchestrator",
 );
 
+const PLANNING_AGENT_IDS = [
+  "deck-developer-proposal",
+  "deck-developer-spec",
+  "deck-developer-design",
+  "deck-developer-task",
+] as const;
+
 // ---------------------------------------------------------------------------
 // getAgentContent
 // ---------------------------------------------------------------------------
@@ -141,6 +148,53 @@ describe("getAgentContent", () => {
     expect(combined).toContain("serializes the shared");
     expect(combined).toContain("deterministic serialized merge");
     expect(combined).toContain("do not advance until reconciliation proves");
+  });
+
+  test("planning prompts avoid hard word budgets", () => {
+    for (const id of PLANNING_AGENT_IDS) {
+      const content = getAgentContent(id)!;
+      const combined = `${content.agentBody}\n${content.skillBody}`;
+      expect(combined, id).not.toMatch(/Size budget/i);
+      expect(combined, id).not.toMatch(/MUST be under \d+ words/i);
+      expect(combined, id).not.toMatch(/under \d+ words/i);
+    }
+  });
+
+  test("planning prompts require quality-focused conciseness", () => {
+    for (const id of PLANNING_AGENT_IDS) {
+      const content = getAgentContent(id)!;
+      const combined = `${content.agentBody}\n${content.skillBody}`;
+      expect(combined, id).toContain("compact as possible without omitting required fields");
+      expect(combined, id).toMatch(/do not merge unrelated/i);
+    }
+  });
+
+  test("task prompt requires self-check and forbids broad exploration", () => {
+    const content = getAgentContent("deck-developer-task")!;
+    const combined = `${content.agentBody}\n${content.skillBody}`;
+    expect(combined).toContain("Required Self-Check Before Return");
+    expect(combined).toContain("Every task has **Owner**, **Priority**, **Complexity**, **Parallel**, **Depends on**, **Files**, and **Verification** fields");
+    expect(combined).toContain("Complexity Summary counts exactly match the task IDs");
+    expect(combined).toContain("Every dependency reference points to a valid task ID");
+    expect(combined).toContain("Review Workload Forecast is present");
+    expect(combined).toContain("Open Questions / Blockers are classified");
+    expect(combined).toContain("Do not perform broad exploration");
+    expect(combined).toContain("explicit current-state/context provided by the Orchestrator");
+  });
+
+  test("orchestrator repairs contract violations and gates Apply blockers", () => {
+    const content = getAgentContent("deck-developer-orchestrator")!;
+    const combined = `${content.agentBody}\n${content.skillBody}`;
+    expect(combined).toContain("violates the exact return contract");
+    expect(combined).toContain("wrong or non-requested language");
+    expect(combined).toContain("format mismatch");
+    expect(combined).toContain("omits required fields");
+    expect(combined).toContain("inconsistent counts");
+    expect(combined).toContain("bad registry status/intent");
+    expect(combined).toContain("misses the required review workload forecast");
+    expect(combined).toContain("blocker handling unexplained");
+    expect(combined).toContain("classify tasks as unblocked, blocked, or allowed-with-placeholder");
+    expect(combined).toContain("Do not launch Apply for blocked tasks");
   });
 
   test("parallel phase agents support registry-deferred mode", () => {

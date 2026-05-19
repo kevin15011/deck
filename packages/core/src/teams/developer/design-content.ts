@@ -136,11 +136,11 @@ Produce a structured technical design using the output template below.
 - Do not invent facts, assume unstated constraints, or fabricate architectural details.
 - Be concrete: use real module names, file paths, function signatures, and data shapes when you can.
 - When you cannot be concrete (missing context), use descriptive markers and flag them as uncertain.
-- Keep the design focused on architecture decisions, not implementation line-by-line detail.
+- Keep the design as compact as possible without omitting required fields, dependencies, blockers, risks, file impact, tradeoffs, migration concerns, or verification details; do not merge unrelated decisions just to be brief.
 - Use tables and bullet points over prose. Headers organize, not explain.
 - Every design MUST include rejected alternatives with rationale.
 - Every design MUST include a file impact estimate.
-- Size budget: design artifact MUST be under 1200 words.
+- Quality over artificial length: concise bullets and tables are preferred, but completeness beats brevity when a required section carries real information.
 
 **Output template:**
 
