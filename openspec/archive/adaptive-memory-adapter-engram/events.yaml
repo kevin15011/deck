@@ -1,0 +1,116 @@
+events:
+  - name: exploration.completed
+    phase: explore
+    status: completed
+    artifact: exploration.md
+    timestamp: 2026-05-18
+    summary: Completed exploration for provider-neutral adaptive memory injection with Engram as first adapter.
+  - name: proposal.completed
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    source: exploration.md
+    timestamp: 2026-05-18
+    summary: Created proposal for provider-neutral adaptive memory injection with Engram as first adapter.
+  - name: spec.completed
+    phase: spec
+    status: completed
+    artifact: spec.md
+    source: proposal.md
+    timestamp: 2026-05-19
+    summary: Created formal requirements for provider-neutral adaptive memory injection with Engram as first adapter.
+  - name: design.completed
+    phase: design
+    status: completed
+    artifact: design.md
+    source: proposal.md
+    timestamp: 2026-05-19
+    summary: Created technical design for provider-neutral adaptive memory injection with Engram as external adapter.
+  - name: tasks.completed
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    source: spec.md
+    timestamp: 2026-05-19
+    summary: Created implementation tasks for adaptive memory adapter with Engram injection, 8 tasks across shared and backend domains.
+  - name: apply.general.completed
+    phase: apply
+    agent: general
+    status: completed
+    artifact: apply-progress.md
+    source: tasks.md
+    timestamp: 2026-05-19
+    summary: General Apply completed shared Tasks 1, 2, and 3 for provider-neutral adaptive memory contracts, compositor tests, and core prompt neutrality.
+  - name: apply.backend.completed
+    phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    source: tasks.md
+    timestamp: 2026-05-19
+    summary: Backend Apply completed Tasks 4-8: Engram adapter package with provider implementation, Engram adapter tests, Pi adapter memory composition, OpenCode adapter memory composition, and CLI/TUI memory provider wiring.
+  - name: verify.failed
+    phase: verify
+    status: failed
+    artifact: verify-report.md
+    source: apply-progress.md
+    timestamp: 2026-05-19
+    summary: Verify failed due to selected-provider/tool-binding and unsupported-provider compliance gaps despite passing tests/typecheck.
+  - name: review.changes_requested
+    phase: review
+    status: changes_requested
+    artifact: review-report.md
+    source: apply-progress.md
+    timestamp: 2026-05-19
+    summary: Review requested changes for session-only CLI injection, placeholder Engram MCP tool names, memory safety guidance, and unsupported provider injection.
+  - name: apply.backend.fixes_completed
+    phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    source: verify-report.md
+    timestamp: 2026-05-19
+    summary: Backend Apply fix round completed. Fixed --memory=engram to guarantee runtime binding metadata (REQ-AMI-002), added centralized resolveMemoryInjection with unsupported provider ID validation (REQ-AMI-003), removed generic Engram tool name aliases and marked provider experimental, added memory safety guidance prohibiting secrets/PII (REQ-ENG-002), made tool binding scope explicit, centralized provider resolution, and aligned diagnostic naming.
+  - name: verify.passed_with_warnings
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    source: apply-progress.md
+    timestamp: 2026-05-19
+    summary: Re-verify passed with warnings after fixes; tests/typecheck passed and --memory=engram now materializes session, agent, and skill bindings. Remaining warnings are missing build script and experimental Engram MCP names.
+  - name: review.changes_requested
+    phase: review
+    status: changes_requested
+    artifact: review-report.md
+    source: apply-progress.md
+    timestamp: 2026-05-19
+    summary: Re-review requested changes for Engram provider ID hardcoded in core and launch-time rematerialization overwriting Pi model/thinking configuration.
+  - name: apply.backend.fixes_round2_completed
+    phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    source: review-report.md
+    timestamp: 2026-05-19
+    summary: Backend Apply fix round 2 completed. Removed concrete Engram provider ID/allowlist from non-test core by requiring caller-injected provider registries, verified non-test core has no Engram matches, and updated Pi launch memory materialization to preserve existing Developer Team model/thinking assignments with regression coverage.
+  - name: verify.completed
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    source: apply-progress.md
+    timestamp: 2026-05-19
+    summary: Final re-verify passed with warnings; 638/638 tests passed, typecheck passed, core is Engram-free, and --memory=engram preserves Pi model/thinking while adding session/agent/skill bindings. Remaining warning is missing build script.
+  - name: review.approved
+    phase: review
+    status: approved
+    artifact: review-report.md
+    source: apply-progress.md
+    timestamp: 2026-05-19
+    summary: Final re-review approved; provider-neutral core boundary restored, Pi launch preserves model/thinking config, unsupported providers fail closed, and Engram remains isolated/experimental with safety guidance.
+  - name: archive.completed
+    phase: archive
+    status: archived
+    artifact: archive-report.md
+    source: verify-report.md
+    timestamp: 2026-05-19
+    summary: Archive phase completed. Traceability report created. All artifacts moved to openspec/archive/adaptive-memory-adapter-engram/. Follow-up recorded: validate Engram MCP tool names (memory_search, memory_read, memory_write) against Engram runtime and remove experimental warning if appropriate.

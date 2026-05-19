@@ -1,0 +1,54 @@
+change: adaptive-memory-adapter-engram
+phase: archive
+status: archived
+updatedAt: 2026-05-19
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply: apply-progress.md
+  verify: verify-report.md
+  review: review-report.md
+  archive: archive-report.md
+agents:
+  general:
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+  backend:
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+provenance:
+  source: exploration.md
+  note: Proposal phase completed from exploration findings and user intent.
+  spec:
+    source: proposal.md
+    note: Spec phase completed from proposal and exploration findings.
+  design:
+    source: proposal.md
+    note: Design phase completed from proposal, exploration context, and targeted architecture review.
+  tasks:
+    source: spec.md
+    note: Tasks phase completed from spec and design artifacts.
+  apply:
+    general:
+      source: tasks.md
+      note: General Apply completed Tasks 1, 2, and 3 from the shared/core slice.
+    backend:
+      source: review-report.md
+      note: Backend Apply completed Tasks 4-8, initial fix round, and fix round 2. Fix round 2 removed concrete Engram provider registration from non-test core by injecting provider allowlists outside core, and preserved existing Pi model/thinking assignments during --memory=engram launch materialization.
+  verify:
+    source: apply-progress.md
+    status: passed_with_warnings
+    note: Final re-verify passed with warnings; tests/typecheck passed, core is Engram-free, and --memory=engram preserves Pi model/thinking while adding session/agent/skill bindings. Remaining warning is missing build script.
+  review:
+    source: apply-progress.md
+    status: approved
+    note: Final re-review approved; provider-neutral core boundary restored, Pi launch preserves model/thinking config, unsupported providers fail closed, and Engram remains isolated/experimental with safety guidance.
+  archive:
+    source: verify-report.md
+    note: Archive phase completed. Traceability report created at archive-report.md. All artifacts moved to openspec/archive/adaptive-memory-adapter-engram/. Follow-up recorded: validate Engram MCP tool names against Engram runtime.
+archiveTarget: openspec/archive/adaptive-memory-adapter-engram/
