@@ -38,6 +38,11 @@ import { APPLY_FRONTEND_AGENT_BODY, APPLY_FRONTEND_SKILL_BODY } from "./apply-fr
 import { VERIFY_AGENT_BODY, VERIFY_SKILL_BODY } from "./verify-content";
 import { REVIEW_AGENT_BODY, REVIEW_SKILL_BODY } from "./review-content";
 import { ARCHIVE_AGENT_BODY, ARCHIVE_SKILL_BODY } from "./archive-content";
+import {
+  VISUAL_EXPLANATIONS_SKILL_FRAGMENT,
+  VISUAL_EXPLANATIONS_AGENT_BODY,
+  VISUAL_EXPLANATIONS_SKILL_BODY,
+} from "./visual-explanations-content";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,7 +62,10 @@ export type AgentContent = {
 const REAL_CONTENT: Record<string, { agentBody: string; skillBody: string }> = {
   "deck-developer-orchestrator": {
     agentBody: ORCHESTRATOR_AGENT_BODY,
-    skillBody: ORCHESTRATOR_SKILL_BODY,
+    // Visual explanations are composed into the Orchestrator skill only.
+    // Proposal, Spec, Design, and Task agents do not receive this content
+    // by default (REQ-VISUAL-002, REQ-TEAMINSTALL-002).
+    skillBody: `${ORCHESTRATOR_SKILL_BODY.trimEnd()}\n\n${VISUAL_EXPLANATIONS_SKILL_FRAGMENT}\n`,
   },
   "deck-developer-explorer": {
     agentBody: EXPLORER_AGENT_BODY,

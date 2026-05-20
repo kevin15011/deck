@@ -52,6 +52,7 @@ import {
   type PiRequiredToolsReview,
   type PiToolInstallResult,
   type PiRunnerCapabilityInventory,
+  type PiRunnerFullCapabilityInventory,
 } from "@deck/adapter-pi";
 
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
@@ -278,7 +279,7 @@ export function DeckApp() {
   const [dashboardSupermemorySetupActive, setDashboardSupermemorySetupActive] = useState(false);
   const [dashboardCompletionStatus, setDashboardCompletionStatus] = useState<string | undefined>(undefined);
   const [dashboardState, setDashboardState] = useState<PiRunnerDashboardState>(() => createDefaultPiRunnerDashboardState());
-  const [dashboardInventory, setDashboardInventory] = useState<PiRunnerCapabilityInventory>({});
+  const [dashboardInventory, setDashboardInventory] = useState<PiRunnerFullCapabilityInventory>({});
   const [dashboardActionResults, setDashboardActionResults] = useState<PiRunnerActionRunResult[]>([]);
 
   const installedPi = runtimeStatuses.find((status) => status.runtime === "pi" && status.installed && status.command);
@@ -375,7 +376,9 @@ export function DeckApp() {
         setDashboardState(createDefaultPiRunnerDashboardState({
           runtime: { piCommand: installedPi.command, preflight, toolsReview: review },
           capabilityStatuses: Object.fromEntries(
-            Object.entries(inventory).map(([capabilityId, entry]) => [capabilityId, entry?.status]),
+            Object.entries(inventory)
+              .filter(([key]) => key !== '_internal')
+              .map(([capabilityId, entry]) => [capabilityId, (entry as any)?.status]),
           ),
         }));
         setDashboardActionResults([]);

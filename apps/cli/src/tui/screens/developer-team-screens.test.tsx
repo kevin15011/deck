@@ -74,7 +74,7 @@ describe("Developer Team screens dashboard context regression", () => {
     expect(dashboardAgents["deck-developer-orchestrator"]).toContain("thinking: high");
     expect(dashboardAgents["deck-developer-apply-backend"]).toBe(homeAgents["deck-developer-apply-backend"]);
     expect(dashboardAgents["deck-developer-apply-backend"]).toContain("model: opencode-go/kimi-k2.6");
-    expect(dashboardAgents["deck-developer-apply-backend"]).toContain("thinking: off");
+    expect(dashboardAgents["deck-developer-apply-backend"]).not.toContain("thinking:");
   });
 
   test("DeveloperTeamReviewScreen preserva Home install/skip y solo agrega contexto cuando viene del dashboard", () => {

@@ -4,14 +4,23 @@ import React from "react";
 import { PiRunnerDashboardScreens } from "../screens/pi-runner-dashboard-screens";
 import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan } from "./state";
 
+/**
+ * Pi Runner dashboard render tests.
+ *
+ * Changes from previous version (REQ-DASH-001, REQ-DASH-002):
+ * - Tests for `runner-capabilities-detail` renamed to `packages-detail`.
+ * - Tests for `runner-ui-visual-helpers-detail` removed (merged into Packages).
+ * - runner-mermaid is NOT shown as mandatory/toggleable in Packages detail.
+ * - Dashboard shows 4 sections: Packages, Adaptive Memory, Teams, Review & Install.
+ * REQ-DASH-003: Visual support feedback appears only in Review, not as a selectable option.
+ */
 const plan: PiRunnerReviewPlan = {
   ready: false,
   diagnostics: [
     {
       code: "CAPABILITY_SOURCE_UNKNOWN",
       severity: "warning",
-      message: "Mermaid is required; pi-mermaid implementation source is pending.",
-      capabilityId: "runner-mermaid",
+      message: "Some capability sources are pending.",
     },
   ],
   groups: {
@@ -27,16 +36,6 @@ const plan: PiRunnerReviewPlan = {
       },
     ],
     manualSteps: [
-      {
-        id: "capability.runner-mermaid.pending-source",
-        kind: "pending-source",
-        title: "Resolve Mermaid runner implementation",
-        status: "pending",
-        capabilityId: "runner-mermaid",
-        implementationId: "pi-mermaid",
-        source: "TBD",
-        required: true,
-      },
       {
         id: "capability.rtk.manual-install",
         kind: "manual-external-install",
@@ -61,8 +60,7 @@ const plan: PiRunnerReviewPlan = {
         id: "team.developer-team.apply",
         kind: "apply-team-bundle",
         title: "Apply Developer Team bundle",
-        status: "blocked",
-        unresolvedCapabilities: ["runner-mermaid"],
+        status: "ready",
       },
     ],
     validations: [
@@ -77,29 +75,31 @@ const plan: PiRunnerReviewPlan = {
 };
 
 describe("Pi Runner dashboard render", () => {
-  test("dashboard principal muestra las cinco secciones con estados y contadores", () => {
+  test("dashboard principal muestra las cuatro secciones con estados y contadores", () => {
+    // REQ-DASH-002: Four sections: Packages, Adaptive Memory, Teams, Review & Install
     const state = createDefaultPiRunnerDashboardState({ plan });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
-    expect(output).toContain("Pi Runner Capability Dashboard");
-    expect(output).toContain("Runner Capabilities globales");
-    expect(output).toContain("Adaptive Memory global");
-    expect(output).toContain("Runner UI / visual helpers");
+    expect(output).toContain("Pi Runner Setup Dashboard");
+    expect(output).toContain("Packages");
+    expect(output).toContain("Adaptive Memory");
     expect(output).toContain("Teams");
     expect(output).toContain("Review & Install");
-    expect(output).toContain("acciones:");
-    expect(output).toContain("manual");
-    expect(output).toContain("pending");
+    // Fix #2: user-facing copy uses neutral language, no Mermaid terminology
+    expect(output).toContain("Configure runner packages, Adaptive Memory, Teams and Review & Install.");
+    expect(output).toContain("actions:");
   });
 
-  test("Runner Capabilities muestra configurables y Mermaid obligatorio separado de pi-mermaid", () => {
+  test("Packages detail muestra configurables y NO Mermaid como obligatorio", () => {
+    // REQ-DASH-001: runner-mermaid is NOT a selectable/configurable package
+    // REQ-DASH-002: Runner Capabilities + visual helpers merged into Packages
     const state = createDefaultPiRunnerDashboardState({
-      screen: "runner-capabilities-detail",
+      screen: "packages-detail",
       capabilityStatuses: {
         rtk: "manual",
         "context-mode": "missing",
         "codebase-memory": "manual",
-        "runner-mermaid": "pending-source",
+        "pi-hud": "pending-source",
       },
       selectedCapabilities: { rtk: true, "context-mode": false, "codebase-memory": false },
     });
@@ -108,45 +108,40 @@ describe("Pi Runner dashboard render", () => {
     expect(output).toContain("[x] RTK");
     expect(output).toContain("[ ] context-mode");
     expect(output).toContain("[ ] codebase-memory");
-    expect(output).toContain("Mermaid: required/no toggleable");
-    expect(output).toContain("implementación pi-mermaid");
-    expect(output).toContain("Source: TBD");
-    expect(output).toContain("paquete opcional");
-    expect(output).toContain("manual");
-    expect(output).toContain("missing");
-    expect(output).toContain("pending-source");
+    // Fix #2: Mermaid is not mentioned in Packages detail user-facing copy
+    expect(output).not.toContain("Mermaid");
+    expect(output).not.toContain("Mermaid: required/no toggleable");
+    expect(output).not.toContain("Source: TBD");
+    expect(output).not.toContain("paquete opcional");
   });
 
-  test("Runner UI/visual helpers muestra pi-hud opcional Pi-only y Mermaid requerido", () => {
+  test("Packages detail incluye pi-hud para Pi scope sin Mermaid como opción", () => {
+    // REQ-DASH-001: pi-hud remains optional; runner-mermaid is not shown
     const state = createDefaultPiRunnerDashboardState({
-      screen: "runner-ui-visual-helpers-detail",
+      screen: "packages-detail",
       selectedCapabilities: { "pi-hud": true },
       capabilityStatuses: {
         "pi-hud": "pending-source",
-        "runner-mermaid": "pending-source",
       },
     });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
-    expect(output).toContain("Runner UI / visual helpers");
+    expect(output).toContain("Packages");
     expect(output).toContain("[x] pi-hud");
-    expect(output).toContain("optional");
-    expect(output).toContain("Pi-only");
-    expect(output).toContain("Mermaid required/no toggleable");
-    expect(output).toContain("Implementación Pi: pi-mermaid");
-    expect(output).toContain("source TBD");
+    expect(output).not.toContain("Mermaid required");
+    expect(output).not.toContain("runner-mermaid");
   });
 
   test("Adaptive Memory muestra None/Engram/Supermemory single-choice con None default", () => {
     const state = createDefaultPiRunnerDashboardState({ screen: "adaptive-memory-detail" });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
-    expect(output).toContain("Single-choice exacto");
+    expect(output).toContain("Single-choice");
     expect(output).toContain("(●) None");
     expect(output).toContain("( ) Engram");
     expect(output).toContain("( ) Supermemory");
-    expect(output).toContain("Provider activo: none");
-    expect(output).toContain("Sin memoria adaptativa activa por default");
+    expect(output).toContain("Active provider: none");
+    expect(output).toContain("No adaptive memory active by default");
   });
 
   test("Adaptive Memory/Supermemory renderiza estado no secreto y nunca token sentinela", () => {
@@ -166,7 +161,7 @@ describe("Pi Runner dashboard render", () => {
     });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
-    expect(output).toContain("Provider activo: supermemory");
+    expect(output).toContain("Active provider: supermemory");
     expect(output).toContain("user-visible");
     expect(output).toContain("token [redacted]");
     expect(output).not.toContain(tokenSentinel);
@@ -193,29 +188,33 @@ describe("Pi Runner dashboard render", () => {
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
     expect(output).toContain("[x] Developer Team");
-    expect(output).toContain("Abrir Developer Team detail");
-    expect(output).toContain("Consumo/compatibilidad explícita");
-    expect(output).toContain("runner-mermaid: inherits-runner");
+    expect(output).toContain("Open Developer Team detail");
+    expect(output).toContain("Explicit consumption/compatibility");
     expect(output).toContain("codebase-memory: consumes-directly");
     expect(output).toContain("adaptive-memory: consumes-directly");
+    // REQ-DASH-001: runner-mermaid no longer in capability profile
+    expect(output).not.toContain("runner-mermaid: inherits-runner");
   });
 
-  test("Review & Install agrupa acciones y muestra manuales/pendientes como texto visible", () => {
+  test("Review & Install agrupa acciones y muestra sección de visualización mínima", () => {
+    // REQ-DASH-003: Visual support appears only as minimal feedback
+    // REQ-DASH-004: Review distinguishes user selections from internal support
     const state = createDefaultPiRunnerDashboardState({ screen: "review-plan", plan });
-    const output = renderToString(<PiRunnerDashboardScreens state={state} canRunPlan={false} runBlockDiagnostics={[{ message: "Supermemory config pendiente" }]} />);
+    const output = renderToString(<PiRunnerDashboardScreens state={state} canRunPlan={false} runBlockDiagnostics={[{ message: "Supermemory config pending" }]} />);
 
     expect(output).toContain("Review & Install");
-    expect(output).toContain("Instalaciones automáticas");
-    expect(output).toContain("Pasos manuales / pendientes");
-    expect(output).toContain("Escritura de configuración");
-    expect(output).toContain("Aplicación de team");
-    expect(output).toContain("Validación");
-    expect(output).toContain("pending · pending-source · Resolve Mermaid runner implementation (pi-mermaid)");
+    expect(output).toContain("Automatic installs");
+    expect(output).toContain("Manual / pending steps");
+    expect(output).toContain("Config writes");
+    expect(output).toContain("Team applications");
+    expect(output).toContain("Validation");
     expect(output).toContain("manual · manual-external-install · Install RTK manually");
-    expect(output).toContain("blocked · apply-team-bundle · Apply Developer Team bundle");
-    expect(output).toContain("Bloqueos de ejecución");
-    expect(output).toContain("Supermemory config pendiente");
-    expect(output).toContain("Configurar Supermemory antes de ejecutar");
+    expect(output).toContain("ready · apply-team-bundle · Apply Developer Team bundle");
+    expect(output).toContain("Execution blocks");
+    expect(output).toContain("Configure Supermemory before running");
+    // REQ-DASH-003: No Mermaid pending-source in manual steps
+    expect(output).not.toContain("pending · pending-source");
+    expect(output).not.toContain("Resolve Mermaid");
   });
 
   test("Complete muestra mensajes y diagnósticos redactados sin filtrar token", () => {
@@ -235,11 +234,10 @@ describe("Pi Runner dashboard render", () => {
       />,
     );
 
-    expect(output).toContain("Pi Runner dashboard complete");
+    expect(output).toContain("Pi Runner setup complete");
     expect(output).toContain("adaptive-memory.supermemory.pi-mcp-config");
-    expect(output).toContain("diagnóstico:");
+    expect(output).toContain("diagnostic:");
     expect(output).not.toContain(tokenSentinel);
     expect(output).toContain("[redacted]");
   });
-
 });

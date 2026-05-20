@@ -1,5 +1,8 @@
 import type { CapabilityToolMapping } from "./capability-catalog";
+import type { InternalRunnerPackageId } from "./internal-runner-packages";
 import type { RequiredToolStatus } from "./required-tools";
+
+export type { InternalRunnerPackageId } from "./internal-runner-packages";
 
 export type InstallablePiToolId =
   | "sub-agents"
@@ -35,6 +38,33 @@ export const PI_INSTALLABLE_TOOLS: InstallablePiTool[] = [
   // Adaptive Memory provider === "engram".
   { id: "engram-memory", name: "Engram memory", source: "Gentleman-Programming/engram", required: false, installKind: "external" },
 ];
+
+// ---------------------------------------------------------------------------
+// Internal runner package boundary
+//
+// Design decision: pi-mermaid is NOT in PI_INSTALLABLE_TOOLS. It lives in the
+// internal runner packages catalog (internal-runner-packages.ts) and is installed
+// silently without dashboard selection. This assertion exists to prevent accidental
+// re-inclusion during future changes.
+//
+// REQ-DASH-001: Mermaid/runner-mermaid must not be a configurable dashboard option.
+// REQ-PIINSTALL-003: Required internal support must not become a configuration decision.
+// Fix #3: Uses Extract to correctly detect whether "pi-mermaid" is in the union.
+// ---------------------------------------------------------------------------
+
+/** Internal runner package IDs that must NOT appear in PI_INSTALLABLE_TOOLS. */
+export const INTERNAL_INSTALLABLE_BOUNDARY: InternalRunnerPackageId[] = ["pi-mermaid"];
+
+/**
+ * Compile-time assertion: pi-mermaid must not be in the user-facing install catalog.
+ * Fix #3: Uses Extract<..., "pi-mermaid"> extends never to correctly detect
+ * whether "pi-mermaid" is a member of the union. If this fails, do NOT add pi-mermaid
+ * to PI_INSTALLABLE_TOOLS — move it to internal-runner-packages.ts instead.
+ */
+type _AssertInternalBoundary = Extract<(typeof PI_INSTALLABLE_TOOLS)[number]["id"], "pi-mermaid"> extends never ? true : never;
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _boundaryAssertion: _AssertInternalBoundary = true;
 
 export type CapabilityPlanToolMetadata = Pick<CapabilityToolMapping, "capabilityId" | "toolId" | "source" | "installKind" | "runnerScope" | "requirementLevel"> & {
   name: string;

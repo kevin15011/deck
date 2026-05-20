@@ -13,10 +13,14 @@ import type {
   UserSelectableCapabilityId,
 } from "./state";
 
+/**
+ * Dashboard section IDs for the new grouping (REQ-DASH-002).
+ * Mermaid / visual helpers sections are removed — visual support is internal silent.
+ * REQ-DASH-001: Mermaid is NOT presented as a configurable capability.
+ */
 export type DashboardSectionId =
-  | "runner-capabilities"
+  | "packages"
   | "adaptive-memory"
-  | "runner-ui-visual-helpers"
   | "teams"
   | "review-install";
 
@@ -69,10 +73,9 @@ type SectionSignals = {
   actions: number;
 };
 
-const DASHBOARD_SECTION_COUNT = 5;
-const RUNNER_CAPABILITY_OPTION_COUNT = 4; // RTK, context-mode, codebase-memory, back
+const DASHBOARD_SECTION_COUNT = 4;
+const PACKAGES_OPTION_COUNT = 5; // rtk, context-mode, codebase-memory, pi-hud, back
 const ADAPTIVE_MEMORY_OPTION_COUNT = 4; // none, engram, supermemory, back
-const VISUAL_HELPER_OPTION_COUNT = 2; // pi-hud toggle, back
 const TEAMS_OPTION_COUNT = 3; // Developer Team, Developer Team detail, back
 const DEVELOPER_TEAM_DETAIL_OPTION_COUNT = 3; // configure models, use current/defaults, back
 const REVIEW_PLAN_OPTION_COUNT = 3; // run, back, dashboard
@@ -83,12 +86,10 @@ export function getCursorLimit(state: PiRunnerDashboardState): number {
   switch (state.screen) {
     case "dashboard":
       return DASHBOARD_SECTION_COUNT;
-    case "runner-capabilities-detail":
-      return RUNNER_CAPABILITY_OPTION_COUNT;
+    case "packages-detail":
+      return PACKAGES_OPTION_COUNT;
     case "adaptive-memory-detail":
       return ADAPTIVE_MEMORY_OPTION_COUNT;
-    case "runner-ui-visual-helpers-detail":
-      return VISUAL_HELPER_OPTION_COUNT;
     case "teams-detail":
       return TEAMS_OPTION_COUNT;
     case "developer-team-detail":
@@ -131,44 +132,32 @@ export function getPlanActionCounts(plan: PiRunnerReviewPlan | undefined): PlanA
 export function getDashboardSectionSummaries(state: PiRunnerDashboardState): DashboardSectionSummary[] {
   const counts = getPlanActionCounts(state.plan);
   const capabilityOptions = getRunnerCapabilitySummaries(state);
-  const selectedRunnerCapabilities = capabilityOptions.filter((option) => option.selected && option.requirementLevel === "configurable").length;
-  const selectedVisualHelpers = capabilityOptions.filter((option) => option.selected && option.capabilityId === "pi-hud").length;
+  const selectedPackages = capabilityOptions.filter((option) => option.selected && option.requirementLevel === "configurable").length;
   const selectedTeams = Object.values(state.teams).filter((team) => team.selected).length;
-  const runnerSignals = signalsForSection(state, ["rtk", "context-mode", "codebase-memory"]);
+  const packagesSignals = signalsForSection(state, ["rtk", "context-mode", "codebase-memory", "pi-hud"]);
   const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.") || action.capabilityId === "codebase-memory" && state.adaptiveMemory.provider === "engram"));
-  const visualSignals = signalsForSection(state, state.runnerScope === "pi" ? ["runner-mermaid", "pi-hud"] : ["runner-mermaid"]);
   const teamSignals = signalsForActions(state.plan?.groups.teamApplications ?? []);
 
   return [
     {
-      id: "runner-capabilities",
-      title: "Runner Capabilities globales",
-      screen: "runner-capabilities-detail",
-      readiness: readinessFromSignals(runnerSignals),
-      selectedCount: selectedRunnerCapabilities,
-      totalCount: 3,
-      actionCount: runnerSignals.actions,
-      detail: `${selectedRunnerCapabilities}/3 configurables seleccionadas; ${formatSignals(runnerSignals)}. Mermaid se deriva como requerido.`,
+      id: "packages",
+      title: "Packages",
+      screen: "packages-detail",
+      readiness: readinessFromSignals(packagesSignals),
+      selectedCount: selectedPackages,
+      totalCount: 4,
+      actionCount: packagesSignals.actions,
+      detail: `${selectedPackages}/4 packages selected; ${formatSignals(packagesSignals)}.`,
     },
     {
       id: "adaptive-memory",
-      title: "Adaptive Memory global",
+      title: "Adaptive Memory",
       screen: "adaptive-memory-detail",
       readiness: readinessForAdaptiveMemory(state, adaptiveSignals),
       selectedCount: state.adaptiveMemory.provider === "none" ? 0 : 1,
       totalCount: 1,
       actionCount: adaptiveSignals.actions,
-      detail: `Provider seleccionado: ${state.adaptiveMemory.provider}; ${formatSignals(adaptiveSignals)}.`,
-    },
-    {
-      id: "runner-ui-visual-helpers",
-      title: "Runner UI / visual helpers",
-      screen: "runner-ui-visual-helpers-detail",
-      readiness: readinessFromSignals(visualSignals),
-      selectedCount: selectedVisualHelpers,
-      totalCount: 1,
-      actionCount: visualSignals.actions,
-      detail: `Mermaid es requerido del runner; pi-hud es opcional y solo Pi; ${formatSignals(visualSignals)}.`,
+      detail: `Provider selected: ${state.adaptiveMemory.provider}; ${formatSignals(adaptiveSignals)}.`,
     },
     {
       id: "teams",
@@ -178,7 +167,7 @@ export function getDashboardSectionSummaries(state: PiRunnerDashboardState): Das
       selectedCount: selectedTeams,
       totalCount: Object.keys(state.teams).length,
       actionCount: teamSignals.actions,
-      detail: `${selectedTeams} team(s) seleccionados; ${formatSignals(teamSignals)}.`,
+      detail: `${selectedTeams} team(s) selected; ${formatSignals(teamSignals)}.`,
     },
     {
       id: "review-install",
@@ -188,16 +177,26 @@ export function getDashboardSectionSummaries(state: PiRunnerDashboardState): Das
       selectedCount: counts.total,
       totalCount: counts.total,
       actionCount: counts.total,
-      detail: `${counts.automatic} automáticas, ${counts.manual} manuales/pendientes, ${counts.config} config, ${counts.team} team, ${counts.validation} validación.`,
+      detail: `${counts.automatic} automatic, ${counts.manual} manual/pending, ${counts.config} config, ${counts.team} team, ${counts.validation} validation.`,
     },
   ];
 }
 
+/**
+ * Returns capability option summaries for the Packages section.
+ *
+ * Changes from previous version (REQ-DASH-001):
+ * - runner-mermaid is EXCLUDED — it is internal silent support, not user-selectable.
+ * - pi-hud remains (optional, Pi-only).
+ * REQ-DASH-003: Visual support appears only as minimal feedback in Review, not as a selectable capability.
+ */
 export function getRunnerCapabilitySummaries(state: PiRunnerDashboardState): CapabilityOptionSummary[] {
+  // REQ-DASH-001: runner-mermaid is NOT a user-selectable capability.
+  // Only configurable user-facing capabilities are listed here.
   const configurable: UserSelectableCapabilityId[] = ["rtk", "context-mode", "codebase-memory"];
-  const summaries = configurable.map((capabilityId) => capabilitySummary(state, capabilityId, Boolean(state.selectedCapabilities[capabilityId])));
-
-  summaries.push(capabilitySummary(state, "runner-mermaid", true));
+  const summaries = configurable.map((capabilityId) =>
+    capabilitySummary(state, capabilityId, Boolean(state.selectedCapabilities[capabilityId])),
+  );
 
   if (state.runnerScope === "pi") {
     summaries.push(capabilitySummary(state, "pi-hud", Boolean(state.selectedCapabilities["pi-hud"])));
@@ -219,23 +218,28 @@ export function getAdaptiveMemorySummary(state: PiRunnerDashboardState): Adaptiv
       { provider: "supermemory", selected: provider === "supermemory", label: "Supermemory" },
     ],
     detail: provider === "none"
-      ? "Sin memoria adaptativa activa por default."
+      ? "No adaptive memory active by default."
       : provider === "engram"
-        ? "Engram habilita la acción técnica engram-memory derivada."
-        : "Supermemory usa config no secreta y credenciales MCP redactadas.",
+        ? "Engram enables the derived engram-memory technical action."
+        : "Supermemory uses non-secret config and redacted MCP credentials.",
   };
 }
 
+/**
+ * Returns the capability consumption profile for a team.
+ *
+ * Changes from previous version (REQ-DASH-001, REQ-DASH-004):
+ * - runner-mermaid is removed from the consumption profile (internal silent support).
+ * - Developer Team is no longer blocked by runner-mermaid availability.
+ */
 export function getTeamCapabilityProfile(state: PiRunnerDashboardState, teamId: string): TeamCapabilityProfile {
   const team = state.teams[teamId];
-  const mermaidStatus = state.capabilityStatuses["runner-mermaid"];
-  const installable = !team?.selected || mermaidStatus === "ready";
+  const installable = Boolean(team?.selected); // No longer blocked by mermaid
 
   return {
     teamId,
     installable,
     capabilities: {
-      "runner-mermaid": "inherits-runner",
       "context-mode": state.selectedCapabilities["context-mode"] ? "compatible" : "not-used",
       "codebase-memory": state.selectedCapabilities["codebase-memory"] ? "consumes-directly" : "not-used",
       rtk: state.selectedCapabilities.rtk ? "compatible" : "not-used",
@@ -244,12 +248,33 @@ export function getTeamCapabilityProfile(state: PiRunnerDashboardState, teamId: 
     },
     diagnostics: installable
       ? []
-      : ["Developer Team hereda Mermaid del runner; resolver Mermaid antes de aplicar el team."],
+      : ["Select the team to proceed with installation."],
   };
 }
 
+/**
+ * Returns a summary for a single capability option.
+ *
+ * Fixes TypeScript error (Task 4 deferral): capability may be undefined for
+ * internal IDs like runner-mermaid. Added null check.
+ */
 function capabilitySummary(state: PiRunnerDashboardState, capabilityId: CapabilityId, selected: boolean): CapabilityOptionSummary {
   const capability = getPiRunnerCapability(capabilityId);
+  // Handle the case where capability is undefined (e.g., internal IDs like runner-mermaid
+  // are not returned by getPiRunnerCapability for user-facing lookups).
+  // This should not happen for user-facing IDs, but we guard against it.
+  if (!capability) {
+    return {
+      capabilityId,
+      label: capabilityId,
+      requirementLevel: "configurable",
+      selected,
+      status: state.capabilityStatuses[capabilityId] ?? "unknown",
+      runnerScope: state.runnerScope,
+      detail: `Capability '${capabilityId}' not found in user-facing catalog.`,
+    };
+  }
+
   const implementation = capability.implementations?.[state.runnerScope === "opencode" ? "opencode" : "pi"];
   const status = state.capabilityStatuses[capabilityId] ?? "unknown";
 
@@ -261,9 +286,7 @@ function capabilitySummary(state: PiRunnerDashboardState, capabilityId: Capabili
     status,
     runnerScope: capability.runnerScope,
     implementationId: implementation?.id,
-    detail: capabilityId === "runner-mermaid"
-      ? `Mermaid es requerido; implementación ${implementation?.id ?? "TBD"} para ${state.runnerScope}.`
-      : capability.description,
+    detail: capability.description,
   };
 }
 

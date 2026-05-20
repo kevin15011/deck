@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { getAgentContent, getTeamSessionInstructions } from "./content-registry";
+import {
+  VISUAL_EXPLANATIONS_REQUIRED_SNIPPETS,
+  VISUAL_EXPLANATIONS_FORBIDDEN_PHRASES,
+} from "./visual-explanations-content";
 
 const DEVELOPER_AGENT_IDS = [
   "deck-developer-orchestrator",
@@ -22,6 +26,13 @@ const REGISTRY_WRITER_AGENT_IDS = DEVELOPER_AGENT_IDS.filter(
 );
 
 const PLANNING_AGENT_IDS = [
+  "deck-developer-proposal",
+  "deck-developer-spec",
+  "deck-developer-design",
+  "deck-developer-task",
+] as const;
+
+const SDD_SUBAGENT_IDS = [
   "deck-developer-proposal",
   "deck-developer-spec",
   "deck-developer-design",
@@ -250,6 +261,66 @@ describe("getAgentContent", () => {
 
     const verify = getAgentContent("deck-developer-verify")!;
     expect(verify.agentBody).toContain("Verify Agent");
+  });
+
+  // -------------------------------------------------------------------------
+  // Visual explanations — REQ-VISUAL-001, REQ-VISUAL-002, REQ-VISUAL-003,
+  // REQ-VISUAL-004, REQ-OPENSPEC-002, REQ-TEAMINSTALL-002
+  // -------------------------------------------------------------------------
+
+  test("orchestrator skill includes visual explanations content (REQ-VISUAL-001, REQ-VISUAL-002)", () => {
+    const content = getAgentContent("deck-developer-orchestrator")!;
+    for (const snippet of VISUAL_EXPLANATIONS_REQUIRED_SNIPPETS) {
+      expect(content.skillBody, `missing: "${snippet}"`).toContain(snippet);
+    }
+  });
+
+  test("orchestrator skill has no Mermaid or config exposure (REQ-VISUAL-004)", () => {
+    const content = getAgentContent("deck-developer-orchestrator")!;
+    for (const phrase of VISUAL_EXPLANATIONS_FORBIDDEN_PHRASES) {
+      expect(content.skillBody, `forbidden phrase found: "${phrase}"`).not.toContain(phrase);
+    }
+  });
+
+  test("orchestrator skill contains non-authoritative guidance (REQ-VISUAL-003, REQ-OPENSPEC-002)", () => {
+    const content = getAgentContent("deck-developer-orchestrator")!;
+    expect(content.skillBody).toContain("not authoritative");
+    expect(content.skillBody).toContain("OpenSpec artifacts and Spec Registry remain authoritative");
+    expect(content.skillBody).toContain("Never alter approval state via visual");
+    expect(content.skillBody).toContain("Never introduce new requirements");
+    expect(content.skillBody).toContain("Never override registry status");
+  });
+
+  test("SDD subagent skills do NOT include visual explanations content (REQ-VISUAL-002, REQ-TEAMINSTALL-002)", () => {
+    for (const id of SDD_SUBAGENT_IDS) {
+      const content = getAgentContent(id)!;
+      expect(content.skillBody, `${id} should NOT contain visual explanations`).not.toContain(
+        "# Visual Explanations",
+      );
+      expect(content.skillBody, `${id} should NOT contain visual output rules`).not.toContain(
+        "## Visual Output Rules",
+      );
+      expect(content.skillBody, `${id} should NOT contain non-authoritative notice`).not.toContain(
+        "Non-Authoritative Notice",
+      );
+    }
+  });
+
+  test("all non-orchestrator agent skills do NOT include visual explanations content", () => {
+    const nonOrchestrator = DEVELOPER_AGENT_IDS.filter((id) => id !== "deck-developer-orchestrator");
+    for (const id of nonOrchestrator) {
+      const content = getAgentContent(id)!;
+      expect(content.skillBody, `${id} should NOT contain visual explanations`).not.toContain(
+        "# Visual Explanations",
+      );
+    }
+  });
+
+  test("orchestrator skill contains visual accessibility guidance", () => {
+    const content = getAgentContent("deck-developer-orchestrator")!;
+    expect(content.skillBody).toContain("Accessibility");
+    expect(content.skillBody).toContain("not rely on diagrams");
+    expect(content.skillBody).toContain("Visuals are supplemental to text");
   });
 });
 

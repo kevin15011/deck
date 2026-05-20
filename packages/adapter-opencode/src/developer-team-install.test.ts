@@ -121,12 +121,15 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
       const skillContent = orchestratorSkill.content;
       expect(skillContent).toContain("# Orchestrator Skill");
       expect(skillContent).toContain("SDD Workflow");
+      expect(skillContent).toContain("# Visual Explanations");
+      expect(skillContent).toContain("Visuals summarize, not replace");
 
-      // Explorer skill has real (non-placeholder) content
+      // Explorer skill has real (non-placeholder) content and does not receive Orchestrator-only visual guidance.
       const explorerSkill = plan.skills.find((s) => s.agent.id === "deck-developer-explorer")!;
       expect(explorerSkill.content).toContain("# Explorer Skill");
       expect(explorerSkill.content).toContain("Investigation Steps");
       expect(explorerSkill.content).not.toContain("Placeholder");
+      expect(explorerSkill.content).not.toContain("# Visual Explanations");
 
       // Explorer agent has real (non-placeholder) content
       const explorerAgent = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;

@@ -2,12 +2,15 @@ import {
   applyDeveloperTeamInstall,
   buildDeveloperTeamInstallPlan,
   getPiInstallableTool,
+  installInternalRunnerPackages,
   installPiTools,
   validateSupermemoryPiMcpConfig,
   writeSupermemoryPiMcpConfig,
   type DeveloperTeamApplyResult,
   type DeveloperTeamInstallPlan,
   type InstallablePiTool,
+  type InternalRunnerInstallResult,
+  type InternalRunnerPackageInstallAction,
   type PiToolInstallResult,
 } from "@deck/adapter-pi";
 import { writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
@@ -36,6 +39,7 @@ export type PiRunnerActionRunnerDependencies = {
   piMcpConfigPath?: string;
   piMcpHomeDir?: string;
   installPiTools?: typeof installPiTools;
+  installInternalRunnerPackages?: typeof installInternalRunnerPackages;
   writeDeckConfig?: typeof writeDeckConfig;
   writeSupermemoryPiMcpConfig?: typeof writeSupermemoryPiMcpConfig;
   validateSupermemoryPiMcpConfig?: typeof validateSupermemoryPiMcpConfig;
@@ -162,6 +166,12 @@ async function runPiPackageInstall(
   action: PiRunnerAction,
   dependencies: PiRunnerActionRunnerDependencies,
 ): Promise<PiRunnerActionRunResult> {
+  // Fix #1: Detect internal package install actions BEFORE the piCommand check.
+  // These actions are routed through installInternalRunnerPackages() (not buildInstallableTool()).
+  if (action.internalPackageId) {
+    return await runInternalPackageInstall(action, dependencies);
+  }
+
   if (!dependencies.piCommand) {
     return skippedResult(action, "Pi command is required to install Pi packages; run preflight or provide dependencies.piCommand before installation.");
   }
@@ -201,6 +211,67 @@ async function runPiPackageInstall(
     message: failed ? "Pi package install reported a failure." : `Installed ${tool.name} with pi install ${tool.source}.`,
     diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...installResults.flatMap((result) => result.message ? [result.message] : [])]),
     raw: redactRaw(installResults),
+  };
+}
+
+/**
+ * Runs internal runner package install actions via the dedicated executor.
+ *
+ * Fix #1: Internal package install actions (identified by `internalPackageId`) are routed
+ * here instead of through `buildInstallableTool()`, which only handles user-facing
+ * `PI_INSTALLABLE_TOOLS` entries. Preserves `visual_support_install_failed` error code
+ * on failure.
+ */
+async function runInternalPackageInstall(
+  action: PiRunnerAction,
+  dependencies: PiRunnerActionRunnerDependencies,
+): Promise<PiRunnerActionRunResult> {
+  // Build the internal install action from plan metadata.
+  // The plan action has internalPackageId + source (no toolId).
+  // source is typed as `npm:${string}` in the plan so this cast is always valid.
+  const installAction: InternalRunnerPackageInstallAction = {
+    packageId: action.internalPackageId!,
+    name: action.title,
+    source: (action.source as `npm:${string}`) ?? `npm:${action.internalPackageId}`,
+    installKind: "npm-package",
+    reason: action.diagnostics?.[0] ?? `${action.internalPackageId} is required but not installed.`,
+  };
+
+  const runner = dependencies.installInternalRunnerPackages ?? installInternalRunnerPackages;
+  const installResults = await runner(
+    dependencies.piCommand ?? undefined,
+    [installAction],
+    (result: InternalRunnerInstallResult) => {
+      dependencies.onActionResult?.({
+        actionId: action.id,
+        status: result.success ? "executed" : "failed",
+        message: result.success
+          ? `Installed visual explanation support with pi install ${result.packageId}.`
+          : "Visual explanation support install failed.",
+        diagnostics: result.message ? redactDiagnostics([result.message]) : [],
+        raw: redactRaw(result),
+      });
+    },
+  );
+
+  const result = installResults[0];
+  if (!result) {
+    return {
+      actionId: action.id,
+      status: "failed",
+      message: "Internal package installer returned no result.",
+      diagnostics: redactDiagnostics(action.diagnostics ?? []),
+    };
+  }
+
+  return {
+    actionId: action.id,
+    status: result.success ? "executed" : "failed",
+    message: result.success
+      ? "Installed visual explanation support."
+      : "Visual explanation support install failed.",
+    diagnostics: result.message ? redactDiagnostics([result.message]) : [],
+    raw: redactRaw(result),
   };
 }
 
@@ -433,9 +504,9 @@ function isSensitiveKey(key: string): boolean {
 function redact(value: string): string {
   return value
     .replace(/sk-sm-[A-Za-z0-9._~+/-]+/g, "[REDACTED]")
-    .replace(/(x-supermemory-api-key[\"'\s:=]+)[^\s\"'}]+/gi, "$1[REDACTED]")
-    .replace(/(api[-_]?key[\"'\s:=]+)[^\s\"'}]+/gi, "$1[REDACTED]")
-    .replace(/(token[\"'\s:=]+)[^\s\"'}]+/gi, "$1[REDACTED]")
+    .replace(/(x-supermemory-api-key["'\s:=]+)[^\s\"'}]+/gi, "$1[REDACTED]")
+    .replace(/(api[-_]?key["'\s:=]+)[^\s\"'}]+/gi, "$1[REDACTED]")
+    .replace(/(token["'\s:=]+)[^\s\"'}]+/gi, "$1[REDACTED]")
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]");
 }
 

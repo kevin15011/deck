@@ -1,5 +1,6 @@
 import {
-  getPiRunnerCapability,
+  ALL_PI_RUNNER_CAPABILITY_IDS,
+  getUserFacingCapability,
   type CapabilityId,
   type CapabilityImplementationId,
   type CapabilityStatus,
@@ -12,6 +13,11 @@ import {
   getPiPrerequisiteInstallableTools,
   type InstallablePiToolId,
 } from "./installation-plan";
+import {
+  detectInternalRunnerPackageStatus,
+  getInternalRunnerPackageInstallAction,
+  type InternalRunnerPackageId,
+} from "./internal-runner-packages";
 import type { PiRunnerCapabilityInventory } from "./capability-inventory";
 import type { PiRequiredToolsReview } from "./required-tools";
 
@@ -25,6 +31,8 @@ export type PiRunnerAction = {
   description?: string;
   capabilityId?: CapabilityId;
   toolId?: InstallablePiToolId;
+  /** Internal package identifier for automatic internal-package install actions. */
+  internalPackageId?: InternalRunnerPackageId;
   implementationId?: CapabilityImplementationId;
   source?: string;
   status: PiRunnerActionStatus;
@@ -56,8 +64,7 @@ export type PiRunnerReviewPlan = {
 
 type BuildPiRunnerReviewPlanState = {
   runnerScope?: RunnerScope;
-  selectedCapabilities?: Partial<Record<Exclude<CapabilityId, "runner-mermaid">, boolean>>;
-  requiredCapabilities?: Partial<Record<Extract<CapabilityId, "runner-mermaid">, true>>;
+  selectedCapabilities?: Partial<Record<CapabilityId, boolean>>;
   adaptiveMemory?: {
     provider?: AdaptiveMemoryProviderChoice;
     supermemory?: { configured?: boolean; hasToken?: boolean; userId?: string; teamId?: string; organizationId?: string };
@@ -86,6 +93,7 @@ export function buildPiRunnerReviewPlan(
 
   addPrerequisiteActions(groups, state.runtime?.toolsReview);
   addCapabilityActions(groups, diagnostics, state, inventory, runnerScope);
+  addInternalRunnerSupportActions(groups, state.runtime?.toolsReview, runnerScope);
   addAdaptiveMemoryActions(groups, diagnostics, state, state.runtime?.toolsReview);
   addTeamActions(groups, diagnostics, state, inventory);
   addValidationActions(groups);
@@ -133,10 +141,11 @@ function addCapabilityActions(
 ): void {
   const selectedCapabilities = state.selectedCapabilities ?? {};
 
-  for (const [capabilityId, selected] of Object.entries(selectedCapabilities) as [Exclude<CapabilityId, "runner-mermaid">, boolean][]) {
+  for (const [capabilityId, selected] of Object.entries(selectedCapabilities) as [CapabilityId, boolean][]) {
     if (!selected) continue;
     const entry = inventory[capabilityId];
-    const capability = getPiRunnerCapability(capabilityId);
+    const capability = getUserFacingCapability(capabilityId);
+    if (!capability) continue;
     const toolMetadata = getCapabilityToolMetadata(capabilityId);
     const installKind = toolMetadata?.installKind ?? capability.installKind;
     const toolId = toolMetadata?.toolId ?? capability.toolId;
@@ -163,43 +172,71 @@ function addCapabilityActions(
     groups.manualSteps.push(action);
     addCapabilityDiagnostic(diagnostics, capabilityId, entry.status, action.id, entry.diagnostics?.join(" ") ?? "");
   }
+}
 
-  if (state.requiredCapabilities?.["runner-mermaid"] ?? true) {
-    const entry = inventory["runner-mermaid"];
-    const status = entry?.status ?? (runnerScope === "pi" ? "pending-source" : "blocked");
+/**
+ * Handles internal runner support — automatic silent install or ready/not-checked feedback.
+ *
+ * Replaces the manual `runner-mermaid` pending-source flow with automatic
+ * internal package support actions (Fix #1).
+ *
+ * - Missing `pi-mermaid` → automatic install action titled "Install visual explanation support"
+ * - Present `pi-mermaid` → validation/ready feedback only
+ * - Absent review data → "not-checked" feedback only (no install action scheduled)
+ *
+ * Fix #1: Sets `internalPackageId` on the install action so the action-runner can route
+ * it through `installInternalRunnerPackages()` instead of `buildInstallableTool()`.
+ * Fix #2: Uses neutral `Validate visual explanation support` instead of Mermaid terminology.
+ *
+ * REQ-PIINSTALL-001, REQ-PIINSTALL-002, REQ-PIINSTALL-003.
+ */
+function addInternalRunnerSupportActions(
+  groups: PiRunnerReviewPlan["groups"],
+  review: PiRequiredToolsReview | undefined,
+  runnerScope: RunnerScope,
+): void {
+  if (runnerScope !== "pi") return;
 
-    if (status === "ready") {
-      groups.validations.push({
-        id: "capability.runner-mermaid.validate",
-        kind: "validate",
-        title: "Validate Mermaid runner capability",
-        description: "Mermaid is required and already satisfied for the selected runner.",
-        capabilityId: "runner-mermaid",
-        implementationId: entry?.implementationId as CapabilityImplementationId | undefined,
-        source: entry?.source,
-        status: "ready",
-        required: true,
-      });
-      return;
-    }
+  const packageId: InternalRunnerPackageId = "pi-mermaid";
+  const state = detectInternalRunnerPackageStatus(packageId, review);
 
-    const action = buildPendingSourceAction(
-      "runner-mermaid",
-      status,
-      entry?.source ?? "TBD",
-      (entry?.implementationId as CapabilityImplementationId | undefined) ?? (runnerScope === "pi" ? "pi-mermaid" : "TBD"),
-      true,
-    );
-    groups.manualSteps.push(action);
-    addCapabilityDiagnostic(
-      diagnostics,
-      "runner-mermaid",
-      status,
-      action.id,
-      runnerScope === "pi"
-        ? "Mermaid is required; pi-mermaid is the Pi implementation and source/detection are pending."
-        : "Mermaid is required; OpenCode implementation mapping is TBD.",
-    );
+  // Fix #4: When review data is absent, surface "not-checked" validation feedback
+  // rather than scheduling an install without evidence.
+  if (state.status === "ready" || state.status === "not-checked") {
+    const feedbackTitle = state.status === "ready"
+      ? "Validate visual explanation support"
+      : "Validate visual explanation support";
+    const feedbackDescription = state.status === "ready"
+      ? "Visual explanation support is required and already satisfied."
+      : "Could not verify visual explanation support — review data is not available.";
+    groups.validations.push({
+      id: "capability.runner-mermaid.validate",
+      kind: "validate",
+      title: feedbackTitle,
+      description: feedbackDescription,
+      capabilityId: "runner-mermaid",
+      // implementationId intentionally omitted — do not expose pi-mermaid in user-facing review
+      source: "npm:pi-mermaid",
+      status: "ready",
+      required: true,
+    });
+    return;
+  }
+
+  const installAction = getInternalRunnerPackageInstallAction(packageId, review);
+  if (installAction) {
+    groups.automaticInstalls.push({
+      id: `internal.${packageId}.install`,
+      kind: "install-pi-package",
+      title: "Install visual explanation support",
+      description: "Automatically installs visual explanation support.",
+      // Fix #1: Set internalPackageId so the action-runner routes this through
+      // installInternalRunnerPackages() instead of buildInstallableTool().
+      internalPackageId: packageId,
+      source: installAction.source,
+      status: "ready",
+      required: true,
+    });
   }
 }
 
@@ -296,6 +333,9 @@ function addTeamActions(
   const developerTeam = state.teams?.["developer-team"];
   if (!developerTeam?.selected) return;
 
+  // REQ-TEAMINSTALL-003: Developer Team must not be blocked by visual support status.
+  // runner-mermaid is handled silently via pi-mermaid internal runner packages.
+  // Only check user-facing unresolved capabilities.
   const unresolvedCapabilities = getUnresolvedTeamCapabilities(inventory);
   const blocked = unresolvedCapabilities.some((capabilityId) => inventory[capabilityId]?.status === "blocked");
 
@@ -308,23 +348,8 @@ function addTeamActions(
       : "Applies Developer Team agents/skills with existing model/thinking semantics.",
     status: unresolvedCapabilities.length === 0 ? "ready" : blocked ? "blocked" : "pending",
     required: true,
-    dependencies: ["runner-mermaid"],
     unresolvedCapabilities,
-    diagnostics: unresolvedCapabilities.length > 0
-      ? ["Developer Team depends on Mermaid runner capability; resolve pending/blocking capability actions first."]
-      : undefined,
   });
-
-  const mermaidStatus = inventory["runner-mermaid"]?.status;
-  if (mermaidStatus && mermaidStatus !== "ready") {
-    diagnostics.push({
-      code: "TEAM_CAPABILITY_UNSATISFIED",
-      severity: mermaidStatus === "blocked" ? "error" : "warning",
-      message: "Developer Team consumes runner capabilities while Mermaid remains unresolved for the runner.",
-      capabilityId: "runner-mermaid",
-      actionId: "team.developer-team.apply",
-    });
-  }
 }
 
 function addValidationActions(groups: PiRunnerReviewPlan["groups"]): void {
@@ -338,17 +363,17 @@ function addValidationActions(groups: PiRunnerReviewPlan["groups"]): void {
 }
 
 function buildManualExternalAction(capabilityId: CapabilityId, toolId: InstallablePiToolId | undefined, source: string | undefined): PiRunnerAction {
-  const capability = getPiRunnerCapability(capabilityId);
+  const capability = getUserFacingCapability(capabilityId);
   return {
     id: `capability.${capabilityId}.manual`,
     kind: "manual-external-install",
-    title: `Manual setup: ${capability.label}`,
-    description: capability.description,
+    title: `Manual setup: ${capability?.label ?? capabilityId}`,
+    description: capability?.description,
     capabilityId,
     toolId,
     source,
     status: "manual",
-    diagnostics: [`${capability.label} is external/manual; it is not treated as a failed automatic install.`],
+    diagnostics: [`${capability?.label ?? capabilityId} is external/manual; it is not treated as a failed automatic install.`],
   };
 }
 
@@ -359,22 +384,18 @@ function buildPendingSourceAction(
   implementationId: CapabilityImplementationId | undefined,
   required: boolean,
 ): PiRunnerAction {
-  const capability = getPiRunnerCapability(capabilityId);
+  const capability = getUserFacingCapability(capabilityId);
   return {
     id: `capability.${capabilityId}.pending-source`,
     kind: "pending-source",
-    title: `${capability.label}: source pending`,
-    description: capability.description,
+    title: `${capability?.label ?? capabilityId}: source pending`,
+    description: capability?.description,
     capabilityId,
     implementationId,
     source: source ?? "TBD",
     status: status === "blocked" ? "blocked" : "pending",
     required,
-    diagnostics: [
-      capabilityId === "runner-mermaid"
-        ? `Mermaid is required; ${implementationId ?? "TBD"} is the runner implementation placeholder.`
-        : `${capability.label} has no confirmed source/detector yet.`,
-    ],
+    diagnostics: [`${capability?.label ?? capabilityId} has no confirmed source/detector yet.`],
   };
 }
 
@@ -398,9 +419,20 @@ function getCapabilityToolMetadata(capabilityId: CapabilityId): CapabilityToolPl
   return getCapabilityInstallableToolMappings().find((mapping) => mapping.capabilityId === capabilityId);
 }
 
+/**
+ * Returns user-facing capability IDs that are unresolved.
+ * Excludes `runner-mermaid` — visual support is handled silently via
+ * internal runner packages (pi-mermaid), not as a blocking user-facing capability.
+ *
+ * REQ-TEAMINSTALL-003: Developer Team must not be blocked by visual support status.
+ */
 function getUnresolvedTeamCapabilities(inventory: PiRunnerCapabilityInventory): CapabilityId[] {
-  const requiredCapabilities: CapabilityId[] = ["runner-mermaid"];
-  return requiredCapabilities.filter((capabilityId) => {
+  const userFacingIds = ALL_PI_RUNNER_CAPABILITY_IDS.filter((id) => {
+    const entry = getUserFacingCapability(id);
+    return entry && entry.requirementLevel === "required";
+  });
+
+  return userFacingIds.filter((capabilityId) => {
     const status = inventory[capabilityId]?.status;
     return status !== "ready";
   });

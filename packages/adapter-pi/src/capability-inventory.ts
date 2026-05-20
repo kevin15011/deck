@@ -1,10 +1,18 @@
 import {
-  getPiRunnerCapability,
+  ALL_PI_RUNNER_CAPABILITY_IDS,
+  getUserFacingCapability,
   PI_RUNNER_CAPABILITY_IDS,
   type CapabilityId,
   type CapabilityStatus,
+  type InternalCapabilityId,
   type RunnerScope,
 } from "./capability-catalog";
+import {
+  detectInternalRunnerPackageStatus,
+  INTERNAL_RUNNER_PACKAGE_IDS,
+  type InternalRunnerPackageId,
+  type InternalRunnerPackageStatus,
+} from "./internal-runner-packages";
 import type { PiPreflightResult } from "./preflight";
 import {
   getCapabilityDetectorMappings,
@@ -23,44 +31,99 @@ export type PiRunnerCapabilityInventoryEntry = {
   diagnostics: string[];
 };
 
+/**
+ * Internal capability entry used for pi-mermaid detection via internal-runner-packages.
+ * These entries track internal/deprecated capabilities not shown in user-facing summaries.
+ */
+export type PiRunnerInternalCapabilityInventoryEntry = {
+  capabilityId: InternalCapabilityId;
+  status: "ready" | "missing" | "installing" | "installed" | "unchanged" | "skipped" | "updated" | "created" | "failed" | "conflict";
+  runnerScope: "pi";
+  installed: boolean;
+  implementationId: "pi-mermaid";
+  source: "npm:pi-mermaid";
+  diagnostics: string[];
+};
+
 export type PiRunnerCapabilityInventory = Partial<Record<CapabilityId, PiRunnerCapabilityInventoryEntry>>;
+
+/**
+ * Combined inventory including internal capabilities.
+ */
+export type PiRunnerFullCapabilityInventory = PiRunnerCapabilityInventory & {
+  _internal?: Partial<Record<InternalCapabilityId, PiRunnerInternalCapabilityInventoryEntry>>;
+};
 
 export type BuildPiRunnerCapabilityInventoryConfig = {
   runnerScope?: RunnerScope;
+  /** When true, also populates _internal with internal capability entries. */
+  includeInternal?: boolean;
 };
 
+/**
+ * Maps internal runner package IDs to internal capability IDs.
+ * pi-mermaid (package) maps to runner-mermaid (capability).
+ */
+const INTERNAL_PACKAGE_TO_CAPABILITY: Record<InternalRunnerPackageId, InternalCapabilityId> = {
+  "pi-mermaid": "runner-mermaid",
+};
+
+/**
+ * Maps an InternalRunnerPackageStatus to the subset that maps to inventory status.
+ */
+function toInternalCapabilityStatus(
+  status: InternalRunnerPackageStatus,
+): PiRunnerInternalCapabilityInventoryEntry["status"] {
+  // Map any terminal/in-progress status to the entry status union
+  switch (status) {
+    case "ready":
+    case "missing":
+    case "installing":
+    case "installed":
+    case "unchanged":
+    case "skipped":
+    case "updated":
+    case "created":
+    case "failed":
+    case "conflict":
+      return status;
+    // "not-checked" falls through — treat as missing for inventory purposes
+    case "not-checked":
+      return "missing";
+  }
+}
+
+/**
+ * Builds a user-facing capability inventory for the Pi runner dashboard.
+ *
+ * Changes from previous version (REQ-DASH-001):
+ * - `runner-mermaid` is no longer treated as `pending-source` or `blocked`.
+ * - Pi visual support is detected via `pi-mermaid` in internal-runner-packages.ts.
+ * - Internal capabilities are returned separately in `_internal` when `includeInternal: true`.
+ *
+ * @param review     - Preflight/required-tools review data.
+ * @param preflight  - Optional full preflight result for additional diagnostics.
+ * @param config     - Inventory build configuration.
+ */
 export function buildPiRunnerCapabilityInventory(
   review: PiRequiredToolsReview | undefined,
   _preflight?: PiPreflightResult,
   config: BuildPiRunnerCapabilityInventoryConfig = {},
-): PiRunnerCapabilityInventory {
+): PiRunnerFullCapabilityInventory {
   const runnerScope = config.runnerScope ?? "pi";
   const installedNames = buildInstalledNameSet(review);
   const detectorMappings = getCapabilityDetectorMappings();
-  const inventory: PiRunnerCapabilityInventory = {};
+  const inventory: PiRunnerFullCapabilityInventory = {};
+
+  // -----------------------------------------------------------------------
+  // User-facing capabilities (excludes internal/deprecated like runner-mermaid)
+  // -----------------------------------------------------------------------
 
   for (const capabilityId of PI_RUNNER_CAPABILITY_IDS) {
-    const capability = getPiRunnerCapability(capabilityId);
+    const capability = getUserFacingCapability(capabilityId);
 
+    if (!capability) continue;
     if (!isCapabilityInScope(capability.runnerScope, runnerScope)) continue;
-
-    if (capabilityId === "runner-mermaid") {
-      const implementation = runnerScope === "pi" ? capability.implementations?.pi : capability.implementations?.opencode;
-      inventory[capabilityId] = {
-        capabilityId,
-        runnerScope,
-        installed: false,
-        status: runnerScope === "pi" ? "pending-source" : "blocked",
-        source: implementation?.source ?? "TBD",
-        implementationId: implementation?.id ?? "TBD",
-        diagnostics: [
-          runnerScope === "pi"
-            ? "Mermaid is required for the Pi runner; pi-mermaid is the Pi implementation, but source/detection are pending."
-            : "Mermaid is required for this runner, but the OpenCode implementation mapping is TBD.",
-        ],
-      };
-      continue;
-    }
 
     if (capabilityId === "pi-hud") {
       inventory[capabilityId] = {
@@ -76,7 +139,11 @@ export function buildPiRunnerCapabilityInventory(
 
     const mapping = detectorMappings.find((entry) => entry.capabilityId === capabilityId);
     const installed = isCapabilityInstalled(capabilityId, installedNames, mapping?.detectorNames ?? []);
-    const status: CapabilityStatus = installed ? "ready" : capability.installKind === "external" ? "manual" : "missing";
+    const status: CapabilityStatus = installed
+      ? "ready"
+      : capability.installKind === "external"
+        ? "manual"
+        : "missing";
 
     inventory[capabilityId] = {
       capabilityId,
@@ -96,8 +163,39 @@ export function buildPiRunnerCapabilityInventory(
     };
   }
 
+  // -----------------------------------------------------------------------
+  // Internal capabilities (pi-mermaid detection via internal runner packages)
+  // REQ-PIINSTALL-001, REQ-PIINSTALL-002: delegate detection to internal-runner-packages.ts
+  // -----------------------------------------------------------------------
+
+  if (config.includeInternal && runnerScope === "pi") {
+    const internalEntries: PiRunnerFullCapabilityInventory["_internal"] = {};
+
+    for (const packageId of INTERNAL_RUNNER_PACKAGE_IDS) {
+      const state = detectInternalRunnerPackageStatus(packageId, review, _preflight);
+      const capabilityId = INTERNAL_PACKAGE_TO_CAPABILITY[packageId];
+      const mappedStatus = toInternalCapabilityStatus(state.status);
+
+      internalEntries[capabilityId] = {
+        capabilityId,
+        status: mappedStatus,
+        runnerScope: "pi",
+        installed: state.status === "ready",
+        implementationId: "pi-mermaid",
+        source: "npm:pi-mermaid",
+        diagnostics: state.diagnostics,
+      };
+    }
+
+    inventory._internal = internalEntries;
+  }
+
   return inventory;
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function buildInstalledNameSet(review: PiRequiredToolsReview | undefined): Set<string> {
   const values = [
@@ -110,7 +208,9 @@ function buildInstalledNameSet(review: PiRequiredToolsReview | undefined): Set<s
 }
 
 function isCapabilityInstalled(capabilityId: CapabilityId, installedNames: Set<string>, detectorNames: string[]): boolean {
-  const capability = getPiRunnerCapability(capabilityId);
+  const capability = getUserFacingCapability(capabilityId);
+  if (!capability) return false;
+
   const candidates = [
     capabilityId,
     capability.toolId,

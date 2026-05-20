@@ -3,6 +3,8 @@ import type { PiRunnerCapabilityInventory } from "@deck/adapter-pi";
 import { reduce } from "./reducer";
 import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan } from "./state";
 
+// REQ-DASH-001: runner-mermaid is internal, not in user-facing inventory
+// REQ-DASH-002: Packages section replaces Runner Capabilities + visual helpers
 const inventory: PiRunnerCapabilityInventory = {
   "context-mode": {
     capabilityId: "context-mode",
@@ -39,15 +41,6 @@ const inventory: PiRunnerCapabilityInventory = {
     source: "TBD",
     diagnostics: ["pi-hud pending"],
   },
-  "runner-mermaid": {
-    capabilityId: "runner-mermaid",
-    status: "pending-source",
-    runnerScope: "pi",
-    installed: false,
-    source: "TBD",
-    implementationId: "pi-mermaid",
-    diagnostics: ["pi-mermaid pending"],
-  },
 };
 
 function allActionIds(plan: PiRunnerReviewPlan | undefined): string[] {
@@ -61,9 +54,10 @@ describe("Pi Runner dashboard reducer", () => {
 
     state = reduce(state, { type: "set-capability", capabilityId: "rtk", selected: true });
     state = reduce(state, { type: "set-team-selected", teamId: "developer-team", selected: true });
-    state = reduce(state, { type: "navigate", screen: "runner-capabilities-detail" });
+    // REQ-DASH-002: packages-detail replaces runner-capabilities-detail
+    state = reduce(state, { type: "navigate", screen: "packages-detail" });
 
-    expect(state.screen).toBe("runner-capabilities-detail");
+    expect(state.screen).toBe("packages-detail");
     expect(state.backStack).toEqual(["dashboard"]);
 
     state = reduce(state, { type: "back" });
@@ -92,8 +86,9 @@ describe("Pi Runner dashboard reducer", () => {
 
   test("cursor se limita por sección", () => {
     let state = createDefaultPiRunnerDashboardState();
+    // REQ-DASH-002: Dashboard has 4 sections (not 5 — Runner Capabilities + visual helpers merged into Packages)
     state = reduce(state, { type: "cursor", cursor: 99 });
-    expect(state.cursor).toBe(4);
+    expect(state.cursor).toBe(3);
 
     state = reduce(state, { type: "navigate", screen: "adaptive-memory-detail" });
     state = reduce(state, { type: "cursor", cursor: 99 });

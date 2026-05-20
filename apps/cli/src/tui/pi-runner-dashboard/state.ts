@@ -5,6 +5,7 @@ import type {
   DeveloperTeamModelAssignments,
   DeveloperTeamThinkingAssignments,
   InstallablePiToolId,
+  InternalRunnerPackageId,
   PiPreflightResult,
   PiRequiredToolsReview,
   RunnerScope,
@@ -13,9 +14,8 @@ import type {
 
 export type PiRunnerDashboardScreen =
   | "dashboard"
-  | "runner-capabilities-detail"
+  | "packages-detail"
   | "adaptive-memory-detail"
-  | "runner-ui-visual-helpers-detail"
   | "teams-detail"
   | "developer-team-detail"
   | "review-plan"
@@ -24,9 +24,8 @@ export type PiRunnerDashboardScreen =
 
 export const PI_RUNNER_DASHBOARD_SCREENS: PiRunnerDashboardScreen[] = [
   "dashboard",
-  "runner-capabilities-detail",
+  "packages-detail",
   "adaptive-memory-detail",
-  "runner-ui-visual-helpers-detail",
   "teams-detail",
   "developer-team-detail",
   "review-plan",
@@ -36,9 +35,12 @@ export const PI_RUNNER_DASHBOARD_SCREENS: PiRunnerDashboardScreen[] = [
 
 export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
 
+/**
+ * User-selectable capability IDs for the Packages section.
+ * Excludes runner-mermaid (internal silent support, not user-configurable).
+ * REQ-DASH-001: Mermaid is not a configurable dashboard capability.
+ */
 export type UserSelectableCapabilityId = Exclude<CapabilityId, "runner-mermaid">;
-
-export type RequiredRunnerCapabilityId = Extract<CapabilityId, "runner-mermaid">;
 
 export type SupermemorySetupValues = {
   userId?: string;
@@ -68,7 +70,6 @@ export type PiRunnerDashboardState = {
   cursor: number;
   runnerScope: RunnerScope;
   selectedCapabilities: Partial<Record<UserSelectableCapabilityId, boolean>>;
-  requiredCapabilities: Partial<Record<RequiredRunnerCapabilityId, true>>;
   capabilityStatuses: Partial<Record<CapabilityId, CapabilityStatus>>;
   adaptiveMemory: {
     provider: AdaptiveMemoryProviderChoice;
@@ -88,6 +89,13 @@ export type PiRunnerDashboardState = {
 
 export type PiRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
 
+/**
+ * Action produced by the Pi Runner review plan.
+ *
+ * Fix #1: `internalPackageId` is set on automatic install actions for internal
+ * runner packages (pi-mermaid) to signal the action-runner to route execution
+ * through `installInternalRunnerPackages()` instead of `buildInstallableTool()`.
+ */
 export type PiRunnerAction = {
   id: string;
   kind: TechnicalActionKind;
@@ -95,6 +103,8 @@ export type PiRunnerAction = {
   description?: string;
   capabilityId?: CapabilityId;
   toolId?: InstallablePiToolId;
+  /** Fix #1: Identifies internal package install actions for the action-runner executor. */
+  internalPackageId?: InternalRunnerPackageId;
   implementationId?: CapabilityImplementationId;
   source?: string;
   status: PiRunnerActionStatus;
@@ -153,6 +163,15 @@ export const DEFAULT_PI_RUNNER_REVIEW_PLAN: PiRunnerReviewPlan = {
   ready: false,
 };
 
+/**
+ * Default state for the Pi Runner dashboard.
+ *
+ * Changes from previous version (REQ-DASH-001, REQ-DASH-002):
+ * - Removed `runner-mermaid` from requiredCapabilities (internal silent support).
+ * - Replaced `runner-capabilities-detail` and `runner-ui-visual-helpers-detail` screens
+ *   with `packages-detail` (REQ-DASH-002: Packages grouping).
+ * - Dashboard sections are now: Packages, Adaptive Memory, Teams, Review & Install.
+ */
 export const DEFAULT_PI_RUNNER_DASHBOARD_STATE: PiRunnerDashboardState = {
   screen: "dashboard",
   backStack: [],
@@ -163,9 +182,6 @@ export const DEFAULT_PI_RUNNER_DASHBOARD_STATE: PiRunnerDashboardState = {
     "codebase-memory": false,
     rtk: false,
     "pi-hud": false,
-  },
-  requiredCapabilities: {
-    "runner-mermaid": true,
   },
   capabilityStatuses: {},
   adaptiveMemory: {
@@ -194,10 +210,6 @@ export function createDefaultPiRunnerDashboardState(
     selectedCapabilities: {
       ...DEFAULT_PI_RUNNER_DASHBOARD_STATE.selectedCapabilities,
       ...overrides.selectedCapabilities,
-    },
-    requiredCapabilities: {
-      ...DEFAULT_PI_RUNNER_DASHBOARD_STATE.requiredCapabilities,
-      ...overrides.requiredCapabilities,
     },
     capabilityStatuses: {
       ...DEFAULT_PI_RUNNER_DASHBOARD_STATE.capabilityStatuses,

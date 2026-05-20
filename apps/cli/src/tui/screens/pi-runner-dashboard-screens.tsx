@@ -22,14 +22,26 @@ type PiRunnerDashboardScreensProps = {
   runBlockDiagnostics?: DashboardRunDiagnostic[];
 };
 
+/**
+ * Pi Runner Dashboard Screens.
+ *
+ * Fix #2: User-facing copy uses neutral "visual explanation support" terminology.
+ * Mermaid/pi-mermaid is NOT mentioned in dashboard overview, packages section,
+ * or validation feedback titles. "npm:pi-mermaid" appears only as source/diagnostic
+ * metadata in action objects, not in rendered text.
+ *
+ * Changes (REQ-DASH-001, REQ-DASH-002, REQ-DASH-003):
+ * - Removed `runner-capabilities-detail` and `runner-ui-visual-helpers-detail` screens.
+ * - Added `packages-detail` screen as the Packages section.
+ * - Visual explanation support is NOT presented as a configurable option.
+ * - Visual support appears only as minimal install feedback in the Review & Install section.
+ */
 export function PiRunnerDashboardScreens({ state, installResults = [], completionStatus, canRunPlan, runBlockDiagnostics = [] }: PiRunnerDashboardScreensProps) {
   switch (state.screen) {
-    case "runner-capabilities-detail":
-      return <RunnerCapabilitiesDetail state={state} />;
+    case "packages-detail":
+      return <PackagesDetail state={state} />;
     case "adaptive-memory-detail":
       return <AdaptiveMemoryDetail state={state} />;
-    case "runner-ui-visual-helpers-detail":
-      return <RunnerVisualHelpersDetail state={state} />;
     case "teams-detail":
       return <TeamsDetail state={state} />;
     case "developer-team-detail":
@@ -50,15 +62,15 @@ function DashboardOverview({ state }: { state: PiRunnerDashboardState }) {
   const sections = getDashboardSectionSummaries(state);
   return (
     <Box flexDirection="column">
-      <Text bold>Pi Runner Capability Dashboard</Text>
-      <Text dimColor>Dashboard por secciones: capacidades, memoria, helpers visuales, teams y revisión final.</Text>
+      <Text bold>Pi Runner Setup Dashboard</Text>
+      <Text dimColor>Configure runner packages, Adaptive Memory, Teams and Review &amp; Install.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={state.cursor}
           items={sections.map((section) => ({
             id: section.id,
             label: section.title,
-            hint: `${readinessLabel(section.readiness)} · ${section.detail} · acciones: ${section.actionCount}`,
+            hint: `${readinessLabel(section.readiness)} · ${section.detail} · actions: ${section.actionCount}`,
           }))}
         />
       </Box>
@@ -66,15 +78,19 @@ function DashboardOverview({ state }: { state: PiRunnerDashboardState }) {
   );
 }
 
-function RunnerCapabilitiesDetail({ state }: { state: PiRunnerDashboardState }) {
+/**
+ * Packages section — replaces the old Runner Capabilities + Runner UI/visual helpers.
+ * Fix #2: Mermaid/visual-support is NOT mentioned in user-facing copy.
+ * REQ-DASH-002: Groups user-facing package choices under Packages.
+ */
+function PackagesDetail({ state }: { state: PiRunnerDashboardState }) {
   const capabilities = getRunnerCapabilitySummaries(state);
-  const toggleable = capabilities.filter((capability) => capability.requirementLevel === "configurable");
-  const mermaid = capabilities.find((capability) => capability.capabilityId === "runner-mermaid");
+  const toggleable = capabilities.filter((capability) => capability.requirementLevel === "configurable" || capability.requirementLevel === "optional");
 
   return (
     <Box flexDirection="column">
-      <Text bold>Runner Capabilities globales</Text>
-      <Text dimColor>Decisiones por capacidad; no por paquete. Space alterna solo configurables.</Text>
+      <Text bold>Packages</Text>
+      <Text dimColor>Select packages to install or configure. Space toggles configurable and optional packages.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={state.cursor}
@@ -84,16 +100,10 @@ function RunnerCapabilitiesDetail({ state }: { state: PiRunnerDashboardState }) 
               label: `${capability.selected ? "[x]" : "[ ]"} ${capability.label}`,
               hint: `${statusLabel(capability.status)} · ${capability.detail}`,
             })),
-            { id: "back", label: "Volver al dashboard", hint: "Conserva selecciones" },
+            { id: "back", label: "Back to dashboard", hint: "Preserves selections" },
           ]}
         />
       </Box>
-      {mermaid ? (
-        <Box marginTop={1} flexDirection="column">
-          <Text color="yellow">Mermaid: required/no toggleable · estado {statusLabel(mermaid.status)}</Text>
-          <Text dimColor>{mermaid.detail} Source: TBD; no se presenta como paquete opcional.</Text>
-        </Box>
-      ) : null}
     </Box>
   );
 }
@@ -103,8 +113,8 @@ function AdaptiveMemoryDetail({ state }: { state: PiRunnerDashboardState }) {
   const supermemory = state.adaptiveMemory.supermemory;
   return (
     <Box flexDirection="column">
-      <Text bold>Adaptive Memory global</Text>
-      <Text dimColor>Single-choice exacto: None, Engram o Supermemory. Default: None.</Text>
+      <Text bold>Adaptive Memory</Text>
+      <Text dimColor>Single-choice: None, Engram or Supermemory. Default: None.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={state.cursor}
@@ -112,54 +122,24 @@ function AdaptiveMemoryDetail({ state }: { state: PiRunnerDashboardState }) {
             ...summary.options.map((option) => ({
               id: option.provider,
               label: `${option.selected ? "(●)" : "( )"} ${option.label}`,
-              hint: option.selected ? "seleccionado" : "Enter para seleccionar",
+              hint: option.selected ? "selected" : "Enter to select",
             })),
-            { id: "back", label: "Volver al dashboard", hint: "Memoria auxiliar; OpenSpec/Registry siguen siendo autoridad" },
+            { id: "back", label: "Back to dashboard", hint: "Adaptive memory is auxiliary; OpenSpec/Registry remain authoritative" },
           ]}
         />
       </Box>
       <Box marginTop={1} flexDirection="column">
-        <Text>Provider activo: <Text color="cyan">{summary.provider}</Text></Text>
+        <Text>Active provider: <Text color="cyan">{summary.provider}</Text></Text>
         <Text>{redactSecretText(summary.detail)}</Text>
         {state.adaptiveMemory.status ? <Text>{redactSecretText(state.adaptiveMemory.status)}</Text> : null}
         {summary.provider === "supermemory" ? (
           <>
-            <Text color="yellow">Supermemory: configurar identidad no secreta; token fuera de .deck/config.json y siempre redactado.</Text>
-            <Text>Configuración: {supermemory?.configured ? "lista" : "pendiente"}; token Pi MCP: {supermemory?.hasToken ? "recibido/redactado" : "pendiente"}</Text>
-            <Text>User ID: {supermemory?.userId ? redactSecretText(supermemory.userId) : "pendiente"}</Text>
-            {supermemory?.diagnostics?.length ? <Text>Diagnósticos: {supermemory.diagnostics.map(redactSecretText).join("; ")}</Text> : null}
+            <Text color="yellow">Supermemory: configure non-secret identity; token outside .deck/config.json and always redacted.</Text>
+            <Text>Config: {supermemory?.configured ? "ready" : "pending"}; token Pi MCP: {supermemory?.hasToken ? "received/redacted" : "pending"}</Text>
+            <Text>User ID: {supermemory?.userId ? redactSecretText(supermemory.userId) : "pending"}</Text>
+            {supermemory?.diagnostics?.length ? <Text>Diagnostics: {supermemory.diagnostics.map(redactSecretText).join("; ")}</Text> : null}
           </>
         ) : null}
-      </Box>
-    </Box>
-  );
-}
-
-function RunnerVisualHelpersDetail({ state }: { state: PiRunnerDashboardState }) {
-  const capabilities = getRunnerCapabilitySummaries(state);
-  const mermaid = capabilities.find((capability) => capability.capabilityId === "runner-mermaid");
-  const piHud = capabilities.find((capability) => capability.capabilityId === "pi-hud");
-
-  return (
-    <Box flexDirection="column">
-      <Text bold>Runner UI / visual helpers</Text>
-      <Text dimColor>Mermaid es requisito obligatorio del runner; pi-hud es opcional Pi-only.</Text>
-      <Box marginTop={1}>
-        <MenuList
-          cursor={state.cursor}
-          items={[
-            {
-              id: "pi-hud",
-              label: `${piHud?.selected ? "[x]" : "[ ]"} pi-hud`,
-              hint: `${statusLabel(piHud?.status ?? "unknown")} · optional · Pi-only · source/detection pending`,
-            },
-            { id: "back", label: "Volver al dashboard", hint: "Sin instalar helpers pendientes automáticamente" },
-          ]}
-        />
-      </Box>
-      <Box marginTop={1} flexDirection="column">
-        <Text color="yellow">Mermaid required/no toggleable · estado {statusLabel(mermaid?.status ?? "unknown")}</Text>
-        <Text dimColor>Implementación Pi: {mermaid?.implementationId ?? "pi-mermaid"}; source TBD; no es paquete opcional.</Text>
       </Box>
     </Box>
   );
@@ -171,7 +151,7 @@ function TeamsDetail({ state }: { state: PiRunnerDashboardState }) {
   return (
     <Box flexDirection="column">
       <Text bold>Teams</Text>
-      <Text dimColor>Developer Team se selecciona desde Teams y reutiliza la configuración de modelos existente.</Text>
+      <Text dimColor>Developer Team is selected from Teams and reuses existing model configuration.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={state.cursor}
@@ -179,14 +159,14 @@ function TeamsDetail({ state }: { state: PiRunnerDashboardState }) {
             {
               id: "developer-team-toggle",
               label: `${team?.selected ? "[x]" : "[ ]"} Developer Team`,
-              hint: profile.installable ? "compatibilidad: lista o no seleccionada" : "compatibilidad: requiere resolver Mermaid/capabilities",
+              hint: profile.installable ? "ready" : "requires configuration",
             },
             {
               id: "developer-team-detail",
-              label: "Abrir Developer Team detail",
-              hint: "Configurar modelos por agente y ver consumo",
+              label: "Open Developer Team detail",
+              hint: "Configure models per agent and view consumption",
             },
-            { id: "back", label: "Volver al dashboard", hint: "Conserva team y modelos" },
+            { id: "back", label: "Back to dashboard", hint: "Preserves team and models" },
           ]}
         />
       </Box>
@@ -201,17 +181,17 @@ function DeveloperTeamDetail({ state }: { state: PiRunnerDashboardState }) {
   return (
     <Box flexDirection="column">
       <Text bold>Developer Team detail</Text>
-      <Text>Seleccionado: <Text color={team?.selected ? "green" : "yellow"}>{team?.selected ? "sí" : "no"}</Text></Text>
-      <Text>Adaptive Memory recibido del dashboard: <Text color="cyan">{state.adaptiveMemory.provider}</Text></Text>
-      <Text dimColor>Provider/model/thinking se configuran con las pantallas existentes; semántica sin cambios.</Text>
+      <Text>Selected: <Text color={team?.selected ? "green" : "yellow"}>{team?.selected ? "yes" : "no"}</Text></Text>
+      <Text>Adaptive Memory from dashboard: <Text color="cyan">{state.adaptiveMemory.provider}</Text></Text>
+      <Text dimColor>Provider/model/thinking configured with existing screens; semantics unchanged.</Text>
       {team?.status ? <Text color="green">{team.status}</Text> : null}
       <Box marginTop={1}>
         <MenuList
           cursor={state.cursor}
           items={[
-            { id: "configure-models", label: "Configurar modelos por agente", hint: "Reutiliza flujo existente" },
-            { id: "defaults", label: "Usar modelos actuales/defaults", hint: "No modifica semántica" },
-            { id: "back", label: "Volver a Teams", hint: "Conserva selección" },
+            { id: "configure-models", label: "Configure models per agent", hint: "Reuses existing flow" },
+            { id: "defaults", label: "Use current/default models", hint: "Does not modify semantics" },
+            { id: "back", label: "Back to Teams", hint: "Preserves selection" },
           ]}
         />
       </Box>
@@ -220,37 +200,44 @@ function DeveloperTeamDetail({ state }: { state: PiRunnerDashboardState }) {
   );
 }
 
+/**
+ * Review & Install screen — shows minimal visual support feedback only.
+ * Fix #2: `implementationId` is not rendered for internal actions.
+ * User-facing feedback uses neutral "visual explanation support" language.
+ * Technical `npm:pi-mermaid` appears only in action.source field, not as rendered title.
+ * REQ-DASH-003: Visual support appears only as minimal install/review feedback.
+ */
 function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { state: PiRunnerDashboardState; canRunPlan?: boolean; runBlockDiagnostics?: DashboardRunDiagnostic[] }) {
   const plan = state.plan;
   const counts = getPlanActionCounts(plan);
   const canRun = canRunPlan ?? canRunPlanFromState(state);
   return (
     <Box flexDirection="column">
-      <Text bold>Review & Install</Text>
-      <Text dimColor>Plan agrupado; manuales y pendientes no se muestran como instalación automática lista.</Text>
+      <Text bold>Review &amp; Install</Text>
+      <Text dimColor>Grouped plan; manual and pending steps are not shown as automatic install ready.</Text>
       <Text>Readiness: <Text color={plan?.ready ? "green" : "yellow"}>{plan?.ready ? "ready" : "unresolved/manual/pending"}</Text></Text>
-      <Text>Acciones: {counts.automatic} automáticas, {counts.manual} manuales/pendientes, {counts.config} config, {counts.team} team, {counts.validation} validación.</Text>
+      <Text>Actions: {counts.automatic} automatic, {counts.manual} manual/pending, {counts.config} config, {counts.team} team, {counts.validation} validation.</Text>
       <Box marginTop={1} flexDirection="column">
-        <ActionGroup title="Instalaciones automáticas" actions={plan?.groups.automaticInstalls ?? []} />
-        <ActionGroup title="Pasos manuales / pendientes" actions={plan?.groups.manualSteps ?? []} />
-        <ActionGroup title="Escritura de configuración" actions={plan?.groups.configWrites ?? []} />
-        <ActionGroup title="Aplicación de team" actions={plan?.groups.teamApplications ?? []} />
-        <ActionGroup title="Validación" actions={plan?.groups.validations ?? []} />
+        <ActionGroup title="Automatic installs" actions={plan?.groups.automaticInstalls ?? []} />
+        <ActionGroup title="Manual / pending steps" actions={plan?.groups.manualSteps ?? []} />
+        <ActionGroup title="Config writes" actions={plan?.groups.configWrites ?? []} />
+        <ActionGroup title="Team applications" actions={plan?.groups.teamApplications ?? []} />
+        <ActionGroup title="Validation" actions={plan?.groups.validations ?? []} />
       </Box>
       {plan?.diagnostics.length ? (
         <Box marginTop={1} flexDirection="column">
-          <Text bold>Diagnósticos</Text>
+          <Text bold>Diagnostics</Text>
           {plan.diagnostics.map((diagnostic) => <Text key={`${diagnostic.code}:${diagnostic.message}`}>  {diagnostic.severity}: {redactSecretText(diagnostic.message)}</Text>)}
         </Box>
       ) : null}
       {!canRun && runBlockDiagnostics.length ? (
         <Box marginTop={1} flexDirection="column">
-          <Text bold>Bloqueos de ejecución</Text>
+          <Text bold>Execution blocks</Text>
           {runBlockDiagnostics.map((diagnostic) => <Text key={diagnostic.message} color="yellow">  {redactSecretText(diagnostic.message)}</Text>)}
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <MenuList cursor={state.cursor} items={[{ id: "run", label: canRun ? "Run executable actions" : "Configurar Supermemory antes de ejecutar", hint: canRun ? undefined : "Resolver configuración/diagnósticos de Supermemory antes de ejecutar" }, { id: "back", label: "Volver a editar" }, { id: "dashboard", label: "Dashboard" }]} />
+        <MenuList cursor={state.cursor} items={[{ id: "run", label: canRun ? "Run executable actions" : "Configure Supermemory before running", hint: canRun ? undefined : "Resolve Supermemory configuration before running" }, { id: "back", label: "Back to edit" }, { id: "dashboard", label: "Dashboard" }]} />
       </Box>
     </Box>
   );
@@ -260,8 +247,8 @@ function InstallProgressScreen({ results }: { state: PiRunnerDashboardState; res
   return (
     <Box flexDirection="column">
       <Text bold>Install progress</Text>
-      <Text dimColor>Ejecutando acciones automáticas/config/team/validación; manuales y pending-source quedan informativas.</Text>
-      {results.length === 0 ? <Text>Preparando ejecución...</Text> : results.map((result) => (
+      <Text dimColor>Executing automatic/config/team/validation actions; manual and pending-source remain informational.</Text>
+      {results.length === 0 ? <Text>Preparing execution...</Text> : results.map((result) => (
         <Text key={result.actionId}>  {result.status}: {result.actionId} — {redactSecretText(result.message)}</Text>
       ))}
     </Box>
@@ -271,27 +258,37 @@ function InstallProgressScreen({ results }: { state: PiRunnerDashboardState; res
 function DashboardCompleteScreen({ results, completionStatus }: { results: PiRunnerActionRunResult[]; completionStatus?: string }) {
   return (
     <Box flexDirection="column">
-      <Text bold>Pi Runner dashboard complete</Text>
-      <Text dimColor>Resumen con diagnósticos redactados; secretos de Supermemory no se muestran.</Text>
-      {results.length === 0 ? <Text>No se ejecutaron acciones.</Text> : results.map((result) => (
+      <Text bold>Pi Runner setup complete</Text>
+      <Text dimColor>Summary with redacted diagnostics; Supermemory secrets not shown.</Text>
+      {results.length === 0 ? <Text>No actions executed.</Text> : results.map((result) => (
         <Box key={result.actionId} flexDirection="column">
           <Text>  {result.status}: {result.actionId} — {redactSecretText(result.message)}</Text>
           {result.diagnostics.map((diagnostic, index) => (
-            <Text key={`${result.actionId}:diagnostic:${index}`} dimColor>    diagnóstico: {redactSecretText(diagnostic)}</Text>
+            <Text key={`${result.actionId}:diagnostic:${index}`} dimColor>    diagnostic: {redactSecretText(diagnostic)}</Text>
           ))}
         </Box>
       ))}
-      <Box marginTop={1}><Text dimColor>{redactSecretText(completionStatus ?? "Enter para continuar.")}</Text></Box>
+      <Box marginTop={1}><Text dimColor>{redactSecretText(completionStatus ?? "Enter to continue.")}</Text></Box>
     </Box>
   );
 }
 
+/**
+ * Renders an action group.
+ *
+ * Fix #2: `implementationId` is hidden for internal actions (those with `internalPackageId`
+ * or `id` starting with `internal.`) in the rendered output. Internal actions are shown
+ * with neutral titles only — no implementationId is revealed in the user-facing summary.
+ */
 function ActionGroup({ title, actions }: { title: string; actions: PiRunnerAction[] }) {
   return (
     <Box flexDirection="column">
       <Text bold>{title}</Text>
       {actions.length === 0 ? <Text dimColor>  none</Text> : actions.map((action) => (
-        <Text key={action.id}>  {action.status} · {action.kind} · {action.title}{action.implementationId ? ` (${action.implementationId})` : ""}</Text>
+        <Text key={action.id}>
+          {"  "}{action.status} · {action.kind} · {action.title}
+          {action.implementationId && !isInternalAction(action) ? ` (${action.implementationId})` : ""}
+        </Text>
       ))}
     </Box>
   );
@@ -300,13 +297,24 @@ function ActionGroup({ title, actions }: { title: string; actions: PiRunnerActio
 function CapabilityConsumption({ profile }: { profile: ReturnType<typeof getTeamCapabilityProfile> }) {
   return (
     <Box marginTop={1} flexDirection="column">
-      <Text bold>Consumo/compatibilidad explícita</Text>
+      <Text bold>Explicit consumption/compatibility</Text>
       {Object.entries(profile.capabilities).map(([capability, consumption]) => (
         <Text key={capability}>  {capability}: {consumption}</Text>
       ))}
       {profile.diagnostics.map((diagnostic) => <Text key={diagnostic} color="yellow">  {redactSecretText(diagnostic)}</Text>)}
     </Box>
   );
+}
+
+/**
+ * Returns true for internal package install actions where implementationId
+ * should not be shown in user-facing output.
+ *
+ * Fix #2: Hides implementationId (pi-mermaid) for internal actions — technical
+ * metadata is preserved in the action object but not rendered in the dashboard.
+ */
+function isInternalAction(action: PiRunnerAction): boolean {
+  return Boolean(action.internalPackageId) || action.id.startsWith("internal.") || action.id.startsWith("capability.runner-mermaid");
 }
 
 function readinessLabel(readiness: string): string {
@@ -335,9 +343,9 @@ function canRunPlanFromState(state: PiRunnerDashboardState): boolean {
 
 function redactSecretText(value: string): string {
   return value
-    .replace(/(x-supermemory-api-key[\"'\s:=]+)[^\s\"'}]+/gi, "$1[redacted]")
-    .replace(/(api[-_]?key[\"'\s:=]+)[^\s\"'}]+/gi, "$1[redacted]")
-    .replace(/(token[\"'\s:=]+)[^\s\"'}]+/gi, "$1[redacted]")
+    .replace(/(x-supermemory-api-key["'\s:=]+)[^\s"'}]+/gi, "$1[redacted]")
+    .replace(/(api[-_]?key["'\s:=]+)[^\s"'}]+/gi, "$1[redacted]")
+    .replace(/(token["'\s:=]+)[^\s"'}]+/gi, "$1[redacted]")
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
     .replace(/sk-sm-[A-Za-z0-9._~+/-]+/gi, "[redacted]");
 }

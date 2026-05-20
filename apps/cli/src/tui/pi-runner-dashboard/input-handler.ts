@@ -12,17 +12,21 @@ export type PiRunnerDashboardContinueEffect =
   | { type: "complete-dashboard" }
   | { type: "none" };
 
+/**
+ * Returns the toggle action for the current cursor position.
+ *
+ * Changes from previous version (REQ-DASH-001, REQ-DASH-002):
+ * - Removed runner-ui-visual-helpers-detail handling (visual helpers section removed).
+ * - Runner Capabilities detail renamed to packages-detail.
+ * REQ-DASH-003: Visual support is internal; no toggleable Mermaid option.
+ */
 export function getPiRunnerDashboardToggleAction(
   state: PiRunnerDashboardState,
 ): PiRunnerDashboardAction | undefined {
-  if (state.screen === "runner-capabilities-detail") {
-    const capabilities = ["rtk", "context-mode", "codebase-memory"] as const;
+  if (state.screen === "packages-detail") {
+    const capabilities = ["rtk", "context-mode", "codebase-memory", "pi-hud"] as const;
     const capabilityId = capabilities[state.cursor];
     return capabilityId ? { type: "toggle-capability", capabilityId } : undefined;
-  }
-
-  if (state.screen === "runner-ui-visual-helpers-detail" && state.cursor === 0) {
-    return { type: "toggle-capability", capabilityId: "pi-hud" };
   }
 
   if (state.screen === "teams-detail" && state.cursor === 0) {
@@ -45,8 +49,9 @@ export function getPiRunnerDashboardContinueEffect(
     return { type: "dispatch", action: { type: "navigate", screen: section.screen } };
   }
 
-  if (state.screen === "runner-capabilities-detail") {
-    if (state.cursor >= 3) return { type: "dispatch", action: { type: "go-dashboard" } };
+  if (state.screen === "packages-detail") {
+    // 0=rtk, 1=context-mode, 2=codebase-memory, 3=pi-hud, 4=back
+    if (state.cursor === 4) return { type: "dispatch", action: { type: "go-dashboard" } };
     const action = getPiRunnerDashboardToggleAction(state);
     return action ? { type: "dispatch", action } : { type: "none" };
   }
@@ -59,14 +64,6 @@ export function getPiRunnerDashboardContinueEffect(
     return provider === "supermemory"
       ? { type: "select-supermemory-and-open-setup", action }
       : { type: "dispatch", action };
-  }
-
-  if (state.screen === "runner-ui-visual-helpers-detail") {
-    if (state.cursor === 0) {
-      const action = getPiRunnerDashboardToggleAction(state);
-      return action ? { type: "dispatch", action } : { type: "none" };
-    }
-    return { type: "dispatch", action: { type: "go-dashboard" } };
   }
 
   if (state.screen === "teams-detail") {
@@ -90,7 +87,7 @@ export function getPiRunnerDashboardContinueEffect(
       if (!options.canRunPlan) {
         return {
           type: "block-review-install",
-          status: "Supermemory requiere userId y token efímero capturado antes de ejecutar Review/Install; Pi MCP config se escribe durante Review & Install.",
+          status: "Supermemory requires userId and ephemeral token captured before executing Review & Install; Pi MCP config is written during Review & Install.",
         };
       }
       return { type: "dispatch", action: { type: "start-install" } };

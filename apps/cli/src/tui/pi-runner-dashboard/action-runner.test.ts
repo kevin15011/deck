@@ -432,3 +432,144 @@ describe("Pi Runner dashboard action runner Developer Team model preservation", 
     expect(frontmatterFor(dashboardPlan!, "deck-developer-apply-backend")).not.toContain("thinking:");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix #1: Internal package install action routing
+// Tests that missing pi-mermaid plan/action is executed via installInternalRunnerPackages()
+// and preserves visual_support_install_failed on failure.
+// ---------------------------------------------------------------------------
+
+describe("Fix #1: internal package install action routing", () => {
+  /**
+   * Test that an action-runner action with internalPackageId invokes
+   * installInternalRunnerPackages() (not buildInstallableTool()) and that
+   * the pi install npm:pi-mermaid command is correctly dispatched.
+   */
+  test("missing pi-mermaid plan action executes pi install npm:pi-mermaid via installInternalRunnerPackages", async () => {
+    const calls: string[][] = [];
+
+    const result = await runPiRunnerAction(
+      {
+        id: "internal.pi-mermaid.install",
+        kind: "install-pi-package",
+        title: "Install visual explanation support",
+        internalPackageId: "pi-mermaid",
+        source: "npm:pi-mermaid",
+        status: "ready",
+      },
+      {
+        piCommand: "pi",
+        installInternalRunnerPackages: (command, actions, onResult) => {
+          return Promise.resolve(
+            actions.map((action) => {
+              calls.push([command!, "install", action.source]);
+              const success = command === "pi" && action.source === "npm:pi-mermaid";
+              const installResult = {
+                packageId: action.packageId,
+                success,
+                actionKind: "install-pi-package" as const,
+                status: success ? "installed" as const : "failed" as const,
+                errorCode: success ? undefined : "visual_support_install_failed",
+              };
+              onResult(installResult);
+              return installResult;
+            }),
+          );
+        },
+      },
+    );
+
+    // Verify the command was dispatched correctly
+    expect(calls).toEqual([["pi", "install", "npm:pi-mermaid"]]);
+
+    // Verify execution result
+    expect(result).toMatchObject({
+      actionId: "internal.pi-mermaid.install",
+      status: "executed",
+    });
+    expect(result.message).toBe("Installed visual explanation support.");
+  });
+
+  /**
+   * Test that a failing internal package install surfaces the correct error code.
+   * REQ-PIINSTALL-004: install failures surface visual_support_install_failed.
+   */
+  test("missing pi-mermaid install failure surfaces visual_support_install_failed error code", async () => {
+    const result = await runPiRunnerAction(
+      {
+        id: "internal.pi-mermaid.install",
+        kind: "install-pi-package",
+        title: "Install visual explanation support",
+        internalPackageId: "pi-mermaid",
+        source: "npm:pi-mermaid",
+        status: "ready",
+      },
+      {
+        piCommand: "pi",
+        installInternalRunnerPackages: (_command, actions, onResult) => {
+          return Promise.resolve(
+            actions.map((action) => {
+              const installResult = {
+                packageId: action.packageId,
+                success: false,
+                actionKind: "install-pi-package" as const,
+                status: "failed" as const,
+                message: "npm error E404: package not found",
+                errorCode: "visual_support_install_failed",
+              };
+              onResult(installResult);
+              return installResult;
+            }),
+          );
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      actionId: "internal.pi-mermaid.install",
+      status: "failed",
+    });
+    expect(result.message).toBe("Visual explanation support install failed.");
+    expect(result.diagnostics.some(d => d.includes("npm error E404") || d.includes("unavailable"))).toBe(true);
+  });
+
+  /**
+   * Test that missing pi-mermaid install with no piCommand still reports failure gracefully.
+   */
+  test("missing pi-mermaid install with no piCommand reports failure gracefully", async () => {
+    const result = await runPiRunnerAction(
+      {
+        id: "internal.pi-mermaid.install",
+        kind: "install-pi-package",
+        title: "Install visual explanation support",
+        internalPackageId: "pi-mermaid",
+        source: "npm:pi-mermaid",
+        status: "ready",
+      },
+      {
+        piCommand: undefined,
+        installInternalRunnerPackages: (command, _actions, onResult) => {
+          // Like the real implementation: when piCommand is unavailable, return
+          // a failed result and invoke the callback
+          const installResult = {
+            packageId: "pi-mermaid",
+            success: false,
+            actionKind: "install-pi-package" as const,
+            status: "failed" as const,
+            message: command ? "pi install failed" : "Pi install command is unavailable.",
+            errorCode: "visual_support_install_failed",
+          };
+          onResult(installResult);
+          return Promise.resolve([installResult]);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      actionId: "internal.pi-mermaid.install",
+      status: "failed",
+    });
+    // The mock returns a result with the "Pi install command is unavailable." message
+    expect(result.message).toBe("Visual explanation support install failed.");
+  });
+});
