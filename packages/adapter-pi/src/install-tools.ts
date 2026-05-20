@@ -1,8 +1,15 @@
+import type { TechnicalActionKind } from "./capability-catalog";
 import type { InstallablePiTool } from "./installation-plan";
+
+export type PiToolInstallResultStatus = "installed" | "manual" | "failed";
 
 export type PiToolInstallResult = {
   tool: string;
   success: boolean;
+  /** Review Plan-compatible action kind that produced this result. */
+  actionKind: Extract<TechnicalActionKind, "install-pi-package" | "manual-external-install">;
+  /** Machine-readable result status. External/manual tools are `manual`, not failed installs. */
+  status: PiToolInstallResultStatus;
   message?: string;
 };
 
@@ -20,16 +27,29 @@ export async function installPiTools(
   onResult: (result: PiToolInstallResult) => void,
   runInstallCommand: RunInstallCommand = runInstallCommandWithBun,
 ): Promise<PiToolInstallResult[]> {
-  if (!command) return [];
-
   const results: PiToolInstallResult[] = [];
 
   for (const tool of plan) {
     if (tool.installKind === "external") {
       const result = {
         tool: tool.name,
+        success: true,
+        actionKind: "manual-external-install" as const,
+        status: "manual" as const,
+        message: `Manual external install required from ${tool.source}.`,
+      };
+      results.push(result);
+      onResult(result);
+      continue;
+    }
+
+    if (!command) {
+      const result = {
+        tool: tool.name,
         success: false,
-        message: `Manual install required from ${tool.source}.`,
+        actionKind: "install-pi-package" as const,
+        status: "failed" as const,
+        message: "Pi install command is unavailable.",
       };
       results.push(result);
       onResult(result);
@@ -42,6 +62,8 @@ export async function installPiTools(
       const result = {
         tool: tool.name,
         success: exitCode === 0,
+        actionKind: "install-pi-package" as const,
+        status: exitCode === 0 ? "installed" as const : "failed" as const,
         message: exitCode === 0 ? undefined : (stderr || stdout).trim(),
       };
       results.push(result);
@@ -50,6 +72,8 @@ export async function installPiTools(
       const result = {
         tool: tool.name,
         success: false,
+        actionKind: "install-pi-package" as const,
+        status: "failed" as const,
         message: error instanceof Error ? error.message : "Unable to run installation command.",
       };
       results.push(result);

@@ -1,3 +1,4 @@
+import type { CapabilityToolMapping } from "./capability-catalog";
 import type { RequiredToolStatus } from "./required-tools";
 
 export type InstallablePiToolId =
@@ -29,8 +30,46 @@ export const PI_INSTALLABLE_TOOLS: InstallablePiTool[] = [
   { id: "codebase-memory", name: "codebase-memory", source: "DeusData/codebase-memory-mcp", required: false, installKind: "external" },
   { id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "external" },
   { id: "context7", name: "Context7", source: "npm:@dreki-gg/pi-context7", required: false, installKind: "pi-package" },
+  // Legacy technical tool kept for backward compatibility. The capability dashboard must not
+  // expose Engram as a global selectable capability; engram-memory is only derived when
+  // Adaptive Memory provider === "engram".
   { id: "engram-memory", name: "Engram memory", source: "Gentleman-Programming/engram", required: false, installKind: "external" },
 ];
+
+export type CapabilityPlanToolMetadata = Pick<CapabilityToolMapping, "capabilityId" | "toolId" | "source" | "installKind" | "runnerScope" | "requirementLevel"> & {
+  name: string;
+};
+
+const TOOL_TO_CAPABILITY: Partial<Record<InstallablePiToolId, CapabilityToolMapping["capabilityId"]>> = {
+  "context-mode": "context-mode",
+  "codebase-memory": "codebase-memory",
+  rtk: "rtk",
+};
+
+export function getPiInstallableTool(toolId: InstallablePiToolId): InstallablePiTool | undefined {
+  return PI_INSTALLABLE_TOOLS.find((tool) => tool.id === toolId);
+}
+
+export function getPiPrerequisiteInstallableTools(): InstallablePiTool[] {
+  return PI_INSTALLABLE_TOOLS.filter((tool) => tool.required);
+}
+
+export function getCapabilityInstallableToolMappings(): CapabilityPlanToolMetadata[] {
+  return PI_INSTALLABLE_TOOLS.flatMap((tool) => {
+    const capabilityId = TOOL_TO_CAPABILITY[tool.id];
+    if (!capabilityId) return [];
+
+    return [{
+      capabilityId,
+      toolId: tool.id,
+      name: tool.name,
+      source: tool.source,
+      installKind: tool.installKind,
+      runnerScope: "all",
+      requirementLevel: "configurable",
+    } satisfies CapabilityPlanToolMetadata];
+  });
+}
 
 export function buildPiInstallationPlan(options: BuildPiInstallationPlanOptions): InstallablePiTool[] {
   const installedToolNames = new Set(

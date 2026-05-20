@@ -862,3 +862,36 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
   });
 
 });
+
+describe("Developer Team dashboard model/frontmatter preservation regressions", () => {
+  function frontmatterFor(plan: ReturnType<typeof buildDeveloperTeamInstallPlan>, agentId: string): string {
+    const agent = plan.agents.find((entry) => entry.agent.id === agentId);
+    expect(agent).toBeTruthy();
+    return agent!.content.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+  }
+
+  test("dashboard assignments preserve the same observable model/thinking frontmatter as existing Configure models path", () => {
+    const modelAssignments: DeveloperTeamModelAssignments = {
+      "deck-developer-orchestrator": "openai-codex/gpt-5.5",
+      "deck-developer-apply-backend": "opencode-go/kimi-k2.6",
+    };
+    const thinkingAssignments: DeveloperTeamThinkingAssignments = {
+      "deck-developer-orchestrator": "high",
+      "deck-developer-apply-backend": "high",
+    };
+
+    const existingConfigureModelsPlan = buildDeveloperTeamInstallPlan("/tmp/project", { modelAssignments, thinkingAssignments });
+    const dashboardAssignmentsPlan = buildDeveloperTeamInstallPlan("/tmp/project", { modelAssignments, thinkingAssignments });
+
+    expect(frontmatterFor(dashboardAssignmentsPlan, "deck-developer-orchestrator")).toBe(
+      frontmatterFor(existingConfigureModelsPlan, "deck-developer-orchestrator"),
+    );
+    expect(frontmatterFor(dashboardAssignmentsPlan, "deck-developer-apply-backend")).toBe(
+      frontmatterFor(existingConfigureModelsPlan, "deck-developer-apply-backend"),
+    );
+    expect(frontmatterFor(dashboardAssignmentsPlan, "deck-developer-orchestrator")).toContain("model: openai-codex/gpt-5.5");
+    expect(frontmatterFor(dashboardAssignmentsPlan, "deck-developer-orchestrator")).toContain("thinking: high");
+    expect(frontmatterFor(dashboardAssignmentsPlan, "deck-developer-apply-backend")).toContain("model: opencode-go/kimi-k2.6");
+    expect(frontmatterFor(dashboardAssignmentsPlan, "deck-developer-apply-backend")).toContain("thinking: off");
+  });
+});

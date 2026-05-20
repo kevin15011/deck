@@ -1,3 +1,6 @@
+export * from "./capability-catalog";
+export * from "./capability-inventory";
+export * from "./capability-plan";
 export * from "./developer-team-catalog";
 export * from "./developer-team-install";
 export * from "./explorer-prompt";

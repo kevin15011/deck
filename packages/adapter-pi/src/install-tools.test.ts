@@ -29,6 +29,7 @@ describe("installPiTools", () => {
     ]);
     expect(emitted).toEqual(["context-mode", "codebase-memory"]);
     expect(results.every((result) => result.success)).toBe(true);
+    expect(results.every((result) => result.actionKind === "install-pi-package" && result.status === "installed")).toBe(true);
   });
 
   test("returns a failure result instead of throwing when installation command fails", async () => {
@@ -39,10 +40,16 @@ describe("installPiTools", () => {
       async () => ({ exitCode: 1, stdout: "", stderr: "failed" }),
     );
 
-    expect(result).toEqual({ tool: "context-mode", success: false, message: "failed" });
+    expect(result).toEqual({
+      tool: "context-mode",
+      success: false,
+      actionKind: "install-pi-package",
+      status: "failed",
+      message: "failed",
+    });
   });
 
-  test("does not run pi install for external RTK", async () => {
+  test("does not run pi install for external RTK and returns manual review-plan result", async () => {
     const calls: string[][] = [];
     const [result] = await installPiTools(
       "pi",
@@ -55,6 +62,45 @@ describe("installPiTools", () => {
     );
 
     expect(calls).toEqual([]);
-    expect(result).toEqual({ tool: "RTK", success: false, message: "Manual install required from rtk-ai/rtk." });
+    expect(result).toEqual({
+      tool: "RTK",
+      success: true,
+      actionKind: "manual-external-install",
+      status: "manual",
+      message: "Manual external install required from rtk-ai/rtk.",
+    });
+  });
+
+  test("returns manual external result when install command is unavailable", async () => {
+    const emitted: string[] = [];
+    const results = await installPiTools(
+      undefined,
+      [
+        { id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "external" },
+        { id: "context-mode", name: "context-mode", source: "npm:context-mode", required: false, installKind: "pi-package" },
+      ],
+      (result) => emitted.push(result.tool),
+      async () => {
+        throw new Error("should not run");
+      },
+    );
+
+    expect(emitted).toEqual(["RTK", "context-mode"]);
+    expect(results).toEqual([
+      {
+        tool: "RTK",
+        success: true,
+        actionKind: "manual-external-install",
+        status: "manual",
+        message: "Manual external install required from rtk-ai/rtk.",
+      },
+      {
+        tool: "context-mode",
+        success: false,
+        actionKind: "install-pi-package",
+        status: "failed",
+        message: "Pi install command is unavailable.",
+      },
+    ]);
   });
 });
