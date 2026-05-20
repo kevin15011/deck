@@ -1,0 +1,13 @@
+{
+  "name": "@deck/sdd-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./contracts/*": "./src/contracts/*.ts",
+    "./orchestrator/*": "./src/orchestrator/*.ts",
+    "./runner/*": "./src/runner/*.ts",
+    "./artifact-state/*": "./src/artifact-state/*.ts"
+  }
+}

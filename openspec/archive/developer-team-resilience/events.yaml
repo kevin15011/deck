@@ -1,0 +1,36 @@
+- timestamp: '2026-05-20T00:00:00Z'
+  phase: apply
+  status: completed
+  artifact: packages/sdd-runtime/
+  actor: sdd-apply-general-executor
+  note: 'Apply completed: all 18 tasks implemented with Strict TDD. 93 tests passing, 0 failures, clean TypeScript. New @deck/sdd-runtime package with contracts, orchestrator, runner, artifact-state modules.'
+- timestamp: '2026-05-20T06:00:00Z'
+  phase: apply
+  status: completed
+  artifact: packages/sdd-runtime/
+  actor: sdd-apply-general-executor
+  note: 'Continuation apply: hardened 7 review findings. self-audit null/primitive/malformed validation, runner recovery independent validation, hard budget overrides runner continuation, artifact adapter capability requirements, router uses configured thresholds consistently. 147 tests passing, 0 failures, clean TypeScript.'
+- timestamp: '2026-05-20T07:30:00Z'
+  phase: apply
+  status: completed
+  artifact: packages/sdd-runtime/
+  actor: sdd-apply-general-executor
+  note: 'Second continuation apply: fixed 4 deeper review findings. (1) Self-audit: added missing design fields (compatibility, observability) and tasks fields (splitability, boundaryTests, blockers, placeholders) with full entry-shape validation. (2) Orchestrator pipeline: normalizeAuditForScoring prevents throws on null/primitive/missing arrays. (3) Runner recovery: artifact freshness timestamp + idempotency key validation. (4) Runner pipeline: hard budget uses distinct budget_exhausted classification. 184 tests passing, 0 failures, clean TypeScript.'
+- timestamp: '2026-05-20T09:00:00Z'
+  phase: apply
+  status: completed
+  artifact: packages/sdd-runtime/
+  actor: sdd-apply-general-executor
+  note: 'Third continuation apply: fixed 3 fresh review findings. (1) Self-audit: validate string-array element types across ALL array fields — ambiguity, externalContracts, sensitiveData, stateMutation, observability, boundaryTests, blockers, placeholders, and taskReadiness[].blockers. Rejects non-string elements like [123], [false], [{}], [null]. (2) Runner recovery: require Number.isFinite(timestamp) and reject future/skewed timestamps explicitly. (3) attemptResume: explicit budget_exhausted case returns conservative non-resumable decision. 198 tests passing, 0 failures, clean TypeScript.'
+- timestamp: '2026-05-20T10:00:00Z'
+  phase: verify
+  status: passed
+  artifact: verify-report.md
+  actor: sdd-verify-executor
+  note: 'Verify completed: 18/18 original tasks complete; all review findings fixed; project-agnostic scope preserved; bun test passed with 976 tests; targeted packages/sdd-runtime suite passed with 198 tests and 98.15% line coverage; bunx tsc --noEmit passed; artifact state/events updated. PASS.'
+- timestamp: '2026-05-20T10:00:00Z'
+  phase: archive
+  status: completed
+  artifact: archive-report.md
+  actor: sdd-archive-executor
+  note: 'Archive completed. Delta specs synced to openspec/specs/ (adaptive-quality-control, runner-orchestration-resilience, artifact-state-contracts). Change moved to openspec/archive/developer-team-resilience/. Traceability report recorded.'
