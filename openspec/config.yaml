@@ -1,0 +1,60 @@
+schema: spec-driven
+
+context: |
+  Tech stack: TypeScript, Bun (runtime + package manager), React, Ink (CLI TUI)
+  Architecture: Monorepo (apps/cli, packages/core, packages/adapter-*)
+  Testing: Bun built-in test runner (bun:test), ~70 test files
+  Style: ES2022, ESNext modules, strict TypeScript, no explicit linter/formatter
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Respect existing active change boundaries
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    - Follow existing code patterns
+    tdd: true
+    test_command: "bun test"
+  verify:
+    test_command: "bun test"
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
+
+testing:
+  strict_tdd: true
+  runner:
+    framework: bun
+    command: "bun test"
+  layers:
+    unit:
+      available: true
+      tool: bun:test
+    integration:
+      available: false
+      tool: ""
+    e2e:
+      available: false
+      tool: ""
+  coverage:
+    available: true
+    command: "bun test --coverage"
+  quality:
+    linter:
+      available: false
+      command: ""
+    type_checker:
+      available: true
+      command: "tsc --noEmit"
+    formatter:
+      available: false
+      command: ""

@@ -1,0 +1,124 @@
+change: developer-team-resilience
+status: archived
+current_phase: archive
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  specs:
+    adaptive-quality-control: specs/adaptive-quality-control/spec.md
+    runner-orchestration-resilience: specs/runner-orchestration-resilience/spec.md
+    artifact-state-contracts: specs/artifact-state-contracts/spec.md
+  design: design.md
+  tasks: tasks.md
+  verify: verify-report.md
+phases:
+  explore:
+    status: completed
+    artifact: exploration.md
+    completed_at: '2026-05-20T00:00:00Z'
+    updated_at: '2026-05-20T00:00:00Z'
+    provenance:
+      source: 'user request: run SDD Explore for developer-team-resilience'
+      created_by: sdd-explore-executor
+      note: Explored general resilience patterns for multi-agent SDD pipelines based on prior session root-cause analysis.
+  proposal:
+    status: completed
+    artifact: proposal.md
+    completed_at: '2026-05-20T00:00:00Z'
+    updated_at: '2026-05-20T00:00:00Z'
+    provenance:
+      source: 'user request: run SDD Propose for developer-team-resilience'
+      created_by: sdd-propose-executor
+      note: Proposed project-agnostic adaptive quality and runner/orchestration resilience capabilities.
+  design:
+    status: completed
+    artifact: design.md
+    completed_at: '2026-05-20T00:00:00Z'
+    updated_at: '2026-05-20T00:00:00Z'
+    provenance:
+      source: 'user request: run SDD Design for developer-team-resilience'
+      created_by: sdd-design-executor
+      note: Designed project-agnostic resilience contracts, risk routing, loop breaking, runner recovery, state management, budgets, and migration path.
+  spec:
+    status: completed
+    artifact: spec.md
+    completed_at: '2026-05-20T00:00:00Z'
+    updated_at: '2026-05-20T00:00:00Z'
+    provenance:
+      source: 'user request: run SDD Spec for developer-team-resilience'
+      created_by: sdd-spec-executor
+      note: Specified project-agnostic adaptive quality, runner resilience, and artifact state contracts.
+  tasks:
+    status: completed
+    artifact: tasks.md
+    completed_at: '2026-05-20T00:00:00Z'
+    updated_at: '2026-05-20T00:00:00Z'
+    provenance:
+      source: 'user request: run SDD Tasks for developer-team-resilience'
+      created_by: sdd-tasks-executor
+      note: Broke down into 18 tasks across 5 phases with TDD, review workload forecast, and maintainer-approved size exception.
+  apply:
+    status: completed
+    artifact: packages/sdd-runtime/
+    completed_at: '2026-05-20T00:00:00Z'
+    updated_at: '2026-05-20T09:00:00Z'
+    provenance:
+      source: 'user request: run SDD Apply for developer-team-resilience'
+      created_by: sdd-apply-general-executor
+      note: Implemented all 18 tasks with Strict TDD. 93 tests, 0 failures. New package @deck/sdd-runtime with contracts, orchestrator, runner, artifact-state modules. Continuation apply hardened 7 review findings. Second continuation fixed 4 deeper findings. Third continuation fixed 3 fresh review findings: string-array element type validation across all self-audit fields, timestamp freshness with Number.isFinite and future rejection, explicit budget_exhausted handling in attemptResume. 198 tests passing, 0 failures, clean TypeScript.
+  verify:
+    status: passed
+    artifact: verify-report.md
+    completed_at: '2026-05-20T10:00:00Z'
+    updated_at: '2026-05-20T10:00:00Z'
+    provenance:
+      source: 'user request: run SDD Verify for developer-team-resilience'
+      created_by: sdd-verify-executor
+      note: Verified 18/18 original tasks, all review fixes, project-agnostic scope, strict TDD evidence, Bun tests, coverage, typecheck, and artifact integrity. PASS.
+  archive:
+    status: completed
+    artifact: archive-report.md
+    completed_at: '2026-05-20T10:00:00Z'
+    updated_at: '2026-05-20T10:00:00Z'
+    provenance:
+      source: verify-report.md
+      created_by: sdd-archive-executor
+      note: Archive completed. Delta specs synced to main specs. All artifacts moved to openspec/archive/developer-team-resilience/. Traceability report recorded.
+archiveTarget: openspec/archive/developer-team-resilience/
+events:
+  - phase: explore
+    status: completed
+    timestamp: '2026-05-20T00:00:00Z'
+    artifact: exploration.md
+    note: Exploration completed for developer-team-resilience.
+  - phase: proposal
+    status: completed
+    timestamp: '2026-05-20T00:00:00Z'
+    artifact: proposal.md
+    note: Proposal completed for developer-team-resilience.
+  - phase: design
+    status: completed
+    timestamp: '2026-05-20T00:00:00Z'
+    artifact: design.md
+    note: Design completed for developer-team-resilience.
+  - phase: spec
+    status: completed
+    timestamp: '2026-05-20T00:00:00Z'
+    artifact: spec.md
+    note: Spec completed for developer-team-resilience.
+  - phase: tasks
+    status: completed
+    timestamp: '2026-05-20T00:00:00Z'
+    artifact: tasks.md
+    note: Tasks completed for developer-team-resilience.
+  - phase: apply
+    status: completed
+    timestamp: '2026-05-20T00:00:00Z'
+    artifact: packages/sdd-runtime/
+    note: Apply completed for developer-team-resilience. 18/18 tasks, 93 tests, strict TDD.
+  - phase: verify
+    status: passed
+    timestamp: '2026-05-20T10:00:00Z'
+    artifact: verify-report.md
+    note: Verify completed for developer-team-resilience. 18/18 tasks, all review fixes, 198 targeted runtime tests, 976 full tests, clean TypeScript, PASS.
