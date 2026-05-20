@@ -1,0 +1,73 @@
+events:
+  - event: explore.completed
+    phase: explore
+    status: completed
+    artifact: exploration.md
+    timestamp: "2026-05-20T00:00:00Z"
+    source: "user request, code exploration, pi-mermaid package reference, external skill reference"
+    actor: deck-developer-orchestrator
+    note: "Explored silent visual explanation support, pi-mermaid internal installation, Orchestrator-only visual skill, skill adapters, and dashboard package grouping."
+  - event: proposal.completed
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: "2026-05-20T00:00:00Z"
+    source: "exploration.md and user-approved direction"
+    actor: deck-developer-proposal
+    note: "Proposed silent Pi visual support, Deck-owned Orchestrator visual skill, runner skill/package adapters, and dashboard grouping changes."
+  - event: spec.completed
+    phase: spec
+    status: completed
+    artifact: spec.md
+    timestamp: "2026-05-20T00:00:00Z"
+    source: "proposal.md"
+    actor: deck-developer-spec
+    note: "Registry-deferred spec phase reconciled by orchestrator after parallel Spec+Design completion."
+  - event: design.completed
+    phase: design
+    status: completed
+    artifact: design.md
+    timestamp: "2026-05-20T00:00:00Z"
+    source: "proposal.md"
+    actor: deck-developer-design
+    note: "Registry-deferred design phase reconciled by orchestrator after parallel Spec+Design batch."
+  - event: tasks.completed
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    timestamp: "2026-05-20T00:00:00Z"
+    source: "spec.md, design.md"
+    actor: deck-developer-task
+    note: "10 tasks created: 2 Shared, 5 Backend, 3 Frontend. No blockers."
+  - event: apply.completed
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    timestamp: "2026-05-20T00:00:00Z"
+    source: "tasks.md, spec.md, design.md, verify-report.md, review.md"
+    actor: deck-developer-orchestrator
+    note: "Tasks 1-10 complete plus Verify/Review fixes. Full test suite and TypeScript typecheck pass."
+  - event: verify.completed
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    timestamp: "2026-05-20T00:00:00Z"
+    source: "spec.md, tasks.md, design.md, apply-progress.md"
+    actor: deck-developer-verify
+    note: "Re-verify passed with warning only for missing root build script."
+  - event: review.rereview.completed
+    phase: review
+    status: approved
+    artifact: review.md
+    timestamp: "2026-05-20T00:00:00Z"
+    source: "spec.md, design.md, tasks.md, apply-progress.md"
+    actor: deck-developer-review
+    note: "Re-review approved; previous blocker and major findings resolved."
+  - event: archive.completed
+    phase: archive
+    status: archived
+    artifact: archive-report.md
+    timestamp: "2026-05-20T00:00:00Z"
+    source: "verify-report.md, review.md, apply-progress.md, state.yaml, events.yaml, archive-report.md"
+    actor: deck-developer-archive
+    note: "Change archived. 10/10 tasks completed. Verify passed_with_warnings. Review approved. All findings resolved. No follow-ups."

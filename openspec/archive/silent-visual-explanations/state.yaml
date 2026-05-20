@@ -1,0 +1,134 @@
+change: silent-visual-explanations
+status: archived
+current_phase: archive
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply-progress: apply-progress.md
+  verify: verify-report.md
+  review: review.md
+  archive_report: archive-report.md
+phases:
+  explore:
+    status: completed
+    artifact: exploration.md
+    completed_at: "2026-05-20T00:00:00Z"
+    provenance:
+      created_by: deck-developer-orchestrator
+      note: "Inline exploration completed after configured Explorer provider rejected reasoning fields."
+  proposal:
+    status: completed
+    artifact: proposal.md
+    completed_at: "2026-05-20T00:00:00Z"
+    provenance:
+      created_by: deck-developer-proposal
+      source_artifact: exploration.md
+      note: "Proposal created from exploration findings and user-approved direction for silent internal visual explanation support."
+  spec:
+    status: completed
+    artifact: spec.md
+    completed_at: "2026-05-20T00:00:00Z"
+    provenance:
+      created_by: deck-developer-spec
+      source_artifact: proposal.md
+      registry_write: deferred-reconciled-by-orchestrator
+      note: "Spec completed in registry-deferred mode after parallel Spec+Design batch."
+  design:
+    status: completed
+    artifact: design.md
+    completed_at: "2026-05-20T00:00:00Z"
+    provenance:
+      created_by: deck-developer-design
+      source_artifact: proposal.md
+      registry_write: deferred-reconciled-by-orchestrator
+      note: "Design completed in registry-deferred mode after parallel Spec+Design batch."
+  tasks:
+    status: completed
+    artifact: tasks.md
+    completed_at: "2026-05-20T00:00:00Z"
+    provenance:
+      created_by: deck-developer-task
+      source_artifacts:
+        - spec.md
+        - design.md
+      note: "10 atomic tasks across 3 domains. Spec open questions resolved by Design decisions. No blockers."
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: "2026-05-20T00:00:00Z"
+    provenance:
+      - created_by: deck-developer-apply-general
+        source_artifacts:
+          - tasks.md
+          - spec.md
+          - design.md
+        note: "Tasks 1-2 complete: Deck-owned visual explanation content created and composed into Orchestrator skill only."
+      - created_by: deck-developer-apply-backend
+        source_artifacts:
+          - tasks.md
+          - spec.md
+          - design.md
+        note: "Tasks 3-6 complete: internal pi-mermaid runner package catalog, silent visual support planning, install-tools integration, and package boundary tests implemented."
+      - created_by: deck-developer-apply-frontend
+        source_artifacts:
+          - tasks.md
+          - spec.md
+          - design.md
+          - apply-progress.md
+        note: "Tasks 7-10 complete: developer-team install tests and dashboard grouping/state/screens/tests updated; full test suite and TypeScript typecheck pass."
+      - created_by: deck-developer-apply-general
+        source_artifacts:
+          - verify-report.md
+          - review.md
+          - apply-progress.md
+        note: "Verify/Review fixes complete: internal visual support install routed through internal package executor, user-facing Mermaid/pi-mermaid copy removed, boundary type assertion fixed, absent review data handled as not-checked. Full test suite and typecheck pass."
+  verify:
+    status: passed_with_warnings
+    artifact: verify-report.md
+    completed_at: "2026-05-20T00:00:00Z"
+    provenance:
+      created_by: deck-developer-verify
+      source_artifacts:
+        - spec.md
+        - tasks.md
+        - design.md
+        - apply-progress.md
+      registry_write: deferred-reconciled-by-orchestrator
+      note: "Re-verify passed with warning only for missing root build script. 1103/1103 full suite passed; typecheck passed."
+  review:
+    status: approved
+    artifact: review.md
+    completed_at: "2026-05-20T00:00:00Z"
+    provenance:
+      created_by: deck-developer-review
+      source_artifacts:
+        - spec.md
+        - design.md
+        - tasks.md
+        - apply-progress.md
+      registry_write: deferred-reconciled-by-orchestrator
+      note: "Re-review approved. Previous blocker and major findings resolved."
+      - created_by: deck-developer-apply-general
+        source_artifacts:
+          - verify-report.md
+          - review.md
+          - apply-progress.md
+        note: "Verify/Review fixes complete. Fix #1: internal package install actions routed through installInternalRunnerPackages() (internalPackageId check before piCommand guard). Fix #2: neutral user-facing copy, implementationId hidden for internal actions. Fix #3: Extract-based boundary type assertion. Fix #4: absent review data → not-checked, not missing. 395 targeted tests pass, typecheck clean."
+  archive:
+    status: archived
+    artifact: archive-report.md
+    completed_at: "2026-05-20T00:00:00Z"
+    archive_target: openspec/archive/silent-visual-explanations/
+    provenance:
+      created_by: deck-developer-archive
+      source_artifacts:
+        - verify-report.md
+        - review.md
+        - apply-progress.md
+        - state.yaml
+        - events.yaml
+        - archive-report.md
+      note: "Change archived. 10/10 tasks completed. Verify passed_with_warnings (root build script N/A). Review approved. All findings resolved. No follow-ups."
