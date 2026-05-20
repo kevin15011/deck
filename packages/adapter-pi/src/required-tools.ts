@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import type { CapabilityId } from "./capability-catalog";
 import { createToolStatus, type EnvironmentToolStatus } from "./tool-status";
 
 export type RequiredToolStatus = {
@@ -11,6 +12,12 @@ export type PiRequiredToolsReview = {
   requiredTools: RequiredToolStatus[];
   tools: EnvironmentToolStatus[];
   error?: string;
+};
+
+export type CapabilityDetectorMapping = {
+  capabilityId: CapabilityId;
+  toolName: string;
+  detectorNames: string[];
 };
 
 type CommandResult = {
@@ -28,12 +35,24 @@ type ReviewPiRequiredToolsOptions = {
 const REQUIRED_TOOLS = [
   { name: "sub-agents", packageNames: ["sub-agents", "subagents", "pi-subagents"] },
   { name: "MCP packages", packageNames: ["mcp", "mcp-packages", "pi-mcp-adapter"] },
-  { name: "context-mode", packageNames: ["context-mode"] },
-  { name: "codebase-memory", packageNames: ["codebase-memory", "codebase-memory-mcp"] },
-  { name: "RTK", packageNames: ["rtk"] },
+  { name: "context-mode", packageNames: ["context-mode"], capabilityId: "context-mode" as const },
+  { name: "codebase-memory", packageNames: ["codebase-memory", "codebase-memory-mcp"], capabilityId: "codebase-memory" as const },
+  { name: "RTK", packageNames: ["rtk"], capabilityId: "rtk" as const },
   { name: "Context7", packageNames: ["context7", "pi-context7", "@dreki-gg/pi-context7"] },
   { name: "Engram memory", packageNames: ["engram"] },
 ];
+
+// Future detector extension point: runner-mermaid is the required global capability,
+// implemented by pi-mermaid for Pi and by a separate TBD mapping for OpenCode. pi-hud is
+// optional and Pi-only. No unconfirmed pi-mermaid/pi-hud detectors are added here yet.
+const CAPABILITY_DETECTOR_MAPPINGS: CapabilityDetectorMapping[] = REQUIRED_TOOLS.flatMap((tool) => {
+  if (!tool.capabilityId) return [];
+  return [{ capabilityId: tool.capabilityId, toolName: tool.name, detectorNames: tool.packageNames }];
+});
+
+export function getCapabilityDetectorMappings(): CapabilityDetectorMapping[] {
+  return CAPABILITY_DETECTOR_MAPPINGS.map((mapping) => ({ ...mapping, detectorNames: [...mapping.detectorNames] }));
+}
 
 export function reviewPiRequiredTools(options: ReviewPiRequiredToolsOptions): PiRequiredToolsReview {
   const runCommand = options.runCommand ?? runCommandSync;

@@ -99,6 +99,19 @@ export type MemoryInjectionOptions = {
   piMcpHomeDir?: string;
 };
 
+export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
+  modelAssignments?: DeveloperTeamModelAssignments;
+  thinkingAssignments?: DeveloperTeamThinkingAssignments;
+  preserveMissingThinkingAssignments?: boolean;
+  /**
+   * Resolved provider from the capability dashboard/TUI install path.
+   * Kept as an explicit alias so dashboard code can inject the same provider
+   * constructed by launch resolution without relying on legacy selection helpers.
+   * `memoryInjection` still takes precedence, then `memoryProvider`, then this alias.
+   */
+  dashboardMemoryProvider?: AdaptiveMemoryProvider;
+};
+
 // --- Legacy local resolveMemoryInjection (delegated to core) ---
 // Kept as a thin wrapper for any Pi-specific extensions in the future.
 // Currently delegates to the centralized core implementation with
@@ -221,26 +234,17 @@ function hasAuthenticatedSupermemoryToolBindings(bundle: MemoryInjectionBundle):
 
 export function buildDeveloperTeamInstallPlan(
   projectRoot: string,
-  options?: {
-    modelAssignments?: DeveloperTeamModelAssignments;
-    thinkingAssignments?: DeveloperTeamThinkingAssignments;
-    memoryProvider?: AdaptiveMemoryProvider;
-    memoryInjection?: MemoryInjectionBundle;
-    supportedMemoryProviderIds?: Iterable<string>;
-    piMcpConfigPath?: string;
-    piMcpHomeDir?: string;
-    preserveMissingThinkingAssignments?: boolean;
-  },
+  options?: DeveloperTeamInstallOptions,
 ): DeveloperTeamInstallPlan & { memoryDiagnostics: MemoryDiagnostic[] } {
   const agentsDir = join(projectRoot, ".pi", "agents");
   const skillsDir = join(projectRoot, ".pi", "skills");
   const modelAssignments = options?.modelAssignments;
   const thinkingAssignments = options?.thinkingAssignments;
+  const resolvedMemoryProvider = options?.memoryProvider ?? options?.dashboardMemoryProvider;
 
-  // Resolve memory injection using centralized resolver with provider ID validation
   const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolvePiMemoryInjection({
     memoryInjection: options?.memoryInjection,
-    memoryProvider: options?.memoryProvider,
+    memoryProvider: resolvedMemoryProvider,
     supportedMemoryProviderIds: options?.supportedMemoryProviderIds,
     piMcpConfigPath: options?.piMcpConfigPath,
     piMcpHomeDir: options?.piMcpHomeDir,
@@ -336,17 +340,14 @@ export function applyDeveloperTeamInstall(
   const mkdir = options?.mkdir ?? mkdirSync;
   const readFile = options?.readFile ?? readFileSync;
 
-  // Ensure agents directory exists
   if (!exists(plan.agentsDir)) {
     mkdir(plan.agentsDir, { recursive: true });
   }
 
-  // Ensure skills directory exists
   if (!exists(plan.skillsDir)) {
     mkdir(plan.skillsDir, { recursive: true });
   }
 
-  // Ensure each skill subdirectory exists
   for (const planned of plan.skills) {
     const skillDir = join(planned.absolutePath, "..");
     if (!exists(skillDir)) {
@@ -431,11 +432,8 @@ export function verifyDeveloperTeamInstall(
       issues.push(`Description mismatch for skill ${planned.agent.skillId}.`);
     }
 
-    // Verify skill body contains a recognizable heading
     const registryContent = getAgentContent(planned.agent.id);
     if (registryContent) {
-      // The skill body should be present in the file content
-      // Extract first heading from skill body as a check
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
       if (headingMatch && !content.includes(headingMatch[0])) {
         issues.push(`Missing expected heading "${headingMatch[0]}".`);
@@ -500,14 +498,12 @@ export function rollbackDeveloperTeamFiles(
 
   for (const entry of backup.entries) {
     if (entry.previousContent === null) {
-      // File was newly created by install — remove it
       try {
         unlink(entry.absolutePath);
       } catch {
         // File may already be gone (partial apply or external removal)
       }
     } else {
-      // File existed before install — restore original content
       writeFile(entry.absolutePath, entry.previousContent, "utf-8");
     }
   }
@@ -515,13 +511,6 @@ export function rollbackDeveloperTeamFiles(
 
 // --- Content builders (consume core registry) ---
 
-/**
- * Pi-specific frontmatter + body from the core registry.
- *
- * The adapter only adds Pi frontmatter (name, description, skill, tools, etc.)
- * and wraps the registry's runner-agnostic skill body. When a memory bundle
- * is provided, memory instructions are composed into the skill surface.
- */
 function buildSkillFileContent(
   agent: DeveloperTeamAgent,
   memoryBundle?: MemoryInjectionBundle,
@@ -531,7 +520,6 @@ function buildSkillFileContent(
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
 
-  // Compose memory instructions for skill surface
   const skillResult = memoryBundle
     ? composeAdaptiveMemory(content.skillBody, memoryBundle, {
         surface: "skill",
@@ -550,18 +538,6 @@ function buildSkillFileContent(
   ].join("\n");
 }
 
-/**
- * Pi-specific frontmatter + body from the core registry.
- *
- * The adapter only adds Pi frontmatter (name, description, skill, tools, etc.)
- * and wraps the registry's runner-agnostic agent body. When a memory bundle
- * is provided, memory instructions are composed into the agent surface and
- * memory tool names are added to the Pi `tools:` frontmatter line.
- *
- * Tool bindings are only added when the composition found matching fragments
- * for the agent surface, ensuring tools are scoped to surfaces that actually
- * receive memory guidance.
- */
 function buildAgentFileContent(
   agent: DeveloperTeamAgent,
   model?: string,
@@ -573,7 +549,6 @@ function buildAgentFileContent(
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
 
-  // Compose memory instructions for agent surface
   const agentResult: AdaptiveMemoryCompositionResult = memoryBundle
     ? composeAdaptiveMemory(content.agentBody, memoryBundle, {
         surface: "agent",
@@ -582,8 +557,6 @@ function buildAgentFileContent(
       })
     : { content: content.agentBody, toolBindings: [] as readonly import("@deck/core/memory/adaptive-memory").MemoryToolBinding[] };
 
-  // Build tools line — only add memory tool bindings when the composition
-  // produced matching fragments (agentResult.toolBindings is empty otherwise)
   const baseTools = "read,write,bash";
   const toolsLine = memoryBundle
     ? buildPiToolsLine(baseTools, agentResult.toolBindings)
