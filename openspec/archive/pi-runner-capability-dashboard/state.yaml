@@ -1,0 +1,791 @@
+change: pi-runner-capability-dashboard
+status: archived
+current_phase: archive
+artifacts:
+  archive: archive.md
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply: apply-progress.md
+  apply_backend_fix: apply-progress.md
+  apply_general_contract_sync: apply-progress.md
+  apply_frontend: apply-progress.md
+  apply_frontend_fix: apply-progress.md
+  apply_backend_tasks_7_9: apply-progress.md
+  verify_backend_7_9: verify-backend-7-9-output.md
+  review_backend_7_9: review-backend-7-9-output.md
+  apply_backend_7_9_fix: apply-progress.md
+  apply_backend_tests: apply-progress.md
+  apply_backend_tests_output: apply-backend-tests-output.md
+  verify_backend_7_9_fix: verify-backend-7-9-fix-output.md
+  review_backend_7_9_fix: review-backend-7-9-fix-output.md
+  apply_frontend_tasks_13_15: apply-progress.md
+  verify_frontend_13_15: verify-frontend-13-15-output.md
+  review_frontend_13_15: review-frontend-13-15-output.md
+  apply_frontend_13_15_fix: apply-progress.md
+  apply_frontend_13_15_fix_2: apply-progress.md
+  verify_frontend_13_15_fix: verify-frontend-13-15-fix-output.md
+  review_frontend_13_15_fix: review-frontend-13-15-fix-output.md
+  verify_frontend_13_15_fix_2: verify-frontend-13-15-fix-2-output.md
+  review_frontend_13_15_fix_2: review-frontend-13-15-fix-2-output.md
+  verify_foundation: verify-foundation-output.md
+  review_foundation: review-foundation-output.md
+  verify_foundation_fix: verify-foundation-fix-output.md
+  review_foundation_fix: review-foundation-fix-output.md
+  verify_backend: verify-backend-output.md
+  review_backend: review-backend-output.md
+  verify_backend_fix: verify-backend-fix-output.md
+  review_backend_fix: review-backend-fix-output.md
+  verify_contract_sync: verify-contract-sync-output.md
+  review_contract_sync: review-contract-sync-output.md
+  verify_frontend: verify-frontend-output.md
+  review_frontend: review-frontend-output.md
+  verify_frontend_fix: verify-frontend-fix-output.md
+  review_frontend_fix: review-frontend-fix-output.md
+  apply_frontend_tests: apply-progress.md
+  apply_frontend_tests_output: apply-frontend-tests-output.md
+  verify_tests: verify-tests-output.md
+  review_tests: review-tests-output.md
+  apply_backend_tests_fix_output: apply-backend-tests-fix-output.md
+  apply_frontend_tests_fix: apply-progress.md
+  apply_frontend_tests_fix_output: apply-frontend-tests-fix-output.md
+  verify_tests_fix: verify-tests-fix-output.md
+  review_tests_fix: review-tests-fix-output.md
+  apply_frontend_tests_fix_2: apply-progress.md
+  verify_tests_fix_2: verify-tests-fix-2-output.md
+  review_tests_fix_2: review-tests-fix-2-output.md
+  apply_final_fix: apply-progress.md
+  verify_final_fix: verify-final-fix-output.md
+  review_final_fix: review-final-fix-output.md
+  apply_final_fix_2: apply-progress.md
+  verify_final_fix_2: verify-final-fix-2-output.md
+  review_final_fix_2: review-final-fix-2-output.md
+  verify_final: verify-final-output.md
+  review_final: review-final-output.md
+  apply_frontend_final_review_fix: apply-progress.md
+  apply_frontend_final_fix_2: apply-progress.md
+decisions:
+  adaptive_memory_options:
+    status: confirmed
+    value:
+    - None
+    - Engram
+    - Supermemory
+    note: Single-choice global Adaptive Memory; no memory provider active by default.
+  engram_installability:
+    status: confirmed
+    value: Engram/engram-memory appears as installable/actionable only when Adaptive
+      Memory = Engram is selected.
+  mermaid_requirement:
+    status: confirmed
+    value: Mermaid is mandatory as a runner capability; Pi implements it via pi-mermaid,
+      while OpenCode needs its own implementation mapping. Do not conflate the global
+      Mermaid capability with the pi-mermaid package/tool.
+  pi_hud_scope:
+    status: confirmed
+    value: pi-hud is optional and applies only within the Pi runner experience.
+phases:
+  explore:
+    status: completed
+    artifact: exploration.md
+    completed_at: '2026-05-19T00:00:00Z'
+    updated_at: '2026-05-19T00:00:00Z'
+    provenance:
+      source: 'user request: explore global Pi Runner installation UX as capability
+        dashboard'
+      created_by: deck-developer-explorer
+      note: Explored current TUI/install flow, Pi tools/model/memory implementation,
+        recent Supermemory/Engram adaptive-memory state, and preliminary dashboard
+        architecture.
+  proposal:
+    status: completed
+    artifact: proposal.md
+    completed_at: '2026-05-20T00:44:21Z'
+    updated_at: '2026-05-20T00:44:21Z'
+    provenance:
+      source: 'user request: propose Pi Runner capability dashboard after exploration'
+      created_by: deck-developer-proposal
+      note: Proposal created for dashboard by capabilities with separate global runner
+        capabilities, adaptive memory, UI/visual helpers, teams, and final review
+        plan; updated with Engram installability decision.
+  spec:
+    status: completed
+    artifact: spec.md
+    completed_at: '2026-05-20T00:49:45Z'
+    updated_at: '2026-05-20T00:49:45Z'
+    provenance:
+      source: registry-deferred parallel Spec phase
+      created_by: deck-developer-spec
+      note: Spec completed for dashboard by capabilities with requirements and acceptance
+        scenarios, including adaptive memory None/Engram/Supermemory, Engram installability
+        only when selected, mandatory Mermaid capability with Pi implementation pi-mermaid,
+        and optional Pi-only pi-hud.
+  design:
+    status: completed
+    artifact: design.md
+    completed_at: '2026-05-20T00:50:17Z'
+    updated_at: '2026-05-20T00:50:17Z'
+    provenance:
+      source: registry-deferred parallel Design phase
+      created_by: deck-developer-design
+      note: Design completed with architecture for capability inventory, dashboard
+        screens, navigation/state, capability-to-action plan generation, Adaptive
+        Memory provider state, Teams compatibility/consumption, Developer Team model
+        config reuse, mandatory runner Mermaid policy with Pi implementation pi-mermaid,
+        optional Pi-only pi-hud policy, and test strategy.
+  tasks:
+    status: completed
+    artifact: tasks.md
+    completed_at: '2026-05-19T12:00:00Z'
+    updated_at: '2026-05-19T12:00:00Z'
+    provenance:
+      source: deck-developer-task
+      created_by: deck-developer-task
+      note: Tasks broken down from Spec and Design into 19 atomic tasks across Shared/Contracts
+        (2), Backend (7), Frontend (6), and Tests (4) groups. pi-mermaid and pi-hud
+        sources allowed with placeholder pending-source. Two High-complexity tasks
+        flagged for potential splitting. Review workload estimated at 400-800 lines
+        with medium risk.
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T01:14:25Z'
+    updated_at: '2026-05-20T01:21:20Z'
+    agent: general
+    provenance:
+      source: 'SDD Apply Fix: Review Foundation findings for Task 1 and Task 2 only'
+      created_by: deck-developer-apply-general
+      note: 'Applied Review Foundation fixes: runner-mermaid now maps implementations
+        per runner, selectedCapabilities excludes required runner-mermaid, model/thinking/tool
+        ID contracts are stricter, and duplicate imports were cleaned. No backend
+        inventory/plan or frontend reducer/screens were implemented.'
+  apply_fix_foundation:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T01:21:20Z'
+    updated_at: '2026-05-20T01:21:20Z'
+    agent: general
+    provenance:
+      source: Review Foundation changes_requested for Tasks 1-2
+      created_by: deck-developer-apply-general
+      note: Fixed Mermaid global vs Pi implementation mapping, separated user-selectable
+        and required capabilities, reused Developer Team model/thinking types, typed
+        PiRunnerAction.toolId as InstallablePiToolId, and added implementationId for
+        runner implementation placeholders.
+  apply_backend:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-19T00:00:00Z'
+    updated_at: '2026-05-19T00:00:00Z'
+    agent: backend
+    provenance:
+      source: 'SDD Apply Backend: Tasks 3-6 only'
+      created_by: deck-developer-apply-backend
+      note: Implemented capability inventory and review plan builders, added installable
+        tool metadata helpers, and exposed capability detector mappings while preserving
+        legacy buildPiInstallationPlan and reviewPiRequiredTools contracts.
+  apply_backend_fix:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T01:45:00Z'
+    updated_at: '2026-05-20T01:45:00Z'
+    agent: backend
+    provenance:
+      source: 'SDD Apply Backend Fix: Review Backend findings for Tasks 3-6'
+      created_by: deck-developer-apply-backend
+      note: 'Fixed capability plan readiness contract: Developer Team action is pending/blocked
+        with dependencies and unresolvedCapabilities when required Mermaid is unresolved;
+        runner-mermaid ready inventory no longer emits pending-source; selected installable
+        capability actions consume getCapabilityInstallableToolMappings metadata to
+        reduce drift.'
+  apply_general_contract_sync:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T02:05:00Z'
+    updated_at: '2026-05-20T02:05:00Z'
+    agent: general
+    provenance:
+      source: 'SDD Apply General Contract Sync: Review Backend minor integration finding'
+      created_by: deck-developer-apply-general
+      note: Synced duplicated TUI PiRunnerAction contract with backend-emitted dependencies
+        and unresolvedCapabilities fields. No reducer/screens/action-runner or backend
+        logic changes were made.
+  apply_backend_tasks_7_9:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T03:45:00Z'
+    updated_at: '2026-05-20T03:45:00Z'
+    agent: backend
+    provenance:
+      source: 'SDD Apply Backend: Tasks 7-9 only'
+      created_by: deck-developer-apply-backend
+      note: Implemented Review Plan manual semantics for external tools in installPiTools,
+        added dashboardMemoryProvider injection path for Developer Team install, and
+        exported shared Pi adaptive-memory provider resolver for launch/TUI install
+        with Supermemory MCP validation and no Deck token persistence.
+  apply_frontend:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T02:30:00Z'
+    updated_at: '2026-05-20T02:30:00Z'
+    agent: frontend
+    provenance:
+      source: 'SDD Apply Frontend: Tasks 10-12 only'
+      created_by: deck-developer-apply-frontend
+      note: Implemented pure dashboard reducer, selectors, and injectable action runner
+        for Pi Runner capability dashboard. No screens, app.tsx wiring, developer-team
+        screens, or dedicated tests were implemented per scope.
+  apply_frontend_fix:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T03:05:00Z'
+    updated_at: '2026-05-20T03:05:00Z'
+    agent: frontend
+    provenance:
+      source: 'SDD Apply Frontend Fix: Review Frontend findings for Tasks 10-12'
+      created_by: deck-developer-apply-frontend
+      note: Fixed missing piCommand false success, section summary manual/pending/unknown
+        readiness, stale plan invalidation/current-plan guard, Supermemory raw redaction,
+        and missing toolId fallback. No screens/app.tsx/developer-team screens or
+        dedicated tests added.
+  verify_foundation:
+    status: passed_with_warnings
+    artifact: verify-foundation-output.md
+    completed_at: '2026-05-20T01:16:50Z'
+    updated_at: '2026-05-20T01:16:50Z'
+    provenance:
+      source: registry-deferred parallel Verify phase for Foundation Tasks 1-2
+      created_by: deck-developer-verify
+      note: Foundation verify passed with warnings; workspace tests and typecheck
+        passed, but no dedicated Task 1-2 tests and no root build script.
+  review_foundation:
+    status: changes_requested
+    artifact: review-foundation-output.md
+    completed_at: '2026-05-20T01:17:20Z'
+    updated_at: '2026-05-20T01:17:20Z'
+    provenance:
+      source: registry-deferred parallel Review phase for Foundation Tasks 1-2
+      created_by: deck-developer-review
+      note: 'Foundation review requested changes: model Mermaid implementation per
+        runner instead of generic pi-mermaid detector, remove required runner-mermaid
+        from selectedCapabilities, and tighten reused types/toolId contracts.'
+  verify_foundation_fix:
+    status: passed_with_warnings
+    artifact: verify-foundation-fix-output.md
+    completed_at: '2026-05-20T01:24:00Z'
+    updated_at: '2026-05-20T01:24:00Z'
+    provenance:
+      source: registry-deferred parallel Verify re-check for Foundation Tasks 1-2
+      created_by: deck-developer-verify
+      note: Foundation fix verify passed with warnings; review findings resolved,
+        typecheck and workspace tests passed, with warnings for missing build script
+        and dedicated foundation tests.
+  review_foundation_fix:
+    status: approved
+    artifact: review-foundation-fix-output.md
+    completed_at: '2026-05-20T01:24:00Z'
+    updated_at: '2026-05-20T01:24:00Z'
+    provenance:
+      source: registry-deferred parallel Review re-check for Foundation Tasks 1-2
+      created_by: deck-developer-review
+      note: Foundation fix review approved; previous review findings resolved and
+        contracts are safe for Backend/Frontend consumption.
+  verify_backend:
+    status: passed_with_warnings
+    artifact: verify-backend-output.md
+    completed_at: '2026-05-20T01:30:00Z'
+    updated_at: '2026-05-20T01:30:00Z'
+    provenance:
+      source: registry-deferred parallel Verify phase for Backend Tasks 3-6
+      created_by: deck-developer-verify
+      note: Backend verify passed with warnings; Tasks 3-6 complete, typecheck and
+        workspace tests passed, warnings for absent build script and dedicated adapter
+        tests pending Task 16.
+  review_backend:
+    status: approved_with_changes
+    artifact: review-backend-output.md
+    completed_at: '2026-05-20T01:30:00Z'
+    updated_at: '2026-05-20T01:30:00Z'
+    provenance:
+      source: registry-deferred parallel Review phase for Backend Tasks 3-6
+      created_by: deck-developer-review
+      note: 'Backend review approved with changes: improve team action readiness when
+        required capabilities are unsatisfied, respect future ready state for required
+        runner-mermaid, and reduce tool metadata drift risk.'
+  verify_backend_fix:
+    status: passed_with_warnings
+    artifact: verify-backend-fix-output.md
+    completed_at: '2026-05-20T01:50:00Z'
+    updated_at: '2026-05-20T01:50:00Z'
+    provenance:
+      source: registry-deferred parallel Verify re-check for Backend Tasks 3-6
+      created_by: deck-developer-verify
+      note: Backend fix verify passed with warnings; review fixes resolved, typecheck/workspace/adapter
+        tests passed, warnings for absent build script and dedicated tests pending
+        Task 16.
+  review_backend_fix:
+    status: approved_with_changes
+    artifact: review-backend-fix-output.md
+    completed_at: '2026-05-20T01:50:00Z'
+    updated_at: '2026-05-20T01:50:00Z'
+    provenance:
+      source: registry-deferred parallel Review re-check for Backend Tasks 3-6
+      created_by: deck-developer-review
+      note: 'Backend fix review approved with changes: backend fixes resolved; remaining
+        minor integration change is to sync TUI PiRunnerAction type with dependencies/unresolvedCapabilities
+        emitted by backend.'
+  verify_contract_sync:
+    status: passed_with_warnings
+    artifact: verify-contract-sync-output.md
+    completed_at: '2026-05-20T02:10:00Z'
+    updated_at: '2026-05-20T02:10:00Z'
+    provenance:
+      source: registry-deferred parallel Verify for General Contract Sync
+      created_by: deck-developer-verify
+      note: Contract sync verify passed with warnings; TUI PiRunnerAction includes
+        dependencies/unresolvedCapabilities, typecheck and workspace tests passed,
+        warnings for absent build script and dedicated tests.
+  review_contract_sync:
+    status: approved
+    artifact: review-contract-sync-output.md
+    completed_at: '2026-05-20T02:10:00Z'
+    updated_at: '2026-05-20T02:10:00Z'
+    provenance:
+      source: registry-deferred parallel Review for General Contract Sync
+      created_by: deck-developer-review
+      note: Contract sync review approved; TUI PiRunnerAction contract is aligned
+        with backend dependencies/unresolvedCapabilities and safe for Frontend consumption.
+  verify_frontend:
+    status: passed_with_warnings
+    artifact: verify-frontend-output.md
+    completed_at: '2026-05-20T02:40:00Z'
+    updated_at: '2026-05-20T02:40:00Z'
+    provenance:
+      source: registry-deferred parallel Verify phase for Frontend Tasks 10-12
+      created_by: deck-developer-verify
+      note: Frontend verify passed with warnings; Tasks 10-12 complete, typecheck
+        and workspace tests passed, warnings for absent build script, no dedicated
+        tests, and install-pi-package missing-piCommand edge case.
+  review_frontend:
+    status: changes_requested
+    artifact: review-frontend-output.md
+    completed_at: '2026-05-20T02:40:00Z'
+    updated_at: '2026-05-20T02:40:00Z'
+    provenance:
+      source: registry-deferred parallel Review phase for Frontend Tasks 10-12
+      created_by: deck-developer-review
+      note: 'Frontend review requested changes: install-pi-package must not report
+        success without piCommand, section summaries must reflect manual/pending/unknown
+        states, reducer must invalidate stale plans, Supermemory raw results must
+        be sanitized, and missing toolId fallback must be removed.'
+  verify_frontend_fix:
+    status: passed_with_warnings
+    artifact: verify-frontend-fix-output.md
+    completed_at: '2026-05-20T03:15:00Z'
+    updated_at: '2026-05-20T03:15:00Z'
+    provenance:
+      source: registry-deferred parallel Verify re-check for Frontend Tasks 10-12
+      created_by: deck-developer-verify
+      note: Frontend fix verify passed with warnings; review findings resolved, typecheck
+        and workspace tests passed, warnings for absent build script and no dedicated
+        tests.
+  review_frontend_fix:
+    status: approved
+    artifact: review-frontend-fix-output.md
+    completed_at: '2026-05-20T03:15:00Z'
+    updated_at: '2026-05-20T03:15:00Z'
+    provenance:
+      source: registry-deferred parallel Review re-check for Frontend Tasks 10-12
+      created_by: deck-developer-review
+      note: Frontend fix review approved; reducer, selectors, and action-runner are
+        safe for future screens/app wiring within Tasks 13-15.
+  verify_backend_7_9:
+    status: passed_with_warnings
+    artifact: verify-backend-7-9-output.md
+    completed_at: '2026-05-20T03:30:00Z'
+    updated_at: '2026-05-20T03:30:00Z'
+    provenance:
+      source: registry-deferred parallel Verify phase for Backend Tasks 7-9
+      created_by: deck-developer-verify
+      note: Backend Tasks 7-9 verify passed with warnings; relevant and workspace
+        tests passed, typecheck passed, root build script absent.
+  review_backend_7_9:
+    status: changes_requested
+    artifact: review-backend-7-9-output.md
+    completed_at: '2026-05-20T03:30:00Z'
+    updated_at: '2026-05-20T03:30:00Z'
+    provenance:
+      source: registry-deferred parallel Review phase for Backend Tasks 7-9
+      created_by: deck-developer-review
+      note: 'Backend Tasks 7-9 review requested changes: harden direct Supermemory
+        dashboard resolver path with validation/fail-closed diagnostics, and allow
+        external/manual tools to return manual results even without piCommand.'
+  apply_backend_7_9_fix:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T04:20:00Z'
+    updated_at: '2026-05-20T04:20:00Z'
+    agent: backend
+    provenance:
+      source: 'SDD Apply Backend Fix: Review Backend 7-9 findings only'
+      created_by: deck-developer-apply-backend
+      note: Fixed direct Supermemory dashboard resolver validation/fail-closed behavior,
+        wrapped Engram/Supermemory provider construction, added direct invalid/secret/extra
+        Supermemory tests, and made external install tools emit manual results even
+        when piCommand is unavailable.
+  verify_backend_7_9_fix:
+    status: passed_with_warnings
+    artifact: verify-backend-7-9-fix-output.md
+    completed_at: '2026-05-20T04:30:00Z'
+    updated_at: '2026-05-20T04:30:00Z'
+    provenance:
+      source: registry-deferred parallel Verify re-check for Backend Tasks 7-9
+      created_by: deck-developer-verify
+      note: Backend Tasks 7-9 fix verify passed with warnings; 720 workspace tests
+        and 70 targeted tests passed, typecheck passed, root build script absent.
+  review_backend_7_9_fix:
+    status: approved
+    artifact: review-backend-7-9-fix-output.md
+    completed_at: '2026-05-20T04:30:00Z'
+    updated_at: '2026-05-20T04:30:00Z'
+    provenance:
+      source: registry-deferred parallel Review re-check for Backend Tasks 7-9
+      created_by: deck-developer-review
+      note: Backend Tasks 7-9 fix review approved; Supermemory direct dashboard path
+        is safe/fail-closed and external installs return manual results without piCommand.
+  apply_frontend_tasks_13_15:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T05:00:00Z'
+    updated_at: '2026-05-20T05:00:00Z'
+    agent: frontend
+    provenance:
+      source: 'SDD Apply Frontend: Tasks 13-15 only'
+      created_by: deck-developer-apply-frontend
+      note: Implemented Ink dashboard screens, routed Pi Start installation through
+        the capability dashboard instead of the package wizard, and added optional
+        Developer Team dashboard context while preserving Home Configure models semantics.
+        Typecheck and TUI tests passed; root build script absent.
+  verify_frontend_13_15:
+    status: passed_with_warnings
+    artifact: verify-frontend-13-15-output.md
+    completed_at: '2026-05-20T05:10:00Z'
+    updated_at: '2026-05-20T05:10:00Z'
+    provenance:
+      source: registry-deferred parallel Verify phase for Frontend Tasks 13-15
+      created_by: deck-developer-verify
+      note: Frontend Tasks 13-15 verify passed with warnings; TUI and workspace tests
+        passed, typecheck passed, root build script absent, dedicated dashboard render
+        tests pending.
+  review_frontend_13_15:
+    status: changes_requested
+    artifact: review-frontend-13-15-output.md
+    completed_at: '2026-05-20T05:10:00Z'
+    updated_at: '2026-05-20T05:10:00Z'
+    provenance:
+      source: registry-deferred parallel Review phase for Frontend Tasks 13-15
+      created_by: deck-developer-review
+      note: 'Frontend Tasks 13-15 review requested changes: connect dashboard Adaptive
+        Memory to provider resolution/Supermemory config, fix Teams back-stack navigation,
+        preserve multi-environment continuation after Pi dashboard, and resolve inert
+        defaults/onDone UI actions.'
+  apply_frontend_13_15_fix:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T06:00:00Z'
+    updated_at: '2026-05-20T06:00:00Z'
+    agent: frontend
+    provenance:
+      source: 'SDD Apply Frontend Fix: review-frontend-13-15 findings only'
+      created_by: deck-developer-apply-frontend
+      note: Fixed dashboard Adaptive Memory provider resolution/Supermemory handoff,
+        Developer Team detail back-stack navigation, Pi-to-OpenCode continuation,
+        observable defaults action, and dashboard complete text. Typecheck and TUI
+        tests passed; root build script absent.
+  apply_frontend_13_15_fix_2:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T07:00:00Z'
+    updated_at: '2026-05-20T07:00:00Z'
+    agent: frontend
+    provenance:
+      source: 'SDD Apply Frontend Fix 2: review-frontend-13-15-fix findings only'
+      created_by: deck-developer-apply-frontend
+      note: Fixed post-dashboard completion navigation to avoid legacy team-selection
+        and aligned Review/Install UI run affordance with shared Supermemory resolver
+        diagnostics. Typecheck and TUI tests passed; root build script absent.
+  verify_frontend_13_15_fix:
+    status: passed_with_warnings
+    artifact: verify-frontend-13-15-fix-output.md
+    completed_at: '2026-05-20T06:10:00Z'
+    updated_at: '2026-05-20T06:10:00Z'
+    provenance:
+      source: registry-deferred parallel Verify re-check for Frontend Tasks 13-15
+      created_by: deck-developer-verify
+      note: Frontend Tasks 13-15 first fix verify passed with warnings; prior findings
+        mostly resolved, tests/typecheck passed, build absent and dedicated dashboard
+        coverage pending.
+  review_frontend_13_15_fix:
+    status: changes_requested
+    artifact: review-frontend-13-15-fix-output.md
+    completed_at: '2026-05-20T06:10:00Z'
+    updated_at: '2026-05-20T06:10:00Z'
+    provenance:
+      source: registry-deferred parallel Review re-check for Frontend Tasks 13-15
+      created_by: deck-developer-review
+      note: 'Frontend Tasks 13-15 first fix review requested changes: post-dashboard
+        completion still used legacy helper that could reopen team-selection, and
+        Review/Install UI predicate needed resolver diagnostics alignment.'
+  apply_frontend_tests:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T00:00:00Z'
+    updated_at: '2026-05-20T00:00:00Z'
+    agent: frontend
+    provenance:
+      source: 'SDD Apply Frontend Tests: Tasks 17-18 and frontend portion of Task
+        19 only'
+      created_by: deck-developer-apply-frontend
+      note: Added TUI reducer tests, dashboard render tests, and frontend Developer
+        Team preservation regression tests. TUI tests and typecheck passed; root build
+        script absent. Backend/adapter Task 19 portion not touched.
+  verify_frontend_13_15_fix_2:
+    status: passed_with_warnings
+    artifact: verify-frontend-13-15-fix-2-output.md
+    completed_at: '2026-05-20T07:10:00Z'
+    updated_at: '2026-05-20T07:10:00Z'
+    provenance:
+      source: registry-deferred parallel Verify re-check for Frontend Tasks 13-15
+        Fix 2
+      created_by: deck-developer-verify
+      note: Frontend Tasks 13-15 Fix 2 verify passed with warnings; dashboard complete
+        no longer reopens team-selection, Pi+OpenCode continues to OpenCode, Review/Install
+        predicate matches handler, tests/typecheck passed, build absent.
+  review_frontend_13_15_fix_2:
+    status: approved
+    artifact: review-frontend-13-15-fix-2-output.md
+    completed_at: '2026-05-20T07:10:00Z'
+    updated_at: '2026-05-20T07:10:00Z'
+    provenance:
+      source: registry-deferred parallel Review re-check for Frontend Tasks 13-15
+        Fix 2
+      created_by: deck-developer-review
+      note: Frontend Tasks 13-15 Fix 2 review approved; post-dashboard continuation
+        and Review/Install run affordance are aligned and safe.
+  apply_backend_tests:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T07:30:00Z'
+    updated_at: '2026-05-20T07:30:00Z'
+    agent: backend
+    provenance:
+      source: 'SDD Apply Backend Tests: Task 16 and backend portion of Task 19 only'
+      created_by: deck-developer-apply-backend
+      note: Added adapter unit tests for capability catalog, inventory, review plan,
+        exclusions, Adaptive Memory provider behavior, readiness/manual/pending states,
+        and backend preservation regressions for dashboard plan and dashboardMemoryProvider.
+        Targeted tests and typecheck passed; root build script absent.
+  verify_tests:
+    status: passed_with_warnings
+    artifact: verify-tests-output.md
+    completed_at: '2026-05-20T07:50:00Z'
+    updated_at: '2026-05-20T07:50:00Z'
+    provenance:
+      source: registry-deferred parallel Verify phase for Tests Tasks 16-19
+      created_by: deck-developer-verify
+      note: Tests verify passed with warnings; Tasks 16-19 complete, 758 workspace
+        tests and 77 targeted tests passed, typecheck passed, root build script absent.
+  review_tests:
+    status: changes_requested
+    artifact: review-tests-output.md
+    completed_at: '2026-05-20T07:50:00Z'
+    updated_at: '2026-05-20T07:50:00Z'
+    provenance:
+      source: registry-deferred parallel Review phase for Tests Tasks 16-19
+      created_by: deck-developer-review
+      note: 'Tests review requested changes: add dashboard-specific Supermemory fail-closed/secret
+        redaction coverage, stronger model config/frontmatter preservation regression,
+        and more structural assertions for exclusions/providers.'
+  apply_backend_tests_fix:
+    status: completed
+    artifact: apply-backend-tests-fix-output.md
+    completed_at: '2026-05-20T08:20:00Z'
+    updated_at: '2026-05-20T08:20:00Z'
+    agent: backend
+    provenance:
+      source: 'Apply Tests Fix Backend: review-tests-output findings only'
+      created_by: deck-developer-apply-backend
+      note: 'Added Supermemory fail-closed and token redaction coverage, structural
+        catalog/plan assertions, and Developer Team model/thinking frontmatter preservation
+        regression. Minimal product change: capability plan now requires non-secret
+        Supermemory userId plus token before validation is ready. Targeted tests and
+        typecheck passed; root build script absent.'
+  apply_frontend_tests_fix:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-19T00:00:00Z'
+    updated_at: '2026-05-19T00:00:00Z'
+    agent: frontend
+    provenance:
+      source: Apply Tests Fix Frontend for review-tests-output.md findings
+      created_by: deck-developer-apply-frontend
+      note: Added dashboard-specific Supermemory redaction/fail-closed tests, model
+        config preservation regression, and input handler mapping coverage for Tasks
+        17-19 review findings.
+  verify_tests_fix:
+    status: passed_with_warnings
+    artifact: verify-tests-fix-output.md
+    completed_at: '2026-05-20T08:40:00Z'
+    updated_at: '2026-05-20T08:40:00Z'
+    provenance:
+      source: registry-deferred parallel Verify re-check for Tests Tasks 16-19
+      created_by: deck-developer-verify
+      note: Tests fix verify passed with warnings; 89 targeted tests and 770 workspace
+        tests passed, typecheck passed, root build script absent.
+  review_tests_fix:
+    status: changes_requested
+    artifact: review-tests-fix-output.md
+    completed_at: '2026-05-20T08:40:00Z'
+    updated_at: '2026-05-20T08:40:00Z'
+    provenance:
+      source: registry-deferred parallel Review re-check for Tests Tasks 16-19
+      created_by: deck-developer-review
+      note: Tests fix review requested changes; model/frontmatter preservation still
+        needs dashboard state -> action-runner -> Developer Team boundary coverage,
+        and input handler tests must cover real app handler or be wired into app.
+  apply_frontend_tests_fix_2:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T09:10:00Z'
+    updated_at: '2026-05-20T09:10:00Z'
+    agent: frontend
+    provenance:
+      source: Apply Tests Fix 2 Frontend for review-tests-fix-output.md findings
+      created_by: deck-developer-apply-frontend
+      note: Wired app.tsx dashboard input handling to shared input-handler effects
+        and added action-runner apply-team-bundle boundary regression preserving Developer
+        Team model/thinking frontmatter from dashboard state through plan application.
+        Targeted tests, workspace tests, and typecheck passed; root build script absent.
+  verify_tests_fix_2:
+    status: passed_with_warnings
+    artifact: verify-tests-fix-2-output.md
+    completed_at: '2026-05-20T09:10:00Z'
+    updated_at: '2026-05-20T09:10:00Z'
+    provenance:
+      source: registry-deferred parallel Verify re-check for Tests Fix 2 Tasks 16-19
+      created_by: deck-developer-verify
+      note: Tests Fix 2 verify passed with warnings; 68 targeted tests and 771 workspace
+        tests passed, typecheck passed, root build script absent.
+  review_tests_fix_2:
+    status: approved
+    artifact: review-tests-fix-2-output.md
+    completed_at: '2026-05-20T09:10:00Z'
+    updated_at: '2026-05-20T09:10:00Z'
+    provenance:
+      source: registry-deferred parallel Review re-check for Tests Fix 2 Tasks 16-19
+      created_by: deck-developer-review
+      note: Tests Fix 2 review approved; dashboard state -> action-runner -> Developer
+        Team frontmatter boundary and real app input handler wiring are covered.
+  verify_final:
+    status: passed_with_warnings
+    artifact: verify-final-output.md
+    completed_at: '2026-05-20T09:30:00Z'
+    updated_at: '2026-05-20T09:30:00Z'
+    provenance:
+      source: registry-deferred final Verify phase
+      created_by: deck-developer-verify
+      note: Final verify passed with warnings; 19/19 tasks complete, 771 workspace
+        tests and 121 targeted tests passed, typecheck passed, root build script absent.
+  review_final:
+    status: changes_requested
+    artifact: review-final-output.md
+    completed_at: '2026-05-20T09:30:00Z'
+    updated_at: '2026-05-20T09:30:00Z'
+    provenance:
+      source: registry-deferred final Review phase
+      created_by: deck-developer-review
+      note: Final review requested changes; Supermemory credential handoff must not
+        persist before Review & Install, provider resolution must occur after plan
+        config writes, and app/controller maintainability should be improved where
+        feasible.
+  apply_frontend_final_review_fix:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T10:00:00Z'
+    updated_at: '2026-05-20T10:00:00Z'
+    agent: frontend
+    provenance:
+      source: Apply Final Review Fix for review-final-output.md findings only
+      created_by: deck-developer-apply-frontend
+      note: 'Fixed Supermemory dashboard boundary: setup no longer persists Pi MCP
+        credentials before Run; Review & Install writes Pi MCP config inside configWrites,
+        resolves provider after that write and before Developer Team application,
+        clears ephemeral token after use/cancel, redacts complete diagnostics, and
+        removes dead dashboard dispatch prop. Targeted/workspace tests and typecheck
+        passed; root build script absent.'
+
+  apply_frontend_final_fix_2:
+    status: completed
+    artifact: apply-progress.md
+    completed_at: '2026-05-20T10:45:00Z'
+    updated_at: '2026-05-20T10:45:00Z'
+    agent: frontend
+    provenance:
+      source: Apply Final Fix 2 for verify-final-fix-output.md failure and review-final-fix major/minor
+      created_by: deck-developer-apply-frontend
+      note: 'Fixed final-fix verification failure and review hardening: informational
+        Supermemory setup diagnostic no longer blocks Run, Run requires real ephemeral
+        token in addition to hasToken state, write-pi-mcp-config without token fails
+        for required handoff, cleanup/cancel/exit invalidates dashboard Supermemory
+        readiness, action-runner redacts standalone sk-sm tokens, and Review & Install
+        stale copy was updated. Targeted tests and typecheck passed; root build script
+        absent.'
+  verify_final_fix:
+    status: failed
+    artifact: verify-final-fix-output.md
+    completed_at: '2026-05-20T10:15:00Z'
+    updated_at: '2026-05-20T10:15:00Z'
+    provenance:
+      source: registry-deferred Verify re-check for Final Fix
+      created_by: deck-developer-verify
+      note: Final fix verify failed because real Supermemory setup diagnostic blocked Run before write-pi-mcp-config/provider resolution/team apply.
+  review_final_fix:
+    status: approved_with_changes
+    artifact: review-final-fix-output.md
+    completed_at: '2026-05-20T10:15:00Z'
+    updated_at: '2026-05-20T10:15:00Z'
+    provenance:
+      source: registry-deferred Review re-check for Final Fix
+      created_by: deck-developer-review
+      note: Final fix review approved with changes; token lifecycle hardening and standalone sk-sm redaction were requested.
+  verify_final_fix_2:
+    status: passed_with_warnings
+    artifact: verify-final-fix-2-output.md
+    completed_at: '2026-05-20T10:55:00Z'
+    updated_at: '2026-05-20T10:55:00Z'
+    provenance:
+      source: registry-deferred Verify re-check for Final Fix 2
+      created_by: deck-developer-verify
+      note: Final Fix 2 verify passed with warnings; targeted 131/131 and workspace 778/778 tests passed, typecheck passed, root build script absent.
+  review_final_fix_2:
+    status: approved
+    artifact: review-final-fix-2-output.md
+    completed_at: '2026-05-20T10:55:00Z'
+    updated_at: '2026-05-20T10:55:00Z'
+    provenance:
+      source: registry-deferred Review re-check for Final Fix 2
+      created_by: deck-developer-review
+      note: Final Fix 2 review approved; Supermemory Review & Install boundary, token lifecycle, redaction, and diagnostics are safe enough to close.
+
+  archive:
+    status: archived
+    artifact: archive.md
+    completed_at: '2026-05-20T11:10:00Z'
+    updated_at: '2026-05-20T11:10:00Z'
+    provenance:
+      source: 'SDD Archive: completed Final Verify and Final Review Fix 2'
+      created_by: deck-developer-archive
+      note: Change closed after 19/19 tasks completed, Final Verify passed_with_warnings (targeted 131/131, workspace 778/778, typecheck pass, root build script absent), and Final Review Fix 2 approved. Archive artifact created at archive.md and artifacts moved to openspec/archive/pi-runner-capability-dashboard/.
+archiveTarget: openspec/archive/pi-runner-capability-dashboard/
