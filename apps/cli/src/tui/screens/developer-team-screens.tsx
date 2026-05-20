@@ -2,20 +2,29 @@ import React from "react";
 import { Box, Text } from "ink";
 
 import { DEVELOPER_TEAM_AGENTS, PI_THINKING_LEVELS, supportsDeveloperTeamModel, supportsThinkingForModel } from "@deck/adapter-pi";
-import type { PiModel, PiProvider, PiThinkingLevel } from "@deck/adapter-pi";
+import type { CapabilityStatus, PiModel, PiProvider, PiThinkingLevel } from "@deck/adapter-pi";
 import type { AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
 import { MenuList } from "../components/menu-list";
+
+type DeveloperTeamDashboardContext = {
+  source?: "home" | "dashboard";
+  adaptiveMemoryProvider?: AdaptiveMemoryActiveProvider;
+  capabilityStatuses?: Partial<Record<string, CapabilityStatus>>;
+  returnLabel?: string;
+};
 
 type DeveloperTeamReviewScreenProps = {
   projectRoot: string;
   cursor: number;
+  dashboardContext?: DeveloperTeamDashboardContext;
 };
 
-export function DeveloperTeamReviewScreen({ projectRoot, cursor }: DeveloperTeamReviewScreenProps) {
+export function DeveloperTeamReviewScreen({ projectRoot, cursor, dashboardContext }: DeveloperTeamReviewScreenProps) {
   return (
     <Box flexDirection="column">
       <Text bold>Developer Team will be installed to:</Text>
       <Text color="cyan">  {projectRoot}/.pi/agents/</Text>
+      {dashboardContext?.source === "dashboard" ? <DashboardContextSummary context={dashboardContext} /> : null}
       <Box marginTop={1} flexDirection="column">
         <Text bold>Included agents ({DEVELOPER_TEAM_AGENTS.length})</Text>
         {DEVELOPER_TEAM_AGENTS.map((agent) => (
@@ -29,10 +38,24 @@ export function DeveloperTeamReviewScreen({ projectRoot, cursor }: DeveloperTeam
           cursor={cursor}
           items={[
             { id: "install", label: "Install Developer Team now" },
-            { id: "skip", label: "Skip Developer Team" },
+            { id: "skip", label: dashboardContext?.returnLabel ?? "Skip Developer Team" },
           ]}
         />
       </Box>
+    </Box>
+  );
+}
+
+function DashboardContextSummary({ context }: { context: DeveloperTeamDashboardContext }) {
+  const statuses = context.capabilityStatuses ?? {};
+  return (
+    <Box marginTop={1} flexDirection="column">
+      <Text bold>Dashboard context</Text>
+      <Text>Adaptive Memory selected in dashboard: <Text color="cyan">{context.adaptiveMemoryProvider ?? "none"}</Text></Text>
+      <Text dimColor>Model provider/model/thinking semantics are reused unchanged.</Text>
+      {Object.entries(statuses).length > 0 ? (
+        <Text dimColor>Capability states: {Object.entries(statuses).map(([id, status]) => `${id}=${status}`).join(", ")}</Text>
+      ) : null}
     </Box>
   );
 }
@@ -233,9 +256,10 @@ type AgentModelConfigListScreenProps = {
   cursor: number;
   modelAssignments: Record<string, string>;
   thinkingAssignments: Record<string, PiThinkingLevel>;
+  dashboardContext?: DeveloperTeamDashboardContext;
 };
 
-export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingAssignments }: AgentModelConfigListScreenProps) {
+export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingAssignments, dashboardContext }: AgentModelConfigListScreenProps) {
   const agentItems = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const assigned = modelAssignments[agent.id];
     const thinking = thinkingAssignments[agent.id];
@@ -246,12 +270,13 @@ export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingA
     };
   });
 
-  const items = [...agentItems, { id: "finish", label: "Finish configuration", hint: "" }];
+  const items = [...agentItems, { id: "finish", label: "Finish configuration", hint: dashboardContext?.returnLabel ?? "" }];
 
   return (
     <Box flexDirection="column">
       <Text bold>Select an agent to configure</Text>
       <Text dimColor>Current assignments are shown. Choose an agent to change its model and reasoning level.</Text>
+      {dashboardContext?.source === "dashboard" ? <DashboardContextSummary context={dashboardContext} /> : null}
       <Box marginTop={1}>
         <MenuList cursor={cursor} items={items} />
       </Box>
@@ -261,12 +286,14 @@ export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingA
 
 type NoProvidersScreenProps = {
   onContinue?: () => void;
+  dashboardContext?: DeveloperTeamDashboardContext;
 };
 
-export function NoProvidersScreen({}: NoProvidersScreenProps) {
+export function NoProvidersScreen({ dashboardContext }: NoProvidersScreenProps) {
   return (
     <Box flexDirection="column">
       <Text color="yellow" bold>No Pi providers detected</Text>
+      {dashboardContext?.source === "dashboard" ? <DashboardContextSummary context={dashboardContext} /> : null}
       <Text dimColor>Deck could not find providers in Pi settings, `pi --list-models`, or environment credentials.</Text>
       <Box marginTop={1} flexDirection="column">
         <Text>Deck checks:</Text>

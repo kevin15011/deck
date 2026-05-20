@@ -21,6 +21,7 @@ import {
   backupDeveloperTeamFiles,
   buildModelInventoryFromPiListModels,
   buildPiInstallationPlan,
+  buildPiRunnerCapabilityInventory,
   detectConfiguredProviders,
   getDefaultThinkingForModel,
   getOptionalPiTools,
@@ -50,6 +51,7 @@ import {
   type PiProvider,
   type PiRequiredToolsReview,
   type PiToolInstallResult,
+  type PiRunnerCapabilityInventory,
 } from "@deck/adapter-pi";
 
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
@@ -80,6 +82,15 @@ import {
   SupermemorySetupScreen,
   type SupermemorySetupValues,
 } from "./screens/developer-team-screens";
+import { runPiRunnerReviewPlan, type PiRunnerActionRunResult } from "./pi-runner-dashboard/action-runner";
+import {
+  getPiRunnerDashboardContinueEffect,
+  getPiRunnerDashboardToggleAction,
+  type PiRunnerDashboardContinueEffect,
+} from "./pi-runner-dashboard/input-handler";
+import { reducePiRunnerDashboard } from "./pi-runner-dashboard/reducer";
+import { createDefaultPiRunnerDashboardState, type PiRunnerDashboardState } from "./pi-runner-dashboard/state";
+import { PiRunnerDashboardScreens } from "./screens/pi-runner-dashboard-screens";
 import { HomeScreen } from "./screens/home-screen";
 
 type Screen =
@@ -88,6 +99,7 @@ type Screen =
   | "model-team-selection"
   | "environment-selection"
   | "environment-check"
+  | "pi-runner-dashboard"
   | "pi-preflight-checking"
   | "pi-preflight"
   | "required-tools"
@@ -160,6 +172,7 @@ export function createMemoryProviderForSelection(choice: MemoryProviderChoice, v
   return undefined;
 }
 
+
 type SupermemoryPiMcpWriter = (options: { token: string; serverName?: string; configPath?: string; homeDir?: string }) => PiMcpConfigWriteResult;
 
 export function handOffSupermemoryCredentialToPiMcp(
@@ -187,6 +200,34 @@ export function handOffSupermemoryCredentialToPiMcp(
     success: true,
     path: result.path,
     message: `Supermemory MCP server '${result.serverName}' configured in Pi MCP config at ${result.path}; credential value is ${redactSecret(token)}.`,
+  };
+}
+
+export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupValues):
+  | { ok: true; values: { configured: true; hasToken: true; userId: string; teamId?: string; organizationId?: string; diagnostics: string[] }; status: string }
+  | { ok: false; message: string } {
+  const normalizedValues = {
+    token: values.token.trim(),
+    userId: values.userId.trim(),
+    teamId: values.teamId.trim(),
+    orgId: values.orgId.trim(),
+  };
+
+  if (!normalizedValues.token || !normalizedValues.userId) {
+    return { ok: false, message: "Supermemory dashboard setup requires token and userId before Review/Install." };
+  }
+
+  return {
+    ok: true,
+    values: {
+      configured: true,
+      hasToken: true,
+      userId: normalizedValues.userId,
+      ...(normalizedValues.teamId ? { teamId: normalizedValues.teamId } : {}),
+      ...(normalizedValues.orgId ? { organizationId: normalizedValues.orgId } : {}),
+      diagnostics: ["Supermemory token captured ephemerally for Review & Install; no Pi MCP config was written yet."],
+    },
+    status: "Dashboard Adaptive Memory: Supermemory listo para Review & Install. Token: [redacted]; Pi MCP config se escribirá al ejecutar Run.",
   };
 }
 
@@ -228,12 +269,17 @@ export function DeckApp() {
   const [modelEnvironmentCursor, setModelEnvironmentCursor] = useState(0);
   const [modelTeamCursor, setModelTeamCursor] = useState(0);
   const [selectedModelEnvironment, setSelectedModelEnvironment] = useState<EnvironmentId | null>(null);
-  const [modelConfigSource, setModelConfigSource] = useState<"install" | "menu" | null>(null);
+  const [modelConfigSource, setModelConfigSource] = useState<"install" | "menu" | "dashboard" | null>(null);
   const [memoryProvider, setMemoryProvider] = useState<AdaptiveMemoryProvider | undefined>(undefined);
   const [memoryProviderChoice, setMemoryProviderChoice] = useState<MemoryProviderChoice>("none");
   const [supermemorySetup, setSupermemorySetup] = useState<SupermemorySetupValues>({ token: "", userId: "", teamId: "", orgId: "" });
   const [supermemoryError, setSupermemoryError] = useState<string | undefined>(undefined);
   const [memoryStatus, setMemoryStatus] = useState<string | undefined>(undefined);
+  const [dashboardSupermemorySetupActive, setDashboardSupermemorySetupActive] = useState(false);
+  const [dashboardCompletionStatus, setDashboardCompletionStatus] = useState<string | undefined>(undefined);
+  const [dashboardState, setDashboardState] = useState<PiRunnerDashboardState>(() => createDefaultPiRunnerDashboardState());
+  const [dashboardInventory, setDashboardInventory] = useState<PiRunnerCapabilityInventory>({});
+  const [dashboardActionResults, setDashboardActionResults] = useState<PiRunnerActionRunResult[]>([]);
 
   const installedPi = runtimeStatuses.find((status) => status.runtime === "pi" && status.installed && status.command);
   const installedOpenCode = runtimeStatuses.find((status) => status.runtime === "opencode" && status.installed && status.command);
@@ -259,6 +305,11 @@ export function DeckApp() {
   );
 
   useInput((input, key) => {
+    if (screen === "pi-runner-dashboard") {
+      handleDashboardInput(input, key);
+      return;
+    }
+
     if (isSupermemoryInputScreen(screen)) {
       handleSupermemoryTextInput(input, key);
       return;
@@ -270,6 +321,12 @@ export function DeckApp() {
     }
 
     if (key.escape) {
+      if (dashboardSupermemorySetupActive) {
+        clearDashboardSupermemoryEphemeralState();
+        setDashboardSupermemorySetupActive(false);
+        resetCursor("pi-runner-dashboard");
+        return;
+      }
       goBack();
       return;
     }
@@ -313,7 +370,16 @@ export function DeckApp() {
       if (!cancelled) {
         setPiPreflight(preflight);
         setToolsReview(review);
-        resetCursor("pi-preflight");
+        const inventory = buildPiRunnerCapabilityInventory(review, preflight, { runnerScope: "pi" });
+        setDashboardInventory(inventory);
+        setDashboardState(createDefaultPiRunnerDashboardState({
+          runtime: { piCommand: installedPi.command, preflight, toolsReview: review },
+          capabilityStatuses: Object.fromEntries(
+            Object.entries(inventory).map(([capabilityId, entry]) => [capabilityId, entry?.status]),
+          ),
+        }));
+        setDashboardActionResults([]);
+        resetCursor("pi-runner-dashboard");
       }
     }
 
@@ -376,6 +442,39 @@ export function DeckApp() {
       cancelled = true;
     };
   }, [installationPlan, installedPi?.command, screen]);
+
+  useEffect(() => {
+    if (screen !== "pi-runner-dashboard" || dashboardState.screen !== "install-progress" || !dashboardState.plan) return;
+
+    let cancelled = false;
+
+    async function runDashboardInstall() {
+      setDashboardActionResults([]);
+      const results = await runPiRunnerReviewPlan(dashboardState.plan!, {
+        projectRoot: resolveProjectRoot(),
+        piCommand: dashboardState.runtime.piCommand,
+        dashboardState,
+        supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
+        onActionResult: (result) => {
+          if (!cancelled) setDashboardActionResults((current) => [...current, result]);
+        },
+      });
+
+      if (!cancelled) {
+        setDashboardActionResults(results);
+        setDashboardCompletionStatus(getDashboardCompletionStatus());
+        clearDashboardSupermemoryEphemeralState();
+        setDashboardState((current) => reducePiRunnerDashboard(current, { type: "complete" }));
+      }
+    }
+
+    void runDashboardInstall();
+
+    return () => {
+      cancelled = true;
+      clearDashboardSupermemoryEphemeralState();
+    };
+  }, [dashboardState.screen, dashboardState.plan, dashboardState.runtime.piCommand, screen, supermemorySetup.token, selectedEnvironments, installedOpenCode?.command, openCodePreflight]);
 
   useEffect(() => {
     if (screen !== "opencode-installing") return;
@@ -657,6 +756,9 @@ export function DeckApp() {
         // Finish button
         if (modelConfigSource === "install") {
           resetCursor("memory-provider-selection");
+        } else if (modelConfigSource === "dashboard") {
+          syncDashboardDeveloperTeamModelConfig();
+          resetCursor("pi-runner-dashboard");
         } else {
           applyDeveloperTeamModelConfig();
           resetCursor("complete");
@@ -717,6 +819,8 @@ export function DeckApp() {
     if (screen === "no-providers") {
       if (modelConfigSource === "install") {
         resetCursor("memory-provider-selection");
+      } else if (modelConfigSource === "dashboard") {
+        resetCursor("pi-runner-dashboard");
       } else {
         resetCursor("home");
       }
@@ -729,6 +833,7 @@ export function DeckApp() {
       setMemoryProviderChoice(choice);
       setSupermemoryError(undefined);
       if (choice === "supermemory") {
+        setDashboardSupermemorySetupActive(false);
         resetCursor("supermemory-token");
         return;
       }
@@ -771,6 +876,113 @@ export function DeckApp() {
     if (screen === "complete") resetCursor("home");
   }
 
+  function handleDashboardInput(input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) {
+    if (input === "q") {
+      clearDashboardSupermemoryEphemeralState();
+      exit();
+      return;
+    }
+    if (key.escape) {
+      if (dashboardState.screen === "dashboard") {
+        clearDashboardSupermemoryEphemeralState();
+        resetCursor("environment-check");
+      } else {
+        setDashboardState((current) => reducePiRunnerDashboard(current, { type: "back" }));
+      }
+      return;
+    }
+    if (key.upArrow || input === "k") {
+      setDashboardState((current) => reducePiRunnerDashboard(current, { type: "cursor-up" }));
+      return;
+    }
+    if (key.downArrow || input === "j") {
+      setDashboardState((current) => reducePiRunnerDashboard(current, { type: "cursor-down" }));
+      return;
+    }
+    if (input === " ") {
+      toggleDashboardCurrent();
+      return;
+    }
+    if (key.return) {
+      continueDashboardCurrent();
+    }
+  }
+
+  function toggleDashboardCurrent() {
+    const action = getPiRunnerDashboardToggleAction(dashboardState);
+    if (action) setDashboardState((current) => reducePiRunnerDashboard(current, action));
+  }
+
+  function continueDashboardCurrent() {
+    const effect = getPiRunnerDashboardContinueEffect(dashboardState, {
+      inventory: dashboardInventory,
+      canRunPlan: canRunDashboardPlan(dashboardState),
+    });
+    applyDashboardContinueEffect(effect);
+  }
+
+  function applyDashboardContinueEffect(effect: PiRunnerDashboardContinueEffect) {
+    switch (effect.type) {
+      case "dispatch":
+        if (effect.action.type === "select-adaptive-memory" && effect.action.provider !== "supermemory") {
+          clearDashboardSupermemoryEphemeralState();
+        }
+        setDashboardState((state) => reducePiRunnerDashboard(state, effect.action));
+        return;
+      case "select-supermemory-and-open-setup":
+        setDashboardState((state) => reducePiRunnerDashboard(state, effect.action));
+        setDashboardSupermemorySetupActive(true);
+        setMemoryProviderChoice("supermemory");
+        setSupermemoryError(undefined);
+        resetCursor("supermemory-token");
+        return;
+      case "open-developer-team-model-config": {
+        hydrateDeveloperTeamModelConfig();
+        const inventory = detectPiModelInventoryForTui();
+        setDetectedProviders(inventory.providers);
+        setModelsByProvider(inventory.modelsByProvider);
+        setModelConfigSource("dashboard");
+        if (inventory.providers.length === 0) resetCursor("no-providers");
+        else resetCursor("agent-model-config-list");
+        return;
+      }
+      case "reuse-developer-team-model-config": {
+        hydrateDeveloperTeamModelConfig();
+        const assignments = readDeveloperTeamModelConfigAssignments(resolveProjectRoot());
+        setDashboardState((state) => ({
+          ...state,
+          teams: {
+            ...state.teams,
+            "developer-team": {
+              ...state.teams["developer-team"],
+              modelAssignments: assignments.modelAssignments,
+              thinkingAssignments: assignments.thinkingAssignments,
+              status: "Modelos actuales/defaults conservados para Developer Team.",
+            },
+          },
+          plan: undefined,
+          planRevision: state.planRevision + 1,
+          planGeneratedForRevision: undefined,
+        }));
+        return;
+      }
+      case "block-review-install":
+        setDashboardState((state) => ({
+          ...state,
+          adaptiveMemory: {
+            ...state.adaptiveMemory,
+            status: effect.status,
+          },
+        }));
+        return;
+      case "complete-dashboard":
+        goToNextEnvironmentAfterDashboardComplete();
+        return;
+      case "none":
+        return;
+    }
+  }
+
   function isSupermemoryInputScreen(value: Screen): value is "supermemory-token" | "supermemory-user-id" | "supermemory-team-id" | "supermemory-org-id" {
     return value === "supermemory-token" || value === "supermemory-user-id" || value === "supermemory-team-id" || value === "supermemory-org-id";
   }
@@ -785,6 +997,12 @@ export function DeckApp() {
 
   function handleSupermemoryTextInput(input: string, key: { return?: boolean; backspace?: boolean; delete?: boolean; escape?: boolean }) {
     if (key.escape) {
+      if (dashboardSupermemorySetupActive) {
+        clearDashboardSupermemoryEphemeralState();
+        setDashboardSupermemorySetupActive(false);
+        resetCursor("pi-runner-dashboard");
+        return;
+      }
       goBack();
       return;
     }
@@ -826,20 +1044,71 @@ export function DeckApp() {
       return;
     }
     if (screen === "supermemory-org-id") {
+      if (dashboardSupermemorySetupActive) {
+        if (persistDashboardSupermemorySelection(supermemorySetup)) {
+          setDashboardSupermemorySetupActive(false);
+          resetCursor("pi-runner-dashboard");
+        }
+        return;
+      }
       if (persistMemoryProviderSelection("supermemory", supermemorySetup)) {
         resetCursor("developer-team-review");
       }
     }
   }
 
+  function persistDashboardSupermemorySelection(values: SupermemorySetupValues): boolean {
+    const setup = buildDashboardSupermemorySetupUpdate(values);
+    if (!setup.ok) {
+      setSupermemoryError(setup.message);
+      return false;
+    }
+
+    setDashboardState((state) => reducePiRunnerDashboard(state, {
+      type: "update-supermemory",
+      values: setup.values,
+    }));
+    setMemoryStatus(setup.status);
+    return true;
+  }
+
+  function clearDashboardSupermemoryEphemeralState() {
+    setSupermemorySetup((current) => ({ ...current, token: "" }));
+    setDashboardState((current) => {
+      if (current.adaptiveMemory.provider !== "supermemory" || !current.adaptiveMemory.supermemory?.hasToken) return current;
+      return reducePiRunnerDashboard(current, {
+        type: "update-supermemory",
+        values: { configured: false, hasToken: false, diagnostics: [] },
+      });
+    });
+  }
+
+  function getDashboardRunBlockDiagnostics(state: PiRunnerDashboardState = dashboardState, token: string = supermemorySetup.token) {
+    const diagnostics: { message: string }[] = [];
+    if (state.adaptiveMemory.provider === "supermemory") {
+      const setup = state.adaptiveMemory.supermemory;
+      if (!setup?.configured || !setup.hasToken || !setup.userId) {
+        diagnostics.push({ message: "Supermemory requiere userId y token efímero antes de ejecutar Review/Install." });
+      } else if (!token.trim()) {
+        diagnostics.push({ message: "Supermemory requiere reingresar el token efímero antes de ejecutar Review/Install." });
+      }
+    }
+    return diagnostics;
+  }
+
+  function canRunDashboardPlan(state: PiRunnerDashboardState): boolean {
+    return getDashboardRunBlockDiagnostics(state, supermemorySetup.token).length === 0;
+  }
+
   function persistMemoryProviderSelection(choice: MemoryProviderChoice, values: SupermemorySetupValues): boolean {
     try {
       if (choice === "supermemory") {
-        const handoff = handOffSupermemoryCredentialToPiMcp(values);
-        if (!handoff.success) {
+        const result = writeSupermemoryPiMcpConfig({ token: values.token.trim(), serverName: "supermemory" });
+        if (!result.ok) {
+          const message = `Unable to configure Supermemory in Pi MCP config at ${result.path}. Check file permissions and existing MCP config JSON, then try again.`;
           setMemoryProvider(undefined);
-          setSupermemoryError(handoff.message);
-          setMemoryStatus(`Supermemory MCP setup failed: ${handoff.message}`);
+          setSupermemoryError(message);
+          setMemoryStatus(`Supermemory MCP setup failed: ${message}`);
           return false;
         }
       }
@@ -878,6 +1147,23 @@ export function DeckApp() {
 
   function getThinkingLevelByCursor(index: number) {
     return PI_THINKING_LEVELS[index] ?? "low";
+  }
+
+  function syncDashboardDeveloperTeamModelConfig() {
+    setDashboardState((current) => ({
+      ...current,
+      teams: {
+        ...current.teams,
+        "developer-team": {
+          ...current.teams["developer-team"],
+          modelAssignments,
+          thinkingAssignments,
+        },
+      },
+      plan: undefined,
+      planRevision: current.planRevision + 1,
+      planGeneratedForRevision: undefined,
+    }));
   }
 
   function applyDeveloperTeamModelConfig() {
@@ -952,17 +1238,35 @@ export function DeckApp() {
     resetCursor(nextScreen);
   }
 
+  function getNextScreenAfterDashboardComplete(): Screen {
+    if (selectedEnvironments.includes("opencode-development") && installedOpenCode?.command) {
+      return "opencode-preflight-checking";
+    }
+    return "home";
+  }
+
+  function getDashboardCompletionStatus(): string {
+    return getNextScreenAfterDashboardComplete() === "opencode-preflight-checking"
+      ? "Enter para continuar con OpenCode."
+      : "Enter para finalizar y volver a Home.";
+  }
+
+  function goToNextEnvironmentAfterDashboardComplete() {
+    resetCursor(getNextScreenAfterDashboardComplete());
+  }
+
   function goBack() {
     let next: Screen | undefined;
 
     if (screen === "agent-model-config-list" || screen === "no-providers") {
-      next = modelConfigSource === "install" ? "team-selection" : "model-team-selection";
+      next = modelConfigSource === "install" ? "team-selection" : modelConfigSource === "dashboard" ? "pi-runner-dashboard" : "model-team-selection";
     } else {
       const previous: Partial<Record<Screen, Screen>> = {
         "model-environment-selection": "home",
         "model-team-selection": "model-environment-selection",
         "environment-selection": "home",
         "environment-check": "environment-selection",
+        "pi-runner-dashboard": "environment-check",
         "pi-preflight-checking": "environment-check",
         "pi-preflight": "environment-check",
         "required-tools": "pi-preflight",
@@ -996,6 +1300,16 @@ export function DeckApp() {
     if (next) resetCursor(next);
   }
 
+  function dashboardDeveloperTeamContext() {
+    if (modelConfigSource !== "dashboard") return undefined;
+    return {
+      source: "dashboard" as const,
+      adaptiveMemoryProvider: dashboardState.adaptiveMemory.provider,
+      capabilityStatuses: dashboardState.capabilityStatuses,
+      returnLabel: "Volver al dashboard",
+    };
+  }
+
   return (
     <ScreenFrame title={screenTitle(screen)} help={HELP} width={stdout.columns || 72} height={stdout.rows || undefined}>
       {screen === "home" ? <HomeScreen cursor={homeCursor} /> : null}
@@ -1007,6 +1321,9 @@ export function DeckApp() {
         <EnvironmentSelectionScreen cursor={cursor} selected={selectedEnvironments} />
       ) : null}
       {screen === "environment-check" ? <EnvironmentCheckScreen statuses={runtimeStatuses} /> : null}
+      {screen === "pi-runner-dashboard" ? (
+        <PiRunnerDashboardScreens state={dashboardState} installResults={dashboardActionResults} completionStatus={dashboardCompletionStatus} canRunPlan={canRunDashboardPlan(dashboardState)} runBlockDiagnostics={getDashboardRunBlockDiagnostics(dashboardState)} />
+      ) : null}
       {screen === "pi-preflight-checking" ? <CheckingScreen /> : null}
       {screen === "pi-preflight" && piPreflight ? <PiPreflightScreen preflight={piPreflight} /> : null}
       {screen === "required-tools" && toolsReview ? <RequiredToolsScreen review={toolsReview} /> : null}
@@ -1015,7 +1332,7 @@ export function DeckApp() {
       {screen === "installing" ? <Text>Installing selected tools...</Text> : null}
       {screen === "team-selection" ? <TeamSelectionScreen cursor={cursor} selected={selectedTeams} /> : null}
       {screen === "agent-model-config-list" ? (
-        <AgentModelConfigListScreen cursor={agentConfigCursor} modelAssignments={modelAssignments} thinkingAssignments={thinkingAssignments} />
+        <AgentModelConfigListScreen cursor={agentConfigCursor} modelAssignments={modelAssignments} thinkingAssignments={thinkingAssignments} dashboardContext={dashboardDeveloperTeamContext()} />
       ) : null}
       {screen === "model-provider-selection" ? (
         <ModelProviderSelectionScreen cursor={cursor} providers={detectedProviders} />
@@ -1033,7 +1350,7 @@ export function DeckApp() {
           supportsThinking={supportsThinkingForModel(selectedModel)}
         />
       ) : null}
-      {screen === "no-providers" ? <NoProvidersScreen /> : null}
+      {screen === "no-providers" ? <NoProvidersScreen dashboardContext={dashboardDeveloperTeamContext()} /> : null}
       {screen === "memory-provider-selection" ? (
         <MemoryProviderSelectionScreen cursor={cursor} selectedProvider={memoryProviderChoice} status={memoryStatus} />
       ) : null}
@@ -1041,7 +1358,7 @@ export function DeckApp() {
         <SupermemorySetupScreen screen={screen} values={supermemorySetup} error={supermemoryError} />
       ) : null}
       {screen === "developer-team-review" ? (
-        <DeveloperTeamReviewScreen projectRoot={resolveProjectRoot()} cursor={developerTeamCursor} />
+        <DeveloperTeamReviewScreen projectRoot={resolveProjectRoot()} cursor={developerTeamCursor} dashboardContext={dashboardDeveloperTeamContext()} />
       ) : null}
       {screen === "developer-team-installing" ? (
         <DeveloperTeamInstallingScreen currentStep={agentAssignmentIndex} totalSteps={DEVELOPER_TEAM_AGENTS.length} />
@@ -1064,6 +1381,7 @@ function screenTitle(screen: Screen): string {
     "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",
     "environment-check": "Environment check",
+    "pi-runner-dashboard": "Pi Runner capability dashboard",
     "pi-preflight-checking": "Checking Pi environment",
     "pi-preflight": "Pi Environment Preflight",
     "required-tools": "Review required tools",
