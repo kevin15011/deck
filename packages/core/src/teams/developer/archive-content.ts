@@ -171,7 +171,15 @@ When Phase 5 is active:
 4. If no relevant note exists → create one.
 5. Do not create one note per session. Do not duplicate learnings.
 
-### Step 7: Write the Archive Report
+### Step 7: Prepare Diff Context for Post-Archive Git Suggestions
+
+Gather change diff context for the Orchestrator's post-Archive Git suggestion step:
+- Collect the change scope: affected capabilities, modified files, added/changed/removed behavior.
+- Summarize the conventional commit type implied by the change (feat, fix, refactor, etc.).
+- Note ambiguities when multiple types or scopes apply.
+- Include this context in the Return Summary under a "Git Suggestion Context" section.
+
+### Step 8: Write the Archive Report
 
 Compile everything into the output template below.
 
@@ -232,13 +240,22 @@ Compile everything into the output template below.
 > If none, write "None — no new reusable learnings."
 \`\`\`
 
-### Step 8: Persist Artifact
+### Step 9: Self-Verify Artifact
+
+Before returning completion:
+1. Verify the required artifact file exists at the expected path.
+2. Verify the artifact has content (byte count > 0).
+3. Verify registry state/event persistence (or return registry intent if in deferred mode).
+4. Include completion evidence in the return contract: artifact path, \`exists=true\`, byte count, phase status, registry status, any blocker.
+5. If verification fails, do NOT claim completion. Report the failure as a blocker.
+
+### Step 10: Persist Artifact
 
 Write the archive report as \`archive-report.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
-### Step 9: Return Summary
+### Step 11: Return Summary
 
 Return EXACTLY this format to the orchestrator:
 
@@ -265,8 +282,14 @@ Return EXACTLY this format to the orchestrator:
 ### Follow-ups
 - {Priority}: {description} — {owner}
 
+### Git Suggestion Context
+- **Conventional commit type**: {feat/fix/refactor/etc. — or note ambiguity}
+- **Scope**: {affected area(s)}
+- **Key changes**: {bullet list of main changes}
+- **Ambiguity notes**: {none, or describe why multiple types/scopes apply}
+
 ### Next Step
-{Change is closed. Ready for next change or session end.}
+{Change is closed. Ready for next change or session end. Orchestrator will present advisory Git suggestions based on this context.}
 \`\`\`
 
 ## Rules

@@ -200,6 +200,12 @@ exploration when available. Be concise.}
 ## Next Steps
 
 Ready for Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) in parallel.
+
+## Mermaid Summary Source
+
+\`\`\`mermaid
+{concise diagram summarizing proposal scope — e.g., affected capabilities, dependencies, or impact relationships}
+\`\`\`
 \`\`\`
 
 ### Step 4: Persist Artifact and Registry
@@ -220,7 +226,16 @@ If a memory adapter is available, you MAY optionally save a concise summary to m
 
 If a proposal already exists for this change, READ it first and UPDATE it rather than overwriting.
 
-### Step 5: Return Summary
+### Step 5: Self-Verify Artifact
+
+Before returning completion:
+1. Verify the required artifact file exists at the expected path.
+2. Verify the artifact has content (byte count > 0).
+3. Verify registry state/event persistence (or return registry intent if in deferred mode).
+4. Include completion evidence in the return contract: artifact path, \`exists=true\`, byte count, phase status, registry status, any blocker.
+5. If verification fails, do NOT claim completion. Report the failure as a blocker.
+
+### Step 6: Return Summary
 
 Return EXACTLY this format to the orchestrator:
 
@@ -241,6 +256,8 @@ Return EXACTLY this format to the orchestrator:
 - **Approach**: {one-line approach}
 - **Risk Level**: {Low/Medium/High}
 - **Open Questions**: {N questions remaining}
+- **Artifact Verified**: {exists=true, byte count, registry status}
+- **Mermaid Source**: {fenced Mermaid diagram summarizing this phase, or "N/A — no structural relationships to diagram"}
 
 ### Next Step
 Ready for Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) in parallel.
@@ -258,6 +275,7 @@ Ready for Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) 
 - Keep the proposal concise. Bullet points and tables over prose.
 - Always include a rollback plan and acceptance direction.
 - Use concrete file paths when you can.
+- Include a concise Mermaid diagram in the artifact when the phase output has structural relationships that benefit from visualization.
 - Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
 - If exploration is comprehensive, do not re-explore — trust the Explorer's findings.
 `;

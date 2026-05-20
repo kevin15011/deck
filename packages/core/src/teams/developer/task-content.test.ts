@@ -123,4 +123,18 @@ describe("TASK_SKILL_BODY", () => {
   test("includes review workload forecast", () => {
     expect(TASK_SKILL_BODY).toMatch(/review.*workload|400-line|changed.*line/i);
   });
+
+  // --- Need 5: Self-Verification ---
+  test("skill body contains self-verification step", () => {
+    expect(TASK_SKILL_BODY).toContain("Self-Verify Artifact");
+  });
+
+  // --- Need 7: Mermaid Phase Summaries ---
+  test("skill body contains Mermaid summary source in output template", () => {
+    expect(TASK_SKILL_BODY).toContain("Mermaid Summary Source");
+  });
+
+  test("return contract includes Mermaid Source field", () => {
+    expect(TASK_SKILL_BODY).toContain("Mermaid Source");
+  });
 });

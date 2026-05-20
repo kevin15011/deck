@@ -245,6 +245,12 @@ If none apply, state "None specific to this change."}
 ## Next Steps
 
 Ready for Task (\`deck-developer-task\`) to break this design into implementation tasks, combined with Spec.
+
+## Mermaid Summary Source
+
+\`\`\`mermaid
+{concise diagram summarizing design architecture — e.g., component/module boundaries, data flow, or system structure}
+\`\`\`
 \`\`\`
 
 ### Step 4: Persist Artifact and Registry
@@ -269,7 +275,16 @@ If a memory adapter is available, you MAY optionally save a concise summary to m
 
 If a design already exists for this change, READ it first and UPDATE it rather than overwriting.
 
-### Step 5: Return Summary
+### Step 5: Self-Verify Artifact
+
+Before returning completion:
+1. Verify the required artifact file exists at the expected path.
+2. Verify the artifact has content (byte count > 0).
+3. Verify registry state/event persistence (or return registry intent if in deferred mode).
+4. Include completion evidence in the return contract: artifact path, \`exists=true\`, byte count, phase status, registry status, any blocker.
+5. If verification fails, do NOT claim completion. Report the failure as a blocker.
+
+### Step 6: Return Summary
 
 Return EXACTLY this format to the orchestrator:
 
@@ -293,6 +308,8 @@ Return EXACTLY this format to the orchestrator:
 - **Open Decisions**: {N decisions remaining}
 - **Migration Required**: {yes/no}
 - **Spec Status**: {available/partial/not yet available}
+- **Artifact Verified**: {exists=true, byte count, registry status}
+- **Mermaid Source**: {fenced Mermaid diagram summarizing this phase, or "N/A — no structural relationships to diagram"}
 
 ### Key Tradeoffs
 - {tradeoff 1}: {chosen} over {rejected} — {rationale}
@@ -316,6 +333,7 @@ Ready for Task (\`deck-developer-task\`) to combine with Spec and break into imp
 - Always include rejected alternatives with rationale, file impact estimate, and risks.
 - Respect injected stack-specific rules under \`## Project Standards (auto-resolved)\`.
 - Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
+- Include a concise Mermaid diagram in the artifact when the phase output has structural relationships that benefit from visualization.
 - If the proposal is unclear or missing critical information, flag it as a blocker rather than guessing.
 - Design does not formally depend on Spec. If Spec is unavailable, proceed with Proposal-only context.
 `;

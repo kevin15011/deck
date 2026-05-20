@@ -205,4 +205,18 @@ describe("Spec vs Proposal/Explorer differentiation", () => {
     // Confirm explorer has them (sanity)
     expect(EXPLORER_AGENT_BODY).toMatch(/investigat/i);
   });
+
+  // --- Need 5: Self-Verification ---
+  test("skill body contains self-verification step", () => {
+    expect(SPEC_SKILL_BODY).toContain("Self-Verify Artifact");
+  });
+
+  // --- Need 7: Mermaid Phase Summaries ---
+  test("skill body contains Mermaid summary source in output template", () => {
+    expect(SPEC_SKILL_BODY).toContain("Mermaid Summary Source");
+  });
+
+  test("return contract includes Mermaid Source field", () => {
+    expect(SPEC_SKILL_BODY).toContain("Mermaid Source");
+  });
 });

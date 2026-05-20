@@ -1,0 +1,36 @@
+change: optimize-sdd-v2-core-implementation
+events:
+  - type: change.created
+    phase: explore
+    status: in_progress
+    timestamp: '2026-05-20'
+    actor: deck-developer-orchestrator
+    note: New cycle created after prior attempt (optimize-sdd-apply-and-commit-suggestions) failed due to implementing on .pi/ instead of source packages. All prior planning artifacts will be reused. Explorer must investigate core→adapter architecture before any implementation.
+  - type: explore.started
+    phase: explore
+    status: in_progress
+    timestamp: '2026-05-20'
+    actor: deck-developer-orchestrator
+    note: Explorer launched to investigate packages/core, packages/sdd-runtime, and adapter-pi architecture before reusing prior planning artifacts.
+  - type: explore.completed
+    phase: explore
+    status: completed
+    timestamp: '2026-05-20'
+    actor: deck-developer-explorer
+    note: Confirmed three-layer architecture (source/adapter/output). All 7 needs target packages/core/src/teams/developer/ content files. Primary file is orchestrator-content.ts. No adapter changes required for the 7 needs. Prior planning artifacts (proposal, spec, design, tasks, review) from optimize-sdd-apply-and-commit-suggestions are valid and should be reused.
+    artifact: exploration.md
+    key_findings:
+      - Three-layer architecture confirmed: source (packages/core/), adapter (packages/adapter-pi/), output (.pi/)
+      - Primary implementation file: orchestrator-content.ts (all 7 needs touch this)
+      - Phase sequence is guidance text in Orchestrator prompts, not code-enforced in sdd-runtime
+      - Apply batching, triage expansion, persistence hardening, config respect, Mermaid summaries all in orchestrator-content.ts
+      - Post-Archive Git suggestions: archive-content.ts + orchestrator-content.ts
+      - Mermaid summaries: visual-explanations-content.ts + phase content files (proposal, spec, design, task)
+      - No adapter changes needed for the 7 needs
+  - type: proposal.completed
+    phase: proposal
+    status: completed
+    timestamp: '2026-05-20'
+    actor: deck-developer-proposal
+    note: Proposal produced for v2 cycle targeting correct source layer (packages/core/). Same 7 needs as prior proposal with correct source file map. Reuses prior spec (27 REQs, 7 capabilities). Primary file is orchestrator-content.ts; no adapter changes needed. 4 open questions remain for Design/Spec.
+    artifact: proposal.md

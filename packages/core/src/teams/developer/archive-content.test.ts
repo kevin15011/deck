@@ -104,4 +104,15 @@ describe("ARCHIVE_SKILL_BODY", () => {
   test("contains structured return format for orchestrator consumption", () => {
     expect(ARCHIVE_SKILL_BODY).toMatch(/## Archive Report|## Return Summary/i);
   });
+
+  // --- Need 2: Post-Archive Git Suggestions ---
+  test("skill body contains diff context preparation step", () => {
+    expect(ARCHIVE_SKILL_BODY).toContain("Prepare Diff Context");
+    expect(ARCHIVE_SKILL_BODY).toContain("Git Suggestion Context");
+  });
+
+  // --- Need 5: Self-Verification ---
+  test("skill body contains self-verification step", () => {
+    expect(ARCHIVE_SKILL_BODY).toContain("Self-Verify Artifact");
+  });
 });

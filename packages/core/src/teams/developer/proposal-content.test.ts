@@ -198,4 +198,18 @@ describe("Proposal vs Explorer/Orchestrator differentiation", () => {
     // Confirm explorer has them (sanity)
     expect(EXPLORER_AGENT_BODY).toMatch(/investigat/i);
   });
+
+  // --- Need 5: Self-Verification ---
+  test("skill body contains self-verification step", () => {
+    expect(PROPOSAL_SKILL_BODY).toContain("Self-Verify Artifact");
+  });
+
+  // --- Need 7: Mermaid Phase Summaries ---
+  test("skill body contains Mermaid summary source in output template", () => {
+    expect(PROPOSAL_SKILL_BODY).toContain("Mermaid Summary Source");
+  });
+
+  test("return contract includes Mermaid Source field", () => {
+    expect(PROPOSAL_SKILL_BODY).toContain("Mermaid Source");
+  });
 });

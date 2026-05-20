@@ -284,6 +284,12 @@ REQ-{cap}-{002}: {requirement statement}
 |---|---|---|
 | REQ-{cap}-{001} | {scenario name} | Defined |
 | REQ-{cap}-{002} | {scenario name} | Defined |
+
+## Mermaid Summary Source
+
+\`\`\`mermaid
+{concise diagram summarizing spec structure — e.g., requirements capability map, scenario coverage}
+\`\`\`
 \`\`\`
 
 **Quality and conciseness:** Keep the spec as compact as possible without omitting required fields, acceptance scenarios, validation/error contracts, dependencies, blockers, risks, or verification details. do not merge unrelated requirements or scenarios just to be brief.
@@ -310,7 +316,16 @@ If a memory adapter is available, you MAY optionally save a concise summary to m
 
 If a spec already exists for this change, READ it first and UPDATE it rather than overwriting.
 
-### Step 9: Return Summary
+### Step 9: Self-Verify Artifact
+
+Before returning completion:
+1. Verify the required artifact file exists at the expected path.
+2. Verify the artifact has content (byte count > 0).
+3. Verify registry state/event persistence (or return registry intent if in deferred mode).
+4. Include completion evidence in the return contract: artifact path, \`exists=true\`, byte count, phase status, registry status, any blocker.
+5. If verification fails, do NOT claim completion. Report the failure as a blocker.
+
+### Step 10: Return Summary
 
 Return EXACTLY this format to the orchestrator:
 
@@ -331,6 +346,8 @@ Return EXACTLY this format to the orchestrator:
 - **Total Requirements**: {N requirements (M MUST, S SHOULD, O MAY)}
 - **Acceptance Scenarios**: {N scenarios}
 - **Open Questions**: {N questions remaining}
+- **Artifact Verified**: {exists=true, byte count, registry status}
+- **Mermaid Source**: {fenced Mermaid diagram summarizing this phase, or "N/A — no structural relationships to diagram"}
 
 ### Key Requirements
 - REQ-{cap}-{001}: {one-line summary} (MUST)
@@ -352,5 +369,6 @@ Ready for Design (\`deck-developer-design\`) and Task (\`deck-developer-task\`) 
 - Keep requirements testable. Every MUST/SHOULD should map to at least one acceptance scenario.
 - Use Given/When/Then for all acceptance scenarios.
 - Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
+- Include a concise Mermaid diagram in the artifact when the phase output has structural relationships that benefit from visualization.
 - If the proposal is unclear or missing critical information, flag it as a blocker rather than guessing.
 `;

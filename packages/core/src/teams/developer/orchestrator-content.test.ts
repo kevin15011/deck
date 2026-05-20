@@ -116,6 +116,37 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
   test("describes memory as auxiliary", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/memory.*auxiliary|auxiliary.*memory/i);
   });
+
+  // --- Need 1: Apply Batching ---
+
+  test("contains apply batching guidance", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Apply Batching");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Group related tasks");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("ordered task list");
+  });
+
+  // --- Need 2: Post-Archive Git Suggestions ---
+
+  test("contains post-Archive Git suggestion guidance", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Post-Archive Git Suggestions");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("NEVER");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("advisory");
+  });
+
+  // --- Need 3: Expanded Explorer Triage ---
+
+  test("SDD triage covers workflow and agent config triggers", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("agent configuration");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("workflow internals");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("OpenSpec");
+  });
+
+  // --- Need 4: Role-Based Delegation ---
+
+  test("contains SDD vs role-based delegation clarification", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("SDD vs. Role-Based Delegation");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("formal pipeline");
+  });
 });
 
 describe("ORCHESTRATOR_AGENT_BODY", () => {
@@ -218,5 +249,50 @@ describe("ORCHESTRATOR_SKILL_BODY", () => {
 
   test("does not contain placeholder comment", () => {
     expect(ORCHESTRATOR_SKILL_BODY).not.toContain("Placeholder");
+  });
+
+  // --- Need 1: Apply Batching ---
+
+  test("skill body contains apply batching guidance", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Apply Batching");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do NOT default to one agent per task");
+  });
+
+  // --- Need 3: Expanded Explorer Triage ---
+
+  test("skill triage covers workflow and agent config triggers", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("agent configuration");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("workflow internals");
+  });
+
+  // --- Need 5: Persistence Hardening ---
+
+  test("skill body contains self-verification guidance", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Self-Verification Before Phase Completion");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Orchestrator Verification Before Phase Advancement");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("completion evidence");
+  });
+
+  // --- Need 6: Execution Config ---
+
+  test("skill body contains agent execution configuration guidance", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Agent Execution Configuration");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("registered configuration");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("readDeveloperTeamModelAssignments");
+  });
+
+  // --- Need 7: Mermaid Phase Summaries ---
+
+  test("skill body contains phase summary diagram guidance", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Phase Summary Diagrams");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("explanatory and non-authoritative");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("runner-agnostic");
+  });
+
+  // --- Need 2: Post-Archive Git Suggestions ---
+
+  test("skill body contains post-Archive Git suggestion guidance", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Post-Archive Git Suggestions");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("advisory");
   });
 });

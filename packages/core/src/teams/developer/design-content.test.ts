@@ -223,4 +223,18 @@ describe("Design vs Proposal/Spec differentiation", () => {
     // Confirm spec skill has them (sanity)
     expect(SPEC_SKILL_BODY).toMatch(/Given.*When.*Then/i);
   });
+
+  // --- Need 5: Self-Verification ---
+  test("skill body contains self-verification step", () => {
+    expect(DESIGN_SKILL_BODY).toContain("Self-Verify Artifact");
+  });
+
+  // --- Need 7: Mermaid Phase Summaries ---
+  test("skill body contains Mermaid summary source in output template", () => {
+    expect(DESIGN_SKILL_BODY).toContain("Mermaid Summary Source");
+  });
+
+  test("return contract includes Mermaid Source field", () => {
+    expect(DESIGN_SKILL_BODY).toContain("Mermaid Source");
+  });
 });

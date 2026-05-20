@@ -80,6 +80,12 @@ These are stop rules. Once any trigger fires, delegate or explain why delegation
 - Use fresh reviewers after implementation, conflict resolution, or incidents.
 - Avoid delegation for truly local one-file fixes, quick state checks, and already-understood mechanical edits.
 
+### SDD vs. Role-Based Delegation
+
+- **SDD is the formal pipeline**: when the user is running an SDD workflow (explicitly requested or accepted recommendation), the full phase sequence (proposal → spec/design → tasks → apply → verify/review → archive) is authoritative. Do not skip phases because of delegation rules.
+- **Role-based delegation applies outside SDD**: when delegation rules trigger for non-SDD requests (quick fixes, focused analyses, bounded tasks), delegate to the appropriate specialist role according to registered delegation rules.
+- **SDD delegation rules remain active during SDD**: the 4-file rule, multi-file write rule, PR rule, incident rule, and long-session rule apply during SDD phases to prevent context inflation. These are orthogonal to role-based delegation.
+
 ## Dependency Graph
 
 \`\`\`
@@ -102,8 +108,8 @@ Before asking for Execution Mode or launching SDD phases, classify the user requ
 Use the smallest workflow that preserves quality:
 
 1. **Direct**: answer, inspect, or edit inline when the request is local, low-risk, already clear, or a single mechanical artifact.
-2. **Specialist only**: delegate one narrow role when the request is a bounded artifact or analysis task, such as writing a PRD/proposal, reviewing a prompt, or exploring a focused area.
-3. **Recommend SDD**: actively suggest SDD when the request has ambiguous scope, product requirements, architecture decisions, likely multi-file impact, testing strategy, migration risk, or cross-cutting behavior.
+2. **Specialist only**: delegate one narrow role when the request is a bounded artifact or analysis task, such as writing a PRD/proposal, reviewing a prompt, exploring a focused area, evaluating agent configuration, or assessing workflow internals.
+3. **Recommend SDD**: actively suggest SDD when the request has ambiguous scope, product requirements, architecture decisions, likely multi-file impact, testing strategy, migration risk, cross-cutting behavior, codebase structure changes, agent configuration changes, prompt changes, SDD workflow internals, OpenSpec/routing implications, or broad project impact.
 4. **Run SDD**: start the full SDD pipeline when the user explicitly asks for SDD, accepts the recommendation, or requests implementation/planning that clearly needs Proposal → Spec/Design → Tasks → Apply → Verify/Review → Archive.
 
 Do not ask for Automatic vs Interactive until this triage says **Run SDD**. If triage says **Recommend SDD**, ask one question: "This looks like it would benefit from SDD; do you want to run the SDD flow for it?" Then stop and wait.
@@ -146,6 +152,17 @@ Before launching Apply, inspect the Tasks artifact's \`Review Workload Forecast\
 
 Do not launch Apply for blocked tasks. If blocker classification is missing, contradictory, or does not match the task dependencies/review forecast, request repair before Apply.
 
+### Apply Batching
+
+Before dispatching Apply agents:
+
+1. **Group related tasks** by owner, context, dependency chain, file area, component, or service into coherent batches.
+2. **Assign an ordered task list** to one appropriately specialized Apply agent when tasks are related.
+3. **Do NOT default to one agent per task** when tasks share a coherent owner or context.
+4. **Launch multiple Apply agents only when** work areas are independent, non-overlapping, have no ordering dependency, have low conflict risk, and can be verified independently.
+5. **Respect dependency ordering**: shared/contracts work runs before dependent backend/frontend work.
+6. **Use Task artifact execution groups** as the primary source for batching decisions when available.
+
 When Tasks recommends an owner:
 
 - **General Apply** → small, shared, cross-cutting, config, scripts, docs tied to implementation.
@@ -153,6 +170,17 @@ When Tasks recommends an owner:
 - **Frontend Apply** → UI, components, state, accessibility, frontend tests.
 - Shared/contracts usually run before backend/frontend.
 - Backend and frontend may run in parallel only when contracts and dependencies are clear.
+
+## Post-Archive Git Suggestions
+
+After Archive completes, present advisory Git metadata to the user:
+
+1. **Suggest conventional commit message(s)** based on the completed change scope and diff context prepared by the Archive Agent.
+2. **Optionally suggest PR title/body** when sufficient context exists.
+3. **Label suggestions as advisory** when conventional commit type or scope is ambiguous; present multiple candidates when applicable.
+4. **NEVER** automatically commit, push, change branches, create PRs, or otherwise mutate Git state. Git suggestions are advisory only.
+
+The Archive Agent prepares diff context for this step. The Orchestrator presents suggestions to the user after the Archive summary.
 
 ## Project AI Notes (Phase 5 — Deferred)
 
@@ -262,8 +290,8 @@ export const ORCHESTRATOR_SKILL_BODY = `# Orchestrator Skill
 Before asking for execution mode or launching phases, classify the request as **Direct**, **Specialist only**, **Recommend SDD**, or **Run SDD**.
 
 - **Direct**: local, low-risk, already clear, or a single mechanical artifact.
-- **Specialist only**: bounded artifact or analysis task that benefits from one role, such as PRD writing, prompt review, or focused exploration.
-- **Recommend SDD**: ambiguous scope, product requirements, architecture decisions, likely multi-file impact, testing strategy, migration risk, or cross-cutting behavior.
+- **Specialist only**: bounded artifact or analysis task that benefits from one role, such as PRD writing, prompt review, focused exploration, evaluating agent configuration, or assessing workflow internals.
+- **Recommend SDD**: ambiguous scope, product requirements, architecture decisions, likely multi-file impact, testing strategy, migration risk, cross-cutting behavior, codebase structure changes, agent configuration changes, prompt changes, SDD workflow internals, OpenSpec/routing implications, or broad project impact.
 - **Run SDD**: explicit SDD request, accepted SDD recommendation, or implementation/planning that clearly needs the full phase pipeline.
 
 Do not infer full SDD from "OpenSpec", "PRD", "requirements", or prompt length alone. Do not ask for Automatic vs Interactive until triage says **Run SDD**. If triage says **Recommend SDD**, ask one question and wait.
@@ -303,6 +331,18 @@ proposal ──┬─ spec ────┐
 - Before Apply, inspect the Tasks workload forecast and \`Open Questions / Blockers\`; classify tasks as unblocked, blocked, or allowed-with-placeholder.
 - Ask the user or request Task repair when blockers affect implementation plan, contracts, data model, behavior, or verification.
 - Do not launch Apply for blocked tasks.
+
+#### Apply Batching
+
+Before dispatching Apply agents:
+
+1. **Group related tasks** by owner, context, dependency chain, file area, component, or service into coherent batches.
+2. **Assign an ordered task list** to one appropriately specialized Apply agent when tasks are related.
+3. **Do NOT default to one agent per task** when tasks share a coherent owner or context.
+4. **Launch multiple Apply agents only when** work areas are independent, non-overlapping, have no ordering dependency, have low conflict risk, and can be verified independently.
+5. **Respect dependency ordering**: shared/contracts work runs before dependent backend/frontend work.
+6. **Use Task artifact execution groups** as the primary source for batching decisions when available.
+
 - Orchestrator executes owners according to dependencies.
 - Shared/contracts usually run before backend/frontend.
 - Backend and frontend may run in parallel only when contracts are clear.
@@ -314,6 +354,15 @@ proposal ──┬─ spec ────┐
 - Both run in parallel after Apply.
 - When running them in parallel, launch both in **registry-deferred mode**: each writes only its report artifact and returns registry intent; the Orchestrator serializes the shared \`state.yaml\`/\`events.yaml\` updates after both complete.
 - Apply agents receive combined findings for fixes.
+
+### Agent Execution Configuration
+
+- **Use registered configuration by default**: model, context window, thinking level, tools, and similar settings configured for each agent MUST be respected when launching sub-agents.
+- **Do not override** registered execution configuration unless:
+  1. The user explicitly requests an override, OR
+  2. A documented workflow rule requires a specific override (e.g., parallel phase batching may standardize context).
+- **When an override is used**, identify the basis in the delegation context or summary (e.g., "model override: user requested opus for review").
+- The adapter preserves registered model/thinking via \`readDeveloperTeamModelAssignments()\`. Orchestrator guidance must not contradict registered config.
 
 ## Artifact Persistence Policy
 
@@ -340,6 +389,25 @@ The Spec Registry is the phase gate. Before advancing to the next phase, verify:
 - Tasks output includes the required workload forecast and classified Open Questions / Blockers before Apply is allowed.
 - Do not accept a phase output that violates the exact return contract, uses the wrong or non-requested language, has a format mismatch, omits required fields, reports inconsistent counts, has bad registry status/intent, misses the required review workload forecast, or leaves blocker handling unexplained.
 
+### Self-Verification Before Phase Completion
+
+Before a phase agent claims completion, it MUST:
+1. Verify the required artifact file exists on disk (file exists check + byte count > 0).
+2. In non-deferred registry mode: verify required registry state/event persistence is recorded.
+3. In registry-deferred mode: verify the artifact exists and return registry intent (do not claim registry writes).
+4. Include completion evidence in the return contract: artifact path, exists=true, byte count, phase status, registry intent or recorded event type, and any blocker.
+5. If verification fails, do NOT claim completion. Report the failure and block.
+
+### Orchestrator Verification Before Phase Advancement
+
+Before advancing to a dependent phase, the Orchestrator MUST:
+1. Verify the official artifact path exists on disk.
+2. Verify state.yaml records the expected phase/status/artifact.
+3. Verify events.yaml records a corresponding event.
+4. Verify state.yaml preserves all prior artifacts/provenance.
+5. Verify events.yaml preserves all prior events.
+6. If any check fails, do NOT advance. Repair or request repair from the phase agent.
+
 If any registry file or entry is missing, or if a phase output reset/dropped prior registry history, do not continue to the next phase. Repair it directly when the expected state is unambiguous; otherwise request repair from the phase agent and report the blocker to the user.
 
 If a phase output looks directionally useful but violates contract, language, format, required-field, count, registry, review-forecast, or blocker-handling expectations, do not mark it sufficient. Request a focused repair and re-check the repaired output before advancing.
@@ -347,6 +415,32 @@ If a phase output looks directionally useful but violates contract, language, fo
 For registry-deferred parallel batches, do not advance until reconciliation proves that \`state.yaml\` preserves all prior artifact/provenance entries plus every parallel artifact, and \`events.yaml\` preserves all prior events plus every parallel phase event. If reconciliation cannot prove this, stop and report a Registry Blocker.
 
 If a memory adapter is available, agents MAY save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
+
+## Phase Summary Diagrams
+
+After each planning phase (Proposal, Spec, Design, Task), include a concise Mermaid diagram in the user-facing summary:
+
+- **Proposal summary**: dependency/impact diagram showing affected capabilities.
+- **Spec summary**: requirements capability map.
+- **Design summary**: architecture/component diagram.
+- **Task summary**: task dependency/grouping diagram.
+
+Rules:
+- Diagrams are **explanatory and non-authoritative**. OpenSpec artifacts and registry entries are authoritative.
+- Diagrams MUST be **runner-agnostic**: use standard Mermaid syntax that renders in supported runners and remains readable as fenced source when not rendered.
+- Keep diagrams **concise** — one diagram per phase, focused on structure/relationships.
+- Phase agents SHOULD provide Mermaid source or diagram-ready data in their artifacts when the phase output has structural relationships that benefit from visualization.
+
+## Post-Archive Git Suggestions
+
+After Archive completes, present advisory Git metadata to the user:
+
+1. **Suggest conventional commit message(s)** based on the completed change scope and diff context prepared by the Archive Agent.
+2. **Optionally suggest PR title/body** when sufficient context exists.
+3. **Label suggestions as advisory** when conventional commit type or scope is ambiguous; present multiple candidates when applicable.
+4. **NEVER** automatically commit, push, change branches, create PRs, or otherwise mutate Git state. Git suggestions are advisory only.
+
+The Archive Agent prepares diff context for this step. The Orchestrator presents suggestions to the user after the Archive summary.
 
 ## Project AI Notes (Phase 5 — Deferred)
 

@@ -303,6 +303,12 @@ Task 4 (Shared) → Task 5 (Backend)
 - {Question or conflict between Spec and Design}
 
 > If none, write "None — tasks are ready for Apply."
+
+## Mermaid Summary Source
+
+\`\`\`mermaid
+{concise diagram summarizing task structure — e.g., task dependency graph, parallelization plan, or grouping by domain}
+\`\`\`
 \`\`\`
 
 **Quality and conciseness:** Keep the tasks artifact as compact as possible without omitting required fields, acceptance/verification details, dependencies, blockers, risks, review workload forecast, or routing information. Do not merge unrelated tasks just to be brief.
@@ -335,7 +341,16 @@ If a memory adapter is available, you MAY optionally save a concise summary to m
 
 If a tasks artifact already exists for this change, READ it first and UPDATE it rather than overwriting.
 
-### Step 9: Return Summary
+### Step 9: Self-Verify Artifact
+
+Before returning completion:
+1. Verify the required artifact file exists at the expected path.
+2. Verify the artifact has content (byte count > 0).
+3. Verify registry state/event persistence (or return registry intent if in deferred mode).
+4. Include completion evidence in the return contract: artifact path, \`exists=true\`, byte count, phase status, registry status, any blocker.
+5. If verification fails, do NOT claim completion. Report the failure as a blocker.
+
+### Step 10: Return Summary
 
 Return EXACTLY this format to the orchestrator:
 
@@ -356,6 +371,8 @@ Return EXACTLY this format to the orchestrator:
 - **High Complexity Tasks**: {N}
 - **Review Workload Forecast**: {Low / Medium / High risk, scope reduction: Yes / No, sequential slices: Yes / No}
 - **Open Questions**: {N}
+- **Artifact Verified**: {exists=true, byte count, registry status}
+- **Mermaid Source**: {fenced Mermaid diagram summarizing this phase, or "N/A — no structural relationships to diagram"}
 
 ### Routing Recommendations
 - **General Apply**: {task numbers}
@@ -384,5 +401,6 @@ Ready for Apply agents (\`deck-developer-apply-general\`, \`deck-developer-apply
 - Respect dependencies: shared/contracts usually run before backend/frontend.
 - Do not produce a flat naive list when multiple domains are involved.
 - Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
+- Include a concise Mermaid diagram in the artifact when the phase output has structural relationships that benefit from visualization.
 - Preserve uncertainty: flag open questions instead of inventing task details.
 `;

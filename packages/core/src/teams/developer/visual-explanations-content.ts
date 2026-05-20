@@ -12,8 +12,9 @@
  * Proposal, Spec, Design, and Task agents do not receive this content by
  * default (REQ-VISUAL-002, REQ-TEAMINSTALL-002).
  *
- * User-facing copy must avoid exposing Mermaid syntax, Mermaid configuration,
- * or Mermaid as a user decision (REQ-VISUAL-004).
+ * SDD phase summaries are an explicit exception: they REQUIRE concise
+ * Mermaid diagrams to help users understand phase outputs visually.
+ * Non-SDD conversational copy should avoid Mermaid syntax.
  */
 
 import type { AgentContent } from "./content-registry";
@@ -49,7 +50,7 @@ Do not use visuals when:
 | Never alter approval state via visual | Phase handoffs require formal registry entries, not visual edits |
 | Never introduce new requirements | REQ-OPENSPEC-002 — visual summaries do not add to Spec |
 | Never override registry status | Visual output reflects registry state; it does not change it |
-| Avoid Mermaid syntax in user-facing copy | Users should not need to read or configure diagram syntax (REQ-VISUAL-004) |
+| Avoid Mermaid syntax in non-SDD conversational copy. SDD phase summaries REQUIRE concise Mermaid diagrams as an explicit exception. | SDD summaries benefit from structural diagrams; other copy stays prose-first |
 | Keep visuals brief | A visual should aid understanding; a long diagram adds noise |
 
 ## Non-Authoritative Notice
@@ -57,6 +58,15 @@ Do not use visuals when:
 When a response includes a visual summary, close with a brief note:
 
 > **Note**: Visual summaries are explanatory only. For authoritative workflow state, approvals, and phase handoffs, refer to OpenSpec artifacts and the Spec Registry.
+
+## SDD Phase Summaries
+
+SDD phase summaries (Proposal, Spec, Design, Task) are an explicit exception to the Mermaid-avoidance rule. They REQUIRE concise Mermaid diagrams to visualize phase outputs.
+
+- Use standard Mermaid syntax (flowchart, graph, etc.).
+- Diagrams must be runner-agnostic and readable as fenced source when not rendered.
+- Keep one concise diagram per phase summary.
+- Phase agents SHOULD provide Mermaid source or diagram-ready data in their artifacts.
 
 ## Design: Accessibility
 
@@ -91,14 +101,12 @@ export const VISUAL_EXPLANATIONS_REQUIRED_SNIPPETS = [
   "Visuals summarize, not replace",
   "Never introduce new requirements",
   "Never override registry status",
-  "Avoid Mermaid syntax in user-facing copy",
+  "SDD phase summaries",
   "Accessibility",
 ] as const;
 
 /** Phrases that must NOT appear — Mermaid/config exposure, authoritative claims */
 export const VISUAL_EXPLANATIONS_FORBIDDEN_PHRASES = [
-  "```mermaid",
-  "mermaid diagram",
   "Mermaid configuration",
   "install mermaid",
   "runner-mermaid",
