@@ -1,0 +1,118 @@
+import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
+
+function createTempDir(): string {
+  return mkdtempSync(join(tmpdir(), "deck-prompt-test-"));
+}
+
+function cleanup(dir: string) {
+  rmSync(dir, { recursive: true, force: true });
+}
+
+describe("buildPromptGenerationPlan", () => {
+  test("generates 12 prompt files", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    expect(plan).toHaveLength(12);
+  });
+
+  test("each prompt file references the matching skill path", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    for (const planned of plan) {
+      expect(planned.content).toContain(".opencode/skills/");
+      expect(planned.content).toContain("/SKILL.md");
+    }
+  });
+
+  test("orchestrator prompt differs from subagent prompts", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    const orchestrator = plan.find((p) => p.agent.id === "deck-developer-orchestrator")!;
+    const explorer = plan.find((p) => p.agent.id === "deck-developer-explorer")!;
+    expect(orchestrator.content).not.toBe(explorer.content);
+    expect(orchestrator.content).toContain("Orchestrator");
+    expect(explorer.content).toContain("Explorer");
+  });
+
+  test("prompt files use deck-developer-* path under configDir prompts", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    for (const planned of plan) {
+      expect(planned.absolutePath).toContain("/prompts/deck-developer/");
+      expect(planned.absolutePath).toEndWith(`${planned.agent.id}.md`);
+    }
+  });
+
+  test("prompt content references skill file with absolute path", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    for (const planned of plan) {
+      // The skill path should be an absolute path in the content
+      expect(planned.content).toContain("/tmp/project/.opencode/skills/");
+      expect(planned.content).toContain("/SKILL.md");
+    }
+  });
+
+  test("all 12 developer team agents are covered", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp", projectRoot: "/tmp" });
+    const ids = plan.map((p) => p.agent.id).sort();
+    expect(ids).toContain("deck-developer-orchestrator");
+    expect(ids).toContain("deck-developer-explorer");
+    expect(ids).toContain("deck-developer-proposal");
+    expect(ids).toContain("deck-developer-spec");
+    expect(ids).toContain("deck-developer-design");
+    expect(ids).toContain("deck-developer-task");
+    expect(ids).toContain("deck-developer-apply-general");
+    expect(ids).toContain("deck-developer-apply-backend");
+    expect(ids).toContain("deck-developer-apply-frontend");
+    expect(ids).toContain("deck-developer-verify");
+    expect(ids).toContain("deck-developer-review");
+    expect(ids).toContain("deck-developer-archive");
+  });
+});
+
+describe("applyPromptGeneration", () => {
+  test("writes all 12 prompt files to disk", () => {
+    const dir = createTempDir();
+    try {
+      const configDir = join(dir, ".config", "opencode");
+      const projectRoot = dir;
+      const plan = buildPromptGenerationPlan({ configDir, projectRoot });
+      applyPromptGeneration(plan);
+
+      for (const planned of plan) {
+        expect(require("node:fs").existsSync(planned.absolutePath)).toBe(true);
+        const content = readFileSync(planned.absolutePath, "utf-8");
+        expect(content).toBe(planned.content);
+      }
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("re-applying is idempotent", () => {
+    const dir = createTempDir();
+    try {
+      const configDir = join(dir, ".config", "opencode");
+      const projectRoot = dir;
+      const plan = buildPromptGenerationPlan({ configDir, projectRoot });
+
+      applyPromptGeneration(plan);
+      applyPromptGeneration(plan); // second apply
+
+      for (const planned of plan) {
+        const content = readFileSync(planned.absolutePath, "utf-8");
+        expect(content).toBe(planned.content);
+      }
+    } finally {
+      cleanup(dir);
+    }
+  });
+});
+
+describe("buildPromptReference", () => {
+  test("returns {file:/absolute/path} format", () => {
+    const ref = buildPromptReference("/home/user/.config/opencode", "deck-developer-orchestrator");
+    expect(ref).toMatch(/^\{file:\/home\/user\/\.config\/opencode\/prompts\/deck-developer\/deck-developer-orchestrator\.md\}$/);
+  });
+});

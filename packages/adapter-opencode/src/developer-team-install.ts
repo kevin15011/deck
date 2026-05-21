@@ -14,8 +14,15 @@ import {
 } from "@deck/core/memory/adaptive-memory";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 
+import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
+import { buildCommandGenerationPlan, applyCommandGeneration } from "./command-generation";
+import { mergeAndWrite } from "./config-merge";
+import { resolveModelConfig, DEFAULT_OPENCODE_MODELS } from "./model-config";
+import { detectMermaidPluginStatus, INTERNAL_OPENCODE_PACKAGE_IDS } from "./internal-opencode-packages";
+import type { AgentEntry, OpenCodeConfig } from "./types";
+
 // ---------------------------------------------------------------------------
-// Types
+// Types (re-export)
 // ---------------------------------------------------------------------------
 
 export type OpenCodePlannedAgentFile = {
@@ -39,6 +46,11 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   agents: OpenCodePlannedAgentFile[];
   skills: OpenCodePlannedSkillFile[];
   memoryDiagnostics: MemoryDiagnostic[];
+  /** Agent entries for opencode.json config merge */
+  agentEntries: Record<string, AgentEntry>;
+  promptGenerationPlan: ReturnType<typeof buildPromptGenerationPlan>;
+  commandGenerationPlan: ReturnType<typeof buildCommandGenerationPlan>;
+  mermaidPluginStatus: "ready" | "missing";
 };
 
 export type OpenCodeBundleApplyResult = {
@@ -49,6 +61,11 @@ export type OpenCodeBundleApplyResult = {
 
 export type OpenCodeDeveloperTeamApplyResult = {
   results: OpenCodeBundleApplyResult[];
+  configMergeResult?: {
+    status: "created" | "updated" | "unchanged";
+    backupPath: string;
+    pluginsAdded: string[];
+  };
 };
 
 export type OpenCodeBundleVerifyResult = {
@@ -82,13 +99,6 @@ export type MemoryInjectionOptions = {
 // Memory injection resolution (delegated to core)
 // ---------------------------------------------------------------------------
 
-/**
- * Resolve a memory injection bundle from options.
- *
- * Delegates to the centralized core resolver which validates provider IDs
- * against the supported set and produces fail-closed diagnostics for
- * unsupported or unavailable providers (REQ-AMI-003).
- */
 function resolveOpenCodeMemoryInjection(
   options?: MemoryInjectionOptions,
 ): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
@@ -100,81 +110,170 @@ function resolveOpenCodeMemoryInjection(
   });
 }
 
-/**
- * Map MemoryToolBinding entries to OpenCode tool format.
- *
- * OpenCode uses a simple array of MCP tool names in its frontmatter.
- * When memory tool bindings are present and the agent content received
- * a memory injection (matching fragments), their tool names are appended
- * to the base tools list.
- */
-function buildOpenCodeToolsLine(baseTools: string[], toolBindings: readonly MemoryToolBinding[]): string[] {
-  if (toolBindings.length === 0) return baseTools;
+// ---------------------------------------------------------------------------
+// Tools
+// ---------------------------------------------------------------------------
 
-  const memoryToolNames = toolBindings.flatMap((binding) => [...binding.toolNames]);
-  const seen = new Set<string>();
-  const allTools: string[] = [];
+/** Tools available to all subagents */
+const SUBAGENT_TOOLS: Record<string, boolean> = {
+  bash: true,
+  edit: true,
+  read: true,
+  write: true,
+};
 
-  for (const tool of baseTools) {
-    if (!seen.has(tool)) {
-      seen.add(tool);
-      allTools.push(tool);
-    }
+/** Tools available to the orchestrator (includes delegation) */
+const ORCHESTRATOR_TOOLS: Record<string, boolean> = {
+  bash: true,
+  delegate: true,
+  delegation_list: true,
+  delegation_read: true,
+  edit: true,
+  read: true,
+  write: true,
+};
+
+// ---------------------------------------------------------------------------
+// Agent entry builder
+// ---------------------------------------------------------------------------
+
+function buildAgentEntry(
+  agent: DeveloperTeamAgent,
+  promptReference: string,
+  options?: { cliModelOverride?: string; configModelOverrides?: Record<string, string>; reasoningEffortOverrides?: Record<string, import("./model-config").OpenCodeThinkingLevel> },
+): AgentEntry {
+  const isOrchestrator = agent.id === "deck-developer-orchestrator";
+  const modelConfig = resolveModelConfig(agent.id, options?.cliModelOverride, options?.configModelOverrides, options?.reasoningEffortOverrides);
+
+  const entry: AgentEntry = {
+    description: agent.description,
+    mode: isOrchestrator ? "primary" : "subagent",
+    model: modelConfig.model,
+    prompt: promptReference,
+    tools: isOrchestrator ? ORCHESTRATOR_TOOLS : SUBAGENT_TOOLS,
+  };
+
+  if (modelConfig.reasoningEffort) {
+    entry.reasoningEffort = modelConfig.reasoningEffort;
   }
 
-  for (const tool of memoryToolNames) {
-    if (!seen.has(tool)) {
-      seen.add(tool);
-      allTools.push(tool);
-    }
+  if (isOrchestrator) {
+    // Orchestrator: deny-by-default + allowlist all subagents
+    const subagents = DEVELOPER_TEAM_AGENTS.filter((a) => a.id !== "deck-developer-orchestrator");
+    const permissionTask: Record<string, string> = {
+      "*": "deny",
+      ...Object.fromEntries(subagents.map((a) => [a.id, "allow"])),
+    };
+    entry.permission = { task: permissionTask };
+    entry.hidden = false;
+    entry.variant = "";
+  } else {
+    // Subagents: hidden
+    entry.hidden = true;
+    entry.variant = "";
   }
 
-  return allTools;
+  return entry;
+}
+
+// ---------------------------------------------------------------------------
+// Skill file content builder
+// ---------------------------------------------------------------------------
+
+function buildSkillFileContent(
+  agent: DeveloperTeamAgent,
+  memoryBundle?: MemoryInjectionBundle,
+): string {
+  const content = getAgentContent(agent.id);
+  if (!content) {
+    throw new Error(`No content found for agent ${agent.id} in core registry.`);
+  }
+
+  const skillResult = memoryBundle
+    ? composeAdaptiveMemory(content.skillBody, memoryBundle, {
+        surface: "skill",
+        teamId: "developer-team",
+        skillId: agent.skillId,
+      })
+    : { content: content.skillBody, toolBindings: [] as readonly MemoryToolBinding[] };
+
+  return [
+    "---",
+    `name: ${agent.skillId}`,
+    `description: "${agent.description}"`,
+    "disable-model-invocation: true",
+    "user-invocable: false",
+    "license: MIT",
+    "metadata:",
+    "  author: gentleman-programming",
+    '  version: "3.0"',
+    "  delegate_only: true",
+    "---",
+    "",
+    skillResult.content,
+    "",
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
 // Plan
 // ---------------------------------------------------------------------------
 
-/**
- * Build an OpenCode-specific installation plan for the Developer Team.
- *
- * OpenCode uses `.opencode/agents/` for agent markdown files and
- * `.opencode/skills/<skill-id>/SKILL.md` for skill files. The adapter
- * consumes canonical agent definitions and content from `@deck/core` and
- * wraps them with minimal OpenCode-appropriate frontmatter.
- *
- * When a memory provider or injection bundle is provided, memory instructions
- * are composed per-surface (agent, skill) and memory tool names are added
- * to the OpenCode tools list.
- */
 export function buildOpenCodeDeveloperTeamInstallPlan(
   projectRoot: string,
-  options?: MemoryInjectionOptions,
+  options?: MemoryInjectionOptions & {
+    configDir?: string;
+    cliModelOverride?: string;
+    configModelOverrides?: Record<string, string>;
+    reasoningEffortOverrides?: Record<string, import("./model-config").OpenCodeThinkingLevel>;
+  },
 ): OpenCodeDeveloperTeamInstallPlan {
+  const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
   const agentsDir = join(projectRoot, ".opencode", "agents");
   const skillsDir = join(projectRoot, ".opencode", "skills");
 
-  // Resolve memory injection using centralized resolver with provider ID validation
   const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options);
 
-  const agents: OpenCodePlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
-    const relativePath = `.opencode/agents/${agent.id}.md`;
-    const absolutePath = join(projectRoot, relativePath);
-    const content = buildAgentFileContent(agent, memoryBundle);
+  // Build agent entries for opencode.json
+  const agentEntries: Record<string, AgentEntry> = {};
+  for (const agent of DEVELOPER_TEAM_AGENTS) {
+    const promptReference = buildPromptReference(configDir, agent.id);
+    agentEntries[agent.id] = buildAgentEntry(agent, promptReference, {
+      cliModelOverride: options?.cliModelOverride,
+      configModelOverrides: options?.configModelOverrides,
+      reasoningEffortOverrides: options?.reasoningEffortOverrides,
+    });
+  }
 
-    return { agent, relativePath, absolutePath, content };
-  });
-
+  // Build skill files
   const skills: OpenCodePlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.opencode/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
     const content = buildSkillFileContent(agent, memoryBundle);
-
     return { agent, relativePath, absolutePath, content };
   });
 
-  return { projectRoot, agentsDir, skillsDir, agents, skills, memoryDiagnostics };
+  // Prompt generation plan
+  const promptGenerationPlan = buildPromptGenerationPlan({ configDir, projectRoot });
+
+  // Command generation plan
+  const commandGenerationPlan = buildCommandGenerationPlan({ configDir });
+
+  // Detect mermaid plugin status (will be resolved during apply using the merged config)
+  const mermaidPluginStatus: "ready" | "missing" = "missing";
+
+  return {
+    projectRoot,
+    agentsDir,
+    skillsDir,
+    agents: [], // Skills are in skills[]
+    skills,
+    memoryDiagnostics,
+    agentEntries,
+    promptGenerationPlan,
+    commandGenerationPlan,
+    mermaidPluginStatus,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -183,64 +282,86 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
 
 export function applyOpenCodeDeveloperTeamInstall(
   plan: OpenCodeDeveloperTeamInstallPlan,
-  options?: { writeFile?: typeof writeFileSync; exists?: typeof existsSync; mkdir?: typeof mkdirSync; readFile?: typeof readFileSync },
+  options?: {
+    writeFile?: typeof writeFileSync;
+    readFile?: typeof readFileSync;
+    exists?: typeof existsSync;
+    mkdir?: typeof mkdirSync;
+    unlink?: typeof unlinkSync;
+    configDir?: string;
+  },
 ): OpenCodeDeveloperTeamApplyResult {
   const writeFile = options?.writeFile ?? writeFileSync;
+  const readFile = options?.readFile ?? readFileSync;
   const exists = options?.exists ?? existsSync;
   const mkdir = options?.mkdir ?? mkdirSync;
-  const readFile = options?.readFile ?? readFileSync;
+  const unlink = options?.unlink ?? unlinkSync;
+  const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
+  const opencodeConfigPath = join(configDir, "opencode.json");
 
-  // Ensure agents directory exists
-  if (!exists(plan.agentsDir)) {
-    mkdir(plan.agentsDir, { recursive: true });
+  // 1. Config merge (agents + mermaid plugin)
+  const mermaidPlugins = INTERNAL_OPENCODE_PACKAGE_IDS.filter(() => plan.mermaidPluginStatus === "missing");
+
+  let configMergeResult: OpenCodeDeveloperTeamApplyResult["configMergeResult"];
+  try {
+    const mergeResult = mergeAndWrite({
+      configPath: opencodeConfigPath,
+      agentEntries: plan.agentEntries,
+      pluginsToAdd: mermaidPlugins,
+      readFile,
+      writeFile,
+      renameFile: (from, to) => require("node:fs").renameSync(from, to),
+      exists,
+    });
+    configMergeResult = {
+      status: mergeResult.status,
+      backupPath: mergeResult.backupPath,
+      pluginsAdded: mergeResult.pluginsAdded,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[deck] opencode.json config merge failed: ${message}`);
+    throw new Error(`Failed to write model configuration to opencode.json: ${message}`);
   }
 
-  // Ensure skills directory exists
-  if (!exists(plan.skillsDir)) {
-    mkdir(plan.skillsDir, { recursive: true });
-  }
-
-  // Ensure each skill subdirectory exists
+  // 2. Write skills
   for (const planned of plan.skills) {
     const skillDir = join(planned.absolutePath, "..");
     if (!exists(skillDir)) {
       mkdir(skillDir, { recursive: true });
     }
+    if (exists(planned.absolutePath)) {
+      const existing = readFile(planned.absolutePath, "utf-8");
+      if (existing !== planned.content) {
+        writeFile(planned.absolutePath, planned.content, "utf-8");
+      }
+    } else {
+      writeFile(planned.absolutePath, planned.content, "utf-8");
+    }
   }
 
-  const agentResults: OpenCodeBundleApplyResult[] = plan.agents.map((planned) => {
-    if (exists(planned.absolutePath)) {
-      const existing = readFile(planned.absolutePath, "utf-8");
-      if (existing === planned.content) {
-        return { agentId: planned.agent.id, kind: "agent" as const, status: "unchanged" as const };
-      }
-      writeFile(planned.absolutePath, planned.content, "utf-8");
-      return { agentId: planned.agent.id, kind: "agent" as const, status: "updated" as const };
-    }
-
-    writeFile(planned.absolutePath, planned.content, "utf-8");
-    return { agentId: planned.agent.id, kind: "agent" as const, status: "created" as const };
+  // 3. Write prompt files
+  applyPromptGeneration(plan.promptGenerationPlan, {
+    writeFile: writeFile as (path: string, content: string, encoding: "utf-8") => void,
+    mkdir: mkdir as (path: string, opts: { recursive: true }) => void,
   });
 
-  const skillResults: OpenCodeBundleApplyResult[] = plan.skills.map((planned) => {
-    if (exists(planned.absolutePath)) {
-      const existing = readFile(planned.absolutePath, "utf-8");
-      if (existing === planned.content) {
-        return { agentId: planned.agent.id, kind: "skill" as const, status: "unchanged" as const };
-      }
-      writeFile(planned.absolutePath, planned.content, "utf-8");
-      return { agentId: planned.agent.id, kind: "skill" as const, status: "updated" as const };
-    }
-
-    writeFile(planned.absolutePath, planned.content, "utf-8");
-    return { agentId: planned.agent.id, kind: "skill" as const, status: "created" as const };
+  // 4. Write command files
+  applyCommandGeneration(plan.commandGenerationPlan, {
+    writeFile: writeFile as (path: string, content: string, encoding: "utf-8") => void,
+    mkdir: mkdir as (path: string, opts: { recursive: true }) => void,
   });
 
-  return { results: [...agentResults, ...skillResults] };
+  // Build results
+  const results: OpenCodeBundleApplyResult[] = [
+    ...plan.skills.map((s) => ({ agentId: s.agent.id, kind: "skill" as const, status: "created" as const })),
+  ];
+
+  return { results, configMergeResult };
 }
 
 // ---------------------------------------------------------------------------
-// Verify
+// Verify (for skill files only — opencode.json is managed by config merge)
 // ---------------------------------------------------------------------------
 
 export function verifyOpenCodeDeveloperTeamInstall(
@@ -249,28 +370,6 @@ export function verifyOpenCodeDeveloperTeamInstall(
 ): OpenCodeDeveloperTeamVerifyResult {
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;
-
-  const agentResults: OpenCodeBundleVerifyResult[] = plan.agents.map((planned) => {
-    const issues: string[] = [];
-
-    if (!exists(planned.absolutePath)) {
-      return { agentId: planned.agent.id, valid: false, issues: ["File does not exist."] };
-    }
-
-    const content = readFile(planned.absolutePath, "utf-8");
-
-    if (!content.includes(`name: ${planned.agent.name}`)) {
-      issues.push(`Frontmatter name mismatch: expected "name: ${planned.agent.name}".`);
-    }
-
-    if (!content.includes(`description:`)) {
-      issues.push("Missing description field in frontmatter.");
-    } else if (!content.includes(planned.agent.description)) {
-      issues.push(`Description mismatch for ${planned.agent.id}.`);
-    }
-
-    return { agentId: planned.agent.id, valid: issues.length === 0, issues };
-  });
 
   const skillResults: OpenCodeBundleVerifyResult[] = plan.skills.map((planned) => {
     const issues: string[] = [];
@@ -287,7 +386,16 @@ export function verifyOpenCodeDeveloperTeamInstall(
       issues.push(`Description mismatch for skill ${planned.agent.skillId}.`);
     }
 
-    // Verify skill body contains a recognizable heading from core registry
+    if (!content.includes("disable-model-invocation: true")) {
+      issues.push("Missing disable-model-invocation in frontmatter.");
+    }
+    if (!content.includes("user-invocable: false")) {
+      issues.push("Missing user-invocable in frontmatter.");
+    }
+    if (!content.includes("delegate_only: true")) {
+      issues.push("Missing delegate_only in metadata.");
+    }
+
     const registryContent = getAgentContent(planned.agent.id);
     if (registryContent) {
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
@@ -300,110 +408,18 @@ export function verifyOpenCodeDeveloperTeamInstall(
   });
 
   return {
-    valid: agentResults.every((r) => r.valid) && skillResults.every((r) => r.valid),
-    agentResults,
+    valid: skillResults.every((r) => r.valid),
+    agentResults: [],
     skillResults,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Content builders (consume core registry)
-// ---------------------------------------------------------------------------
-
-/**
- * OpenCode-specific frontmatter + body from the core registry.
- *
- * The adapter only adds minimal frontmatter (name, description, skill)
- * and wraps the registry's runner-agnostic skill body. When a memory bundle
- * is provided, memory instructions are composed into the skill surface.
- */
-function buildSkillFileContent(
-  agent: DeveloperTeamAgent,
-  memoryBundle?: MemoryInjectionBundle,
-): string {
-  const content = getAgentContent(agent.id);
-  if (!content) {
-    throw new Error(`No content found for agent ${agent.id} in core registry.`);
-  }
-
-  // Compose memory instructions for skill surface
-  const skillResult = memoryBundle
-    ? composeAdaptiveMemory(content.skillBody, memoryBundle, {
-        surface: "skill",
-        teamId: "developer-team",
-        skillId: agent.skillId,
-      })
-    : { content: content.skillBody, toolBindings: [] as readonly MemoryToolBinding[] };
-
-  return [
-    "---",
-    `description: ${agent.description}`,
-    "---",
-    "",
-    skillResult.content,
-    "",
-  ].join("\n");
-}
-
-/**
- * OpenCode-specific frontmatter + body from the core registry.
- *
- * The adapter only adds minimal frontmatter (name, description, skill, tools)
- * and wraps the registry's runner-agnostic agent body. When a memory bundle
- * is provided, memory instructions are composed into the agent surface and
- * memory tool names are added to the OpenCode tools list.
- *
- * Tool bindings are only added when the composition found matching fragments
- * for the agent surface, ensuring tools are scoped to surfaces that actually
- * receive memory guidance.
- */
-function buildAgentFileContent(
-  agent: DeveloperTeamAgent,
-  memoryBundle?: MemoryInjectionBundle,
-): string {
-  const content = getAgentContent(agent.id);
-  if (!content) {
-    throw new Error(`No content found for agent ${agent.id} in core registry.`);
-  }
-
-  // Compose memory instructions for agent surface
-  const agentResult: AdaptiveMemoryCompositionResult = memoryBundle
-    ? composeAdaptiveMemory(content.agentBody, memoryBundle, {
-        surface: "agent",
-        teamId: "developer-team",
-        agentId: agent.id,
-      })
-    : { content: content.agentBody, toolBindings: [] as readonly MemoryToolBinding[] };
-
-  // Build tools list — only add memory tool bindings when the composition
-  // produced matching fragments (agentResult.toolBindings is empty otherwise)
-  const baseTools = ["read", "write", "bash"];
-  const toolsList = memoryBundle
-    ? buildOpenCodeToolsLine(baseTools, agentResult.toolBindings)
-    : baseTools;
-
-  const toolsYaml = toolsList.join(", ");
-
-  return [
-    "---",
-    `name: ${agent.name}`,
-    `description: ${agent.description}`,
-    `skill: ${agent.skillId}`,
-    `tools: ${toolsYaml}`,
-    "---",
-    "",
-    agentResult.content,
-    "",
-  ].join("\n");
-}
-
-// ---------------------------------------------------------------------------
-// Backup
+// Backup (for skill files)
 // ---------------------------------------------------------------------------
 
 export type FileBackupEntry = {
   absolutePath: string;
-  /** null means the file did not exist before the install */
   previousContent: string | null;
 };
 
@@ -418,26 +434,18 @@ export function backupDeveloperTeamFiles(
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;
 
-  const allFiles = [...plan.agents, ...plan.skills];
-
-  const entries: FileBackupEntry[] = allFiles.map((planned) => {
+  const entries: FileBackupEntry[] = plan.skills.map((planned) => {
     if (exists(planned.absolutePath)) {
-      return {
-        absolutePath: planned.absolutePath,
-        previousContent: readFile(planned.absolutePath, "utf-8"),
-      };
+      return { absolutePath: planned.absolutePath, previousContent: readFile(planned.absolutePath, "utf-8") };
     }
-    return {
-      absolutePath: planned.absolutePath,
-      previousContent: null,
-    };
+    return { absolutePath: planned.absolutePath, previousContent: null };
   });
 
   return { entries };
 }
 
 // ---------------------------------------------------------------------------
-// Rollback
+// Rollback (for skill files)
 // ---------------------------------------------------------------------------
 
 export function rollbackDeveloperTeamFiles(
@@ -449,14 +457,12 @@ export function rollbackDeveloperTeamFiles(
 
   for (const entry of backup.entries) {
     if (entry.previousContent === null) {
-      // File was newly created by install — remove it
       try {
         unlink(entry.absolutePath);
       } catch {
-        // File may already be gone (partial apply or external removal)
+        // ignore
       }
     } else {
-      // File existed before install — restore original content
       writeFile(entry.absolutePath, entry.previousContent, "utf-8");
     }
   }

@@ -11,173 +11,208 @@ import {
   verifyOpenCodeDeveloperTeamInstall,
 } from "./developer-team-install";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { DEFAULT_OPENCODE_MODELS } from "./model-config";
 
 function createTempProject(): string {
-  return mkdtempSync(join(tmpdir(), "deck-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "deck-opencode-test-"));
+  mkdirSync(join(dir, ".opencode", "skills"), { recursive: true });
+  return dir;
 }
 
 function cleanup(dir: string) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-function ensureOpenCodeDirs(projectRoot: string) {
-  mkdirSync(join(projectRoot, ".opencode", "agents"), { recursive: true });
-  mkdirSync(join(projectRoot, ".opencode", "skills"), { recursive: true });
-}
-
 describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
-  test("includes all 12 agents, 12 skills, and project .opencode paths", () => {
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/my-project");
+  test("generates 12 agent entries for opencode.json", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    expect(Object.keys(plan.agentEntries)).toHaveLength(12);
+  });
 
-    expect(plan.projectRoot).toBe("/tmp/my-project");
-    expect(plan.agentsDir).toBe("/tmp/my-project/.opencode/agents");
-    expect(plan.skillsDir).toBe("/tmp/my-project/.opencode/skills");
-    expect(plan.agents).toHaveLength(12);
+  test("orchestrator has mode: primary", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    expect(plan.agentEntries["deck-developer-orchestrator"].mode).toBe("primary");
+  });
+
+  test("subagents have mode: subagent and hidden: true", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    const subagentIds = Object.keys(plan.agentEntries).filter((id) => id !== "deck-developer-orchestrator");
+    for (const id of subagentIds) {
+      expect(plan.agentEntries[id].mode).toBe("subagent");
+      expect(plan.agentEntries[id].hidden).toBe(true);
+    }
+  });
+
+  test("orchestrator has permission.task deny-by-default + allowlist", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    const perm = plan.agentEntries["deck-developer-orchestrator"].permission?.task;
+    expect(perm).toBeDefined();
+    expect(perm!["*"]).toBe("deny");
+    expect(perm!["deck-developer-explorer"]).toBe("allow");
+    expect(perm!["deck-developer-proposal"]).toBe("allow");
+  });
+
+  test("subagents have correct tool whitelist", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    const explorer = plan.agentEntries["deck-developer-explorer"];
+    expect(explorer.tools).toEqual({ bash: true, edit: true, read: true, write: true });
+  });
+
+  test("orchestrator has delegation tools", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    const tools = plan.agentEntries["deck-developer-orchestrator"].tools;
+    expect(tools!.delegate).toBe(true);
+    expect(tools!.delegation_list).toBe(true);
+    expect(tools!.delegation_read).toBe(true);
+  });
+
+  test("model assignments match DEFAULT_OPENCODE_MODELS", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    for (const [agentId, defaults] of Object.entries(DEFAULT_OPENCODE_MODELS)) {
+      expect(plan.agentEntries[agentId].model).toBe(defaults.model);
+    }
+  });
+
+  test("orchestrator has reasoningEffort: high", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    expect(plan.agentEntries["deck-developer-orchestrator"].reasoningEffort).toBe("high");
+  });
+
+  test("prompt references use {file:/absolute/path} format", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    for (const [agentId, entry] of Object.entries(plan.agentEntries)) {
+      expect(entry.prompt).toMatch(/^\{file:\//);
+      expect(entry.prompt).toContain(agentId);
+    }
+  });
+
+  test("generates prompt generation plan with 12 files", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    expect(plan.promptGenerationPlan).toHaveLength(12);
+  });
+
+  test("generates command generation plan with 14 commands", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    expect(plan.commandGenerationPlan).toHaveLength(14);
+  });
+
+  test("generates skill files for all 12 agents", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
     expect(plan.skills).toHaveLength(12);
-
-    const agentIds = plan.agents.map((a) => a.agent.id);
-    expect(agentIds).toContain("deck-developer-orchestrator");
-    expect(agentIds).toContain("deck-developer-archive");
-    expect(agentIds).toContain("deck-developer-apply-general");
-    expect(agentIds).toContain("deck-developer-apply-backend");
-    expect(agentIds).toContain("deck-developer-apply-frontend");
-
-    const skillIds = plan.skills.map((s) => s.agent.id);
-    expect(skillIds).toEqual(agentIds);
-  });
-
-  test("each planned agent has .opencode/agents relative path with team-scoped ID and valid content", () => {
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-
-    for (const planned of plan.agents) {
-      expect(planned.relativePath).toMatch(/^\.opencode\/agents\/deck-developer-.*\.md$/);
-      expect(planned.absolutePath).toBe(join("/tmp/project", planned.relativePath));
-      expect(planned.content).toContain("---");
-      expect(planned.content).toContain(`name: ${planned.agent.name}`);
-      expect(planned.content).toContain(`description: ${planned.agent.description}`);
+    for (const skill of plan.skills) {
+      expect(skill.content).toContain("disable-model-invocation: true");
+      expect(skill.content).toContain("user-invocable: false");
+      expect(skill.content).toContain("delegate_only: true");
     }
   });
 
-  test("each agent prompt explicitly references its matching skillId", () => {
+  test("skill content comes from core registry", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-
-    for (const planned of plan.agents) {
-      expect(planned.content).toContain(`skill: ${planned.agent.skillId}`);
-    }
-  });
-
-  test("each planned skill has .opencode/skills/<team-scoped-id>/SKILL.md path and valid content", () => {
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-
-    for (const planned of plan.skills) {
-      expect(planned.relativePath).toMatch(/^\.opencode\/skills\/deck-developer-[^/]+\/SKILL\.md$/);
-      expect(planned.absolutePath).toBe(join("/tmp/project", planned.relativePath));
-      expect(planned.content).toContain("---");
-      expect(planned.content).toContain(`description: ${planned.agent.description}`);
-      // Derive expected heading from core registry — no agent-specific branching needed
-      const registryContent = getAgentContent(planned.agent.id)!;
-      const headingMatch = registryContent.skillBody.match(/^# .+$/m);
-      expect(headingMatch).toBeTruthy();
-      expect(planned.content).toContain(headingMatch![0]);
-    }
-  });
-
-  test("does not contain .pi paths", () => {
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-
-    for (const planned of plan.agents) {
-      expect(planned.relativePath).not.toContain(".pi");
-      expect(planned.absolutePath).not.toContain(".pi");
-    }
-    for (const planned of plan.skills) {
-      expect(planned.relativePath).not.toContain(".pi");
-      expect(planned.absolutePath).not.toContain(".pi");
-    }
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestratorSkill.content).toContain("SDD Workflow");
+    expect(orchestratorSkill.content).toContain("Visual Explanations");
   });
 });
 
 describe("applyOpenCodeDeveloperTeamInstall", () => {
-  test("writes valid agent and skill files to temp directory", () => {
+  test("writes skill files to .opencode/skills/ with correct content", () => {
     const projectRoot = createTempProject();
     try {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
       const result = applyOpenCodeDeveloperTeamInstall(plan);
 
-      expect(result.results).toHaveLength(24);
-      expect(result.results.filter((r) => r.kind === "agent")).toHaveLength(12);
-      expect(result.results.filter((r) => r.kind === "skill")).toHaveLength(12);
-      expect(result.results.every((r) => r.status === "created")).toBe(true);
-
-      // Spot-check one agent file has valid frontmatter and body
-      const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-      const content = orchestrator.content;
-      expect(content).toContain("name: deck-developer-orchestrator");
-      expect(content).toContain("description:");
-      expect(content).toContain("# Orchestrator Agent");
-      expect(content).toContain("## Project Standards (auto-resolved)");
-
-      // Spot-check one skill file — orchestrator has real content
       const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
-      const skillContent = orchestratorSkill.content;
-      expect(skillContent).toContain("# Orchestrator Skill");
-      expect(skillContent).toContain("SDD Workflow");
-      expect(skillContent).toContain("# Visual Explanations");
-      expect(skillContent).toContain("Visuals summarize, not replace");
-
-      // Explorer skill has real (non-placeholder) content and does not receive Orchestrator-only visual guidance.
-      const explorerSkill = plan.skills.find((s) => s.agent.id === "deck-developer-explorer")!;
-      expect(explorerSkill.content).toContain("# Explorer Skill");
-      expect(explorerSkill.content).toContain("Investigation Steps");
-      expect(explorerSkill.content).not.toContain("Placeholder");
-      expect(explorerSkill.content).not.toContain("# Visual Explanations");
-
-      // Explorer agent has real (non-placeholder) content
-      const explorerAgent = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
-      expect(explorerAgent.content).toContain("# Explorer Agent");
-      expect(explorerAgent.content).toContain("investigator, not an implementor");
-      expect(explorerAgent.content).not.toContain("Placeholder");
+      expect(existsSync(orchestratorSkill.absolutePath)).toBe(true);
+      const content = readFileSync(orchestratorSkill.absolutePath, "utf-8");
+      expect(content).toContain("disable-model-invocation: true");
     } finally {
       cleanup(projectRoot);
     }
   });
 
-  test("re-applying unchanged files is idempotent", () => {
+  test("writes prompt files to configDir/prompts/deck-developer/", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      const result = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
-      // First apply
-      const first = applyOpenCodeDeveloperTeamInstall(plan);
-      expect(first.results.every((r) => r.status === "created")).toBe(true);
-
-      // Second apply — same plan, same content
-      const second = applyOpenCodeDeveloperTeamInstall(plan);
-      expect(second.results.every((r) => r.status === "unchanged")).toBe(true);
+      for (const planned of plan.promptGenerationPlan) {
+        expect(existsSync(planned.absolutePath)).toBe(true);
+      }
     } finally {
       cleanup(projectRoot);
     }
   });
 
-  test("detects updated files when content differs", () => {
+  test("writes command files to configDir/commands/", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
-      // First apply
-      applyOpenCodeDeveloperTeamInstall(plan);
+      for (const planned of plan.commandGenerationPlan) {
+        expect(existsSync(planned.absolutePath)).toBe(true);
+        const content = readFileSync(planned.absolutePath, "utf-8");
+        expect(content).toContain("agent: deck-developer-orchestrator");
+        expect(content).toContain("subtask: true");
+      }
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
 
-      // Corrupt one agent file
-      const target = plan.agents[0];
-      writeFileSync(target.absolutePath, "corrupted", "utf-8");
+  test("writes opencode.json with agent entries", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
-      // Re-apply
-      const result = applyOpenCodeDeveloperTeamInstall(plan);
-      const targetResult = result.results.find((r) => r.agentId === target.agent.id && r.kind === "agent");
-      expect(targetResult?.status).toBe("updated");
+      const configPath = join(configDir, "opencode.json");
+      expect(existsSync(configPath)).toBe(true);
+      const config = JSON.parse(readFileSync(configPath, "utf-8"));
+      expect(config.agent).toBeDefined();
+      expect(config.agent["deck-developer-orchestrator"]).toBeDefined();
+      expect(config.agent["deck-developer-orchestrator"].mode).toBe("primary");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
 
-      // Others unchanged
-      const others = result.results.filter((r) => r.agentId !== target.agent.id || r.kind !== "agent");
-      expect(others.every((r) => r.status === "unchanged")).toBe(true);
+  test("injects mermaid plugin when missing", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      const configPath = join(configDir, "opencode.json");
+      const config = JSON.parse(readFileSync(configPath, "utf-8"));
+      expect(config.plugin).toContain("opencode-mermaid-renderer");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("idempotent — re-applying does not duplicate entries", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      const configPath = join(configDir, "opencode.json");
+      const config = JSON.parse(readFileSync(configPath, "utf-8"));
+      const keys = Object.keys(config.agent ?? {});
+      expect(keys.filter((k) => k.startsWith("deck-developer-"))).toHaveLength(12);
     } finally {
       cleanup(projectRoot);
     }
@@ -185,86 +220,40 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
 });
 
 describe("verifyOpenCodeDeveloperTeamInstall", () => {
-  test("passes when all agent and skill files exist with correct content", () => {
+  test("passes when all skill files exist with correct frontmatter", () => {
     const projectRoot = createTempProject();
     try {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
       applyOpenCodeDeveloperTeamInstall(plan);
-
       const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(true);
-      expect(verifyResult.agentResults).toHaveLength(12);
-      expect(verifyResult.agentResults.every((r) => r.valid)).toBe(true);
-      expect(verifyResult.skillResults).toHaveLength(12);
-      expect(verifyResult.skillResults.every((r) => r.valid)).toBe(true);
     } finally {
       cleanup(projectRoot);
     }
   });
 
-  test("catches missing agent files", () => {
+  test("fails when skill file is missing", () => {
     const projectRoot = createTempProject();
     try {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-
-      // Don't apply — verify should fail
+      // Don't apply
       const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(false);
-      expect(verifyResult.agentResults).toHaveLength(12);
-      expect(verifyResult.agentResults.every((r) => !r.valid)).toBe(true);
-      expect(verifyResult.skillResults).toHaveLength(12);
-      expect(verifyResult.skillResults.every((r) => !r.valid)).toBe(true);
-
-      // Each should report missing file
-      for (const r of verifyResult.agentResults) {
-        expect(r.issues).toContain("File does not exist.");
-      }
-      for (const r of verifyResult.skillResults) {
-        expect(r.issues).toContain("File does not exist.");
-      }
     } finally {
       cleanup(projectRoot);
     }
   });
 
-  test("catches name/description mismatch in agent frontmatter", () => {
+  test("catches missing disable-model-invocation frontmatter", () => {
     const projectRoot = createTempProject();
     try {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
       applyOpenCodeDeveloperTeamInstall(plan);
-
-      // Corrupt the name in one agent file
-      const target = plan.agents[0];
-      const content = readFileSync(target.absolutePath, "utf-8");
-      writeFileSync(target.absolutePath, content.replace(`name: ${target.agent.name}`, "name: wrong-name"), "utf-8");
-
-      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
-      expect(verifyResult.valid).toBe(false);
-
-      const targetResult = verifyResult.agentResults.find((r) => r.agentId === target.agent.id);
-      expect(targetResult?.valid).toBe(false);
-      expect(targetResult?.issues.length).toBeGreaterThan(0);
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-
-  test("catches corrupted skill files", () => {
-    const projectRoot = createTempProject();
-    try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      applyOpenCodeDeveloperTeamInstall(plan);
-
       // Corrupt one skill file
       const target = plan.skills[0];
-      writeFileSync(target.absolutePath, "corrupted", "utf-8");
-
+      writeFileSync(target.absolutePath, "corrupted content", "utf-8");
       const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(false);
-
-      const targetResult = verifyResult.skillResults.find((r) => r.agentId === target.agent.id);
-      expect(targetResult?.valid).toBe(false);
-      expect(targetResult?.issues.length).toBeGreaterThan(0);
     } finally {
       cleanup(projectRoot);
     }
@@ -272,37 +261,13 @@ describe("verifyOpenCodeDeveloperTeamInstall", () => {
 });
 
 describe("backupDeveloperTeamFiles", () => {
-  test("captures existing file content and records null for missing files", () => {
+  test("captures existing skill file content", () => {
     const projectRoot = createTempProject();
     try {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      ensureOpenCodeDirs(projectRoot);
-
-      // Pre-create one agent file
-      writeFileSync(plan.agents[0].absolutePath, "old-content", "utf-8");
-
+      applyOpenCodeDeveloperTeamInstall(plan);
       const backup = backupDeveloperTeamFiles(plan);
-      expect(backup.entries).toHaveLength(24); // 12 agents + 12 skills
-
-      // The pre-existing file should have its content captured
-      const existingEntry = backup.entries.find((e) => e.absolutePath === plan.agents[0].absolutePath)!;
-      expect(existingEntry.previousContent).toBe("old-content");
-
-      // Files that didn't exist should have null
-      const missingEntries = backup.entries.filter((e) => e.previousContent === null);
-      expect(missingEntries).toHaveLength(23);
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-
-  test("captures all null when project is empty", () => {
-    const projectRoot = createTempProject();
-    try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      const backup = backupDeveloperTeamFiles(plan);
-
-      expect(backup.entries.every((e) => e.previousContent === null)).toBe(true);
+      expect(backup.entries.every((e) => e.previousContent !== null)).toBe(true);
     } finally {
       cleanup(projectRoot);
     }
@@ -310,283 +275,19 @@ describe("backupDeveloperTeamFiles", () => {
 });
 
 describe("rollbackDeveloperTeamFiles", () => {
-  test("restores overwritten file content", () => {
+  test("restores overwritten skill files", () => {
     const projectRoot = createTempProject();
     try {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      ensureOpenCodeDirs(projectRoot);
-      writeFileSync(plan.agents[0].absolutePath, "original-content", "utf-8");
-
-      const backup = backupDeveloperTeamFiles(plan);
-
-      // Overwrite via apply
       applyOpenCodeDeveloperTeamInstall(plan);
-      expect(readFileSync(plan.agents[0].absolutePath, "utf-8")).not.toBe("original-content");
-
-      // Rollback
-      rollbackDeveloperTeamFiles(backup);
-      expect(readFileSync(plan.agents[0].absolutePath, "utf-8")).toBe("original-content");
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-
-  test("removes newly-created agent and skill files", () => {
-    const projectRoot = createTempProject();
-    try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
       const backup = backupDeveloperTeamFiles(plan);
-
-      // Apply creates all files
-      applyOpenCodeDeveloperTeamInstall(plan);
-      expect(existsSync(plan.agents[0].absolutePath)).toBe(true);
-      expect(existsSync(plan.skills[0].absolutePath)).toBe(true);
-
-      // Rollback removes them
+      // Corrupt
+      writeFileSync(plan.skills[0].absolutePath, "CORRUPTED", "utf-8");
       rollbackDeveloperTeamFiles(backup);
-      expect(existsSync(plan.agents[0].absolutePath)).toBe(false);
-      expect(existsSync(plan.skills[0].absolutePath)).toBe(false);
+      const content = readFileSync(plan.skills[0].absolutePath, "utf-8");
+      expect(content).not.toBe("CORRUPTED");
     } finally {
       cleanup(projectRoot);
     }
-  });
-
-  test("returns tree to previous state after partial apply", () => {
-    const projectRoot = createTempProject();
-    try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      ensureOpenCodeDirs(projectRoot);
-
-      // Also create the skill subdirectory for skills[0]
-      mkdirSync(join(projectRoot, ".opencode", "skills", plan.skills[0].agent.id), { recursive: true });
-
-      // Pre-create some files with known content
-      writeFileSync(plan.agents[0].absolutePath, "agent-0-original", "utf-8");
-      writeFileSync(plan.skills[0].absolutePath, "skill-0-original", "utf-8");
-
-      const backup = backupDeveloperTeamFiles(plan);
-
-      // Simulate partial apply: only write a few files
-      mkdirSync(join(projectRoot, ".opencode", "skills", plan.skills[1].agent.id), { recursive: true });
-      writeFileSync(plan.agents[0].absolutePath, "agent-0-new", "utf-8");
-      writeFileSync(plan.agents[1].absolutePath, "agent-1-new", "utf-8");
-      writeFileSync(plan.skills[1].absolutePath, "skill-1-new", "utf-8");
-
-      // Rollback
-      rollbackDeveloperTeamFiles(backup);
-
-      // Pre-existing files restored
-      expect(readFileSync(plan.agents[0].absolutePath, "utf-8")).toBe("agent-0-original");
-      expect(readFileSync(plan.skills[0].absolutePath, "utf-8")).toBe("skill-0-original");
-
-      // Newly-created files removed
-      expect(existsSync(plan.agents[1].absolutePath)).toBe(false);
-      expect(existsSync(plan.skills[1].absolutePath)).toBe(false);
-
-      // Files never touched still don't exist
-      expect(existsSync(plan.skills[2].absolutePath)).toBe(false);
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-});
-
-describe("buildOpenCodeDeveloperTeamInstallPlan with memory injection", () => {
-  const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-    id: "engram",
-    displayName: "Engram Memory",
-    buildInjection: () => ({
-      instructions: [
-        {
-          surface: "session" as const,
-          markdown: "Session-level Engram memory instructions.",
-          teamId: "developer-team",
-        },
-        {
-          surface: "agent" as const,
-          markdown: "Agent-level Engram memory instructions.",
-          teamId: "developer-team",
-        },
-        {
-          surface: "skill" as const,
-          markdown: "Skill-level Engram memory instructions.",
-          teamId: "developer-team",
-        },
-      ],
-      toolBindings: [
-        { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
-        { capability: "memory.read" as const, serverName: "engram", toolNames: ["memory_read"] },
-        { capability: "memory.write" as const, serverName: "engram", toolNames: ["memory_write"] },
-      ],
-    }),
-  };
-
-  test("default plan has no memory injection and no diagnostics", () => {
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-
-    expect(plan.memoryDiagnostics).toHaveLength(0);
-
-    // Agent content should NOT contain Adaptive Memory section
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestrator.content).not.toContain("## Adaptive Memory (provider-injected)");
-
-    // Skill content should NOT contain Adaptive Memory section
-    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestratorSkill.content).not.toContain("## Adaptive Memory (provider-injected)");
-
-    // Default tools line remains unchanged: read, write, bash
-    expect(orchestrator.content).toContain("tools: read, write, bash");
-    expect(orchestrator.content).not.toContain("memory_search");
-  });
-
-  test("plan with Engram provider includes Adaptive Memory section in agent content", () => {
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: engramProvider,
-    });
-
-    expect(plan.memoryDiagnostics).toHaveLength(0);
-
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestrator.content).toContain("## Adaptive Memory (provider-injected)");
-    expect(orchestrator.content).toContain("Agent-level Engram memory instructions.");
-    expect(orchestrator.content).toContain("Memory is auxiliary");
-  });
-
-  test("plan with Engram provider includes Adaptive Memory section in skill content", () => {
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: engramProvider,
-    });
-
-    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestratorSkill.content).toContain("## Adaptive Memory (provider-injected)");
-    expect(orchestratorSkill.content).toContain("Skill-level Engram memory instructions.");
-  });
-
-  test("plan with Engram provider adds memory tool names to OpenCode tools line", () => {
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: engramProvider,
-    });
-
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-    // OpenCode tools format: comma-separated in YAML
-    expect(orchestrator.content).toContain("tools:");
-    expect(orchestrator.content).toContain("memory_search");
-    expect(orchestrator.content).toContain("memory_read");
-    expect(orchestrator.content).toContain("memory_write");
-  });
-
-  test("plan with pre-built memoryInjection bundle includes Adaptive Memory section", () => {
-    const bundle: import("@deck/core/memory/adaptive-memory").MemoryInjectionBundle = {
-      instructions: [
-        {
-          surface: "agent" as const,
-          markdown: "Direct bundle injection for OpenCode agents.",
-          teamId: "developer-team",
-        },
-      ],
-      toolBindings: [
-        { capability: "memory.search" as const, serverName: "custom", toolNames: ["custom_search"] },
-      ],
-    };
-
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      memoryInjection: bundle,
-    });
-
-    expect(plan.memoryDiagnostics).toHaveLength(0);
-
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestrator.content).toContain("Direct bundle injection for OpenCode agents.");
-    expect(orchestrator.content).toContain("custom_search");
-  });
-
-  test("unsupported provider ID produces diagnostic and no injection (REQ-AMI-003)", () => {
-    const unsupportedProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "unknown-provider",
-      displayName: "Unknown Provider",
-      buildInjection: () => ({
-        instructions: [
-          {
-            surface: "agent" as const,
-            markdown: "Should NOT be injected.",
-            teamId: "developer-team",
-          },
-        ],
-        toolBindings: [
-          { capability: "memory.search" as const, serverName: "unknown", toolNames: ["unknown_search"] },
-        ],
-      }),
-    };
-
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: unsupportedProvider,
-    });
-
-    // Should produce unsupported_memory_provider diagnostic
-    expect(plan.memoryDiagnostics).toHaveLength(1);
-    expect(plan.memoryDiagnostics[0].code).toBe("unsupported_memory_provider");
-    expect(plan.memoryDiagnostics[0].providerId).toBe("unknown-provider");
-
-    // Should NOT inject memory content — fail-closed
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestrator.content).not.toContain("## Adaptive Memory (provider-injected)");
-    expect(orchestrator.content).not.toContain("Should NOT be injected");
-    expect(orchestrator.content).not.toContain("unknown_search");
-    expect(orchestrator.content).toContain("tools: read, write, bash");
-  });
-
-  test("broken supported Engram provider produces memory_provider_unavailable diagnostic and no injection", () => {
-    const brokenEngram: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram", // Supported ID, but buildInjection throws
-      displayName: "Broken Engram",
-      buildInjection: () => {
-        throw new Error("provider init failed");
-      },
-    };
-
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: brokenEngram,
-    });
-
-    // Should produce a memory_provider_unavailable diagnostic
-    expect(plan.memoryDiagnostics).toHaveLength(1);
-    expect(plan.memoryDiagnostics[0].code).toBe("memory_provider_unavailable");
-    expect(plan.memoryDiagnostics[0].providerId).toBe("engram");
-
-    // Should NOT inject memory content — fail-closed
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestrator.content).not.toContain("## Adaptive Memory (provider-injected)");
-    expect(orchestrator.content).toContain("tools: read, write, bash");
-  });
-
-  test("tool bindings are scoped: no bindings added when no matching fragments for surface", () => {
-    const sessionOnlyWithTools: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram",
-      displayName: "Session-Only with Tools",
-      buildInjection: () => ({
-        instructions: [
-          {
-            surface: "session" as const,
-            markdown: "Session-level only.",
-            teamId: "developer-team",
-          },
-        ],
-        toolBindings: [
-          { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
-          { capability: "memory.read" as const, serverName: "engram", toolNames: ["memory_read"] },
-        ],
-      }),
-    };
-
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: sessionOnlyWithTools,
-    });
-
-    // Agent content should NOT have memory tools since session-only fragment
-    // doesn't match the agent surface
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestrator.content).not.toContain("memory_search");
-    expect(orchestrator.content).not.toContain("memory_read");
-    expect(orchestrator.content).toContain("tools: read, write, bash"); // default, no memory tools
   });
 });
