@@ -3,12 +3,17 @@
  *
  * Default model assignments and reasoningEffort per agent role.
  * Mirrors the pattern from Pi's model-config.ts.
+ *
+ * Canonical model defaults are consumed from @deck/core's ModelCatalog.
+ * This module provides OpenCode-specific overlays: opencode.json reading
+ * and reasoningEffort mapping.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
+import { getModelCatalog, type DeveloperTeamDefaultModelAssignment } from "@deck/core";
 import type { OpenCodeConfig } from "./types";
 
 export type OpenCodeModelConfig = {
@@ -20,24 +25,47 @@ export type OpenCodeThinkingLevel = "off" | "low" | "medium" | "high";
 
 export const OPENCODE_THINKING_LEVELS: readonly OpenCodeThinkingLevel[] = ["off", "low", "medium", "high"];
 
+export type DeveloperTeamModelAssignments = Record<string, string>;
+export type DeveloperTeamThinkingAssignments = Record<string, OpenCodeThinkingLevel>;
+
 // ---------------------------------------------------------------------------
-// Default model map — 12 agents
+// Default model map — consumed from core ModelCatalog
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_OPENCODE_MODELS: Record<string, OpenCodeModelConfig> = {
-  "deck-developer-orchestrator": { model: "openai/gpt-5.5", reasoningEffort: "high" },
-  "deck-developer-explorer": { model: "opencode-go/kimi-k2.6" },
-  "deck-developer-proposal": { model: "opencode-go/kimi-k2.6" },
-  "deck-developer-spec": { model: "zai-coding-plan/glm-5.1" },
-  "deck-developer-design": { model: "openai/gpt-5.5" },
-  "deck-developer-task": { model: "zai-coding-plan/glm-5.1" },
-  "deck-developer-apply-general": { model: "minimax-coding-plan/MiniMax-M2.7" },
-  "deck-developer-apply-backend": { model: "minimax-coding-plan/MiniMax-M2.7" },
-  "deck-developer-apply-frontend": { model: "minimax-coding-plan/MiniMax-M2.7" },
-  "deck-developer-verify": { model: "openai/gpt-5.5" },
-  "deck-developer-review": { model: "opencode-go/kimi-k2.6" },
-  "deck-developer-archive": { model: "opencode-go/deepseek-v4-flash" },
-};
+// Build from core's canonical developerTeamDefaults, mapping to OpenCode's
+// reasoningEffort field name. The model IDs are canonical; the reasoning
+// mapping is OpenCode-specific.
+function buildDefaultOpenCodeModels(): Record<string, OpenCodeModelConfig> {
+  const catalog = getModelCatalog();
+  const result: Record<string, OpenCodeModelConfig> = {};
+
+  for (const assignment of catalog.developerTeamDefaults) {
+    result[assignment.agentId] = {
+      model: assignment.modelId,
+      reasoningEffort: assignment.reasoning ? mapReasoningToOpenCode(assignment.reasoning) : undefined,
+    };
+  }
+
+  return Object.freeze(result);
+}
+
+function mapReasoningToOpenCode(reasoning: import("@deck/core").ReasoningLevel): "low" | "medium" | "high" | undefined {
+  switch (reasoning) {
+    case "high":
+    case "xhigh":
+      return "high";
+    case "medium":
+      return "medium";
+    case "minimal":
+    case "low":
+      return "low";
+    case "off":
+    default:
+      return undefined;
+  }
+}
+
+export const DEFAULT_OPENCODE_MODELS: Readonly<Record<string, OpenCodeModelConfig>> = buildDefaultOpenCodeModels();
 
 // ---------------------------------------------------------------------------
 // Thinking/reasoning helpers

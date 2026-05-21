@@ -15,5 +15,6 @@ export * from "./pi-team-launch";
 export * from "./pi-team-profile";
 export * from "./preflight";
 export * from "./required-tools";
+export * from "./runner-capabilities";
 export * from "./team-catalog";
 export * from "./tool-status";

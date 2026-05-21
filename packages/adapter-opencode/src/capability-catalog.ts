@@ -5,7 +5,7 @@ export type OpenCodeCapabilityId = "rtk" | "context-mode" | "codebase-memory" | 
 
 export type OpenCodeRunnerScope = "opencode" | "all";
 
-export type OpenCodeCapabilityStatus = "ready" | "missing" | "manual" | "pending";
+export type OpenCodeCapabilityStatus = "ready" | "missing" | "manual" | "pending" | "blocked";
 
 export type OpenCodeCapabilityInstallKind = "opencode-plugin" | "external" | "pending";
 

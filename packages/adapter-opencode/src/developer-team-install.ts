@@ -83,7 +83,7 @@ export type OpenCodeDeveloperTeamVerifyResult = {
 /** Re-export MemoryDiagnostic from core for backward compatibility. */
 export type MemoryDiagnostic = CoreMemoryDiagnostic;
 
-const SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS = ["engram"] as const;
+const SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
 
 /** Options for memory injection during OpenCode Developer Team install. */
 export type MemoryInjectionOptions = {

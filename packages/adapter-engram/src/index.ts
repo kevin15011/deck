@@ -168,3 +168,14 @@ export type {
   MemoryInstructionFragment,
   MemoryToolBinding,
 };
+
+/**
+ * Provider metadata for CLI registration.
+ * The CLI composition root uses this to discover and register available memory providers.
+ */
+export const ENGRAM_MEMORY_PROVIDER_ID = "engram";
+export const ENGRAM_MEMORY_PROVIDER_METADATA = {
+  id: ENGRAM_MEMORY_PROVIDER_ID,
+  displayName: "Engram Memory (Experimental)",
+  description: "Experimental persistent memory provider with session search and write capabilities.",
+} as const;

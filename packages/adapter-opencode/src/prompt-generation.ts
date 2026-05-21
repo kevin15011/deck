@@ -1,8 +1,10 @@
 /**
  * Prompt file generation for OpenCode Developer Team.
  *
- * Generates thin wrapper prompt files in `~/.config/opencode/prompts/deck-developer/`.
- * Each prompt references the skill file at an absolute path.
+ * Generates prompt files in `~/.config/opencode/prompts/deck-developer/`.
+ * Prompts include the canonical system prompt from @deck/core so all runners
+ * share the same orchestrator philosophy, delegation rules, and SDD workflow.
+ * The adapter only formats for OpenCode's agent-prompt file convention.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -10,6 +12,8 @@ import { dirname, join } from "node:path";
 
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
+import { ORCHESTRATOR_SYSTEM_PROMPT } from "@deck/core/teams/developer/orchestrator-content";
+import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,42 +40,40 @@ export type GeneratePromptFilesOptions = {
 
 function buildOrchestratorPrompt(skillPath: string): string {
   return [
-    `You are the Deck Developer Team Orchestrator. Read your skill file at ${skillPath} and follow it exactly.`,
+    ORCHESTRATOR_SYSTEM_PROMPT,
+    "",
+    "---",
+    "",
+    `## Skill Reference`,
+    ``,
+    `Read your skill file at ${skillPath} for detailed SDD workflow methodology, artifact persistence policy, skill resolution, and project AI notes handling.`,
     "",
   ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
-// Subagent prompt template
+// Prompt content builder using core content registry
 // ---------------------------------------------------------------------------
 
-function buildSubagentPrompt(phase: string, skillPath: string): string {
+function buildPromptContent(agent: DeveloperTeamAgent, skillPath: string): string {
+  const content = getAgentContent(agent.id);
+  if (!content) {
+    throw new Error(`No content found for agent ${agent.id} in core registry.`);
+  }
+
+  const isOrchestrator = agent.id === "deck-developer-orchestrator";
+  const baseContent = isOrchestrator ? ORCHESTRATOR_SYSTEM_PROMPT : content.agentBody;
+
   return [
-    `You are a Deck Developer Team agent for the ${phase} phase, not the orchestrator. Do this phase's work yourself. Do NOT delegate, Do NOT call task/delegate, and Do NOT launch sub-agents. Read your skill file at ${skillPath} and follow it exactly.`,
+    baseContent,
+    "",
+    "---",
+    "",
+    "## Skill Reference",
+    "",
+    `Read your skill file at ${skillPath} and follow it exactly.`,
     "",
   ].join("\n");
-}
-
-// ---------------------------------------------------------------------------
-// Phase name mapping
-// ---------------------------------------------------------------------------
-
-function getPhaseName(agentId: string): string {
-  const map: Record<string, string> = {
-    "deck-developer-orchestrator": "Orchestrator",
-    "deck-developer-explorer": "Explorer",
-    "deck-developer-proposal": "Proposal",
-    "deck-developer-spec": "Spec",
-    "deck-developer-design": "Design",
-    "deck-developer-task": "Task",
-    "deck-developer-apply-general": "Apply (General)",
-    "deck-developer-apply-backend": "Apply (Backend)",
-    "deck-developer-apply-frontend": "Apply (Frontend)",
-    "deck-developer-verify": "Verify",
-    "deck-developer-review": "Review",
-    "deck-developer-archive": "Archive",
-  };
-  return map[agentId] ?? agentId;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,10 +87,7 @@ export function buildPromptGenerationPlan(options: { configDir: string; projectR
   return DEVELOPER_TEAM_AGENTS.map((agent): PlannedPromptFile => {
     const skillPath = join(projectRoot, ".opencode", "skills", agent.skillId, "SKILL.md");
     const promptPath = join(promptsDir, `${agent.id}.md`);
-    const isOrchestrator = agent.id === "deck-developer-orchestrator";
-    const content = isOrchestrator
-      ? buildOrchestratorPrompt(skillPath)
-      : buildSubagentPrompt(getPhaseName(agent.id), skillPath);
+    const content = buildPromptContent(agent, skillPath);
 
     return { agent, absolutePath: promptPath, content };
   });

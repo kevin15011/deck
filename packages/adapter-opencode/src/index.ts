@@ -1,5 +1,6 @@
 export * from "./capability-catalog";
 export * from "./capability-inventory";
+export * from "./capability-plan";
 export * from "./command-generation";
 export * from "./config-merge";
 export * from "./developer-team-install";
@@ -7,7 +8,10 @@ export * from "./install-tools";
 export * from "./installation-plan";
 export * from "./internal-opencode-packages";
 export * from "./model-config";
+export * from "./opencode-mcp-config";
 export * from "./preflight";
 export * from "./prompt-generation";
 export * from "./required-tools";
+export * from "./team-catalog";
 export * from "./tool-status";
+export * from "./runner-capabilities";

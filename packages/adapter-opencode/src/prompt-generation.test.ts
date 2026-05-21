@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
+import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 
 function createTempDir(): string {
   return mkdtempSync(join(tmpdir(), "deck-prompt-test-"));
@@ -114,5 +115,50 @@ describe("buildPromptReference", () => {
   test("returns {file:/absolute/path} format", () => {
     const ref = buildPromptReference("/home/user/.config/opencode", "deck-developer-orchestrator");
     expect(ref).toMatch(/^\{file:\/home\/user\/\.config\/opencode\/prompts\/deck-developer\/deck-developer-orchestrator\.md\}$/);
+  });
+});
+
+describe("core content integration", () => {
+  test("subagents use agentBody from core registry", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    const backendAgent = plan.find((p) => p.agent.id === "deck-developer-apply-backend")!;
+    const coreContent = getAgentContent("deck-developer-apply-backend");
+    expect(coreContent).toBeDefined();
+    // The prompt should contain substantial content from core (more than the old stub)
+    expect(backendAgent.content.length).toBeGreaterThan(500);
+  });
+
+  test("orchestrator prompt uses ORCHESTRATOR_SYSTEM_PROMPT", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    const orchestrator = plan.find((p) => p.agent.id === "deck-developer-orchestrator")!;
+    // Orchestrator should have the full orchestrator content + skill reference
+    expect(orchestrator.content).toContain("Orchestrator");
+    expect(orchestrator.content).toContain("## Skill Reference");
+  });
+
+  test("all prompts include skill reference path", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/home/kevinlb/deck" });
+    for (const planned of plan) {
+      expect(planned.content).toContain("## Skill Reference");
+      expect(planned.content).toContain("/SKILL.md");
+    }
+  });
+
+  test("prompt content is richer than old stub (500+ chars)", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    for (const planned of plan) {
+      // Old stub was ~17 lines, new content should be substantially longer
+      expect(planned.content.length).toBeGreaterThan(500);
+    }
+  });
+
+  test("explorer agent prompt contains explorer-specific content from core", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    const explorer = plan.find((p) => p.agent.id === "deck-developer-explorer")!;
+    const coreContent = getAgentContent("deck-developer-explorer");
+    expect(coreContent).toBeDefined();
+    // Should contain content from core, not a generic stub
+    expect(explorer.content).toContain("Explorer");
+    expect(explorer.content.length).toBeGreaterThan(500);
   });
 });

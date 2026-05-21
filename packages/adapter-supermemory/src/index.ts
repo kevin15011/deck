@@ -104,3 +104,14 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
     },
   };
 }
+
+/**
+ * Provider metadata for CLI registration.
+ * The CLI composition root uses this to discover and register available memory providers.
+ */
+export const SUPERMEMORY_MEMORY_PROVIDER_ID = "supermemory";
+export const SUPERMEMORY_MEMORY_PROVIDER_METADATA = {
+  id: SUPERMEMORY_MEMORY_PROVIDER_ID,
+  displayName: "Supermemory MCP",
+  description: "MCP-based adaptive memory with personal container and team scoping.",
+} as const;

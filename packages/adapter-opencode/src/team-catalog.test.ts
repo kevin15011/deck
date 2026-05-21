@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { getTeamsForEnvironment, PI_DEVELOPMENT_TEAMS } from "./team-catalog";
+import { getTeamsForEnvironment, OPENCODE_DEVELOPMENT_TEAMS } from "./team-catalog";
 
 describe("Team catalog", () => {
-  test("Pi Development Environment includes Developer Team", () => {
-    const teams = getTeamsForEnvironment("pi-development");
+  test("OpenCode Development Environment includes Developer Team", () => {
+    const teams = getTeamsForEnvironment("opencode-development");
 
     expect(teams).toHaveLength(1);
     expect(teams[0].id).toBe("developer-team");
@@ -12,13 +12,13 @@ describe("Team catalog", () => {
     expect(teams[0].description).toBeTruthy();
   });
 
-  test("non-Pi environments return empty team list", () => {
+  test("non-OpenCode environments return empty team list", () => {
     expect(getTeamsForEnvironment("unknown")).toHaveLength(0);
-    expect(getTeamsForEnvironment("opencode-development")).toHaveLength(0);
+    expect(getTeamsForEnvironment("pi-development")).toHaveLength(0);
   });
 
   test("each team entry has id, displayName, and description", () => {
-    for (const team of PI_DEVELOPMENT_TEAMS) {
+    for (const team of OPENCODE_DEVELOPMENT_TEAMS) {
       expect(team.id).toBeTruthy();
       expect(team.displayName).toBeTruthy();
       expect(team.description).toBeTruthy();

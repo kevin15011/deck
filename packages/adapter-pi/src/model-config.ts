@@ -4,13 +4,19 @@
  * Detects configured providers from Pi settings, `pi --list-models`, and
  * environment variable fallbacks. Offers model choices per provider and
  * tracks agent-level model assignments.
+ *
+ * The canonical model data is consumed from @deck/core's ModelCatalog.
+ * This module provides Pi-specific overlays: env-var mapping,
+ * `pi --list-models` parsing, and PiThinkingLevel mapping.
  */
+
+import { getProviders, getModelsForProvider, type ModelProviderEntry } from "@deck/core";
 
 export type PiProvider = {
   id: string;
   displayName: string;
   envVars: readonly string[];
-};
+} & ModelProviderEntry;
 
 export type PiModel = {
   id: string;
@@ -36,56 +42,58 @@ export type PiSettings = {
   defaultModel?: string;
 };
 
-export const PI_PROVIDERS: readonly PiProvider[] = [
-  { id: "opencode-go", displayName: "OpenCode Go", envVars: ["OPENCODE_API_KEY"] },
-  { id: "openai-codex", displayName: "OpenAI Subscription / Codex", envVars: ["OPENAI_API_KEY"] },
-  { id: "anthropic", displayName: "Anthropic (Claude)", envVars: ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"] },
-  { id: "openai", displayName: "OpenAI API", envVars: ["OPENAI_API_KEY"] },
-  { id: "google", displayName: "Google (Gemini)", envVars: ["GEMINI_API_KEY"] },
-  { id: "groq", displayName: "Groq", envVars: ["GROQ_API_KEY"] },
-  { id: "ollama", displayName: "Ollama (local)", envVars: ["OLLAMA_HOST"] },
-  { id: "mistral", displayName: "Mistral AI", envVars: ["MISTRAL_API_KEY"] },
-] as const;
+// ---------------------------------------------------------------------------
+// Canonical provider registry (consumed from core)
+// ---------------------------------------------------------------------------
 
-export const DEFAULT_MODELS_BY_PROVIDER: Readonly<Record<string, readonly PiModel[]>> = {
-  "opencode-go": [
-    { id: "opencode-go/kimi-k2.6", displayName: "Kimi K2.6", providerId: "opencode-go" },
-    { id: "opencode-go/qwen3.6-plus", displayName: "Qwen 3.6 Plus", providerId: "opencode-go" },
-    { id: "opencode-go/deepseek-v4-pro", displayName: "DeepSeek V4 Pro", providerId: "opencode-go" },
-  ],
-  "openai-codex": [
-    { id: "openai-codex/gpt-5.5", displayName: "GPT-5.5", providerId: "openai-codex" },
-    { id: "openai-codex/gpt-5.4", displayName: "GPT-5.4", providerId: "openai-codex" },
-    { id: "openai-codex/gpt-5.1-codex-mini", displayName: "GPT-5.1 Codex Mini", providerId: "openai-codex" },
-  ],
-  anthropic: [
-    { id: "anthropic/claude-sonnet-4", displayName: "Claude Sonnet 4", providerId: "anthropic" },
-    { id: "anthropic/claude-opus-4", displayName: "Claude Opus 4", providerId: "anthropic" },
-    { id: "anthropic/claude-haiku-4", displayName: "Claude Haiku 4", providerId: "anthropic" },
-  ],
-  openai: [
-    { id: "openai/gpt-4o", displayName: "GPT-4o", providerId: "openai" },
-    { id: "openai/gpt-4o-mini", displayName: "GPT-4o Mini", providerId: "openai" },
-    { id: "openai/gpt-4-turbo", displayName: "GPT-4 Turbo", providerId: "openai" },
-  ],
-  google: [
-    { id: "google/gemini-2.5-pro", displayName: "Gemini 2.5 Pro", providerId: "google" },
-    { id: "google/gemini-2.5-flash", displayName: "Gemini 2.5 Flash", providerId: "google" },
-  ],
-  groq: [
-    { id: "groq/llama-3.3-70b", displayName: "Llama 3.3 70B", providerId: "groq" },
-    { id: "groq/mixtral-8x7b", displayName: "Mixtral 8x7B", providerId: "groq" },
-  ],
-  ollama: [
-    { id: "ollama/llama3.3", displayName: "Llama 3.3", providerId: "ollama" },
-    { id: "ollama/qwen2.5-coder", displayName: "Qwen 2.5 Coder", providerId: "ollama" },
-    { id: "ollama/deepseek-coder-v2", displayName: "DeepSeek Coder V2", providerId: "ollama" },
-  ],
-  mistral: [
-    { id: "mistral/mistral-large", displayName: "Mistral Large", providerId: "mistral" },
-    { id: "mistral/mistral-medium", displayName: "Mistral Medium", providerId: "mistral" },
-  ],
+// Pi-specific provider metadata: env vars for detection
+const PI_PROVIDER_ENV_VARS: Record<string, readonly string[]> = {
+  "opencode-go": ["OPENCODE_API_KEY"],
+  "openai-codex": ["OPENAI_API_KEY"],
+  "anthropic": ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"],
+  "openai": ["OPENAI_API_KEY"],
+  "google": ["GEMINI_API_KEY"],
+  "groq": ["GROQ_API_KEY"],
+  "ollama": ["OLLAMA_HOST"],
+  "mistral": ["MISTRAL_API_KEY"],
 };
+
+export const PI_PROVIDERS: readonly PiProvider[] = getProviders().map((p) => ({
+  ...p,
+  envVars: PI_PROVIDER_ENV_VARS[p.id] ?? [],
+})) as readonly PiProvider[];
+
+// ---------------------------------------------------------------------------
+// Canonical model registry (consumed from core)
+// ---------------------------------------------------------------------------
+
+// Build DEFAULT_MODELS_BY_PROVIDER from core's model catalog at module load time.
+// This eliminates duplication between Pi's hardcoded model list and the canonical
+// catalog in core. The data is identical; only the source differs.
+function buildDefaultModelsFromCore(): Readonly<Record<string, readonly PiModel[]>> {
+  try {
+    // Dynamic import to avoid any potential circular dependency issues during module init
+    const { getProviders, getModelsForProvider } = require("@deck/core");
+    const result: Record<string, readonly PiModel[]> = {};
+    for (const provider of getProviders()) {
+      const models = getModelsForProvider(provider.id);
+      if (models.length > 0) {
+        result[provider.id] = models.map((m: { id: string; displayName: string; providerId: string }) => ({
+          id: m.id,
+          displayName: m.displayName,
+          providerId: m.providerId,
+        }));
+      }
+    }
+    return Object.freeze(result);
+  } catch {
+    // Fallback: empty record. Tests or edge cases that don't need model data
+    // will use listModelsForProvider with explicit modelsOutput.
+    return Object.freeze({});
+  }
+}
+
+export const DEFAULT_MODELS_BY_PROVIDER: Readonly<Record<string, readonly PiModel[]>> = buildDefaultModelsFromCore();
 
 export type DetectProvidersOptions = {
   env?: Record<string, string | undefined>;
