@@ -71,6 +71,8 @@ type BuildPiRunnerReviewPlanState = {
   };
   teams?: Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>;
   runtime?: { toolsReview?: PiRequiredToolsReview };
+  /** Package instruction bundle per runner scope. */
+  packageInstructions?: Partial<Record<import("@deck/core/config/deck-config").PackageInstructionRunnerId, import("@deck/core/teams/developer/instruction-bundles").CapabilityInstructionBundle>>;
 };
 
 const EXCLUDED_PLAN_TERMS = ["@juicesharp/rpiv-todo", "@juicesharp/rpiv-ask-user-question", "context7"];
@@ -97,6 +99,7 @@ export function buildPiRunnerReviewPlan(
   addAdaptiveMemoryActions(groups, diagnostics, state, state.runtime?.toolsReview);
   addTeamActions(groups, diagnostics, state, inventory);
   addValidationActions(groups);
+  addPackageInstructionActions(groups, diagnostics, state);
 
   const cleanGroups = removeExcludedActions(groups);
   const unresolved = [
@@ -472,4 +475,43 @@ function normalizeName(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+/**
+ * Adds config-write actions for package instruction toggles.
+ *
+ * When any package instruction toggle is enabled for the pi runner scope,
+ * a write-deck-config action is added to persist the packageInstructions
+ * field to .deck/config.json.
+ *
+ * This is separate from package installation — toggling instruction injection
+ * does NOT install or uninstall packages.
+ */
+function addPackageInstructionActions(
+  groups: PiRunnerReviewPlan["groups"],
+  diagnostics: PiRunnerPlanDiagnostic[],
+  state: BuildPiRunnerReviewPlanState,
+): void {
+  const runnerScope = state.runnerScope ?? "pi";
+  const piBundle = state.packageInstructions?.[runnerScope as "pi" | "opencode"];
+  if (!piBundle || piBundle.instructions.length === 0) return;
+
+  groups.configWrites.push({
+    id: "package-instructions.pi.deck-config",
+    kind: "write-deck-config",
+    title: "Write package instruction configuration",
+    description: "Persists per-runner package instruction toggles to .deck/config.json. This controls prompt instruction injection, not package installation.",
+    status: "ready",
+    required: false,
+    diagnostics: [
+      "Package instruction toggles affect prompt content only; they do not install or remove packages.",
+    ],
+  });
+
+  diagnostics.push({
+    code: "PACKAGE_INSTRUCTIONS_CONFIGURED",
+    severity: "info",
+    message: "Package instruction injection is enabled; prompt content will include configured package guidance.",
+    actionId: "package-instructions.pi.deck-config",
+  });
 }

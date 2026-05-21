@@ -2,6 +2,10 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 import {
+  buildCapabilityInstructionBundle,
+  getEnabledPackageInstructionIds,
+} from "@deck/core/teams/developer/instruction-bundles";
+import {
   composeAdaptiveMemory,
   resolveMemoryInjection,
   type AdaptiveMemoryCompositionResult,
@@ -9,6 +13,8 @@ import {
   type MemoryDiagnostic as CoreMemoryDiagnostic,
   type MemoryInjectionBundle,
 } from "@deck/core/memory/adaptive-memory";
+import { readDeckConfig } from "@deck/core/config/deck-config";
+import type { CapabilityInstructionBundle } from "@deck/core";
 import type { DeveloperTeamAgent } from "./developer-team-catalog";
 import { DEVELOPER_TEAM_AGENTS } from "./developer-team-catalog";
 import {
@@ -110,6 +116,12 @@ export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
    * `memoryInjection` still takes precedence, then `memoryProvider`, then this alias.
    */
   dashboardMemoryProvider?: AdaptiveMemoryProvider;
+  /**
+   * Pre-built capability instruction bundle. When provided, the bundle's
+   * fragments are composed into agent/skill content via the content registry.
+   * Adapters should prefer passing this over having each builder re-compose.
+   */
+  capabilityInstructions?: CapabilityInstructionBundle;
 };
 
 // --- Legacy local resolveMemoryInjection (delegated to core) ---
@@ -250,6 +262,8 @@ export function buildDeveloperTeamInstallPlan(
     piMcpHomeDir: options?.piMcpHomeDir,
   });
 
+  const capabilityInstructions = options?.capabilityInstructions;
+
   const agents: PlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.pi/agents/${agent.id}.md`;
     const absolutePath = join(projectRoot, relativePath);
@@ -259,7 +273,7 @@ export function buildDeveloperTeamInstallPlan(
     const thinking = model && options?.preserveMissingThinkingAssignments && !hasThinkingAssignment
       ? undefined
       : model ? resolveThinkingForModel(model, thinkingAssignments?.[agent.id]) : resolveThinkingForModel(undefined);
-    const content = buildAgentFileContent(agent, model, thinking, memoryBundle);
+    const content = buildAgentFileContent(agent, model, thinking, memoryBundle, capabilityInstructions);
 
     return { agent, relativePath, absolutePath, content };
   });
@@ -267,7 +281,7 @@ export function buildDeveloperTeamInstallPlan(
   const skills: PlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.pi/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const content = buildSkillFileContent(agent, memoryBundle);
+    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions);
 
     return { agent, relativePath, absolutePath, content };
   });
@@ -514,8 +528,9 @@ export function rollbackDeveloperTeamFiles(
 function buildSkillFileContent(
   agent: DeveloperTeamAgent,
   memoryBundle?: MemoryInjectionBundle,
+  capabilityInstructions?: CapabilityInstructionBundle,
 ): string {
-  const content = getAgentContent(agent.id);
+  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions } : undefined);
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
@@ -543,8 +558,9 @@ function buildAgentFileContent(
   model?: string,
   thinking?: PiThinkingLevel,
   memoryBundle?: MemoryInjectionBundle,
+  capabilityInstructions?: CapabilityInstructionBundle,
 ): string {
-  const content = getAgentContent(agent.id);
+  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions } : undefined);
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }

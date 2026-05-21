@@ -7,6 +7,7 @@ import {
 import { OPENCODE_INSTALLABLE_TOOLS } from "./installation-plan";
 import type { OpenCodeRunnerCapabilityInventory } from "./capability-inventory";
 import type { OpenCodeToolsReview } from "./required-tools";
+import type { CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 
 export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
 export type OpenCodeRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
@@ -55,6 +56,8 @@ type BuildOpenCodeRunnerReviewPlanState = {
   };
   teams?: Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>;
   runtime?: { toolsReview?: OpenCodeToolsReview };
+  /** Package instruction toggles per runner scope. */
+  packageInstructions?: Partial<Record<string, CapabilityInstructionBundle>>;
 };
 
 export function buildOpenCodeRunnerReviewPlan(
@@ -73,6 +76,7 @@ export function buildOpenCodeRunnerReviewPlan(
   addCapabilityActions(groups, diagnostics, state, inventory);
   addAdaptiveMemoryActions(groups, diagnostics, state);
   addTeamActions(groups, diagnostics, state, inventory);
+  addPackageInstructionActions(groups, diagnostics, state);
   addValidationActions(groups);
 
   const unresolved = [
@@ -231,6 +235,45 @@ function addValidationActions(groups: OpenCodeRunnerReviewPlan["groups"]): void 
     title: "Validate OpenCode runner capability state",
     description: "Re-run environment/tool checks after executable actions complete.",
     status: "ready",
+  });
+}
+
+/**
+ * Adds a config-write action when package instruction injection is enabled for a runner scope.
+ *
+ * Package instruction injection is toggled per-runner via .deck/config.json's `packageInstructions`
+ * field. When a runner scope has at least one instruction enabled, we persist that config so it
+ * survives across `deck-init` runs.
+ *
+ * This writes to .deck/config.json's `packageInstructions` field, NOT the same config key used by
+ * internal-runner packages. They are independent.
+ */
+function addPackageInstructionActions(
+  groups: OpenCodeRunnerReviewPlan["groups"],
+  diagnostics: OpenCodeRunnerPlanDiagnostic[],
+  state: BuildOpenCodeRunnerReviewPlanState,
+): void {
+  const runnerScope = state.runnerScope ?? "opencode";
+  const opencodeBundle = state.packageInstructions?.[runnerScope];
+  if (!opencodeBundle || opencodeBundle.instructions.length === 0) return;
+
+  groups.configWrites.push({
+    id: "package-instructions.opencode.deck-config",
+    kind: "write-deck-config",
+    title: "Write package instruction configuration",
+    description: "Persists per-runner package instruction toggles to .deck/config.json. This controls prompt instruction injection, not package installation.",
+    status: "ready",
+    required: false,
+    diagnostics: [
+      "Package instruction toggles affect prompt content only; they do not install or remove packages.",
+    ],
+  });
+
+  diagnostics.push({
+    code: "PACKAGE_INSTRUCTIONS_CONFIGURED",
+    severity: "info",
+    message: "Package instruction injection is enabled; prompt content will include configured package guidance.",
+    actionId: "package-instructions.opencode.deck-config",
   });
 }
 

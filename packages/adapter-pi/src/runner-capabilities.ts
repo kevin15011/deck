@@ -183,10 +183,25 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     }
   }
 
+  // Build capability instruction bundle from config if not already provided
+  const capabilityInstructions = input.capabilityInstructions;
+  const resolvedCapabilityInstructions = capabilityInstructions ?? (() => {
+    try {
+      const { readDeckConfig } = require("@deck/core/config/deck-config");
+      const { getEnabledPackageInstructionIds, buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles/index");
+      const config = readDeckConfig(input.projectRoot);
+      const enabledIds = getEnabledPackageInstructionIds(config, "pi");
+      return enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+
   const plan = buildDeveloperTeamInstallPlan(input.projectRoot, {
     modelAssignments,
     thinkingAssignments,
     supportedMemoryProviderIds: ["engram", "supermemory"],
+    capabilityInstructions: resolvedCapabilityInstructions,
   });
 
   const agents = plan.agents.map((a) => ({
@@ -393,6 +408,7 @@ function buildTeamInstallPlanFromInput(input: import("@deck/core").DeveloperTeam
     modelAssignments,
     thinkingAssignments,
     preserveMissingThinkingAssignments: true,
+    capabilityInstructions: input.capabilityInstructions,
   });
 
   const files: import("@deck/core").DeveloperTeamInstallFile[] = [

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import { buildCapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 import { buildPiRunnerCapabilityInventory, type PiRunnerCapabilityInventory } from "./capability-inventory";
 import { buildPiRunnerReviewPlan, type PiRunnerReviewPlan } from "./capability-plan";
 import { buildDeveloperTeamInstallPlan } from "./developer-team-install";
@@ -496,5 +497,125 @@ describe("buildPiRunnerReviewPlan security and structural regressions", () => {
       expect(action.toolId).not.toBe("context7");
       expect(action.source?.toLowerCase() ?? "").not.toContain("context7");
     }
+  });
+});
+
+describe("buildPiRunnerReviewPlan with package instructions", () => {
+  test("no config-write action when no package instructions are enabled", () => {
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        packageInstructions: {
+          pi: buildCapabilityInstructionBundle([]),
+        },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    const pkgAction = plan.groups.configWrites.find(
+      (action) => action.id === "package-instructions.pi.deck-config",
+    );
+    expect(pkgAction).toBeUndefined();
+  });
+
+  test("adds config-write action when any pi package instruction is enabled", () => {
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        packageInstructions: {
+          pi: buildCapabilityInstructionBundle(["codebase-memory"]),
+        },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    const pkgAction = plan.groups.configWrites.find(
+      (action) => action.id === "package-instructions.pi.deck-config",
+    );
+    expect(pkgAction).toBeDefined();
+    expect(pkgAction?.kind).toBe("write-deck-config");
+    expect(pkgAction?.status).toBe("ready");
+    expect(pkgAction?.title).toContain("package instruction");
+  });
+
+  test("config-write action is not required (optional guidance)", () => {
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        packageInstructions: {
+          pi: buildCapabilityInstructionBundle(["codebase-memory"]),
+        },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    const pkgAction = plan.groups.configWrites.find(
+      (action) => action.id === "package-instructions.pi.deck-config",
+    );
+    expect(pkgAction?.required).toBe(false);
+  });
+
+  test("diagnostic is added when package instructions are enabled", () => {
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        packageInstructions: {
+          pi: buildCapabilityInstructionBundle(["codebase-memory", "rtk"]),
+        },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    const pkgAction = plan.groups.configWrites.find(
+      (action) => action.id === "package-instructions.pi.deck-config",
+    );
+    expect(pkgAction).toBeDefined();
+    const diag = plan.diagnostics.find((d) => d.code === "PACKAGE_INSTRUCTIONS_CONFIGURED");
+    expect(diag).toBeDefined();
+  });
+
+  test("no action when packageInstructions is undefined", () => {
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        packageInstructions: {},
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    const pkgAction = plan.groups.configWrites.find(
+      (action) => action.id === "package-instructions.pi.deck-config",
+    );
+    expect(pkgAction).toBeUndefined();
+  });
+
+  test("opencode scope uses its own bundle", () => {
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        packageInstructions: {
+          opencode: buildCapabilityInstructionBundle(["context-mode"]),
+          pi: buildCapabilityInstructionBundle(["codebase-memory"]),
+        },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    const pkgAction = plan.groups.configWrites.find(
+      (action) => action.id === "package-instructions.opencode.deck-config",
+    );
+    expect(pkgAction).toBeUndefined();
   });
 });

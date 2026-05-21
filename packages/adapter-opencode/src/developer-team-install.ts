@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import {
+  buildCapabilityInstructionBundle,
+  getEnabledPackageInstructionIds,
+} from "@deck/core/teams/developer/instruction-bundles";
+import {
   composeAdaptiveMemory,
   resolveMemoryInjection,
   type AdaptiveMemoryCompositionResult,
@@ -13,6 +17,7 @@ import {
   type MemoryToolBinding,
 } from "@deck/core/memory/adaptive-memory";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import type { CapabilityInstructionBundle } from "@deck/core";
 
 import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
 import { buildCommandGenerationPlan, applyCommandGeneration } from "./command-generation";
@@ -51,6 +56,8 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   promptGenerationPlan: ReturnType<typeof buildPromptGenerationPlan>;
   commandGenerationPlan: ReturnType<typeof buildCommandGenerationPlan>;
   mermaidPluginStatus: "ready" | "missing";
+  /** Captured capability instruction bundle for verify reconciliation */
+  capabilityInstructions?: CapabilityInstructionBundle;
 };
 
 export type OpenCodeBundleApplyResult = {
@@ -93,6 +100,11 @@ export type MemoryInjectionOptions = {
   memoryProvider?: AdaptiveMemoryProvider;
   /** Provider IDs accepted by this adapter/caller registry. */
   supportedMemoryProviderIds?: Iterable<string>;
+  /**
+   * Pre-built capability instruction bundle. When provided, the bundle's
+   * fragments are composed into skill content via the content registry.
+   */
+  capabilityInstructions?: CapabilityInstructionBundle;
 };
 
 // ---------------------------------------------------------------------------
@@ -183,8 +195,9 @@ function buildAgentEntry(
 function buildSkillFileContent(
   agent: DeveloperTeamAgent,
   memoryBundle?: MemoryInjectionBundle,
+  capabilityInstructions?: CapabilityInstructionBundle,
 ): string {
-  const content = getAgentContent(agent.id);
+  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions } : undefined);
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
@@ -234,6 +247,8 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
 
   const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options);
 
+  const capabilityInstructions = options?.capabilityInstructions;
+
   // Build agent entries for opencode.json
   const agentEntries: Record<string, AgentEntry> = {};
   for (const agent of DEVELOPER_TEAM_AGENTS) {
@@ -249,12 +264,12 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   const skills: OpenCodePlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.opencode/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const content = buildSkillFileContent(agent, memoryBundle);
+    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions);
     return { agent, relativePath, absolutePath, content };
   });
 
   // Prompt generation plan
-  const promptGenerationPlan = buildPromptGenerationPlan({ configDir, projectRoot });
+  const promptGenerationPlan = buildPromptGenerationPlan({ configDir, projectRoot, capabilityInstructions });
 
   // Command generation plan
   const commandGenerationPlan = buildCommandGenerationPlan({ configDir });
@@ -273,6 +288,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     promptGenerationPlan,
     commandGenerationPlan,
     mermaidPluginStatus,
+    capabilityInstructions,
   };
 }
 
@@ -324,7 +340,8 @@ export function applyOpenCodeDeveloperTeamInstall(
     throw new Error(`Failed to write model configuration to opencode.json: ${message}`);
   }
 
-  // 2. Write skills
+  // 2. Write skills and track actual status
+  const results: OpenCodeBundleApplyResult[] = [];
   for (const planned of plan.skills) {
     const skillDir = join(planned.absolutePath, "..");
     if (!exists(skillDir)) {
@@ -334,9 +351,13 @@ export function applyOpenCodeDeveloperTeamInstall(
       const existing = readFile(planned.absolutePath, "utf-8");
       if (existing !== planned.content) {
         writeFile(planned.absolutePath, planned.content, "utf-8");
+        results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "updated" as const });
+      } else {
+        results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "unchanged" as const });
       }
     } else {
       writeFile(planned.absolutePath, planned.content, "utf-8");
+      results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "created" as const });
     }
   }
 
@@ -351,11 +372,6 @@ export function applyOpenCodeDeveloperTeamInstall(
     writeFile: writeFile as (path: string, content: string, encoding: "utf-8") => void,
     mkdir: mkdir as (path: string, opts: { recursive: true }) => void,
   });
-
-  // Build results
-  const results: OpenCodeBundleApplyResult[] = [
-    ...plan.skills.map((s) => ({ agentId: s.agent.id, kind: "skill" as const, status: "created" as const })),
-  ];
 
   return { results, configMergeResult };
 }
@@ -396,7 +412,7 @@ export function verifyOpenCodeDeveloperTeamInstall(
       issues.push("Missing delegate_only in metadata.");
     }
 
-    const registryContent = getAgentContent(planned.agent.id);
+    const registryContent = getAgentContent(planned.agent.id, plan.capabilityInstructions ? { capabilityInstructions: plan.capabilityInstructions } : undefined);
     if (registryContent) {
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
       if (headingMatch && !content.includes(headingMatch[0])) {

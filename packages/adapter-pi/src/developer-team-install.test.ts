@@ -968,3 +968,166 @@ describe("Developer Team dashboard model/frontmatter preservation regressions", 
     expect(frontmatterFor(dashboardAssignmentsPlan, "deck-developer-apply-backend")).not.toContain("thinking:");
   });
 });
+
+describe("buildDeveloperTeamInstallPlan with capability instruction injection", () => {
+  test("default plan has no package instruction section", () => {
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project");
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).not.toContain("## Package Instructions (configured)");
+
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestratorSkill.content).not.toContain("## Package Instructions (configured)");
+  });
+
+  test("plan with capabilityInstructions bundle includes package instruction section in agent content", () => {
+    const bundle: import("@deck/core").CapabilityInstructionBundle = {
+      instructions: [
+        {
+          packageId: "codebase-memory",
+          surface: "agent",
+          markdown: "Prefer search_graph, trace_path, get_code_snippet for structural discovery.",
+          teamId: "developer-team",
+        },
+      ],
+    };
+
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
+      capabilityInstructions: bundle,
+    });
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("## Package Instructions (configured)");
+    expect(orchestrator.content).toContain("Prefer search_graph, trace_path, get_code_snippet");
+    expect(orchestrator.content).toContain(".deck/config.json");
+  });
+
+  test("plan with capabilityInstructions bundle includes package instruction section in skill content", () => {
+    const bundle: import("@deck/core").CapabilityInstructionBundle = {
+      instructions: [
+        {
+          packageId: "context-mode",
+          surface: "skill",
+          markdown: "Use ctx_batch_execute and ctx_execute for large-output commands.",
+          teamId: "developer-team",
+        },
+      ],
+    };
+
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
+      capabilityInstructions: bundle,
+    });
+
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestratorSkill.content).toContain("## Package Instructions (configured)");
+    expect(orchestratorSkill.content).toContain("ctx_batch_execute and ctx_execute");
+  });
+
+  test("capability instructions coexist with memory injection", () => {
+    const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "engram",
+      displayName: "Engram Memory",
+      buildInjection: () => ({
+        instructions: [
+          { surface: "agent", markdown: "Agent-level Engram memory instructions.", teamId: "developer-team" },
+        ],
+        toolBindings: [
+          { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
+        ],
+      }),
+    };
+
+    const bundle: import("@deck/core").CapabilityInstructionBundle = {
+      instructions: [
+        {
+          packageId: "codebase-memory",
+          surface: "agent",
+          markdown: "Prefer search_graph for structural discovery.",
+          teamId: "developer-team",
+        },
+      ],
+    };
+
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
+      memoryProvider: engramProvider,
+      capabilityInstructions: bundle,
+    });
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("## Adaptive Memory (provider-injected)");
+    expect(orchestrator.content).toContain("## Package Instructions (configured)");
+    expect(orchestrator.content).toContain("Agent-level Engram memory instructions.");
+    expect(orchestrator.content).toContain("Prefer search_graph for structural discovery.");
+    expect(orchestrator.content).toContain("memory_search");
+  });
+
+  test("agent surface fragments do not appear in skill content", () => {
+    const bundle: import("@deck/core").CapabilityInstructionBundle = {
+      instructions: [
+        { packageId: "codebase-memory", surface: "agent", markdown: "Agent-only instruction.", teamId: "developer-team" },
+        { packageId: "rtk", surface: "skill", markdown: "Skill-only RTK guidance.", teamId: "developer-team" },
+      ],
+    };
+
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
+      capabilityInstructions: bundle,
+    });
+
+    const orchestratorAgent = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+
+    expect(orchestratorAgent.content).toContain("Agent-only instruction.");
+    expect(orchestratorAgent.content).not.toContain("Skill-only RTK guidance.");
+
+    expect(orchestratorSkill.content).toContain("Skill-only RTK guidance.");
+    expect(orchestratorSkill.content).not.toContain("Agent-only instruction.");
+  });
+
+  test("empty capabilityInstructions bundle produces no section", () => {
+    const bundle: import("@deck/core").CapabilityInstructionBundle = {
+      instructions: [],
+    };
+
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
+      capabilityInstructions: bundle,
+    });
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).not.toContain("## Package Instructions (configured)");
+  });
+
+  test("multiple package instructions from different packages are all included", () => {
+    const bundle: import("@deck/core").CapabilityInstructionBundle = {
+      instructions: [
+        { packageId: "codebase-memory", surface: "agent", markdown: "Codebase memory guidance." },
+        { packageId: "context-mode", surface: "agent", markdown: "Context mode guidance." },
+        { packageId: "rtk", surface: "agent", markdown: "RTK fallback guidance." },
+      ],
+    };
+
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
+      capabilityInstructions: bundle,
+    });
+
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("Codebase memory guidance.");
+    expect(orchestrator.content).toContain("Context mode guidance.");
+    expect(orchestrator.content).toContain("RTK fallback guidance.");
+  });
+
+  test("capabilityInstructions via bundle prop (not readDeckConfig) works without config file", () => {
+    const bundle: import("@deck/core").CapabilityInstructionBundle = {
+      instructions: [
+        { packageId: "codebase-memory", surface: "agent", markdown: "No config file needed." },
+      ],
+    };
+
+    const plan = buildDeveloperTeamInstallPlan("/tmp/nonexistent-project", {
+      capabilityInstructions: bundle,
+    });
+
+    const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
+    expect(explorer.content).toContain("## Package Instructions (configured)");
+    expect(explorer.content).toContain("No config file needed.");
+  });
+});

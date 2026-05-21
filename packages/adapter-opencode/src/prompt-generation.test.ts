@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 
 import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { buildCapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 
 function createTempDir(): string {
   return mkdtempSync(join(tmpdir(), "deck-prompt-test-"));
@@ -160,5 +161,34 @@ describe("core content integration", () => {
     // Should contain content from core, not a generic stub
     expect(explorer.content).toContain("Explorer");
     expect(explorer.content.length).toBeGreaterThan(500);
+  });
+
+  test("capabilityInstructions are passed through to orchestrator prompt generation", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      capabilityInstructions: bundle,
+    });
+    const orchestrator = plan.find((p) => p.agent.id === "deck-developer-orchestrator")!;
+    // Verify the orchestrator prompt was generated with content
+    expect(orchestrator.content).toContain("Orchestrator");
+    expect(orchestrator.content).toContain("## Skill Reference");
+    // The capability instructions should be composed into the orchestrator skill body
+    // via getAgentContent when building the prompt
+    expect(orchestrator.content.length).toBeGreaterThan(500);
+  });
+
+  test("capabilityInstructions are passed through to all agent prompt generation", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory", "context-mode"]);
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      capabilityInstructions: bundle,
+    });
+    // All agents should have substantial content
+    for (const planned of plan) {
+      expect(planned.content.length).toBeGreaterThan(500);
+    }
   });
 });

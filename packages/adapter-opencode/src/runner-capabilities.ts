@@ -181,10 +181,25 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     }
   }
 
+  // Build capability instruction bundle from config if not already provided
+  const capabilityInstructions = input.capabilityInstructions;
+  const resolvedCapabilityInstructions = capabilityInstructions ?? (() => {
+    try {
+      const { readDeckConfig } = require("@deck/core/config/deck-config");
+      const { getEnabledPackageInstructionIds, buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles/index");
+      const config = readDeckConfig(input.projectRoot);
+      const enabledIds = getEnabledPackageInstructionIds(config, "opencode");
+      return enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+
   const plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
     configModelOverrides: modelAssignments,
     reasoningEffortOverrides: reasoningAssignments,
     supportedMemoryProviderIds: ["engram", "supermemory"],
+    capabilityInstructions: resolvedCapabilityInstructions,
   });
 
   const agents = plan.skills.map((s) => {
@@ -234,6 +249,7 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
   const plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
     configModelOverrides: modelAssignments,
     reasoningEffortOverrides: reasoningAssignments,
+    capabilityInstructions: input.capabilityInstructions,
   });
 
   // OpenCode writes skill files, prompt files, and command files
@@ -275,7 +291,9 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
 }
 
 async function verifyTeamInstall(input: import("@deck/core").DeveloperTeamVerifyInput): Promise<RunnerDeveloperTeamVerifyResult> {
-  const plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot);
+  const plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
+    capabilityInstructions: input.capabilityInstructions,
+  });
   const result: OpenCodeDeveloperTeamVerifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
 
   return {
@@ -395,6 +413,7 @@ function buildTeamInstallPlanFromInput(input: import("@deck/core").DeveloperTeam
   const plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
     configModelOverrides: modelAssignments,
     reasoningEffortOverrides: reasoningAssignments,
+    capabilityInstructions: input.capabilityInstructions,
   });
 
   const files: import("@deck/core").DeveloperTeamInstallFile[] = [

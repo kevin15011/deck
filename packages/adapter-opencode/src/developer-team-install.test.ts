@@ -19,6 +19,12 @@ function createTempProject(): string {
   return dir;
 }
 
+function createTempConfigDir(projectRoot: string): string {
+  const configDir = join(projectRoot, ".config", "opencode");
+  mkdirSync(configDir, { recursive: true });
+  return configDir;
+}
+
 function cleanup(dir: string) {
   rmSync(dir, { recursive: true, force: true });
 }
@@ -118,8 +124,9 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
   test("writes skill files to .opencode/skills/ with correct content", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      const result = applyOpenCodeDeveloperTeamInstall(plan);
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      const result = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
       const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
       expect(existsSync(orchestratorSkill.absolutePath)).toBe(true);
@@ -223,8 +230,9 @@ describe("verifyOpenCodeDeveloperTeamInstall", () => {
   test("passes when all skill files exist with correct frontmatter", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      applyOpenCodeDeveloperTeamInstall(plan);
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
       const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(true);
     } finally {
@@ -247,8 +255,9 @@ describe("verifyOpenCodeDeveloperTeamInstall", () => {
   test("catches missing disable-model-invocation frontmatter", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      applyOpenCodeDeveloperTeamInstall(plan);
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
       // Corrupt one skill file
       const target = plan.skills[0];
       writeFileSync(target.absolutePath, "corrupted content", "utf-8");
@@ -264,8 +273,9 @@ describe("backupDeveloperTeamFiles", () => {
   test("captures existing skill file content", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      applyOpenCodeDeveloperTeamInstall(plan);
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
       const backup = backupDeveloperTeamFiles(plan);
       expect(backup.entries.every((e) => e.previousContent !== null)).toBe(true);
     } finally {
@@ -278,8 +288,9 @@ describe("rollbackDeveloperTeamFiles", () => {
   test("restores overwritten skill files", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      applyOpenCodeDeveloperTeamInstall(plan);
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
       const backup = backupDeveloperTeamFiles(plan);
       // Corrupt
       writeFileSync(plan.skills[0].absolutePath, "CORRUPTED", "utf-8");
