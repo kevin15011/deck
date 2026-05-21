@@ -1,0 +1,48 @@
+change: hexagonal-architecture-memory-refactor
+phase: archive
+status: completed
+artifact: archive-report.md
+provenance:
+  - tool: deck-developer-proposal
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-05-21T00:00:00Z"
+  - tool: deck-developer-spec
+    model: zai-coding-plan/glm-5.1
+    timestamp: "2026-05-21T00:00:00Z"
+  - tool: deck-developer-design
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-05-21T00:00:00Z"
+  - tool: deck-developer-task
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-05-21T00:00:00Z"
+  - tool: deck-developer-apply-backend
+    model: minimax-coding-plan/MiniMax-M2.7
+    timestamp: "2026-05-21T12:00:00Z"
+  - tool: deck-developer-apply-general
+    model: minimax-coding-plan/MiniMax-M2.7
+    timestamp: "2026-05-21T13:00:00Z"
+  - tool: deck-developer-verify
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-05-21T14:00:00Z"
+artifacts:
+  - path: openspec/changes/hexagonal-architecture-memory-refactor/proposal.md
+    type: proposal
+    description: Change proposal with intent, scope, approach, risks, and rollback plan
+  - path: openspec/changes/hexagonal-architecture-memory-refactor/spec.md
+    type: spec
+    description: Requirements and acceptance scenarios for hexagonal architecture boundary restoration
+  - path: openspec/changes/hexagonal-architecture-memory-refactor/design.md
+    type: design
+    description: Technical architecture, tradeoffs, file impact, and implementation approach
+  - path: openspec/changes/hexagonal-architecture-memory-refactor/tasks.md
+    type: tasks
+    description: 23 implementation tasks across 5 phases with dependency graph and routing
+  - path: openspec/changes/hexagonal-architecture-memory-refactor/apply-progress.md
+    type: apply-progress
+    description: Apply phase progress — Foundation, Adapters, CLI, and Verification tasks
+  - path: openspec/changes/hexagonal-architecture-memory-refactor/verify-report.md
+    type: verify-report
+    description: Verification report with test results, typecheck status, and known issues
+  - path: openspec/changes/hexagonal-architecture-memory-refactor/archive-report.md
+    type: archive
+    description: Archive report with metrics, lessons learned, and git diff summary

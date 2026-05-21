@@ -1,0 +1,109 @@
+events:
+  - type: phase_started
+    phase: proposal
+    timestamp: "2026-05-21T00:00:00Z"
+    description: Proposal phase initiated for hexagonal-architecture-memory-refactor
+  - type: artifact_created
+    phase: proposal
+    timestamp: "2026-05-21T00:00:00Z"
+    artifact: openspec/changes/hexagonal-architecture-memory-refactor/proposal.md
+    description: Proposal artifact created with intent, scope, approach, risks, rollback plan, and acceptance direction
+  - type: phase_completed
+    phase: proposal
+    timestamp: "2026-05-21T00:00:00Z"
+    status: completed
+    description: Proposal phase completed; ready for Spec and Design in parallel
+  - type: phase_started
+    phase: spec
+    timestamp: "2026-05-21T00:00:00Z"
+    description: Spec phase initiated for hexagonal-architecture-memory-refactor
+  - type: artifact_created
+    phase: spec
+    timestamp: "2026-05-21T00:00:00Z"
+    artifact: openspec/changes/hexagonal-architecture-memory-refactor/spec.md
+    description: Spec artifact created with 26 requirements, 20 acceptance scenarios across 6 capabilities
+  - type: phase_completed
+    phase: spec
+    timestamp: "2026-05-21T00:00:00Z"
+    status: completed
+    description: Spec phase completed; ready for Design refinement and Task breakdown
+  - type: phase_started
+    phase: design
+    timestamp: "2026-05-21T00:00:00Z"
+    description: Design phase initiated for hexagonal-architecture-memory-refactor
+  - type: artifact_created
+    phase: design
+    timestamp: "2026-05-21T00:00:00Z"
+    artifact: openspec/changes/hexagonal-architecture-memory-refactor/design.md
+    description: Design artifact created with 8 components, 41 files, sequence diagrams, and architecture decisions
+  - type: phase_completed
+    phase: design
+    timestamp: "2026-05-21T00:00:00Z"
+    status: completed
+    description: Design phase completed; ready for Task breakdown
+  - type: phase_started
+    phase: tasks
+    timestamp: "2026-05-21T00:00:00Z"
+    description: Task phase initiated for hexagonal-architecture-memory-refactor
+  - type: artifact_created
+    phase: tasks
+    timestamp: "2026-05-21T00:00:00Z"
+    artifact: openspec/changes/hexagonal-architecture-memory-refactor/tasks.md
+    description: Task artifact created with 23 tasks across 5 phases, dependency graph, and routing recommendations
+  - type: phase_completed
+    phase: tasks
+    timestamp: "2026-05-21T00:00:00Z"
+    status: completed
+    description: Task phase completed; ready for Apply execution
+  - type: phase_started
+    phase: apply
+    agent: backend
+    timestamp: "2026-05-21T06:00:00Z"
+    description: Apply phase initiated for Adapter tasks (8-16)
+  - type: artifact_updated
+    phase: apply
+    agent: backend
+    timestamp: "2026-05-21T12:00:00Z"
+    artifact: openspec/changes/hexagonal-architecture-memory-refactor/apply-progress.md
+    description: Adapter tasks 8-16 complete — team catalogs cleaned/created, RunnerCapabilities factories implemented, model-configs consume core catalog, manifest serializers refactored, memory provider metadata exported
+  - type: artifact_created
+    phase: apply
+    agent: general
+    timestamp: "2026-05-21T00:00:00Z"
+    artifact: openspec/changes/hexagonal-architecture-memory-refactor/apply-progress.md
+    description: Foundation tasks 1-7 complete — runner-capability, model-catalog, manifest, adaptive-memory cleanup, team-catalog helpers, runtime literals removed, tests updated
+  - type: task_completed
+    phase: apply
+    agent: general
+    task: "17"
+    timestamp: "2026-05-21T13:00:00Z"
+    artifact: apps/cli/src/runner-capability-registry.ts
+    description: Task 17 complete — CLI composition root created with RunnerCapabilityCatalog, imports only adapters and core (no TUI)
+  - type: phase_started
+    phase: verify
+    timestamp: "2026-05-21T14:00:00Z"
+    description: Verify phase initiated for hexagonal-architecture-memory-refactor
+  - type: artifact_created
+    phase: verify
+    timestamp: "2026-05-21T14:00:00Z"
+    artifact: openspec/changes/hexagonal-architecture-memory-refactor/verify-report.md
+    description: Verify report created — core purity audit passes, typecheck 0 errors, 1267 tests pass, 6 TUI adapter imports documented as follow-up
+  - type: phase_completed
+    phase: verify
+    timestamp: "2026-05-21T14:00:00Z"
+    status: completed
+    description: Verify phase completed; core clean, typecheck clean, OpenCode plan builder and prompts fixed
+  - type: phase_started
+    phase: archive
+    timestamp: "2026-05-21T14:30:00Z"
+    description: Archive phase initiated for hexagonal-architecture-memory-refactor
+  - type: artifact_created
+    phase: archive
+    timestamp: "2026-05-21T14:30:00Z"
+    artifact: openspec/changes/hexagonal-architecture-memory-refactor/archive-report.md
+    description: Archive report created with metrics, lessons learned, known technical debt, and git diff summary
+  - type: phase_completed
+    phase: archive
+    timestamp: "2026-05-21T14:30:00Z"
+    status: completed
+    description: Archive phase completed — SDD hexagonal-architecture-memory-refactor closed
