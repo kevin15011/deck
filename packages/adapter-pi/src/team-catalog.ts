@@ -14,7 +14,7 @@ export type { TeamId };
 export { ALL_TEAMS as PI_DEVELOPMENT_TEAMS } from "@deck/core/team-catalog";
 
 export function getTeamsForEnvironment(environmentId: string): readonly import("@deck/core/team-catalog").TeamEntry[] {
-  if (environmentId === "pi-development") {
+  if (environmentId === "pi-development" || environmentId === "opencode-development") {
     return ALL_TEAMS;
   }
   return [];

@@ -1,8 +1,12 @@
 import React from "react";
 import { Box, Text } from "ink";
 
-import { DEVELOPER_TEAM_AGENTS, PI_THINKING_LEVELS, supportsDeveloperTeamModel, supportsThinkingForModel } from "@deck/adapter-pi";
+import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
+import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
+import { PI_THINKING_LEVELS, supportsDeveloperTeamModel, supportsThinkingForModel } from "@deck/adapter-pi";
+import { OPENCODE_THINKING_LEVELS, supportsThinkingForOpenCodeModel } from "@deck/adapter-opencode";
 import type { CapabilityStatus, PiModel, PiProvider, PiThinkingLevel } from "@deck/adapter-pi";
+import type { OpenCodeThinkingLevel } from "@deck/adapter-opencode";
 import type { AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
 import { MenuList } from "../components/menu-list";
 
@@ -158,13 +162,15 @@ export function SupermemorySetupScreen({ screen, values, error }: SupermemorySet
 type ModelProviderSelectionScreenProps = {
   cursor: number;
   providers: PiProvider[];
+  runtime?: "pi" | "opencode";
 };
 
-export function ModelProviderSelectionScreen({ cursor, providers }: ModelProviderSelectionScreenProps) {
+export function ModelProviderSelectionScreen({ cursor, providers, runtime = "pi" }: ModelProviderSelectionScreenProps) {
+  const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
   return (
     <Box flexDirection="column">
-      <Text bold>Select a Pi provider</Text>
-      <Text dimColor>Providers come from Pi settings, `pi --list-models`, or detected credentials.</Text>
+      <Text bold>Select a {runtimeLabel} provider</Text>
+      <Text dimColor>Providers come from {runtimeLabel} settings and detected credentials.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
@@ -182,22 +188,24 @@ type ModelSelectionScreenProps = {
   cursor: number;
   provider: PiProvider;
   models: PiModel[];
+  runtime?: "pi" | "opencode";
 };
 
-export function ModelSelectionScreen({ cursor, provider, models }: ModelSelectionScreenProps) {
+export function ModelSelectionScreen({ cursor, provider, models, runtime = "pi" }: ModelSelectionScreenProps) {
+  const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
   return (
     <Box flexDirection="column">
       <Text bold>Select a model for {provider.displayName}</Text>
-      <Text dimColor>Models are loaded from Pi when available; defaults are fallback only.</Text>
+      <Text dimColor>Models are loaded from {runtimeLabel} when available; defaults are fallback only.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
           items={models.map((m) => ({
             id: m.id,
             label: m.displayName,
-            hint: !supportsDeveloperTeamModel(m)
+            hint: runtime === "pi" && !supportsDeveloperTeamModel(m)
               ? `${m.id} · not compatible with Developer Team conversation history`
-              : supportsThinkingForModel(m) ? m.id : `${m.id} · Thinking not supported; using off`,
+              : (runtime === "opencode" ? supportsThinkingForOpenCodeModel(m.id) : supportsThinkingForModel(m)) ? m.id : `${m.id} · Thinking not supported; using off`,
           }))}
         />
       </Box>
@@ -210,8 +218,9 @@ type AgentModelAssignmentScreenProps = {
   agentIndex: number;
   totalAgents: number;
   modelId: string;
-  defaultThinking: PiThinkingLevel;
+  defaultThinking: PiThinkingLevel | OpenCodeThinkingLevel;
   supportsThinking?: boolean;
+  runtime?: "pi" | "opencode";
 };
 
 export function AgentModelAssignmentScreen({
@@ -221,9 +230,12 @@ export function AgentModelAssignmentScreen({
   modelId,
   defaultThinking,
   supportsThinking = true,
+  runtime = "pi",
 }: AgentModelAssignmentScreenProps) {
   const agent = DEVELOPER_TEAM_AGENTS[agentIndex];
   const progress = `${agentIndex + 1}/${totalAgents}`;
+  const thinkingLevels = runtime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
+  const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
 
   return (
     <Box flexDirection="column">
@@ -233,11 +245,11 @@ export function AgentModelAssignmentScreen({
       <Text>Selected model: <Text color="cyan">{modelId}</Text></Text>
       {supportsThinking ? (
         <>
-          <Text dimColor>Choose Pi thinking/effort level for this agent.</Text>
+          <Text dimColor>Choose {runtimeLabel} thinking/effort level for this agent.</Text>
           <Box marginTop={1}>
             <MenuList
               cursor={cursor}
-              items={PI_THINKING_LEVELS.map((level) => ({
+              items={thinkingLevels.map((level) => ({
                 id: level,
                 label: `thinking ${level}`,
                 hint: level === defaultThinking ? "recommended/default" : "",
@@ -287,22 +299,37 @@ export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingA
 type NoProvidersScreenProps = {
   onContinue?: () => void;
   dashboardContext?: DeveloperTeamDashboardContext;
+  runtime?: "pi" | "opencode";
 };
 
-export function NoProvidersScreen({ dashboardContext }: NoProvidersScreenProps) {
+export function NoProvidersScreen({ dashboardContext, runtime = "pi" }: NoProvidersScreenProps) {
+  const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
   return (
     <Box flexDirection="column">
-      <Text color="yellow" bold>No Pi providers detected</Text>
+      <Text color="yellow" bold>No {runtimeLabel} providers detected</Text>
       {dashboardContext?.source === "dashboard" ? <DashboardContextSummary context={dashboardContext} /> : null}
-      <Text dimColor>Deck could not find providers in Pi settings, `pi --list-models`, or environment credentials.</Text>
+      <Text dimColor>Deck could not find providers in {runtimeLabel} settings or detected credentials.</Text>
       <Box marginTop={1} flexDirection="column">
         <Text>Deck checks:</Text>
-        <Text>  ~/.pi/agent/settings.json defaultProvider/defaultModel</Text>
-        <Text>  pi --list-models</Text>
-        <Text>  Provider env vars such as OPENCODE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY</Text>
+        {runtime === "opencode" ? (
+          <>
+            <Text>  ~/.config/opencode/opencode.json agent model entries</Text>
+            <Text>  opencode models</Text>
+          </>
+        ) : (
+          <>
+            <Text>  ~/.pi/agent/settings.json defaultProvider/defaultModel</Text>
+            <Text>  pi --list-models</Text>
+            <Text>  Provider env vars such as OPENCODE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY</Text>
+          </>
+        )}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>Run `pi --list-models` or `pi config` to confirm Pi can see your providers.</Text>
+        {runtime === "opencode" ? (
+          <Text dimColor>Run `opencode models` to confirm OpenCode can see your providers.</Text>
+        ) : (
+          <Text dimColor>Run `pi --list-models` or `pi config` to confirm Pi can see your providers.</Text>
+        )}
       </Box>
       <Box marginTop={1}>
         <Text dimColor>Press Enter to skip model assignment (you can configure it later).</Text>

@@ -13,8 +13,14 @@ describe("Team catalog", () => {
   });
 
   test("non-Pi environments return empty team list", () => {
-    expect(getTeamsForEnvironment("opencode-development")).toHaveLength(0);
     expect(getTeamsForEnvironment("unknown")).toHaveLength(0);
+  });
+
+  test("OpenCode Development Environment includes Developer Team", () => {
+    const teams = getTeamsForEnvironment("opencode-development");
+
+    expect(teams).toHaveLength(1);
+    expect(teams[0].id).toBe("developer-team");
   });
 
   test("each team entry has id, displayName, and description", () => {
