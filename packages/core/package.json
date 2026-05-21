@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./runner-capability": "./src/runner-capability.ts",
     "./developer-team-catalog": "./src/developer-team-catalog.ts",
     "./team-catalog": "./src/team-catalog.ts",
     "./explorer-prompt": "./src/explorer-prompt.ts",
