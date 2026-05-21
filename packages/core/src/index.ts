@@ -2,7 +2,10 @@
 export * from "./developer-team-catalog";
 export * from "./explorer-prompt";
 export * from "./orchestrator-prompt";
-export * from "./team-catalog";
+
+// Re-export team-catalog but hide TeamEntry (conflicts with runner-capability)
+export { getTeamById, getTeamsForEnvironment, ALL_TEAMS, DEVELOPER_TEAM } from "./team-catalog";
+export type { TeamId } from "./team-catalog";
 
 // New canonical exports from teams/developer/ structure
 export {
@@ -10,6 +13,78 @@ export {
   getTeamSessionInstructions,
   type AgentContent,
 } from "./teams/developer/content-registry";
+
+// Runner-neutral capability interface — export aggregate type plus only the types
+// needed by consumers of the capability interface. Avoid re-exporting types that
+// have canonical definitions elsewhere (model-catalog, adaptive-memory).
+export type { RunnerCapabilities } from "./runner-capability";
+export type {
+  RunnerId,
+  RunnerEnvironmentId,
+  RunnerEnvironment,
+  RunnerEnvironmentInspectInput,
+  RunnerEnvironmentInspection,
+  RunnerToolCapabilities,
+  RunnerToolOptionalTool,
+  RunnerTeamCapabilities,
+  RunnerModelCapabilities,
+  RunnerMemoryCapabilities,
+  RunnerCapabilityCatalogEntry,
+  RunnerCapabilityResolver,
+  ReasoningLevel,
+  ModelCatalog,
+  ModelCatalogEntry,
+  ModelProviderEntry,
+  DeveloperTeamDefaultModelAssignment,
+  RunnerInstallationInput,
+  RunnerToolInstallInput,
+  RunnerToolInstallResult,
+  RunnerToolReviewInput,
+  RunnerToolReviewResult,
+  RunnerDeveloperTeamInstallPlan,
+  RunnerDeveloperTeamApplyResult,
+  RunnerDeveloperTeamVerifyResult,
+  DeveloperTeamManifest,
+  DeveloperTeamManifestInput,
+  DeveloperTeamInstallPlanInput,
+  DeveloperTeamApplyInput,
+  DeveloperTeamVerifyInput,
+  DeveloperTeamInstallFile,
+  TeamEntry,
+  RunnerModelCatalogInput,
+  RunnerModelResolveInput,
+  RunnerResolvedModelAssignment,
+  RunnerModelAssignmentReadInput,
+  RunnerModelAssignments,
+  RunnerMemoryProviderInput,
+  RunnerInstallPlanInput,
+  RunnerInstallPlan,
+  RunnerInstallApplyOptions,
+  InstallableTool,
+  RunnerInstallResult,
+  RunnerToolsReviewInput,
+  RunnerToolsReviewResult,
+  RunnerInstallCapabilities,
+  DeveloperTeamInstallInput,
+  BackupManifest,
+  BackupFileEntry,
+  DeveloperTeamApplyResult,
+  DeveloperTeamApplyAgentResult,
+  DeveloperTeamVerifyResult,
+  DeveloperTeamVerifySkillResult,
+  DeveloperTeamVerifyAgentResult,
+  RunnerDeveloperTeamCapabilities,
+  ModelConfigAssignmentsResult,
+  ModelOverrideOptions,
+  ModelConfigResult,
+  RunnerModelConfigCapabilities,
+} from "./runner-capability";
+
+// Canonical model catalog
+export * from "./model-catalog";
+
+// Developer Team manifest builder
+export { buildDeveloperTeamManifest, getCataloguedAgentIds, isManifestModelComplete } from "./teams/developer/manifest";
 
 // Deck project config contracts
 export * from "./config/deck-config";

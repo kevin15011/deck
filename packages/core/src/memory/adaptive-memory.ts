@@ -83,8 +83,6 @@ export type ResolveMemoryInjectionOptions = {
   buildContext?: AdaptiveMemoryBuildContext;
 };
 
-export const SUPPORTED_ADAPTIVE_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
-
 export const ADAPTIVE_MEMORY_SECTION_HEADING =
   "## Adaptive Memory (provider-injected)";
 

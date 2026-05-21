@@ -28,6 +28,25 @@ export const DEVELOPER_TEAM: TeamEntry = {
 
 export const ALL_TEAMS: readonly TeamEntry[] = [DEVELOPER_TEAM];
 
+/**
+ * Returns teams available for a given environment ID.
+ *
+ * This is a pure data lookup — adapters own which environment IDs they support.
+ * Callers pass the environment ID they are querying for, and this function
+ * returns all teams registered for that environment (currently all teams are
+ * available in all environments).
+ *
+ * In the future, if environments have different team availability, this function
+ * would filter accordingly. Today it returns the full catalog since there is
+ * only one team.
+ */
+export function getTeamsForEnvironment(
+  _environmentId: string,
+  catalog: readonly TeamEntry[],
+): readonly TeamEntry[] {
+  return catalog;
+}
+
 export function getTeamById(teamId: string): TeamEntry | undefined {
   return ALL_TEAMS.find((t) => t.id === teamId);
 }

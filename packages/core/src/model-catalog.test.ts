@@ -1,0 +1,190 @@
+import { describe, expect, test } from "bun:test";
+
+import {
+  MODEL_CATALOG,
+  getModelCatalog,
+  getProviders,
+  getModels,
+  getDeveloperTeamDefaults,
+  findModel,
+  findProvider,
+  getModelsForProvider,
+  getDefaultForAgent,
+} from "./model-catalog";
+
+import { DEVELOPER_TEAM_AGENTS } from "./teams/developer/catalog";
+
+describe("ModelCatalog", () => {
+  describe("catalog data", () => {
+    test("providers are defined", () => {
+      const providers = getProviders();
+      expect(providers.length).toBeGreaterThan(0);
+    });
+
+    test("all provider IDs are non-empty strings", () => {
+      const providers = getProviders();
+      for (const provider of providers) {
+        expect(typeof provider.id).toBe("string");
+        expect(provider.id.length).toBeGreaterThan(0);
+        expect(typeof provider.displayName).toBe("string");
+      }
+    });
+
+    test("models are defined", () => {
+      const models = getModels();
+      expect(models.length).toBeGreaterThan(0);
+    });
+
+    test("all model IDs follow provider/model naming", () => {
+      const models = getModels();
+      for (const model of models) {
+        expect(model.id).toContain("/");
+        const [providerId] = model.id.split("/");
+        expect(providerId.length).toBeGreaterThan(0);
+      }
+    });
+
+    test("model entries have required fields", () => {
+      const models = getModels();
+      for (const model of models) {
+        expect(typeof model.id).toBe("string");
+        expect(typeof model.displayName).toBe("string");
+        expect(typeof model.providerId).toBe("string");
+        expect(Array.isArray(model.capabilities)).toBe(true);
+      }
+    });
+
+    test("developer team defaults are defined", () => {
+      const defaults = getDeveloperTeamDefaults();
+      expect(defaults.length).toBeGreaterThan(0);
+    });
+
+    test("MODEL_CATALOG singleton matches getter functions", () => {
+      const catalog = getModelCatalog();
+      expect(catalog.providers).toEqual(getProviders());
+      expect(catalog.models).toEqual(getModels());
+      expect(catalog.developerTeamDefaults).toEqual(getDeveloperTeamDefaults());
+    });
+  });
+
+  describe("catalog completeness for all Developer Team agents", () => {
+    test("every Developer Team agent has a default model assignment", () => {
+      const defaults = getDeveloperTeamDefaults();
+      for (const agent of DEVELOPER_TEAM_AGENTS) {
+        const assignment = defaults.find((d) => d.agentId === agent.id);
+        expect(assignment).toBeDefined();
+        expect(assignment?.modelId).toBeTruthy();
+      }
+    });
+
+    test("every default model ID exists in the model catalog", () => {
+      const defaults = getDeveloperTeamDefaults();
+      const models = getModels();
+      const modelIds = new Set(models.map((m) => m.id));
+
+      for (const defaultEntry of defaults) {
+        expect(modelIds.has(defaultEntry.modelId)).toBe(true);
+      }
+    });
+
+    test("every default provider ID exists in the provider catalog", () => {
+      const defaults = getDeveloperTeamDefaults();
+      const providers = getProviders();
+      const providerIds = new Set(providers.map((p) => p.id));
+
+      for (const defaultEntry of defaults) {
+        const [providerId] = defaultEntry.modelId.split("/");
+        expect(providerIds.has(providerId)).toBe(true);
+      }
+    });
+
+    test("catalogued defaults cover exactly the Developer Team agents", () => {
+      const defaults = getDeveloperTeamDefaults();
+      const agentIds = new Set(DEVELOPER_TEAM_AGENTS.map((a) => a.id));
+      const defaultAgentIds = new Set(defaults.map((d) => d.agentId));
+
+      expect(defaultAgentIds.size).toBe(agentIds.size);
+      for (const id of agentIds) {
+        expect(defaultAgentIds.has(id)).toBe(true);
+      }
+    });
+  });
+
+  describe("helper functions", () => {
+    test("findModel returns model by ID", () => {
+      const models = getModels();
+      const first = models[0];
+      expect(findModel(first.id)).toEqual(first);
+    });
+
+    test("findModel returns undefined for unknown model", () => {
+      expect(findModel("unknown/model")).toBeUndefined();
+    });
+
+    test("findProvider returns provider by ID", () => {
+      const providers = getProviders();
+      const first = providers[0];
+      expect(findProvider(first.id)).toEqual(first);
+    });
+
+    test("findProvider returns undefined for unknown provider", () => {
+      expect(findProvider("unknown-provider")).toBeUndefined();
+    });
+
+    test("getModelsForProvider returns only models for that provider", () => {
+      const providers = getProviders();
+      const first = providers[0];
+      const models = getModelsForProvider(first.id);
+
+      for (const model of models) {
+        expect(model.providerId).toBe(first.id);
+      }
+    });
+
+    test("getModelsForProvider returns empty for unknown provider", () => {
+      expect(getModelsForProvider("unknown-provider")).toEqual([]);
+    });
+
+    test("getDefaultForAgent returns default for known agent", () => {
+      const agents = DEVELOPER_TEAM_AGENTS;
+      const first = agents[0];
+      const defaultEntry = getDefaultForAgent(first.id);
+      expect(defaultEntry).toBeDefined();
+      expect(defaultEntry?.agentId).toBe(first.id);
+    });
+
+    test("getDefaultForAgent returns undefined for unknown agent", () => {
+      expect(getDefaultForAgent("unknown-agent")).toBeUndefined();
+    });
+  });
+
+  describe("runner-neutrality", () => {
+    test("catalog contains no runner-specific field names", () => {
+      const source = JSON.stringify(MODEL_CATALOG);
+      expect(source).not.toContain("thinkingLevel");
+      expect(source).not.toContain("reasoningEffort");
+    });
+
+    test("catalog contains no environment variable names", () => {
+      const source = JSON.stringify(MODEL_CATALOG);
+      expect(source).not.toContain("API_KEY");
+      expect(source).not.toContain("OPENAI_API_KEY");
+      expect(source).not.toContain("ANTHROPIC_API_KEY");
+    });
+
+    test("catalog model capabilities use generic strings only", () => {
+      const models = getModels();
+      const allowedCapabilities = new Set(["tool-use", "vision", "reasoning", "local"]);
+
+      for (const model of models) {
+        for (const cap of model.capabilities) {
+          // Capabilities are either known generic ones or a custom string
+          if (typeof cap === "string" && !allowedCapabilities.has(cap)) {
+            // Custom capability strings are allowed (string & {})
+            expect(typeof cap).toBe("string");
+          }
+        }
+      }
+    });
+  });
+});

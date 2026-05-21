@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  ADAPTIVE_MEMORY_PROVIDER_IDS,
   ADAPTIVE_MEMORY_SCOPES,
   DEFAULT_ADAPTIVE_MEMORY_COMMIT_POLICY,
   createAdaptiveMemoryDiagnostic,
@@ -18,11 +17,10 @@ import type {
 } from "./adaptive-memory-contract";
 
 describe("adaptive memory contract", () => {
-  test("defines provider-neutral built-in provider identity without MCP tool names", () => {
-    expect(ADAPTIVE_MEMORY_PROVIDER_IDS).toEqual(["engram", "supermemory"]);
-
+  test("defines provider-neutral open provider identity without MCP tool names", () => {
+    // With the removal of ADAPTIVE_MEMORY_PROVIDER_IDS, the contract now uses
+    // open provider IDs. Verify the contract itself (scopes, policy) has no MCP tool names.
     const serializedContracts = [
-      ...ADAPTIVE_MEMORY_PROVIDER_IDS,
       ...ADAPTIVE_MEMORY_SCOPES,
       DEFAULT_ADAPTIVE_MEMORY_COMMIT_POLICY,
     ].join(" ");

@@ -125,9 +125,9 @@ describe("validateDeckConfig", () => {
     }
   });
 
-  test("rejects unsupported providers", () => {
+  test("rejects empty string as provider", () => {
     expectDeckConfigError(
-      () => validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "other" } }),
+      () => validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "" } }),
       "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER",
     );
   });

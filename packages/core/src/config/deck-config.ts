@@ -4,8 +4,7 @@ import { dirname, join } from "node:path";
 export const DECK_CONFIG_VERSION = 1;
 export const DECK_CONFIG_RELATIVE_PATH = join(".deck", "config.json");
 
-export const ADAPTIVE_MEMORY_ACTIVE_PROVIDERS = ["none", "engram", "supermemory"] as const;
-export type AdaptiveMemoryActiveProvider = (typeof ADAPTIVE_MEMORY_ACTIVE_PROVIDERS)[number];
+export type AdaptiveMemoryActiveProvider = "none" | (string & {});
 
 export const SUPERMEMORY_SEARCH_MODES = ["memories", "documents"] as const;
 export type SupermemorySearchMode = (typeof SUPERMEMORY_SEARCH_MODES)[number];
@@ -314,7 +313,7 @@ function parseActiveProvider(
   fieldPath: string,
   configPath?: string,
 ): AdaptiveMemoryActiveProvider {
-  if (typeof value !== "string" || !ADAPTIVE_MEMORY_ACTIVE_PROVIDERS.includes(value as AdaptiveMemoryActiveProvider)) {
+  if (typeof value !== "string" || value.trim().length === 0) {
     throw new DeckConfigError(
       "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER",
       `Unsupported adaptive-memory provider: ${String(value)}.`,

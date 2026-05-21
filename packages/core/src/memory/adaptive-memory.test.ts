@@ -11,36 +11,35 @@ import {
 
 const baseContent = "# Developer Team\n\nBase instructions.";
 
-function createTestEngramProvider(): AdaptiveMemoryProvider {
+function createTestMemoryProvider(id: string): AdaptiveMemoryProvider {
   return {
-    id: "engram",
-    displayName: "Engram",
+    id,
+    displayName: `${id} Provider`,
     buildInjection: (context): MemoryInjectionBundle => ({
       instructions: [
         {
           surface: "session",
           teamId: context.teamId,
-          markdown:
-            "Use Engram only for auxiliary cross-session recall; OpenSpec remains authoritative.",
+          markdown: `Use ${id} only for auxiliary cross-session recall.`,
         },
         {
           surface: "agent",
           teamId: context.teamId,
           agentIds: ["deck-developer-orchestrator"],
-          markdown: "Search Engram before delegating if runtime memory is enabled.",
+          markdown: `Search ${id} before delegating.`,
         },
         {
           surface: "skill",
           teamId: context.teamId,
           skillIds: ["deck-developer-spec"],
-          markdown: "Write a concise Engram summary only after OpenSpec artifacts exist.",
+          markdown: `Write ${id} summary only after artifacts exist.`,
         },
       ],
       toolBindings: [
         {
           capability: "memory.search",
-          serverName: "engram",
-          toolNames: ["memory_search"],
+          serverName: id,
+          toolNames: [`${id}_search`],
         },
       ],
     }),
@@ -60,7 +59,7 @@ describe("composeAdaptiveMemory", () => {
   });
 
   test("composes a single provider fragment for the requested surface", () => {
-    const provider = createTestEngramProvider();
+    const provider = createTestMemoryProvider("mock-provider");
     const bundle = provider.buildInjection({ teamId: "developer-team" });
 
     const result = composeAdaptiveMemory(baseContent, bundle, {
@@ -70,13 +69,13 @@ describe("composeAdaptiveMemory", () => {
 
     expect(result.content).toContain(baseContent);
     expect(result.content).toContain(ADAPTIVE_MEMORY_SECTION_HEADING);
-    expect(result.content).toContain("Use Engram only for auxiliary cross-session recall");
-    expect(result.content).not.toContain("Search Engram before delegating");
-    expect(result.content).not.toContain("Write a concise Engram summary");
+    expect(result.content).toContain("Use mock-provider only for auxiliary cross-session recall");
+    expect(result.content).not.toContain("Search mock-provider before delegating");
+    expect(result.content).not.toContain("Write a concise mock-provider summary");
   });
 
   test("filters fragments by session, agent, and skill surfaces", () => {
-    const bundle = createTestEngramProvider().buildInjection({
+    const bundle = createTestMemoryProvider("mock-provider").buildInjection({
       teamId: "developer-team",
     });
 
@@ -85,9 +84,9 @@ describe("composeAdaptiveMemory", () => {
       teamId: "developer-team",
       agentId: "deck-developer-orchestrator",
     });
-    expect(agentResult.content).toContain("Search Engram before delegating");
-    expect(agentResult.content).not.toContain("Use Engram only");
-    expect(agentResult.content).not.toContain("Write a concise Engram summary");
+    expect(agentResult.content).toContain("Search mock-provider before delegating");
+    expect(agentResult.content).not.toContain("Use mock-provider only");
+    expect(agentResult.content).not.toContain("Write a concise mock-provider summary");
 
     const otherAgentResult = composeAdaptiveMemory(baseContent, bundle, {
       surface: "agent",
@@ -102,13 +101,13 @@ describe("composeAdaptiveMemory", () => {
       teamId: "developer-team",
       skillId: "deck-developer-spec",
     });
-    expect(skillResult.content).toContain("Write a concise Engram summary");
-    expect(skillResult.content).not.toContain("Use Engram only");
-    expect(skillResult.content).not.toContain("Search Engram before delegating");
+    expect(skillResult.content).toContain("Write mock-provider summary only after artifacts exist.");
+    expect(skillResult.content).not.toContain("Use mock-provider only");
+    expect(skillResult.content).not.toContain("Search mock-provider before delegating");
   });
 
   test("passes provider tool bindings through when fragments match", () => {
-    const bundle = createTestEngramProvider().buildInjection({
+    const bundle = createTestMemoryProvider("mock-provider").buildInjection({
       teamId: "developer-team",
     });
 
@@ -131,7 +130,7 @@ describe("composeAdaptiveMemory", () => {
         },
       ],
       toolBindings: [
-        { capability: "memory.search", serverName: "engram", toolNames: ["memory_search"] },
+        { capability: "memory.search", serverName: "mock-provider", toolNames: ["mock_search"] },
       ],
     };
 
@@ -146,7 +145,7 @@ describe("composeAdaptiveMemory", () => {
   });
 
   test("enforces the auxiliary memory policy in composed output", () => {
-    const providerBundle = createTestEngramProvider().buildInjection({
+    const providerBundle = createTestMemoryProvider("mock-provider").buildInjection({
       teamId: "developer-team",
     });
 
@@ -188,8 +187,8 @@ describe("resolveMemoryInjection", () => {
     expect(diagnostics).toEqual([]);
   });
 
-  test("resolves a supported Engram provider successfully", () => {
-    const provider = createTestEngramProvider();
+  test("resolves a supported mock provider successfully", () => {
+    const provider = createTestMemoryProvider("mock-provider");
     const { bundle, diagnostics } = resolveMemoryInjection({
       memoryProvider: provider,
       supportedProviderIds: [provider.id],
@@ -212,7 +211,7 @@ describe("resolveMemoryInjection", () => {
 
     const { bundle, diagnostics } = resolveMemoryInjection({
       memoryProvider: unsupported,
-      supportedProviderIds: ["engram"],
+      supportedProviderIds: ["mock-provider"],
       buildContext: { teamId: "developer-team" },
     });
     expect(bundle).toBeUndefined();
@@ -224,8 +223,8 @@ describe("resolveMemoryInjection", () => {
 
   test("produces memory_provider_unavailable diagnostic when provider buildInjection throws", () => {
     const broken: AdaptiveMemoryProvider = {
-      id: "engram",
-      displayName: "Broken Engram",
+      id: "mock-provider",
+      displayName: "Broken Mock Provider",
       buildInjection: () => {
         throw new Error("init failed");
       },
@@ -239,7 +238,7 @@ describe("resolveMemoryInjection", () => {
     expect(bundle).toBeUndefined();
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].code).toBe("memory_provider_unavailable");
-    expect(diagnostics[0].providerId).toBe("engram");
+    expect(diagnostics[0].providerId).toBe("mock-provider");
     expect(diagnostics[0].message).toContain("init failed");
   });
 
@@ -250,7 +249,7 @@ describe("resolveMemoryInjection", () => {
       ],
       toolBindings: [],
     };
-    const provider = createTestEngramProvider();
+    const provider = createTestMemoryProvider("mock-provider");
 
     const { bundle, diagnostics } = resolveMemoryInjection({
       memoryInjection: preBuilt,
@@ -261,7 +260,7 @@ describe("resolveMemoryInjection", () => {
   });
 
   test("rejects provider by default when no caller registry is injected", () => {
-    const provider = createTestEngramProvider();
+    const provider = createTestMemoryProvider("mock-provider");
 
     const { bundle, diagnostics } = resolveMemoryInjection({ memoryProvider: provider });
     expect(bundle).toBeUndefined();
@@ -284,37 +283,37 @@ describe("resolveMemoryInjection", () => {
   });
 });
 describe("extended adaptive memory provider resolution", () => {
-  test("recognizes Supermemory when caller registry supports it", () => {
+  test("resolves a provider when caller registry supports its ID", () => {
     const provider: AdaptiveMemoryProvider = {
-      id: "supermemory",
-      displayName: "Supermemory MCP",
+      id: "test-provider",
+      displayName: "Test Provider",
       buildInjection: () => ({
-        instructions: [{ surface: "session", teamId: "developer-team", markdown: "Use Supermemory advisory context." }],
-        toolBindings: [{ capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"] }],
+        instructions: [{ surface: "session", teamId: "developer-team", markdown: "Use test provider advisory context." }],
+        toolBindings: [{ capability: "memory.search", serverName: "test-provider", toolNames: ["test_search"] }],
       }),
     };
 
     const { bundle, diagnostics } = resolveMemoryInjection({
       memoryProvider: provider,
-      supportedProviderIds: ["engram", "supermemory"],
+      supportedProviderIds: ["test-provider", "another-provider"],
       buildContext: { teamId: "developer-team" },
     });
 
     expect(diagnostics).toEqual([]);
-    expect(bundle?.toolBindings[0].serverName).toBe("supermemory");
+    expect(bundle?.toolBindings[0].serverName).toBe("test-provider");
   });
 
   test("fails closed when more than one provider is active", () => {
-    const provider = createTestEngramProvider();
-    const supermemory: AdaptiveMemoryProvider = {
-      id: "supermemory",
-      displayName: "Supermemory MCP",
+    const provider = createTestMemoryProvider("mock-provider");
+    const otherProvider: AdaptiveMemoryProvider = {
+      id: "another-provider",
+      displayName: "Another Provider",
       buildInjection: () => ({ instructions: [], toolBindings: [] }),
     };
 
     const { bundle, diagnostics } = resolveMemoryInjection({
-      memoryProviders: [provider, supermemory],
-      supportedProviderIds: ["engram", "supermemory"],
+      memoryProviders: [provider, otherProvider],
+      supportedProviderIds: ["mock-provider", "another-provider"],
     });
 
     expect(bundle).toBeUndefined();
@@ -324,17 +323,17 @@ describe("extended adaptive memory provider resolution", () => {
 
   test("collects provider health diagnostics without blocking injection", async () => {
     const provider: AdaptiveMemoryProvider = {
-      id: "supermemory",
-      displayName: "Supermemory MCP",
+      id: "mock-provider",
+      displayName: "Mock Provider",
       buildInjection: () => ({ instructions: [], toolBindings: [] }),
       health: () => ({
-        providerId: "supermemory",
+        providerId: "mock-provider",
         status: "degraded",
         diagnostics: [{
           code: "ADAPTIVE_MEMORY_HEALTH_UNKNOWN",
           severity: "warning",
           message: "Authenticated runtime probe has not run.",
-          providerId: "supermemory",
+          providerId: "mock-provider",
           recoverable: true,
         }],
       }),
@@ -342,7 +341,7 @@ describe("extended adaptive memory provider resolution", () => {
 
     const { bundle, diagnostics } = resolveMemoryInjection({
       memoryProvider: provider,
-      supportedProviderIds: ["supermemory"],
+      supportedProviderIds: ["mock-provider"],
     });
     expect(bundle).toBeDefined();
     expect(diagnostics).toEqual([]);

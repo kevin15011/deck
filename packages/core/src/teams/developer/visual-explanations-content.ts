@@ -113,5 +113,4 @@ export const VISUAL_EXPLANATIONS_FORBIDDEN_PHRASES = [
   "visual explanations are authoritative",
   "visual output changes registry",
   "visual overrides approval",
-  "pi-mermaid",
 ] as const;

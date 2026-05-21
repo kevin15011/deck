@@ -1,6 +1,4 @@
-export const ADAPTIVE_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
-export type BuiltInAdaptiveMemoryProviderId = (typeof ADAPTIVE_MEMORY_PROVIDER_IDS)[number];
-export type AdaptiveMemoryProviderId = BuiltInAdaptiveMemoryProviderId | (string & {});
+export type AdaptiveMemoryProviderId = string & {};
 
 export const ADAPTIVE_MEMORY_SCOPES = ["personal", "project", "team", "org"] as const;
 export type AdaptiveMemoryScope = (typeof ADAPTIVE_MEMORY_SCOPES)[number];
