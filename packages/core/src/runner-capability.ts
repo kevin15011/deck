@@ -109,11 +109,15 @@ export type RunnerToolInstallInput = {
 // Team capabilities
 // ---------------------------------------------------------------------------
 
+import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles/index";
+
 export type DeveloperTeamManifestInput = {
   projectRoot: string;
   environmentId: RunnerEnvironmentId;
   modelAssignments?: readonly DeveloperTeamModelAssignmentInput[];
   memoryProviderId?: string;
+  /** Optional capability instruction bundle for the manifest */
+  capabilityInstructions?: CapabilityInstructionBundle;
 };
 
 export type DeveloperTeamModelAssignmentInput = {
@@ -182,6 +186,7 @@ export type DeveloperTeamInstallPlanInput = {
   projectRoot: string;
   manifest: DeveloperTeamManifest;
   environmentId: RunnerEnvironmentId;
+  capabilityInstructions?: import("./teams/developer/instruction-bundles/index").CapabilityInstructionBundle;
 };
 
 export type RunnerDeveloperTeamInstallPlan = {
@@ -208,6 +213,7 @@ export type RunnerDeveloperTeamApplyResult = {
 export type DeveloperTeamVerifyInput = {
   projectRoot: string;
   environmentId: RunnerEnvironmentId;
+  capabilityInstructions?: import("./teams/developer/instruction-bundles/index").CapabilityInstructionBundle;
 };
 
 export type RunnerDeveloperTeamVerifyResult = {
@@ -404,6 +410,7 @@ export type DeveloperTeamInstallInput = {
   modelAssignments?: readonly DeveloperTeamModelAssignmentInput[];
   reasoningEffortOverrides?: readonly DeveloperTeamModelAssignmentInput[];
   memoryProviderId?: string;
+  capabilityInstructions?: import("./teams/developer/instruction-bundles/index").CapabilityInstructionBundle;
 };
 
 export type BackupManifest = {

@@ -27,9 +27,26 @@ export type DeckAdaptiveMemoryConfig = {
   supermemory?: DeckSupermemoryConfig;
 };
 
+// ---------------------------------------------------------------------------
+// Package Instruction Config
+// ---------------------------------------------------------------------------
+
+export const PACKAGE_INSTRUCTION_RUNNERS = ["pi", "opencode"] as const;
+export type PackageInstructionRunnerId = (typeof PACKAGE_INSTRUCTION_RUNNERS)[number];
+
+export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk"] as const;
+export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number];
+
+export type DeckPackageInstructionRunnerConfig = Partial<
+  Record<PackageInstructionPackageId, boolean>
+>;
+
+export type DeckPackageInstructionConfig = Partial<Record<PackageInstructionRunnerId, DeckPackageInstructionRunnerConfig>>;
+
 export type DeckConfig = {
   version?: typeof DECK_CONFIG_VERSION;
   adaptiveMemory?: DeckAdaptiveMemoryConfig;
+  packageInstructions?: DeckPackageInstructionConfig;
 };
 
 export type NormalizedDeckConfig = {
@@ -38,6 +55,7 @@ export type NormalizedDeckConfig = {
     activeProvider: AdaptiveMemoryActiveProvider;
     supermemory?: DeckSupermemoryConfig;
   };
+  packageInstructions: Record<PackageInstructionRunnerId, Record<PackageInstructionPackageId, boolean>>;
 };
 
 export type DeckConfigErrorCode =
@@ -80,7 +98,7 @@ export type ActiveMemoryProviderResolution = {
 const SECRET_FIELD_PATTERN =
   /(?:token|secret|credential|credentials|api[-_]?key|password|private[-_]?key|access[-_]?key|auth(?:orization)?)/i;
 
-const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory"]);
+const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "packageInstructions"]);
 const ADAPTIVE_MEMORY_FIELDS = new Set(["activeProvider", "supermemory"]);
 const SUPERMEMORY_FIELDS = new Set([
   "mcpServerName",
@@ -91,6 +109,8 @@ const SUPERMEMORY_FIELDS = new Set([
   "searchMode",
   "maxMemoriesPerSession",
 ]);
+const PACKAGE_INSTRUCTION_RUNNER_FIELDS = new Set(PACKAGE_INSTRUCTION_RUNNERS);
+const PACKAGE_INSTRUCTION_PACKAGE_FIELDS = new Set(PACKAGE_INSTRUCTION_PACKAGE_IDS);
 
 export function getDeckConfigPath(projectRoot: string): string {
   return join(projectRoot, DECK_CONFIG_RELATIVE_PATH);
@@ -101,6 +121,10 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
     version: DECK_CONFIG_VERSION,
     adaptiveMemory: {
       activeProvider: "none",
+    },
+    packageInstructions: {
+      pi: { "codebase-memory": false, "context-mode": false, rtk: false },
+      opencode: { "codebase-memory": false, "context-mode": false, rtk: false },
     },
   };
 }
@@ -159,9 +183,15 @@ export function validateDeckConfig(
     options?.configPath,
   );
 
+  const packageInstructions = normalizePackageInstructionConfig(
+    config.packageInstructions,
+    options?.configPath,
+  );
+
   return {
     version: DECK_CONFIG_VERSION,
     adaptiveMemory,
+    packageInstructions,
   };
 }
 
@@ -306,6 +336,79 @@ function normalizeSupermemoryConfig(
   if (orgId !== undefined) normalized.orgId = orgId;
 
   return normalized;
+}
+
+function normalizePackageInstructionConfig(
+  value: unknown,
+  configPath?: string,
+): NormalizedDeckConfig["packageInstructions"] {
+  // Default: all runners have all packages disabled
+  const defaultResult: NormalizedDeckConfig["packageInstructions"] = {
+    pi: { "codebase-memory": false, "context-mode": false, rtk: false },
+    opencode: { "codebase-memory": false, "context-mode": false, rtk: false },
+  };
+
+  if (value === undefined || value === null) {
+    return defaultResult;
+  }
+
+  assertPlainObject(value, "packageInstructions", configPath);
+
+  // Validate each runner key
+  for (const runnerKey of Object.keys(value)) {
+    if (!PACKAGE_INSTRUCTION_RUNNER_FIELDS.has(runnerKey as PackageInstructionRunnerId)) {
+      throw new DeckConfigError(
+        "DECK_CONFIG_UNKNOWN_FIELD",
+        `Unknown Deck config field: packageInstructions.${runnerKey}`,
+        { configPath, fieldPath: `packageInstructions.${runnerKey}` },
+      );
+    }
+  }
+
+  // Normalize: start from defaults, apply provided values, validate
+  const result: NormalizedDeckConfig["packageInstructions"] = {
+    pi: { "codebase-memory": false, "context-mode": false, rtk: false },
+    opencode: { "codebase-memory": false, "context-mode": false, rtk: false },
+  };
+
+  for (const runner of PACKAGE_INSTRUCTION_RUNNERS) {
+    const runnerValue = value[runner];
+    if (runnerValue === undefined || runnerValue === null) {
+      // Keep defaults (all false)
+      continue;
+    }
+
+    assertPlainObject(runnerValue, `packageInstructions.${runner}`, configPath);
+
+    // Validate each package key in this runner
+    for (const pkgKey of Object.keys(runnerValue)) {
+      if (!PACKAGE_INSTRUCTION_PACKAGE_FIELDS.has(pkgKey as PackageInstructionPackageId)) {
+        throw new DeckConfigError(
+          "DECK_CONFIG_UNKNOWN_FIELD",
+          `Unknown Deck config field: packageInstructions.${runner}.${pkgKey}`,
+          { configPath, fieldPath: `packageInstructions.${runner}.${pkgKey}` },
+        );
+      }
+    }
+
+    // Normalize package booleans
+    for (const pkg of PACKAGE_INSTRUCTION_PACKAGE_IDS) {
+      const pkgValue = runnerValue[pkg];
+      if (pkgValue !== undefined) {
+        if (typeof pkgValue !== "boolean") {
+          throw new DeckConfigError(
+            "DECK_CONFIG_INVALID_SHAPE",
+            `packageInstructions.${runner}.${pkg} must be a boolean.`,
+            { configPath, fieldPath: `packageInstructions.${runner}.${pkg}` },
+          );
+        }
+        result[runner][pkg] = pkgValue;
+      }
+      // If undefined, keep default (false)
+    }
+  }
+
+  return result;
 }
 
 function parseActiveProvider(

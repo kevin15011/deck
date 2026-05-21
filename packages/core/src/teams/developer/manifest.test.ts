@@ -4,6 +4,7 @@ import { buildDeveloperTeamManifest, getCataloguedAgentIds, isManifestModelCompl
 import type { DeveloperTeamManifest } from "./manifest";
 
 import { DEVELOPER_TEAM_AGENTS } from "./catalog";
+import { buildCapabilityInstructionBundle } from "./instruction-bundles/index";
 
 describe("DeveloperTeamManifest", () => {
   describe("buildDeveloperTeamManifest", () => {
@@ -167,6 +168,97 @@ describe("DeveloperTeamManifest", () => {
       expect(manifestStr).not.toContain("pi-mermaid");
       expect(manifestStr).not.toContain("pi-development");
       expect(manifestStr).not.toContain("opencode-development");
+    });
+  });
+
+  describe("capabilityInstructions", () => {
+    test("manifest without capabilityInstructions produces unchanged agent/skill content", () => {
+      const manifest = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+      });
+
+      // Explorer agent should not have package instruction sections
+      const explorer = manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      expect(explorer!.instruction).not.toContain("## Package Instructions");
+    });
+
+    test("manifest with capabilityInstructions propagates instructions into agent content", () => {
+      const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+      const manifest = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+        capabilityInstructions: bundle,
+      });
+
+      // Explorer agent should have package instruction section
+      const explorer = manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      expect(explorer!.instruction).toContain("## Package Instructions (configured)");
+      expect(explorer!.instruction).toContain("Codebase Memory");
+    });
+
+    test("manifest with capabilityInstructions propagates instructions into skill content", () => {
+      const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+      const manifest = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+        capabilityInstructions: bundle,
+      });
+
+      // Explorer skill should have package instruction section
+      const explorerSkill = manifest.skills.find((s) => s.agentId === "deck-developer-explorer");
+      expect(explorerSkill!.body).toContain("## Package Instructions (configured)");
+      expect(explorerSkill!.body).toContain("Codebase Memory");
+    });
+
+    test("multiple packages produce multiple instruction sections in manifest", () => {
+      const bundle = buildCapabilityInstructionBundle(["codebase-memory", "context-mode"]);
+      const manifest = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+        capabilityInstructions: bundle,
+      });
+
+      const explorer = manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      expect(explorer!.instruction).toContain("Codebase Memory");
+      expect(explorer!.instruction).toContain("Context Mode");
+    });
+
+    test("memoryBundle and capabilityInstructions coexist in manifest output", () => {
+      const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+      const manifest = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+        capabilityInstructions: bundle,
+        memoryBundle: {
+          instructions: [],
+          toolBindings: [],
+        },
+      });
+
+      // Both should be present (they coexist independently)
+      const explorer = manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      expect(explorer!.memoryBundle).toBeDefined();
+      expect(explorer!.instruction).toContain("## Package Instructions");
+    });
+
+    test("empty bundle does not inject instructions", () => {
+      const bundle = buildCapabilityInstructionBundle([]);
+      const manifest = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+        capabilityInstructions: bundle,
+      });
+
+      // With empty bundle, no instructions should be injected
+      const explorer = manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      expect(explorer!.instruction).not.toContain("## Package Instructions");
+    });
+
+    test("all agents receive capability instructions when bundle is provided", () => {
+      const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+      const manifest = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+        capabilityInstructions: bundle,
+      });
+
+      for (const agent of manifest.agents) {
+        expect(agent.instruction).toContain("## Package Instructions (configured)");
+      }
     });
   });
 });

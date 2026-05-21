@@ -27,6 +27,7 @@ import type {
   DeveloperTeamManifestAgent,
   DeveloperTeamManifestSkill,
 } from "../../runner-capability";
+import type { CapabilityInstructionBundle } from "./instruction-bundles/index";
 
 // Re-export model catalog types for convenience
 export type { ModelCatalog, DeveloperTeamDefaultModelAssignment, ReasoningLevel };
@@ -42,6 +43,8 @@ export type BuildManifestOptions = {
   modelAssignments?: readonly DeveloperTeamModelAssignmentOverride[];
   memoryBundle?: MemoryInjectionBundle;
   memoryDiagnostics?: readonly MemoryDiagnostic[];
+  /** Optional capability instruction bundle to compose into agent and skill content */
+  capabilityInstructions?: CapabilityInstructionBundle;
 };
 
 export type DeveloperTeamModelAssignmentOverride = {
@@ -61,7 +64,7 @@ export type DeveloperTeamModelAssignmentOverride = {
  * Memory injection is passed through unchanged — core does not build it.
  */
 export function buildDeveloperTeamManifest(options: BuildManifestOptions): DeveloperTeamManifest {
-  const { team, modelAssignments = [], memoryBundle, memoryDiagnostics = [] } = options;
+  const { team, modelAssignments = [], memoryBundle, memoryDiagnostics = [], capabilityInstructions } = options;
 
   // Index overrides by agentId for fast lookup
   const overrideByAgent = new Map<string, DeveloperTeamModelAssignmentOverride>();
@@ -72,7 +75,7 @@ export function buildDeveloperTeamManifest(options: BuildManifestOptions): Devel
   // Build agent manifests
   const agents: DeveloperTeamManifestAgent[] = [];
   for (const agentDef of DEVELOPER_TEAM_AGENTS) {
-    const content = getAgentContent(agentDef.id);
+    const content = getAgentContent(agentDef.id, { capabilityInstructions });
     const override = overrideByAgent.get(agentDef.id);
     const defaultModel = getDefaultForAgent(agentDef.id);
 
@@ -92,7 +95,7 @@ export function buildDeveloperTeamManifest(options: BuildManifestOptions): Devel
   // Build skill manifests
   const skills: DeveloperTeamManifestSkill[] = [];
   for (const agentDef of DEVELOPER_TEAM_AGENTS) {
-    const content = getAgentContent(agentDef.id);
+    const content = getAgentContent(agentDef.id, { capabilityInstructions });
 
     skills.push({
       agentId: agentDef.id,

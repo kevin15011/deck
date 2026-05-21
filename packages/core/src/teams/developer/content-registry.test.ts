@@ -5,6 +5,10 @@ import {
   VISUAL_EXPLANATIONS_REQUIRED_SNIPPETS,
   VISUAL_EXPLANATIONS_FORBIDDEN_PHRASES,
 } from "./visual-explanations-content";
+import {
+  buildCapabilityInstructionBundle,
+  type CapabilityInstructionBundle,
+} from "./instruction-bundles/index";
 
 const DEVELOPER_AGENT_IDS = [
   "deck-developer-orchestrator",
@@ -357,5 +361,146 @@ describe("getTeamSessionInstructions", () => {
     expect(instructions).toContain("deck-developer-verify");
     expect(instructions).toContain("deck-developer-review");
     expect(instructions).toContain("deck-developer-archive");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Capability instruction injection
+// ---------------------------------------------------------------------------
+
+describe("getAgentContent with capabilityInstructions", () => {
+  test("existing output unchanged when no bundle provided", () => {
+    const content = getAgentContent("deck-developer-explorer");
+    expect(content).toBeDefined();
+    expect(content!.agentBody).toContain("# Explorer Agent");
+    expect(content!.agentBody).not.toContain("## Package Instructions");
+  });
+
+  test("agent body includes capability instruction fragments when bundle provided", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
+
+    expect(content).toBeDefined();
+    expect(content!.agentBody).toContain("## Package Instructions (configured)");
+    expect(content!.agentBody).toContain("Codebase Memory");
+  });
+
+  test("skill body includes capability instruction fragments when bundle provided", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
+
+    expect(content).toBeDefined();
+    expect(content!.skillBody).toContain("## Package Instructions (configured)");
+    expect(content!.skillBody).toContain("Codebase Memory");
+  });
+
+  test("non-matching surface fragments are absent from agent body", () => {
+    // session-surface fragments should not appear in agent body
+    const bundle: CapabilityInstructionBundle = {
+      instructions: [
+        {
+          packageId: "codebase-memory",
+          surface: "session",
+          markdown: "This is a session-level fragment and should NOT appear in agent body",
+        },
+      ],
+    };
+
+    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
+
+    expect(content!.agentBody).not.toContain("session-level fragment");
+  });
+
+  test("multiple packages produce both instruction sections in agent body", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory", "context-mode"]);
+    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
+
+    expect(content!.agentBody).toContain("Codebase Memory");
+    expect(content!.agentBody).toContain("Context Mode");
+  });
+
+  test("both memory bundle and capability bundle coexist (independent injection)", () => {
+    // The content registry handles both independently;
+    // memory injection is a separate concern from capability instructions.
+    // Here we just verify the capability instructions don't break the structure.
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
+
+    // Context authority guidance still present
+    expect(content!.agentBody).toContain("Context Authority");
+    // Capability instructions appended after
+    expect(content!.agentBody).toContain("## Package Instructions (configured)");
+  });
+
+  test("empty bundle does not inject instructions", () => {
+    const bundle: CapabilityInstructionBundle = { instructions: [] };
+    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle });
+
+    // Same as no bundle
+    const withoutBundle = getAgentContent("deck-developer-explorer");
+    expect(content!.agentBody).toBe(withoutBundle!.agentBody);
+    expect(content!.skillBody).toBe(withoutBundle!.skillBody);
+  });
+});
+
+describe("getTeamSessionInstructions with capabilityInstructions", () => {
+  test("existing output unchanged when no bundle provided", () => {
+    const instructions = getTeamSessionInstructions("developer-team");
+    expect(instructions).toBeDefined();
+    expect(instructions).toContain("# Deck Developer Team");
+    expect(instructions).not.toContain("## Package Instructions");
+  });
+
+  test("session-surface fragments appended when bundle provided", () => {
+    // Add a session-surface fragment
+    const bundle: CapabilityInstructionBundle = {
+      instructions: [
+        {
+          packageId: "codebase-memory",
+          surface: "session",
+          markdown: "## Session-level capability\n\nThis should appear in session instructions.",
+        },
+      ],
+    };
+
+    const result = getTeamSessionInstructions("developer-team", { capabilityInstructions: bundle });
+
+    expect(result).toContain("## Package Instructions (configured)");
+    expect(result).toContain("Session-level capability");
+  });
+
+  test("agent-surface fragments NOT appended to session instructions", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+    // codebase-memory has no session-surface fragments
+
+    const result = getTeamSessionInstructions("developer-team", { capabilityInstructions: bundle });
+
+    // Agent-surface fragments should not appear in session
+    // (codebase-memory only has agent/skill surfaces)
+    // With no session-surface fragments, the base is unchanged
+    const withoutBundle = getTeamSessionInstructions("developer-team");
+    expect(result).toBe(withoutBundle);
+  });
+
+  test("multiple session-surface fragments are all appended", () => {
+    const bundle: CapabilityInstructionBundle = {
+      instructions: [
+        {
+          packageId: "codebase-memory",
+          surface: "session",
+          markdown: "## First Session Fragment",
+        },
+        {
+          packageId: "context-mode",
+          surface: "session",
+          markdown: "## Second Session Fragment",
+        },
+      ],
+    };
+
+    const result = getTeamSessionInstructions("developer-team", { capabilityInstructions: bundle });
+
+    expect(result).toContain("First Session Fragment");
+    expect(result).toContain("Second Session Fragment");
   });
 });

@@ -86,6 +86,18 @@ export * from "./model-catalog";
 // Developer Team manifest builder
 export { buildDeveloperTeamManifest, getCataloguedAgentIds, isManifestModelComplete } from "./teams/developer/manifest";
 
+// Instruction bundle helpers (capability instruction injection)
+export {
+  buildCapabilityInstructionBundle,
+  getEnabledPackageInstructionIds,
+  composeCapabilityInstructions,
+  type CapabilityInstructionSurface,
+  type CapabilityInstructionPackageId,
+  type CapabilityInstructionFragment,
+  type CapabilityInstructionBundle,
+  type CapabilityInstructionCompositionContext,
+} from "./teams/developer/instruction-bundles/index";
+
 // Deck project config contracts
 export * from "./config/deck-config";
 

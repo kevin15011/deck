@@ -16,7 +16,9 @@ import type {
   ModelCatalogEntry,
   ModelProviderEntry,
   DeveloperTeamDefaultModelAssignment,
+  DeveloperTeamManifestInput,
 } from "./runner-capability";
+import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles/index";
 
 describe("RunnerCapabilities core types", () => {
   describe("type exports exist and are well-structured", () => {
@@ -83,6 +85,38 @@ describe("RunnerCapabilities core types", () => {
       expect(catalog.providers).toHaveLength(1);
       expect(catalog.models).toHaveLength(1);
       expect(Array.isArray(catalog.developerTeamDefaults)).toBe(true);
+    });
+  });
+
+  describe("DeveloperTeamManifestInput", () => {
+    test("capabilityInstructions uses canonical CapabilityInstructionBundle type", () => {
+      const bundle: CapabilityInstructionBundle = {
+        instructions: [
+          {
+            packageId: "codebase-memory",
+            surface: "skill",
+            markdown: "Test instruction",
+          },
+        ],
+      };
+      const input: DeveloperTeamManifestInput = {
+        projectRoot: "/tmp",
+        environmentId: "test-env",
+        capabilityInstructions: bundle,
+      };
+
+      expect(input.capabilityInstructions).toBeDefined();
+      expect(input.capabilityInstructions!.instructions).toHaveLength(1);
+      expect(input.capabilityInstructions!.instructions[0].packageId).toBe("codebase-memory");
+    });
+
+    test("capabilityInstructions is optional", () => {
+      const input: DeveloperTeamManifestInput = {
+        projectRoot: "/tmp",
+        environmentId: "test-env",
+      };
+
+      expect(input.capabilityInstructions).toBeUndefined();
     });
   });
 

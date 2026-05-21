@@ -43,6 +43,11 @@ import {
   VISUAL_EXPLANATIONS_AGENT_BODY,
   VISUAL_EXPLANATIONS_SKILL_BODY,
 } from "./visual-explanations-content";
+import type { CapabilityInstructionBundle } from "./instruction-bundles/index";
+import {
+  composeCapabilityInstructions,
+  type CapabilityInstructionCompositionContext,
+} from "./instruction-bundles/index";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,6 +58,11 @@ export type AgentContent = {
   agentBody: string;
   /** Body for the skill definition file (after runtime frontmatter) */
   skillBody: string;
+};
+
+export type ContentRegistryOptions = {
+  /** Optional capability instruction bundle to compose into agent/skill/session content */
+  capabilityInstructions?: CapabilityInstructionBundle;
 };
 
 // ---------------------------------------------------------------------------
@@ -162,6 +172,14 @@ function withContextAuthorityGuidance(content: AgentContent): AgentContent {
   };
 }
 
+function appendCapabilityInstructions(
+  baseContent: string,
+  bundle: CapabilityInstructionBundle | undefined,
+  context: CapabilityInstructionCompositionContext,
+): string {
+  return composeCapabilityInstructions(baseContent, bundle, context);
+}
+
 // ---------------------------------------------------------------------------
 // Registry: agent content
 // ---------------------------------------------------------------------------
@@ -172,12 +190,34 @@ function withContextAuthorityGuidance(content: AgentContent): AgentContent {
  * For all agents in the Developer Team catalog, returns their detailed prompts.
  * For unknown agent IDs not in the catalog, returns a structured placeholder.
  *
+ * When options.capabilityInstructions is provided, package instruction fragments
+ * are composed into both agentBody and skillBody after context-authority guidance.
+ *
  * Returns undefined for agent IDs not in the Developer Team catalog.
  */
-export function getAgentContent(agentId: string): AgentContent | undefined {
+export function getAgentContent(
+  agentId: string,
+  options?: ContentRegistryOptions,
+): AgentContent | undefined {
   const real = REAL_CONTENT[agentId];
   if (real) {
-    return withContextAuthorityGuidance(real);
+    const withAuthority = withContextAuthorityGuidance(real);
+    if (!options?.capabilityInstructions) {
+      return withAuthority;
+    }
+    // Compose capability instructions into agent and skill bodies
+    return {
+      agentBody: appendCapabilityInstructions(
+        withAuthority.agentBody,
+        options.capabilityInstructions,
+        { surface: "agent", agentId },
+      ),
+      skillBody: appendCapabilityInstructions(
+        withAuthority.skillBody,
+        options.capabilityInstructions,
+        { surface: "skill", skillId: `${agentId}-skill` },
+      ),
+    };
   }
 
   // Look up in catalog for placeholder
@@ -186,10 +226,27 @@ export function getAgentContent(agentId: string): AgentContent | undefined {
     return undefined;
   }
 
-  return withContextAuthorityGuidance({
+  const withAuthority = withContextAuthorityGuidance({
     agentBody: buildPlaceholderAgentBody(agent.displayName, agent.description),
     skillBody: buildPlaceholderSkillBody(agent.displayName, agent.description),
   });
+
+  if (!options?.capabilityInstructions) {
+    return withAuthority;
+  }
+
+  return {
+    agentBody: appendCapabilityInstructions(
+      withAuthority.agentBody,
+      options.capabilityInstructions,
+      { surface: "agent", agentId },
+    ),
+    skillBody: appendCapabilityInstructions(
+      withAuthority.skillBody,
+      options.capabilityInstructions,
+      { surface: "skill", skillId: `${agentId}-skill` },
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -205,11 +262,25 @@ export function getAgentContent(agentId: string): AgentContent | undefined {
  *
  * Adapters map this to their runtime-specific session initialization mechanism.
  *
+ * When options.capabilityInstructions is provided, matching session-surface
+ * fragments are appended after context-authority guidance.
+ *
  * Returns undefined for unknown team IDs.
  */
-export function getTeamSessionInstructions(teamId: string): string | undefined {
+export function getTeamSessionInstructions(
+  teamId: string,
+  options?: ContentRegistryOptions,
+): string | undefined {
   if (teamId === "developer-team") {
-    return appendContextAuthorityGuidance(ORCHESTRATOR_SYSTEM_PROMPT);
+    const base = appendContextAuthorityGuidance(ORCHESTRATOR_SYSTEM_PROMPT);
+    if (!options?.capabilityInstructions) {
+      return base;
+    }
+    return appendCapabilityInstructions(
+      base,
+      options.capabilityInstructions,
+      { surface: "session" },
+    );
   }
 
   return undefined;
