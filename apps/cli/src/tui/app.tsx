@@ -21,6 +21,7 @@ import {
   readOpenCodeDeveloperTeamModelConfigAssignments,
   supportsThinkingForOpenCodeModel,
   getDefaultThinkingForOpenCodeModel,
+  getTeamsForEnvironment as getOpenCodeTeamsForEnvironment,
   resolveThinkingForOpenCodeModel,
   type InstallableOpenCodeTool,
   type InstallableOpenCodeToolId,
@@ -668,7 +669,11 @@ export function DeckApp() {
   function getCursorLimit(): number {
     if (screen === "home") return getHomeMenuOptions().length - 1;
     if (screen === "model-environment-selection") return getEnvironmentOptions().length - 1;
-    if (screen === "model-team-selection") return Math.max(0, getTeamsForEnvironment(selectedModelEnvironment ?? "pi-development").length - 1);
+    if (screen === "model-team-selection") {
+      const env = selectedModelEnvironment ?? "pi-development";
+      const teams = env === "opencode-development" ? getOpenCodeTeamsForEnvironment(env) : getTeamsForEnvironment(env);
+      return Math.max(0, teams.length - 1);
+    }
     if (screen === "environment-selection") return getEnvironmentOptions().length - 1;
     if (screen === "optional-tools") return getOptionalPiTools().length - 1;
     if (screen === "installation-review") return 1;
@@ -756,7 +761,8 @@ export function DeckApp() {
     }
 
     if (screen === "model-team-selection") {
-      const teams = getTeamsForEnvironment(selectedModelEnvironment ?? "pi-development");
+      const env = selectedModelEnvironment ?? "pi-development";
+      const teams = env === "opencode-development" ? getOpenCodeTeamsForEnvironment(env) : getTeamsForEnvironment(env);
       const team = teams[modelTeamCursor];
       if (!team) return;
 
@@ -1693,7 +1699,7 @@ function ModelEnvironmentSelectionScreen({ cursor }: { cursor: number }) {
           items={getEnvironmentOptions().map((option) => ({
             id: option.value,
             label: option.label,
-            hint: option.value === "pi-development" ? "available" : "not implemented yet",
+            hint: option.value === "pi-development" || option.value === "opencode-development" ? "available" : "not implemented yet",
           }))}
         />
       </Box>
@@ -1702,7 +1708,10 @@ function ModelEnvironmentSelectionScreen({ cursor }: { cursor: number }) {
 }
 
 function ModelTeamSelectionScreen({ cursor, environment }: { cursor: number; environment: EnvironmentId }) {
-  const teams = getTeamsForEnvironment(environment);
+  const teams =
+    environment === "opencode-development"
+      ? getOpenCodeTeamsForEnvironment(environment)
+      : getTeamsForEnvironment(environment);
 
   return (
     <Box flexDirection="column">
