@@ -1,18 +1,12 @@
-import type {
-  CapabilityId,
-  CapabilityImplementationId,
-  CapabilityStatus,
-  DeveloperTeamModelAssignments,
-  DeveloperTeamThinkingAssignments,
-  InstallablePiToolId,
-  InternalRunnerPackageId,
-  PiPreflightResult,
-  PiRequiredToolsReview,
-  RunnerScope,
-  TechnicalActionKind,
-} from "@deck/adapter-pi";
+/**
+ * Runtime-agnostic runner dashboard state.
+ *
+ * Supports any runner (Pi, OpenCode, etc.) via the `runnerScope` field.
+ * Capability IDs, action kinds, and tool IDs are generic strings to avoid
+ * coupling to a specific adapter.
+ */
 
-export type PiRunnerDashboardScreen =
+export type RunnerDashboardScreen =
   | "dashboard"
   | "packages-detail"
   | "adaptive-memory-detail"
@@ -22,7 +16,7 @@ export type PiRunnerDashboardScreen =
   | "install-progress"
   | "complete";
 
-export const PI_RUNNER_DASHBOARD_SCREENS: PiRunnerDashboardScreen[] = [
+export const RUNNER_DASHBOARD_SCREENS: RunnerDashboardScreen[] = [
   "dashboard",
   "packages-detail",
   "adaptive-memory-detail",
@@ -34,13 +28,6 @@ export const PI_RUNNER_DASHBOARD_SCREENS: PiRunnerDashboardScreen[] = [
 ];
 
 export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
-
-/**
- * User-selectable capability IDs for the Packages section.
- * Excludes runner-mermaid (internal silent support, not user-configurable).
- * REQ-DASH-001: Mermaid is not a configurable dashboard capability.
- */
-export type UserSelectableCapabilityId = Exclude<CapabilityId, "runner-mermaid">;
 
 export type SupermemorySetupValues = {
   userId?: string;
@@ -54,85 +41,110 @@ export type SupermemorySetupState = SupermemorySetupValues & {
   diagnostics: string[];
 };
 
-export type PiRunnerTeamState = {
+export type RunnerTeamState = {
   teamId: string;
   label: string;
   selected: boolean;
-  modelAssignments?: DeveloperTeamModelAssignments;
-  thinkingAssignments?: DeveloperTeamThinkingAssignments;
+  modelAssignments?: Record<string, string>;
+  thinkingAssignments?: Record<string, string>;
   capabilityProfile?: TeamCapabilityProfile;
   status?: string;
 };
 
-export type PiRunnerDashboardState = {
-  screen: PiRunnerDashboardScreen;
-  backStack: PiRunnerDashboardScreen[];
+/**
+ * Generic capability ID — adapters define their own concrete IDs.
+ */
+export type CapabilityId = string;
+
+/**
+ * Generic capability status used in the dashboard.
+ */
+export type CapabilityStatus = "ready" | "missing" | "manual" | "pending-source" | "blocked";
+
+/**
+ * Generic action kind — adapters define their own concrete kinds.
+ */
+export type ActionKind = string;
+
+/**
+ * Generic tool ID — adapters define their own concrete tool IDs.
+ */
+export type ToolId = string;
+
+/**
+ * Generic package ID — adapters define their own concrete package IDs.
+ */
+export type PackageId = string;
+
+/**
+ * Generic implementation ID — adapters define their own concrete implementation IDs.
+ */
+export type ImplementationId = string;
+
+export type RunnerScope = "pi" | "opencode" | "all";
+
+export type RunnerDashboardState = {
+  screen: RunnerDashboardScreen;
+  backStack: RunnerDashboardScreen[];
   cursor: number;
   runnerScope: RunnerScope;
-  selectedCapabilities: Partial<Record<UserSelectableCapabilityId, boolean>>;
+  selectedCapabilities: Partial<Record<CapabilityId, boolean>>;
   capabilityStatuses: Partial<Record<CapabilityId, CapabilityStatus>>;
   adaptiveMemory: {
     provider: AdaptiveMemoryProviderChoice;
     supermemory?: SupermemorySetupState;
     status?: string;
   };
-  teams: Record<string, PiRunnerTeamState>;
+  teams: Record<string, RunnerTeamState>;
   runtime: {
-    piCommand?: string;
-    preflight?: PiPreflightResult;
-    toolsReview?: PiRequiredToolsReview;
+    runnerCommand?: string;
+    preflight?: unknown;
+    toolsReview?: unknown;
   };
-  plan?: PiRunnerReviewPlan;
+  plan?: RunnerReviewPlan;
   planRevision: number;
   planGeneratedForRevision?: number;
 };
 
-export type PiRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
+export type RunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
 
-/**
- * Action produced by the Pi Runner review plan.
- *
- * Fix #1: `internalPackageId` is set on automatic install actions for internal
- * runner packages (pi-mermaid) to signal the action-runner to route execution
- * through `installInternalRunnerPackages()` instead of `buildInstallableTool()`.
- */
-export type PiRunnerAction = {
+export type RunnerAction = {
   id: string;
-  kind: TechnicalActionKind;
+  kind: ActionKind;
   title: string;
   description?: string;
   capabilityId?: CapabilityId;
-  toolId?: InstallablePiToolId;
-  /** Fix #1: Identifies internal package install actions for the action-runner executor. */
-  internalPackageId?: InternalRunnerPackageId;
-  implementationId?: CapabilityImplementationId;
+  toolId?: ToolId;
+  /** Identifies internal package install actions for the action-runner executor. */
+  internalPackageId?: PackageId;
+  implementationId?: ImplementationId;
   source?: string;
-  status: PiRunnerActionStatus;
+  status: RunnerActionStatus;
   required?: boolean;
   dependencies?: CapabilityId[];
   unresolvedCapabilities?: CapabilityId[];
   diagnostics?: string[];
 };
 
-export type PiRunnerPlanDiagnosticSeverity = "info" | "warning" | "error";
+export type RunnerPlanDiagnosticSeverity = "info" | "warning" | "error";
 
-export type PiRunnerPlanDiagnostic = {
+export type RunnerPlanDiagnostic = {
   code: string;
   message: string;
-  severity: PiRunnerPlanDiagnosticSeverity;
+  severity: RunnerPlanDiagnosticSeverity;
   capabilityId?: CapabilityId;
   actionId?: string;
 };
 
-export type PiRunnerReviewPlan = {
+export type RunnerReviewPlan = {
   groups: {
-    automaticInstalls: PiRunnerAction[];
-    manualSteps: PiRunnerAction[];
-    configWrites: PiRunnerAction[];
-    teamApplications: PiRunnerAction[];
-    validations: PiRunnerAction[];
+    automaticInstalls: RunnerAction[];
+    manualSteps: RunnerAction[];
+    configWrites: RunnerAction[];
+    teamApplications: RunnerAction[];
+    validations: RunnerAction[];
   };
-  diagnostics: PiRunnerPlanDiagnostic[];
+  diagnostics: RunnerPlanDiagnostic[];
   ready: boolean;
 };
 
@@ -151,7 +163,7 @@ export type TeamCapabilityProfile = {
   diagnostics: string[];
 };
 
-export const DEFAULT_PI_RUNNER_REVIEW_PLAN: PiRunnerReviewPlan = {
+export const DEFAULT_RUNNER_REVIEW_PLAN: RunnerReviewPlan = {
   groups: {
     automaticInstalls: [],
     manualSteps: [],
@@ -164,15 +176,11 @@ export const DEFAULT_PI_RUNNER_REVIEW_PLAN: PiRunnerReviewPlan = {
 };
 
 /**
- * Default state for the Pi Runner dashboard.
+ * Default state for the runner dashboard.
  *
- * Changes from previous version (REQ-DASH-001, REQ-DASH-002):
- * - Removed `runner-mermaid` from requiredCapabilities (internal silent support).
- * - Replaced `runner-capabilities-detail` and `runner-ui-visual-helpers-detail` screens
- *   with `packages-detail` (REQ-DASH-002: Packages grouping).
- * - Dashboard sections are now: Packages, Adaptive Memory, Teams, Review & Install.
+ * Dashboard sections: Packages, Adaptive Memory, Teams, Review & Install.
  */
-export const DEFAULT_PI_RUNNER_DASHBOARD_STATE: PiRunnerDashboardState = {
+export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   screen: "dashboard",
   backStack: [],
   cursor: 0,
@@ -181,7 +189,6 @@ export const DEFAULT_PI_RUNNER_DASHBOARD_STATE: PiRunnerDashboardState = {
     "context-mode": false,
     "codebase-memory": false,
     rtk: false,
-    "pi-hud": false,
   },
   capabilityStatuses: {},
   adaptiveMemory: {
@@ -200,35 +207,53 @@ export const DEFAULT_PI_RUNNER_DASHBOARD_STATE: PiRunnerDashboardState = {
   planGeneratedForRevision: undefined,
 };
 
-export function createDefaultPiRunnerDashboardState(
-  overrides: Partial<PiRunnerDashboardState> = {},
-): PiRunnerDashboardState {
+export function createDefaultRunnerDashboardState(
+  overrides: Partial<RunnerDashboardState> = {},
+): RunnerDashboardState {
   return {
-    ...DEFAULT_PI_RUNNER_DASHBOARD_STATE,
+    ...DEFAULT_RUNNER_DASHBOARD_STATE,
     ...overrides,
-    backStack: overrides.backStack ?? [...DEFAULT_PI_RUNNER_DASHBOARD_STATE.backStack],
+    backStack: overrides.backStack ?? [...DEFAULT_RUNNER_DASHBOARD_STATE.backStack],
     selectedCapabilities: {
-      ...DEFAULT_PI_RUNNER_DASHBOARD_STATE.selectedCapabilities,
+      ...DEFAULT_RUNNER_DASHBOARD_STATE.selectedCapabilities,
       ...overrides.selectedCapabilities,
     },
     capabilityStatuses: {
-      ...DEFAULT_PI_RUNNER_DASHBOARD_STATE.capabilityStatuses,
+      ...DEFAULT_RUNNER_DASHBOARD_STATE.capabilityStatuses,
       ...overrides.capabilityStatuses,
     },
     adaptiveMemory: {
-      ...DEFAULT_PI_RUNNER_DASHBOARD_STATE.adaptiveMemory,
+      ...DEFAULT_RUNNER_DASHBOARD_STATE.adaptiveMemory,
       ...overrides.adaptiveMemory,
     },
     teams: {
-      ...DEFAULT_PI_RUNNER_DASHBOARD_STATE.teams,
+      ...DEFAULT_RUNNER_DASHBOARD_STATE.teams,
       ...overrides.teams,
     },
     runtime: {
-      ...DEFAULT_PI_RUNNER_DASHBOARD_STATE.runtime,
+      ...DEFAULT_RUNNER_DASHBOARD_STATE.runtime,
       ...overrides.runtime,
     },
     plan: overrides.plan,
-    planRevision: overrides.planRevision ?? DEFAULT_PI_RUNNER_DASHBOARD_STATE.planRevision,
+    planRevision: overrides.planRevision ?? DEFAULT_RUNNER_DASHBOARD_STATE.planRevision,
     planGeneratedForRevision: overrides.planGeneratedForRevision,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Backward-compatible type aliases for Pi-specific code
+// ---------------------------------------------------------------------------
+
+export type PiRunnerDashboardScreen = RunnerDashboardScreen;
+export type PiRunnerTeamState = RunnerTeamState;
+export type PiRunnerDashboardState = RunnerDashboardState;
+export type PiRunnerActionStatus = RunnerActionStatus;
+export type PiRunnerAction = RunnerAction;
+export type PiRunnerPlanDiagnosticSeverity = RunnerPlanDiagnosticSeverity;
+export type PiRunnerPlanDiagnostic = RunnerPlanDiagnostic;
+export type PiRunnerReviewPlan = RunnerReviewPlan;
+
+export const PI_RUNNER_DASHBOARD_SCREENS = RUNNER_DASHBOARD_SCREENS;
+export const DEFAULT_PI_RUNNER_REVIEW_PLAN = DEFAULT_RUNNER_REVIEW_PLAN;
+export const DEFAULT_PI_RUNNER_DASHBOARD_STATE = DEFAULT_RUNNER_DASHBOARD_STATE;
+export const createDefaultPiRunnerDashboardState = createDefaultRunnerDashboardState;

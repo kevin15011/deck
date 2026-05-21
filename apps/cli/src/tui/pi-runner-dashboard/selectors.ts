@@ -1,22 +1,23 @@
-import {
-  getPiRunnerCapability,
-  type CapabilityId,
-  type CapabilityStatus,
-} from "@deck/adapter-pi";
+/**
+ * Runtime-agnostic dashboard selectors.
+ *
+ * Works with any runner (Pi, OpenCode, etc.) via the `runnerScope` field.
+ * Capability catalogs are injected via the `capabilityResolver` parameter.
+ */
+
 import type {
   AdaptiveMemoryProviderChoice,
-  PiRunnerAction,
-  PiRunnerDashboardScreen,
-  PiRunnerDashboardState,
-  PiRunnerReviewPlan,
+  CapabilityId,
+  CapabilityStatus,
+  RunnerAction,
+  RunnerDashboardScreen,
+  RunnerDashboardState,
+  RunnerReviewPlan,
   TeamCapabilityProfile,
-  UserSelectableCapabilityId,
 } from "./state";
 
 /**
- * Dashboard section IDs for the new grouping (REQ-DASH-002).
- * Mermaid / visual helpers sections are removed — visual support is internal silent.
- * REQ-DASH-001: Mermaid is NOT presented as a configurable capability.
+ * Dashboard section IDs for the grouping.
  */
 export type DashboardSectionId =
   | "packages"
@@ -29,7 +30,7 @@ export type SectionReadiness = "ready" | "attention" | "pending" | "blocked";
 export type DashboardSectionSummary = {
   id: DashboardSectionId;
   title: string;
-  screen: PiRunnerDashboardScreen;
+  screen: RunnerDashboardScreen;
   readiness: SectionReadiness;
   selectedCount: number;
   totalCount: number;
@@ -64,6 +65,29 @@ export type PlanActionCounts = {
   total: number;
 };
 
+/**
+ * Generic capability catalog entry — adapters provide their own catalogs.
+ */
+export type CapabilityCatalogEntry = {
+  capabilityId: CapabilityId;
+  label: string;
+  description: string;
+  runnerScope: string;
+  requirementLevel: "required" | "optional" | "configurable";
+  toolId?: string;
+  source?: string;
+  implementations?: Record<string, { id: string; source: string; installKind: string; note?: string }>;
+  isInternal?: boolean;
+};
+
+/**
+ * Resolver function that adapters provide to look up capabilities.
+ */
+export type CapabilityResolver = {
+  getCapability: (capabilityId: CapabilityId) => CapabilityCatalogEntry | undefined;
+  getUserFacingIds: () => CapabilityId[];
+};
+
 type SectionSignals = {
   ready: number;
   manual: number;
@@ -74,7 +98,6 @@ type SectionSignals = {
 };
 
 const DASHBOARD_SECTION_COUNT = 4;
-const PACKAGES_OPTION_COUNT = 5; // rtk, context-mode, codebase-memory, pi-hud, back
 const ADAPTIVE_MEMORY_OPTION_COUNT = 4; // none, engram, supermemory, back
 const TEAMS_OPTION_COUNT = 3; // Developer Team, Developer Team detail, back
 const DEVELOPER_TEAM_DETAIL_OPTION_COUNT = 3; // configure models, use current/defaults, back
@@ -82,12 +105,12 @@ const REVIEW_PLAN_OPTION_COUNT = 3; // run, back, dashboard
 const INSTALL_PROGRESS_OPTION_COUNT = 1;
 const COMPLETE_OPTION_COUNT = 1;
 
-export function getCursorLimit(state: PiRunnerDashboardState): number {
+export function getCursorLimit(state: RunnerDashboardState, packageCount: number): number {
   switch (state.screen) {
     case "dashboard":
       return DASHBOARD_SECTION_COUNT;
     case "packages-detail":
-      return PACKAGES_OPTION_COUNT;
+      return packageCount + 1; // capabilities + back
     case "adaptive-memory-detail":
       return ADAPTIVE_MEMORY_OPTION_COUNT;
     case "teams-detail":
@@ -105,13 +128,13 @@ export function getCursorLimit(state: PiRunnerDashboardState): number {
   }
 }
 
-export function clampCursor(cursor: number, state: PiRunnerDashboardState): number {
-  const limit = getCursorLimit(state);
+export function clampCursor(cursor: number, state: RunnerDashboardState, packageCount: number): number {
+  const limit = getCursorLimit(state, packageCount);
   if (limit <= 0) return 0;
   return Math.min(Math.max(cursor, 0), limit - 1);
 }
 
-export function getPlanActionCounts(plan: PiRunnerReviewPlan | undefined): PlanActionCounts {
+export function getPlanActionCounts(plan: RunnerReviewPlan | undefined): PlanActionCounts {
   const groups = plan?.groups;
   const automatic = groups?.automaticInstalls.length ?? 0;
   const manual = groups?.manualSteps.length ?? 0;
@@ -129,13 +152,14 @@ export function getPlanActionCounts(plan: PiRunnerReviewPlan | undefined): PlanA
   };
 }
 
-export function getDashboardSectionSummaries(state: PiRunnerDashboardState): DashboardSectionSummary[] {
+export function getDashboardSectionSummaries(state: RunnerDashboardState, resolver: CapabilityResolver): DashboardSectionSummary[] {
   const counts = getPlanActionCounts(state.plan);
-  const capabilityOptions = getRunnerCapabilitySummaries(state);
+  const capabilityOptions = getRunnerCapabilitySummaries(state, resolver);
   const selectedPackages = capabilityOptions.filter((option) => option.selected && option.requirementLevel === "configurable").length;
   const selectedTeams = Object.values(state.teams).filter((team) => team.selected).length;
-  const packagesSignals = signalsForSection(state, ["rtk", "context-mode", "codebase-memory", "pi-hud"]);
-  const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.") || action.capabilityId === "codebase-memory" && state.adaptiveMemory.provider === "engram"));
+  const configurableIds = resolver.getUserFacingIds();
+  const packagesSignals = signalsForSection(state, configurableIds);
+  const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.") || (action.capabilityId === "codebase-memory" && state.adaptiveMemory.provider === "engram")));
   const teamSignals = signalsForActions(state.plan?.groups.teamApplications ?? []);
 
   return [
@@ -145,9 +169,9 @@ export function getDashboardSectionSummaries(state: PiRunnerDashboardState): Das
       screen: "packages-detail",
       readiness: readinessFromSignals(packagesSignals),
       selectedCount: selectedPackages,
-      totalCount: 4,
+      totalCount: configurableIds.length,
       actionCount: packagesSignals.actions,
-      detail: `${selectedPackages}/4 packages selected; ${formatSignals(packagesSignals)}.`,
+      detail: `${selectedPackages}/${configurableIds.length} packages selected; ${formatSignals(packagesSignals)}.`,
     },
     {
       id: "adaptive-memory",
@@ -184,28 +208,16 @@ export function getDashboardSectionSummaries(state: PiRunnerDashboardState): Das
 
 /**
  * Returns capability option summaries for the Packages section.
- *
- * Changes from previous version (REQ-DASH-001):
- * - runner-mermaid is EXCLUDED — it is internal silent support, not user-selectable.
- * - pi-hud remains (optional, Pi-only).
- * REQ-DASH-003: Visual support appears only as minimal feedback in Review, not as a selectable capability.
+ * Uses the injected capability resolver to get catalog entries.
  */
-export function getRunnerCapabilitySummaries(state: PiRunnerDashboardState): CapabilityOptionSummary[] {
-  // REQ-DASH-001: runner-mermaid is NOT a user-selectable capability.
-  // Only configurable user-facing capabilities are listed here.
-  const configurable: UserSelectableCapabilityId[] = ["rtk", "context-mode", "codebase-memory"];
-  const summaries = configurable.map((capabilityId) =>
-    capabilitySummary(state, capabilityId, Boolean(state.selectedCapabilities[capabilityId])),
+export function getRunnerCapabilitySummaries(state: RunnerDashboardState, resolver: CapabilityResolver): CapabilityOptionSummary[] {
+  const configurable = resolver.getUserFacingIds();
+  return configurable.map((capabilityId) =>
+    capabilitySummary(state, capabilityId, Boolean(state.selectedCapabilities[capabilityId]), resolver),
   );
-
-  if (state.runnerScope === "pi") {
-    summaries.push(capabilitySummary(state, "pi-hud", Boolean(state.selectedCapabilities["pi-hud"])));
-  }
-
-  return summaries;
 }
 
-export function getAdaptiveMemorySummary(state: PiRunnerDashboardState): AdaptiveMemorySummary {
+export function getAdaptiveMemorySummary(state: RunnerDashboardState): AdaptiveMemorySummary {
   const provider = state.adaptiveMemory.provider;
   const configured = provider !== "supermemory" || Boolean(state.adaptiveMemory.supermemory?.configured);
 
@@ -227,14 +239,10 @@ export function getAdaptiveMemorySummary(state: PiRunnerDashboardState): Adaptiv
 
 /**
  * Returns the capability consumption profile for a team.
- *
- * Changes from previous version (REQ-DASH-001, REQ-DASH-004):
- * - runner-mermaid is removed from the consumption profile (internal silent support).
- * - Developer Team is no longer blocked by runner-mermaid availability.
  */
-export function getTeamCapabilityProfile(state: PiRunnerDashboardState, teamId: string): TeamCapabilityProfile {
+export function getTeamCapabilityProfile(state: RunnerDashboardState, teamId: string): TeamCapabilityProfile {
   const team = state.teams[teamId];
-  const installable = Boolean(team?.selected); // No longer blocked by mermaid
+  const installable = Boolean(team?.selected);
 
   return {
     teamId,
@@ -243,7 +251,6 @@ export function getTeamCapabilityProfile(state: PiRunnerDashboardState, teamId: 
       "context-mode": state.selectedCapabilities["context-mode"] ? "compatible" : "not-used",
       "codebase-memory": state.selectedCapabilities["codebase-memory"] ? "consumes-directly" : "not-used",
       rtk: state.selectedCapabilities.rtk ? "compatible" : "not-used",
-      "pi-hud": state.selectedCapabilities["pi-hud"] ? "compatible" : "not-used",
       "adaptive-memory": state.adaptiveMemory.provider === "none" ? "not-used" : "consumes-directly",
     },
     diagnostics: installable
@@ -254,15 +261,9 @@ export function getTeamCapabilityProfile(state: PiRunnerDashboardState, teamId: 
 
 /**
  * Returns a summary for a single capability option.
- *
- * Fixes TypeScript error (Task 4 deferral): capability may be undefined for
- * internal IDs like runner-mermaid. Added null check.
  */
-function capabilitySummary(state: PiRunnerDashboardState, capabilityId: CapabilityId, selected: boolean): CapabilityOptionSummary {
-  const capability = getPiRunnerCapability(capabilityId);
-  // Handle the case where capability is undefined (e.g., internal IDs like runner-mermaid
-  // are not returned by getPiRunnerCapability for user-facing lookups).
-  // This should not happen for user-facing IDs, but we guard against it.
+function capabilitySummary(state: RunnerDashboardState, capabilityId: CapabilityId, selected: boolean, resolver: CapabilityResolver): CapabilityOptionSummary {
+  const capability = resolver.getCapability(capabilityId);
   if (!capability) {
     return {
       capabilityId,
@@ -290,7 +291,7 @@ function capabilitySummary(state: PiRunnerDashboardState, capabilityId: Capabili
   };
 }
 
-function signalsForSection(state: PiRunnerDashboardState, capabilityIds: CapabilityId[]): SectionSignals {
+function signalsForSection(state: RunnerDashboardState, capabilityIds: CapabilityId[]): SectionSignals {
   const statusSignals = signalsForCapabilityStatuses(capabilityIds.map((capabilityId) => state.capabilityStatuses[capabilityId]));
   const actionSignals = signalsForActions(actionsForCapabilities(state.plan, capabilityIds));
 
@@ -328,7 +329,7 @@ function signalsForCapabilityStatuses(statuses: Array<CapabilityStatus | undefin
   }, emptySignals());
 }
 
-function signalsForActions(actions: PiRunnerAction[]): SectionSignals {
+function signalsForActions(actions: RunnerAction[]): SectionSignals {
   return actions.reduce<SectionSignals>((signals, action) => {
     signals.actions += 1;
     if (action.status === "blocked" || action.status === "failed") signals.blocked += 1;
@@ -340,7 +341,7 @@ function signalsForActions(actions: PiRunnerAction[]): SectionSignals {
   }, emptySignals());
 }
 
-function readinessForAdaptiveMemory(state: PiRunnerDashboardState, signals: SectionSignals): SectionReadiness {
+function readinessForAdaptiveMemory(state: RunnerDashboardState, signals: SectionSignals): SectionReadiness {
   if (state.adaptiveMemory.provider === "supermemory" && !state.adaptiveMemory.supermemory?.configured) return "pending";
   return readinessFromSignals(signals);
 }
@@ -360,17 +361,17 @@ function emptySignals(): SectionSignals {
   return { ready: 0, manual: 0, pending: 0, blocked: 0, unknown: 0, actions: 0 };
 }
 
-function actionsForCapabilities(plan: PiRunnerReviewPlan | undefined, capabilityIds: CapabilityId[]): PiRunnerAction[] {
+function actionsForCapabilities(plan: RunnerReviewPlan | undefined, capabilityIds: CapabilityId[]): RunnerAction[] {
   if (!plan) return [];
   const wanted = new Set<CapabilityId>(capabilityIds);
   return allPlanActions(plan).filter((action) => action.capabilityId && wanted.has(action.capabilityId));
 }
 
-function actionsMatching(plan: PiRunnerReviewPlan | undefined, predicate: (action: PiRunnerAction) => boolean): PiRunnerAction[] {
+function actionsMatching(plan: RunnerReviewPlan | undefined, predicate: (action: RunnerAction) => boolean): RunnerAction[] {
   if (!plan) return [];
   return allPlanActions(plan).filter(predicate);
 }
 
-function allPlanActions(plan: PiRunnerReviewPlan): PiRunnerAction[] {
+function allPlanActions(plan: RunnerReviewPlan): RunnerAction[] {
   return Object.values(plan.groups).flat();
 }

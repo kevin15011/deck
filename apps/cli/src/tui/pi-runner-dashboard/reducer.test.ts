@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { PiRunnerCapabilityInventory } from "@deck/adapter-pi";
-import { reduce } from "./reducer";
-import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan } from "./state";
+import { buildPiRunnerReviewPlan, type PiRunnerCapabilityInventory } from "@deck/adapter-pi";
+import { reduce, type PlanBuilderFn } from "./reducer";
+import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan, type RunnerDashboardState } from "./state";
+
+const piPlanBuilder: PlanBuilderFn = (state, inventory) => buildPiRunnerReviewPlan(state as any, inventory as PiRunnerCapabilityInventory);
 
 // REQ-DASH-001: runner-mermaid is internal, not in user-facing inventory
 // REQ-DASH-002: Packages section replaces Runner Capabilities + visual helpers
@@ -122,7 +124,7 @@ describe("Pi Runner dashboard reducer", () => {
     let state = createDefaultPiRunnerDashboardState();
     expect(state.adaptiveMemory.provider).toBe("none");
 
-    state = reduce(state, { type: "enter-review", inventory });
+    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
 
     const ids = allActionIds(state.plan);
     expect(ids.some((id) => id.includes("engram"))).toBe(false);
@@ -144,12 +146,12 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.adaptiveMemory.provider).toBe("engram");
     expect(state.adaptiveMemory.supermemory).toBeUndefined();
 
-    state = reduce(state, { type: "enter-review", inventory });
+    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
     expect(allActionIds(state.plan).some((id) => id.includes("engram"))).toBe(true);
     expect(allActionIds(state.plan).some((id) => id.includes("supermemory"))).toBe(false);
 
     state = reduce(state, { type: "select-adaptive-memory", provider: "none" });
-    state = reduce(state, { type: "regenerate-plan", inventory });
+    state = reduce(state, { type: "regenerate-plan", inventory }, piPlanBuilder);
     expect(state.adaptiveMemory.provider).toBe("none");
     expect(allActionIds(state.plan).some((id) => id.includes("engram") || id.includes("supermemory"))).toBe(false);
   });
@@ -157,12 +159,12 @@ describe("Pi Runner dashboard reducer", () => {
   test("cambiar de Engram a Supermemory remueve Engram y prepara Supermemory", () => {
     let state = createDefaultPiRunnerDashboardState();
     state = reduce(state, { type: "select-adaptive-memory", provider: "engram" });
-    state = reduce(state, { type: "enter-review", inventory });
+    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
     expect(allActionIds(state.plan).some((id) => id.includes("engram"))).toBe(true);
 
     state = reduce(state, { type: "back" });
     state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
-    state = reduce(state, { type: "enter-review", inventory });
+    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
 
     const ids = allActionIds(state.plan);
     expect(state.adaptiveMemory.provider).toBe("supermemory");
@@ -176,11 +178,11 @@ describe("Pi Runner dashboard reducer", () => {
 
     state = reduce(state, { type: "toggle-team", teamId: "developer-team" });
     expect(state.teams["developer-team"]?.selected).toBe(true);
-    state = reduce(state, { type: "enter-review", inventory });
+    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
     expect(state.plan?.groups.teamApplications.some((action) => action.id === "team.developer-team.apply")).toBe(true);
 
     state = reduce(state, { type: "set-team-selected", teamId: "developer-team", selected: false });
-    state = reduce(state, { type: "regenerate-plan", inventory });
+    state = reduce(state, { type: "regenerate-plan", inventory }, piPlanBuilder);
     expect(state.teams["developer-team"]?.selected).toBe(false);
     expect(state.plan?.groups.teamApplications).toEqual([]);
   });
@@ -188,7 +190,7 @@ describe("Pi Runner dashboard reducer", () => {
   test("Review & Install regenera plan y bloquea instalación con plan stale", () => {
     let state = createDefaultPiRunnerDashboardState();
     state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
-    state = reduce(state, { type: "enter-review", inventory });
+    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
 
     const firstRevision = state.planGeneratedForRevision;
     expect(state.screen).toBe("review-plan");
@@ -202,7 +204,7 @@ describe("Pi Runner dashboard reducer", () => {
     const blocked = reduce(state, { type: "start-install" });
     expect(blocked.screen).toBe("review-plan");
 
-    state = reduce(state, { type: "regenerate-plan", inventory });
+    state = reduce(state, { type: "regenerate-plan", inventory }, piPlanBuilder);
     expect(state.planGeneratedForRevision).toBe(state.planRevision);
     expect(state.planGeneratedForRevision).not.toBe(firstRevision);
     expect(state.plan?.groups.automaticInstalls.some((action) => action.capabilityId === "context-mode")).toBe(true);

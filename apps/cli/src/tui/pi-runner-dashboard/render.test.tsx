@@ -234,7 +234,7 @@ describe("Pi Runner dashboard render", () => {
       />,
     );
 
-    expect(output).toContain("Pi Runner setup complete");
+    expect(output).toContain("Runner setup complete");
     expect(output).toContain("adaptive-memory.supermemory.pi-mcp-config");
     expect(output).toContain("diagnostic:");
     expect(output).not.toContain(tokenSentinel);

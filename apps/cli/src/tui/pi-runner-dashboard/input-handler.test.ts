@@ -62,7 +62,7 @@ describe("Pi Runner dashboard input mapping", () => {
 
     expect(getPiRunnerDashboardContinueEffect(state, { inventory, canRunPlan: false })).toEqual({
       type: "block-review-install",
-      status: "Supermemory requires userId and ephemeral token captured before executing Review & Install; Pi MCP config is written during Review & Install.",
+      status: "Supermemory requires userId and ephemeral token captured before executing Review & Install.",
     });
   });
 

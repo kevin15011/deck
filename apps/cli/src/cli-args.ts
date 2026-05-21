@@ -24,6 +24,12 @@ export type ParsedArgs =
       memoryProvider?: string;
     }
   | {
+      command: "opencode-launch";
+      teamId: string;
+      /** Memory provider selection, e.g. "engram". Undefined means no memory. */
+      memoryProvider?: string;
+    }
+  | {
       command: "error";
       message: string;
     };
@@ -31,25 +37,81 @@ export type ParsedArgs =
 /**
  * Known team slugs mapped to canonical team IDs.
  */
-const TEAM_SLUGS: Record<string, string> = {
+const PI_TEAM_SLUGS: Record<string, string> = {
+  developer: "developer-team",
+};
+
+const OPENCODE_TEAM_SLUGS: Record<string, string> = {
   developer: "developer-team",
 };
 
 /**
- * Supported memory provider identifiers.
- * Add new providers here as they are implemented and validated.
- *
- * Note: "engram" is experimental — its MCP tool bindings have not been
- * validated against the Engram runtime and may change.
+ * Supported memory provider identifiers for Pi.
  */
 export const SUPPORTED_MEMORY_PROVIDERS = ["engram", "supermemory"] as const;
 export type SupportedMemoryProvider = (typeof SUPPORTED_MEMORY_PROVIDERS)[number];
+
+/**
+ * Supported memory provider identifiers for OpenCode.
+ */
+export const SUPPORTED_OPENCODE_MEMORY_PROVIDERS = ["engram"] as const;
+export type SupportedOpenCodeMemoryProvider = (typeof SUPPORTED_OPENCODE_MEMORY_PROVIDERS)[number];
 
 function parseBooleanFlag(value: string | undefined): boolean | undefined {
   if (value === undefined || value === "") return true;
   if (value === "true") return true;
   if (value === "false") return false;
   return true;
+}
+
+/**
+ * Parse `deck opencode <team> [--memory=<provider>]`.
+ */
+function parseOpenCodeCommand(rest: string[]): ParsedArgs {
+  if (rest.length === 0) {
+    return {
+      command: "error",
+      message: "Usage: deck opencode <team> [--memory=engram]\nAvailable teams: developer",
+    };
+  }
+
+  const [teamSlug, ...flags] = rest;
+  const teamId = OPENCODE_TEAM_SLUGS[teamSlug];
+
+  if (!teamId) {
+    const available = Object.keys(OPENCODE_TEAM_SLUGS).join(", ");
+    return {
+      command: "error",
+      message: `Unknown OpenCode team: ${teamSlug}. Available teams: ${available}`,
+    };
+  }
+
+  let memoryProvider: string | undefined;
+  for (const flag of flags) {
+    if (flag === "--memory") {
+      memoryProvider = "";
+    } else if (flag.startsWith("--memory=")) {
+      memoryProvider = flag.slice("--memory=".length);
+    }
+  }
+
+  if (memoryProvider !== undefined) {
+    if (memoryProvider === "" || memoryProvider === "none") {
+      memoryProvider = undefined;
+    } else if (!SUPPORTED_OPENCODE_MEMORY_PROVIDERS.includes(memoryProvider as SupportedOpenCodeMemoryProvider)) {
+      const available = [...SUPPORTED_OPENCODE_MEMORY_PROVIDERS, "none"].join(", ");
+      return {
+        command: "error",
+        message: `Unsupported memory provider: ${memoryProvider}. Available providers: ${available}`,
+      };
+    }
+  }
+
+  return {
+    command: "opencode-launch",
+    teamId,
+    ...(memoryProvider ? { memoryProvider } : {}),
+  };
 }
 
 /**
@@ -66,6 +128,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   const [first, ...rest] = args;
 
+  if (first === "opencode") {
+    return parseOpenCodeCommand(rest);
+  }
+
   if (first !== "pi") {
     return { command: "tui" };
   }
@@ -79,10 +145,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   const [teamSlug, ...flags] = rest;
-  const teamId = TEAM_SLUGS[teamSlug];
+  const teamId = PI_TEAM_SLUGS[teamSlug];
 
   if (!teamId) {
-    const available = Object.keys(TEAM_SLUGS).join(", ");
+    const available = Object.keys(PI_TEAM_SLUGS).join(", ");
     return {
       command: "error",
       message: `Unknown Pi team: ${teamSlug}. Available teams: ${available}`,

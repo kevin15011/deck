@@ -174,4 +174,58 @@ describe("parseArgs", () => {
     });
     expect("memoryProvider" in result).toBe(false);
   });
+
+  // -------------------------------------------------------------------------
+  // OpenCode tests
+  // -------------------------------------------------------------------------
+
+  test("parses 'deck opencode developer' as opencode-launch for developer-team", () => {
+    const result = parseArgs(["opencode", "developer"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "opencode-launch",
+      teamId: "developer-team",
+    });
+  });
+
+  test("parses 'deck opencode developer --memory=engram' with memory provider", () => {
+    const result = parseArgs(["opencode", "developer", "--memory=engram"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "opencode-launch",
+      teamId: "developer-team",
+      memoryProvider: "engram",
+    });
+  });
+
+  test("parses --memory=none as no memory provider for opencode", () => {
+    const result = parseArgs(["opencode", "developer", "--memory=none"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "opencode-launch",
+      teamId: "developer-team",
+    });
+    expect("memoryProvider" in result).toBe(false);
+  });
+
+  test("returns error for unknown team under 'deck opencode'", () => {
+    const result = parseArgs(["opencode", "unknown-team"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: "Unknown OpenCode team: unknown-team. Available teams: developer",
+    });
+  });
+
+  test("returns error when 'deck opencode' is called without a team", () => {
+    const result = parseArgs(["opencode"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("Usage"),
+    });
+  });
+
+  test("returns error for unsupported memory provider under opencode", () => {
+    const result = parseArgs(["opencode", "developer", "--memory=supermemory"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("Unsupported memory provider"),
+    });
+  });
 });
