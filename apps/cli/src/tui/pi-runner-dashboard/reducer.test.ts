@@ -88,9 +88,9 @@ describe("Pi Runner dashboard reducer", () => {
 
   test("cursor se limita por sección", () => {
     let state = createDefaultPiRunnerDashboardState();
-    // REQ-DASH-002: Dashboard has 4 sections (not 5 — Runner Capabilities + visual helpers merged into Packages)
+    // Dashboard has 5 sections: Packages, Adaptive Memory, Teams, Configure Packages, Review & Install
     state = reduce(state, { type: "cursor", cursor: 99 });
-    expect(state.cursor).toBe(3);
+    expect(state.cursor).toBe(4);
 
     state = reduce(state, { type: "navigate", screen: "adaptive-memory-detail" });
     state = reduce(state, { type: "cursor", cursor: 99 });
@@ -208,5 +208,53 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.planGeneratedForRevision).toBe(state.planRevision);
     expect(state.planGeneratedForRevision).not.toBe(firstRevision);
     expect(state.plan?.groups.automaticInstalls.some((action) => action.capabilityId === "context-mode")).toBe(true);
+  });
+
+  test("toggle-package-instruction actualiza packageInstructions y invalida plan", () => {
+    let state = createDefaultPiRunnerDashboardState();
+    const initialRevision = state.planRevision;
+
+    state = reduce(state, { type: "toggle-package-instruction", packageId: "codebase-memory" });
+    expect(state.packageInstructions["codebase-memory"]).toBe(true);
+    expect(state.plan).toBeUndefined();
+    expect(state.planRevision).toBe(initialRevision + 1);
+
+    state = reduce(state, { type: "toggle-package-instruction", packageId: "context-mode" });
+    expect(state.packageInstructions["context-mode"]).toBe(true);
+    expect(state.packageInstructions["codebase-memory"]).toBe(true);
+    expect(state.planRevision).toBe(initialRevision + 2);
+
+    state = reduce(state, { type: "toggle-package-instruction", packageId: "codebase-memory" });
+    expect(state.packageInstructions["codebase-memory"]).toBe(false);
+    expect(state.plan).toBeUndefined();
+    expect(state.planRevision).toBeGreaterThanOrEqual(initialRevision + 3);
+  });
+
+  test("set-package-instruction establece valor explícito y invalida plan", () => {
+    let state = createDefaultPiRunnerDashboardState();
+
+    state = reduce(state, { type: "set-package-instruction", packageId: "rtk", enabled: true });
+    expect(state.packageInstructions.rtk).toBe(true);
+
+    state = reduce(state, { type: "set-package-instruction", packageId: "rtk", enabled: false });
+    expect(state.packageInstructions.rtk).toBe(false);
+
+    expect(state.plan).toBeUndefined();
+  });
+
+  test("packageInstructions es independiente de selectedCapabilities", () => {
+    let state = createDefaultPiRunnerDashboardState();
+
+    // selectedCapabilities controls installation; packageInstructions controls instruction injection
+    state = reduce(state, { type: "set-capability", capabilityId: "codebase-memory", selected: true });
+    state = reduce(state, { type: "toggle-package-instruction", packageId: "codebase-memory" });
+
+    expect(state.selectedCapabilities["codebase-memory"]).toBe(true);
+    expect(state.packageInstructions["codebase-memory"]).toBe(true);
+
+    // Toggle one does not affect the other
+    state = reduce(state, { type: "set-capability", capabilityId: "codebase-memory", selected: false });
+    expect(state.selectedCapabilities["codebase-memory"]).toBe(false);
+    expect(state.packageInstructions["codebase-memory"]).toBe(true);
   });
 });

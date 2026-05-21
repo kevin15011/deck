@@ -31,6 +31,8 @@ export type RunnerDashboardAction =
   | { type: "update-supermemory"; values: Partial<SupermemorySetupState> }
   | { type: "toggle-team"; teamId: string }
   | { type: "set-team-selected"; teamId: string; selected: boolean }
+  | { type: "toggle-package-instruction"; packageId: CapabilityId }
+  | { type: "set-package-instruction"; packageId: CapabilityId; enabled: boolean }
   | { type: "enter-review"; inventory: unknown }
   | { type: "regenerate-plan"; inventory: unknown }
   | { type: "start-install" }
@@ -86,6 +88,10 @@ export function reduceRunnerDashboard(
       return setTeamSelected(state, action.teamId, !state.teams[action.teamId]?.selected);
     case "set-team-selected":
       return setTeamSelected(state, action.teamId, action.selected);
+    case "toggle-package-instruction":
+      return setPackageInstruction(state, action.packageId, !state.packageInstructions[action.packageId]);
+    case "set-package-instruction":
+      return setPackageInstruction(state, action.packageId, action.enabled);
     case "enter-review":
       return enterReview(state, action.inventory, planBuilder);
     case "regenerate-plan":
@@ -205,6 +211,18 @@ function setTeamSelected(state: RunnerDashboardState, teamId: string, selected: 
         ...existing,
         selected,
       },
+    },
+  });
+}
+
+function setPackageInstruction(state: RunnerDashboardState, packageId: CapabilityId, enabled: boolean): RunnerDashboardState {
+  if (Boolean(state.packageInstructions[packageId]) === enabled) return state;
+
+  return invalidatePlan({
+    ...state,
+    packageInstructions: {
+      ...state.packageInstructions,
+      [packageId]: enabled,
     },
   });
 }

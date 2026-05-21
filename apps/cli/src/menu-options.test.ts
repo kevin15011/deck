@@ -3,15 +3,16 @@ import { describe, expect, test } from "bun:test";
 import { getEnvironmentOptions, getHomeMenuOptions, getPiInstalledNextSteps, placeholder } from "./menu-options";
 
 describe("home menu options", () => {
-  test("marks unfinished actions as yellow placeholders except configure-models", () => {
+  test("marks unfinished actions as yellow placeholders except implemented ones", () => {
     const options = getHomeMenuOptions();
 
     expect(options[0]).toEqual({ value: "start-installation", label: "Start installation" });
-    expect(options[1]).toEqual({ value: "upgrade-tools", label: `Upgrade tools ${placeholder()}` });
-    expect(options[2]).toEqual({ value: "configure-models", label: "Configure models" });
-    expect(options[3]).toEqual({ value: "management-uninstall", label: `Management / uninstall ${placeholder()}` });
-    expect(options[4]).toEqual({ value: "doctor", label: `Doctor ${placeholder()}` });
-    expect(options[5]).toEqual({ value: "exit", label: "Exit" });
+    expect(options[1]).toEqual({ value: "configure-packages", label: "Configure packages" });
+    expect(options[2]).toEqual({ value: "upgrade-tools", label: `Upgrade tools ${placeholder()}` });
+    expect(options[3]).toEqual({ value: "configure-models", label: "Configure models" });
+    expect(options[4]).toEqual({ value: "management-uninstall", label: `Management / uninstall ${placeholder()}` });
+    expect(options[5]).toEqual({ value: "doctor", label: `Doctor ${placeholder()}` });
+    expect(options[6]).toEqual({ value: "exit", label: "Exit" });
   });
 });
 

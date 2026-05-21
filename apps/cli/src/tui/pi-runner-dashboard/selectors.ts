@@ -5,15 +5,16 @@
  * Capability catalogs are injected via the `capabilityResolver` parameter.
  */
 
-import type {
-  AdaptiveMemoryProviderChoice,
-  CapabilityId,
-  CapabilityStatus,
-  RunnerAction,
-  RunnerDashboardScreen,
-  RunnerDashboardState,
-  RunnerReviewPlan,
-  TeamCapabilityProfile,
+import {
+  CANONICAL_INSTRUCTION_PACKAGE_IDS,
+  type AdaptiveMemoryProviderChoice,
+  type CapabilityId,
+  type CapabilityStatus,
+  type RunnerAction,
+  type RunnerDashboardScreen,
+  type RunnerDashboardState,
+  type RunnerReviewPlan,
+  type TeamCapabilityProfile,
 } from "./state";
 
 /**
@@ -23,7 +24,8 @@ export type DashboardSectionId =
   | "packages"
   | "adaptive-memory"
   | "teams"
-  | "review-install";
+  | "review-install"
+  | "package-instructions";
 
 export type SectionReadiness = "ready" | "attention" | "pending" | "blocked";
 
@@ -97,10 +99,11 @@ type SectionSignals = {
   actions: number;
 };
 
-const DASHBOARD_SECTION_COUNT = 4;
+const DASHBOARD_SECTION_COUNT = 5;
 const ADAPTIVE_MEMORY_OPTION_COUNT = 4; // none, engram, supermemory, back
 const TEAMS_OPTION_COUNT = 3; // Developer Team, Developer Team detail, back
 const DEVELOPER_TEAM_DETAIL_OPTION_COUNT = 3; // configure models, use current/defaults, back
+const PACKAGE_INSTRUCTIONS_OPTION_COUNT = 4; // codebase-memory, context-mode, rtk, back
 const REVIEW_PLAN_OPTION_COUNT = 2; // run, dashboard
 const INSTALL_PROGRESS_OPTION_COUNT = 1;
 const COMPLETE_OPTION_COUNT = 1;
@@ -117,6 +120,8 @@ export function getCursorLimit(state: RunnerDashboardState, packageCount: number
       return TEAMS_OPTION_COUNT;
     case "developer-team-detail":
       return DEVELOPER_TEAM_DETAIL_OPTION_COUNT;
+    case "package-instructions-detail":
+      return PACKAGE_INSTRUCTIONS_OPTION_COUNT;
     case "review-plan":
       return REVIEW_PLAN_OPTION_COUNT;
     case "install-progress":
@@ -162,6 +167,10 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
   const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.") || (action.capabilityId === "codebase-memory" && state.adaptiveMemory.provider === "engram")));
   const teamSignals = signalsForActions(state.plan?.groups.teamApplications ?? []);
 
+  const enabledInstructionCount = CANONICAL_INSTRUCTION_PACKAGE_IDS.filter(
+    (pkg) => state.packageInstructions[pkg] === true,
+  ).length;
+
   return [
     {
       id: "packages",
@@ -192,6 +201,16 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
       totalCount: Object.keys(state.teams).length,
       actionCount: teamSignals.actions,
       detail: `${selectedTeams} team(s) selected; ${formatSignals(teamSignals)}.`,
+    },
+    {
+      id: "package-instructions",
+      title: "Configure Packages",
+      screen: "package-instructions-detail",
+      readiness: enabledInstructionCount === 0 ? "pending" : "ready",
+      selectedCount: enabledInstructionCount,
+      totalCount: CANONICAL_INSTRUCTION_PACKAGE_IDS.length,
+      actionCount: 0,
+      detail: `${enabledInstructionCount}/${CANONICAL_INSTRUCTION_PACKAGE_IDS.length} instructions enabled; instruction injection only, does not install packages.`,
     },
     {
       id: "review-install",

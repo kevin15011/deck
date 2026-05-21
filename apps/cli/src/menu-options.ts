@@ -12,6 +12,7 @@ export function placeholder(): string {
 export function getHomeMenuOptions(): MenuOption[] {
   return [
     { value: "start-installation", label: "Start installation" },
+    { value: "configure-packages", label: "Configure packages" },
     { value: "upgrade-tools", label: `Upgrade tools ${placeholder()}` },
     { value: "configure-models", label: "Configure models" },
     { value: "management-uninstall", label: `Management / uninstall ${placeholder()}` },

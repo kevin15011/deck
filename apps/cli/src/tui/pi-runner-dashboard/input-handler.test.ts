@@ -18,13 +18,14 @@ describe("Pi Runner dashboard input mapping", () => {
   test("dashboard cursor abre secciones y Review genera plan", () => {
     let state = createDefaultPiRunnerDashboardState();
     // REQ-DASH-002: Section 0 is Packages (packages-detail), not Runner Capabilities
+    // Section 4 is Configure Packages (package-instructions-detail)
     expect(getPiRunnerDashboardContinueEffect(state, { inventory })).toEqual({
       type: "dispatch",
       action: { type: "navigate", screen: "packages-detail" },
     });
 
-    // cursor: 3 = Review & Install (index 3 in 4-section dashboard)
-    state = createDefaultPiRunnerDashboardState({ cursor: 3 });
+    // cursor: 4 = Review & Install (index 4 in 5-section dashboard)
+    state = createDefaultPiRunnerDashboardState({ cursor: 4 });
     const effect = getPiRunnerDashboardContinueEffect(state, { inventory });
     expect(effect).toMatchObject({ type: "dispatch", action: { type: "enter-review" } });
     if (effect.type === "dispatch") {
@@ -32,6 +33,15 @@ describe("Pi Runner dashboard input mapping", () => {
       expect(state.screen).toBe("review-plan");
       expect(state.plan).toBeDefined();
     }
+  });
+
+  test("Enter on Configure Packages section navigates to package-instructions-detail", () => {
+    let state = createDefaultPiRunnerDashboardState({ cursor: 3 });
+    const effect = getPiRunnerDashboardContinueEffect(state, { inventory });
+    expect(effect).toEqual({
+      type: "dispatch",
+      action: { type: "navigate", screen: "package-instructions-detail" },
+    });
   });
 
   test("space/enter togglea pi-hud desde Packages detail (no visual helpers)", () => {

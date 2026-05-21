@@ -12,6 +12,7 @@ export type RunnerDashboardScreen =
   | "adaptive-memory-detail"
   | "teams-detail"
   | "developer-team-detail"
+  | "package-instructions-detail"
   | "review-plan"
   | "install-progress"
   | "complete";
@@ -22,6 +23,7 @@ export const RUNNER_DASHBOARD_SCREENS: RunnerDashboardScreen[] = [
   "adaptive-memory-detail",
   "teams-detail",
   "developer-team-detail",
+  "package-instructions-detail",
   "review-plan",
   "install-progress",
   "complete",
@@ -81,6 +83,27 @@ export type PackageId = string;
  */
 export type ImplementationId = string;
 
+/**
+ * Canonical package instruction IDs for instruction injection.
+ * These are the packages that can be toggled via Configure Packages.
+ */
+export const CANONICAL_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk"] as const;
+export type CanonicalInstructionPackageId = (typeof CANONICAL_INSTRUCTION_PACKAGE_IDS)[number];
+
+/**
+ * Loads package instructions from a deck config for a specific runner scope.
+ * Used to initialize dashboard state from existing .deck/config.json.
+ */
+export function loadRunnerPackageInstructionsFromConfig(
+  config: { packageInstructions?: Record<string, Record<string, boolean>> },
+  runnerScope: RunnerScope,
+): Partial<Record<CapabilityId, boolean>> {
+  const runner = runnerScope === "opencode" ? "opencode" : "pi";
+  const runnerConfig = config?.packageInstructions?.[runner];
+  if (!runnerConfig) return {};
+  return { ...runnerConfig };
+}
+
 export type RunnerScope = "pi" | "opencode" | "all";
 
 export type RunnerDashboardState = {
@@ -101,6 +124,8 @@ export type RunnerDashboardState = {
     preflight?: unknown;
     toolsReview?: unknown;
   };
+  /** Package instruction injection toggles for canonical packages: codebase-memory, context-mode, rtk. */
+  packageInstructions: Partial<Record<CapabilityId, boolean>>;
   plan?: RunnerReviewPlan;
   planRevision: number;
   planGeneratedForRevision?: number;
@@ -202,6 +227,7 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
     },
   },
   runtime: {},
+  packageInstructions: {},
   plan: undefined,
   planRevision: 0,
   planGeneratedForRevision: undefined,
@@ -233,6 +259,10 @@ export function createDefaultRunnerDashboardState(
     runtime: {
       ...DEFAULT_RUNNER_DASHBOARD_STATE.runtime,
       ...overrides.runtime,
+    },
+    packageInstructions: {
+      ...DEFAULT_RUNNER_DASHBOARD_STATE.packageInstructions,
+      ...overrides.packageInstructions,
     },
     plan: overrides.plan,
     planRevision: overrides.planRevision ?? DEFAULT_RUNNER_DASHBOARD_STATE.planRevision,

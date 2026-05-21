@@ -73,7 +73,8 @@ import {
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
-import { writeDeckConfig, type AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
+import { readDeckConfig, writeDeckConfig, type AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
+import { buildCapabilityInstructionBundle } from "@deck/core";
 
 import {
   getNextScreenAfterDeveloperTeamInstall,
@@ -105,7 +106,7 @@ import {
   type RunnerDashboardContinueEffect,
 } from "./pi-runner-dashboard/input-handler";
 import { reduceRunnerDashboard } from "./pi-runner-dashboard/reducer";
-import { createDefaultRunnerDashboardState, type RunnerDashboardState } from "./pi-runner-dashboard/state";
+import { createDefaultRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type RunnerDashboardState } from "./pi-runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/pi-runner-dashboard-screens";
 import { getOpenCodeRunnerCapability, OPENCODE_RUNNER_CAPABILITY_IDS, getUserFacingOpenCodeCapability } from "@deck/adapter-opencode";
 import { getPiRunnerCapability, PI_RUNNER_CAPABILITY_IDS, getUserFacingCapability } from "@deck/adapter-pi";
@@ -138,6 +139,8 @@ type Screen =
   | "developer-team-review"
   | "developer-team-installing"
   | "opencode-preflight-checking"
+  | "configure-packages-runner-selection"
+  | "configure-packages-detail"
   | "complete";
 
 const HELP = "j/k or ↑/↓: navigate • space: toggle • enter: continue • esc: back • q: quit";
@@ -292,6 +295,11 @@ export function DeckApp() {
   const [dashboardInventory, setDashboardInventory] = useState<PiRunnerFullCapabilityInventory>({});
   const [dashboardActionResults, setDashboardActionResults] = useState<RunnerActionRunResult[]>([]);
 
+  // Configure packages standalone flow
+  const [configurePackagesRunner, setConfigurePackagesRunner] = useState<"pi" | "opencode" | null>(null);
+  const [configurePackagesCursor, setConfigurePackagesCursor] = useState(0);
+  const [configurePackagesToggles, setConfigurePackagesToggles] = useState<Record<string, boolean>>({});
+
   // Runtime-agnostic capability resolver — dispatches to the correct adapter based on runnerScope
   const dashboardCapabilityResolver = useMemo(() => ({
     getCapability: (capabilityId: string) => {
@@ -412,6 +420,7 @@ export function DeckApp() {
         setToolsReview(review);
         const inventory = buildPiRunnerCapabilityInventory(review, preflight, { runnerScope: "pi" });
         setDashboardInventory(inventory);
+        const piConfig = readDeckConfig(resolveProjectRoot());
         setDashboardState(createDefaultRunnerDashboardState({
           runtime: { runnerCommand: installedPi.command, preflight, toolsReview: review },
           capabilityStatuses: Object.fromEntries(
@@ -419,6 +428,7 @@ export function DeckApp() {
               .filter(([key]) => key !== '_internal')
               .map(([capabilityId, entry]) => [capabilityId, (entry as any)?.status]),
           ),
+          packageInstructions: loadRunnerPackageInstructionsFromConfig(piConfig, "pi"),
         }));
         setDashboardActionResults([]);
         resetCursor("pi-runner-dashboard");
@@ -454,6 +464,7 @@ export function DeckApp() {
         // Build OpenCode capability inventory and route to the same runner dashboard
         const inventory = buildOpenCodeRunnerCapabilityInventory(review, { runnerScope: "opencode", includeInternal: true });
         setDashboardInventory(inventory as any);
+        const opencodeConfig = readDeckConfig(resolveProjectRoot());
         setDashboardState(createDefaultRunnerDashboardState({
           runtime: { runnerCommand: installedOpenCode.command, preflight, toolsReview: review as any },
           runnerScope: "opencode",
@@ -469,6 +480,7 @@ export function DeckApp() {
               selected: false,
             },
           },
+          packageInstructions: loadRunnerPackageInstructionsFromConfig(opencodeConfig, "opencode"),
         }));
         setDashboardActionResults([]);
         resetCursor("pi-runner-dashboard");
@@ -689,6 +701,8 @@ export function DeckApp() {
       return selectedModel && supportsThinking ? thinkingLevels.length - 1 : 0;
     }
     if (screen === "no-providers") return 0;
+    if (screen === "configure-packages-runner-selection") return 2; // Pi, OpenCode, Back
+    if (screen === "configure-packages-detail") return 4; // 3 packages + Apply + Back
     return 0;
   }
 
@@ -701,6 +715,8 @@ export function DeckApp() {
     if (screen === "model-team-selection") setModelTeamCursor(next);
     if (screen === "agent-model-config-list") setAgentConfigCursor(next);
     if (screen === "developer-team-review") setDeveloperTeamCursor(next);
+    if (screen === "configure-packages-runner-selection") setConfigurePackagesCursor(next);
+    if (screen === "configure-packages-detail") setConfigurePackagesCursor(next);
   }
 
   function toggleCurrent() {
@@ -731,12 +747,28 @@ export function DeckApp() {
         current.includes(tool.id) ? current.filter((selected) => selected !== tool.id) : [...current, tool.id],
       );
     }
+
+    if (screen === "configure-packages-detail") {
+      const packages = ["codebase-memory", "context-mode", "rtk"];
+      const pkg = packages[configurePackagesCursor];
+      if (!pkg) return;
+      setConfigurePackagesToggles((current) => ({
+        ...current,
+        [pkg]: !current[pkg],
+      }));
+    }
   }
 
   function continueFromCurrent() {
     if (screen === "home") {
       const action = getHomeMenuOptions()[homeCursor]?.value;
       if (action === "start-installation") resetCursor("environment-selection");
+      if (action === "configure-packages") {
+        setConfigurePackagesRunner(null);
+        setConfigurePackagesCursor(0);
+        resetCursor("configure-packages-runner-selection");
+        return;
+      }
       if (action === "configure-models") {
         setModelConfigSource("menu");
         resetCursor("model-environment-selection");
@@ -809,6 +841,119 @@ export function DeckApp() {
         return resetCursor("opencode-preflight-checking");
       }
       resetCursor("complete");
+      return;
+    }
+
+    if (screen === "configure-packages-runner-selection") {
+      const runners = [
+        { id: "pi", label: "Pi" },
+        { id: "opencode", label: "OpenCode" },
+        { id: "back", label: "Back" },
+      ];
+      const selected = runners[configurePackagesCursor];
+      if (!selected || selected.id === "back") {
+        resetCursor("home");
+        return;
+      }
+      const runner = selected.id as "pi" | "opencode";
+      const config = readDeckConfig(resolveProjectRoot());
+      const instructions = loadRunnerPackageInstructionsFromConfig(config, runner);
+      setConfigurePackagesRunner(runner);
+      setConfigurePackagesCursor(0);
+      setConfigurePackagesToggles({
+        "codebase-memory": instructions["codebase-memory"] ?? false,
+        "context-mode": instructions["context-mode"] ?? false,
+        "rtk": instructions["rtk"] ?? false,
+      });
+      resetCursor("configure-packages-detail");
+      return;
+    }
+
+    if (screen === "configure-packages-detail") {
+      const options = [
+        { id: "codebase-memory" },
+        { id: "context-mode" },
+        { id: "rtk" },
+        { id: "apply" },
+        { id: "back" },
+      ];
+      const selected = options[configurePackagesCursor];
+      if (!selected) return;
+
+      if (selected.id === "back") {
+        setConfigurePackagesRunner(null);
+        setConfigurePackagesCursor(0);
+        resetCursor("configure-packages-runner-selection");
+        return;
+      }
+
+      if (selected.id === "apply" && configurePackagesRunner) {
+        const projectRoot = resolveProjectRoot();
+        const existingConfig = readDeckConfig(projectRoot);
+        const newPackageInstructions = {
+          ...existingConfig.packageInstructions,
+          [configurePackagesRunner]: {
+            ...existingConfig.packageInstructions?.[configurePackagesRunner],
+            ...configurePackagesToggles,
+          },
+        };
+        writeDeckConfig(projectRoot, {
+          ...existingConfig,
+          packageInstructions: newPackageInstructions,
+        });
+
+        if (configurePackagesRunner === "opencode") {
+          const configDir = join(homedir(), ".config", "opencode");
+          
+          // Leer assignments existentes para preservar modelos
+          let configModelOverrides: Record<string, string> = {};
+          let reasoningEffortOverrides: Record<string, string> = {};
+          try {
+            const opencodeConfig = JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8"));
+            for (const [agentId, entry] of Object.entries(opencodeConfig.agent ?? {})) {
+              if (agentId.startsWith("deck-developer-") && entry && typeof entry === "object") {
+                if ("model" in entry) configModelOverrides[agentId] = entry.model as string;
+                if ("reasoningEffort" in entry) reasoningEffortOverrides[agentId] = entry.reasoningEffort as string;
+              }
+            }
+          } catch {}
+          
+          // Construir bundle de instrucciones
+          const enabledIds = Object.entries(configurePackagesToggles)
+            .filter(([, enabled]) => enabled)
+            .map(([id]) => id);
+          const bundle = buildCapabilityInstructionBundle(enabledIds as any);
+          
+          // Generar y aplicar plan
+          const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+            configDir,
+            capabilityInstructions: bundle,
+            configModelOverrides,
+            reasoningEffortOverrides: reasoningEffortOverrides as any,
+          });
+          
+          try {
+            const result = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+            const updatedCount = result.results.filter((r) => r.status === "updated").length;
+            const createdCount = result.results.filter((r) => r.status === "created").length;
+            setDashboardCompletionStatus(
+              `Package instructions applied. ${updatedCount} updated, ${createdCount} created.`,
+            );
+          } catch (error) {
+            setDashboardCompletionStatus(
+              `Failed to apply: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        } else {
+          setDashboardCompletionStatus(`Package instructions saved for Pi. Run 'deck pi developer' to apply changes.`);
+        }
+        
+        setConfigurePackagesRunner(null);
+        setConfigurePackagesCursor(0);
+        resetCursor("complete");
+        return;
+      }
+
       return;
     }
 
@@ -1540,6 +1685,8 @@ export function DeckApp() {
         "developer-team-review": "memory-provider-selection",
         "developer-team-installing": "developer-team-review",
         "opencode-preflight-checking": "environment-check",
+        "configure-packages-runner-selection": "home",
+        "configure-packages-detail": "configure-packages-runner-selection",
         complete: "home",
       };
       next = previous[screen];
@@ -1613,7 +1760,17 @@ export function DeckApp() {
         <DeveloperTeamInstallingScreen currentStep={agentAssignmentIndex} totalSteps={DEVELOPER_TEAM_AGENTS.length} />
       ) : null}
       {screen === "opencode-preflight-checking" ? <OpenCodeCheckingScreen /> : null}
-      {screen === "complete" ? <CompleteScreen results={installResults} developerTeamResults={developerTeamResults} /> : null}
+      {screen === "configure-packages-runner-selection" ? (
+        <ConfigurePackagesRunnerSelection cursor={configurePackagesCursor} />
+      ) : null}
+      {screen === "configure-packages-detail" ? (
+        <ConfigurePackagesDetail
+          cursor={configurePackagesCursor}
+          runner={configurePackagesRunner}
+          toggles={configurePackagesToggles}
+        />
+      ) : null}
+      {screen === "complete" ? <CompleteScreen results={installResults} developerTeamResults={developerTeamResults} status={dashboardCompletionStatus} /> : null}
     </ScreenFrame>
   );
 }
@@ -1646,6 +1803,8 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "developer-team-review": "Developer Team",
     "developer-team-installing": "Installing Developer Team",
     "opencode-preflight-checking": "Checking OpenCode environment",
+    "configure-packages-runner-selection": "Configure Packages",
+    "configure-packages-detail": "Configure Packages",
     complete: "Complete",
   };
 
@@ -1666,6 +1825,63 @@ function OpenCodeCheckingScreen() {
     <Box flexDirection="column">
       <Text color="cyan">Inspecting OpenCode configuration...</Text>
       <Text dimColor>Deck is checking version, config directory, package manifest, and installed tools.</Text>
+    </Box>
+  );
+}
+
+function ConfigurePackagesRunnerSelection({ cursor }: { cursor: number }) {
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>Select a runner to configure package instructions for.</Text>
+      <Box marginTop={1}>
+        <MenuList
+          cursor={cursor}
+          items={[
+            { id: "pi", label: "Pi" },
+            { id: "opencode", label: "OpenCode" },
+            { id: "back", label: "Back" },
+          ]}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+function ConfigurePackagesDetail({
+  cursor,
+  runner,
+  toggles,
+}: {
+  cursor: number;
+  runner: "pi" | "opencode" | null;
+  toggles: Record<string, boolean>;
+}) {
+  const packages = [
+    { id: "codebase-memory", label: "Codebase Memory", hint: "graph-based code discovery instructions" },
+    { id: "context-mode", label: "Context Mode", hint: "batch execute and think-in-code instructions" },
+    { id: "rtk", label: "RTK", hint: "fallback guidance for hook-less environments" },
+  ];
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>
+        {runner ? `Configure Packages — ${runner === "pi" ? "Pi" : "OpenCode"}` : "Configure Packages"}
+      </Text>
+      <Text dimColor>Space toggles package instructions. Enter selects Apply or Back.</Text>
+      <Box marginTop={1}>
+        <MenuList
+          cursor={cursor}
+          items={[
+            ...packages.map((pkg) => ({
+              id: pkg.id,
+              label: `${toggles[pkg.id] ? "[x]" : "[ ]"} ${pkg.label}`,
+              hint: pkg.hint,
+            })),
+            { id: "apply", label: "Apply changes" },
+            { id: "back", label: "Back" },
+          ]}
+        />
+      </Box>
     </Box>
   );
 }
@@ -1938,13 +2154,13 @@ function OpenCodeInstallationReviewScreen({ cursor, plan }: { cursor: number; pl
   );
 }
 
-export function CompleteScreen({ results, developerTeamResults }: { results: (PiToolInstallResult | OpenCodeToolInstallResult)[]; developerTeamResults: AgentApplyResult[] }) {
+export function CompleteScreen({ results, developerTeamResults, status }: { results: (PiToolInstallResult | OpenCodeToolInstallResult)[]; developerTeamResults: AgentApplyResult[]; status?: string }) {
   const hasResults = results.length > 0 || developerTeamResults.length > 0;
 
   if (!hasResults) {
     return (
       <Box flexDirection="column">
-        <Text>Nothing was changed.</Text>
+        <Text>{status || "Nothing was changed."}</Text>
         <Box marginTop={1}>
           <Text dimColor>Press Enter to return to Home.</Text>
         </Box>

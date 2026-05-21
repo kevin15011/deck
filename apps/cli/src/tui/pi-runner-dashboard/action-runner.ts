@@ -5,7 +5,7 @@
  * Each adapter provides its own implementations for runtime-specific actions.
  */
 
-import { writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
+import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
 
@@ -238,13 +238,52 @@ async function runInternalPackageInstall(
   action: RunnerAction,
   dependencies: RunnerActionRunnerDependencies,
 ): Promise<RunnerActionRunResult> {
-  // Internal packages are handled by the adapter's installer if provided
+  const packageName = action.internalPackageId ?? action.id;
+
+  // Primary: use installInternalRunnerPackages if provided
+  if (dependencies.installInternalRunnerPackages) {
+    const runner = dependencies.installInternalRunnerPackages;
+    const installActions = [{ packageId: packageName, name: packageName, source: action.source ?? "", installKind: "pi-package", reason: action.title }];
+
+    const installResults = await runner(
+      dependencies.piCommand,
+      installActions,
+      (result) => {
+        dependencies.onActionResult?.({
+          actionId: action.id,
+          status: result.success ? "executed" : "failed",
+          message: result.success ? `Installed ${packageName}.` : `Failed to install ${packageName}.`,
+          diagnostics: result.message ? redactDiagnostics([result.message]) : [],
+          raw: redactRaw(result),
+        });
+      },
+    );
+
+    const result = installResults[0];
+    if (!result) {
+      return {
+        actionId: action.id,
+        status: "failed",
+        message: "Internal package installer returned no result.",
+        diagnostics: redactDiagnostics(action.diagnostics ?? []),
+      };
+    }
+
+    return {
+      actionId: action.id,
+      status: result.success ? "executed" : "failed",
+      message: result.success ? `Installed ${packageName}.` : `Failed to install ${packageName}.`,
+      diagnostics: result.message ? redactDiagnostics([result.message]) : [],
+      raw: redactRaw(result),
+    };
+  }
+
+  // Fallback: use installPackages if provided (backward compatibility)
   const runner = dependencies.installPackages;
   if (!runner) {
     return skippedResult(action, "Internal package installer not provided.");
   }
 
-  const packageName = action.internalPackageId ?? action.id;
   const installResults = await runner(
     dependencies.runnerCommand,
     [{ name: packageName, source: action.source ?? "" }],
@@ -290,24 +329,54 @@ function writeDeckConfigAction(
   const state = dependencies.dashboardState;
   const provider = state?.adaptiveMemory.provider ?? "none";
   const supermemory = state?.adaptiveMemory.supermemory;
-  const config = provider === "supermemory"
-    ? {
-        version: 1,
-        adaptiveMemory: {
+
+  // Read existing config to preserve OTHER runner's packageInstructions
+  const existingConfig = readDeckConfig(projectRoot);
+
+  // Determine current runner scope (defaults to "pi" for backward compatibility)
+  const currentRunner: "pi" | "opencode" = (state?.runnerScope ?? "pi") as "pi" | "opencode";
+
+  // Build packageInstructions: preserve other runner's config, update current runner's toggles
+  const currentPackageInstructions = state?.packageInstructions ?? {};
+  const piInstructions = currentRunner === "pi"
+    ? { ...existingConfig.packageInstructions.pi, ...currentPackageInstructions }
+    : { ...existingConfig.packageInstructions.pi };
+  const opencodeInstructions = currentRunner === "opencode"
+    ? { ...existingConfig.packageInstructions.opencode, ...currentPackageInstructions }
+    : { ...existingConfig.packageInstructions.opencode };
+
+  const updatedPackageInstructions: NormalizedDeckConfig["packageInstructions"] = {
+    pi: {
+      "codebase-memory": piInstructions["codebase-memory"] ?? false,
+      "context-mode": piInstructions["context-mode"] ?? false,
+      rtk: piInstructions.rtk ?? false,
+    },
+    opencode: {
+      "codebase-memory": opencodeInstructions["codebase-memory"] ?? false,
+      "context-mode": opencodeInstructions["context-mode"] ?? false,
+      rtk: opencodeInstructions.rtk ?? false,
+    },
+  };
+
+  const config: NormalizedDeckConfig = {
+    version: 1,
+    adaptiveMemory: provider === "supermemory"
+      ? {
           activeProvider: "supermemory" as const,
           supermemory: {
             userId: supermemory?.userId,
             teamId: supermemory?.teamId,
             orgId: supermemory?.organizationId,
           },
-        },
-      }
-    : provider === "engram"
-      ? { version: 1, adaptiveMemory: { activeProvider: "engram" as const } }
-      : { version: 1, adaptiveMemory: { activeProvider: "none" as const } };
+        }
+      : provider === "engram"
+        ? { activeProvider: "engram" as const }
+        : { activeProvider: "none" as const },
+    packageInstructions: updatedPackageInstructions,
+  };
 
   const writer = dependencies.writeDeckConfig ?? writeDeckConfig;
-  writer(projectRoot, config as NormalizedDeckConfig);
+  writer(projectRoot, config);
 
   return {
     actionId: action.id,

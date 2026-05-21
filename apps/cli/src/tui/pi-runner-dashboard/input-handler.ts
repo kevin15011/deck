@@ -7,7 +7,7 @@
 
 import type { RunnerDashboardAction } from "./reducer";
 import { getDashboardSectionSummaries, type CapabilityResolver } from "./selectors";
-import type { RunnerDashboardState } from "./state";
+import { CANONICAL_INSTRUCTION_PACKAGE_IDS, type RunnerDashboardState } from "./state";
 
 export type RunnerDashboardContinueEffect =
   | { type: "dispatch"; action: RunnerDashboardAction }
@@ -32,6 +32,10 @@ export function getDashboardToggleAction(
       const capabilityId = defaultIds[state.cursor];
       return capabilityId ? { type: "toggle-capability", capabilityId } : undefined;
     }
+    if (state.screen === "package-instructions-detail") {
+      const instructionId = CANONICAL_INSTRUCTION_PACKAGE_IDS[state.cursor];
+      return instructionId ? { type: "toggle-package-instruction", packageId: instructionId } : undefined;
+    }
     if (state.screen === "teams-detail" && state.cursor === 0) {
       return { type: "toggle-team", teamId: "developer-team" };
     }
@@ -42,6 +46,11 @@ export function getDashboardToggleAction(
     const capabilityIds = resolver.getUserFacingIds();
     const capabilityId = capabilityIds[state.cursor];
     return capabilityId ? { type: "toggle-capability", capabilityId } : undefined;
+  }
+
+  if (state.screen === "package-instructions-detail") {
+    const instructionId = CANONICAL_INSTRUCTION_PACKAGE_IDS[state.cursor];
+    return instructionId ? { type: "toggle-package-instruction", packageId: instructionId } : undefined;
   }
 
   if (state.screen === "teams-detail" && state.cursor === 0) {
@@ -104,6 +113,13 @@ export function getDashboardContinueEffect(
     if (state.cursor === 1) return { type: "reuse-developer-team-model-config" };
     if (state.cursor === 2) return { type: "dispatch", action: { type: "back" } };
     return { type: "none" };
+  }
+
+  if (state.screen === "package-instructions-detail") {
+    // Last item is "back"
+    if (state.cursor === CANONICAL_INSTRUCTION_PACKAGE_IDS.length) return { type: "dispatch", action: { type: "go-dashboard" } };
+    const action = getDashboardToggleAction(state, effectiveResolver);
+    return action ? { type: "dispatch", action } : { type: "none" };
   }
 
   if (state.screen === "review-plan") {

@@ -27,7 +27,7 @@ type RunnerDashboardScreensProps = {
  * Runtime-agnostic Runner Dashboard Screens.
  *
  * Works with any runner (Pi, OpenCode, etc.) via the capabilityResolver.
- * Dashboard sections: Packages, Adaptive Memory, Teams, Review & Install.
+ * Dashboard sections: Packages, Adaptive Memory, Teams, Configure Packages, Review & Install.
  */
 export function RunnerDashboardScreens({ state, installResults = [], completionStatus, canRunPlan, runBlockDiagnostics = [], capabilityResolver }: RunnerDashboardScreensProps) {
   switch (state.screen) {
@@ -39,6 +39,8 @@ export function RunnerDashboardScreens({ state, installResults = [], completionS
       return <TeamsDetail state={state} resolver={capabilityResolver} />;
     case "developer-team-detail":
       return <DeveloperTeamDetail state={state} resolver={capabilityResolver} />;
+    case "package-instructions-detail":
+      return <PackageInstructionsDetail state={state} />;
     case "review-plan":
       return <ReviewPlanScreen state={state} canRunPlan={canRunPlan} runBlockDiagnostics={runBlockDiagnostics} />;
     case "install-progress":
@@ -155,6 +157,38 @@ function AdaptiveMemoryDetail({ state }: { state: RunnerDashboardState }) {
       </Box>
       <Box marginTop={1}>
         <Text dimColor>{summary.detail}</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Package Instructions Detail
+// ---------------------------------------------------------------------------
+
+function PackageInstructionsDetail({ state }: { state: RunnerDashboardState }) {
+  const packages = [
+    { id: "codebase-memory" as const, label: "Codebase Memory", hint: "graph-based code discovery instructions" },
+    { id: "context-mode" as const, label: "Context Mode", hint: "batch execute and think-in-code instructions" },
+    { id: "rtk" as const, label: "RTK", hint: "fallback guidance for hook-less environments" },
+  ];
+
+  return (
+    <Box flexDirection="column">
+      <Text bold>Configure Packages</Text>
+      <Text dimColor>Instruction injection only; does not install packages. Space toggles each package.</Text>
+      <Box marginTop={1}>
+        <MenuList
+          cursor={state.cursor}
+          items={[
+            ...packages.map((pkg) => ({
+              id: pkg.id,
+              label: `${state.packageInstructions[pkg.id] ? "[x]" : "[ ]"} ${pkg.label}`,
+              hint: pkg.hint,
+            })),
+            { id: "back", label: "Back to dashboard" },
+          ]}
+        />
       </Box>
     </Box>
   );
