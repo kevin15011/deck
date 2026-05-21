@@ -101,7 +101,7 @@ const DASHBOARD_SECTION_COUNT = 4;
 const ADAPTIVE_MEMORY_OPTION_COUNT = 4; // none, engram, supermemory, back
 const TEAMS_OPTION_COUNT = 3; // Developer Team, Developer Team detail, back
 const DEVELOPER_TEAM_DETAIL_OPTION_COUNT = 3; // configure models, use current/defaults, back
-const REVIEW_PLAN_OPTION_COUNT = 3; // run, back, dashboard
+const REVIEW_PLAN_OPTION_COUNT = 2; // run, dashboard
 const INSTALL_PROGRESS_OPTION_COUNT = 1;
 const COMPLETE_OPTION_COUNT = 1;
 
@@ -152,12 +152,12 @@ export function getPlanActionCounts(plan: RunnerReviewPlan | undefined): PlanAct
   };
 }
 
-export function getDashboardSectionSummaries(state: RunnerDashboardState, resolver: CapabilityResolver): DashboardSectionSummary[] {
+export function getDashboardSectionSummaries(state: RunnerDashboardState, resolver?: CapabilityResolver): DashboardSectionSummary[] {
   const counts = getPlanActionCounts(state.plan);
   const capabilityOptions = getRunnerCapabilitySummaries(state, resolver);
   const selectedPackages = capabilityOptions.filter((option) => option.selected && option.requirementLevel === "configurable").length;
   const selectedTeams = Object.values(state.teams).filter((team) => team.selected).length;
-  const configurableIds = resolver.getUserFacingIds();
+  const configurableIds = resolver?.getUserFacingIds() ?? [];
   const packagesSignals = signalsForSection(state, configurableIds);
   const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.") || (action.capabilityId === "codebase-memory" && state.adaptiveMemory.provider === "engram")));
   const teamSignals = signalsForActions(state.plan?.groups.teamApplications ?? []);
@@ -167,7 +167,7 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
       id: "packages",
       title: "Packages",
       screen: "packages-detail",
-      readiness: readinessFromSignals(packagesSignals),
+      readiness: selectedPackages === 0 ? "pending" : readinessFromSignals(packagesSignals),
       selectedCount: selectedPackages,
       totalCount: configurableIds.length,
       actionCount: packagesSignals.actions,
@@ -177,7 +177,7 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
       id: "adaptive-memory",
       title: "Adaptive Memory",
       screen: "adaptive-memory-detail",
-      readiness: readinessForAdaptiveMemory(state, adaptiveSignals),
+      readiness: state.adaptiveMemory.provider === "none" ? "pending" : readinessForAdaptiveMemory(state, adaptiveSignals),
       selectedCount: state.adaptiveMemory.provider === "none" ? 0 : 1,
       totalCount: 1,
       actionCount: adaptiveSignals.actions,
@@ -187,7 +187,7 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
       id: "teams",
       title: "Teams",
       screen: "teams-detail",
-      readiness: readinessFromSignals(teamSignals),
+      readiness: selectedTeams === 0 ? "pending" : readinessFromSignals(teamSignals),
       selectedCount: selectedTeams,
       totalCount: Object.keys(state.teams).length,
       actionCount: teamSignals.actions,
@@ -210,8 +210,8 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
  * Returns capability option summaries for the Packages section.
  * Uses the injected capability resolver to get catalog entries.
  */
-export function getRunnerCapabilitySummaries(state: RunnerDashboardState, resolver: CapabilityResolver): CapabilityOptionSummary[] {
-  const configurable = resolver.getUserFacingIds();
+export function getRunnerCapabilitySummaries(state: RunnerDashboardState, resolver?: CapabilityResolver): CapabilityOptionSummary[] {
+  const configurable = resolver?.getUserFacingIds() ?? [];
   return configurable.map((capabilityId) =>
     capabilitySummary(state, capabilityId, Boolean(state.selectedCapabilities[capabilityId]), resolver),
   );
@@ -262,8 +262,8 @@ export function getTeamCapabilityProfile(state: RunnerDashboardState, teamId: st
 /**
  * Returns a summary for a single capability option.
  */
-function capabilitySummary(state: RunnerDashboardState, capabilityId: CapabilityId, selected: boolean, resolver: CapabilityResolver): CapabilityOptionSummary {
-  const capability = resolver.getCapability(capabilityId);
+function capabilitySummary(state: RunnerDashboardState, capabilityId: CapabilityId, selected: boolean, resolver?: CapabilityResolver): CapabilityOptionSummary {
+  const capability = resolver?.getCapability(capabilityId);
   if (!capability) {
     return {
       capabilityId,

@@ -412,7 +412,7 @@ describe("Pi Runner dashboard action runner Developer Team model preservation", 
           return dashboardPlan;
         },
         applyDeveloperTeamInstall: (plan) => {
-          dashboardPlan = plan;
+          dashboardPlan = plan as unknown as DeveloperTeamInstallPlan;
           return { results: [] } as never;
         },
       },

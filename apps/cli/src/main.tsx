@@ -5,9 +5,13 @@ import { parseArgs } from "./cli-args";
 import { runOpenCodeLaunch } from "./opencode-launch-command";
 import { runPiLaunch } from "./pi-launch-command";
 import { resolveProjectRoot } from "./project-root";
+import { createRunnerCapabilityRegistry, type RunnerCapabilityCatalog } from "./runner-capability-registry";
 import { DeckApp } from "./tui/app";
 import { ScreenFrame } from "./tui/screen-frame";
 import { HomeScreen } from "./tui/screens/home-screen";
+
+// Create the runner capability catalog at composition time
+const runnerCatalog: RunnerCapabilityCatalog = createRunnerCapabilityRegistry();
 
 // Drop the runtime/script args — Bun passes them as argv[0] and argv[1]
 const userArgs = process.argv.slice(2);

@@ -7,7 +7,6 @@
 
 import { writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
-import { buildDeveloperTeamInstallPlan } from "@deck/adapter-pi";
 import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
 
 export type RunnerActionRunStatus = "executed" | "informational" | "skipped" | "failed";
@@ -69,8 +68,8 @@ export type RunnerActionRunnerDependencies = {
   piCommand?: string;
   writeSupermemoryPiMcpConfig?: McpConfigWriterFn;
   validateSupermemoryPiMcpConfig?: McpConfigValidatorFn;
-  buildDeveloperTeamInstallPlan?: (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => { results: Array<{ agentId: string; kind: string; status: string }> };
-  applyDeveloperTeamInstall?: typeof buildDeveloperTeamInstallPlan;
+  buildDeveloperTeamInstallPlan?: (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => import("@deck/adapter-pi").DeveloperTeamInstallPlan;
+  applyDeveloperTeamInstall?: (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => import("@deck/adapter-pi").DeveloperTeamApplyResult;
   installInternalRunnerPackages?: (command: string | undefined, actions: Array<{ packageId: string; name: string; source: string; installKind: string; reason: string }>, onResult: (result: { success: boolean; message?: string }) => void) => Promise<Array<{ success: boolean; message?: string }>>;
   resolveAdaptiveMemoryProvider?: (options: { provider: string; supermemoryToken?: string; projectRoot?: string }) => AdaptiveMemoryProvider | undefined;
 };
@@ -503,8 +502,9 @@ function redactDiagnostics(diagnostics: string[]): string[] {
   return diagnostics.map(redact);
 }
 
-function redact(value: string): string {
-  return value
+function redact(value: unknown): string {
+  const str = typeof value === "string" ? value : String(value);
+  return str
     .replace(/sk-[a-zA-Z0-9]{20,}/g, "[redacted]")
     .replace(/eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g, "[redacted]");
 }

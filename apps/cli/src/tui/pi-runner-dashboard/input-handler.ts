@@ -116,7 +116,6 @@ export function getDashboardContinueEffect(
       }
       return { type: "dispatch", action: { type: "start-install" } };
     }
-    if (state.cursor === 1) return { type: "dispatch", action: { type: "back" } };
     return { type: "dispatch", action: { type: "go-dashboard" } };
   }
 

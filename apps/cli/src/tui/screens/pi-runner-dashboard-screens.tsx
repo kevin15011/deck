@@ -81,7 +81,7 @@ function canRunPlanFromState(state: RunnerDashboardState): boolean {
 // Dashboard Overview
 // ---------------------------------------------------------------------------
 
-function DashboardOverview({ state, resolver }: { state: RunnerDashboardState; resolver: CapabilityResolver }) {
+function DashboardOverview({ state, resolver }: { state: RunnerDashboardState; resolver?: CapabilityResolver }) {
   const sections = getDashboardSectionSummaries(state, resolver);
   const runnerLabel = state.runnerScope === "opencode" ? "OpenCode" : "Pi";
   return (
@@ -106,7 +106,7 @@ function DashboardOverview({ state, resolver }: { state: RunnerDashboardState; r
 // Packages Detail
 // ---------------------------------------------------------------------------
 
-function PackagesDetail({ state, resolver }: { state: RunnerDashboardState; resolver: CapabilityResolver }) {
+function PackagesDetail({ state, resolver }: { state: RunnerDashboardState; resolver?: CapabilityResolver }) {
   const capabilities = getRunnerCapabilitySummaries(state, resolver);
   const toggleable = capabilities.filter((capability) => capability.requirementLevel === "configurable" || capability.requirementLevel === "optional");
 
@@ -164,7 +164,7 @@ function AdaptiveMemoryDetail({ state }: { state: RunnerDashboardState }) {
 // Teams Detail
 // ---------------------------------------------------------------------------
 
-function TeamsDetail({ state, resolver }: { state: RunnerDashboardState; resolver: CapabilityResolver }) {
+function TeamsDetail({ state, resolver }: { state: RunnerDashboardState; resolver?: CapabilityResolver }) {
   const teams = Object.values(state.teams);
   return (
     <Box flexDirection="column">
@@ -192,7 +192,7 @@ function TeamsDetail({ state, resolver }: { state: RunnerDashboardState; resolve
 // Developer Team Detail
 // ---------------------------------------------------------------------------
 
-function DeveloperTeamDetail({ state, resolver }: { state: RunnerDashboardState; resolver: CapabilityResolver }) {
+function DeveloperTeamDetail({ state, resolver }: { state: RunnerDashboardState; resolver?: CapabilityResolver }) {
   const profile = getTeamCapabilityProfile(state, "developer-team");
   return (
     <Box flexDirection="column">
@@ -243,7 +243,6 @@ function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { sta
           cursor={state.cursor}
           items={[
             { id: "run", label: effectiveCanRun ? "Run install" : "Blocked", hint: effectiveCanRun ? "" : "Complete Supermemory setup first" },
-            { id: "back", label: "Back" },
             { id: "dashboard", label: "Dashboard" },
           ]}
         />

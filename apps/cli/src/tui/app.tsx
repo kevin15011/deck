@@ -6,6 +6,7 @@ import { Box, Text, useApp, useInput, useStdout } from "ink";
 import {
   buildOpenCodeInstallationPlan,
   buildOpenCodeRunnerCapabilityInventory,
+  buildOpenCodeRunnerReviewPlan,
   getSelectableOpenCodeTools,
   inspectOpenCodeEnvironment,
   installOpenCodeTools,
@@ -309,13 +310,17 @@ export function DeckApp() {
   // Runtime-agnostic plan builder — dispatches to the correct adapter based on runnerScope
   const dashboardPlanBuilder = useMemo(() => {
     return (state: RunnerDashboardState, inventory: unknown) => {
-      // Currently only Pi has a plan builder; OpenCode plan builder is deferred
       if (state.runnerScope === "opencode") {
-        return {
-          groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
-          diagnostics: [],
-          ready: false,
-        };
+        return buildOpenCodeRunnerReviewPlan(
+          {
+            runnerScope: state.runnerScope,
+            selectedCapabilities: state.selectedCapabilities,
+            adaptiveMemory: state.adaptiveMemory,
+            teams: state.teams,
+            runtime: { toolsReview: state.runtime.toolsReview as OpenCodeToolsReview | undefined },
+          },
+          inventory as Parameters<typeof buildOpenCodeRunnerReviewPlan>[1],
+        );
       }
       return buildPiRunnerReviewPlan(state as any, inventory as PiRunnerCapabilityInventory);
     };
