@@ -34,3 +34,9 @@ events:
     actor: deck-developer-proposal
     note: Proposal produced for v2 cycle targeting correct source layer (packages/core/). Same 7 needs as prior proposal with correct source file map. Reuses prior spec (27 REQs, 7 capabilities). Primary file is orchestrator-content.ts; no adapter changes needed. 4 open questions remain for Design/Spec.
     artifact: proposal.md
+  - type: change.abandoned
+    phase: tasks
+    status: abandoned
+    timestamp: '2026-05-23'
+    actor: deck-developer-archive
+    note: Change abandoned during replanning. Prior change (optimize-sdd-apply-and-commit-suggestions) remained incomplete. Planning artifacts (exploration, proposal, spec, design, tasks) completed but no Apply work performed. Change closed without implementation.

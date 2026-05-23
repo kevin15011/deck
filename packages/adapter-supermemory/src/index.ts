@@ -56,7 +56,7 @@ function diagnostic(message: string, code: "ADAPTIVE_MEMORY_HEALTH_UNKNOWN" | "A
   return createAdaptiveMemoryDiagnostic(code, message, { severity: code === "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED" ? "error" : "warning", providerId: "supermemory", recoverable: true });
 }
 
-function createAdapter(config: SupermemoryMemoryProviderConfig): AdaptiveMemoryAdapter {
+function createAdapter(config: SupermemoryMemoryProviderConfig, _authenticatedRuntimeValidated: { current: boolean }): AdaptiveMemoryAdapter {
   return {
     identity: { id: "supermemory", displayName: "Supermemory MCP" },
     async loadContext(request: AdaptiveMemoryContextRequest): Promise<AdaptiveMemoryContextResult> {
@@ -76,9 +76,13 @@ function createAdapter(config: SupermemoryMemoryProviderConfig): AdaptiveMemoryA
       }
       return { savedCount: 0, discardedCount: request.candidates.length, decisions: request.candidates.map((candidate) => ({ accepted: false, scope: candidate.scope.scope, source: candidate.metadata.source, reason: "Commit guidance is emitted for Pi MCP execution; adapter does not persist memories directly." })), diagnostics: [diagnostic("Runtime commits are performed through the validated execute MCP tool.")] };
     },
-    async configure(_request: AdaptiveMemoryConfigureRequest): Promise<void> {},
+    async configure(request: AdaptiveMemoryConfigureRequest): Promise<void> {
+      if (typeof request.providerState?.authenticatedRuntimeValidated === "boolean") {
+        _authenticatedRuntimeValidated.current = request.providerState.authenticatedRuntimeValidated;
+      }
+    },
     async health(): Promise<AdaptiveMemoryHealthResult> {
-      return { providerId: "supermemory", status: config.authenticatedRuntimeValidated ? "available" : "degraded", diagnostics: config.authenticatedRuntimeValidated ? [] : [diagnostic("Supermemory requires authenticated runtime validation through an execute read-only probe before full availability.", "ADAPTIVE_MEMORY_HEALTH_UNKNOWN")] };
+      return { providerId: "supermemory", status: _authenticatedRuntimeValidated.current ? "available" : "degraded", diagnostics: _authenticatedRuntimeValidated.current ? [] : [diagnostic("Supermemory requires authenticated runtime validation through an execute read-only probe before full availability.", "ADAPTIVE_MEMORY_HEALTH_UNKNOWN")] };
     },
   };
 }
@@ -89,17 +93,26 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
   validatedContainer(personalContainer(normalized.userId));
   if (normalized.teamId) validatedContainer(`t:${normalized.teamId}`);
   if (normalized.orgId) validatedContainer(`o:${normalized.orgId}`);
-  const adapter = createAdapter(normalized);
+  const _authenticatedRuntimeValidated = { current: config.authenticatedRuntimeValidated ?? false };
+  const adapter = createAdapter(normalized, _authenticatedRuntimeValidated);
   return {
     id: "supermemory",
     displayName: "Supermemory MCP",
     adapter,
     health: () => adapter.health(),
     buildInjection(): MemoryInjectionBundle {
-      if (!normalized.authenticatedRuntimeValidated) {
-        throw new Error("Supermemory authenticated runtime validation is required before MCP tool injection.");
-      }
-      const bindings: readonly MemoryToolBinding[] = [{ capability: "memory.search", serverName: normalized.mcpServerName, toolNames: SUPERMEMORY_MCP_TOOLS, metadata: { endpoint: SUPERMEMORY_MCP_SERVER_URL, requiresAuthenticatedExecuteProbe: true, authenticatedRuntimeValidated: true, serverQualifiedToolNamesRequired: true } }];
+      const bindings: readonly MemoryToolBinding[] = [{
+        capability: "memory.search",
+        serverName: normalized.mcpServerName,
+        toolNames: SUPERMEMORY_MCP_TOOLS,
+        metadata: {
+          endpoint: SUPERMEMORY_MCP_SERVER_URL,
+          requiresAuthenticatedExecuteProbe: true,
+          authenticatedRuntimeValidated: _authenticatedRuntimeValidated.current,
+          serverQualifiedToolNamesRequired: true,
+          serverQualifiedToolNames: [normalized.mcpServerName + ".execute", normalized.mcpServerName + ".search_docs"],
+        },
+      }];
       return { instructions: createFragments(normalized), toolBindings: bindings };
     },
   };

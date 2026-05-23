@@ -1,6 +1,11 @@
 change: optimize-sdd-v2-core-implementation
-current_phase: tasks
-status: completed
+current_phase: closed
+status: abandoned
+closure_reason: Change abandoned during replanning. Prior change (optimize-sdd-apply-and-commit-suggestions) was incomplete, and this v2 cycle was created to correct the implementation target from .pi/ to packages/core/. However, the change was abandoned before Apply phase began. No implementation work was performed.
+closed_at: "2026-05-23"
+references:
+  prior_incomplete_change: optimize-sdd-apply-and-commit-suggestions
+  prior_change_status: incomplete
 phases:
   explore:
     status: completed
@@ -47,6 +52,18 @@ phases:
         note: Prior spec with 27 valid REQs across 7 capabilities — reused
       - source: openspec/changes/optimize-sdd-v2-core-implementation/exploration.md
         note: New architecture investigation confirming three-layer source/adapter/output model and correct implementation targets
+  spec:
+    status: completed
+    artifact: spec.md
+    completed_at: '2026-05-20'
+  design:
+    status: completed
+    artifact: design.md
+    completed_at: '2026-05-20'
+  tasks:
+    status: completed
+    artifact: tasks.md
+    completed_at: '2026-05-20'
 artifacts:
   exploration.md:
     path: openspec/changes/optimize-sdd-v2-core-implementation/exploration.md
@@ -73,35 +90,8 @@ artifacts:
     phase: tasks
     status: completed
     created: '2026-05-20'
-  prior_change: optimize-sdd-apply-and-commit-suggestions
-prior_change_status: incomplete
-prior_change_note: All planning artifacts (proposal, spec, design, tasks, review) from prior change are valid and should be reused. Implementation failed because changes were applied to .pi/ (generated output) instead of packages/core/ (source).
-scope_amendments:
-  - added_at: '2026-05-20'
-    added_by: deck-developer-orchestrator
-    description: First implementation attempt applied changes to .pi/ which is gitignored adapter output. This cycle must implement changes in the correct source: packages/core/ and packages/sdd-runtime/ (source).
-  - added_at: '2026-05-20'
-    added_by: deck-developer-explorer
-    description: Confirmed architecture — all agent content lives in packages/core/src/teams/developer/, adapter-pi only materializes to .pi/, no adapter changes needed for the 7 needs. Primary implementation file is orchestrator-content.ts.
-key_findings:
-  - finding: Three-layer architecture confirmed — source (packages/core/), adapter (packages/adapter-pi/), output (.pi/).
-    detail: All 7 needs are implemented as content updates in packages/core/src/teams/developer/. No adapter changes required.
-  - finding: orchestrator-content.ts is the primary file for all 7 needs.
-    detail: SDD phase sequence, apply routing, triage, delegation, persistence policy, execution config respect, and Mermaid summaries are all guidance text in the Orchestrator's ORCHESTRATOR_SYSTEM_PROMPT and ORCHESTRATOR_SKILL_BODY.
-  - finding: Phase sequence is guidance text, not code-enforced.
-    detail: packages/sdd-runtime/ provides pipeline utilities (audit, risk, quality, loop, budget, state management) but does not hard-code phase ordering. Phase sequencing lives in Orchestrator prompts.
-  - finding: Apply batching guidance is in orchestrator-content.ts.
-    detail: Grouping by owner/context, parallel fanout criteria, and blocked-task gating are text rules in the Apply Routing section of the Orchestrator content.
-  - finding: Persistence hardening spans orchestrator-content.ts plus all phase content files.
-    detail: Self-verification rules for phase agents and Orchestrator verification before phase advancement live in orchestrator-content.ts. Individual phase SKILL_BODY files need self-verification steps.
-  - finding: Mermaid summaries require updates to visual-explanations-content.ts, orchestrator-content.ts, and phase content files.
-    detail: Phase agents should provide Mermaid source or diagram-ready structure in artifacts for Orchestrator to include in user-facing summaries.
-  - finding: Execution config respect is guidance in orchestrator-content.ts.
-    detail: The adapter already preserves model/thinking via readDeveloperTeamModelAssignments(). Orchestrator guidance must not override registered config.
-  - finding: Post-Archive Git suggestions require orchestrator-content.ts and archive-content.ts updates.
-    detail: Archive prepares change diff context; Orchestrator suggests conventional commits and PR metadata after Archive completes.
-  - finding: Explorer-before-Proposal triage expansion is in orchestrator-content.ts SDD Triage Gate section.
-    detail: Expand triggers to cover codebase, architecture, agent config, prompt, workflow-internal, OpenSpec/routing, and broad-impact changes.
-  - finding: Role-based delegation clarification is in orchestrator-content.ts Delegation Rules section.
-    detail: Specialized role delegation applies outside formal SDD/direct when delegation rules trigger, while SDD remains the formal pipeline.
-blockers: []
+lessons_learned:
+  - Three-layer architecture confirmed: source (packages/core/), adapter (packages/adapter-pi/), output (.pi/)
+  - Primary implementation file for SDD orchestration changes: orchestrator-content.ts
+  - Phase sequence is guidance text in Orchestrator prompts, not code-enforced in sdd-runtime
+  - All 7 needs from prior change target orchestrator-content.ts; no adapter changes required

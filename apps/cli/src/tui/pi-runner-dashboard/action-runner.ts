@@ -172,7 +172,7 @@ export async function runRunnerAction(
       case "write-mcp-config":
         return writeMcpConfigAction(action, dependencies);
       case "apply-team-bundle":
-        return applyTeamBundleAction(action, dependencies);
+        return await applyTeamBundleAction(action, dependencies);
       case "validate":
         return validateAction(action, dependencies);
       default:
@@ -420,10 +420,10 @@ function writeMcpConfigAction(
   };
 }
 
-function applyTeamBundleAction(
+async function applyTeamBundleAction(
   action: RunnerAction,
   dependencies: RunnerActionRunnerDependencies,
-): RunnerActionRunResult {
+): Promise<RunnerActionRunResult> {
   const projectRoot = dependencies.projectRoot;
   if (!projectRoot) {
     return skippedResult(action, "Project root is required to apply team bundle.");
@@ -435,17 +435,7 @@ function applyTeamBundleAction(
   }
 
   const memoryProvider = dependencies.resolvedMemoryProvider ?? dependencies.memoryProvider;
-  const installerResult = installer(projectRoot, memoryProvider ? { memoryProvider } : undefined);
-
-  // Handle both sync and async results
-  if (installerResult instanceof Promise) {
-    return {
-      actionId: action.id,
-      status: "executed",
-      message: "Team bundle installation initiated (async).",
-      diagnostics: redactDiagnostics(action.diagnostics ?? []),
-    };
-  }
+  const installerResult = await installer(projectRoot, memoryProvider ? { memoryProvider } : undefined);
 
   const result = installerResult as { results?: Array<{ agentId?: string; kind?: string; status?: string }> };
   const count = result?.results?.length ?? 0;

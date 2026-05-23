@@ -28,6 +28,7 @@ import {
   type OpenCodePreflightResult,
   type OpenCodeToolsReview,
   type OpenCodeToolInstallResult,
+  writeSupermemoryOpenCodeMcpConfig,
 } from "@deck/adapter-opencode";
 import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/external";
 import {
@@ -525,11 +526,31 @@ export function DeckApp() {
 
     async function runDashboardInstall() {
       setDashboardActionResults([]);
+      const isOpenCode = dashboardState.runnerScope === "opencode";
+      const resolvedMemoryProvider = isOpenCode && memoryProvider ? memoryProvider : undefined;
       const results = await runRunnerReviewPlan(dashboardState.plan!, {
         projectRoot: resolveProjectRoot(),
         runnerCommand: dashboardState.runtime.runnerCommand,
         dashboardState,
         supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
+        memoryProvider: resolvedMemoryProvider,
+        resolvedMemoryProvider,
+        writeMcpConfig: isOpenCode ? writeSupermemoryOpenCodeMcpConfig : undefined,
+        installTeamBundle: isOpenCode ? async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => {
+          const deckConfig = readDeckConfig(projectRoot);
+          const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
+          const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+          const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
+          const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { ...(options?.memoryProvider ? { memoryProvider: options.memoryProvider } : {}), capabilityInstructions, standaloneSkills });
+          const backup = backupOpenCodeDeveloperTeamFiles(plan);
+          const applyResult = applyOpenCodeDeveloperTeamInstall(plan);
+          const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
+          if (!verifyResult.valid) {
+            rollbackOpenCodeDeveloperTeamFiles(backup);
+            throw new Error("Verification failed. Changes rolled back.");
+          }
+          return { results: applyResult.results ?? [] };
+        } : undefined,
         onActionResult: (result: RunnerActionRunResult) => {
           if (!cancelled) setDashboardActionResults((current) => [...current, result]);
         },

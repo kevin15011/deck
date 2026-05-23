@@ -161,6 +161,7 @@ export type AdaptiveMemoryConfigureRequest = {
     limit?: number;
     commitPolicy?: Partial<AdaptiveMemoryCommitPolicy>;
   };
+  providerState?: Record<string, unknown>;
 };
 
 export type AdaptiveMemoryHealthStatus = "available" | "unavailable" | "degraded" | "unknown";

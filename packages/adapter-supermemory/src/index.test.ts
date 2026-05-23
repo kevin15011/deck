@@ -29,12 +29,15 @@ describe("createSupermemoryMemoryProvider", () => {
     expect(text).toContain("supermemory.search_docs");
   });
 
-  test("health and injection fail closed until authenticated runtime validation is known", async () => {
+  test("health returns degraded and buildInjection succeeds when auth validation is not yet known", async () => {
     const provider = createSupermemoryMemoryProvider({ userId: "kevin" });
     const health = await provider.health!();
     expect(health.status).toBe("degraded");
     expect(health.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_HEALTH_UNKNOWN");
-    expect(() => provider.buildInjection({ teamId: "developer-team" })).toThrow(/authenticated runtime validation/);
+    const bundle = provider.buildInjection({ teamId: "developer-team" });
+    expect(bundle.instructions).toHaveLength(3);
+    expect(bundle.toolBindings).toHaveLength(1);
+    expect(bundle.toolBindings[0].metadata.authenticatedRuntimeValidated).toBe(false);
   });
 
   test("uses governance validators for invalid containers and commit candidates", async () => {
@@ -49,5 +52,37 @@ describe("createSupermemoryMemoryProvider", () => {
     }] });
     expect(result.savedCount).toBe(0);
     expect(result.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_GOVERNANCE_REJECTED");
+  });
+
+  test("buildInjection succeeds without authenticatedRuntimeValidated field", () => {
+    const bundle = createSupermemoryMemoryProvider({ userId: "test" }).buildInjection({ teamId: "developer-team" });
+    expect(bundle.instructions).toHaveLength(3);
+    expect(bundle.toolBindings[0].metadata.authenticatedRuntimeValidated).toBe(false);
+  });
+
+  test("buildInjection succeeds with authenticatedRuntimeValidated false", () => {
+    const bundle = createSupermemoryMemoryProvider({ userId: "test", authenticatedRuntimeValidated: false }).buildInjection({});
+    expect(bundle.instructions).toHaveLength(3);
+    expect(bundle.toolBindings).toHaveLength(1);
+    expect(bundle.toolBindings[0].metadata.authenticatedRuntimeValidated).toBe(false);
+  });
+
+  test("configure updates auth state and health reflects it", async () => {
+    const provider = createSupermemoryMemoryProvider({ userId: "kevin" });
+    expect((await provider.health!()).status).toBe("degraded");
+    await provider.adapter!.configure({ providerId: "supermemory", providerState: { authenticatedRuntimeValidated: true } });
+    expect((await provider.health!()).status).toBe("available");
+    expect((await provider.health!()).diagnostics).toHaveLength(0);
+  });
+
+  test("tool binding metadata includes serverQualifiedToolNames", () => {
+    const bundle = createSupermemoryMemoryProvider({ userId: "test" }).buildInjection({});
+    expect(bundle.toolBindings[0].metadata.serverQualifiedToolNames).toEqual(["supermemory.execute", "supermemory.search_docs"]);
+  });
+
+  test("buildInjection with custom server name", () => {
+    const bundle = createSupermemoryMemoryProvider({ userId: "test", mcpServerName: "custom" }).buildInjection({});
+    expect(bundle.toolBindings[0].serverName).toBe("custom");
+    expect(bundle.toolBindings[0].metadata.serverQualifiedToolNames).toEqual(["custom.execute", "custom.search_docs"]);
   });
 });
