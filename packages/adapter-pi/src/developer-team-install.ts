@@ -44,12 +44,20 @@ export type PlannedSkillFile = {
   content: string;
 };
 
+export type PlannedStandaloneSkillFile = {
+  skillId: string;
+  relativePath: string;
+  absolutePath: string;
+  content: string;
+};
+
 export type DeveloperTeamInstallPlan = {
   projectRoot: string;
   agentsDir: string;
   skillsDir: string;
   agents: PlannedAgentFile[];
   skills: PlannedSkillFile[];
+  standaloneSkills: PlannedStandaloneSkillFile[];
   memoryDiagnostics: MemoryDiagnostic[];
 };
 
@@ -122,6 +130,12 @@ export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
    * Adapters should prefer passing this over having each builder re-compose.
    */
   capabilityInstructions?: CapabilityInstructionBundle;
+  /**
+   * Standalone skill definitions to include in the install plan.
+   * When provided, these skills are written as-is (verbatim) to .pi/skills/{skillId}/SKILL.md
+   * without generating agent-bound frontmatter.
+   */
+  standaloneSkills?: readonly { skillId: string; body: string }[];
 };
 
 // --- Legacy local resolveMemoryInjection (delegated to core) ---
@@ -286,7 +300,14 @@ export function buildDeveloperTeamInstallPlan(
     return { agent, relativePath, absolutePath, content };
   });
 
-  return { projectRoot, agentsDir, skillsDir, agents, skills, memoryDiagnostics };
+  // Build standalone skill files (verbatim, no generated frontmatter)
+  const standaloneSkills: PlannedStandaloneSkillFile[] = (options?.standaloneSkills ?? []).map((skill) => {
+    const relativePath = `.pi/skills/${skill.skillId}/SKILL.md`;
+    const absolutePath = join(projectRoot, relativePath);
+    return { skillId: skill.skillId, relativePath, absolutePath, content: skill.body };
+  });
+
+  return { projectRoot, agentsDir, skillsDir, agents, skills, standaloneSkills, memoryDiagnostics };
 }
 
 export function readDeveloperTeamModelAssignments(
@@ -397,7 +418,22 @@ export function applyDeveloperTeamInstall(
     return { agentId: planned.agent.id, kind: "skill" as const, status: "created" as const };
   });
 
-  return { results: [...agentResults, ...skillResults] };
+  // Write standalone skills (verbatim, no generated frontmatter)
+  const standaloneSkillResults: BundleApplyResult[] = plan.standaloneSkills.map((planned) => {
+    if (exists(planned.absolutePath)) {
+      const existing = readFile(planned.absolutePath, "utf-8");
+      if (existing === planned.content) {
+        return { agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const };
+      }
+      writeFile(planned.absolutePath, planned.content, "utf-8");
+      return { agentId: planned.skillId, kind: "skill" as const, status: "updated" as const };
+    }
+
+    writeFile(planned.absolutePath, planned.content, "utf-8");
+    return { agentId: planned.skillId, kind: "skill" as const, status: "created" as const };
+  });
+
+  return { results: [...agentResults, ...skillResults, ...standaloneSkillResults] };
 }
 
 // --- Verify ---

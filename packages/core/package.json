@@ -19,6 +19,7 @@
     "./teams/developer/content-registry": "./src/teams/developer/content-registry.ts",
     "./teams/developer/instruction-bundles": "./src/teams/developer/instruction-bundles/index.ts",
     "./teams/developer/orchestrator-content": "./src/teams/developer/orchestrator-content.ts",
-    "./teams/developer/explorer-content": "./src/teams/developer/explorer-content.ts"
+    "./teams/developer/explorer-content": "./src/teams/developer/explorer-content.ts",
+    "./skills/external": "./src/skills/external/index.ts"
   }
 }

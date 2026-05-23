@@ -227,10 +227,16 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     memoryBundle: undefined,
   }));
 
+  const standaloneSkills = plan.standaloneSkills.map((s) => ({
+    skillId: s.skillId,
+    body: s.content,
+  }));
+
   return {
     team: OPENCODE_DEVELOPMENT_TEAMS[0],
     agents,
     skills,
+    standaloneSkills,
     memoryDiagnostics: plan.memoryDiagnostics,
   };
 }
@@ -250,11 +256,13 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
     configModelOverrides: modelAssignments,
     reasoningEffortOverrides: reasoningAssignments,
     capabilityInstructions: input.capabilityInstructions,
+    standaloneSkills: input.manifest.standaloneSkills,
   });
 
   // OpenCode writes skill files, prompt files, and command files
   const files: import("@deck/core").DeveloperTeamInstallFile[] = [
     ...plan.skills.map((s) => ({ path: s.relativePath, content: s.content })),
+    ...plan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content })),
     // Prompt and command files would be added from promptGenerationPlan and commandGenerationPlan
   ];
 
@@ -262,19 +270,31 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
 }
 
 async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyInput): Promise<RunnerDeveloperTeamApplyResult> {
+  // Separate agent-bound skills from standalone skills via the path pattern
+  const agentSkillFiles = input.plan.files.filter((f: { path: string }) => f.path.includes("/skills/") && !f.path.includes(".opencode/skills/judgment-day") && !f.path.includes(".opencode/skills/cognitive-doc-design") && !f.path.includes(".opencode/skills/comment-writer"));
+  const standaloneSkillFiles = input.plan.files.filter((f: { path: string }) =>
+    f.path.includes(".opencode/skills/judgment-day") ||
+    f.path.includes(".opencode/skills/cognitive-doc-design") ||
+    f.path.includes(".opencode/skills/comment-writer")
+  );
+
   const plan: OpenCodeDeveloperTeamInstallPlan = {
     projectRoot: input.projectRoot,
     agentsDir: `${input.projectRoot}/.opencode/agents`,
     skillsDir: `${input.projectRoot}/.opencode/skills`,
     agents: [],
-    skills: input.plan.files
-      .filter((f: { path: string }) => f.path.includes("/skills/"))
-      .map((f: { path: string; content: string }) => ({
-        agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
-        relativePath: f.path,
-        absolutePath: `${input.projectRoot}/${f.path}`,
-        content: f.content,
-      })),
+    skills: agentSkillFiles.map((f: { path: string; content: string }) => ({
+      agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
+      relativePath: f.path,
+      absolutePath: `${input.projectRoot}/${f.path}`,
+      content: f.content,
+    })),
+    standaloneSkills: standaloneSkillFiles.map((f: { path: string; content: string }) => ({
+      skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
+      relativePath: f.path,
+      absolutePath: `${input.projectRoot}/${f.path}`,
+      content: f.content,
+    })),
     memoryDiagnostics: [],
     agentEntries: {},
     promptGenerationPlan: {} as ReturnType<typeof import("./prompt-generation").buildPromptGenerationPlan>,
@@ -418,21 +438,32 @@ function buildTeamInstallPlanFromInput(input: import("@deck/core").DeveloperTeam
 
   const files: import("@deck/core").DeveloperTeamInstallFile[] = [
     ...plan.skills.map((s) => ({ path: s.relativePath, content: s.content })),
+    ...plan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content })),
   ];
 
   return { files };
 }
 
 function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApplyInput): Promise<import("@deck/core").DeveloperTeamApplyResult> {
+  // Separate standalone skills from agent-bound skills
+  const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
   const plan: OpenCodeDeveloperTeamInstallPlan = {
     projectRoot: input.projectRoot,
     agentsDir: `${input.projectRoot}/.opencode/agents`,
     skillsDir: `${input.projectRoot}/.opencode/skills`,
     agents: [],
     skills: input.plan.files
-      .filter((f) => f.path.includes("/skills/"))
+      .filter((f) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
       .map((f) => ({
         agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
+        relativePath: f.path,
+        absolutePath: `${input.projectRoot}/${f.path}`,
+        content: f.content,
+      })),
+    standaloneSkills: input.plan.files
+      .filter((f) => standaloneSkillIds.some((id) => f.path.includes(id)))
+      .map((f) => ({
+        skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
         relativePath: f.path,
         absolutePath: `${input.projectRoot}/${f.path}`,
         content: f.content,
@@ -462,15 +493,24 @@ function verifyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamVeri
 }
 
 function backupTeamFiles(plan: import("@deck/core").RunnerDeveloperTeamInstallPlan): import("@deck/core").BackupManifest {
+  const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
   const nativePlan: OpenCodeDeveloperTeamInstallPlan = {
     projectRoot: "",
     agentsDir: "",
     skillsDir: "",
     agents: [],
     skills: plan.files
-      .filter((f) => f.path.includes("/skills/"))
+      .filter((f) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
       .map((f) => ({
         agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
+        relativePath: f.path,
+        absolutePath: f.path,
+        content: f.content,
+      })),
+    standaloneSkills: plan.files
+      .filter((f) => standaloneSkillIds.some((id) => f.path.includes(id)))
+      .map((f) => ({
+        skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
         relativePath: f.path,
         absolutePath: f.path,
         content: f.content,

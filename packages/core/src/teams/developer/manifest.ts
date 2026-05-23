@@ -26,8 +26,10 @@ import type {
   DeveloperTeamManifest,
   DeveloperTeamManifestAgent,
   DeveloperTeamManifestSkill,
+  DeveloperTeamManifestStandaloneSkill,
 } from "../../runner-capability";
 import type { CapabilityInstructionBundle } from "./instruction-bundles/index";
+import { getStandaloneSkills, getStandaloneSkillBody } from "../../skills/external";
 
 // Re-export model catalog types for convenience
 export type { ModelCatalog, DeveloperTeamDefaultModelAssignment, ReasoningLevel };
@@ -36,7 +38,7 @@ export type { ModelCatalog, DeveloperTeamDefaultModelAssignment, ReasoningLevel 
 // Types
 // ---------------------------------------------------------------------------
 
-export type { DeveloperTeamManifest, DeveloperTeamManifestAgent, DeveloperTeamManifestSkill };
+export type { DeveloperTeamManifest, DeveloperTeamManifestAgent, DeveloperTeamManifestSkill, DeveloperTeamManifestStandaloneSkill };
 
 export type BuildManifestOptions = {
   team: TeamEntry;
@@ -105,10 +107,23 @@ export function buildDeveloperTeamManifest(options: BuildManifestOptions): Devel
     });
   }
 
+  // Build standalone skill manifests (not bound to agents)
+  const standaloneSkills: DeveloperTeamManifestStandaloneSkill[] = [];
+  for (const skillDef of getStandaloneSkills()) {
+    const body = getStandaloneSkillBody(skillDef.skillId);
+    if (body !== undefined) {
+      standaloneSkills.push({
+        skillId: skillDef.skillId,
+        body,
+      });
+    }
+  }
+
   return {
     team,
     agents,
     skills,
+    standaloneSkills,
     memoryDiagnostics,
   };
 }

@@ -130,6 +130,7 @@ export type DeveloperTeamManifest = {
   team: TeamEntry;
   agents: readonly DeveloperTeamManifestAgent[];
   skills: readonly DeveloperTeamManifestSkill[];
+  standaloneSkills?: readonly DeveloperTeamManifestStandaloneSkill[];
   memoryDiagnostics: readonly MemoryDiagnostic[];
 };
 
@@ -153,6 +154,12 @@ export type DeveloperTeamManifestSkill = {
   skillId: string;
   body: string;
   memoryBundle?: MemoryInjectionBundle;
+};
+
+export type DeveloperTeamManifestStandaloneSkill = {
+  skillId: string;
+  /** Contenido verbatim del SKILL.md incluyendo frontmatter */
+  body: string;
 };
 
 export type MemoryDiagnostic = {

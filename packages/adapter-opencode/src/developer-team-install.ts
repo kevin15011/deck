@@ -44,12 +44,20 @@ export type OpenCodePlannedSkillFile = {
   content: string;
 };
 
+export type OpenCodePlannedStandaloneSkillFile = {
+  skillId: string;
+  relativePath: string;
+  absolutePath: string;
+  content: string;
+};
+
 export type OpenCodeDeveloperTeamInstallPlan = {
   projectRoot: string;
   agentsDir: string;
   skillsDir: string;
   agents: OpenCodePlannedAgentFile[];
   skills: OpenCodePlannedSkillFile[];
+  standaloneSkills: OpenCodePlannedStandaloneSkillFile[];
   memoryDiagnostics: MemoryDiagnostic[];
   /** Agent entries for opencode.json config merge */
   agentEntries: Record<string, AgentEntry>;
@@ -105,6 +113,12 @@ export type MemoryInjectionOptions = {
    * fragments are composed into skill content via the content registry.
    */
   capabilityInstructions?: CapabilityInstructionBundle;
+  /**
+   * Standalone skill definitions to include in the install plan.
+   * When provided, these skills are written as-is (verbatim) to .opencode/skills/{skillId}/SKILL.md
+   * without generating agent-bound frontmatter.
+   */
+  standaloneSkills?: readonly { skillId: string; body: string }[];
 };
 
 // ---------------------------------------------------------------------------
@@ -268,6 +282,13 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     return { agent, relativePath, absolutePath, content };
   });
 
+  // Build standalone skill files (verbatim, no generated frontmatter)
+  const standaloneSkills: OpenCodePlannedStandaloneSkillFile[] = (options?.standaloneSkills ?? []).map((skill) => {
+    const relativePath = `.opencode/skills/${skill.skillId}/SKILL.md`;
+    const absolutePath = join(projectRoot, relativePath);
+    return { skillId: skill.skillId, relativePath, absolutePath, content: skill.body };
+  });
+
   // Prompt generation plan
   const promptGenerationPlan = buildPromptGenerationPlan({ configDir, projectRoot, capabilityInstructions });
 
@@ -283,6 +304,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     skillsDir,
     agents: [], // Skills are in skills[]
     skills,
+    standaloneSkills,
     memoryDiagnostics,
     agentEntries,
     promptGenerationPlan,
@@ -358,6 +380,26 @@ export function applyOpenCodeDeveloperTeamInstall(
     } else {
       writeFile(planned.absolutePath, planned.content, "utf-8");
       results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "created" as const });
+    }
+  }
+
+  // 3. Write standalone skills (verbatim, no generated frontmatter)
+  for (const planned of plan.standaloneSkills) {
+    const skillDir = join(planned.absolutePath, "..");
+    if (!exists(skillDir)) {
+      mkdir(skillDir, { recursive: true });
+    }
+    if (exists(planned.absolutePath)) {
+      const existing = readFile(planned.absolutePath, "utf-8");
+      if (existing !== planned.content) {
+        writeFile(planned.absolutePath, planned.content, "utf-8");
+        results.push({ agentId: planned.skillId, kind: "skill" as const, status: "updated" as const });
+      } else {
+        results.push({ agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const });
+      }
+    } else {
+      writeFile(planned.absolutePath, planned.content, "utf-8");
+      results.push({ agentId: planned.skillId, kind: "skill" as const, status: "created" as const });
     }
   }
 

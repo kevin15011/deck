@@ -220,10 +220,16 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     memoryBundle: undefined,
   }));
 
+  const standaloneSkills = plan.standaloneSkills.map((s) => ({
+    skillId: s.skillId,
+    body: s.content,
+  }));
+
   return {
     team: PI_DEVELOPMENT_TEAMS[0],
     agents,
     skills,
+    standaloneSkills,
     memoryDiagnostics: plan.memoryDiagnostics,
   };
 }
@@ -242,17 +248,21 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
   const plan = buildDeveloperTeamInstallPlan(input.projectRoot, {
     modelAssignments,
     thinkingAssignments,
+    standaloneSkills: input.manifest.standaloneSkills,
   });
 
   const files: import("@deck/core").DeveloperTeamInstallFile[] = [
     ...plan.agents.map((a) => ({ path: a.relativePath, content: a.content })),
     ...plan.skills.map((s) => ({ path: s.relativePath, content: s.content })),
+    ...plan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content })),
   ];
 
   return { files };
 }
 
 async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyInput): Promise<RunnerDeveloperTeamApplyResult> {
+  // Separate standalone skills from agent-bound skills
+  const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
   const plan: DeveloperTeamInstallPlan = {
     projectRoot: input.projectRoot,
     agentsDir: `${input.projectRoot}/.pi/agents`,
@@ -266,9 +276,17 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
         content: f.content,
       })),
     skills: input.plan.files
-      .filter((f: { path: string }) => f.path.includes("/skills/"))
+      .filter((f: { path: string }) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
       .map((f: { path: string; content: string }) => ({
         agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "" } as any,
+        relativePath: f.path,
+        absolutePath: `${input.projectRoot}/${f.path}`,
+        content: f.content,
+      })),
+    standaloneSkills: input.plan.files
+      .filter((f: { path: string }) => standaloneSkillIds.some((id) => f.path.includes(id)))
+      .map((f: { path: string; content: string }) => ({
+        skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
         relativePath: f.path,
         absolutePath: `${input.projectRoot}/${f.path}`,
         content: f.content,
@@ -430,6 +448,8 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
     }
   }
 
+  // Separate standalone skills from agent-bound skills
+  const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
   const plan: DeveloperTeamInstallPlan = {
     projectRoot: input.projectRoot,
     agentsDir: `${input.projectRoot}/.pi/agents`,
@@ -443,9 +463,17 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
         content: f.content,
       })),
     skills: input.plan.files
-      .filter((f) => f.path.includes("/skills/"))
+      .filter((f) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
       .map((f) => ({
         agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "" } as any,
+        relativePath: f.path,
+        absolutePath: `${input.projectRoot}/${f.path}`,
+        content: f.content,
+      })),
+    standaloneSkills: input.plan.files
+      .filter((f) => standaloneSkillIds.some((id) => f.path.includes(id)))
+      .map((f) => ({
+        skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
         relativePath: f.path,
         absolutePath: `${input.projectRoot}/${f.path}`,
         content: f.content,
@@ -471,6 +499,7 @@ function verifyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamVeri
 }
 
 function backupTeamFiles(plan: import("@deck/core").RunnerDeveloperTeamInstallPlan): import("@deck/core").BackupManifest {
+  const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
   const nativePlan: DeveloperTeamInstallPlan = {
     projectRoot: "",
     agentsDir: "",
@@ -484,9 +513,17 @@ function backupTeamFiles(plan: import("@deck/core").RunnerDeveloperTeamInstallPl
         content: f.content,
       })),
     skills: plan.files
-      .filter((f) => f.path.includes("/skills/"))
+      .filter((f) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
       .map((f) => ({
         agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "" } as any,
+        relativePath: f.path,
+        absolutePath: f.path,
+        content: f.content,
+      })),
+    standaloneSkills: plan.files
+      .filter((f) => standaloneSkillIds.some((id) => f.path.includes(id)))
+      .map((f) => ({
+        skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
         relativePath: f.path,
         absolutePath: f.path,
         content: f.content,

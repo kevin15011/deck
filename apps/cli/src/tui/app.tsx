@@ -29,6 +29,7 @@ import {
   type OpenCodeToolsReview,
   type OpenCodeToolInstallResult,
 } from "@deck/adapter-opencode";
+import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/external";
 import {
   buildDeveloperTeamInstallPlan,
   applyDeveloperTeamInstall,
@@ -567,7 +568,8 @@ export function DeckApp() {
         const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
         const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
 
-        const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}), capabilityInstructions });
+        const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
+        const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}), capabilityInstructions, standaloneSkills });
         const backup = backupOpenCodeDeveloperTeamFiles(plan);
 
         try {
@@ -929,11 +931,13 @@ export function DeckApp() {
           const bundle = buildCapabilityInstructionBundle(enabledIds as any);
           
           // Generar y aplicar plan
+          const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
           const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
             configDir,
             capabilityInstructions: bundle,
             configModelOverrides,
             reasoningEffortOverrides: reasoningEffortOverrides as any,
+            standaloneSkills,
           });
           
           try {
@@ -1462,7 +1466,8 @@ export function DeckApp() {
       const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
       const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
 
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}), capabilityInstructions });
+      const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}), capabilityInstructions, standaloneSkills });
       const backup = backupOpenCodeDeveloperTeamFiles(plan);
 
       try {
