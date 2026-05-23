@@ -12,8 +12,7 @@ import { dirname, join } from "node:path";
 
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
-import { ORCHESTRATOR_SYSTEM_PROMPT } from "@deck/core/teams/developer/orchestrator-content";
-import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { getAgentContent, getTeamSessionInstructions } from "@deck/core/teams/developer/content-registry";
 import type { CapabilityInstructionBundle } from "@deck/core";
 
 // ---------------------------------------------------------------------------
@@ -38,23 +37,6 @@ export type GeneratePromptFilesOptions = {
 };
 
 // ---------------------------------------------------------------------------
-// Orchestrator prompt template
-// ---------------------------------------------------------------------------
-
-function buildOrchestratorPrompt(skillPath: string): string {
-  return [
-    ORCHESTRATOR_SYSTEM_PROMPT,
-    "",
-    "---",
-    "",
-    `## Skill Reference`,
-    ``,
-    `Read your skill file at ${skillPath} for detailed SDD workflow methodology, artifact persistence policy, skill resolution, and project AI notes handling.`,
-    "",
-  ].join("\n");
-}
-
-// ---------------------------------------------------------------------------
 // Prompt content builder using core content registry
 // ---------------------------------------------------------------------------
 
@@ -69,7 +51,10 @@ function buildPromptContent(
   }
 
   const isOrchestrator = agent.id === "deck-developer-orchestrator";
-  const baseContent = isOrchestrator ? ORCHESTRATOR_SYSTEM_PROMPT : content.agentBody;
+  const baseContent = isOrchestrator
+    ? (getTeamSessionInstructions("developer-team", capabilityInstructions ? { capabilityInstructions } : undefined) ??
+      content.agentBody)
+    : content.agentBody;
 
   return [
     baseContent,
