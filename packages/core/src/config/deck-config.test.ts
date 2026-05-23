@@ -54,11 +54,12 @@ describe("PACKAGE_INSTRUCTION_RUNNERS", () => {
 });
 
 describe("PACKAGE_INSTRUCTION_PACKAGE_IDS", () => {
-  test("contains codebase-memory, context-mode, rtk", () => {
+  test("contains codebase-memory, context-mode, rtk, adaptive-memory", () => {
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("codebase-memory");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("context-mode");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("rtk");
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toHaveLength(3);
+    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("adaptive-memory");
+    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toHaveLength(4);
   });
 });
 
@@ -76,8 +77,8 @@ describe("readDeckConfig", () => {
       version: 1,
       adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
-        pi: { "codebase-memory": false, "context-mode": false, rtk: false },
-        opencode: { "codebase-memory": false, "context-mode": false, rtk: false },
+        pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
+        opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
       },
     });
   });
@@ -246,8 +247,8 @@ describe("validateDeckConfig — packageInstructions", () => {
       version: 1,
       adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
-        pi: { "codebase-memory": true, "context-mode": true, rtk: true },
-        opencode: { "codebase-memory": true, "context-mode": true, rtk: true },
+        pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": true },
+        opencode: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": true },
       },
     });
 

@@ -22,11 +22,13 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
         "codebase-memory": overrides.pi?.["codebase-memory"] ?? false,
         "context-mode": overrides.pi?.["context-mode"] ?? false,
         rtk: overrides.pi?.rtk ?? false,
+        "adaptive-memory": overrides.pi?.["adaptive-memory"] ?? false,
       },
       opencode: {
         "codebase-memory": overrides.opencode?.["codebase-memory"] ?? false,
         "context-mode": overrides.opencode?.["context-mode"] ?? false,
         rtk: overrides.opencode?.rtk ?? false,
+        "adaptive-memory": overrides.opencode?.["adaptive-memory"] ?? false,
       },
     },
   };
@@ -120,7 +122,7 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("returns only enabled packages for pi runner", () => {
     const config = makeConfig({
-      pi: { "codebase-memory": true, "context-mode": false, rtk: true },
+      pi: { "codebase-memory": true, "context-mode": false, rtk: true, "adaptive-memory": false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "pi");
@@ -129,7 +131,7 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("returns only enabled packages for opencode runner", () => {
     const config = makeConfig({
-      opencode: { "codebase-memory": false, "context-mode": true, rtk: false },
+      opencode: { "codebase-memory": false, "context-mode": true, rtk: false, "adaptive-memory": false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "opencode");
@@ -144,11 +146,11 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("preserves canonical order even when enabled in different order", () => {
     const config = makeConfig({
-      pi: { "codebase-memory": true, "context-mode": true, rtk: true },
+      pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "pi");
-    // Order should be canonical: codebase-memory, context-mode, rtk
+    // Order should be canonical: codebase-memory, context-mode, rtk, adaptive-memory
     expect(ids).toEqual(["codebase-memory", "context-mode", "rtk"]);
   });
 });
