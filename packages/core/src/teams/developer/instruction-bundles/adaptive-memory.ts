@@ -16,7 +16,18 @@ export function buildAdaptiveMemoryInstructionBundle(): CapabilityInstructionBun
       surface: "agent",
       markdown: `## Adaptive Memory
 
-Adaptive memory persists decisions, discoveries, and context across sessions. It is ADVISORY — OpenSpec artifacts and Spec Registry are ALWAYS authoritative.
+Adaptive memory is configured via \`.deck/config.json\` (field: \`adaptiveMemory.activeProvider\`). The active provider injects its tool instructions into agent prompts. You MUST follow the provider-specific tools and container conventions.
+
+### Container Tag Conventions
+
+Use the appropriate container tag for the scope of what you're saving:
+
+| Prefix | Scope | Example |
+|--------|-------|---------|
+| \`u:\` | User — personal learnings, preferences, corrections | \`u:kevin\` |
+| \`t:\` | Team — team conventions, decisions, shared patterns | \`t:developer-team\` |
+| \`o:\` | Organization — org-wide standards | \`o:GCO\` |
+| \`p:\` | Project — project-specific heuristics, conventions, retrospectives | \`p:deck\` |
 
 ### When to Save (proactive)
 
@@ -58,15 +69,6 @@ Before ending a session, write a brief summary covering:
 - Next Steps: what remains for the next session
 - Relevant Files: paths and what they do
 
-### Scope
-
-Memory operates at four scope levels:
-
-- **personal** — individual preferences and learnings
-- **project** — project-specific decisions and discoveries (default)
-- **team** — shared team decisions
-- **org** — organization-wide patterns
-
 ### Authority Rule
 
 OpenSpec artifacts and Spec Registry entries are ALWAYS authoritative. Adaptive memory is advisory and MUST NOT override official specifications, requirements, designs, tasks, or approved change history.
@@ -79,14 +81,36 @@ If the memory provider is unavailable, tools are missing, or operations error: c
 
 ### Session Limit
 
-Soft maximum of 7 memories per session. Prefer saving fewer high-quality observations over many low-value ones.`,
+Soft maximum of 7 memories per session. Prefer saving fewer high-quality observations over many low-value ones.
+
+### Provider: Supermemory
+
+When \`adaptiveMemory.activeProvider\` is \`supermemory\`, use these tools:
+
+- **\`supermemory_memory\`** (action: "save") — commit a memory to the configured container
+- **\`supermemory_recall\`** (query: "...") — retrieve relevant memories from memory
+
+Tool binding is prepared by the Supermemory adapter; do not call raw MCP tools directly.
+
+### Provider: Engram
+
+When \`adaptiveMemory.activeProvider\` is \`engram\`, use Engram's documented tool interface. The Engram adapter injects its specific instructions; follow those instead of these generic ones.`,
     },
     {
       packageId: "adaptive-memory",
       surface: "session",
       markdown: `## Adaptive Memory
 
-Adaptive memory persists decisions, discoveries, and context across sessions. It is **ADVISORY** — OpenSpec artifacts and Spec Registry are ALWAYS authoritative.
+Adaptive memory is configured via \`.deck/config.json\` (field: \`adaptiveMemory.activeProvider\`). The active provider injects its tool instructions into agent prompts.
+
+### Container Tag Conventions
+
+| Prefix | Scope | Example |
+|--------|-------|---------|
+| \`u:\` | User — personal learnings, preferences | \`u:kevin\` |
+| \`t:\` | Team — team conventions, decisions | \`t:developer-team\` |
+| \`o:\` | Organization — org-wide standards | \`o:GCO\` |
+| \`p:\` | Project — project-specific heuristics | \`p:deck\` |
 
 When coordinating work, be aware that sub-agents may save and search memories as part of their workflow. Agents should proactively save after significant decisions, bug fixes, discoveries, or pattern establishment.
 
@@ -98,6 +122,19 @@ If memory operations fail or tools are unavailable, agents continue working norm
       packageId: "adaptive-memory",
       surface: "skill",
       markdown: `## Adaptive Memory
+
+Adaptive memory is configured via \`.deck/config.json\` (field: \`adaptiveMemory.activeProvider\`). The active provider injects its tool instructions into agent prompts. You MUST follow the provider-specific tools and container conventions.
+
+### Container Tag Conventions
+
+Use the appropriate container tag for the scope of what you're saving:
+
+| Prefix | Scope | Example |
+|--------|-------|---------|
+| \`u:\` | User — personal learnings, preferences, corrections | \`u:kevin\` |
+| \`t:\` | Team — team conventions, decisions, shared patterns | \`t:developer-team\` |
+| \`o:\` | Organization — org-wide standards | \`o:GCO\` |
+| \`p:\` | Project — project-specific heuristics, conventions, retrospectives | \`p:deck\` |
 
 ### When to Save (proactive)
 
@@ -124,7 +161,20 @@ OpenSpec artifacts and Spec Registry are ALWAYS authoritative. Adaptive memory i
 
 ### Fail-Open
 
-If memory operations error or tools are unavailable: continue working normally. Never block agent work or surface errors for memory issues.`,
+If memory operations error or tools are unavailable: continue working normally. Never block agent work or surface errors for memory issues.
+
+### Provider: Supermemory
+
+When \`adaptiveMemory.activeProvider\` is \`supermemory\`, use these tools:
+
+- **\`supermemory_memory\`** (action: "save") — commit a memory to the configured container
+- **\`supermemory_recall\`** (query: "...") — retrieve relevant memories from memory
+
+Tool binding is prepared by the Supermemory adapter; do not call raw MCP tools directly.
+
+### Provider: Engram
+
+When \`adaptiveMemory.activeProvider\` is \`engram\`, use Engram's documented tool interface. The Engram adapter injects its specific instructions; follow those instead of these generic ones.`,
     },
   ];
 

@@ -439,11 +439,11 @@ function errorDiagnostic(
   return { code, severity: "error", message: redact(message), path, serverName };
 }
 
-function redactDiagnostic(diagnostic: PiMcpConfigDiagnostic): PiMcpConfigDiagnostic {
+export function redactDiagnostic(diagnostic: PiMcpConfigDiagnostic): PiMcpConfigDiagnostic {
   return { ...diagnostic, message: redact(diagnostic.message) };
 }
 
-function redact(value: string): string {
+export function redact(value: string): string {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
     .replace(

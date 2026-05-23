@@ -22,6 +22,18 @@ if (parsed.command === "error") {
   process.exit(1);
 }
 
+if (parsed.command === "doctor") {
+  try {
+    const { runDoctorDiagnostics, renderDoctorReport, shouldExitWithError } = await import("./doctor-command");
+    const result = await runDoctorDiagnostics();
+    renderDoctorReport(result);
+    process.exit(shouldExitWithError(result) ? 1 : 0);
+  } catch (err) {
+    console.error("deck doctor failed:", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+}
+
 if (parsed.command === "opencode-launch") {
   const projectRoot = resolveProjectRoot();
   const result = await runOpenCodeLaunch({

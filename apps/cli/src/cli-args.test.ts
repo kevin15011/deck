@@ -228,4 +228,29 @@ describe("parseArgs", () => {
       message: expect.stringContaining("Unsupported memory provider"),
     });
   });
+
+  // -------------------------------------------------------------------------
+  // deck doctor tests
+  // -------------------------------------------------------------------------
+
+  test("parses 'deck doctor' as doctor command", () => {
+    const result = parseArgs(["doctor"]);
+    expect(result).toEqual<ParsedArgs>({ command: "doctor" });
+  });
+
+  test("parses 'deck doctor --fix' as error with no extra args message", () => {
+    const result = parseArgs(["doctor", "--fix"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("no acepta argumentos adicionales"),
+    });
+  });
+
+  test("parses 'deck doctor extra' as error with no extra args message", () => {
+    const result = parseArgs(["doctor", "extra"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("no acepta argumentos adicionales"),
+    });
+  });
 });

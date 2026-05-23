@@ -16,7 +16,7 @@ export function getHomeMenuOptions(): MenuOption[] {
     { value: "upgrade-tools", label: `Upgrade tools ${placeholder()}` },
     { value: "configure-models", label: "Configure models" },
     { value: "management-uninstall", label: `Management / uninstall ${placeholder()}` },
-    { value: "doctor", label: `Doctor ${placeholder()}` },
+    { value: "doctor", label: "Doctor" },
     { value: "exit", label: "Exit" },
   ];
 }

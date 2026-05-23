@@ -68,9 +68,13 @@ Adaptive memory persiste decisiones...
 ## Adaptive Memory — Routing
 
 Provider activo: supermemory
-- Guardar: `supermemory_execute` con `documents.add`
-- Buscar: `supermemory_execute` con `search.memories`
-- Tags: user=kevin, team=developer, org=GCO, project=deck
+- Herramientas MCP disponibles: `supermemory.execute` y `supermemory.search_docs`
+- Uso típico:
+  - Buscar: `supermemory.execute` con `client.search.memories` o `client.search.documents`
+  - Guardar: `supermemory.execute` con `client.add`
+  - Perfil: `supermemory.execute` con `client.profile`
+- Tags: user={userId}, team=developer, org={orgId}, project={project}
+- **Auth**: OpenCode usa `{env:SUPERMEMORY_API_KEY}` en `opencode.json` — OpenCode resuelve la variable al iniciar. El token real nunca se almacena en disco.
 
 <!-- deck-managed:memory-injection:end -->
 
@@ -162,3 +166,27 @@ export function removeManagedSections(content: string): string;
 ## Estado
 
 **Propuesta** — Pendiente de implementación en un futuro SDD change.
+
+## Limitación de Autenticación MCP para OpenCode — RESUELTO
+
+**Solución encontrada**: OpenCode soporta sintaxis de interpolación de variables de entorno en headers:
+```json
+"headers": {
+  "Authorization": "Bearer {env:SUPERMEMORY_API_KEY}"
+}
+```
+
+**Cómo funciona**:
+1. Deck escribe el token como referencia `{env:SUPERMEMORY_API_KEY}` en opencode.json
+2. OpenCode resuelve la variable al iniciar el MCP server
+3. El token real nunca se almacena en disco — solo la referencia
+
+**Cambios realizados**:
+- `packages/adapter-opencode/src/opencode-mcp-config.ts` — ahora escribe `headers.Authorization` con interpolación de env var
+- URL actualizada a `https://mcp.supermemory.ai/mcp` (endpoint correcto de Supermemory para OpenCode)
+- Installer también escribe `export SUPERMEMORY_API_KEY="token"` en `~/.bashrc` para que la variable esté disponible en futuras sesiones
+
+**Flujo después de reinstall**:
+1. El installer escribe `export SUPERMEMORY_API_KEY="tu-token"` en `~/.bashrc`
+2. Cerrar y reabrir la terminal (o hacer `source ~/.bashrc`)
+3. OpenCode resuelve `{env:SUPERMEMORY_API_KEY}` desde la variable del entorno

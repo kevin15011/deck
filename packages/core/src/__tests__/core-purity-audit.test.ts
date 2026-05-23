@@ -48,6 +48,19 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^"Deck config may not store Supermemory credentials\."$/, reason: "credential validation error message" },
   // Forbidden content reason string — explains why engram migration content is banned
   { pattern: /^"Engram migration payloads"$/, reason: "content classification label in governance rules" },
+  // Provider labels in adaptive memory instruction content
+  { pattern: /^"Provider: Supermemory"$/, reason: "provider label in adaptive memory instruction content" },
+  { pattern: /^"Provider: Engram"$/, reason: "provider label in adaptive memory instruction content" },
+  // Tool names in adaptive memory instruction content
+  { pattern: /supermemory_memory/, reason: "Supermemory tool name in adaptive memory instruction content" },
+  { pattern: /supermemory_recall/, reason: "Supermemory tool name in adaptive memory instruction content" },
+  // Engram provider reference in adaptive memory instruction content
+  { pattern: /`engram`/i, reason: "Engram provider reference in instruction content" },
+  // OpenCode references in RTK instruction content about OpenCode hook
+  { pattern: /--opencode/, reason: "RTK OpenCode hook flag in instruction content" },
+  // Runner ID const arrays in deck-config.ts
+  { pattern: /^"pi"$/, reason: "PACKAGE_INSTRUCTION_RUNNERS runner ID const" },
+  { pattern: /^"opencode"$/, reason: "PACKAGE_INSTRUCTION_RUNNERS runner ID const" },
 ];
 
 const testDir = dirname(fileURLToPath(import.meta.url));

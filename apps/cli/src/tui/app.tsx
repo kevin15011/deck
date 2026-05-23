@@ -113,6 +113,7 @@ import { RunnerDashboardScreens } from "./screens/pi-runner-dashboard-screens";
 import { getOpenCodeRunnerCapability, OPENCODE_RUNNER_CAPABILITY_IDS, getUserFacingOpenCodeCapability } from "@deck/adapter-opencode";
 import { getPiRunnerCapability, PI_RUNNER_CAPABILITY_IDS, getUserFacingCapability } from "@deck/adapter-pi";
 import { HomeScreen } from "./screens/home-screen";
+import { DoctorScreen } from "./screens/doctor-screen";
 
 type Screen =
   | "home"
@@ -143,6 +144,7 @@ type Screen =
   | "opencode-preflight-checking"
   | "configure-packages-runner-selection"
   | "configure-packages-detail"
+  | "doctor"
   | "complete";
 
 const HELP = "j/k or ↑/↓: navigate • space: toggle • enter: continue • esc: back • q: quit";
@@ -801,6 +803,7 @@ export function DeckApp() {
         resetCursor("model-environment-selection");
         return;
       }
+      if (action === "doctor") resetCursor("doctor");
       if (action === "exit") exit();
       return;
     }
@@ -1171,6 +1174,8 @@ export function DeckApp() {
     }
 
     if (screen === "complete") resetCursor("home");
+
+    if (screen === "doctor") resetCursor("home");
   }
 
   function handleDashboardInput(input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) {
@@ -1721,6 +1726,7 @@ export function DeckApp() {
         "opencode-preflight-checking": "environment-check",
         "configure-packages-runner-selection": "home",
         "configure-packages-detail": "configure-packages-runner-selection",
+        "doctor": "home",
         complete: "home",
       };
       next = previous[screen];
@@ -1742,6 +1748,7 @@ export function DeckApp() {
   return (
     <ScreenFrame title={screenTitle(screen, dashboardState.runnerScope)} help={HELP} width={stdout.columns || 72} height={stdout.rows || undefined}>
       {screen === "home" ? <HomeScreen cursor={homeCursor} /> : null}
+      {screen === "doctor" ? <DoctorScreen /> : null}
       {screen === "model-environment-selection" ? <ModelEnvironmentSelectionScreen cursor={modelEnvironmentCursor} /> : null}
       {screen === "model-team-selection" && selectedModelEnvironment ? (
         <ModelTeamSelectionScreen cursor={modelTeamCursor} environment={selectedModelEnvironment} />
@@ -1839,6 +1846,7 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "opencode-preflight-checking": "Checking OpenCode environment",
     "configure-packages-runner-selection": "Configure Packages",
     "configure-packages-detail": "Configure Packages",
+    doctor: "Doctor",
     complete: "Complete",
   };
 

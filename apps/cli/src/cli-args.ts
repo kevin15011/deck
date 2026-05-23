@@ -13,6 +13,7 @@
 
 export type ParsedArgs =
   | { command: "tui" }
+  | { command: "doctor" }
   | {
       command: "pi-launch";
       teamId: string;
@@ -130,6 +131,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (first === "opencode") {
     return parseOpenCodeCommand(rest);
+  }
+
+  if (first === "doctor") {
+    if (rest.length > 0) {
+      return {
+        command: "error",
+        message: "El comando `deck doctor` no acepta argumentos adicionales.",
+      };
+    }
+    return { command: "doctor" };
   }
 
   if (first !== "pi") {

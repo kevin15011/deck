@@ -11,7 +11,7 @@ describe("home menu options", () => {
     expect(options[2]).toEqual({ value: "upgrade-tools", label: `Upgrade tools ${placeholder()}` });
     expect(options[3]).toEqual({ value: "configure-models", label: "Configure models" });
     expect(options[4]).toEqual({ value: "management-uninstall", label: `Management / uninstall ${placeholder()}` });
-    expect(options[5]).toEqual({ value: "doctor", label: `Doctor ${placeholder()}` });
+    expect(options[5]).toEqual({ value: "doctor", label: "Doctor" });
     expect(options[6]).toEqual({ value: "exit", label: "Exit" });
   });
 });
