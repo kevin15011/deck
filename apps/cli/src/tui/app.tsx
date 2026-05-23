@@ -74,7 +74,7 @@ import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import { readDeckConfig, writeDeckConfig, type AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
-import { buildCapabilityInstructionBundle } from "@deck/core";
+import { buildCapabilityInstructionBundle, getEnabledPackageInstructionIds } from "@deck/core";
 
 import {
   getNextScreenAfterDeveloperTeamInstall,
@@ -563,7 +563,11 @@ export function DeckApp() {
       const isOpenCode = selectedEnvironments.includes("opencode-development") && !selectedEnvironments.includes("pi-development");
 
       if (isOpenCode) {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}) });
+        const deckConfig = readDeckConfig(projectRoot);
+        const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
+        const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+
+        const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}), capabilityInstructions });
         const backup = backupOpenCodeDeveloperTeamFiles(plan);
 
         try {
@@ -1454,7 +1458,11 @@ export function DeckApp() {
     const projectRoot = resolveProjectRoot();
 
     if (modelConfigRuntime === "opencode") {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}) });
+      const deckConfig = readDeckConfig(projectRoot);
+      const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
+      const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}), capabilityInstructions });
       const backup = backupOpenCodeDeveloperTeamFiles(plan);
 
       try {

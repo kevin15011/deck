@@ -9,10 +9,16 @@ import {
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import {
   resolveActiveMemoryProvider,
+  readDeckConfig,
   validateDeckConfig,
   type AdaptiveMemoryActiveProvider,
 } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
+import {
+  getEnabledPackageInstructionIds,
+  buildCapabilityInstructionBundle,
+  type CapabilityInstructionBundle,
+} from "@deck/core/teams/developer/instruction-bundles";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -180,12 +186,25 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   const resolvedMemory = resolveOpenCodeMemory(options);
   const allDiagnostics: MemoryProviderDiagnostic[] = [...resolvedMemory.diagnostics];
 
-  // 3. Build install plan
+  // 3. Build capability instructions from config
+  let capabilityInstructions: CapabilityInstructionBundle | undefined;
+  try {
+    const deckConfig = readDeckConfig(projectRoot);
+    const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
+    if (enabledIds.length > 0) {
+      capabilityInstructions = buildCapabilityInstructionBundle(enabledIds);
+    }
+  } catch {
+    // Config not available or invalid — continue without capability instructions
+  }
+
+  // 4. Build install plan
   const installPlan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
     configDir,
     memoryInjection: resolvedMemory.memoryInjection,
     memoryProvider: resolvedMemory.provider,
     supportedMemoryProviderIds: options.supportedMemoryProviderIds ?? SUPPORTED_OPENCODE_LAUNCH_MEMORY_PROVIDER_IDS,
+    capabilityInstructions,
   });
 
   allDiagnostics.push(...installPlan.memoryDiagnostics.map(toMemoryDiagnostic));

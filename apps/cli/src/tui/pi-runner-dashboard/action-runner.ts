@@ -350,11 +350,13 @@ function writeDeckConfigAction(
       "codebase-memory": piInstructions["codebase-memory"] ?? false,
       "context-mode": piInstructions["context-mode"] ?? false,
       rtk: piInstructions.rtk ?? false,
+      "adaptive-memory": piInstructions["adaptive-memory"] ?? false,
     },
     opencode: {
       "codebase-memory": opencodeInstructions["codebase-memory"] ?? false,
       "context-mode": opencodeInstructions["context-mode"] ?? false,
       rtk: opencodeInstructions.rtk ?? false,
+      "adaptive-memory": opencodeInstructions["adaptive-memory"] ?? false,
     },
   };
 
