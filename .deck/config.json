@@ -10,5 +10,19 @@
       "teamId": "developer",
       "orgId": "GCO"
     }
+  },
+  "packageInstructions": {
+    "pi": {
+      "codebase-memory": true,
+      "context-mode": true,
+      "rtk": true,
+      "adaptive-memory": true
+    },
+    "opencode": {
+      "codebase-memory": true,
+      "context-mode": true,
+      "rtk": true,
+      "adaptive-memory": true
+    }
   }
 }
