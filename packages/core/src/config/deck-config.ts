@@ -34,7 +34,7 @@ export type DeckAdaptiveMemoryConfig = {
 export const PACKAGE_INSTRUCTION_RUNNERS = ["pi", "opencode"] as const;
 export type PackageInstructionRunnerId = (typeof PACKAGE_INSTRUCTION_RUNNERS)[number];
 
-export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk"] as const;
+export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk", "adaptive-memory"] as const;
 export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number];
 
 export type DeckPackageInstructionRunnerConfig = Partial<
@@ -123,8 +123,8 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
       activeProvider: "none",
     },
     packageInstructions: {
-      pi: { "codebase-memory": false, "context-mode": false, rtk: false },
-      opencode: { "codebase-memory": false, "context-mode": false, rtk: false },
+      pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
+      opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
     },
   };
 }
@@ -344,8 +344,8 @@ function normalizePackageInstructionConfig(
 ): NormalizedDeckConfig["packageInstructions"] {
   // Default: all runners have all packages disabled
   const defaultResult: NormalizedDeckConfig["packageInstructions"] = {
-    pi: { "codebase-memory": false, "context-mode": false, rtk: false },
-    opencode: { "codebase-memory": false, "context-mode": false, rtk: false },
+    pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
+    opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
   };
 
   if (value === undefined || value === null) {
@@ -367,8 +367,8 @@ function normalizePackageInstructionConfig(
 
   // Normalize: start from defaults, apply provided values, validate
   const result: NormalizedDeckConfig["packageInstructions"] = {
-    pi: { "codebase-memory": false, "context-mode": false, rtk: false },
-    opencode: { "codebase-memory": false, "context-mode": false, rtk: false },
+    pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
+    opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
   };
 
   for (const runner of PACKAGE_INSTRUCTION_RUNNERS) {

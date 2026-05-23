@@ -10,6 +10,7 @@
  * Both can coexist without interference.
  */
 
+import { buildAdaptiveMemoryInstructionBundle } from "./adaptive-memory";
 import { buildCodebaseMemoryInstructionBundle } from "./codebase-memory";
 import { buildContextModeInstructionBundle } from "./context-mode";
 import { buildRtkInstructionBundle } from "./rtk";
@@ -22,7 +23,7 @@ import type { PackageInstructionRunnerId, PackageInstructionPackageId } from "..
 
 export type CapabilityInstructionSurface = "session" | "agent" | "skill";
 
-export type CapabilityInstructionPackageId = "codebase-memory" | "context-mode" | "rtk";
+export type CapabilityInstructionPackageId = "adaptive-memory" | "codebase-memory" | "context-mode" | "rtk";
 
 export type CapabilityInstructionFragment = {
   packageId: CapabilityInstructionPackageId;
@@ -52,6 +53,7 @@ const PACKAGE_BUILDERS: Record<CapabilityInstructionPackageId, () => CapabilityI
   "codebase-memory": buildCodebaseMemoryInstructionBundle,
   "context-mode": buildContextModeInstructionBundle,
   rtk: buildRtkInstructionBundle,
+  "adaptive-memory": buildAdaptiveMemoryInstructionBundle,
 };
 
 // Canonical package order — used for deterministic bundle ordering
@@ -59,6 +61,7 @@ const PACKAGE_ORDER: CapabilityInstructionPackageId[] = [
   "codebase-memory",
   "context-mode",
   "rtk",
+  "adaptive-memory",
 ];
 
 // ---------------------------------------------------------------------------
