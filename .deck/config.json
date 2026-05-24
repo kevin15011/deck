@@ -24,5 +24,6 @@
       "rtk": true,
       "adaptive-memory": true
     }
-  }
+  },
+  "orchestratorPersonality": "pragmatica"
 }

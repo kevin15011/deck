@@ -81,8 +81,10 @@ import { buildCapabilityInstructionBundle, getEnabledPackageInstructionIds } fro
 import {
   getNextScreenAfterDeveloperTeamInstall,
   getNextScreenAfterDeveloperTeamReview,
+  getNextScreenAfterEnvironmentSelection,
   getNextScreenAfterPiToolInstall,
   getNextScreenAfterTeamSelection,
+  getNextScreenAfterPersonalitySelection,
 } from "../developer-team-flow";
 import { getEnvironmentOptions, getHomeMenuOptions } from "../menu-options";
 import { resolveProjectRoot } from "../project-root";
@@ -120,6 +122,7 @@ type Screen =
   | "model-environment-selection"
   | "model-team-selection"
   | "environment-selection"
+  | "personality-selection"
   | "pi-runner-dashboard"
   | "pi-preflight-checking"
   | "pi-preflight"
@@ -302,6 +305,16 @@ export function DeckApp() {
   const [configurePackagesRunner, setConfigurePackagesRunner] = useState<"pi" | "opencode" | null>(null);
   const [configurePackagesCursor, setConfigurePackagesCursor] = useState(0);
   const [configurePackagesToggles, setConfigurePackagesToggles] = useState<Record<string, boolean>>({});
+
+  // Personality selection state
+  const [selectedPersonality, setSelectedPersonality] = useState<"guia" | "pragmatica" | "ahorro-extremo">(() => {
+    try {
+      const config = readDeckConfig(resolveProjectRoot());
+      return config.orchestratorPersonality;
+    } catch {
+      return "pragmatica";
+    }
+  });
 
   // Runtime-agnostic capability resolver — dispatches to the correct adapter based on runnerScope
   const dashboardCapabilityResolver = useMemo(() => ({
@@ -741,6 +754,7 @@ export function DeckApp() {
       return selectedModel && supportsThinking ? thinkingLevels.length - 1 : 0;
     }
     if (screen === "no-providers") return 0;
+    if (screen === "personality-selection") return 2; // 3 options: guia, pragmatica, ahorro-extremo
     if (screen === "configure-packages-runner-selection") return 2; // Pi, OpenCode, Back
     if (screen === "configure-packages-detail") return 4; // 3 packages + Apply + Back
     return 0;
@@ -870,10 +884,42 @@ export function DeckApp() {
 
     if (screen === "environment-selection") {
       if (selectedEnvironments.length === 0) return;
-      const selected = selectedEnvironments;
-      if (selected.includes("pi-development")) return resetCursor("pi-preflight-checking");
-      if (selected.includes("opencode-development")) return resetCursor("opencode-preflight-checking");
-      resetCursor("complete");
+      const nextScreen = getNextScreenAfterEnvironmentSelection({
+        selectedEnvironments,
+        hasPiCommand: true, // not used by this helper
+        hasOpenCodeNext: selectedEnvironments.includes("opencode-development"),
+      });
+      // Default cursor to Pragmática (index 1) on personality-selection screen
+      resetCursor(nextScreen, nextScreen === "personality-selection" ? 1 : 0);
+      return;
+    }
+
+    if (screen === "personality-selection") {
+      const personalities: Array<{ id: "guia" | "pragmatica" | "ahorro-extremo"; label: string }> = [
+        { id: "guia", label: "Guía" },
+        { id: "pragmatica", label: "Pragmática" },
+        { id: "ahorro-extremo", label: "Ahorro extremo" },
+      ];
+      const selected = personalities[cursor];
+      if (!selected) return;
+      setSelectedPersonality(selected.id);
+      try {
+        const projectRoot = resolveProjectRoot();
+        const existingConfig = readDeckConfig(projectRoot);
+        writeDeckConfig(projectRoot, {
+          ...existingConfig,
+          orchestratorPersonality: selected.id,
+        });
+      } catch (error) {
+        // Config write error — stay on screen, user can retry
+        return;
+      }
+      const nextScreen = getNextScreenAfterPersonalitySelection({
+        selectedEnvironments,
+        hasPiCommand: true,
+        hasOpenCodeNext: selectedEnvironments.includes("opencode-development"),
+      });
+      resetCursor(nextScreen);
       return;
     }
 
@@ -1709,6 +1755,7 @@ export function DeckApp() {
         "model-environment-selection": "home",
         "model-team-selection": "model-environment-selection",
         "environment-selection": "home",
+        "personality-selection": "environment-selection",
         "pi-runner-dashboard": "environment-selection",
         "pi-preflight-checking": "environment-selection",
         "pi-preflight": "environment-selection",
@@ -1761,6 +1808,9 @@ export function DeckApp() {
       ) : null}
       {screen === "environment-selection" ? (
         <EnvironmentSelectionScreen cursor={cursor} selected={selectedEnvironments} />
+      ) : null}
+      {screen === "personality-selection" ? (
+        <PersonalitySelectionScreen cursor={cursor} selected={selectedPersonality} />
       ) : null}
       {screen === "pi-runner-dashboard" ? (
         <RunnerDashboardScreens state={dashboardState} installResults={dashboardActionResults} completionStatus={dashboardCompletionStatus} canRunPlan={canRunDashboardPlan(dashboardState)} runBlockDiagnostics={getDashboardRunBlockDiagnostics(dashboardState)} capabilityResolver={dashboardCapabilityResolver} />
@@ -1827,6 +1877,7 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "model-environment-selection": "Select runner for model config",
     "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",
+    "personality-selection": "Choose orchestrator personality",
     "pi-runner-dashboard": runnerScope === "opencode" ? "OpenCode Runner capability dashboard" : "Pi Runner capability dashboard",
     "pi-preflight-checking": "Checking Pi environment",
     "pi-preflight": "Pi Environment Preflight",
@@ -1927,6 +1978,35 @@ function ConfigurePackagesDetail({
             { id: "back", label: "Back" },
           ]}
         />
+      </Box>
+    </Box>
+  );
+}
+
+export function PersonalitySelectionScreen({ cursor, selected }: { cursor: number; selected: "guia" | "pragmatica" | "ahorro-extremo" }) {
+  const personalities = [
+    { id: "guia" as const, label: "Guía (Teacher)", hint: "Full explanations with educational context", tokenCost: "high" },
+    { id: "pragmatica" as const, label: "Pragmática (Pragmatic)", hint: "Balanced — what you need, nothing more", tokenCost: "medium" },
+    { id: "ahorro-extremo" as const, label: "Ahorro extremo (Extreme saver)", hint: "Minimal output for maximum token savings", tokenCost: "low" },
+  ];
+
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>Controls how verbose the orchestrator is when communicating decisions and rationale.</Text>
+      <Box marginTop={1}>
+        <MenuList
+          cursor={cursor}
+          items={personalities.map((p) => ({
+            id: p.id,
+            label: p.label,
+            hint: `${p.hint} [tokens: ${p.tokenCost}]`,
+          }))}
+        />
+      </Box>
+      <Box marginTop={2}>
+        <Text color="yellow">
+          ⚠ Ahorro extremo omits detailed context and rationale to save tokens.
+        </Text>
       </Box>
     </Box>
   );

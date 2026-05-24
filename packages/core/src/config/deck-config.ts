@@ -28,6 +28,14 @@ export type DeckAdaptiveMemoryConfig = {
 };
 
 // ---------------------------------------------------------------------------
+// Orchestrator Personality Config
+// ---------------------------------------------------------------------------
+
+export const ORCHESTRATOR_PERSONALITIES = ["guia", "pragmatica", "ahorro-extremo"] as const;
+export type OrchestratorPersonality = (typeof ORCHESTRATOR_PERSONALITIES)[number];
+export const DEFAULT_ORCHESTRATOR_PERSONALITY: OrchestratorPersonality = "pragmatica";
+
+// ---------------------------------------------------------------------------
 // Package Instruction Config
 // ---------------------------------------------------------------------------
 
@@ -47,6 +55,7 @@ export type DeckConfig = {
   version?: typeof DECK_CONFIG_VERSION;
   adaptiveMemory?: DeckAdaptiveMemoryConfig;
   packageInstructions?: DeckPackageInstructionConfig;
+  orchestratorPersonality?: OrchestratorPersonality;
 };
 
 export type NormalizedDeckConfig = {
@@ -56,6 +65,7 @@ export type NormalizedDeckConfig = {
     supermemory?: DeckSupermemoryConfig;
   };
   packageInstructions: Record<PackageInstructionRunnerId, Record<PackageInstructionPackageId, boolean>>;
+  orchestratorPersonality: OrchestratorPersonality;
 };
 
 export type DeckConfigErrorCode =
@@ -98,7 +108,7 @@ export type ActiveMemoryProviderResolution = {
 const SECRET_FIELD_PATTERN =
   /(?:token|secret|credential|credentials|api[-_]?key|password|private[-_]?key|access[-_]?key|auth(?:orization)?)/i;
 
-const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "packageInstructions"]);
+const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "packageInstructions", "orchestratorPersonality"]);
 const ADAPTIVE_MEMORY_FIELDS = new Set(["activeProvider", "supermemory"]);
 const SUPERMEMORY_FIELDS = new Set([
   "mcpServerName",
@@ -126,6 +136,7 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
       pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
       opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
     },
+    orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
   };
 }
 
@@ -188,10 +199,16 @@ export function validateDeckConfig(
     options?.configPath,
   );
 
+  const orchestratorPersonality = normalizeOrchestratorPersonalityConfig(
+    config.orchestratorPersonality,
+    options?.configPath,
+  );
+
   return {
     version: DECK_CONFIG_VERSION,
     adaptiveMemory,
     packageInstructions,
+    orchestratorPersonality,
   };
 }
 
@@ -409,6 +426,33 @@ function normalizePackageInstructionConfig(
   }
 
   return result;
+}
+
+function normalizeOrchestratorPersonalityConfig(
+  value: unknown,
+  configPath?: string,
+): OrchestratorPersonality {
+  if (value === undefined || value === null) {
+    return DEFAULT_ORCHESTRATOR_PERSONALITY;
+  }
+
+  if (typeof value !== "string") {
+    throw new DeckConfigError(
+      "DECK_CONFIG_INVALID_SHAPE",
+      `orchestratorPersonality must be a string.`,
+      { configPath, fieldPath: "orchestratorPersonality" },
+    );
+  }
+
+  if (!ORCHESTRATOR_PERSONALITIES.includes(value as OrchestratorPersonality)) {
+    throw new DeckConfigError(
+      "DECK_CONFIG_INVALID_SHAPE",
+      `orchestratorPersonality must be one of: ${ORCHESTRATOR_PERSONALITIES.join(", ")}`,
+      { configPath, fieldPath: "orchestratorPersonality" },
+    );
+  }
+
+  return value as OrchestratorPersonality;
 }
 
 function parseActiveProvider(

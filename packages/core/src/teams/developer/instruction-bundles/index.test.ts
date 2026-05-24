@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import type { NormalizedDeckConfig } from "../../../config/deck-config";
+import {
+  DEFAULT_ORCHESTRATOR_PERSONALITY,
+  type NormalizedDeckConfig,
+} from "../../../config/deck-config";
 import {
   buildCapabilityInstructionBundle,
   composeCapabilityInstructions,
@@ -31,6 +34,7 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
         "adaptive-memory": overrides.opencode?.["adaptive-memory"] ?? false,
       },
     },
+    orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
   };
 }
 

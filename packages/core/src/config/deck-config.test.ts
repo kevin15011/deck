@@ -6,7 +6,9 @@ import { join } from "node:path";
 import {
   type AdaptiveMemoryActiveProvider,
   DeckConfigError,
+  DEFAULT_ORCHESTRATOR_PERSONALITY,
   getDeckConfigPath,
+  ORCHESTRATOR_PERSONALITIES,
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   PACKAGE_INSTRUCTION_RUNNERS,
   readDeckConfig,
@@ -80,6 +82,7 @@ describe("readDeckConfig", () => {
         pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
         opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
       },
+      orchestratorPersonality: "pragmatica",
     });
   });
 
@@ -437,6 +440,200 @@ describe("writeDeckConfig", () => {
     expect(reRead.packageInstructions.opencode["codebase-memory"]).toBe(false);
     expect(reRead.packageInstructions.opencode["context-mode"]).toBe(true);
     expect(reRead.packageInstructions.opencode.rtk).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Orchestrator Personality
+// ---------------------------------------------------------------------------
+
+describe("Orchestrator Personality", () => {
+  describe("ORCHESTRATOR_PERSONALITIES constant", () => {
+    test("contains exactly three values", () => {
+      expect(ORCHESTRATOR_PERSONALITIES).toHaveLength(3);
+    });
+
+    test("contains guia, pragmatica, and ahorro-extremo", () => {
+      expect(ORCHESTRATOR_PERSONALITIES).toContain("guia");
+      expect(ORCHESTRATOR_PERSONALITIES).toContain("pragmatica");
+      expect(ORCHESTRATOR_PERSONALITIES).toContain("ahorro-extremo");
+    });
+  });
+
+  describe("DEFAULT_ORCHESTRATOR_PERSONALITY", () => {
+    test("is pragmatica", () => {
+      expect(DEFAULT_ORCHESTRATOR_PERSONALITY).toBe("pragmatica");
+    });
+  });
+
+  describe("validateDeckConfig — orchestratorPersonality", () => {
+    test("defaults to pragmatica when field is absent", () => {
+      const config = validateDeckConfig({
+        version: 1,
+        adaptiveMemory: { activeProvider: "none" },
+      });
+
+      expect(config.orchestratorPersonality).toBe("pragmatica");
+    });
+
+    test("defaults to pragmatica when config file is absent (readDeckConfig)", () => {
+      const root = createTempRoot();
+      const config = readDeckConfig(root);
+
+      expect(config.orchestratorPersonality).toBe("pragmatica");
+    });
+
+    test("accepts guia as valid personality value", () => {
+      const config = validateDeckConfig({
+        version: 1,
+        adaptiveMemory: { activeProvider: "none" },
+        orchestratorPersonality: "guia",
+      });
+
+      expect(config.orchestratorPersonality).toBe("guia");
+    });
+
+    test("accepts pragmatica as valid personality value", () => {
+      const config = validateDeckConfig({
+        version: 1,
+        adaptiveMemory: { activeProvider: "none" },
+        orchestratorPersonality: "pragmatica",
+      });
+
+      expect(config.orchestratorPersonality).toBe("pragmatica");
+    });
+
+    test("accepts ahorro-extremo as valid personality value", () => {
+      const config = validateDeckConfig({
+        version: 1,
+        adaptiveMemory: { activeProvider: "none" },
+        orchestratorPersonality: "ahorro-extremo",
+      });
+
+      expect(config.orchestratorPersonality).toBe("ahorro-extremo");
+    });
+
+    test("rejects invalid string value with DECK_CONFIG_INVALID_SHAPE", () => {
+      const error = expectDeckConfigError(
+        () =>
+          validateDeckConfig({
+            version: 1,
+            adaptiveMemory: { activeProvider: "none" },
+            orchestratorPersonality: "chatty",
+          }),
+        "DECK_CONFIG_INVALID_SHAPE",
+      );
+
+      expect(error.fieldPath).toBe("orchestratorPersonality");
+      expect(error.message).toContain("orchestratorPersonality");
+      expect(error.message).toContain("guia");
+      expect(error.message).toContain("pragmatica");
+      expect(error.message).toContain("ahorro-extremo");
+    });
+
+    test("rejects non-string personality value (number)", () => {
+      const error = expectDeckConfigError(
+        () =>
+          validateDeckConfig({
+            version: 1,
+            adaptiveMemory: { activeProvider: "none" },
+            orchestratorPersonality: 42,
+          }),
+        "DECK_CONFIG_INVALID_SHAPE",
+      );
+
+      expect(error.fieldPath).toBe("orchestratorPersonality");
+      expect(error.message).toContain("must be a string");
+    });
+
+    test("rejects non-string personality value (object)", () => {
+      const error = expectDeckConfigError(
+        () =>
+          validateDeckConfig({
+            version: 1,
+            adaptiveMemory: { activeProvider: "none" },
+            orchestratorPersonality: { value: "pragmatica" },
+          }),
+        "DECK_CONFIG_INVALID_SHAPE",
+      );
+
+      expect(error.fieldPath).toBe("orchestratorPersonality");
+    });
+  });
+
+  describe("writeDeckConfig — orchestratorPersonality round-trip", () => {
+    test("round-trip preserves each valid personality value", () => {
+      const root = createTempRoot();
+
+      for (const personality of ORCHESTRATOR_PERSONALITIES) {
+        writeDeckConfig(root, {
+          version: 1,
+          adaptiveMemory: { activeProvider: "none" },
+          orchestratorPersonality: personality,
+        });
+
+        const reRead = readDeckConfig(root);
+        expect(reRead.orchestratorPersonality).toBe(personality);
+      }
+    });
+
+    test("writing personality does not erase existing adaptiveMemory field", () => {
+      const root = createTempRoot();
+
+      // Write initial config with adaptiveMemory
+      writeDeckConfig(root, {
+        version: 1,
+        adaptiveMemory: { activeProvider: "none" },
+      });
+
+      // Write config with only orchestratorPersonality (adaptiveMemory omitted)
+      const mergedInput = {
+        version: 1,
+        adaptiveMemory: { activeProvider: "none" }, // must be provided to avoid being dropped
+        orchestratorPersonality: "guia",
+      };
+      writeDeckConfig(root, mergedInput);
+
+      const reRead = readDeckConfig(root);
+      expect(reRead.orchestratorPersonality).toBe("guia");
+      expect(reRead.adaptiveMemory.activeProvider).toBe("none");
+    });
+
+    test("write-then-read round-trip preserves personality for each valid value", () => {
+      const root = createTempRoot();
+
+      for (const personality of ORCHESTRATOR_PERSONALITIES) {
+        writeDeckConfig(root, {
+          version: 1,
+          adaptiveMemory: { activeProvider: "none" },
+          orchestratorPersonality: personality,
+        });
+
+        const reRead = readDeckConfig(root);
+        expect(reRead.orchestratorPersonality).toBe(personality);
+      }
+    });
+
+    test("write then read preserves adaptiveMemory when included in the write input", () => {
+      const root = createTempRoot();
+
+      // Write initial config
+      writeDeckConfig(root, {
+        version: 1,
+        adaptiveMemory: { activeProvider: "none" },
+      });
+
+      // Write again including adaptiveMemory in the input
+      writeDeckConfig(root, {
+        version: 1,
+        adaptiveMemory: { activeProvider: "none" },
+        orchestratorPersonality: "guia",
+      });
+
+      const reRead = readDeckConfig(root);
+      expect(reRead.orchestratorPersonality).toBe("guia");
+      expect(reRead.adaptiveMemory.activeProvider).toBe("none");
+    });
   });
 });
 

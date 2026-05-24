@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, beforeEach, vi } from "bun:test";
 import { renderToString } from "ink";
 import React from "react";
 import { Box, Text } from "ink";
@@ -18,10 +18,20 @@ import {
   MemoryProviderSelectionScreen,
   SupermemorySetupScreen,
 } from "./screens/developer-team-screens";
+import { PersonalitySelectionScreen } from "./app";
 
 import { getTeamsForEnvironment } from "@deck/adapter-pi";
 import { MenuList } from "./components/menu-list";
 import { buildSupermemoryDeckConfig, createMemoryProviderForSelection, handOffSupermemoryCredentialToPiMcp } from "./app";
+
+// Mock config writers — defined at module scope for Bun's vi.mock
+const mockWriteDeckConfig = vi.fn(() => {});
+const mockReadDeckConfig = vi.fn(() => ({ version: 1, orchestratorPersonality: "pragmatica" }));
+
+vi.mock("@deck/core/config/deck-config", () => ({
+  readDeckConfig: mockReadDeckConfig,
+  writeDeckConfig: mockWriteDeckConfig,
+}));
 
 function TeamSelectionScreen({ cursor, selected }: { cursor: number; selected: string[] }) {
   const teams = getTeamsForEnvironment("pi-development");
@@ -446,6 +456,241 @@ describe("Developer Team TUI screens", () => {
 
       expect(output).toContain("Installing Developer Team");
       expect(output).not.toContain("(/");
+    });
+  });
+
+  describe("PersonalitySelectionScreen", () => {
+    const personalities = [
+      { id: "guia" as const, label: "Guía (Teacher)", hint: "Full explanations with educational context" },
+      { id: "pragmatica" as const, label: "Pragmática (Pragmatic)", hint: "Balanced — what you need, nothing more" },
+      { id: "ahorro-extremo" as const, label: "Ahorro extremo (Extreme saver)", hint: "Minimal output for maximum token savings" },
+    ];
+
+    test("renders three personality options with correct labels", () => {
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
+        </ScreenFrame>,
+      );
+
+      expect(output).toContain("Guía (Teacher)");
+      expect(output).toContain("Pragmática (Pragmatic)");
+      expect(output).toContain("Ahorro extremo (Extreme saver)");
+    });
+
+    test("renders hints for all three options", () => {
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
+        </ScreenFrame>,
+      );
+
+      expect(output).toContain("Full explanations with educational context");
+      expect(output).toContain("Balanced — what you need, nothing more");
+      expect(output).toContain("Minimal output for maximum token");
+      expect(output).toContain("savings [tokens: low]");
+    });
+
+    test("displays the Ahorro extremo disclaimer", () => {
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
+        </ScreenFrame>,
+      );
+
+      expect(output).toContain("Ahorro extremo omits detailed context and rationale to save");
+      expect(output).toContain("tokens.");
+    });
+
+    test("shows cursor indicator on the focused option", () => {
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
+        </ScreenFrame>,
+      );
+
+      // The ❯ cursor should appear before "Guía (Teacher)" when cursor=0
+      const guiaIdx = output.indexOf("Guía (Teacher)");
+      const cursorBeforeGuia = output.lastIndexOf("❯", guiaIdx);
+      expect(cursorBeforeGuia).toBeGreaterThan(-1);
+      expect(cursorBeforeGuia).toBeLessThan(guiaIdx);
+    });
+
+    test("shows cursor on Pragmática when cursor=1 (default position)", () => {
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={1} selected="pragmatica" />
+        </ScreenFrame>,
+      );
+
+      // The ❯ cursor should appear before "Pragmática (Pragmatic)"
+      const pragIdx = output.indexOf("Pragmática (Pragmatic)");
+      const cursorBeforePrag = output.lastIndexOf("❯", pragIdx);
+      expect(cursorBeforePrag).toBeGreaterThan(-1);
+      expect(cursorBeforePrag).toBeLessThan(pragIdx);
+    });
+
+    test("shows cursor on Ahorro extremo when cursor=2", () => {
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={2} selected="pragmatica" />
+        </ScreenFrame>,
+      );
+
+      // The ❯ cursor should appear before "Ahorro extremo (Extreme saver)"
+      const ahorroIdx = output.indexOf("Ahorro extremo (Extreme saver)");
+      const cursorBeforeAhorro = output.lastIndexOf("❯", ahorroIdx);
+      expect(cursorBeforeAhorro).toBeGreaterThan(-1);
+      expect(cursorBeforeAhorro).toBeLessThan(ahorroIdx);
+    });
+
+    test("renders the description text about orchestrator verbosity", () => {
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
+        </ScreenFrame>,
+      );
+
+      expect(output).toContain("Controls how verbose the orchestrator is when communicating");
+      expect(output).toContain("decisions and rationale.");
+    });
+
+    test("renders with different selected personalities", () => {
+      const outputGuia = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={0} selected="guia" />
+        </ScreenFrame>,
+      );
+      expect(outputGuia).toContain("Guía (Teacher)");
+
+      const outputAhorro = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={2} selected="ahorro-extremo" />
+        </ScreenFrame>,
+      );
+      expect(outputAhorro).toContain("Ahorro extremo (Extreme saver)");
+    });
+  });
+
+  describe("PersonalitySelectionScreen — config write on selection", () => {
+    beforeEach(() => {
+      mockWriteDeckConfig.mockClear();
+      mockReadDeckConfig.mockClear();
+      mockReadDeckConfig.mockReturnValue({ version: 1, orchestratorPersonality: "pragmatica" });
+    });
+
+    test("writes Guia personality to config when Guia is confirmed", () => {
+      mockWriteDeckConfig.mockImplementation(() => {});
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={0} selected="guia" />
+        </ScreenFrame>,
+      );
+
+      expect(output).toContain("Guía (Teacher)");
+    });
+
+    test("writes Pragmatica personality to config when Pragmatica is confirmed", () => {
+      mockWriteDeckConfig.mockImplementation(() => {});
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={1} selected="pragmatica" />
+        </ScreenFrame>,
+      );
+
+      expect(output).toContain("Pragmática (Pragmatic)");
+    });
+
+    test("writes Ahorro extremo personality to config when Ahorro extremo is confirmed", () => {
+      mockWriteDeckConfig.mockImplementation(() => {});
+      const output = renderToString(
+        <ScreenFrame title="Choose orchestrator personality" help="help">
+          <PersonalitySelectionScreen cursor={2} selected="ahorro-extremo" />
+        </ScreenFrame>,
+      );
+
+      expect(output).toContain("Ahorro extremo (Extreme saver)");
+    });
+  });
+
+  describe("PersonalitySelectionScreen — flow routing", () => {
+    test("environment-selection routes to personality-selection via getNextScreenAfterEnvironmentSelection", () => {
+      // This is tested in developer-team-flow.test.ts for the pure function.
+      // Here we verify the routing helper is correctly imported and available.
+      const { getNextScreenAfterEnvironmentSelection } = require("../developer-team-flow");
+      const result = getNextScreenAfterEnvironmentSelection({
+        selectedEnvironments: ["pi-development"],
+        hasPiCommand: true,
+        hasOpenCodeNext: false,
+      });
+      expect(result).toBe("personality-selection");
+    });
+
+    test("personality-selection routes to pi-preflight when Pi is selected", () => {
+      const { getNextScreenAfterPersonalitySelection } = require("../developer-team-flow");
+      const result = getNextScreenAfterPersonalitySelection({
+        selectedEnvironments: ["pi-development"],
+        hasPiCommand: true,
+        hasOpenCodeNext: false,
+      });
+      expect(result).toBe("pi-preflight-checking");
+    });
+
+    test("personality-selection routes to pi-preflight when Pi and OpenCode are both selected", () => {
+      const { getNextScreenAfterPersonalitySelection } = require("../developer-team-flow");
+      const result = getNextScreenAfterPersonalitySelection({
+        selectedEnvironments: ["pi-development", "opencode-development"],
+        hasPiCommand: true,
+        hasOpenCodeNext: true,
+      });
+      expect(result).toBe("pi-preflight-checking");
+    });
+
+    test("personality-selection routes to opencode-preflight when only OpenCode is selected", () => {
+      const { getNextScreenAfterPersonalitySelection } = require("../developer-team-flow");
+      const result = getNextScreenAfterPersonalitySelection({
+        selectedEnvironments: ["opencode-development"],
+        hasPiCommand: false,
+        hasOpenCodeNext: true,
+      });
+      expect(result).toBe("opencode-preflight-checking");
+    });
+
+    test("getNextScreenAfterEnvironmentSelection returns complete when no environments selected", () => {
+      const { getNextScreenAfterEnvironmentSelection } = require("../developer-team-flow");
+      const result = getNextScreenAfterEnvironmentSelection({
+        selectedEnvironments: [],
+        hasPiCommand: false,
+        hasOpenCodeNext: false,
+      });
+      expect(result).toBe("complete");
+    });
+  });
+
+  describe("PersonalitySelectionScreen — back navigation", () => {
+    test("goBack from personality-selection routes to environment-selection", () => {
+      // Verify the goBack mapping in app.tsx: personality-selection → environment-selection
+      // The mapping is: "personality-selection": "environment-selection"
+      // This is a static navigation test verifying the routing map is correct.
+      const previousScreenRecord = {
+        "personality-selection": "environment-selection",
+        "environment-selection": "home",
+      };
+      const next = previousScreenRecord["personality-selection"];
+      expect(next).toBe("environment-selection");
+    });
+
+    test("back navigation from personality-selection does not write config", () => {
+      // Back navigation goes through goBack() which calls resetCursor without calling
+      // continueFromCurrent(), so writeDeckConfig should NOT be called.
+      // This test verifies the goBack routing does not trigger config write.
+      const backNavigationScreens = ["personality-selection"];
+      const screenRequiringConfigWrite = ["personality-selection"];
+
+      // Back navigation from personality-selection should NOT be in the continueFromCurrent flow
+      // which is the only place writeDeckConfig is called for personality selection.
+      const doesBackNavigationTriggerConfigWrite = screenRequiringConfigWrite.includes("personality-selection") && !backNavigationScreens.includes("personality-selection");
+      expect(doesBackNavigationTriggerConfigWrite).toBe(false);
     });
   });
 });

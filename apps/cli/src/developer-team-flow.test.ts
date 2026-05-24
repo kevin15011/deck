@@ -4,6 +4,8 @@ import {
   getNextScreenAfterTeamSelection,
   getNextScreenAfterDeveloperTeamReview,
   getNextScreenAfterDeveloperTeamInstall,
+  getNextScreenAfterEnvironmentSelection,
+  getNextScreenAfterPersonalitySelection,
 } from "./developer-team-flow";
 
 describe("Developer Team flow helpers", () => {
@@ -132,6 +134,90 @@ describe("Developer Team flow helpers", () => {
     test("returns complete when no more environments", () => {
       const result = getNextScreenAfterDeveloperTeamInstall({
         selectedEnvironments: ["pi-development"],
+        hasOpenCodeNext: false,
+      });
+
+      expect(result).toBe("complete");
+    });
+  });
+
+  describe("getNextScreenAfterEnvironmentSelection", () => {
+    test("returns personality-selection when environments are selected", () => {
+      const result = getNextScreenAfterEnvironmentSelection({
+        selectedEnvironments: ["pi-development"],
+        hasPiCommand: true,
+        hasOpenCodeNext: false,
+      });
+
+      expect(result).toBe("personality-selection");
+    });
+
+    test("returns personality-selection when multiple environments are selected", () => {
+      const result = getNextScreenAfterEnvironmentSelection({
+        selectedEnvironments: ["pi-development", "opencode-development"],
+        hasPiCommand: true,
+        hasOpenCodeNext: true,
+      });
+
+      expect(result).toBe("personality-selection");
+    });
+
+    test("returns complete when no environments are selected", () => {
+      const result = getNextScreenAfterEnvironmentSelection({
+        selectedEnvironments: [],
+        hasPiCommand: false,
+        hasOpenCodeNext: false,
+      });
+
+      expect(result).toBe("complete");
+    });
+
+    test("returns personality-selection when only OpenCode is selected", () => {
+      const result = getNextScreenAfterEnvironmentSelection({
+        selectedEnvironments: ["opencode-development"],
+        hasPiCommand: false,
+        hasOpenCodeNext: true,
+      });
+
+      expect(result).toBe("personality-selection");
+    });
+  });
+
+  describe("getNextScreenAfterPersonalitySelection", () => {
+    test("routes to pi-preflight-checking when Pi is selected", () => {
+      const result = getNextScreenAfterPersonalitySelection({
+        selectedEnvironments: ["pi-development"],
+        hasPiCommand: true,
+        hasOpenCodeNext: false,
+      });
+
+      expect(result).toBe("pi-preflight-checking");
+    });
+
+    test("routes to pi-preflight-checking when Pi and OpenCode are both selected", () => {
+      const result = getNextScreenAfterPersonalitySelection({
+        selectedEnvironments: ["pi-development", "opencode-development"],
+        hasPiCommand: true,
+        hasOpenCodeNext: true,
+      });
+
+      expect(result).toBe("pi-preflight-checking");
+    });
+
+    test("routes to opencode-preflight-checking when only OpenCode is selected", () => {
+      const result = getNextScreenAfterPersonalitySelection({
+        selectedEnvironments: ["opencode-development"],
+        hasPiCommand: false,
+        hasOpenCodeNext: true,
+      });
+
+      expect(result).toBe("opencode-preflight-checking");
+    });
+
+    test("routes to complete when no environments are selected (defensive)", () => {
+      const result = getNextScreenAfterPersonalitySelection({
+        selectedEnvironments: [],
+        hasPiCommand: false,
         hasOpenCodeNext: false,
       });
 

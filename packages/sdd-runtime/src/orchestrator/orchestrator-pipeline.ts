@@ -10,6 +10,7 @@ import { computeRiskScore, DEFAULT_SCORER_CONFIG, type RiskScorerConfig } from "
 import { routeQuality, DEFAULT_ROUTER_CONFIG, type QualityRouterConfig, type QualityRouteDecision } from "./quality-router";
 import { checkLoopCondition, DEFAULT_LOOP_BREAKER_CONFIG, type LoopBreakerConfig, type FailureFingerprint, type LoopAction } from "./loop-breaker";
 import type { RiskResult } from "../contracts/risk";
+import { formatBlockReason, formatSkipReason, DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "./personality-output";
 
 // ── Input ──
 
@@ -51,6 +52,8 @@ export interface PipelineConfig {
   scorerConfig: RiskScorerConfig;
   routerConfig: QualityRouterConfig;
   loopBreakerConfig: LoopBreakerConfig;
+  /** Personality for human-facing output verbosity. Defaults to pragmatica. */
+  personality?: OrchestratorPersonality;
 }
 
 export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
@@ -65,12 +68,22 @@ export function runOrchestratorPipeline(
   input: OrchestratorPipelineInput,
   config: PipelineConfig = DEFAULT_PIPELINE_CONFIG,
 ): OrchestratorPipelineResult {
+  const personality = config.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
+
   // 1. Validate audit
   const auditValidation = validateSelfAudit(input.audit, input.auditType);
 
   // 2. Invalid audit blocks in enforced modes
   if (!auditValidation.valid && input.enforcementMode && input.enforcementMode !== "report-only") {
-    const reason = `Self-audit invalid in ${input.enforcementMode} mode: missing=[${auditValidation.missingFields.join(",")}], invalid=[${auditValidation.invalidFields.join(",")}]`;
+    const blockReasonFacts = {
+      missingFields: auditValidation.missingFields,
+      invalidFields: auditValidation.invalidFields,
+      enforcementMode: input.enforcementMode,
+      auditType: input.auditType,
+      isCritical: true,
+    };
+    const reason = formatBlockReason(blockReasonFacts, personality);
+
     // Produce conservative risk result and blocked outcome
     return {
       auditValid: false,
@@ -89,7 +102,7 @@ export function runOrchestratorPipeline(
         checksToRun: [],
         requiresReplanOrOverride: true,
         stateValidationRequired: true,
-        skipReason: reason,
+        skipReason: undefined,
       },
       loopAction: "continue",
       outcome: "blocked",
@@ -115,19 +128,47 @@ export function runOrchestratorPipeline(
     loopAction = result.action;
   }
 
-  // 6. Determine outcome
+  // 6. Determine outcome — blockReason is formatted for human display
   let outcome: PipelineOutcome = "completed";
   let blockReason: string | undefined;
   if (!auditValidation.valid) {
     outcome = "partial";
-    blockReason = `Self-audit incomplete: missing=[${auditValidation.missingFields.join(",")}], invalid=[${auditValidation.invalidFields.join(",")}]`;
+    // Partial path uses "incomplete" wording which the formatter handles as pragmatic default
+    const blockReasonFacts = {
+      missingFields: auditValidation.missingFields,
+      invalidFields: auditValidation.invalidFields,
+      enforcementMode: input.enforcementMode ?? "report-only",
+      auditType: input.auditType,
+      isCritical: false,
+    };
+    blockReason = formatBlockReason(blockReasonFacts, personality);
+  }
+
+  // 7. Format skipReason with personality if set
+  let finalQualityDecision = qualityDecision;
+  if (qualityDecision.skipReason && typeof qualityDecision.skipReason === "string") {
+    // Extract active quality override fields so the formatter's override branch is reachable
+    const qualityOverride = riskResult.overrides.find(
+      (o) => o.scope === "quality-only" && new Date(o.expiresAt) > new Date(),
+    );
+    const skipReasonFacts = {
+      riskScore: riskResult.score,
+      threshold: config.routerConfig.standardThreshold,
+      tier: riskResult.tier,
+      overrideName: qualityOverride?.name,
+      overrideExpiresAt: qualityOverride?.expiresAt,
+    };
+    finalQualityDecision = {
+      ...qualityDecision,
+      skipReason: formatSkipReason(skipReasonFacts, personality),
+    };
   }
 
   return {
     auditValid: auditValidation.valid,
     riskResult,
-    qualityRouted: qualityDecision.invokeQuality,
-    qualityDecision,
+    qualityRouted: finalQualityDecision.invokeQuality,
+    qualityDecision: finalQualityDecision,
     loopAction,
     outcome,
     blockReason,

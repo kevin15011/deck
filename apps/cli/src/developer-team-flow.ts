@@ -2,6 +2,9 @@ export type NextScreen =
   | "team-selection"
   | "developer-team-review"
   | "developer-team-installing"
+  | "environment-selection"
+  | "personality-selection"
+  | "pi-preflight-checking"
   | "opencode-preflight-checking"
   | "complete";
 
@@ -55,6 +58,30 @@ export function getNextScreenAfterDeveloperTeamReview(context: ReviewContext): N
 
 export function getNextScreenAfterDeveloperTeamInstall(context: AfterInstallContext): NextScreen {
   return resolveNextEnvironment(context.hasOpenCodeNext);
+}
+
+export function getNextScreenAfterEnvironmentSelection(context: FlowContext): NextScreen {
+  if (context.selectedEnvironments.length > 0) {
+    return "personality-selection";
+  }
+
+  return "complete";
+}
+
+export function getNextScreenAfterPersonalitySelection(context: FlowContext): NextScreen {
+  const hasPi = context.selectedEnvironments.includes("pi-development");
+
+  if (hasPi) {
+    return "pi-preflight-checking";
+  }
+
+  const hasOpenCode = context.selectedEnvironments.includes("opencode-development");
+
+  if (hasOpenCode) {
+    return "opencode-preflight-checking";
+  }
+
+  return "complete";
 }
 
 function resolveNextEnvironment(hasOpenCodeNext: boolean): NextScreen {

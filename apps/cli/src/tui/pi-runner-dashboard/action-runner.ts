@@ -375,6 +375,7 @@ function writeDeckConfigAction(
         ? { activeProvider: "engram" as const }
         : { activeProvider: "none" as const },
     packageInstructions: updatedPackageInstructions,
+    orchestratorPersonality: existingConfig.orchestratorPersonality,
   };
 
   const writer = dependencies.writeDeckConfig ?? writeDeckConfig;
