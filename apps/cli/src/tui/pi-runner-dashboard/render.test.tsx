@@ -7,10 +7,7 @@ import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan } from "./
 /**
  * Pi Runner dashboard render tests.
  *
- * Updated for configure-packages-instruction-injection (Tasks 8-11):
- * - Dashboard shows 5 sections: Packages, Adaptive Memory, Teams, Configure Packages, Review & Install
- * - Configure Packages section shows instruction injection toggles, not installation
- * - package-instructions-detail screen shows toggles for codebase-memory, context-mode, rtk
+ * Dashboard sections (4): Packages, Adaptive Memory, Teams, Review & Install
  */
 const plan: PiRunnerReviewPlan = {
   ready: false,
@@ -73,8 +70,7 @@ const plan: PiRunnerReviewPlan = {
 };
 
 describe("Pi Runner dashboard render", () => {
-  test("dashboard principal muestra las cinco secciones con estados y contadores", () => {
-    // Tasks 8-11: Five sections: Packages, Adaptive Memory, Teams, Configure Packages, Review & Install
+  test("dashboard principal muestra las cuatro secciones con estados y contadores", () => {
     const state = createDefaultPiRunnerDashboardState({ plan });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
@@ -82,49 +78,12 @@ describe("Pi Runner dashboard render", () => {
     expect(output).toContain("Packages");
     expect(output).toContain("Adaptive Memory");
     expect(output).toContain("Teams");
-    expect(output).toContain("Configure Packages");
     expect(output).toContain("Review & Install");
     expect(output).toContain("Configure packages, Adaptive Memory, Teams and Review & Install.");
     expect(output).toContain("actions:");
   });
 
-  test("Configure Packages section muestra conteo de instrucciones", () => {
-    const state = createDefaultPiRunnerDashboardState({
-      packageInstructions: {
-        "codebase-memory": true,
-        "context-mode": false,
-        rtk: true,
-      },
-    });
-    const output = renderToString(<PiRunnerDashboardScreens state={state} />);
-
-    expect(output).toContain("Configure Packages");
-    expect(output).toContain("2/3 instructions enabled");
-    expect(output).toContain("instruction injection only");
-    expect(output).toContain("does not install packages");
-  });
-
-  test("package-instructions-detail muestra toggles para codebase-memory context-mode rtk", () => {
-    const state = createDefaultPiRunnerDashboardState({
-      screen: "package-instructions-detail",
-      packageInstructions: {
-        "codebase-memory": true,
-        "context-mode": false,
-        rtk: false,
-      },
-    });
-    const output = renderToString(<PiRunnerDashboardScreens state={state} />);
-
-    expect(output).toContain("Configure Packages");
-    expect(output).toContain("Instruction injection only");
-    expect(output).toContain("[x] Codebase Memory");
-    expect(output).toContain("[ ] Context Mode");
-    expect(output).toContain("[ ] RTK");
-    expect(output).toContain("Back to dashboard");
-  });
-
   test("Packages detail muestra packages sin resolver (cursor 0 = back)", () => {
-    // Without a resolver, packages-detail shows empty list with just "Back to dashboard"
     const state = createDefaultPiRunnerDashboardState({
       screen: "packages-detail",
       selectedCapabilities: { rtk: true, "context-mode": false, "codebase-memory": false },

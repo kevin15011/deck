@@ -12,7 +12,6 @@ export type RunnerDashboardScreen =
   | "adaptive-memory-detail"
   | "teams-detail"
   | "developer-team-detail"
-  | "package-instructions-detail"
   | "review-plan"
   | "install-progress"
   | "complete";
@@ -23,7 +22,6 @@ export const RUNNER_DASHBOARD_SCREENS: RunnerDashboardScreen[] = [
   "adaptive-memory-detail",
   "teams-detail",
   "developer-team-detail",
-  "package-instructions-detail",
   "review-plan",
   "install-progress",
   "complete",
@@ -211,9 +209,9 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   cursor: 0,
   runnerScope: "pi",
   selectedCapabilities: {
-    "context-mode": false,
-    "codebase-memory": false,
-    rtk: false,
+    "context-mode": true,
+    "codebase-memory": true,
+    rtk: true,
   },
   capabilityStatuses: {},
   adaptiveMemory: {

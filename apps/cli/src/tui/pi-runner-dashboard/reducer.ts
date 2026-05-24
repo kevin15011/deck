@@ -169,13 +169,17 @@ function selectAdaptiveMemoryProvider(
     });
   }
 
-  return invalidatePlan({
-    ...state,
-    adaptiveMemory: {
-      provider,
-      status: provider === "none" ? "No adaptive memory provider selected." : "Engram selected; engram-memory action is derived by the plan.",
-    },
-  });
+  // After selecting a non-supermemory provider, go back to dashboard
+  return navigate(
+    invalidatePlan({
+      ...state,
+      adaptiveMemory: {
+        provider,
+        status: provider === "none" ? "No adaptive memory provider selected." : "Engram selected; engram-memory action is derived by the plan.",
+      },
+    }),
+    "dashboard",
+  );
 }
 
 function updateSupermemory(

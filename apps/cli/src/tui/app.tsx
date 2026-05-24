@@ -120,7 +120,6 @@ type Screen =
   | "model-environment-selection"
   | "model-team-selection"
   | "environment-selection"
-  | "environment-check"
   | "pi-runner-dashboard"
   | "pi-preflight-checking"
   | "pi-preflight"
@@ -257,7 +256,7 @@ export function DeckApp() {
   const [screen, setScreen] = useState<Screen>("home");
   const [cursor, setCursor] = useState(0);
   const [homeCursor, setHomeCursor] = useState(0);
-  const [selectedEnvironments, setSelectedEnvironments] = useState<EnvironmentId[]>(["pi-development"]);
+  const [selectedEnvironments, setSelectedEnvironments] = useState<EnvironmentId[]>([]);
   const [runtimeStatuses, setRuntimeStatuses] = useState<RuntimeStatus[]>([]);
   const [piPreflight, setPiPreflight] = useState<PiPreflightResult | null>(null);
   const [toolsReview, setToolsReview] = useState<PiRequiredToolsReview | null>(null);
@@ -411,13 +410,17 @@ export function DeckApp() {
     async function runPreflight() {
       await new Promise((resolve) => setTimeout(resolve, 120));
 
-      if (!installedPi?.command) {
+      const selected = selectedEnvironments;
+      const statuses = detectSelectedRuntimes(selected);
+      const detectedPi = statuses.find((s) => s.runtime === "pi" && s.installed && s.command);
+
+      if (!detectedPi?.command) {
         if (!cancelled) resetCursor("complete");
         return;
       }
 
-      const preflight = inspectPiEnvironment({ command: installedPi.command });
-      const review = reviewPiRequiredTools({ command: installedPi.command });
+      const preflight = inspectPiEnvironment({ command: detectedPi.command });
+      const review = reviewPiRequiredTools({ command: detectedPi.command });
 
       if (!cancelled) {
         setPiPreflight(preflight);
@@ -426,7 +429,7 @@ export function DeckApp() {
         setDashboardInventory(inventory);
         const piConfig = readDeckConfig(resolveProjectRoot());
         setDashboardState(createDefaultRunnerDashboardState({
-          runtime: { runnerCommand: installedPi.command, preflight, toolsReview: review },
+          runtime: { runnerCommand: detectedPi.command, preflight, toolsReview: review },
           capabilityStatuses: Object.fromEntries(
             Object.entries(inventory)
               .filter(([key]) => key !== '_internal')
@@ -444,7 +447,7 @@ export function DeckApp() {
     return () => {
       cancelled = true;
     };
-  }, [installedPi?.command, screen]);
+  }, [screen, selectedEnvironments]);
 
   useEffect(() => {
     if (screen !== "opencode-preflight-checking") return;
@@ -454,12 +457,16 @@ export function DeckApp() {
     async function runOpenCodePreflight() {
       await new Promise((resolve) => setTimeout(resolve, 120));
 
-      if (!installedOpenCode?.command) {
+      const selected = selectedEnvironments;
+      const statuses = detectSelectedRuntimes(selected);
+      const detectedOpenCode = statuses.find((s) => s.runtime === "opencode" && s.installed && s.command);
+
+      if (!detectedOpenCode?.command) {
         if (!cancelled) resetCursor("complete");
         return;
       }
 
-      const preflight = inspectOpenCodeEnvironment({ command: installedOpenCode.command });
+      const preflight = inspectOpenCodeEnvironment({ command: detectedOpenCode.command });
       const review = reviewOpenCodeTools({ packageManifest: preflight.packageManifest });
 
       if (!cancelled) {
@@ -470,7 +477,7 @@ export function DeckApp() {
         setDashboardInventory(inventory as any);
         const opencodeConfig = readDeckConfig(resolveProjectRoot());
         setDashboardState(createDefaultRunnerDashboardState({
-          runtime: { runnerCommand: installedOpenCode.command, preflight, toolsReview: review as any },
+          runtime: { runnerCommand: detectedOpenCode.command, preflight, toolsReview: review as any },
           runnerScope: "opencode",
           capabilityStatuses: Object.fromEntries(
             Object.entries(inventory)
@@ -496,7 +503,7 @@ export function DeckApp() {
     return () => {
       cancelled = true;
     };
-  }, [installedOpenCode?.command, screen]);
+  }, [screen, selectedEnvironments]);
 
   useEffect(() => {
     if (screen !== "installing") return;
@@ -640,7 +647,7 @@ export function DeckApp() {
           }
         }
       } else {
-        // Pi path (existing code, unchanged)
+        // Pi path
         const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments, preserveMissingThinkingAssignments: true, ...(memoryProvider ? { memoryProvider } : {}) });
         const backup = backupDeveloperTeamFiles(plan);
 
@@ -660,10 +667,12 @@ export function DeckApp() {
               setDeveloperTeamResults(applyResult.results);
             }
 
+            const statuses = detectSelectedRuntimes(selectedEnvironments);
+            const hasOpenCode = statuses.some((s) => s.runtime === "opencode" && s.installed && s.command);
             const nextScreen = getNextScreenAfterDeveloperTeamInstall({
               selectedEnvironments,
               hasOpenCodeNext:
-                selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+                selectedEnvironments.includes("opencode-development") && hasOpenCode && !openCodePreflight,
             });
 
             resetCursor(nextScreen);
@@ -681,10 +690,12 @@ export function DeckApp() {
               },
             ]);
 
+            const statuses = detectSelectedRuntimes(selectedEnvironments);
+            const hasOpenCode = statuses.some((s) => s.runtime === "opencode" && s.installed && s.command);
             const nextScreen = getNextScreenAfterDeveloperTeamInstall({
               selectedEnvironments,
               hasOpenCodeNext:
-                selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+                selectedEnvironments.includes("opencode-development") && hasOpenCode && !openCodePreflight,
             });
 
             resetCursor(nextScreen);
@@ -698,7 +709,7 @@ export function DeckApp() {
     return () => {
       cancelled = true;
     };
-  }, [screen, selectedEnvironments, installedOpenCode?.command, openCodePreflight, modelAssignments, thinkingAssignments, memoryProvider]);
+  }, [screen, selectedEnvironments, openCodePreflight, modelAssignments, thinkingAssignments, memoryProvider]);
 
   function resetCursor(nextScreen: Screen, nextCursor = 0) {
     setScreen(nextScreen);
@@ -858,18 +869,10 @@ export function DeckApp() {
     }
 
     if (screen === "environment-selection") {
-      const selected = selectedEnvironments.length > 0 ? selectedEnvironments : ["pi-development" as EnvironmentId];
-      const statuses = detectSelectedRuntimes(selected);
-      setRuntimeStatuses(statuses);
-      resetCursor("environment-check");
-      return;
-    }
-
-    if (screen === "environment-check") {
-      if (selectedEnvironments.includes("pi-development") && installedPi?.command) return resetCursor("pi-preflight-checking");
-      if (selectedEnvironments.includes("opencode-development") && installedOpenCode?.command) {
-        return resetCursor("opencode-preflight-checking");
-      }
+      if (selectedEnvironments.length === 0) return;
+      const selected = selectedEnvironments;
+      if (selected.includes("pi-development")) return resetCursor("pi-preflight-checking");
+      if (selected.includes("opencode-development")) return resetCursor("opencode-preflight-checking");
       resetCursor("complete");
       return;
     }
@@ -1000,10 +1003,10 @@ export function DeckApp() {
     }
 
     if (screen === "team-selection") {
+      const hasOpenCode = selectedEnvironments.includes("opencode-development");
       const nextScreen = getNextScreenAfterTeamSelection({
         selectedTeams,
-        hasOpenCodeNext:
-          selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+        hasOpenCodeNext: hasOpenCode,
       });
 
       if (nextScreen === "developer-team-review") {
@@ -1158,19 +1161,14 @@ export function DeckApp() {
     }
 
     if (screen === "developer-team-review") {
+      const hasOpenCode = selectedEnvironments.includes("opencode-development");
       const nextScreen = getNextScreenAfterDeveloperTeamReview({
         cursor: developerTeamCursor,
         selectedEnvironments,
-        hasOpenCodeNext:
-          selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+        hasOpenCodeNext: hasOpenCode,
       });
 
-      if (nextScreen === "developer-team-installing") {
-        resetCursor("developer-team-installing");
-      } else {
-        resetCursor(nextScreen);
-      }
-      return;
+      resetCursor(nextScreen);
     }
 
     if (screen === "complete") resetCursor("home");
@@ -1187,7 +1185,7 @@ export function DeckApp() {
     if (key.escape) {
       if (dashboardState.screen === "dashboard") {
         clearDashboardSupermemoryEphemeralState();
-        resetCursor("environment-check");
+        resetCursor("environment-selection");
       } else {
         setDashboardState((current) => reduceRunnerDashboard(current, { type: "back" }, dashboardPlanBuilder));
       }
@@ -1372,10 +1370,14 @@ export function DeckApp() {
       return false;
     }
 
-    setDashboardState((state) => reduceRunnerDashboard(state, {
-      type: "update-supermemory",
-      values: setup.values,
-    }, dashboardPlanBuilder));
+    setDashboardState((state) => reduceRunnerDashboard(
+      reduceRunnerDashboard(state, {
+        type: "update-supermemory",
+        values: setup.values,
+      }, dashboardPlanBuilder),
+      { type: "navigate", screen: "dashboard" },
+      dashboardPlanBuilder,
+    ));
     setMemoryStatus(setup.status);
     return true;
   }
@@ -1666,17 +1668,22 @@ export function DeckApp() {
   }
 
   function goToNextEnvironmentOrComplete() {
+    const statuses = detectSelectedRuntimes(selectedEnvironments);
+    const hasPi = statuses.some((s) => s.runtime === "pi" && s.installed && s.command);
+    const hasOpenCode = statuses.some((s) => s.runtime === "opencode" && s.installed && s.command);
     const nextScreen = getNextScreenAfterPiToolInstall({
       selectedEnvironments,
-      hasPiCommand: Boolean(installedPi?.command),
-      hasOpenCodeNext: selectedEnvironments.includes("opencode-development") && Boolean(installedOpenCode?.command) && !openCodePreflight,
+      hasPiCommand: hasPi,
+      hasOpenCodeNext: selectedEnvironments.includes("opencode-development") && hasOpenCode && !openCodePreflight,
     });
 
     resetCursor(nextScreen);
   }
 
   function getNextScreenAfterDashboardComplete(): Screen {
-    if (selectedEnvironments.includes("opencode-development") && installedOpenCode?.command) {
+    const statuses = detectSelectedRuntimes(selectedEnvironments);
+    const hasOpenCode = statuses.some((s) => s.runtime === "opencode" && s.installed && s.command);
+    if (selectedEnvironments.includes("opencode-development") && hasOpenCode) {
       return "opencode-preflight-checking";
     }
     return "home";
@@ -1702,10 +1709,9 @@ export function DeckApp() {
         "model-environment-selection": "home",
         "model-team-selection": "model-environment-selection",
         "environment-selection": "home",
-        "environment-check": "environment-selection",
-        "pi-runner-dashboard": "environment-check",
-        "pi-preflight-checking": "environment-check",
-        "pi-preflight": "environment-check",
+        "pi-runner-dashboard": "environment-selection",
+        "pi-preflight-checking": "environment-selection",
+        "pi-preflight": "environment-selection",
         "required-tools": "pi-preflight",
         "optional-tools": "required-tools",
         "installation-review": "optional-tools",
@@ -1723,7 +1729,7 @@ export function DeckApp() {
         "supermemory-org-id": "supermemory-team-id",
         "developer-team-review": "memory-provider-selection",
         "developer-team-installing": "developer-team-review",
-        "opencode-preflight-checking": "environment-check",
+        "opencode-preflight-checking": "environment-selection",
         "configure-packages-runner-selection": "home",
         "configure-packages-detail": "configure-packages-runner-selection",
         "doctor": "home",
@@ -1756,7 +1762,6 @@ export function DeckApp() {
       {screen === "environment-selection" ? (
         <EnvironmentSelectionScreen cursor={cursor} selected={selectedEnvironments} />
       ) : null}
-      {screen === "environment-check" ? <EnvironmentCheckScreen statuses={runtimeStatuses} /> : null}
       {screen === "pi-runner-dashboard" ? (
         <RunnerDashboardScreens state={dashboardState} installResults={dashboardActionResults} completionStatus={dashboardCompletionStatus} canRunPlan={canRunDashboardPlan(dashboardState)} runBlockDiagnostics={getDashboardRunBlockDiagnostics(dashboardState)} capabilityResolver={dashboardCapabilityResolver} />
       ) : null}
@@ -1822,7 +1827,6 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "model-environment-selection": "Select runner for model config",
     "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",
-    "environment-check": "Environment check",
     "pi-runner-dashboard": runnerScope === "opencode" ? "OpenCode Runner capability dashboard" : "Pi Runner capability dashboard",
     "pi-preflight-checking": "Checking Pi environment",
     "pi-preflight": "Pi Environment Preflight",
