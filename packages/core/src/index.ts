@@ -18,6 +18,12 @@ export {
 // needed by consumers of the capability interface. Avoid re-exporting types that
 // have canonical definitions elsewhere (model-catalog, adaptive-memory).
 export type { RunnerCapabilities } from "./runner-capability";
+export {
+  validateRunnerCapabilities,
+  REQUIRED_CAPABILITIES,
+  OPTIONAL_CAPABILITIES,
+} from "./runner-capability-validation";
+export type { ValidationResult } from "./runner-capability-validation";
 export type {
   RunnerId,
   RunnerEnvironmentId,
@@ -84,7 +90,13 @@ export type {
 export * from "./model-catalog";
 
 // Developer Team manifest builder
-export { buildDeveloperTeamManifest, getCataloguedAgentIds, isManifestModelComplete } from "./teams/developer/manifest";
+export {
+  buildDeveloperTeamManifest,
+  buildDeveloperTeamManifestLegacy,
+  getCataloguedAgentIds,
+  isManifestModelComplete,
+  type ManifestBuildResult,
+} from "./teams/developer/manifest";
 
 // Instruction bundle helpers (capability instruction injection)
 export {

@@ -48,10 +48,22 @@ import {
   composeCapabilityInstructions,
   type CapabilityInstructionCompositionContext,
 } from "./instruction-bundles/index";
+import { getDeveloperTeamCatalog } from "./catalog";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+// Result type for error-returning operations
+export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+
+// Error type for content registry operations
+export interface AgentContentError {
+  agentId: string;
+  message: string;
+  suggestions: string[];
+  fallbackAvailable: boolean;
+}
 
 export type AgentContent = {
   /** Body for the agent definition file (after runtime frontmatter) */
@@ -63,6 +75,14 @@ export type AgentContent = {
 export type ContentRegistryOptions = {
   /** Optional capability instruction bundle to compose into agent/skill/session content */
   capabilityInstructions?: CapabilityInstructionBundle;
+};
+
+/** Options for getAgentContentResult */
+export type ContentRegistryResultOptions = {
+  /** Optional capability instruction bundle to compose into agent/skill/session content */
+  capabilityInstructions?: CapabilityInstructionBundle;
+  /** When true, returns fallback content for catalog agents without real content */
+  fallback?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -194,58 +214,209 @@ function appendCapabilityInstructions(
  * are composed into both agentBody and skillBody after context-authority guidance.
  *
  * Returns undefined for agent IDs not in the Developer Team catalog.
+ *
+ * @deprecated Use getAgentContentResult() instead. This wrapper will be removed
+ *             in a future release.
  */
 export function getAgentContent(
   agentId: string,
   options?: ContentRegistryOptions,
 ): AgentContent | undefined {
+  const result = getAgentContentResult(agentId, options);
+  if (result.ok) {
+    return result.value;
+  }
+  // Legacy behavior: returns undefined for unknown agents
+  return undefined;
+}
+
+/**
+ * Returns the agent body and skill body content for a known agent.
+ *
+ * Uses a Result type to distinguish between successful retrieval and error cases.
+ * For agents with real content in REAL_CONTENT, returns ok: true with content.
+ * For unknown agents, returns ok: false with suggestions and fallback availability.
+ *
+ * When options.capabilityInstructions is provided, package instruction fragments
+ * are composed into both agentBody and skillBody after context-authority guidance.
+ *
+ * When options.fallback is true and the agentId exists in the catalog but has no
+ * real content, returns generic fallback content instead of an error.
+ */
+export function getAgentContentResult(
+  agentId: string,
+  options?: ContentRegistryResultOptions,
+): Result<AgentContent, AgentContentError> {
   const real = REAL_CONTENT[agentId];
   if (real) {
     const withAuthority = withContextAuthorityGuidance(real);
     if (!options?.capabilityInstructions) {
-      return withAuthority;
+      return { ok: true, value: withAuthority };
     }
-    // Compose capability instructions into agent and skill bodies
     return {
-      agentBody: appendCapabilityInstructions(
-        withAuthority.agentBody,
-        options.capabilityInstructions,
-        { surface: "agent", agentId },
-      ),
-      skillBody: appendCapabilityInstructions(
-        withAuthority.skillBody,
-        options.capabilityInstructions,
-        { surface: "skill", skillId: `${agentId}-skill` },
-      ),
+      ok: true,
+      value: {
+        agentBody: appendCapabilityInstructions(
+          withAuthority.agentBody,
+          options.capabilityInstructions,
+          { surface: "agent", agentId },
+        ),
+        skillBody: appendCapabilityInstructions(
+          withAuthority.skillBody,
+          options.capabilityInstructions,
+          { surface: "skill", skillId: `${agentId}-skill` },
+        ),
+      },
     };
   }
 
-  // Look up in catalog for placeholder
-  const agent = DEVELOPER_TEAM_AGENTS.find((a) => a.id === agentId);
-  if (!agent) {
-    return undefined;
+  // Not in REAL_CONTENT - check catalog
+  const catalog = getDeveloperTeamCatalog();
+  const catalogAgent = catalog.find((a) => a.id === agentId);
+  const allAgentIds = catalog.map((a) => a.id);
+
+  // Determine fallback content if requested
+  if (options?.fallback) {
+    if (catalogAgent) {
+      // Agent exists in catalog but has no real content — fallback is appropriate
+      const fallbackContent = getUnknownAgentContent(agentId, []);
+      const withAuthority = withContextAuthorityGuidance(fallbackContent);
+      const content = !options?.capabilityInstructions
+        ? withAuthority
+        : {
+            agentBody: appendCapabilityInstructions(
+              withAuthority.agentBody,
+              options.capabilityInstructions,
+              { surface: "agent", agentId },
+            ),
+            skillBody: appendCapabilityInstructions(
+              withAuthority.skillBody,
+              options.capabilityInstructions,
+              { surface: "skill", skillId: `${agentId}-skill` },
+            ),
+          };
+      return { ok: true, value: content };
+    }
+    // Agent is NOT in catalog — cannot provide fallback, return error
+    // Fallback is only for known catalog agents that lack real content
   }
 
-  const withAuthority = withContextAuthorityGuidance({
-    agentBody: buildPlaceholderAgentBody(agent.displayName, agent.description),
-    skillBody: buildPlaceholderSkillBody(agent.displayName, agent.description),
-  });
+  // Not found - generate error with suggestions
+  const suggestions = findSimilarAgentIds(agentId, allAgentIds);
 
-  if (!options?.capabilityInstructions) {
-    return withAuthority;
+  if (catalogAgent) {
+    // Agent is in catalog but has no real content
+    return {
+      ok: false,
+      error: {
+        agentId,
+        message: `Agent "${agentId}" not found in content registry`,
+        suggestions,
+        fallbackAvailable: true,
+      },
+    };
   }
 
+  // Unknown agent - not in catalog at all
   return {
-    agentBody: appendCapabilityInstructions(
-      withAuthority.agentBody,
-      options.capabilityInstructions,
-      { surface: "agent", agentId },
-    ),
-    skillBody: appendCapabilityInstructions(
-      withAuthority.skillBody,
-      options.capabilityInstructions,
-      { surface: "skill", skillId: `${agentId}-skill` },
-    ),
+    ok: false,
+    error: {
+      agentId,
+      message: `Agent "${agentId}" not found in content registry`,
+      suggestions,
+      fallbackAvailable: false,
+    },
+  };
+}
+
+/**
+ * Generates suggestions for unknown agent IDs using Levenshtein distance and prefix matching.
+ *
+ * Ranking: prefix matches first (score 0), then Levenshtein distance ascending.
+ * Limited to maximum 3 suggestions.
+ */
+function findSimilarAgentIds(query: string, candidates: string[]): string[] {
+  const suggestions: Array<{ id: string; score: number }> = [];
+
+  for (const id of candidates) {
+    // Prefix match has highest priority (score 0)
+    if (id.startsWith(query) || query.startsWith(id)) {
+      suggestions.push({ id, score: 0 });
+    } else {
+      // Levenshtein distance
+      const dist = levenshteinDistance(query, id);
+      if (dist <= 3) {
+        suggestions.push({ id, score: dist });
+      }
+    }
+  }
+
+  // Sort by score, then limit to 3
+  return suggestions
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 3)
+    .map((s) => s.id);
+}
+
+/**
+ * Standard Levenshtein distance implementation.
+ * Returns the minimum number of single-character edits needed to transform a into b.
+ */
+function levenshteinDistance(a: string, b: string): number {
+  const matrix: number[][] = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1,
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+/**
+ * Returns generic fallback content for an unknown agent.
+ * Used when options.fallback is true but the agent has no real content.
+ */
+export function getUnknownAgentContent(agentId: string, _suggestions: string[]): AgentContent {
+  return {
+    agentBody: [
+      `# Unknown Agent: ${agentId}`,
+      "",
+      `> This agent is not recognized by the Developer Team content registry.`,
+      "",
+      "## Context",
+      "",
+      "This agent ID is not registered with real content. The Orchestrator should",
+      "either route to a known agent or report this as an unresolved agent reference.",
+      "",
+      "## Project Standards (auto-resolved)",
+      "",
+      "<!-- Orchestrator will inject stack-specific rules at runtime. -->",
+      "",
+      "## Instructions",
+      "",
+      "Contact the Developer Team maintainers to register content for this agent.",
+      "",
+    ].join("\n"),
+    skillBody: [
+      `# Unknown Agent Skill: ${agentId}`,
+      "",
+      `> This skill is not recognized by the Developer Team content registry.`,
+      "",
+      "## Instructions",
+      "",
+      "Contact the Developer Team maintainers to register content for this skill.",
+      "",
+    ].join("\n"),
   };
 }
 
