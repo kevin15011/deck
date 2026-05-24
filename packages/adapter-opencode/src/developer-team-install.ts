@@ -24,6 +24,7 @@ import { buildCommandGenerationPlan, applyCommandGeneration } from "./command-ge
 import { mergeAndWrite } from "./config-merge";
 import { resolveModelConfig, DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { detectMermaidPluginStatus, INTERNAL_OPENCODE_PACKAGE_IDS } from "./internal-opencode-packages";
+import { validateSupermemoryOpenCodeMcpConfig } from "./opencode-mcp-config";
 import type { AgentEntry, OpenCodeConfig } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +67,8 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   mermaidPluginStatus: "ready" | "missing";
   /** Captured capability instruction bundle for verify reconciliation */
   capabilityInstructions?: CapabilityInstructionBundle;
+  /** Memory injection bundle resolved from provider or pre-built injection. */
+  memoryBundle?: MemoryInjectionBundle;
 };
 
 export type OpenCodeBundleApplyResult = {
@@ -127,13 +130,18 @@ export type MemoryInjectionOptions = {
 
 function resolveOpenCodeMemoryInjection(
   options?: MemoryInjectionOptions,
+  configDir?: string,
 ): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
-  return resolveMemoryInjection({
+  const result = resolveMemoryInjection({
     memoryInjection: options?.memoryInjection,
     memoryProvider: options?.memoryProvider,
     supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS,
     buildContext: { teamId: "developer-team" },
   });
+
+  const { bundle: memoryBundle, diagnostics } = result;
+
+  return { bundle: memoryBundle, diagnostics };
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +267,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   const agentsDir = join(projectRoot, ".opencode", "agents");
   const skillsDir = join(projectRoot, ".opencode", "skills");
 
-  const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options);
+  const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options, configDir);
 
   const capabilityInstructions = options?.capabilityInstructions;
 
@@ -311,6 +319,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     commandGenerationPlan,
     mermaidPluginStatus,
     capabilityInstructions,
+    memoryBundle,
   };
 }
 

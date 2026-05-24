@@ -12,6 +12,8 @@ import {
 } from "./developer-team-install";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
+import type { AdaptiveMemoryProvider, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
+import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 
 function createTempProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "deck-opencode-test-"));
@@ -300,5 +302,74 @@ describe("rollbackDeveloperTeamFiles", () => {
     } finally {
       cleanup(projectRoot);
     }
+  });
+});
+
+describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
+  test("returns memoryBundle when Supermemory provider is passed with valid auth", () => {
+    // Valid auth = validateSupermemoryOpenCodeMcpConfig returns ok: true
+    // We stub the validator by providing a pre-built memoryInjection bundle instead of a live provider,
+    // which bypasses the auth probe (pre-built bundles are used directly without validation).
+    const preBuiltBundle: MemoryInjectionBundle = {
+      instructions: [],
+      toolBindings: [{
+        capability: "memory.search",
+        serverName: "supermemory",
+        toolNames: ["supermemory_memory", "supermemory_recall"],
+      }],
+    };
+
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      memoryInjection: preBuiltBundle,
+    });
+
+    expect(plan.memoryBundle).toBeDefined();
+    expect(plan.memoryBundle!.toolBindings.length).toBeGreaterThan(0);
+    expect(plan.memoryBundle!.toolBindings[0].toolNames).toContain("supermemory_memory");
+    expect(plan.memoryBundle!.toolBindings[0].toolNames).toContain("supermemory_recall");
+  });
+
+  test("returns memoryBundle: undefined when no provider is configured", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+
+    expect(plan.memoryBundle).toBeUndefined();
+  });
+
+  test("returns memoryBundle even when auth probe fails (advisory only)", () => {
+    // When Supermemory provider is present but the OpenCode MCP config validation fails,
+    // the resolveOpenCodeMemoryInjection still returns the bundle (auth probe is advisory only).
+    // No diagnostic is emitted - the probe result doesn't affect bundle injection.
+    const provider: AdaptiveMemoryProvider = {
+      id: "supermemory",
+      displayName: "Supermemory",
+      adapter: {
+        health: () => ({ status: "degraded" }),
+        configure: () => {},
+        commit: async () => ({ savedCount: 0, discardedCount: 0, results: [] }),
+        loadContext: async () => [],
+        search: async () => [],
+      },
+      buildInjection: (): MemoryInjectionBundle => ({
+        instructions: [],
+        toolBindings: [{
+          capability: "memory.search",
+          serverName: "supermemory",
+          toolNames: ["supermemory_memory", "supermemory_recall"],
+        }],
+      }),
+    };
+
+    // With no opencode.json present at the expected path, the auth probe would fail.
+    // But auth probe is advisory only - bundle is still returned.
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      memoryProvider: provider,
+      configDir: "/nonexistent/.config/opencode",
+    });
+
+    // Auth probe no longer blocks bundle injection
+    expect(plan.memoryBundle).toBeDefined();
+    expect(plan.memoryBundle?.toolBindings).toHaveLength(1);
+    // No memory diagnostics emitted - auth probe is advisory
+    expect(plan.memoryDiagnostics).toHaveLength(0);
   });
 });

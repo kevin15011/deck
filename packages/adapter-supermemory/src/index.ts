@@ -1,5 +1,5 @@
 import type { AdaptiveMemoryProvider, MemoryInjectionBundle, MemoryInstructionFragment, MemoryToolBinding } from "@deck/core/memory/adaptive-memory";
-import { createAdaptiveMemoryDiagnostic, type AdaptiveMemoryAdapter, type AdaptiveMemoryCommitRequest, type AdaptiveMemoryCommitResult, type AdaptiveMemoryConfigureRequest, type AdaptiveMemoryContextRequest, type AdaptiveMemoryContextResult, type AdaptiveMemoryHealthResult, type AdaptiveMemorySearchRequest, type AdaptiveMemorySearchResult } from "@deck/core/memory/adaptive-memory-contract";
+import { createAdaptiveMemoryDiagnostic, type AdaptiveMemoryAdapter, type AdaptiveMemoryCommitRequest, type AdaptiveMemoryCommitResult, type AdaptiveMemoryConfigureRequest, type AdaptiveMemoryContextRequest, type AdaptiveMemoryContextResult, type AdaptiveMemoryHealthResult, type AdaptiveMemorySearchRequest, type AdaptiveMemorySearchResult, type AdaptiveMemorySource } from "@deck/core/memory/adaptive-memory-contract";
 import { validateAdaptiveMemoryCommitRequest, validateAdaptiveMemorySearchFilters, validateAdaptiveMemoryScope, validateContainerTag } from "@deck/core/memory/adaptive-memory-governance";
 
 export const SUPERMEMORY_MCP_SERVER_URL = "https://supermemory-new.stlmcp.com";
@@ -13,6 +13,10 @@ export type SupermemoryMemoryProviderConfig = {
   searchMode?: "memories" | "documents";
   maxMemoriesPerSession?: number;
   authenticatedRuntimeValidated?: boolean;
+  /** Supermemory API key. Falls back to process.env.SUPERMEMORY_API_KEY if not provided. */
+  apiKey?: string;
+  /** Override for the Supermemory MCP server URL. Defaults to SUPERMEMORY_MCP_SERVER_URL. */
+  mcpServerUrl?: string;
 };
 
 function requireNonEmpty(value: string | undefined, field: string): string {
@@ -56,7 +60,10 @@ function diagnostic(message: string, code: "ADAPTIVE_MEMORY_HEALTH_UNKNOWN" | "A
   return createAdaptiveMemoryDiagnostic(code, message, { severity: code === "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED" ? "error" : "warning", providerId: "supermemory", recoverable: true });
 }
 
-function createAdapter(config: SupermemoryMemoryProviderConfig, _authenticatedRuntimeValidated: { current: boolean }): AdaptiveMemoryAdapter {
+function createAdapter(
+  config: Required<Pick<SupermemoryMemoryProviderConfig, "userId" | "mcpServerName">> & Omit<SupermemoryMemoryProviderConfig, "mcpServerUrl"> & { mcpServerUrl: string },
+  _authenticatedRuntimeValidated: { current: boolean },
+): AdaptiveMemoryAdapter {
   return {
     identity: { id: "supermemory", displayName: "Supermemory MCP" },
     async loadContext(request: AdaptiveMemoryContextRequest): Promise<AdaptiveMemoryContextResult> {
@@ -72,9 +79,77 @@ function createAdapter(config: SupermemoryMemoryProviderConfig, _authenticatedRu
     async commit(request: AdaptiveMemoryCommitRequest): Promise<AdaptiveMemoryCommitResult> {
       const validation = validateAdaptiveMemoryCommitRequest(request);
       if (!validation.valid) {
-        return { savedCount: 0, discardedCount: request.candidates.length, decisions: request.candidates.map((candidate) => ({ accepted: false, scope: candidate.scope.scope, source: candidate.metadata.source, reason: "Rejected by adaptive memory governance." })), diagnostics: [diagnostic("Supermemory commit candidates failed governance validation.", "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED")] };
+        return { savedCount: 0, discardedCount: request.candidates.length, decisions: request.candidates.map((candidate) => ({ accepted: false, scope: candidate.scope.scope as "personal" | "team" | "org" | "project", source: candidate.metadata.source as AdaptiveMemorySource, reason: "Rejected by adaptive memory governance." })), diagnostics: [diagnostic("Supermemory commit candidates failed governance validation.", "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED")] };
       }
-      return { savedCount: 0, discardedCount: request.candidates.length, decisions: request.candidates.map((candidate) => ({ accepted: false, scope: candidate.scope.scope, source: candidate.metadata.source, reason: "Commit guidance is emitted for Pi MCP execution; adapter does not persist memories directly." })), diagnostics: [diagnostic("Runtime commits are performed through the validated execute MCP tool.")] };
+
+      // apiKey falls back to environment variable
+      const apiKey = config.apiKey ?? process.env.SUPERMEMORY_API_KEY;
+      const mcpServerUrl = config.mcpServerUrl;
+
+      if (!apiKey?.trim()) {
+        return {
+          savedCount: 0,
+          discardedCount: request.candidates.length,
+          decisions: request.candidates.map((candidate) => ({ accepted: false, scope: candidate.scope.scope as "personal" | "team" | "org" | "project", source: candidate.metadata.source as AdaptiveMemorySource, reason: "Supermemory API key is missing or invalid." })),
+          diagnostics: [diagnostic("Supermemory API key is missing or invalid — skipping memory persistence.")],
+        };
+      }
+
+      const decisions: Array<{ accepted: boolean; scope: "personal" | "team" | "org" | "project"; source: AdaptiveMemorySource; reason: string }> = [];
+      let savedCount = 0;
+      let discardedCount = 0;
+
+      for (const candidate of request.candidates) {
+        // TODO: Confirm exact Supermemory REST endpoint schema for add/update.
+        // Currently using interim endpoints: POST {mcpServerUrl}/api/memories/add (create)
+        // and POST {mcpServerUrl}/api/memories/update (update).
+        // NOTE: existingMemoryId may not exist on all candidate types; use any to access it.
+        const existingMemoryId = (candidate as unknown as { existingMemoryId?: string }).existingMemoryId;
+        const endpoint = existingMemoryId
+          ? `${mcpServerUrl}/api/memories/update`
+          : `${mcpServerUrl}/api/memories/add`;
+
+        const payload = {
+          containerTag: candidate.containerTag,
+          content: candidate.content,
+          // topicKey may not exist on all candidate metadata types
+          ...(("topicKey" in candidate.metadata) ? { topicKey: (candidate.metadata as unknown as { topicKey?: string }).topicKey } : {}),
+          type: candidate.metadata.type,
+          confidence: candidate.metadata.confidence,
+          source: candidate.metadata.source,
+          ...(existingMemoryId ? { memoryId: existingMemoryId } : {}),
+        };
+
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-supermemory-api-key": apiKey,
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (response.ok) {
+            decisions.push({ accepted: true, scope: candidate.scope.scope as "personal" | "team" | "org" | "project", source: candidate.metadata.source as AdaptiveMemorySource, reason: "Memory persisted successfully." });
+            savedCount++;
+          } else {
+            const errorText = await response.text().catch(() => "Unknown error");
+            decisions.push({ accepted: false, scope: candidate.scope.scope as "personal" | "team" | "org" | "project", source: candidate.metadata.source as AdaptiveMemorySource, reason: `HTTP ${response.status}: ${errorText.slice(0, 200)}` });
+            discardedCount++;
+          }
+        } catch (error) {
+          decisions.push({ accepted: false, scope: candidate.scope.scope as "personal" | "team" | "org" | "project", source: candidate.metadata.source as AdaptiveMemorySource, reason: `Fetch error: ${error instanceof Error ? error.message : String(error)}` });
+          discardedCount++;
+        }
+      }
+
+      return {
+        savedCount,
+        discardedCount,
+        decisions,
+        diagnostics: [diagnostic(`Committed ${savedCount} memories; ${discardedCount} discarded.`)],
+      };
     },
     async configure(request: AdaptiveMemoryConfigureRequest): Promise<void> {
       if (typeof request.providerState?.authenticatedRuntimeValidated === "boolean") {
@@ -89,12 +164,12 @@ function createAdapter(config: SupermemoryMemoryProviderConfig, _authenticatedRu
 
 export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProviderConfig): AdaptiveMemoryProvider {
   const userId = requireNonEmpty(config.userId, "userId");
-  const normalized = { ...config, userId, mcpServerName: config.mcpServerName?.trim() || "supermemory", maxMemoriesPerSession: config.maxMemoriesPerSession ?? 7 };
+  const normalized = { ...config, userId, mcpServerName: config.mcpServerName?.trim() || "supermemory", maxMemoriesPerSession: config.maxMemoriesPerSession ?? 7, mcpServerUrl: config.mcpServerUrl ?? SUPERMEMORY_MCP_SERVER_URL };
   validatedContainer(personalContainer(normalized.userId));
   if (normalized.teamId) validatedContainer(`t:${normalized.teamId}`);
   if (normalized.orgId) validatedContainer(`o:${normalized.orgId}`);
   const _authenticatedRuntimeValidated = { current: config.authenticatedRuntimeValidated ?? false };
-  const adapter = createAdapter(normalized, _authenticatedRuntimeValidated);
+  const adapter = createAdapter(normalized as Required<Pick<SupermemoryMemoryProviderConfig, "userId" | "mcpServerName">> & Omit<SupermemoryMemoryProviderConfig, "mcpServerUrl"> & { mcpServerUrl: string }, _authenticatedRuntimeValidated);
   return {
     id: "supermemory",
     displayName: "Supermemory MCP",

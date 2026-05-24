@@ -216,7 +216,7 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
       instruction: s.content,
       model: modelAssignments[s.agent.id],
       reasoning: reasoningAssignments[s.agent.id],
-      memoryBundle: undefined,
+      memoryBundle: plan.memoryBundle,
     };
   });
 
@@ -224,7 +224,7 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     agentId: s.agent.id,
     skillId: s.agent.skillId,
     body: s.content,
-    memoryBundle: undefined,
+    memoryBundle: plan.memoryBundle,
   }));
 
   const standaloneSkills = plan.standaloneSkills.map((s) => ({
