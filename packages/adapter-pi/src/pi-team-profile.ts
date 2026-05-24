@@ -8,6 +8,7 @@ import {
   type MemoryInjectionBundle,
 } from "@deck/core/memory/adaptive-memory";
 import { renderSddContextSections } from "@deck/core/memory/adaptive-context-renderer";
+import { readDeckConfig } from "@deck/core/config/deck-config";
 import type { MemoryDiagnostic } from "./developer-team-install";
 import { buildTeamProfileDir } from "./pi-team-launch";
 import { getTeamsForEnvironment } from "./team-catalog";
@@ -32,6 +33,8 @@ export type MaterializeTeamProfileOptions = {
   writeFile?: (path: string, data: string, encoding?: BufferEncoding) => void;
   readFile?: (path: string, encoding?: BufferEncoding) => string;
   exists?: (path: string) => boolean;
+  /** Optional orchestrator personality. When absent, falls back to config or default. */
+  orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
 };
 
 // --- System Prompt Builder ---
@@ -60,6 +63,10 @@ export type BuildTeamSystemPromptOptions = {
   memoryProvider?: AdaptiveMemoryProvider;
   memoryUnavailableReason?: string;
   supportedMemoryProviderIds?: Iterable<string>;
+  /** Optional orchestrator personality override. When absent, falls back to config or default. */
+  orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
+  /** Project root for resolving config. Required when using config-based personality fallback. */
+  projectRoot?: string;
 };
 
 /**
@@ -81,7 +88,10 @@ export function buildTeamSystemPrompt(
 ): BuildTeamSystemPromptResult {
   validateTeamForProfile(teamId);
 
-  const instructions = getTeamSessionInstructions(teamId);
+  // Resolve personality: explicit option > config > default
+  const configPath = options?.projectRoot ?? ".";
+  const personality = options?.orchestratorPersonality ?? readDeckConfig(configPath).orchestratorPersonality;
+  const instructions = getTeamSessionInstructions(teamId, { personality });
   const base = instructions ?? [
     `# Deck ${teamId} Session`,
     "",
@@ -157,6 +167,8 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
     memoryProvider: options.memoryProvider,
     supportedMemoryProviderIds: options.supportedMemoryProviderIds,
     memoryUnavailableReason: options.memoryUnavailableReason,
+    orchestratorPersonality: options.orchestratorPersonality,
+    projectRoot: options.projectRoot,
   });
 
   // Ensure directory exists

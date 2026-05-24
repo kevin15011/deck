@@ -13,7 +13,7 @@ import {
   type MemoryDiagnostic as CoreMemoryDiagnostic,
   type MemoryInjectionBundle,
 } from "@deck/core/memory/adaptive-memory";
-import { readDeckConfig } from "@deck/core/config/deck-config";
+import { readDeckConfig, DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
 import type { CapabilityInstructionBundle } from "@deck/core";
 import type { DeveloperTeamAgent } from "./developer-team-catalog";
 import { DEVELOPER_TEAM_AGENTS } from "./developer-team-catalog";
@@ -136,6 +136,14 @@ export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
    * without generating agent-bound frontmatter.
    */
   standaloneSkills?: readonly { skillId: string; body: string }[];
+  /**
+   * Optional orchestrator personality override. When provided, this value is
+   * passed to the content registry to select the appropriate prompt variant.
+   * When absent, falls back to `DEFAULT_ORCHESTRATOR_PERSONALITY`.
+   * If the caller also needs the resolved config, pass `orchestratorPersonality`
+   * explicitly after calling `readDeckConfig(projectRoot)`.
+   */
+  orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
 };
 
 // --- Legacy local resolveMemoryInjection (delegated to core) ---
@@ -278,6 +286,15 @@ export function buildDeveloperTeamInstallPlan(
 
   const capabilityInstructions = options?.capabilityInstructions;
 
+  // Resolve orchestrator personality from options or fall back to config
+  const personality = options?.orchestratorPersonality ?? (() => {
+    try {
+      return readDeckConfig(projectRoot).orchestratorPersonality;
+    } catch {
+      return DEFAULT_ORCHESTRATOR_PERSONALITY;
+    }
+  })();
+
   const agents: PlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.pi/agents/${agent.id}.md`;
     const absolutePath = join(projectRoot, relativePath);
@@ -287,7 +304,7 @@ export function buildDeveloperTeamInstallPlan(
     const thinking = model && options?.preserveMissingThinkingAssignments && !hasThinkingAssignment
       ? undefined
       : model ? resolveThinkingForModel(model, thinkingAssignments?.[agent.id]) : resolveThinkingForModel(undefined);
-    const content = buildAgentFileContent(agent, model, thinking, memoryBundle, capabilityInstructions);
+    const content = buildAgentFileContent(agent, model, thinking, memoryBundle, capabilityInstructions, personality);
 
     return { agent, relativePath, absolutePath, content };
   });
@@ -295,7 +312,7 @@ export function buildDeveloperTeamInstallPlan(
   const skills: PlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.pi/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions);
+    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions, personality);
 
     return { agent, relativePath, absolutePath, content };
   });
@@ -565,8 +582,14 @@ function buildSkillFileContent(
   agent: DeveloperTeamAgent,
   memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
+  personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
 ): string {
-  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions } : undefined);
+  const content = getAgentContent(
+    agent.id,
+    capabilityInstructions
+      ? { capabilityInstructions, personality }
+      : { personality },
+  );
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
@@ -595,8 +618,14 @@ function buildAgentFileContent(
   thinking?: PiThinkingLevel,
   memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
+  personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
 ): string {
-  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions } : undefined);
+  const content = getAgentContent(
+    agent.id,
+    capabilityInstructions
+      ? { capabilityInstructions, personality }
+      : { personality },
+  );
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }

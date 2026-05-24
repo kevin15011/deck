@@ -16,6 +16,70 @@ import {
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "./model-config";
 
+// ---------------------------------------------------------------------------
+// Runner Isolation Verification
+// ---------------------------------------------------------------------------
+
+const FORBIDDEN_PATTERNS = [
+  // Named imports from @deck/core or @deck/sdd-runtime
+  /import\s+.*\s+from\s+["']@deck\/core["']/,
+  /import\s+.*\s+from\s+["']@deck\/sdd-runtime["']/,
+  // Side-effect imports from @deck packages
+  /import\s+["']@deck\/core["']/,
+  /import\s+["']@deck\/sdd-runtime["']/,
+  // Require calls for @deck packages
+  /require\s*\(\s*["']@deck\/core["']\s*\)/,
+  /require\s*\(\s*["']@deck\/sdd-runtime["']\s*\)/,
+  // Dynamic imports for @deck packages
+  /import\s*\(\s*["']@deck\/core["']\s*\)/,
+  /import\s*\(\s*["']@deck\/sdd-runtime["']\s*\)/,
+  // Relative imports into packages/core or packages/sdd-runtime
+  /from\s+["']\.\.\/packages\/core["']/,
+  /from\s+["']\.\.\/packages\/sdd-runtime["']/,
+  /from\s+["']\.\/packages\/core["']/,
+  /from\s+["']\.\/packages\/sdd-runtime["']/,
+  /from\s+["'][^"']*\/packages\/core["']/,
+  /from\s+["'][^"']*\/packages\/sdd-runtime["']/,
+  // Absolute-path imports into deck packages
+  /from\s+["']\/.*packages\/core["']/,
+  /from\s+["']\/.*packages\/sdd-runtime["']/,
+];
+
+/** Scans all content strings for forbidden import/require patterns. */
+function findForbiddenImports(content: string, fileLabel: string): string[] {
+  const violations: string[] = [];
+  for (const pattern of FORBIDDEN_PATTERNS) {
+    if (pattern.test(content)) {
+      violations.push(`[${fileLabel}] Forbidden pattern matched: ${pattern}`);
+    }
+  }
+  return violations;
+}
+
+function verifyRunnerIsolation(): { valid: boolean; violations: string[] } {
+  const violations: string[] = [];
+
+  // Build the plan (uses default pragmatica personality, no config file)
+  const plan = buildDeveloperTeamInstallPlan("/tmp/fake-project-for-isolation-test");
+
+  // Check agent file contents
+  for (const agent of plan.agents) {
+    violations.push(...findForbiddenImports(agent.content, agent.relativePath));
+  }
+
+  // Check skill file contents
+  for (const skill of plan.skills) {
+    violations.push(...findForbiddenImports(skill.content, skill.relativePath));
+  }
+
+  // Check standalone skill contents
+  for (const skill of plan.standaloneSkills) {
+    violations.push(...findForbiddenImports(skill.content, skill.relativePath));
+  }
+
+  return { valid: violations.length === 0, violations };
+}
+
 function createTempProject(): string {
   return mkdtempSync(join(tmpdir(), "deck-test-"));
 }
@@ -529,6 +593,52 @@ describe("rollbackDeveloperTeamFiles", () => {
     } finally {
       cleanup(projectRoot);
     }
+  });
+});
+
+describe("verifyRunnerIsolation", () => {
+  test("generated agent files contain no @deck/core or @deck/sdd-runtime imports", () => {
+    const { valid, violations } = verifyRunnerIsolation();
+    expect(valid).toBe(true);
+    expect(violations).toHaveLength(0);
+  });
+
+  test("generated skill files contain no @deck/core or @deck/sdd-runtime imports", () => {
+    const { valid, violations } = verifyRunnerIsolation();
+    expect(valid).toBe(true);
+    expect(violations).toHaveLength(0);
+  });
+
+  test("plain-text mentions of @deck/core in markdown do NOT trigger violations", () => {
+    // Simulate a file that mentions @deck/core in prose (not an import)
+    const fakeContent = "For more information, see @deck/core documentation.";
+    const found = findForbiddenImports(fakeContent, "test-file.md");
+    // Plain-text mention should NOT match import/require patterns
+    expect(found).toHaveLength(0);
+  });
+
+  test("actual import statements DO trigger violations", () => {
+    const importContent = 'import { foo } from "@deck/core";';
+    const found = findForbiddenImports(importContent, "test-file.ts");
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  test("actual require calls DO trigger violations", () => {
+    const requireContent = 'const core = require("@deck/core");';
+    const found = findForbiddenImports(requireContent, "test-file.js");
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  test("actual dynamic imports DO trigger violations", () => {
+    const dynamicImportContent = 'const core = await import("@deck/core");';
+    const found = findForbiddenImports(dynamicImportContent, "test-file.ts");
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  test("relative path imports into packages/core DO trigger violations", () => {
+    const relativeImport = 'import { foo } from "../packages/core";';
+    const found = findForbiddenImports(relativeImport, "test-file.ts");
+    expect(found.length).toBeGreaterThan(0);
   });
 });
 
@@ -1115,6 +1225,37 @@ describe("buildDeveloperTeamInstallPlan with capability instruction injection", 
     expect(orchestrator.content).toContain("RTK fallback guidance.");
   });
 
+  test("orchestratorPersonality option flows to agent content", () => {
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
+      orchestratorPersonality: "ahorro-extremo",
+    });
+
+    // The personality is passed to getAgentContent → content registry → prompt variant selection
+    // Verify personality option was consumed (no error thrown) and content was generated
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("deck-developer-orchestrator");
+    expect(orchestrator.content).toContain("## Role");
+    // Verify skill content was also generated with personality
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestratorSkill.content).toContain("## SDD Workflow");
+    expect(orchestratorSkill.content).toContain("# Orchestrator Skill");
+  });
+
+  test("falls back to pragmatica when config read fails", () => {
+    // Pass an invalid project root where readDeckConfig would throw
+    // The try/catch in buildDeveloperTeamInstallPlan should fall back to DEFAULT_ORCHESTRATOR_PERSONALITY
+    const plan = buildDeveloperTeamInstallPlan("/nonexistent-root-path", {
+      orchestratorPersonality: undefined, // no explicit override
+    });
+
+    // Should still generate valid content (falls back to pragmatica)
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("## Role");
+    expect(orchestrator.content).toContain("Delegate real work");
+  });
+});
+
+describe("buildDeveloperTeamInstallPlan (capability instructions)", () => {
   test("capabilityInstructions via bundle prop (not readDeckConfig) works without config file", () => {
     const bundle: import("@deck/core").CapabilityInstructionBundle = {
       instructions: [

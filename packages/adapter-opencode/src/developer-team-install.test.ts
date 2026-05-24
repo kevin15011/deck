@@ -15,6 +15,75 @@ import { DEFAULT_OPENCODE_MODELS } from "./model-config";
 import type { AdaptiveMemoryProvider, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 
+// ---------------------------------------------------------------------------
+// Runner Isolation Verification
+// ---------------------------------------------------------------------------
+
+const FORBIDDEN_PATTERNS = [
+  // Named imports from @deck/core or @deck/sdd-runtime
+  /import\s+.*\s+from\s+["']@deck\/core["']/,
+  /import\s+.*\s+from\s+["']@deck\/sdd-runtime["']/,
+  // Side-effect imports from @deck packages
+  /import\s+["']@deck\/core["']/,
+  /import\s+["']@deck\/sdd-runtime["']/,
+  // Require calls for @deck packages
+  /require\s*\(\s*["']@deck\/core["']\s*\)/,
+  /require\s*\(\s*["']@deck\/sdd-runtime["']\s*\)/,
+  // Dynamic imports for @deck packages
+  /import\s*\(\s*["']@deck\/core["']\s*\)/,
+  /import\s*\(\s*["']@deck\/sdd-runtime["']\s*\)/,
+  // Relative imports into packages/core or packages/sdd-runtime
+  /from\s+["']\.\.\/packages\/core["']/,
+  /from\s+["']\.\.\/packages\/sdd-runtime["']/,
+  /from\s+["']\.\/packages\/core["']/,
+  /from\s+["']\.\/packages\/sdd-runtime["']/,
+  /from\s+["'][^"']*\/packages\/core["']/,
+  /from\s+["'][^"']*\/packages\/sdd-runtime["']/,
+  // Absolute-path imports into deck packages
+  /from\s+["']\/.*packages\/core["']/,
+  /from\s+["']\/.*packages\/sdd-runtime["']/,
+];
+
+/** Scans all content strings for forbidden import/require patterns. */
+function findForbiddenImports(content: string, fileLabel: string): string[] {
+  const violations: string[] = [];
+  for (const pattern of FORBIDDEN_PATTERNS) {
+    if (pattern.test(content)) {
+      violations.push(`[${fileLabel}] Forbidden pattern matched: ${pattern}`);
+    }
+  }
+  return violations;
+}
+
+function verifyRunnerIsolation(): { valid: boolean; violations: string[] } {
+  const violations: string[] = [];
+
+  // Build the plan (uses default pragmatica personality, no config file)
+  const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/fake-project-for-isolation-test");
+
+  // Check skill file contents
+  for (const skill of plan.skills) {
+    violations.push(...findForbiddenImports(skill.content, skill.relativePath));
+  }
+
+  // Check prompt file contents (absolutePath used for label)
+  for (const planned of plan.promptGenerationPlan) {
+    violations.push(...findForbiddenImports(planned.content, planned.absolutePath));
+  }
+
+  // Check command file contents (absolutePath used for label)
+  for (const planned of plan.commandGenerationPlan) {
+    violations.push(...findForbiddenImports(planned.content, planned.absolutePath));
+  }
+
+  // Check standalone skill contents
+  for (const skill of plan.standaloneSkills) {
+    violations.push(...findForbiddenImports(skill.content, skill.relativePath));
+  }
+
+  return { valid: violations.length === 0, violations };
+}
+
 function createTempProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "deck-opencode-test-"));
   mkdirSync(join(dir, ".opencode", "skills"), { recursive: true });
@@ -305,6 +374,62 @@ describe("rollbackDeveloperTeamFiles", () => {
   });
 });
 
+describe("verifyRunnerIsolation", () => {
+  test("generated skill files contain no @deck/core or @deck/sdd-runtime imports", () => {
+    const { valid, violations } = verifyRunnerIsolation();
+    expect(valid).toBe(true);
+    expect(violations).toHaveLength(0);
+  });
+
+  test("generated prompt files contain no @deck/core or @deck/sdd-runtime imports", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/fake-project-for-isolation-test");
+    for (const planned of plan.promptGenerationPlan) {
+      const found = findForbiddenImports(planned.content, planned.absolutePath);
+      expect(found).toHaveLength(0);
+    }
+  });
+
+  test("generated command files contain no @deck/core or @deck/sdd-runtime imports", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/fake-project-for-isolation-test");
+    for (const planned of plan.commandGenerationPlan) {
+      const found = findForbiddenImports(planned.content, planned.absolutePath);
+      expect(found).toHaveLength(0);
+    }
+  });
+
+  test("plain-text mentions of @deck/core in markdown do NOT trigger violations", () => {
+    // Simulate a file that mentions @deck/core in prose (not an import)
+    const fakeContent = "For more information, see @deck/core documentation.";
+    const found = findForbiddenImports(fakeContent, "test-file.md");
+    // Plain-text mention should NOT match import/require patterns
+    expect(found).toHaveLength(0);
+  });
+
+  test("actual import statements DO trigger violations", () => {
+    const importContent = 'import { foo } from "@deck/core";';
+    const found = findForbiddenImports(importContent, "test-file.ts");
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  test("actual require calls DO trigger violations", () => {
+    const requireContent = 'const core = require("@deck/core");';
+    const found = findForbiddenImports(requireContent, "test-file.js");
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  test("actual dynamic imports DO trigger violations", () => {
+    const dynamicImportContent = 'const core = await import("@deck/core");';
+    const found = findForbiddenImports(dynamicImportContent, "test-file.ts");
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  test("relative path imports into packages/core DO trigger violations", () => {
+    const relativeImport = 'import { foo } from "../packages/core";';
+    const found = findForbiddenImports(relativeImport, "test-file.ts");
+    expect(found.length).toBeGreaterThan(0);
+  });
+});
+
 describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
   test("returns memoryBundle when Supermemory provider is passed with valid auth", () => {
     // Valid auth = validateSupermemoryOpenCodeMcpConfig returns ok: true
@@ -371,5 +496,39 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
     expect(plan.memoryBundle?.toolBindings).toHaveLength(1);
     // No memory diagnostics emitted - auth probe is advisory
     expect(plan.memoryDiagnostics).toHaveLength(0);
+  });
+});
+
+describe("orchestratorPersonality in buildOpenCodeDeveloperTeamInstallPlan", () => {
+  test("explicit personality option flows to generated skill content", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      personality: "ahorro-extremo",
+    });
+
+    // Verify personality option was consumed and content was generated
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestratorSkill.content).toContain("# Orchestrator Skill");
+    expect(orchestratorSkill.content).toContain("## SDD Workflow");
+    // Verify agent entries also received personality-aware content
+    const orchestratorEntry = plan.agentEntries["deck-developer-orchestrator"];
+    expect(orchestratorEntry).toBeDefined();
+    expect(orchestratorEntry.mode).toBe("primary");
+    // Verify the resolved personality is captured on the plan
+    expect(plan.personality).toBe("ahorro-extremo");
+  });
+
+  test("falls back to pragmatica when config read fails", () => {
+    // Pass a project root where no config exists and config read would fail
+    // The try/catch in buildOpenCodeDeveloperTeamInstallPlan should fall back to DEFAULT_ORCHESTRATOR_PERSONALITY
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/nonexistent-root-path", {
+      personality: undefined,
+    });
+
+    // Should still generate valid content (falls back to pragmatica)
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestratorSkill.content).toContain("# Orchestrator Skill");
+    expect(orchestratorSkill.content).toContain("## SDD Workflow");
+    // Verify fallback to pragmatica is captured on the plan
+    expect(plan.personality).toBe("pragmatica");
   });
 });

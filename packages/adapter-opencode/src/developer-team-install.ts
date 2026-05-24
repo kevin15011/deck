@@ -17,6 +17,8 @@ import {
   type MemoryToolBinding,
 } from "@deck/core/memory/adaptive-memory";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { readDeckConfig } from "@deck/core/config/deck-config";
+import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
 import type { CapabilityInstructionBundle } from "@deck/core";
 
 import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
@@ -69,6 +71,8 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   capabilityInstructions?: CapabilityInstructionBundle;
   /** Memory injection bundle resolved from provider or pre-built injection. */
   memoryBundle?: MemoryInjectionBundle;
+  /** Resolved orchestrator personality used during plan construction */
+  personality?: OrchestratorPersonality;
 };
 
 export type OpenCodeBundleApplyResult = {
@@ -218,8 +222,9 @@ function buildSkillFileContent(
   agent: DeveloperTeamAgent,
   memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
+  personality?: OrchestratorPersonality,
 ): string {
-  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions } : undefined);
+  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions, personality } : { personality });
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
@@ -261,6 +266,8 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     cliModelOverride?: string;
     configModelOverrides?: Record<string, string>;
     reasoningEffortOverrides?: Record<string, import("./model-config").OpenCodeThinkingLevel>;
+    /** Optional personality override; when absent, reads from .deck/config.json */
+    personality?: OrchestratorPersonality;
   },
 ): OpenCodeDeveloperTeamInstallPlan {
   const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
@@ -270,6 +277,16 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options, configDir);
 
   const capabilityInstructions = options?.capabilityInstructions;
+
+  // Resolve personality: use explicit option or read from config
+  const resolvedPersonality: OrchestratorPersonality = options?.personality ?? (() => {
+    try {
+      const config = readDeckConfig(projectRoot);
+      return config.orchestratorPersonality;
+    } catch {
+      return DEFAULT_ORCHESTRATOR_PERSONALITY;
+    }
+  })();
 
   // Build agent entries for opencode.json
   const agentEntries: Record<string, AgentEntry> = {};
@@ -286,7 +303,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   const skills: OpenCodePlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.opencode/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions);
+    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions, resolvedPersonality);
     return { agent, relativePath, absolutePath, content };
   });
 
@@ -298,7 +315,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   });
 
   // Prompt generation plan
-  const promptGenerationPlan = buildPromptGenerationPlan({ configDir, projectRoot, capabilityInstructions });
+  const promptGenerationPlan = buildPromptGenerationPlan({ configDir, projectRoot, capabilityInstructions, personality: resolvedPersonality });
 
   // Command generation plan
   const commandGenerationPlan = buildCommandGenerationPlan({ configDir });
@@ -320,6 +337,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     mermaidPluginStatus,
     capabilityInstructions,
     memoryBundle,
+    personality: resolvedPersonality,
   };
 }
 
@@ -463,7 +481,10 @@ export function verifyOpenCodeDeveloperTeamInstall(
       issues.push("Missing delegate_only in metadata.");
     }
 
-    const registryContent = getAgentContent(planned.agent.id, plan.capabilityInstructions ? { capabilityInstructions: plan.capabilityInstructions } : undefined);
+    const registryContent = getAgentContent(planned.agent.id, {
+      capabilityInstructions: plan.capabilityInstructions,
+      personality: plan.personality,
+    });
     if (registryContent) {
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
       if (headingMatch && !content.includes(headingMatch[0])) {

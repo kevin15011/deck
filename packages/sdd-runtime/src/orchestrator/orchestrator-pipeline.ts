@@ -10,7 +10,92 @@ import { computeRiskScore, DEFAULT_SCORER_CONFIG, type RiskScorerConfig } from "
 import { routeQuality, DEFAULT_ROUTER_CONFIG, type QualityRouterConfig, type QualityRouteDecision } from "./quality-router";
 import { checkLoopCondition, DEFAULT_LOOP_BREAKER_CONFIG, type LoopBreakerConfig, type FailureFingerprint, type LoopAction } from "./loop-breaker";
 import type { RiskResult } from "../contracts/risk";
-import { formatBlockReason, formatSkipReason, DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "./personality-output";
+
+// ── Personality types (moved from personality-output.ts) ────────────────────────
+
+// These remain here for pipeline runtime use only.
+// Prompt generation uses packages/core instead.
+export const ORCHESTRATOR_PERSONALITIES = ["guia", "pragmatica", "ahorro-extremo"] as const;
+export type OrchestratorPersonality = (typeof ORCHESTRATOR_PERSONALITIES)[number];
+export const DEFAULT_ORCHESTRATOR_PERSONALITY: OrchestratorPersonality = "pragmatica";
+
+// ── Formatters (moved from personality-output.ts) ───────────────────────────────
+
+export interface BlockReasonFacts {
+  missingFields: string[];
+  invalidFields: string[];
+  enforcementMode: string;
+  auditType: AuditType;
+  isCritical?: boolean;
+}
+
+export interface SkipReasonFacts {
+  riskScore: number;
+  threshold: number;
+  tier?: string;
+  overrideName?: string;
+  overrideExpiresAt?: string;
+}
+
+function normalizePersonality(p: unknown): OrchestratorPersonality {
+  if (typeof p === "string" && ORCHESTRATOR_PERSONALITIES.includes(p as OrchestratorPersonality)) {
+    return p as OrchestratorPersonality;
+  }
+  return DEFAULT_ORCHESTRATOR_PERSONALITY;
+}
+
+function formatBlockReason(facts: BlockReasonFacts, personality: unknown): string {
+  const p = normalizePersonality(personality);
+  const { missingFields, invalidFields, enforcementMode, auditType, isCritical = false } = facts;
+
+  if (p === "ahorro-extremo") {
+    const parts: string[] = [];
+    if (missingFields.length > 0) parts.push(`missing=[${missingFields.join(",")}]`);
+    if (invalidFields.length > 0) parts.push(`invalid=[${invalidFields.join(",")}]`);
+    const base = `Self-audit invalid in ${enforcementMode} mode: ${parts.join(", ")}`;
+    return isCritical ? `${base} [CRITICAL]` : base;
+  }
+
+  if (p === "guia") {
+    const parts: string[] = [];
+    if (missingFields.length > 0) parts.push(`Missing fields (${missingFields.length}): ${missingFields.join(", ")}`);
+    if (invalidFields.length > 0) parts.push(`Invalid fields (${invalidFields.length}): ${invalidFields.join(", ")}`);
+    const explanation = parts.length > 0 ? ` — ${parts.join("; ")}` : "";
+    const whyItMatters = isCritical
+      ? " This is a CRITICAL-tier issue. A valid self-audit is required before the orchestrator can proceed safely. Without it, the pipeline cannot assess risk or route quality checks correctly."
+      : " A valid self-audit ensures the orchestrator has accurate project context before making routing and risk decisions.";
+    return `Self-audit invalid in ${enforcementMode} mode for ${auditType} audit${explanation}.${whyItMatters}`;
+  }
+
+  // pragmatica
+  const parts: string[] = [];
+  if (missingFields.length > 0) parts.push(`missing=[${missingFields.join(",")}]`);
+  if (invalidFields.length > 0) parts.push(`invalid=[${invalidFields.join(",")}]`);
+  return `Self-audit invalid in ${enforcementMode} mode: ${parts.join(", ")}`;
+}
+
+function formatSkipReason(facts: SkipReasonFacts, personality: unknown): string {
+  const p = normalizePersonality(personality);
+  const { riskScore, threshold, tier, overrideName, overrideExpiresAt } = facts;
+
+  if (p === "ahorro-extremo") {
+    if (overrideName && overrideExpiresAt) return `${tier ?? "Critical"} tier overridden by "${overrideName}" (expires ${overrideExpiresAt})`;
+    return `Risk score ${riskScore} below threshold ${threshold}; quality agents skipped`;
+  }
+
+  if (p === "guia") {
+    if (overrideName && overrideExpiresAt) {
+      return `Quality agents were skipped because the ${tier ?? "critical"} risk tier was explicitly overridden by "${overrideName}", which expires ${overrideExpiresAt}. Overrides allow experienced users to proceed when they have external context the orchestrator cannot see. Without a valid override, the orchestrator would require a full review before continuing.`;
+    }
+    const tierLabel = tier ? ` (${tier} tier)` : "";
+    const whyItMatters = riskScore < threshold ? ` A valid risk assessment is needed before the orchestrator can decide whether to invoke quality agents. Scores below ${threshold} indicate standard-tier projects where the cost of quality agent invocation outweigh the expected benefit.` : "";
+    return `Risk score ${riskScore}${tierLabel} is below the quality routing threshold of ${threshold}; no quality agents will be invoked.${whyItMatters}`;
+  }
+
+  // pragmatica
+  if (overrideName && overrideExpiresAt) return `${tier ?? "Critical"} tier overridden by "${overrideName}" expiring ${overrideExpiresAt}`;
+  return `Risk score ${riskScore} below standard threshold ${threshold}; no quality agents needed`;
+}
 
 // ── Input ──
 

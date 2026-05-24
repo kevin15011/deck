@@ -26,7 +26,13 @@ import { renderDeveloperTeamContextAuthorityGuidance } from "../../memory/adapti
  */
 
 import { DEVELOPER_TEAM_AGENTS } from "./catalog";
-import { ORCHESTRATOR_AGENT_BODY, ORCHESTRATOR_SKILL_BODY, ORCHESTRATOR_SYSTEM_PROMPT } from "./orchestrator-content";
+import {
+  ORCHESTRATOR_AGENT_BODY,
+  ORCHESTRATOR_SKILL_BODY,
+  getOrchestratorSystemPrompt,
+} from "./orchestrator-content";
+import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "../../config/deck-config";
+import { SUB_AGENT_AHORRO_EXTREMO_FRAGMENT } from "./sub-agent-personality-content";
 import { EXPLORER_AGENT_BODY, EXPLORER_SKILL_BODY } from "./explorer-content";
 import { PROPOSAL_AGENT_BODY, PROPOSAL_SKILL_BODY } from "./proposal-content";
 import { SPEC_AGENT_BODY, SPEC_SKILL_BODY } from "./spec-content";
@@ -75,6 +81,8 @@ export type AgentContent = {
 export type ContentRegistryOptions = {
   /** Optional capability instruction bundle to compose into agent/skill/session content */
   capabilityInstructions?: CapabilityInstructionBundle;
+  /** Optional orchestrator personality for session prompt selection */
+  personality?: OrchestratorPersonality;
 };
 
 /** Options for getAgentContentResult */
@@ -83,6 +91,8 @@ export type ContentRegistryResultOptions = {
   capabilityInstructions?: CapabilityInstructionBundle;
   /** When true, returns fallback content for catalog agents without real content */
   fallback?: boolean;
+  /** Optional orchestrator personality (affects session prompt, not agent content) */
+  personality?: OrchestratorPersonality;
 };
 
 // ---------------------------------------------------------------------------
@@ -200,6 +210,48 @@ function appendCapabilityInstructions(
   return composeCapabilityInstructions(baseContent, bundle, context);
 }
 
+/**
+ * Applies composition layers to agent content in the correct order:
+ * 1. context-authority guidance (already applied via withAuthority)
+ * 2. sub-agent personality fragment (non-orchestrator agents only)
+ * 3. capability instruction fragments (if bundle provided)
+ */
+function applyAgentContentComposition(
+  withAuthority: AgentContent,
+  agentId: string,
+  bundle: CapabilityInstructionBundle | undefined,
+): AgentContent {
+  // Step 2: append sub-agent personality fragment for non-orchestrator agents
+  const isOrchestrator = agentId === "deck-developer-orchestrator";
+  const withFragment = isOrchestrator
+    ? withAuthority
+    : appendSubAgentPersonalityFragment(withAuthority);
+
+  // Step 3: append capability instructions if provided
+  if (!bundle) {
+    return withFragment;
+  }
+  return {
+    agentBody: appendCapabilityInstructions(
+      withFragment.agentBody,
+      bundle,
+      { surface: "agent", agentId },
+    ),
+    skillBody: appendCapabilityInstructions(
+      withFragment.skillBody,
+      bundle,
+      { surface: "skill", skillId: `${agentId}-skill` },
+    ),
+  };
+}
+
+function appendSubAgentPersonalityFragment(content: AgentContent): AgentContent {
+  return {
+    agentBody: `${content.agentBody.trimEnd()}\n\n${SUB_AGENT_AHORRO_EXTREMO_FRAGMENT}\n`,
+    skillBody: `${content.skillBody.trimEnd()}\n\n${SUB_AGENT_AHORRO_EXTREMO_FRAGMENT}\n`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Registry: agent content
 // ---------------------------------------------------------------------------
@@ -250,24 +302,12 @@ export function getAgentContentResult(
   const real = REAL_CONTENT[agentId];
   if (real) {
     const withAuthority = withContextAuthorityGuidance(real);
-    if (!options?.capabilityInstructions) {
-      return { ok: true, value: withAuthority };
-    }
-    return {
-      ok: true,
-      value: {
-        agentBody: appendCapabilityInstructions(
-          withAuthority.agentBody,
-          options.capabilityInstructions,
-          { surface: "agent", agentId },
-        ),
-        skillBody: appendCapabilityInstructions(
-          withAuthority.skillBody,
-          options.capabilityInstructions,
-          { surface: "skill", skillId: `${agentId}-skill` },
-        ),
-      },
-    };
+    const composed = applyAgentContentComposition(
+      withAuthority,
+      agentId,
+      options?.capabilityInstructions,
+    );
+    return { ok: true, value: composed };
   }
 
   // Not in REAL_CONTENT - check catalog
@@ -281,21 +321,12 @@ export function getAgentContentResult(
       // Agent exists in catalog but has no real content — fallback is appropriate
       const fallbackContent = getUnknownAgentContent(agentId, []);
       const withAuthority = withContextAuthorityGuidance(fallbackContent);
-      const content = !options?.capabilityInstructions
-        ? withAuthority
-        : {
-            agentBody: appendCapabilityInstructions(
-              withAuthority.agentBody,
-              options.capabilityInstructions,
-              { surface: "agent", agentId },
-            ),
-            skillBody: appendCapabilityInstructions(
-              withAuthority.skillBody,
-              options.capabilityInstructions,
-              { surface: "skill", skillId: `${agentId}-skill` },
-            ),
-          };
-      return { ok: true, value: content };
+      const composed = applyAgentContentComposition(
+        withAuthority,
+        agentId,
+        options?.capabilityInstructions,
+      );
+      return { ok: true, value: composed };
     }
     // Agent is NOT in catalog — cannot provide fallback, return error
     // Fallback is only for known catalog agents that lack real content
@@ -443,7 +474,9 @@ export function getTeamSessionInstructions(
   options?: ContentRegistryOptions,
 ): string | undefined {
   if (teamId === "developer-team") {
-    const base = appendContextAuthorityGuidance(ORCHESTRATOR_SYSTEM_PROMPT);
+    const personality = options?.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
+    const orchestratorPrompt = getOrchestratorSystemPrompt(personality);
+    const base = appendContextAuthorityGuidance(orchestratorPrompt);
     if (!options?.capabilityInstructions) {
       return base;
     }

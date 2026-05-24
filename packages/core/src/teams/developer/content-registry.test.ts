@@ -10,6 +10,7 @@ import {
   buildCapabilityInstructionBundle,
   type CapabilityInstructionBundle,
 } from "./instruction-bundles/index";
+import { SUB_AGENT_AHORRO_EXTREMO_FRAGMENT } from "./sub-agent-personality-content";
 
 const DEVELOPER_AGENT_IDS = [
   "deck-developer-orchestrator",
@@ -691,6 +692,185 @@ describe("getAgentContent deprecated wrapper parity", () => {
       expect(content, `${id} should return content`).toBeDefined();
       expect(content!.agentBody).toBeTruthy();
       expect(content!.skillBody).toBeTruthy();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Personality — Orchestrator System Prompt Variants
+// ---------------------------------------------------------------------------
+
+describe("getTeamSessionInstructions with personality", () => {
+  test("guia personality returns expanded teaching-tone variant", () => {
+    const guiaInstructions = getTeamSessionInstructions("developer-team", { personality: "guia" });
+    expect(guiaInstructions).toBeDefined();
+    expect(guiaInstructions).toContain("Guia Personality");
+    expect(guiaInstructions).toContain("Why delegation matters");
+  });
+
+  test("pragmatica personality returns current ORCHESTRATOR_SYSTEM_PROMPT behavior", () => {
+    const pragmaticaInstructions = getTeamSessionInstructions("developer-team", { personality: "pragmatica" });
+    expect(pragmaticaInstructions).toBeDefined();
+    expect(pragmaticaInstructions).toContain("# Deck Developer Team");
+    expect(pragmaticaInstructions).toContain("deck-developer-orchestrator");
+    // Pragmatica should contain the delegation table with 4+
+    expect(pragmaticaInstructions).toContain("4+");
+  });
+
+  test("ahorro-extremo personality returns compressed variant", () => {
+    const ahorroInstructions = getTeamSessionInstructions("developer-team", { personality: "ahorro-extremo" });
+    expect(ahorroInstructions).toBeDefined();
+    expect(ahorroInstructions).toContain("Ahorro-Extremo");
+    // Should be shorter than pragmatica
+    const pragmaticaInstructions = getTeamSessionInstructions("developer-team", { personality: "pragmatica" });
+    expect(ahorroInstructions!.length).toBeLessThan(pragmaticaInstructions!.length);
+  });
+
+  test("default (no personality) returns pragmatica variant — backward compatibility", () => {
+    const defaultInstructions = getTeamSessionInstructions("developer-team");
+    const pragmaticaInstructions = getTeamSessionInstructions("developer-team", { personality: "pragmatica" });
+    expect(defaultInstructions).toBe(pragmaticaInstructions);
+  });
+
+  test("unknown personality defaults to pragmatica", () => {
+    // @ts-expect-error - testing runtime behavior with invalid personality
+    const unknownInstructions = getTeamSessionInstructions("developer-team", { personality: "unknown-personality" });
+    const pragmaticaInstructions = getTeamSessionInstructions("developer-team", { personality: "pragmatica" });
+    expect(unknownInstructions).toBe(pragmaticaInstructions);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Personality — Sub-Agent Fragment Injection
+// ---------------------------------------------------------------------------
+
+describe("Sub-agent Ahorro-Extremo fragment injection", () => {
+  const nonOrchestratorAgents = [
+    "deck-developer-explorer",
+    "deck-developer-proposal",
+    "deck-developer-spec",
+    "deck-developer-design",
+    "deck-developer-task",
+    "deck-developer-apply-general",
+    "deck-developer-apply-backend",
+    "deck-developer-apply-frontend",
+    "deck-developer-verify",
+    "deck-developer-review",
+    "deck-developer-archive",
+  ];
+
+  test("SUB_AGENT_AHORRO_EXTREMO_FRAGMENT is non-empty and contains terse directives", () => {
+    expect(SUB_AGENT_AHORRO_EXTREMO_FRAGMENT).toBeTruthy();
+    expect(SUB_AGENT_AHORRO_EXTREMO_FRAGMENT.length).toBeGreaterThan(0);
+    expect(SUB_AGENT_AHORRO_EXTREMO_FRAGMENT).toContain("bullets");
+    expect(SUB_AGENT_AHORRO_EXTREMO_FRAGMENT).toContain("Delegation triggers");
+  });
+
+  test("non-orchestrator agents receive sub-agent fragment in agentBody", () => {
+    for (const agentId of nonOrchestratorAgents) {
+      const result = getAgentContentResult(agentId, { personality: "pragmatica" });
+      expect(result.ok, `${agentId} should be found`).toBe(true);
+      if (result.ok) {
+        expect(result.value.agentBody, `${agentId} agentBody should contain fragment`).toContain(
+          "Communication Style (Ahorro-Extremo)",
+        );
+        expect(result.value.agentBody, `${agentId} agentBody should contain delegation preservation`).toContain(
+          "Delegation triggers",
+        );
+      }
+    }
+  });
+
+  test("non-orchestrator agents receive sub-agent fragment in skillBody", () => {
+    for (const agentId of nonOrchestratorAgents) {
+      const result = getAgentContentResult(agentId, { personality: "pragmatica" });
+      expect(result.ok, `${agentId} should be found`).toBe(true);
+      if (result.ok) {
+        expect(result.value.skillBody, `${agentId} skillBody should contain fragment`).toContain(
+          "Communication Style (Ahorro-Extremo)",
+        );
+      }
+    }
+  });
+
+  test("orchestrator agent does NOT receive sub-agent fragment", () => {
+    const result = getAgentContentResult("deck-developer-orchestrator", { personality: "pragmatica" });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.agentBody, "orchestrator agentBody should NOT contain fragment").not.toContain(
+        "Communication Style (Ahorro-Extremo)",
+      );
+      expect(result.value.skillBody, "orchestrator skillBody should NOT contain fragment").not.toContain(
+        "Communication Style (Ahorro-Extremo)",
+      );
+    }
+  });
+
+  test("fragment is appended after context-authority guidance", () => {
+    const result = getAgentContentResult("deck-developer-explorer");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Context authority guidance should appear before the fragment
+      const agentBody = result.value.agentBody;
+      const fragmentIndex = agentBody.indexOf("Communication Style (Ahorro-Extremo)");
+      const contextAuthIndex = agentBody.indexOf("Context Authority");
+      expect(contextAuthIndex, "context authority should be present").toBeGreaterThan(-1);
+      expect(fragmentIndex, "fragment should be present").toBeGreaterThan(-1);
+      expect(fragmentIndex, "fragment should come after context authority").toBeGreaterThan(contextAuthIndex);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Personality — Composition Order
+// ---------------------------------------------------------------------------
+
+describe("getAgentContentResult composition order with personality", () => {
+  test("agentBody composition order: context-authority → sub-agent fragment → capability instructions", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+    const result = getAgentContentResult("deck-developer-explorer", {
+      personality: "ahorro-extremo",
+      capabilityInstructions: bundle,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const agentBody = result.value.agentBody;
+      const contextAuthIndex = agentBody.indexOf("Context Authority");
+      const fragmentIndex = agentBody.indexOf("Communication Style (Ahorro-Extremo)");
+      const packageInstructionsIndex = agentBody.indexOf("## Package Instructions (configured)");
+
+      expect(contextAuthIndex, "context authority should be present").toBeGreaterThan(-1);
+      expect(fragmentIndex, "sub-agent fragment should be present").toBeGreaterThan(-1);
+      expect(packageInstructionsIndex, "capability instructions should be present").toBeGreaterThan(-1);
+
+      // Verify order
+      expect(contextAuthIndex, "context authority before fragment").toBeLessThan(fragmentIndex);
+      expect(fragmentIndex, "fragment before capability instructions").toBeLessThan(packageInstructionsIndex);
+    }
+  });
+
+  test("skillBody composition order: context-authority → sub-agent fragment → capability instructions", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+    const result = getAgentContentResult("deck-developer-explorer", {
+      personality: "ahorro-extremo",
+      capabilityInstructions: bundle,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const skillBody = result.value.skillBody;
+      const contextAuthIndex = skillBody.indexOf("Context Authority");
+      const fragmentIndex = skillBody.indexOf("Communication Style (Ahorro-Extremo)");
+      const packageInstructionsIndex = skillBody.indexOf("## Package Instructions (configured)");
+
+      expect(contextAuthIndex, "context authority should be present").toBeGreaterThan(-1);
+      expect(fragmentIndex, "sub-agent fragment should be present").toBeGreaterThan(-1);
+      expect(packageInstructionsIndex, "capability instructions should be present").toBeGreaterThan(-1);
+
+      // Verify order
+      expect(contextAuthIndex, "context authority before fragment").toBeLessThan(fragmentIndex);
+      expect(fragmentIndex, "fragment before capability instructions").toBeLessThan(packageInstructionsIndex);
     }
   });
 });

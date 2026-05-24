@@ -2,8 +2,12 @@ import { describe, expect, test } from "bun:test";
 
 import {
   ORCHESTRATOR_AGENT_BODY,
+  ORCHESTRATOR_PROMPT_AHORRO_EXTREMO,
+  ORCHESTRATOR_PROMPT_GUIDA,
+  ORCHESTRATOR_PROMPT_PRAGMATICA,
   ORCHESTRATOR_SKILL_BODY,
   ORCHESTRATOR_SYSTEM_PROMPT,
+  getOrchestratorSystemPrompt,
 } from "./orchestrator-content";
 
 describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
@@ -294,5 +298,101 @@ describe("ORCHESTRATOR_SKILL_BODY", () => {
   test("skill body contains post-Archive Git suggestion guidance", () => {
     expect(ORCHESTRATOR_SKILL_BODY).toContain("Post-Archive Git Suggestions");
     expect(ORCHESTRATOR_SKILL_BODY).toContain("advisory");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Personality Variants
+// ---------------------------------------------------------------------------
+
+describe("getOrchestratorSystemPrompt", () => {
+  test("guia variant contains teaching tone indicators", () => {
+    const guia = getOrchestratorSystemPrompt("guia");
+    expect(guia).toContain("Guia Personality");
+    expect(guia).toContain("Why delegation matters");
+    expect(guia).toContain("Rationale:");
+    // Expanded explanations present in guia
+    expect(guia).toContain("key insight");
+    expect(guia.length).toBeGreaterThan(ORCHESTRATOR_SYSTEM_PROMPT.length);
+  });
+
+  test("pragmatica variant matches ORCHESTRATOR_SYSTEM_PROMPT", () => {
+    const pragmatica = getOrchestratorSystemPrompt("pragmatica");
+    expect(pragmatica).toBe(ORCHESTRATOR_SYSTEM_PROMPT);
+  });
+
+  test("ahorro-extremo variant is compressed", () => {
+    const ahorro = getOrchestratorSystemPrompt("ahorro-extremo");
+    expect(ahorro).toContain("Ahorro-Extremo");
+    // Should be significantly shorter than pragmatica
+    expect(ahorro.length).toBeLessThan(ORCHESTRATOR_SYSTEM_PROMPT.length);
+    // Contains compressed indicators
+    expect(ahorro).toContain("Coordinator, not executor");
+  });
+
+  test("default (no arg) returns pragmatica", () => {
+    // @ts-expect-error - testing JS behavior where no arg returns pragmatica
+    const defaultPrompt = getOrchestratorSystemPrompt();
+    expect(defaultPrompt).toBe(ORCHESTRATOR_SYSTEM_PROMPT);
+  });
+
+  test("all three variants contain invariant sections", () => {
+    const guia = getOrchestratorSystemPrompt("guia");
+    const pragmatica = getOrchestratorSystemPrompt("pragmatica");
+    const ahorro = getOrchestratorSystemPrompt("ahorro-extremo");
+
+    const invariantSections = [
+      "deck-developer-orchestrator",
+      "deck-developer-explorer",
+      "deck-developer-proposal",
+      "deck-developer-spec",
+      "deck-developer-design",
+      "deck-developer-task",
+      "deck-developer-apply-general",
+      "deck-developer-apply-backend",
+      "deck-developer-apply-frontend",
+      "deck-developer-verify",
+      "deck-developer-review",
+      "deck-developer-archive",
+      "Delegation Rules",
+      "Mandatory Delegation Triggers",
+      "Dependency Graph",
+      "Artifact Store",
+      "SDD Triage Gate",
+      "Non-Goals",
+    ];
+
+    for (const section of invariantSections) {
+      expect(guia, `guia missing: ${section}`).toContain(section);
+      expect(pragmatica, `pragmatica missing: ${section}`).toContain(section);
+      expect(ahorro, `ahorro missing: ${section}`).toContain(section);
+    }
+  });
+
+  test("all three variants are pairwise distinct", () => {
+    const guia = getOrchestratorSystemPrompt("guia");
+    const pragmatica = getOrchestratorSystemPrompt("pragmatica");
+    const ahorro = getOrchestratorSystemPrompt("ahorro-extremo");
+
+    // guia is longest (expanded)
+    expect(guia.length).toBeGreaterThan(pragmatica.length);
+    // ahorro-extremo is shortest (compressed)
+    expect(ahorro.length).toBeLessThan(pragmatica.length);
+    // All distinct strings
+    expect(guia).not.toBe(pragmatica);
+    expect(guia).not.toBe(ahorro);
+    expect(pragmatica).not.toBe(ahorro);
+  });
+
+  test("ORCHESTRATOR_PROMPT_GUIDA exports the guia variant", () => {
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toBe(getOrchestratorSystemPrompt("guia"));
+  });
+
+  test("ORCHESTRATOR_PROMPT_PRAGMATICA exports the pragmatica variant", () => {
+    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).toBe(ORCHESTRATOR_SYSTEM_PROMPT);
+  });
+
+  test("ORCHESTRATOR_PROMPT_AHORRO_EXTREMO exports the ahorro-extremo variant", () => {
+    expect(ORCHESTRATOR_PROMPT_AHORRO_EXTREMO).toBe(getOrchestratorSystemPrompt("ahorro-extremo"));
   });
 });

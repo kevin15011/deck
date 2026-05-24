@@ -7,7 +7,7 @@ import {
   type PipelineConfig,
   DEFAULT_PIPELINE_CONFIG,
 } from "./orchestrator-pipeline";
-import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "./personality-output";
+import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "./orchestrator-pipeline";
 
 describe("orchestrator-pipeline", () => {
   describe("runOrchestratorPipeline", () => {

@@ -14,6 +14,7 @@ import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import { getAgentContent, getTeamSessionInstructions } from "@deck/core/teams/developer/content-registry";
 import type { CapabilityInstructionBundle } from "@deck/core";
+import { type OrchestratorPersonality } from "@deck/core/config/deck-config";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,6 +31,8 @@ export type GeneratePromptFilesOptions = {
   projectRoot?: string;
   /** Optional capability instruction bundle for prompt content composition. */
   capabilityInstructions?: CapabilityInstructionBundle;
+  /** Optional orchestrator personality for session prompt selection. */
+  personality?: OrchestratorPersonality;
   /** Override writeFile for DI in tests */
   writeFile?: (path: string, content: string, encoding: "utf-8") => void;
   /** Override mkdir for DI in tests */
@@ -43,16 +46,17 @@ export type GeneratePromptFilesOptions = {
 function buildPromptContent(
   agent: DeveloperTeamAgent,
   skillPath: string,
-  capabilityInstructions?: CapabilityInstructionBundle,
+  capabilityInstructions: CapabilityInstructionBundle | undefined,
+  personality: OrchestratorPersonality | undefined,
 ): string {
-  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions } : undefined);
+  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions, personality } : { personality });
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
 
   const isOrchestrator = agent.id === "deck-developer-orchestrator";
   const baseContent = isOrchestrator
-    ? (getTeamSessionInstructions("developer-team", capabilityInstructions ? { capabilityInstructions } : undefined) ??
+    ? (getTeamSessionInstructions("developer-team", { capabilityInstructions, personality }) ??
       content.agentBody)
     : content.agentBody;
 
@@ -73,15 +77,15 @@ function buildPromptContent(
 // ---------------------------------------------------------------------------
 
 export function buildPromptGenerationPlan(
-  options: { configDir: string; projectRoot: string; capabilityInstructions?: CapabilityInstructionBundle },
+  options: { configDir: string; projectRoot: string; capabilityInstructions?: CapabilityInstructionBundle; personality?: OrchestratorPersonality },
 ): PlannedPromptFile[] {
-  const { configDir, projectRoot, capabilityInstructions } = options;
+  const { configDir, projectRoot, capabilityInstructions, personality } = options;
   const promptsDir = join(configDir, "prompts", "deck-developer");
 
   return DEVELOPER_TEAM_AGENTS.map((agent): PlannedPromptFile => {
     const skillPath = join(projectRoot, ".opencode", "skills", agent.skillId, "SKILL.md");
     const promptPath = join(promptsDir, `${agent.id}.md`);
-    const content = buildPromptContent(agent, skillPath, capabilityInstructions);
+    const content = buildPromptContent(agent, skillPath, capabilityInstructions, personality);
 
     return { agent, absolutePath: promptPath, content };
   });
