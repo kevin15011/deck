@@ -6,18 +6,17 @@ describe("reviewOpenCodeTools", () => {
   test("detects OpenCode packages from the config package manifest", () => {
     const result = reviewOpenCodeTools({
       packageManifest: "/home/tester/.config/opencode/package.json",
-      commandExists: (command) => command === "codebase-memory-mcp" || command === "engram",
+      commandExists: (command) => command === "codebase-memory-mcp",
       pathExists: () => true,
       readFile: () => JSON.stringify({ dependencies: { "context-mode": "^1.0.0" } }),
     });
 
-    expect(result.installedPackages).toEqual(["context-mode", "codebase-memory-mcp", "engram"]);
+    expect(result.installedPackages).toEqual(["context-mode", "codebase-memory-mcp"]);
     expect(result.tools).toEqual([
       { name: "RTK", installed: false },
       { name: "context-mode", installed: true },
       { name: "codebase-memory", installed: true },
       { name: "Context7", installed: false },
-      { name: "Engram memory", installed: true },
     ]);
     expect(result.toolStatuses.find((tool) => tool.name === "context-mode")).toEqual({
       name: "context-mode",
@@ -31,7 +30,7 @@ describe("reviewOpenCodeTools", () => {
     const result = reviewOpenCodeTools({
       packageManifest: "/home/tester/.config/opencode/package.json",
       configPath: "/home/tester/.config/opencode/opencode.json",
-      commandExists: (command) => command === "rtk" || command === "engram",
+      commandExists: (command) => command === "rtk",
       pathExists: (path) => path.endsWith("package.json") || path.endsWith("opencode.json"),
       readFile: (path) => {
         if (path.endsWith("package.json")) return JSON.stringify({ dependencies: {} });
@@ -40,7 +39,6 @@ describe("reviewOpenCodeTools", () => {
             "codebase-memory": {},
             "context-mode": {},
             context7: {},
-            engram: {},
           },
           plugin: ["context-mode"],
         });
@@ -52,7 +50,6 @@ describe("reviewOpenCodeTools", () => {
       { name: "context-mode", installed: true },
       { name: "codebase-memory", installed: true },
       { name: "Context7", installed: true },
-      { name: "Engram memory", installed: true },
     ]);
   });
 

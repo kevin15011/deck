@@ -1,6 +1,6 @@
 import type { OpenCodeToolStatus } from "./required-tools";
 
-export type InstallableOpenCodeToolId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "engram-memory";
+export type InstallableOpenCodeToolId = "rtk" | "context-mode" | "codebase-memory" | "context7";
 
 export type InstallableOpenCodeTool = {
   id: InstallableOpenCodeToolId;
@@ -20,7 +20,6 @@ export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [
   { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "opencode-plugin" },
   { id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "external" },
   { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "opencode-plugin" },
-  { id: "engram-memory", name: "Engram memory", module: "Gentleman-Programming/engram", required: false, installKind: "external" },
 ];
 
 export function buildOpenCodeInstallationPlan(options: BuildOpenCodeInstallationPlanOptions): InstallableOpenCodeTool[] {

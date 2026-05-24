@@ -29,7 +29,6 @@ const OPENCODE_TOOLS = [
   { name: "context-mode", packageNames: ["context-mode"] },
   { name: "codebase-memory", packageNames: ["codebase-memory", "codebase-memory-mcp"] },
   { name: "Context7", packageNames: ["context7", "@upstash/context7-mcp", "ctx7"] },
-  { name: "Engram memory", packageNames: ["engram"] },
 ];
 
 export function reviewOpenCodeTools(options: ReviewOpenCodeToolsOptions = {}): OpenCodeToolsReview {
@@ -55,7 +54,6 @@ export function reviewOpenCodeTools(options: ReviewOpenCodeToolsOptions = {}): O
       ...(pathExists(configPath) ? readOpenCodeConfigPackages(readFile(configPath)) : []),
       ...(commandExists("rtk") ? ["rtk"] : []),
       ...(commandExists("codebase-memory-mcp") ? ["codebase-memory-mcp"] : []),
-      ...(commandExists("engram") ? ["engram"] : []),
     ];
     const normalizedInstalled = new Set(installedPackages.map(normalizePackageName));
 

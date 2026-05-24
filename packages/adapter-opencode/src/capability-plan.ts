@@ -141,24 +141,7 @@ function addAdaptiveMemoryActions(
   if (provider === "none") return;
 
   if (provider === "engram") {
-    const tool = OPENCODE_INSTALLABLE_TOOLS.find((t) => t.id === "engram-memory");
-    groups.manualSteps.push({
-      id: "adaptive-memory.engram.manual-install",
-      kind: "manual-external-install",
-      title: "Install Engram adaptive memory",
-      description: "Engram adaptive memory requires manual installation for OpenCode.",
-      toolId: "engram-memory",
-      source: tool?.module,
-      status: "manual",
-      required: true,
-      diagnostics: ["Install or verify Engram manually before using it as the adaptive-memory provider."],
-    });
-    diagnostics.push({
-      code: "MANUAL_TOOL_REQUIRED",
-      severity: "warning",
-      message: "Engram adaptive memory requires manual external installation when selected.",
-      actionId: "adaptive-memory.engram.manual-install",
-    });
+    // Engram is handled as adaptive memory; no tool installation needed
     return;
   }
 
