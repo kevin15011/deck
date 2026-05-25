@@ -1123,6 +1123,8 @@ export function DeckApp() {
       if (cursor === DEVELOPER_TEAM_AGENTS.length) {
         // Finish button
         if (modelConfigSource === "install") {
+          // Persist model assignments before moving to next step
+          applyDeveloperTeamModelConfig();
           resetCursor("memory-provider-selection");
         } else if (modelConfigSource === "dashboard") {
           // For OpenCode and Pi, the dashboard plan builder has no team-application actions,
