@@ -61,10 +61,18 @@ export type DeveloperTeamInstallPlan = {
   memoryDiagnostics: MemoryDiagnostic[];
 };
 
+export type FileInstallResult = {
+  kind: "agent" | "skill";
+  agentId: string;
+  status: "created" | "updated" | "unchanged";
+  absolutePath: string;
+};
+
 export type BundleApplyResult = {
   agentId: string;
   kind: "agent" | "skill";
   status: "created" | "unchanged" | "updated";
+  absolutePath?: string;
 };
 
 /** @deprecated Use BundleApplyResult — kept for backward compat */
@@ -72,6 +80,9 @@ export type AgentApplyResult = BundleApplyResult;
 
 export type DeveloperTeamApplyResult = {
   results: BundleApplyResult[];
+  changedCount: number;
+  unchangedCount: number;
+  fileResults: FileInstallResult[];
 };
 
 export type BundleVerifyResult = {
@@ -318,7 +329,11 @@ export function buildDeveloperTeamInstallPlan(
   });
 
   // Build standalone skill files (verbatim, no generated frontmatter)
+  // Validate skillId to prevent path traversal attacks
   const standaloneSkills: PlannedStandaloneSkillFile[] = (options?.standaloneSkills ?? []).map((skill) => {
+    if (!/^[a-z0-9_-]+$/i.test(skill.skillId)) {
+      throw new Error(`Invalid skillId "${skill.skillId}": must contain only alphanumeric characters, underscores, and hyphens`);
+    }
     const relativePath = `.pi/skills/${skill.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
     return { skillId: skill.skillId, relativePath, absolutePath, content: skill.body };
@@ -411,28 +426,28 @@ export function applyDeveloperTeamInstall(
     if (exists(planned.absolutePath)) {
       const existing = readFile(planned.absolutePath, "utf-8");
       if (existing === planned.content) {
-        return { agentId: planned.agent.id, kind: "agent" as const, status: "unchanged" as const };
+        return { agentId: planned.agent.id, kind: "agent" as const, status: "unchanged" as const, absolutePath: planned.absolutePath };
       }
       writeFile(planned.absolutePath, planned.content, "utf-8");
-      return { agentId: planned.agent.id, kind: "agent" as const, status: "updated" as const };
+      return { agentId: planned.agent.id, kind: "agent" as const, status: "updated" as const, absolutePath: planned.absolutePath };
     }
 
     writeFile(planned.absolutePath, planned.content, "utf-8");
-    return { agentId: planned.agent.id, kind: "agent" as const, status: "created" as const };
+    return { agentId: planned.agent.id, kind: "agent" as const, status: "created" as const, absolutePath: planned.absolutePath };
   });
 
   const skillResults: BundleApplyResult[] = plan.skills.map((planned) => {
     if (exists(planned.absolutePath)) {
       const existing = readFile(planned.absolutePath, "utf-8");
       if (existing === planned.content) {
-        return { agentId: planned.agent.id, kind: "skill" as const, status: "unchanged" as const };
+        return { agentId: planned.agent.id, kind: "skill" as const, status: "unchanged" as const, absolutePath: planned.absolutePath };
       }
       writeFile(planned.absolutePath, planned.content, "utf-8");
-      return { agentId: planned.agent.id, kind: "skill" as const, status: "updated" as const };
+      return { agentId: planned.agent.id, kind: "skill" as const, status: "updated" as const, absolutePath: planned.absolutePath };
     }
 
     writeFile(planned.absolutePath, planned.content, "utf-8");
-    return { agentId: planned.agent.id, kind: "skill" as const, status: "created" as const };
+    return { agentId: planned.agent.id, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath };
   });
 
   // Write standalone skills (verbatim, no generated frontmatter)
@@ -440,17 +455,28 @@ export function applyDeveloperTeamInstall(
     if (exists(planned.absolutePath)) {
       const existing = readFile(planned.absolutePath, "utf-8");
       if (existing === planned.content) {
-        return { agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const };
+        return { agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const, absolutePath: planned.absolutePath };
       }
       writeFile(planned.absolutePath, planned.content, "utf-8");
-      return { agentId: planned.skillId, kind: "skill" as const, status: "updated" as const };
+      return { agentId: planned.skillId, kind: "skill" as const, status: "updated" as const, absolutePath: planned.absolutePath };
     }
 
     writeFile(planned.absolutePath, planned.content, "utf-8");
-    return { agentId: planned.skillId, kind: "skill" as const, status: "created" as const };
+    return { agentId: planned.skillId, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath };
   });
 
-  return { results: [...agentResults, ...skillResults, ...standaloneSkillResults] };
+  const allResults = [...agentResults, ...skillResults, ...standaloneSkillResults];
+  const changedCount = allResults.filter((r) => r.status === "created" || r.status === "updated").length;
+  const unchangedCount = allResults.filter((r) => r.status === "unchanged").length;
+
+  const fileResults: FileInstallResult[] = allResults.map((r) => ({
+    kind: r.kind,
+    agentId: r.agentId,
+    status: r.status,
+    absolutePath: r.absolutePath!,
+  }));
+
+  return { results: allResults, changedCount, unchangedCount, fileResults };
 }
 
 // --- Verify ---

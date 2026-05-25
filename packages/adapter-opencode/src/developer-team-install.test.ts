@@ -297,6 +297,91 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
       cleanup(projectRoot);
     }
   });
+
+  test("re-applying unchanged files is idempotent", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      const firstResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      const secondResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Second run should have changedCount === 0
+      expect(secondResult.changedCount).toBe(0);
+      expect(secondResult.unchangedCount).toBe(firstResult.changedCount + firstResult.unchangedCount);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("second apply produces changedCount === 0", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      const secondResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      expect(secondResult.changedCount).toBe(0);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("file status is 'unchanged' when content matches", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      const secondResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // All fileResults should have status 'unchanged' on second run
+      for (const file of secondResult.fileResults) {
+        expect(file.status).toBe("unchanged");
+      }
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("first apply produces changedCount === total files + configMerge", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      const result = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      const totalFileResults = result.fileResults.length;
+      // configMergeResult contributes to counts (status is 'created' on first run)
+      const configMergeContributes = result.configMergeResult?.status !== "unchanged" ? 1 : 0;
+      expect(result.changedCount).toBe(totalFileResults + configMergeContributes);
+      expect(result.unchangedCount).toBe(0);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("changedCount includes configMergeResult contribution", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = join(projectRoot, ".config", "opencode");
+      mkdirSync(configDir, { recursive: true });
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      const result = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // configMergeResult should have status 'created' on first apply
+      expect(result.configMergeResult?.status).toBe("created");
+      // changedCount should include the configMerge contribution
+      expect(result.changedCount).toBeGreaterThan(result.fileResults.length);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
 });
 
 describe("verifyOpenCodeDeveloperTeamInstall", () => {

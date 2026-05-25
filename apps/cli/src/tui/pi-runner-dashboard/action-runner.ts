@@ -376,6 +376,8 @@ function writeDeckConfigAction(
         : { activeProvider: "none" as const },
     packageInstructions: updatedPackageInstructions,
     orchestratorPersonality: existingConfig.orchestratorPersonality,
+    profiles: existingConfig.profiles,
+    activeProfile: existingConfig.activeProfile,
   };
 
   const writer = dependencies.writeDeckConfig ?? writeDeckConfig;

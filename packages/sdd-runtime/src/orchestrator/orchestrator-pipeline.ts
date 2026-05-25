@@ -11,6 +11,36 @@ import { routeQuality, DEFAULT_ROUTER_CONFIG, type QualityRouterConfig, type Qua
 import { checkLoopCondition, DEFAULT_LOOP_BREAKER_CONFIG, type LoopBreakerConfig, type FailureFingerprint, type LoopAction } from "./loop-breaker";
 import type { RiskResult } from "../contracts/risk";
 
+// ── Pipeline stage types ───────────────────────────────────────────────────────
+
+export type PipelineStage = "audit" | "risk" | "quality" | "loop";
+
+export interface StageError {
+  stage: PipelineStage;
+  error: string;
+  recoverable: boolean;
+}
+
+/**
+ * Isolated configuration slice for a single pipeline stage.
+ * Each stage receives its own config derived from PipelineConfig.
+ */
+export interface StageConfig {
+  scorerConfig?: RiskScorerConfig;
+  routerConfig?: QualityRouterConfig;
+  loopBreakerConfig?: LoopBreakerConfig;
+  personality?: OrchestratorPersonality;
+}
+
+/**
+ * Profile context for pipeline routing.
+ * When provided, phase-level overrides from the profile are applied to stage configs.
+ */
+export interface ProfileContext {
+  name: string;
+  phaseOverrides?: Record<string, Record<string, unknown>>;
+}
+
 // ── Personality types (moved from personality-output.ts) ────────────────────────
 
 // These remain here for pipeline runtime use only.
@@ -91,6 +121,8 @@ export interface OrchestratorPipelineInput {
   failureHistory?: FailureFingerprint[];
   /** Enforcement mode — when set, invalid audit blocks routing */
   enforcementMode?: "report-only" | "conditional-routing" | "full-enforcement";
+  /** Optional profile context for phase-level overrides */
+  profile?: ProfileContext;
 }
 
 // ── Result ──
@@ -107,6 +139,8 @@ export interface OrchestratorPipelineResult {
   outcome: PipelineOutcome;
   /** When blocked/partial, describes why */
   blockReason?: string;
+  /** Collected errors from each stage — pipeline continues despite errors */
+  stageErrors: StageError[];
 }
 
 // ── Config ──
@@ -125,29 +159,155 @@ export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
   loopBreakerConfig: DEFAULT_LOOP_BREAKER_CONFIG,
 };
 
-// ── Pipeline ──
+// ── Pipeline ──────────────────────────────────────────────────────────────────
 
 export function runOrchestratorPipeline(
   input: OrchestratorPipelineInput,
   config: PipelineConfig = DEFAULT_PIPELINE_CONFIG,
 ): OrchestratorPipelineResult {
   const personality = config.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
+  const stageErrors: StageError[] = [];
 
-  // 1. Validate audit
-  const auditValidation = validateSelfAudit(input.audit, input.auditType);
+  // ── Profile-aware config resolution ─────────────────────────────────────────
 
-  // 2. Invalid audit blocks in enforced modes
-  if (!auditValidation.valid && input.enforcementMode && input.enforcementMode !== "report-only") {
-    const blockReasonFacts = {
-      missingFields: auditValidation.missingFields,
-      invalidFields: auditValidation.invalidFields,
-      enforcementMode: input.enforcementMode,
-      auditType: input.auditType,
-      isCritical: true,
-    };
-    const reason = formatBlockReason(blockReasonFacts, personality);
+  // Map auditType to SDD phase for profile override lookup
+  const phaseMap: Record<AuditType, string> = {
+    spec: "spec",
+    design: "design",
+    tasks: "tasks",
+  };
+  const currentPhase = phaseMap[input.auditType] ?? input.auditType;
+  const profileOverrides = input.profile?.phaseOverrides?.[currentPhase] ?? {};
 
-    // Produce conservative risk result and blocked outcome
+  // Apply profile overrides to stage configs (deep merge)
+  function applyProfileOverrides<T extends object>(base: T, overrides: Record<string, unknown> | undefined): T {
+    if (!overrides || Object.keys(overrides).length === 0) return base;
+    // Shallow merge with override precedence — stage config fields are top-level
+    return { ...base, ...overrides } as T;
+  }
+
+  const effectiveScorerConfig = applyProfileOverrides(config.scorerConfig, profileOverrides);
+  const effectiveRouterConfig = applyProfileOverrides(config.routerConfig, profileOverrides);
+  const effectiveLoopBreakerConfig = applyProfileOverrides(config.loopBreakerConfig, profileOverrides);
+
+  // ── Stage wrappers with isolated error collection ──
+
+  function runAuditStage(): {
+    validation: ReturnType<typeof validateSelfAudit>;
+    blocked: boolean;
+    blockReason?: string;
+  } {
+    try {
+      const validation = validateSelfAudit(input.audit, input.auditType);
+
+      // Record validation failures as stage errors (non-recoverable)
+      if (!validation.valid) {
+        const missingFields = validation.missingFields.length > 0
+          ? `Missing fields: ${validation.missingFields.join(", ")}`
+          : "";
+        const invalidFields = validation.invalidFields.length > 0
+          ? `Invalid fields: ${validation.invalidFields.join(", ")}`
+          : "";
+        const errorMsg = [missingFields, invalidFields].filter(Boolean).join("; ") || "Invalid audit";
+
+        stageErrors.push({
+          stage: "audit",
+          error: errorMsg,
+          recoverable: false,
+        });
+      }
+
+      // 2. Invalid audit blocks in enforced modes
+      if (!validation.valid && input.enforcementMode && input.enforcementMode !== "report-only") {
+        const blockReasonFacts = {
+          missingFields: validation.missingFields,
+          invalidFields: validation.invalidFields,
+          enforcementMode: input.enforcementMode,
+          auditType: input.auditType,
+          isCritical: true,
+        };
+        const reason = formatBlockReason(blockReasonFacts, personality);
+        return { validation, blocked: true, blockReason: reason };
+      }
+
+      return { validation, blocked: false };
+    } catch (err) {
+      stageErrors.push({
+        stage: "audit",
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: false,
+      });
+      return {
+        validation: { valid: false, missingFields: [], invalidFields: [] },
+        blocked: false,
+      };
+    }
+  }
+
+  function runRiskStage(normalizedAudit: { ambiguity: string[]; riskSignals: { name: string; evidence: string }[]; confidence: number }): RiskResult {
+    try {
+      return computeRiskScore(normalizedAudit, effectiveScorerConfig);
+    } catch (err) {
+      stageErrors.push({
+        stage: "risk",
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: true,
+      });
+      return {
+        score: 100,
+        tier: "critical",
+        signals: [],
+        thresholds: { standard: 30, boundary: 60, critical: 80 },
+        overrides: [],
+        recommendedChecks: ["full-review"],
+        confidence: 0,
+      };
+    }
+  }
+
+  function runQualityStage(riskResult: RiskResult): QualityRouteDecision {
+    try {
+      return routeQuality(riskResult, effectiveRouterConfig);
+    } catch (err) {
+      stageErrors.push({
+        stage: "quality",
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: true,
+      });
+      return {
+        invokeQuality: false,
+        checksToRun: [],
+        requiresReplanOrOverride: false,
+        stateValidationRequired: false,
+        skipReason: undefined,
+      };
+    }
+  }
+
+  function runLoopStage(failureHistory: FailureFingerprint[] | undefined): LoopAction {
+    try {
+      let loopAction: LoopAction = "continue";
+      if (failureHistory && failureHistory.length > 0) {
+        const latestFailure = failureHistory[failureHistory.length - 1];
+        const result = checkLoopCondition(latestFailure, failureHistory.slice(0, -1), effectiveLoopBreakerConfig);
+        loopAction = result.action;
+      }
+      return loopAction;
+    } catch (err) {
+      stageErrors.push({
+        stage: "loop",
+        error: err instanceof Error ? err.message : String(err),
+        recoverable: true,
+      });
+      return "continue";
+    }
+  }
+
+  // Execute stages
+  const { validation, blocked, blockReason: auditBlockReason } = runAuditStage();
+
+  // If blocked by audit in enforced mode, return early with conservative defaults
+  if (blocked) {
     return {
       auditValid: false,
       riskResult: {
@@ -169,37 +329,33 @@ export function runOrchestratorPipeline(
       },
       loopAction: "continue",
       outcome: "blocked",
-      blockReason: reason,
+      blockReason: auditBlockReason,
+      stageErrors,
     };
   }
 
   // 3. Normalize invalid audit before scoring (report-only / default path)
   //    Prevents crash when audit is null/primitive/missing arrays
-  const normalizedAudit = normalizeAuditForScoring(input.audit, auditValidation.valid);
+  const normalizedAudit = normalizeAuditForScoring(input.audit, validation.valid);
 
   // 4. Compute risk
-  const riskResult = computeRiskScore(normalizedAudit, config.scorerConfig);
+  const riskResult = runRiskStage(normalizedAudit);
 
   // 5. Route quality
-  const qualityDecision = routeQuality(riskResult, config.routerConfig);
+  const qualityDecision = runQualityStage(riskResult);
 
   // 6. Check loop condition from failure history
-  let loopAction: LoopAction = "continue";
-  if (input.failureHistory && input.failureHistory.length > 0) {
-    const latestFailure = input.failureHistory[input.failureHistory.length - 1];
-    const result = checkLoopCondition(latestFailure, input.failureHistory.slice(0, -1), config.loopBreakerConfig);
-    loopAction = result.action;
-  }
+  const loopAction = runLoopStage(input.failureHistory);
 
   // 6. Determine outcome — blockReason is formatted for human display
   let outcome: PipelineOutcome = "completed";
   let blockReason: string | undefined;
-  if (!auditValidation.valid) {
+  if (!validation.valid) {
     outcome = "partial";
     // Partial path uses "incomplete" wording which the formatter handles as pragmatic default
     const blockReasonFacts = {
-      missingFields: auditValidation.missingFields,
-      invalidFields: auditValidation.invalidFields,
+      missingFields: validation.missingFields,
+      invalidFields: validation.invalidFields,
       enforcementMode: input.enforcementMode ?? "report-only",
       auditType: input.auditType,
       isCritical: false,
@@ -216,7 +372,7 @@ export function runOrchestratorPipeline(
     );
     const skipReasonFacts = {
       riskScore: riskResult.score,
-      threshold: config.routerConfig.standardThreshold,
+      threshold: effectiveRouterConfig.standardThreshold,
       tier: riskResult.tier,
       overrideName: qualityOverride?.name,
       overrideExpiresAt: qualityOverride?.expiresAt,
@@ -228,13 +384,14 @@ export function runOrchestratorPipeline(
   }
 
   return {
-    auditValid: auditValidation.valid,
+    auditValid: validation.valid,
     riskResult,
     qualityRouted: finalQualityDecision.invokeQuality,
     qualityDecision: finalQualityDecision,
     loopAction,
     outcome,
     blockReason,
+    stageErrors,
   };
 }
 

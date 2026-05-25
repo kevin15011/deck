@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
@@ -77,8 +77,9 @@ export type OpenCodeDeveloperTeamInstallPlan = {
 
 export type OpenCodeBundleApplyResult = {
   agentId: string;
-  kind: "agent" | "skill";
+  kind: "agent" | "skill" | "prompt" | "command";
   status: "created" | "unchanged" | "updated";
+  absolutePath: string;
 };
 
 export type OpenCodeDeveloperTeamApplyResult = {
@@ -88,6 +89,9 @@ export type OpenCodeDeveloperTeamApplyResult = {
     backupPath: string;
     pluginsAdded: string[];
   };
+  changedCount: number;
+  unchangedCount: number;
+  fileResults: OpenCodeBundleApplyResult[];
 };
 
 export type OpenCodeBundleVerifyResult = {
@@ -308,7 +312,11 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   });
 
   // Build standalone skill files (verbatim, no generated frontmatter)
+  // Validate skillId to prevent path traversal attacks
   const standaloneSkills: OpenCodePlannedStandaloneSkillFile[] = (options?.standaloneSkills ?? []).map((skill) => {
+    if (!/^[a-z0-9_-]+$/i.test(skill.skillId)) {
+      throw new Error(`Invalid skillId "${skill.skillId}": must contain only alphanumeric characters, underscores, and hyphens`);
+    }
     const relativePath = `skills/${skill.skillId}/SKILL.md`;
     const absolutePath = join(skillsDir, skill.skillId, "SKILL.md");
     return { skillId: skill.skillId, relativePath, absolutePath, content: skill.body };
@@ -400,13 +408,13 @@ export function applyOpenCodeDeveloperTeamInstall(
       const existing = readFile(planned.absolutePath, "utf-8");
       if (existing !== planned.content) {
         writeFile(planned.absolutePath, planned.content, "utf-8");
-        results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "updated" as const });
+        results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "updated" as const, absolutePath: planned.absolutePath });
       } else {
-        results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "unchanged" as const });
+        results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "unchanged" as const, absolutePath: planned.absolutePath });
       }
     } else {
       writeFile(planned.absolutePath, planned.content, "utf-8");
-      results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "created" as const });
+      results.push({ agentId: planned.agent.id, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath });
     }
   }
 
@@ -420,29 +428,53 @@ export function applyOpenCodeDeveloperTeamInstall(
       const existing = readFile(planned.absolutePath, "utf-8");
       if (existing !== planned.content) {
         writeFile(planned.absolutePath, planned.content, "utf-8");
-        results.push({ agentId: planned.skillId, kind: "skill" as const, status: "updated" as const });
+        results.push({ agentId: planned.skillId, kind: "skill" as const, status: "updated" as const, absolutePath: planned.absolutePath });
       } else {
-        results.push({ agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const });
+        results.push({ agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const, absolutePath: planned.absolutePath });
       }
     } else {
       writeFile(planned.absolutePath, planned.content, "utf-8");
-      results.push({ agentId: planned.skillId, kind: "skill" as const, status: "created" as const });
+      results.push({ agentId: planned.skillId, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath });
     }
   }
 
-  // 3. Write prompt files
-  applyPromptGeneration(plan.promptGenerationPlan, {
-    writeFile: writeFile as (path: string, content: string, encoding: "utf-8") => void,
-    mkdir: mkdir as (path: string, opts: { recursive: true }) => void,
-  });
+  // 4. Write prompt files with idempotency
+  for (const planned of plan.promptGenerationPlan) {
+    const dir = dirname(planned.absolutePath);
+    mkdir(dir, { recursive: true });
+    const existingContent = exists(planned.absolutePath) ? readFile(planned.absolutePath, "utf-8") : null;
+    if (existingContent === null) {
+      writeFile(planned.absolutePath, planned.content, "utf-8");
+      results.push({ agentId: planned.agent.id, kind: "prompt" as const, status: "created" as const, absolutePath: planned.absolutePath });
+    } else if (existingContent !== planned.content) {
+      writeFile(planned.absolutePath, planned.content, "utf-8");
+      results.push({ agentId: planned.agent.id, kind: "prompt" as const, status: "updated" as const, absolutePath: planned.absolutePath });
+    } else {
+      results.push({ agentId: planned.agent.id, kind: "prompt" as const, status: "unchanged" as const, absolutePath: planned.absolutePath });
+    }
+  }
 
-  // 4. Write command files
-  applyCommandGeneration(plan.commandGenerationPlan, {
-    writeFile: writeFile as (path: string, content: string, encoding: "utf-8") => void,
-    mkdir: mkdir as (path: string, opts: { recursive: true }) => void,
-  });
+  // 5. Write command files with idempotency
+  for (const planned of plan.commandGenerationPlan) {
+    const dir = dirname(planned.absolutePath);
+    mkdir(dir, { recursive: true });
+    const existingContent = exists(planned.absolutePath) ? readFile(planned.absolutePath, "utf-8") : null;
+    if (existingContent === null) {
+      writeFile(planned.absolutePath, planned.content, "utf-8");
+      results.push({ agentId: planned.commandId, kind: "command" as const, status: "created" as const, absolutePath: planned.absolutePath });
+    } else if (existingContent !== planned.content) {
+      writeFile(planned.absolutePath, planned.content, "utf-8");
+      results.push({ agentId: planned.commandId, kind: "command" as const, status: "updated" as const, absolutePath: planned.absolutePath });
+    } else {
+      results.push({ agentId: planned.commandId, kind: "command" as const, status: "unchanged" as const, absolutePath: planned.absolutePath });
+    }
+  }
 
-  return { results, configMergeResult };
+  // 6. Compute aggregate counts
+  const changedCount = results.filter((r) => r.status !== "unchanged").length + (configMergeResult && configMergeResult.status !== "unchanged" ? 1 : 0);
+  const unchangedCount = results.filter((r) => r.status === "unchanged").length + (configMergeResult && configMergeResult.status === "unchanged" ? 1 : 0);
+
+  return { results, configMergeResult, changedCount, unchangedCount, fileResults: results };
 }
 
 // ---------------------------------------------------------------------------

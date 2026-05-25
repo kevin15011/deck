@@ -433,6 +433,8 @@ export type BackupFileEntry = {
 
 export type DeveloperTeamApplyResult = {
   results: readonly DeveloperTeamApplyAgentResult[];
+  changedCount: number;
+  unchangedCount: number;
 };
 
 export type DeveloperTeamApplyAgentResult = {

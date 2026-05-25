@@ -45,6 +45,39 @@ export type PackageInstructionRunnerId = (typeof PACKAGE_INSTRUCTION_RUNNERS)[nu
 export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk", "adaptive-memory"] as const;
 export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number];
 
+// ---------------------------------------------------------------------------
+// SDD Phase / Profile types
+// ---------------------------------------------------------------------------
+
+export const SDD_PHASES = [
+  "explore",
+  "proposal",
+  "spec",
+  "design",
+  "tasks",
+  "apply",
+  "verify",
+  "review",
+  "archive",
+  "onboard",
+] as const;
+export type SDDPhase = (typeof SDD_PHASES)[number];
+
+export type ProfileStrategy = "generated-multi" | "external-single-active";
+
+export type PhaseOverrides = Partial<Record<SDDPhase, Record<string, unknown>>>;
+
+export interface Profile {
+  name: string;
+  description?: string;
+  phaseOverrides?: PhaseOverrides;
+  strategy?: ProfileStrategy;
+}
+
+// ---------------------------------------------------------------------------
+// DeckConfig / NormalizedDeckConfig
+// ---------------------------------------------------------------------------
+
 export type DeckPackageInstructionRunnerConfig = Partial<
   Record<PackageInstructionPackageId, boolean>
 >;
@@ -56,6 +89,8 @@ export type DeckConfig = {
   adaptiveMemory?: DeckAdaptiveMemoryConfig;
   packageInstructions?: DeckPackageInstructionConfig;
   orchestratorPersonality?: OrchestratorPersonality;
+  profiles?: Profile[];
+  activeProfile?: string;
 };
 
 export type NormalizedDeckConfig = {
@@ -66,6 +101,8 @@ export type NormalizedDeckConfig = {
   };
   packageInstructions: Record<PackageInstructionRunnerId, Record<PackageInstructionPackageId, boolean>>;
   orchestratorPersonality: OrchestratorPersonality;
+  profiles: Profile[];
+  activeProfile: string;
 };
 
 export type DeckConfigErrorCode =
@@ -108,7 +145,7 @@ export type ActiveMemoryProviderResolution = {
 const SECRET_FIELD_PATTERN =
   /(?:token|secret|credential|credentials|api[-_]?key|password|private[-_]?key|access[-_]?key|auth(?:orization)?)/i;
 
-const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "packageInstructions", "orchestratorPersonality"]);
+const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "packageInstructions", "orchestratorPersonality", "profiles", "activeProfile"]);
 const ADAPTIVE_MEMORY_FIELDS = new Set(["activeProvider", "supermemory"]);
 const SUPERMEMORY_FIELDS = new Set([
   "mcpServerName",
@@ -137,6 +174,8 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
       opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
     },
     orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
+    profiles: [],
+    activeProfile: "default",
   };
 }
 
@@ -204,11 +243,20 @@ export function validateDeckConfig(
     options?.configPath,
   );
 
+  const profiles = normalizeProfiles(config.profiles, config.activeProfile, options?.configPath);
+  const activeProfile = profiles.length === 0 || config.activeProfile === undefined
+    ? "default"
+    : (config.activeProfile as string);
+
+  assertValidActiveProfile(activeProfile, profiles, options?.configPath);
+
   return {
     version: DECK_CONFIG_VERSION,
     adaptiveMemory,
     packageInstructions,
     orchestratorPersonality,
+    profiles,
+    activeProfile,
   };
 }
 
@@ -453,6 +501,112 @@ function normalizeOrchestratorPersonalityConfig(
   }
 
   return value as OrchestratorPersonality;
+}
+
+function normalizeProfiles(
+  profiles: unknown,
+  activeProfile: unknown,
+  configPath?: string,
+): Profile[] {
+  // Handle null/undefined → empty array
+  if (profiles === undefined || profiles === null) {
+    return [];
+  }
+
+  if (!Array.isArray(profiles)) {
+    throw new DeckConfigError(
+      "DECK_CONFIG_INVALID_SHAPE",
+      `"profiles" must be an array.`,
+      { configPath, fieldPath: "profiles" },
+    );
+  }
+
+  // Check for duplicate names
+  const seenNames = new Set<string>();
+  for (const profile of profiles) {
+    if (typeof profile !== "object" || profile === null) {
+      throw new DeckConfigError(
+        "DECK_CONFIG_INVALID_SHAPE",
+        `"profiles" must contain only objects with a "name" field.`,
+        { configPath, fieldPath: "profiles" },
+      );
+    }
+
+    const p = profile as Record<string, unknown>;
+
+    if (typeof p.name !== "string" || p.name.trim().length === 0) {
+      throw new DeckConfigError(
+        "DECK_CONFIG_INVALID_SHAPE",
+        `"profiles" entries must have a non-empty "name" field.`,
+        { configPath, fieldPath: "profiles" },
+      );
+    }
+
+    if (seenNames.has(p.name)) {
+      throw new DeckConfigError(
+        "DECK_CONFIG_INVALID_SHAPE",
+        `Duplicate profile name: "${p.name}"`,
+        { configPath, fieldPath: "profiles" },
+      );
+    }
+    seenNames.add(p.name);
+
+    // Validate phaseOverrides keys
+    if (p.phaseOverrides !== undefined && p.phaseOverrides !== null) {
+      if (typeof p.phaseOverrides !== "object" || Array.isArray(p.phaseOverrides)) {
+        throw new DeckConfigError(
+          "DECK_CONFIG_INVALID_SHAPE",
+          `"phaseOverrides" must be an object.`,
+          { configPath, fieldPath: "profiles" },
+        );
+      }
+
+      const phaseOverrides = p.phaseOverrides as Record<string, unknown>;
+      for (const phaseKey of Object.keys(phaseOverrides)) {
+        if (!SDD_PHASES.includes(phaseKey as SDDPhase)) {
+          throw new DeckConfigError(
+            "DECK_CONFIG_UNKNOWN_FIELD",
+            `Unknown phase: "${phaseKey}". Valid phases: ${SDD_PHASES.join(", ")}.`,
+            { configPath, fieldPath: `profiles.phaseOverrides.${phaseKey}` },
+          );
+        }
+      }
+    }
+
+    // Validate strategy value
+    if (p.strategy !== undefined && p.strategy !== null) {
+      if (typeof p.strategy !== "string") {
+        throw new DeckConfigError(
+          "DECK_CONFIG_INVALID_SHAPE",
+          `"strategy" must be a string.`,
+          { configPath, fieldPath: "profiles" },
+        );
+      }
+
+      const validStrategies: ProfileStrategy[] = ["generated-multi", "external-single-active"];
+      if (!validStrategies.includes(p.strategy as ProfileStrategy)) {
+        throw new DeckConfigError(
+          "DECK_CONFIG_INVALID_SHAPE",
+          `"strategy" must be one of: ${validStrategies.join(", ")}.`,
+          { configPath, fieldPath: "profiles" },
+        );
+      }
+    }
+  }
+
+  return profiles as Profile[];
+}
+
+function assertValidActiveProfile(activeProfile: string, profiles: Profile[], configPath?: string): void {
+  if (activeProfile === "default") return; // implicit default is always valid
+  const profileNames = profiles.map((p) => p.name);
+  if (!profileNames.includes(activeProfile)) {
+    throw new DeckConfigError(
+      "DECK_CONFIG_INVALID_SHAPE",
+      `Unknown profile: "${activeProfile}". Available profiles: ${profileNames.join(", ")}`,
+      { configPath, fieldPath: "activeProfile" },
+    );
+  }
 }
 
 function parseActiveProvider(

@@ -354,10 +354,50 @@ describe("applyDeveloperTeamInstall", () => {
       // First apply
       const first = applyDeveloperTeamInstall(plan);
       expect(first.results.every((r) => r.status === "created")).toBe(true);
+      expect(first.changedCount).toBe(first.results.length);
+      expect(first.unchangedCount).toBe(0);
 
       // Second apply — same plan, same content
       const second = applyDeveloperTeamInstall(plan);
       expect(second.results.every((r) => r.status === "unchanged")).toBe(true);
+      expect(second.changedCount).toBe(0);
+      expect(second.unchangedCount).toBe(second.results.length);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("second apply produces changedCount === 0", () => {
+    const projectRoot = createTempProject();
+    try {
+      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+
+      // First apply
+      applyDeveloperTeamInstall(plan);
+
+      // Second apply with identical plan
+      const second = applyDeveloperTeamInstall(plan);
+      expect(second.changedCount).toBe(0);
+      expect(second.unchangedCount).toBe(second.results.length);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("file status is 'unchanged' when content matches", () => {
+    const projectRoot = createTempProject();
+    try {
+      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+
+      // First apply
+      applyDeveloperTeamInstall(plan);
+
+      // Second apply — all files should be unchanged
+      const second = applyDeveloperTeamInstall(plan);
+      for (const r of second.results) {
+        expect(r.status).toBe("unchanged");
+      }
+      expect(second.fileResults.every((fr) => fr.status === "unchanged")).toBe(true);
     } finally {
       cleanup(projectRoot);
     }

@@ -15,6 +15,8 @@ import {
   resolveActiveMemoryProvider,
   validateDeckConfig,
   writeDeckConfig,
+  SDD_PHASES,
+  type Profile,
 } from "./deck-config";
 
 const tempRoots: string[] = [];
@@ -83,6 +85,8 @@ describe("readDeckConfig", () => {
         opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
       },
       orchestratorPersonality: "pragmatica",
+      profiles: [],
+      activeProfile: "default",
     });
   });
 
@@ -690,5 +694,260 @@ describe("resolveActiveMemoryProvider", () => {
 
     expect(resolution.activeProvider).toBe("engram");
     expect(resolution.source).toBe("config");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Profiles
+// ---------------------------------------------------------------------------
+
+describe("SDD_PHASES constant", () => {
+  test("contains all required phases", () => {
+    expect(SDD_PHASES).toContain("explore");
+    expect(SDD_PHASES).toContain("proposal");
+    expect(SDD_PHASES).toContain("spec");
+    expect(SDD_PHASES).toContain("design");
+    expect(SDD_PHASES).toContain("tasks");
+    expect(SDD_PHASES).toContain("apply");
+    expect(SDD_PHASES).toContain("verify");
+    expect(SDD_PHASES).toContain("review");
+    expect(SDD_PHASES).toContain("archive");
+    expect(SDD_PHASES).toContain("onboard");
+    expect(SDD_PHASES).toHaveLength(10);
+  });
+});
+
+describe("Profile defaults", () => {
+  test("getDefaultDeckConfig returns empty profiles and default activeProfile", () => {
+    const config = validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "none" } });
+    expect(config.profiles).toEqual([]);
+    expect(config.activeProfile).toBe("default");
+  });
+
+  test("readDeckConfig with no config file returns default profile values", () => {
+    const root = createTempRoot();
+    const config = readDeckConfig(root);
+    expect(config.profiles).toEqual([]);
+    expect(config.activeProfile).toBe("default");
+  });
+
+  test("profile with no profiles field normalizes to empty array and default activeProfile", () => {
+    const config = validateDeckConfig({
+      version: 1,
+      adaptiveMemory: { activeProvider: "none" },
+    });
+    expect(config.profiles).toEqual([]);
+    expect(config.activeProfile).toBe("default");
+  });
+
+  test("null config returns default profile values", () => {
+    const config = validateDeckConfig(null);
+    expect(config.profiles).toEqual([]);
+    expect(config.activeProfile).toBe("default");
+  });
+});
+
+describe("Profile validation", () => {
+  test("accepts valid profile with name only", () => {
+    const config = validateDeckConfig({
+      version: 1,
+      adaptiveMemory: { activeProvider: "none" },
+      profiles: [{ name: "fast" }],
+    });
+    expect(config.profiles).toHaveLength(1);
+    expect(config.profiles[0].name).toBe("fast");
+    expect(config.activeProfile).toBe("default"); // activeProfile not explicitly set
+  });
+
+  test("accepts profile with phase overrides for valid phases", () => {
+    const config = validateDeckConfig({
+      version: 1,
+      adaptiveMemory: { activeProvider: "none" },
+      profiles: [{
+        name: "fast",
+        description: "Fast track profile",
+        phaseOverrides: {
+          verify: { skip: true },
+          spec: { mode: "quick" },
+        },
+      }],
+      activeProfile: "fast",
+    });
+    expect(config.profiles).toHaveLength(1);
+    expect(config.activeProfile).toBe("fast");
+    expect(config.profiles[0].phaseOverrides?.verify).toEqual({ skip: true });
+  });
+
+  test("accepts profile with valid strategy value", () => {
+    const config = validateDeckConfig({
+      version: 1,
+      adaptiveMemory: { activeProvider: "none" },
+      profiles: [{ name: "multi", strategy: "generated-multi" }],
+    });
+    expect(config.profiles[0].strategy).toBe("generated-multi");
+  });
+
+  test("accepts profile with external-single-active strategy", () => {
+    const config = validateDeckConfig({
+      version: 1,
+      adaptiveMemory: { activeProvider: "none" },
+      profiles: [{ name: "single", strategy: "external-single-active" }],
+    });
+    expect(config.profiles[0].strategy).toBe("external-single-active");
+  });
+
+  test("rejects duplicate profile names with DECK_CONFIG_INVALID_SHAPE", () => {
+    expectDeckConfigError(
+      () =>
+        validateDeckConfig({
+          version: 1,
+          adaptiveMemory: { activeProvider: "none" },
+          profiles: [{ name: "fast" }, { name: "fast" }],
+        }),
+      "DECK_CONFIG_INVALID_SHAPE",
+    );
+  });
+
+  test("rejects unknown phase key in phaseOverrides with DECK_CONFIG_UNKNOWN_FIELD", () => {
+    expectDeckConfigError(
+      () =>
+        validateDeckConfig({
+          version: 1,
+          adaptiveMemory: { activeProvider: "none" },
+          profiles: [{ name: "test", phaseOverrides: { unknownPhase: {} } }],
+        }),
+      "DECK_CONFIG_UNKNOWN_FIELD",
+    );
+  });
+
+  test("rejects invalid strategy value with DECK_CONFIG_INVALID_SHAPE", () => {
+    expectDeckConfigError(
+      () =>
+        validateDeckConfig({
+          version: 1,
+          adaptiveMemory: { activeProvider: "none" },
+          profiles: [{ name: "bad", strategy: "invalid-strategy" }],
+        }),
+      "DECK_CONFIG_INVALID_SHAPE",
+    );
+  });
+
+  test("rejects unknown activeProfile name with available names in error", () => {
+    const error = expectDeckConfigError(
+      () =>
+        validateDeckConfig({
+          version: 1,
+          adaptiveMemory: { activeProvider: "none" },
+          profiles: [{ name: "fast" }],
+          activeProfile: "nonexistent",
+        }),
+      "DECK_CONFIG_INVALID_SHAPE",
+    );
+    expect(error.message).toContain("nonexistent");
+    expect(error.message).toContain("fast");
+  });
+
+  test("activeProfile 'default' is valid even with empty profiles array", () => {
+    const config = validateDeckConfig({
+      version: 1,
+      adaptiveMemory: { activeProvider: "none" },
+      profiles: [],
+      activeProfile: "default",
+    });
+    expect(config.activeProfile).toBe("default");
+    expect(config.profiles).toEqual([]);
+  });
+
+  test("non-string strategy value is rejected", () => {
+    expectDeckConfigError(
+      () =>
+        validateDeckConfig({
+          version: 1,
+          adaptiveMemory: { activeProvider: "none" },
+          profiles: [{ name: "bad", strategy: 123 as unknown as string }],
+        }),
+      "DECK_CONFIG_INVALID_SHAPE",
+    );
+  });
+
+  test("non-array profiles value is rejected", () => {
+    expectDeckConfigError(
+      () =>
+        validateDeckConfig({
+          version: 1,
+          adaptiveMemory: { activeProvider: "none" },
+          profiles: "not-an-array",
+        }),
+      "DECK_CONFIG_INVALID_SHAPE",
+    );
+  });
+
+  test("profile with empty name is rejected", () => {
+    expectDeckConfigError(
+      () =>
+        validateDeckConfig({
+          version: 1,
+          adaptiveMemory: { activeProvider: "none" },
+          profiles: [{ name: "" }],
+        }),
+      "DECK_CONFIG_INVALID_SHAPE",
+    );
+  });
+});
+
+describe("Profile persistence round-trip", () => {
+  test("write then read preserves profiles and activeProfile", () => {
+    const root = createTempRoot();
+
+    const input = {
+      version: 1,
+      adaptiveMemory: { activeProvider: "none" },
+      profiles: [
+        { name: "fast", description: "Fast track", phaseOverrides: { verify: { skip: true } } },
+        { name: "full", description: "Full review" },
+      ],
+      activeProfile: "fast",
+    };
+
+    writeDeckConfig(root, input);
+    const reRead = readDeckConfig(root);
+
+    expect(reRead.profiles).toHaveLength(2);
+    expect(reRead.profiles[0].name).toBe("fast");
+    expect(reRead.profiles[0].phaseOverrides?.verify).toEqual({ skip: true });
+    expect(reRead.profiles[1].name).toBe("full");
+    expect(reRead.activeProfile).toBe("fast");
+  });
+
+  test("profile with all SDD phase overrides can be written and read back", () => {
+    const root = createTempRoot();
+
+    const input = {
+      version: 1,
+      adaptiveMemory: { activeProvider: "none" },
+      profiles: [{
+        name: "all-phases",
+        phaseOverrides: {
+          explore: { mode: "quick" },
+          proposal: { mode: "quick" },
+          spec: { mode: "detailed" },
+          design: { mode: "detailed" },
+          tasks: { mode: "standard" },
+          apply: { mode: "standard" },
+          verify: { skip: true },
+          review: { mode: "thorough" },
+          archive: { mode: "standard" },
+          onboard: { mode: "standard" },
+        },
+      }],
+      activeProfile: "all-phases",
+    };
+
+    writeDeckConfig(root, input);
+    const reRead = readDeckConfig(root);
+
+    expect(reRead.profiles[0].phaseOverrides?.verify).toEqual({ skip: true });
+    expect(reRead.profiles[0].phaseOverrides?.spec).toEqual({ mode: "detailed" });
+    expect(reRead.activeProfile).toBe("all-phases");
   });
 });

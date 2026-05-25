@@ -35,6 +35,8 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
       },
     },
     orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
+    profiles: [],
+    activeProfile: "default",
   };
 }
 

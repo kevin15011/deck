@@ -488,47 +488,8 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
 
   return Promise.resolve({
     results: result.results,
-  });
-}
-  }
-
-  // Separate standalone skills from agent-bound skills
-  const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
-  const plan: DeveloperTeamInstallPlan = {
-    projectRoot: input.projectRoot,
-    agentsDir: `${input.projectRoot}/.pi/agents`,
-    skillsDir: `${input.projectRoot}/.pi/skills`,
-    agents: input.plan.files
-      .filter((f) => f.path.includes("/agents/"))
-      .map((f) => ({
-        agent: { id: f.path.split("/").pop()!.replace(".md", ""), name: "", description: "" } as any,
-        relativePath: f.path,
-        absolutePath: `${input.projectRoot}/${f.path}`,
-        content: f.content,
-      })),
-    skills: input.plan.files
-      .filter((f) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
-      .map((f) => ({
-        agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "" } as any,
-        relativePath: f.path,
-        absolutePath: `${input.projectRoot}/${f.path}`,
-        content: f.content,
-      })),
-    standaloneSkills: input.plan.files
-      .filter((f) => standaloneSkillIds.some((id) => f.path.includes(id)))
-      .map((f) => ({
-        skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
-        relativePath: f.path,
-        absolutePath: `${input.projectRoot}/${f.path}`,
-        content: f.content,
-      })),
-    memoryDiagnostics: [],
-  };
-
-  const result: DeveloperTeamApplyResult = applyDeveloperTeamInstall(plan);
-
-  return Promise.resolve({
-    results: result.results,
+    changedCount: result.changedCount,
+    unchangedCount: result.unchangedCount,
   });
 }
 

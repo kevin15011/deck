@@ -226,27 +226,35 @@ export function mergeAndWrite(options: MergeOptions): MergeResult {
   // 3. Merge
   const merged = mergeConfig(existing, agentEntries, pluginsToAdd);
 
-  // 4. Atomic write
+  // 4. Check if content actually changed
   const newContent = JSON.stringify(merged, null, 2);
-  writeConfigAtomic(configPath, newContent, writeFile, renameFile);
+  const existingContent = Object.keys(existing).length > 0 ? JSON.stringify(existing, null, 2) : null;
+  const contentChanged = existingContent !== newContent;
 
-  // 5. Post-write validation
-  try {
-    validateConfig(configPath, readFile);
-  } catch (error) {
-    // Rollback on validation failure
-    if (backupPath && exists(backupPath)) {
-      try {
-        rollbackConfig(backupPath, configPath);
-      } catch {
-        // Rollback itself failed — surface original error
+  // 5. Atomic write (only if content changed)
+  if (contentChanged) {
+    writeConfigAtomic(configPath, newContent, writeFile, renameFile);
+  }
+
+  // 6. Post-write validation
+  if (contentChanged) {
+    try {
+      validateConfig(configPath, readFile);
+    } catch (error) {
+      // Rollback on validation failure
+      if (backupPath && exists(backupPath)) {
+        try {
+          rollbackConfig(backupPath, configPath);
+        } catch {
+          // Rollback itself failed — surface original error
+        }
       }
+      throw error;
     }
-    throw error;
   }
 
   return {
-    status: isNew ? "created" : "updated",
+    status: contentChanged ? (isNew ? "created" : "updated") : "unchanged",
     backupPath,
     agentKeysWritten: Object.keys(agentEntries),
     pluginsAdded: pluginsToAdd,

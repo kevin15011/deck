@@ -488,6 +488,8 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
 
   return Promise.resolve({
     results: result.results,
+    changedCount: result.changedCount,
+    unchangedCount: result.unchangedCount,
   });
 }
 
