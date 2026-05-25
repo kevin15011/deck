@@ -463,10 +463,9 @@ describe("Developer Team TUI screens", () => {
     const personalities = [
       { id: "guia" as const, label: "Guía (Teacher)", hint: "Full explanations with educational context" },
       { id: "pragmatica" as const, label: "Pragmática (Pragmatic)", hint: "Balanced — what you need, nothing more" },
-      { id: "ahorro-extremo" as const, label: "Ahorro extremo (Extreme saver)", hint: "Minimal output for maximum token savings" },
     ];
 
-    test("renders three personality options with correct labels", () => {
+    test("renders two personality options with correct labels", () => {
       const output = renderToString(
         <ScreenFrame title="Choose orchestrator personality" help="help">
           <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
@@ -475,10 +474,9 @@ describe("Developer Team TUI screens", () => {
 
       expect(output).toContain("Guía (Teacher)");
       expect(output).toContain("Pragmática (Pragmatic)");
-      expect(output).toContain("Ahorro extremo (Extreme saver)");
     });
 
-    test("renders hints for all three options", () => {
+    test("renders hints for both options", () => {
       const output = renderToString(
         <ScreenFrame title="Choose orchestrator personality" help="help">
           <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
@@ -487,19 +485,6 @@ describe("Developer Team TUI screens", () => {
 
       expect(output).toContain("Full explanations with educational context");
       expect(output).toContain("Balanced — what you need, nothing more");
-      expect(output).toContain("Minimal output for maximum token");
-      expect(output).toContain("savings [tokens: low]");
-    });
-
-    test("displays the Ahorro extremo disclaimer", () => {
-      const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
-          <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
-        </ScreenFrame>,
-      );
-
-      expect(output).toContain("Ahorro extremo omits detailed context and rationale to save");
-      expect(output).toContain("tokens.");
     });
 
     test("shows cursor indicator on the focused option", () => {
@@ -563,12 +548,6 @@ describe("Developer Team TUI screens", () => {
       );
       expect(outputGuia).toContain("Guía (Teacher)");
 
-      const outputAhorro = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
-          <PersonalitySelectionScreen cursor={2} selected="ahorro-extremo" />
-        </ScreenFrame>,
-      );
-      expect(outputAhorro).toContain("Ahorro extremo (Extreme saver)");
     });
   });
 
@@ -599,17 +578,6 @@ describe("Developer Team TUI screens", () => {
       );
 
       expect(output).toContain("Pragmática (Pragmatic)");
-    });
-
-    test("writes Ahorro extremo personality to config when Ahorro extremo is confirmed", () => {
-      mockWriteDeckConfig.mockImplementation(() => {});
-      const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
-          <PersonalitySelectionScreen cursor={2} selected="ahorro-extremo" />
-        </ScreenFrame>,
-      );
-
-      expect(output).toContain("Ahorro extremo (Extreme saver)");
     });
   });
 

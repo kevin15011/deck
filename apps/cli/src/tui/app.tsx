@@ -307,7 +307,7 @@ export function DeckApp() {
   const [configurePackagesToggles, setConfigurePackagesToggles] = useState<Record<string, boolean>>({});
 
   // Personality selection state
-  const [selectedPersonality, setSelectedPersonality] = useState<"guia" | "pragmatica" | "ahorro-extremo">(() => {
+  const [selectedPersonality, setSelectedPersonality] = useState<"guia" | "pragmatica">(() => {
     try {
       const config = readDeckConfig(resolveProjectRoot());
       return config.orchestratorPersonality;
@@ -786,7 +786,7 @@ export function DeckApp() {
       return selectedModel && supportsThinking ? thinkingLevels.length - 1 : 0;
     }
     if (screen === "no-providers") return 0;
-    if (screen === "personality-selection") return 2; // 3 options: guia, pragmatica, ahorro-extremo
+    if (screen === "personality-selection") return 1; // 2 options: guia, pragmatica
     if (screen === "configure-packages-runner-selection") return 2; // Pi, OpenCode, Back
     if (screen === "configure-packages-detail") return 4; // 3 packages + Apply + Back
     return 0;
@@ -927,10 +927,9 @@ export function DeckApp() {
     }
 
     if (screen === "personality-selection") {
-      const personalities: Array<{ id: "guia" | "pragmatica" | "ahorro-extremo"; label: string }> = [
+      const personalities: Array<{ id: "guia" | "pragmatica"; label: string }> = [
         { id: "guia", label: "Guía" },
         { id: "pragmatica", label: "Pragmática" },
-        { id: "ahorro-extremo", label: "Ahorro extremo" },
       ];
       const selected = personalities[cursor];
       if (!selected) return;
@@ -2017,11 +2016,10 @@ function ConfigurePackagesDetail({
   );
 }
 
-export function PersonalitySelectionScreen({ cursor, selected }: { cursor: number; selected: "guia" | "pragmatica" | "ahorro-extremo" }) {
+export function PersonalitySelectionScreen({ cursor, selected }: { cursor: number; selected: "guia" | "pragmatica" }) {
   const personalities = [
     { id: "guia" as const, label: "Guía (Teacher)", hint: "Full explanations with educational context", tokenCost: "high" },
     { id: "pragmatica" as const, label: "Pragmática (Pragmatic)", hint: "Balanced — what you need, nothing more", tokenCost: "medium" },
-    { id: "ahorro-extremo" as const, label: "Ahorro extremo (Extreme saver)", hint: "Minimal output for maximum token savings", tokenCost: "low" },
   ];
 
   return (
@@ -2036,11 +2034,6 @@ export function PersonalitySelectionScreen({ cursor, selected }: { cursor: numbe
             hint: `${p.hint} [tokens: ${p.tokenCost}]`,
           }))}
         />
-      </Box>
-      <Box marginTop={2}>
-        <Text color="yellow">
-          ⚠ Ahorro extremo omits detailed context and rationale to save tokens.
-        </Text>
       </Box>
     </Box>
   );
