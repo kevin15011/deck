@@ -137,12 +137,13 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
-          mv artifacts/deck-*/* release-assets/
+          # Move only the tar.gz archives, skip checksums.txt (we concatenate them below)
+          mv artifacts/deck-*/deck_v*.tar.gz release-assets/
           ls -la release-assets/
 
       - name: Create checksums combined
         run: |
-          cat release-assets/deck-*/checksums.txt > release-assets/checksums.txt
+          cat artifacts/deck-*/checksums.txt > release-assets/checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -175,10 +176,13 @@ jobs:
       - name: Prepare artifacts
         run: |
           mkdir -p release-assets
-          mv artifacts/deck-*/* release-assets/
+          # Move only the tar.gz archives, skip checksums.txt (we concatenate them below)
+          mv artifacts/deck-*/deck_v*.tar.gz release-assets/
           ls -la release-assets/
 
-      - name: Upload to GitHub Release
+      - name: Create checksums combined
+        run: |
+          cat artifacts/deck-*/checksums.txt > release-assets/checksums.txt
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "build-${{ needs.metadata.outputs.version }}"
