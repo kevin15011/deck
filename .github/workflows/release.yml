@@ -166,6 +166,8 @@ jobs:
     name: Upload pre-release
     needs: [metadata, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: needs.metadata.outputs.is_release == 'false'
     steps:
       - name: Download all artifacts
