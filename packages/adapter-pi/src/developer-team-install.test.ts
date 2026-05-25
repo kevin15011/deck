@@ -311,9 +311,9 @@ describe("applyDeveloperTeamInstall", () => {
       const plan = buildDeveloperTeamInstallPlan(projectRoot);
       const result = applyDeveloperTeamInstall(plan);
 
-      expect(result.results).toHaveLength(24);
+      expect(result.results).toHaveLength(26);
       expect(result.results.filter((r) => r.kind === "agent")).toHaveLength(12);
-      expect(result.results.filter((r) => r.kind === "skill")).toHaveLength(12);
+      expect(result.results.filter((r) => r.kind === "skill")).toHaveLength(14);
       expect(result.results.every((r) => r.status === "created")).toBe(true);
 
       // Spot-check one agent file has valid frontmatter and body
@@ -527,7 +527,7 @@ describe("backupDeveloperTeamFiles", () => {
       writeFileSync(plan.agents[0].absolutePath, "old-content", "utf-8");
 
       const backup = backupDeveloperTeamFiles(plan);
-      expect(backup.entries).toHaveLength(24); // 12 agents + 12 skills
+      expect(backup.entries).toHaveLength(26); // 12 agents + 14 skills (12 agent skills + 2 SDD bootstrap)
 
       // The pre-existing file should have its content captured
       const existingEntry = backup.entries.find((e) => e.absolutePath === plan.agents[0].absolutePath)!;
@@ -535,7 +535,7 @@ describe("backupDeveloperTeamFiles", () => {
 
       // Files that didn't exist should have null
       const missingEntries = backup.entries.filter((e) => e.previousContent === null);
-      expect(missingEntries).toHaveLength(23);
+      expect(missingEntries).toHaveLength(25);
     } finally {
       cleanup(projectRoot);
     }

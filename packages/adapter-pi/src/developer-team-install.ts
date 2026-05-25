@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
 import {
   buildCapabilityInstructionBundle,
   getEnabledPackageInstructionIds,
@@ -51,6 +52,14 @@ export type PlannedStandaloneSkillFile = {
   content: string;
 };
 
+/** SDD bootstrap skill file (deck-init, deck-onboard) */
+export type PlannedSDDSkillFile = {
+  skillId: string;
+  relativePath: string;
+  absolutePath: string;
+  content: string;
+};
+
 export type DeveloperTeamInstallPlan = {
   projectRoot: string;
   agentsDir: string;
@@ -58,6 +67,8 @@ export type DeveloperTeamInstallPlan = {
   agents: PlannedAgentFile[];
   skills: PlannedSkillFile[];
   standaloneSkills: PlannedStandaloneSkillFile[];
+  /** SDD bootstrap skill files (deck-init, deck-onboard) */
+  sddSkillFiles: PlannedSDDSkillFile[];
   memoryDiagnostics: MemoryDiagnostic[];
 };
 
@@ -339,7 +350,16 @@ export function buildDeveloperTeamInstallPlan(
     return { skillId: skill.skillId, relativePath, absolutePath, content: skill.body };
   });
 
-  return { projectRoot, agentsDir, skillsDir, agents, skills, standaloneSkills, memoryDiagnostics };
+// Build SDD bootstrap skill files (deck-init, deck-onboard)
+  // Map: "deck-init/SKILL.md" -> ".pi/skills/deck-init/SKILL.md"
+  const sddSkillFiles: PlannedSDDSkillFile[] = getBootstrapSkillFiles().map((skill) => ({
+    skillId: skill.skillId,
+    relativePath: `.pi/skills/${skill.skillId}/SKILL.md`,
+    absolutePath: join(projectRoot, `.pi/skills/${skill.skillId}/SKILL.md`),
+    content: skill.content,
+  }));
+
+  return { projectRoot, agentsDir, skillsDir, agents, skills, standaloneSkills, sddSkillFiles, memoryDiagnostics };
 }
 
 export function readDeveloperTeamModelAssignments(
@@ -465,7 +485,28 @@ export function applyDeveloperTeamInstall(
     return { agentId: planned.skillId, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath };
   });
 
-  const allResults = [...agentResults, ...skillResults, ...standaloneSkillResults];
+  // Write SDD bootstrap skill files (deck-init, deck-onboard) with idempotency
+  const sddSkillResults: BundleApplyResult[] = plan.sddSkillFiles.map((planned) => {
+    // Ensure directory exists before writing
+    const skillDir = join(planned.absolutePath, "..");
+    if (!exists(skillDir)) {
+      mkdir(skillDir, { recursive: true });
+    }
+
+    if (exists(planned.absolutePath)) {
+      const existing = readFile(planned.absolutePath, "utf-8");
+      if (existing === planned.content) {
+        return { agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const, absolutePath: planned.absolutePath };
+      }
+      writeFile(planned.absolutePath, planned.content, "utf-8");
+      return { agentId: planned.skillId, kind: "skill" as const, status: "updated" as const, absolutePath: planned.absolutePath };
+    }
+
+    writeFile(planned.absolutePath, planned.content, "utf-8");
+    return { agentId: planned.skillId, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath };
+  });
+
+  const allResults = [...agentResults, ...skillResults, ...standaloneSkillResults, ...sddSkillResults];
   const changedCount = allResults.filter((r) => r.status === "created" || r.status === "updated").length;
   const unchangedCount = allResults.filter((r) => r.status === "unchanged").length;
 
@@ -536,8 +577,26 @@ export function verifyDeveloperTeamInstall(
     return { agentId: planned.agent.id, valid: issues.length === 0, issues };
   });
 
+  // Verify SDD bootstrap skill files
+  const sddSkillResults: BundleVerifyResult[] = plan.sddSkillFiles.map((planned) => {
+    const issues: string[] = [];
+
+    if (!exists(planned.absolutePath)) {
+      return { agentId: planned.skillId, valid: false, issues: ["File does not exist."] };
+    }
+
+    const content = readFile(planned.absolutePath, "utf-8");
+
+    // Basic validation: check for expected skill ID content
+    if (!content.includes("deck-init") && !content.includes("deck-onboard")) {
+      issues.push(`Missing expected SDD skill content.`);
+    }
+
+    return { agentId: planned.skillId, valid: issues.length === 0, issues };
+  });
+
   return {
-    valid: agentResults.every((r) => r.valid) && skillResults.every((r) => r.valid),
+    valid: agentResults.every((r) => r.valid) && skillResults.every((r) => r.valid) && sddSkillResults.every((r) => r.valid),
     agentResults,
     skillResults,
   };
@@ -562,7 +621,7 @@ export function backupDeveloperTeamFiles(
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;
 
-  const allFiles = [...plan.agents, ...plan.skills];
+  const allFiles = [...plan.agents, ...plan.skills, ...plan.sddSkillFiles];
 
   const entries: FileBackupEntry[] = allFiles.map((planned) => {
     if (exists(planned.absolutePath)) {

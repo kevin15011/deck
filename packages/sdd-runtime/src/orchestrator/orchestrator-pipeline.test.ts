@@ -11,6 +11,114 @@ import {
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "./orchestrator-pipeline";
 
 describe("orchestrator-pipeline", () => {
+  describe("init-gate", () => {
+    test("initialized: true → normal pipeline", () => {
+      const input: OrchestratorPipelineInput = {
+        audit: {
+          invariants: "simple change",
+          boundaries: "single module",
+          ambiguity: [],
+          riskSignals: [],
+          confidence: 0.95,
+          externalContracts: [],
+          sensitiveData: [],
+          testDirection: "unit-first",
+        },
+        auditType: "spec",
+        projectRoot: "/fake/path",
+      };
+
+      const config: PipelineConfig = {
+        ...DEFAULT_PIPELINE_CONFIG,
+        readInitState: (root) => ({ initialized: true }),
+      };
+
+      const result = runOrchestratorPipeline(input, config);
+
+      expect(result.outcome).toBe("completed");
+      expect(result.delegate).toBeUndefined();
+    });
+
+    test("initialized: false → outcome needs-init", () => {
+      const input: OrchestratorPipelineInput = {
+        audit: {
+          invariants: "simple change",
+          boundaries: "single module",
+          ambiguity: [],
+          riskSignals: [],
+          confidence: 0.95,
+          externalContracts: [],
+          sensitiveData: [],
+          testDirection: "unit-first",
+        },
+        auditType: "spec",
+        projectRoot: "/fake/path",
+      };
+
+      const config: PipelineConfig = {
+        ...DEFAULT_PIPELINE_CONFIG,
+        readInitState: (root) => ({ initialized: false }),
+      };
+
+      const result = runOrchestratorPipeline(input, config);
+
+      expect(result.outcome).toBe("needs-init");
+      expect(result.delegate?.skillId).toBe("deck-init");
+      expect(result.delegate?.reason).toBe("Project not initialized");
+      expect(result.initState?.initialized).toBe(false);
+    });
+
+    test("missing config → skip gate (backward compat)", () => {
+      const input: OrchestratorPipelineInput = {
+        audit: {
+          invariants: "simple change",
+          boundaries: "single module",
+          ambiguity: [],
+          riskSignals: [],
+          confidence: 0.95,
+          externalContracts: [],
+          sensitiveData: [],
+          testDirection: "unit-first",
+        },
+        auditType: "spec",
+        projectRoot: "/fake/path",
+      };
+
+      // No readInitState provided — should skip gate entirely
+      const result = runOrchestratorPipeline(input, DEFAULT_PIPELINE_CONFIG);
+
+      expect(result.outcome).toBe("completed");
+      expect(result.delegate).toBeUndefined();
+    });
+
+    test("readInitState hook not provided → skip gate", () => {
+      const input: OrchestratorPipelineInput = {
+        audit: {
+          invariants: "simple change",
+          boundaries: "single module",
+          ambiguity: [],
+          riskSignals: [],
+          confidence: 0.95,
+          externalContracts: [],
+          sensitiveData: [],
+          testDirection: "unit-first",
+        },
+        auditType: "spec",
+        projectRoot: "/fake/path",
+      };
+
+      const config: PipelineConfig = {
+        ...DEFAULT_PIPELINE_CONFIG,
+        // readInitState intentionally not set
+      };
+
+      const result = runOrchestratorPipeline(input, config);
+
+      expect(result.outcome).toBe("completed");
+      expect(result.delegate).toBeUndefined();
+    });
+  });
+
   describe("runOrchestratorPipeline", () => {
     test("low-risk passes through without quality invocation", () => {
       const input: OrchestratorPipelineInput = {

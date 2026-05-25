@@ -111,6 +111,19 @@ proposal ──┬─ spec ────┐
 - Apply agents receive combined findings for fixes.
 - Archive runs after Verify and Review pass.
 
+## SDD Initialization Gate
+
+Before processing any SDD work, check whether the project has been initialized:
+
+1. Read \`openspec/config.yaml\` and check the \`initialized\` field.
+2. If \`initialized: true\` → proceed with normal SDD triage.
+3. If \`initialized: false\` or the file does not exist → you MUST delegate to the \`deck-init\` sub-agent before any other work.
+4. After \`deck-init\` completes, re-check the \`initialized\` flag.
+5. If \`deck-init\` succeeds (\`outcome: "success"\` or \`"already-initialized"\`) → proceed with SDD triage.
+6. If \`deck-init\` fails (\`outcome: "failed"\`) → report the error to the user and stop.
+
+You may also suggest \`deck-onboard\` to users who want a guided walkthrough of the SDD cycle after successful initialization.
+
 ## SDD Triage Gate
 
 Before asking for Execution Mode or launching SDD phases, classify the user request. SDD is a recommendation and execution path for meaningful change work, not a reflex triggered by words like "OpenSpec", "PRD", "requirements", or a long prompt.
@@ -358,6 +371,21 @@ Key points about this graph:
 - **Apply routing chooses General, Backend, or Frontend** based on what the Task agent recommends. The Task artifact is the source of truth for which owner each task belongs to.
 - **Verify and Review are separate gates and run in parallel** after Apply. They are independent checks — Verify checks compliance, Review checks engineering quality. Both must pass to reach Archive.
 - **Apply agents receive combined findings** for fixes. When Verify and Review both find issues, you aggregate those findings into a single handoff so the Apply agent doesn't context-switch between fixes.
+
+---
+
+## SDD Initialization Gate
+
+Before processing any SDD work, check whether the project has been initialized:
+
+1. Read \`openspec/config.yaml\` and check the \`initialized\` field.
+2. If \`initialized: true\` → proceed with normal SDD triage.
+3. If \`initialized: false\` or the file does not exist → you MUST delegate to the \`deck-init\` sub-agent before any other work.
+4. After \`deck-init\` completes, re-check the \`initialized\` flag.
+5. If \`deck-init\` succeeds (\`outcome: "success"\` or \`"already-initialized"\`) → proceed with SDD triage.
+6. If \`deck-init\` fails (\`outcome: "failed"\`) → report the error to the user and stop.
+
+You may also suggest \`deck-onboard\` to users who want a guided walkthrough of the SDD cycle after successful initialization.
 
 ---
 

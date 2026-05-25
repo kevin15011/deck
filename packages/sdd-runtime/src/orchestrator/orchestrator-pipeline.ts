@@ -9,6 +9,7 @@ import { validateSelfAudit, type AuditType } from "../contracts/self-audit";
 import { computeRiskScore, DEFAULT_SCORER_CONFIG, type RiskScorerConfig } from "./risk-scorer";
 import { routeQuality, DEFAULT_ROUTER_CONFIG, type QualityRouterConfig, type QualityRouteDecision } from "./quality-router";
 import { checkLoopCondition, DEFAULT_LOOP_BREAKER_CONFIG, type LoopBreakerConfig, type FailureFingerprint, type LoopAction } from "./loop-breaker";
+import type { InitState } from "./init-state";
 import type { RiskResult } from "../contracts/risk";
 
 // ── Pipeline stage types ───────────────────────────────────────────────────────
@@ -123,11 +124,13 @@ export interface OrchestratorPipelineInput {
   enforcementMode?: "report-only" | "conditional-routing" | "full-enforcement";
   /** Optional profile context for phase-level overrides */
   profile?: ProfileContext;
+  /** Project root path for init state check */
+  projectRoot?: string;
 }
 
 // ── Result ──
 
-export type PipelineOutcome = "completed" | "blocked" | "partial";
+export type PipelineOutcome = "completed" | "blocked" | "partial" | "needs-init";
 
 export interface OrchestratorPipelineResult {
   auditValid: boolean;
@@ -141,6 +144,10 @@ export interface OrchestratorPipelineResult {
   blockReason?: string;
   /** Collected errors from each stage — pipeline continues despite errors */
   stageErrors: StageError[];
+  /** Delegate info for needs-init outcome */
+  delegate?: { skillId: string; reason: string };
+  /** Init state when read */
+  initState?: InitState;
 }
 
 // ── Config ──
@@ -151,6 +158,8 @@ export interface PipelineConfig {
   loopBreakerConfig: LoopBreakerConfig;
   /** Personality for human-facing output verbosity. Defaults to pragmatica. */
   personality?: OrchestratorPersonality;
+  /** Hook to read init state from project root */
+  readInitState?: (projectRoot: string) => InitState;
 }
 
 export const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
@@ -167,6 +176,40 @@ export function runOrchestratorPipeline(
 ): OrchestratorPipelineResult {
   const personality = config.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
   const stageErrors: StageError[] = [];
+
+  // ── Init gate — before anything else ───────────────────────────────────────
+
+  if (config.readInitState && input.projectRoot) {
+    const initState = config.readInitState(input.projectRoot);
+    if (!initState.initialized) {
+      return {
+        auditValid: false,
+        riskResult: {
+          score: 100,
+          tier: "critical",
+          signals: [],
+          thresholds: { standard: 30, boundary: 60, critical: 80 },
+          overrides: [],
+          recommendedChecks: ["full-review"],
+          confidence: 0,
+        },
+        qualityRouted: false,
+        qualityDecision: {
+          invokeQuality: false,
+          checksToRun: [],
+          requiresReplanOrOverride: true,
+          stateValidationRequired: true,
+          skipReason: undefined,
+        },
+        loopAction: "continue",
+        outcome: "needs-init",
+        blockReason: undefined,
+        stageErrors,
+        delegate: { skillId: "deck-init", reason: "Project not initialized" },
+        initState,
+      };
+    }
+  }
 
   // ── Profile-aware config resolution ─────────────────────────────────────────
 

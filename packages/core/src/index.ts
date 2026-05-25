@@ -121,3 +121,6 @@ export * from "./memory/adaptive-context-renderer";
 
 // Spec Registry — OpenSpec types, path helpers, and event model
 export * from "./spec-registry";
+
+// Bootstrap skills — deck-init and deck-onboard
+export * from "./skills/bootstrap";
