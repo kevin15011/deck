@@ -1,12 +1,16 @@
 # GitHub Actions Release Workflow
 #
 # Builds and releases deck binary for multiple platforms.
-# Triggered on version tag push (v*).
+# Triggered on:
+#   - Push to main (automatic build, pre-release)
+#   - Version tag push v* (stable release)
 
 name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -16,12 +20,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Determine version from tag
+  # Determine version from tag or build type
   metadata:
     name: Extract version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.tag.outputs.version }}
+      is_release: ${{ steps.tag.outputs.is_release }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,8 +34,15 @@ jobs:
       - name: Extract version from tag
         id: tag
         run: |
-          # Remove 'v' prefix if present
-          VERSION="${GITHUB_REF#refs/tags/v}"
+          # Check if this is a tag push or main push
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "is_release=true" >> $GITHUB_OUTPUT
+          else
+            # For main pushes, use package.json version with suffix
+            VERSION=$(node -p "require('./package.json').version")
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
         shell: bash
 
@@ -60,10 +72,13 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Generate build info
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          TARGET: ${{ matrix.target }}
         run: |
           bun scripts/generate-build-info.ts \
-            --version "${{ needs.metadata.outputs.version }}" \
-            --target "${{ matrix.target }}"
+            --version "$VERSION" \
+            --target "$TARGET"
 
       - name: Generate skill bundle
         run: bun scripts/generate-skill-bundle.ts
@@ -72,28 +87,30 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: |
+          mkdir -p dist-cli
           bun build --compile \
             --target=bun-${TARGET} \
-            --outfile=./deck-${TARGET} \
+            --outfile=./dist-cli/deck \
             ./apps/cli/src/main.tsx
 
-      - name: CodeSign macOS binary
-        if: matrix.target == 'darwin-x64' || matrix.target == 'darwin-arm64'
-        run: |
-          # Skip code signing in CI - would require certificates
-          echo "Skipping code signing in CI"
-
       - name: Create archive
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           ARCHIVE_NAME="deck_v${VERSION}_${TARGET}.tar.gz"
-          tar -czf "${ARCHIVE_NAME}" --absolute-names ./deck-${TARGET}
+          tar -czf "${ARCHIVE_NAME}" -C dist-cli deck
 
       - name: Compute checksum
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          if [[ "${{ matrix.target }}" == linux* ]]; then
-            sha256sum deck_v${VERSION}_${TARGET}.tar.gz > checksums.txt
+          ARCHIVE_NAME="deck_v${VERSION}_${TARGET}.tar.gz"
+          if command -v sha256sum &>/dev/null; then
+            sha256sum "${ARCHIVE_NAME}" > checksums.txt
           else
-            shasum -a 256 deck_v${VERSION}_${TARGET}.tar.gz > checksums.txt
+            shasum -a 256 "${ARCHIVE_NAME}" > checksums.txt
           fi
 
       - name: Upload artifact
@@ -101,7 +118,7 @@ jobs:
         with:
           name: deck-${{ matrix.target }}
           path: |
-            deck_v${VERSION}_${{ matrix.target }}.tar.gz
+            deck_v${{ needs.metadata.outputs.version }}_${{ matrix.target }}.tar.gz
             checksums.txt
 
   # Create GitHub Release
@@ -111,6 +128,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    if: needs.metadata.outputs.is_release == 'true'
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -123,12 +141,9 @@ jobs:
           mv artifacts/deck-*/* release-assets/
           ls -la release-assets/
 
-      - name: Create_checksums_combined
+      - name: Create checksums combined
         run: |
-          # Combine individual checksums into one file
-          cat release-assets/checksums.txt > checksums.txt
-          cat release-assets/deck-*/checksums.txt >> checksums.txt
-          mv checksums.txt release-assets/
+          cat release-assets/deck-*/checksums.txt > release-assets/checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -147,17 +162,37 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Verify release was created
-  verify:
-    name: Verify release
-    needs: [metadata, release]
+  # Upload pre-release artifacts (main pushes only)
+  artifacts:
+    name: Upload pre-release
+    needs: [metadata, build]
     runs-on: ubuntu-latest
+    if: needs.metadata.outputs.is_release == 'false'
     steps:
-      - name: Verify release exists
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare artifacts
         run: |
-          # Query the release API to verify it was created
-          curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ needs.metadata.outputs.version }}" | \
-            jq -e '.id' > /dev/null
+          mkdir -p release-assets
+          mv artifacts/deck-*/* release-assets/
+          ls -la release-assets/
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "build-${{ needs.metadata.outputs.version }}"
+          name: "Deck v${{ needs.metadata.outputs.version }} (pre-release)"
+          draft: true
+          prerelease: true
+          generate_release_notes: false
+          files: |
+            release-assets/deck_v*_linux-x64.tar.gz
+            release-assets/deck_v*_linux-arm64.tar.gz
+            release-assets/deck_v*_darwin-x64.tar.gz
+            release-assets/deck_v*_darwin-arm64.tar.gz
+            release-assets/checksums.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
