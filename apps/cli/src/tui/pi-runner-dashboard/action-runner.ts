@@ -8,6 +8,7 @@
 import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
+import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "@deck/adapter-pi";
 
 export type RunnerActionRunStatus = "executed" | "informational" | "skipped" | "failed";
 
@@ -33,7 +34,11 @@ export type PackageInstallerFn = (
  */
 export type TeamBundleInstallerFn = (
   projectRoot: string,
-  options?: { memoryProvider?: AdaptiveMemoryProvider },
+  options?: {
+    memoryProvider?: AdaptiveMemoryProvider;
+    modelAssignments?: DeveloperTeamModelAssignments;
+    thinkingAssignments?: DeveloperTeamThinkingAssignments;
+  },
 ) => Promise<{ results: Array<{ agentId: string; kind: string; status: string }> }>;
 
 /**
@@ -438,7 +443,20 @@ async function applyTeamBundleAction(
   }
 
   const memoryProvider = dependencies.resolvedMemoryProvider ?? dependencies.memoryProvider;
-  const installerResult = await installer(projectRoot, memoryProvider ? { memoryProvider } : undefined);
+  const developerTeam = dependencies.dashboardState?.teams?.["developer-team"];
+  const modelAssignments = developerTeam?.modelAssignments as DeveloperTeamModelAssignments | undefined;
+  const thinkingAssignments = developerTeam?.thinkingAssignments as DeveloperTeamThinkingAssignments | undefined;
+
+  const installerOptions: {
+    memoryProvider?: AdaptiveMemoryProvider;
+    modelAssignments?: DeveloperTeamModelAssignments;
+    thinkingAssignments?: DeveloperTeamThinkingAssignments;
+  } = {};
+  if (memoryProvider) installerOptions.memoryProvider = memoryProvider;
+  if (modelAssignments) installerOptions.modelAssignments = modelAssignments;
+  if (thinkingAssignments) installerOptions.thinkingAssignments = thinkingAssignments;
+
+  const installerResult = await installer(projectRoot, Object.keys(installerOptions).length > 0 ? installerOptions : undefined);
 
   const result = installerResult as { results?: Array<{ agentId?: string; kind?: string; status?: string }> };
   const count = result?.results?.length ?? 0;

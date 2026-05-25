@@ -558,21 +558,53 @@ export function DeckApp() {
         memoryProvider: resolvedMemoryProvider,
         resolvedMemoryProvider,
         writeMcpConfig: isOpenCode ? writeSupermemoryOpenCodeMcpConfig : undefined,
-        installTeamBundle: isOpenCode ? async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => {
-          const deckConfig = readDeckConfig(projectRoot);
-          const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
-          const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
-          const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
-          const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { ...(options?.memoryProvider ? { memoryProvider: options.memoryProvider } : {}), capabilityInstructions, standaloneSkills });
-          const backup = backupOpenCodeDeveloperTeamFiles(plan);
-          const applyResult = applyOpenCodeDeveloperTeamInstall(plan);
-          const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
-          if (!verifyResult.valid) {
-            rollbackOpenCodeDeveloperTeamFiles(backup);
-            throw new Error("Verification failed. Changes rolled back.");
+        installTeamBundle: (() => {
+          if (isOpenCode) {
+            return async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments }) => {
+              const deckConfig = readDeckConfig(projectRoot);
+              const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
+              const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+              const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
+              const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+                ...(options?.memoryProvider ? { memoryProvider: options.memoryProvider } : {}),
+                ...(options?.modelAssignments ? { configModelOverrides: options.modelAssignments } : {}),
+                ...(options?.thinkingAssignments ? { reasoningEffortOverrides: options.thinkingAssignments as Record<string, import("@deck/adapter-opencode").OpenCodeThinkingLevel> } : {}),
+                capabilityInstructions,
+                standaloneSkills,
+              });
+              const backup = backupOpenCodeDeveloperTeamFiles(plan);
+              const applyResult = applyOpenCodeDeveloperTeamInstall(plan);
+              const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
+              if (!verifyResult.valid) {
+                rollbackOpenCodeDeveloperTeamFiles(backup);
+                throw new Error("Verification failed. Changes rolled back.");
+              }
+              return { results: applyResult.results ?? [] };
+            };
           }
-          return { results: applyResult.results ?? [] };
-        } : undefined,
+          // Pi path
+          return async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments }) => {
+            const plan = buildDeveloperTeamInstallPlan(projectRoot, {
+              ...(options?.memoryProvider ? { memoryProvider: options.memoryProvider } : {}),
+              ...(options?.modelAssignments ? { modelAssignments: options.modelAssignments } : {}),
+              ...(options?.thinkingAssignments ? { thinkingAssignments: options.thinkingAssignments } : {}),
+              preserveMissingThinkingAssignments: true,
+            });
+            const backup = backupDeveloperTeamFiles(plan);
+            try {
+              const applyResult = applyDeveloperTeamInstall(plan);
+              const verifyResult = verifyDeveloperTeamInstall(plan);
+              if (!verifyResult.valid) {
+                rollbackDeveloperTeamFiles(backup);
+                throw new Error("Verification failed. Changes rolled back.");
+              }
+              return { results: applyResult.results ?? [] };
+            } catch (error) {
+              rollbackDeveloperTeamFiles(backup);
+              throw error instanceof Error ? error : new Error(String(error));
+            }
+          };
+        })(),
         onActionResult: (result: RunnerActionRunResult) => {
           if (!cancelled) setDashboardActionResults((current) => [...current, result]);
         },
@@ -1093,9 +1125,9 @@ export function DeckApp() {
         if (modelConfigSource === "install") {
           resetCursor("memory-provider-selection");
         } else if (modelConfigSource === "dashboard") {
-          // For OpenCode, the dashboard plan builder has no team-application actions,
+          // For OpenCode and Pi, the dashboard plan builder has no team-application actions,
           // so persist model changes to disk immediately on Finish.
-          if (modelConfigRuntime === "opencode") {
+          if (modelConfigRuntime === "opencode" || modelConfigRuntime === "pi") {
             applyDeveloperTeamModelConfig();
           }
           syncDashboardDeveloperTeamModelConfig();

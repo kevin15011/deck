@@ -25,5 +25,7 @@
       "adaptive-memory": true
     }
   },
-  "orchestratorPersonality": "pragmatica"
+  "orchestratorPersonality": "pragmatica",
+  "profiles": [],
+  "activeProfile": "default"
 }
