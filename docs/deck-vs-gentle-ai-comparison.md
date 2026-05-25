@@ -1,7 +1,8 @@
 # Deck vs Gentle-AI — Comparative Analysis
 
 **Date:** 2026-05-24
-**Status:** Completed
+**Last Updated:** 2026-05-24 (after SDD idempotency/profiles/isolation implementation)
+**Status:** Implemented (Deck now matches Gentle-AI in key areas)
 **Source:** `sm_project_default` (memory ID: ujVKQ5VUyu5FmxFmkpYmWk)
 
 ---
@@ -12,95 +13,131 @@ Two agent orchestration systems were compared:
 - **Deck** (`/home/kevinlb/deck`): TypeScript monorepo with team-based agent architecture
 - **Gentle-AI** (`/home/kevinlb/gentle-ai`): Go monorepo with component-injection architecture
 
+**After SDD:** Deck now has idempotency counts, profile system, and pipeline stage isolation — matching Gentle-AI's key advantages.
+
 ---
 
 ## Aspect-by-Aspect Comparison
 
 ### Structure
 
-| Aspecto | Deck | Gentle-AI | Veredicto |
-|---|---|---|---|
-| **Cohesión** | Equipo de 12 agentes con roles bien definidos y dependencias explícitas | Componentes separados con interfaces definidas | **Deck** — la dependencia graph explícita evita contradicciones entre fases |
-| **Extensibilidad** | Agregar rol = editar `content-registry.ts` + archivos de contenido | Agregar componente = nuevo package Go | **Gentle-AI** — sin necesidad de editar código existente |
-| **Aislamiento** | Todas las decisiones pasan por orchestrator único | Componentes independientes que no se conocen | **Gentle-AI** — fallas aisladas; Deck tiene bottleneck en orchestrator |
-| **Testing** | Tests de integración en cada paquete | Tests unitarios por componente + integración | **Empate** — ambos tienen cobertura adecuada |
+| Aspecto | Deck | Gentle-AI | Veredicto | Status |
+|---|---|---|---|---|
+| **Cohesión** | Equipo de 12 agentes con roles bien definidos y dependencias explícitas | Componentes separados con interfaces definidas | **Deck** — la dependencia graph explícita evita contradicciones entre fases | — |
+| **Extensibilidad** | Agregar rol = editar `content-registry.ts` + archivos de contenido | Agregar componente = nuevo package Go | **Gentle-AI** — sin necesidad de editar código existente | — |
+| **Aislamiento** | Todas las decisiones pasan por orchestrator único | Componentes independientes que no se conocen | **Gentle-AI** — fallas aisladas; Deck tiene bottleneck en orchestrator | **IMPLEMENTED** ✅ |
+| **Testing** | Tests de integración en cada paquete | Tests unitarios por componente + integración | **Empate** — ambos tienen cobertura adecuada | — |
 
 ### Agent Model
 
-| Aspecto | Deck | Gentle-AI | Veredicto |
-|---|---|---|---|
-| **Especialización** | 12 roles con behavior detallado (delegate, no executor) | 1 orchestrator + 9 SDD phases | **Deck** — mayor granularidad, menos ambigüedad en responsabilidades |
-| **Delegación** | Reglas formales con triggers (4-file, multi-file, PR, incident, long-session) | Delegación implícita via sub-agent routing | **Deck** — las reglas previenen contextos inflados |
-| **Escalabilidad** | 12 agentes puede ser overhead para cambios simples | Solo orchestrator + fases activas | **Gentle-AI** — más pragmático para cambios pequeños |
-| **Consistencia** | Personality afecta output pero machine-readable fields idénticos | Personality por preset, no por agente | **Deck** — personality variant mantiene invariancia en campos críticos |
+| Aspecto | Deck | Gentle-AI | Veredicto | Status |
+|---|---|---|---|---|
+| **Especialización** | 12 roles con behavior detallado (delegate, no executor) | 1 orchestrator + 9 SDD phases | **Deck** — mayor granularidad, menos ambigüedad en responsabilidades | — |
+| **Delegación** | Reglas formales con triggers (4-file, multi-file, PR, incident, long-session) | Delegación implícita via sub-agent routing | **Deck** — las reglas previenen contextos inflados | — |
+| **Escalabilidad** | 12 agentes puede ser overhead para cambios simples | Solo orchestrator + fases activas | **Gentle-AI** — más pragmático para cambios pequeños | — |
+| **Consistencia** | Personality afecta output pero machine-readable fields idénticos | Personality por preset, no por agente | **Deck** — personality variant mantiene invariancia en campos críticos | — |
 
 ### Installation
 
-| Aspecto | Deck | Gentle-AI | Veredicto |
-|---|---|---|---|
-| **Idempotencia** | `applyDeveloperTeamInstall` re-aplica sin duplicar | `gentle-ai sync` detecta cambios vs. estado previo | **Gentle-AI** — estrategia de sync es más madura (detecta drift) |
-| **Rollback** | `backupDeveloperTeamFiles` + `rollbackDeveloperTeamFiles` | Backup antes de ejecución en TUI | **Gentle-AI** — backup automático en flujo interactivo; Deck requiere llamadas explícitas |
-| **Verificación** | `verifyDeveloperTeamInstall` valida frontmatter + contenido | `verify.Report` con issues categorizados | **Gentle-AI** — sistema de verificación más completo |
-| **Persistencia** | Markdown + YAML en filesystem | JSON + Binary state | **Deck** — archivos legibles permiten debugging manual; **Gentle-AI** — más robusto contra corrupcción |
+| Aspecto | Deck | Gentle-AI | Veredicto | Status |
+|---|---|---|---|---|
+| **Idempotencia** | `applyDeveloperTeamInstall` detecta drift con `changedCount`/`unchangedCount` | `gentle-ai sync` detecta cambios vs. estado previo | **Empate** — ambos detectan drift antes de escribir | **IMPLEMENTED** ✅ |
+| **Rollback** | `backupDeveloperTeamFiles` + `rollbackDeveloperTeamFiles` | Backup antes de ejecución en TUI | **Gentle-AI** — backup automático en flujo interactivo; Deck requiere llamadas explícitas | — |
+| **Verificación** | `verifyDeveloperTeamInstall` valida frontmatter + contenido | `verify.Report` con issues categorizados | **Gentle-AI** — sistema de verificación más completo | — |
+| **Persistencia** | Markdown + YAML en filesystem | JSON + Binary state | **Deck** — archivos legibles permiten debugging manual; **Gentle-AI** — más robusto contra corrupcción | — |
 
 ### Methodology
 
-| Aspecto | Deck | Gentle-AI | Veredicto |
-|---|---|---|---|
-| **Fases** | proposal → spec/design (parallel) → tasks → apply → verify/review (parallel) → archive | sdd-init → explore → propose → spec → design → tasks → apply → verify → archive | **Deck** — spec y design en parallel ahorra tiempo; Gentle-AI los secuencializa |
-| **Registry** | `state.yaml` + `events.yaml` con merge no-destructivo | No tiene equivalente — usa state management | **Deck** — auditoría completa de decisiones; Gentle-AI depende de git history |
-| **Profiles** | No tiene — usa personality + enforcement modes | SDD profiles con phases override | **Gentle-AI** — profiles permiten personalización sin tocar código |
-| **Parallel Safety** | Registry-deferred mode para spec+design parallel | Phase locking implícito | **Deck** — Serialización explícita es más segura; Gentle-AI requiere coordinación adicional |
+| Aspecto | Deck | Gentle-AI | Veredicto | Status |
+|---|---|---|---|---|
+| **Fases** | proposal → spec/design (parallel) → tasks → apply → verify/review (parallel) → archive | sdd-init → explore → propose → spec → design → tasks → apply → verify → archive | **Deck** — spec y design en parallel ahorra tiempo; Gentle-AI los secuencializa | — |
+| **Registry** | `state.yaml` + `events.yaml` con merge no-destructivo | No tiene equivalente — usa state management | **Deck** — auditoría completa de decisiones; Gentle-AI depende de git history | — |
+| **Profiles** | Profile type con phaseOverrides + strategy | SDD profiles con phases override | **Empate** — ambos tienen profile system | **IMPLEMENTED** ✅ |
+| **Parallel Safety** | Registry-deferred mode para spec+design parallel | Phase locking implícito | **Deck** — Serialización explícita es más segura; Gentle-AI requiere coordinación adicional | — |
 
 ### Memory
 
-| Aspecto | Deck | Gentle-AI | Veredicto |
-|---|---|---|---|
-| **Providers** | Engram + Supermemory + hook para extensiones | Engram como componente nativo | **Gentle-AI** — implementación más integrada |
-| **Surface types** | session, agent, skill surfaces | agent, skill surfaces | **Deck** — session surface permite contexto global; Gentle-AI no tiene equivalente |
-| **Tool binding** | Declarative via `toolBindings` array | Via adapter pattern | **Deck** — más flexible para nuevos providers; **Gentle-AI** — más simple |
-| **Fallback** | Fail-closed con diagnostic cuando provider falla | Binary download como fallback | **Gentle-AI** — mejor handling para plataformas sin brew |
+| Aspecto | Deck | Gentle-AI | Veredicto | Status |
+|---|---|---|---|---|
+| **Providers** | Engram + Supermemory + hook para extensiones | Engram como componente nativo | **Gentle-AI** — implementación más integrada | — |
+| **Surface types** | session, agent, skill surfaces | agent, skill surfaces | **Deck** — session surface permite contexto global; Gentle-AI no tiene equivalente | — |
+| **Tool binding** | Declarative via `toolBindings` array | Via adapter pattern | **Deck** — más flexible para nuevos providers; **Gentle-AI** — más simple | — |
+| **Fallback** | Fail-closed con diagnostic cuando provider falla | Binary download como fallback | **Gentle-AI** — mejor handling para plataformas sin brew | — |
 
 ---
 
-## Key Findings to Apply (Priority Order)
+## Key Findings Applied (SDD Completado)
 
-### 1. Idempotency (HIGHEST PRIORITY)
+### 1. Idempotency (HIGHEST PRIORITY) — ✅ IMPLEMENTED
 
-Gentle-AI's sync mechanism:
-- Compares current state vs. desired state before writing
-- Only writes delta (changed files)
-- Reports `FilesChanged: 0` when nothing needed
-- Uses `verify.Report` with categorized issues
+**Antes:** `applyDeveloperTeamInstall` re-aplica sin detectar drift.
 
-**Action:** Enhance `applyDeveloperTeamInstall` and `applyOpenCodeDeveloperTeamInstall` to:
-- Compare existing file content before writing
-- Skip write if content identical
-- Return detailed change report
+**Después:**
+- `DeveloperTeamApplyResult` y `OpenCodeDeveloperTeamApplyResult` incluyen `changedCount` y `unchangedCount`
+- Content comparison antes de escribir — skip si contenido idéntico
+- Tests verifican que segunda ejecución produce `changedCount === 0`
 
-### 2. Profiles (HIGH PRIORITY)
+**Implementación clave:**
+```typescript
+// packages/adapter-pi/src/developer-team-install.ts
+const existing = readFileIfExists(path);
+if (existing === newContent) {
+  return { status: 'unchanged' };
+}
+```
 
-Gentle-AI's profile system:
-- Named profiles with phase overrides
-- `--profile` and `--profile-phase` flags
-- Strategy selection: `generated-multi` vs `external-single-active`
+### 2. Profiles (HIGH PRIORITY) — ✅ IMPLEMENTED
 
-**Action:** Add SDD profiles to Deck:
-- `Profile` type with phase customization
-- Profile-aware routing in orchestrator
-- Profile persistence in config
+**Antes:** No tenía — solo personality + enforcement modes.
 
-### 3. Aislamiento / Isolation (MEDIUM-HIGH PRIORITY)
+**Después:**
+```typescript
+// packages/core/src/config/deck-config.ts
+export interface Profile {
+  name: string;
+  description?: string;
+  phaseOverrides?: PhaseOverrides;
+  strategy?: ProfileStrategy; // "generated-multi" | "external-single-active"
+}
+```
 
-Gentle-AI's component isolation:
-- Components don't know about each other
-- Each component has isolated inject/verify/run
-- Failures in one component don't cascade
+- `Profile` type con name, phaseOverrides, strategy
+- `profiles` y `activeProfile` en DeckConfig
+- Profile-aware routing en orchestrator
+- Profile validation
 
-**Action:** Introduce component boundaries in orchestrator pipeline:
-- Separate concerns: audit → risk → quality → loop
-- Each stage has isolated config and error handling
-- Pipeline continues even if one stage has issues (report-only mode)
+**Implementación clave:**
+```typescript
+// packages/sdd-runtime/src/orchestrator/orchestrator-pipeline.ts
+export interface ProfileContext {
+  profile: Profile;
+  getPhaseOverride?: (phase: SDDPhase) => Record<string, unknown> | undefined;
+}
+```
+
+### 3. Aislamiento / Isolation (MEDIUM-HIGH PRIORITY) — ✅ IMPLEMENTED
+
+**Antes:** Pipeline tenía ejecución monolítica con fallas en cascada.
+
+**Después:**
+```typescript
+// packages/sdd-runtime/src/orchestrator/orchestrator-pipeline.ts
+export interface StageError {
+  stage: 'audit' | 'risk' | 'quality' | 'loop';
+  error: string;
+  recoverable: boolean;
+}
+
+export interface OrchestratorPipelineResult {
+  // ... existing fields
+  stageErrors: StageError[];
+}
+```
+
+- Cada stage (audit, risk, quality, loop) envuelto en try/catch
+- Errors coleccionados, no thrown
+- Pipeline continúa incluso con stage errors
+- Report-only mode continúa aunque haya errores
 
 ---
 
@@ -125,6 +162,17 @@ Si tuviera que elegir para un proyecto de largo aliento con equipo dedicado: **D
 
 ---
 
+## Follow-ups Identificados
+
+| Prioridad | Item | Estado |
+|---|---|---|
+| MEDIUM | Path traversal sanitization en standaloneSkills `skillId` | Pendiente |
+| LOW | Definir interfaz `PhaseConfig` para PhaseOverrides | Pendiente |
+| LOW | Content registry profile context implementation | Pendiente |
+| LOW | Expandir phase map para más audit types | Pendiente |
+
+---
+
 ## Reference Links
 
 - Deck repo: `/home/kevinlb/deck`
@@ -132,3 +180,12 @@ Si tuviera que elegir para un proyecto de largo aliento con equipo dedicado: **D
 - SDD phases (Deck): `packages/sdd-runtime/src/orchestrator/orchestrator-pipeline.ts`
 - Sync logic (Gentle-AI): `gentle-ai/internal/cli/sync.go`
 - Profile system (Gentle-AI): `gentle-ai/internal/model/types.go` (Profile type)
+- SDD archive: `openspec/archive/sdd-idempotency-profiles-isolation/`
+
+---
+
+## Git History
+
+- **Commit `cefa1ff`**: `feat(sdd): add idempotency counts, profiles, and pipeline stage isolation`
+- **Commit `e293fe0`**: `refactor(orchestrator): remove ahorro-extremo personality, keep only guia and pragmatica`
+- **Commit `91d6415`**: `chore(config): set orchestratorPersonality to ahorro-extremo` (reverted)
