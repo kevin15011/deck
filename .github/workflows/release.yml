@@ -183,6 +183,8 @@ jobs:
       - name: Create checksums combined
         run: |
           cat artifacts/deck-*/checksums.txt > release-assets/checksums.txt
+
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "build-${{ needs.metadata.outputs.version }}"
