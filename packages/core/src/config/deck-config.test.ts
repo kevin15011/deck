@@ -449,14 +449,13 @@ describe("writeDeckConfig", () => {
 
 describe("Orchestrator Personality", () => {
   describe("ORCHESTRATOR_PERSONALITIES constant", () => {
-    test("contains exactly three values", () => {
-      expect(ORCHESTRATOR_PERSONALITIES).toHaveLength(3);
+    test("contains exactly two values", () => {
+      expect(ORCHESTRATOR_PERSONALITIES).toHaveLength(2);
     });
 
-    test("contains guia, pragmatica, and ahorro-extremo", () => {
+    test("contains guia and pragmatica", () => {
       expect(ORCHESTRATOR_PERSONALITIES).toContain("guia");
       expect(ORCHESTRATOR_PERSONALITIES).toContain("pragmatica");
-      expect(ORCHESTRATOR_PERSONALITIES).toContain("ahorro-extremo");
     });
   });
 
@@ -503,16 +502,6 @@ describe("Orchestrator Personality", () => {
       expect(config.orchestratorPersonality).toBe("pragmatica");
     });
 
-    test("accepts ahorro-extremo as valid personality value", () => {
-      const config = validateDeckConfig({
-        version: 1,
-        adaptiveMemory: { activeProvider: "none" },
-        orchestratorPersonality: "ahorro-extremo",
-      });
-
-      expect(config.orchestratorPersonality).toBe("ahorro-extremo");
-    });
-
     test("rejects invalid string value with DECK_CONFIG_INVALID_SHAPE", () => {
       const error = expectDeckConfigError(
         () =>
@@ -528,7 +517,6 @@ describe("Orchestrator Personality", () => {
       expect(error.message).toContain("orchestratorPersonality");
       expect(error.message).toContain("guia");
       expect(error.message).toContain("pragmatica");
-      expect(error.message).toContain("ahorro-extremo");
     });
 
     test("rejects non-string personality value (number)", () => {

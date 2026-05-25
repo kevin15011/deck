@@ -31,6 +31,7 @@ import type {
   TeamEntry,
 } from "@deck/core";
 import { getModelCatalog } from "@deck/core";
+import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Environment catalog
@@ -270,29 +271,33 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
 }
 
 async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyInput): Promise<RunnerDeveloperTeamApplyResult> {
+  // Resolve runner config directory — skills/prompts go to ~/.config/opencode, NOT projectRoot
+  const configDir = join(process.env.HOME ?? "/home/user", ".config", "opencode");
+  const skillsDir = join(configDir, "skills");
+
   // Separate agent-bound skills from standalone skills via the path pattern
-  const agentSkillFiles = input.plan.files.filter((f: { path: string }) => f.path.includes("/skills/") && !f.path.includes(".opencode/skills/judgment-day") && !f.path.includes(".opencode/skills/cognitive-doc-design") && !f.path.includes(".opencode/skills/comment-writer"));
+  const agentSkillFiles = input.plan.files.filter((f: { path: string }) => f.path.includes("/skills/") && !f.path.includes("judgment-day") && !f.path.includes("cognitive-doc-design") && !f.path.includes("comment-writer"));
   const standaloneSkillFiles = input.plan.files.filter((f: { path: string }) =>
-    f.path.includes(".opencode/skills/judgment-day") ||
-    f.path.includes(".opencode/skills/cognitive-doc-design") ||
-    f.path.includes(".opencode/skills/comment-writer")
+    f.path.includes("judgment-day") ||
+    f.path.includes("cognitive-doc-design") ||
+    f.path.includes("comment-writer")
   );
 
   const plan: OpenCodeDeveloperTeamInstallPlan = {
     projectRoot: input.projectRoot,
-    agentsDir: `${input.projectRoot}/.opencode/agents`,
-    skillsDir: `${input.projectRoot}/.opencode/skills`,
+    agentsDir: join(configDir, "agents"),
+    skillsDir: join(configDir, "skills"),
     agents: [],
     skills: agentSkillFiles.map((f: { path: string; content: string }) => ({
       agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
       relativePath: f.path,
-      absolutePath: `${input.projectRoot}/${f.path}`,
+      absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
       content: f.content,
     })),
     standaloneSkills: standaloneSkillFiles.map((f: { path: string; content: string }) => ({
       skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
       relativePath: f.path,
-      absolutePath: `${input.projectRoot}/${f.path}`,
+      absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
       content: f.content,
     })),
     memoryDiagnostics: [],
@@ -302,7 +307,7 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
     mermaidPluginStatus: "missing",
   };
 
-  const result: OpenCodeDeveloperTeamApplyResult = applyOpenCodeDeveloperTeamInstall(plan);
+  const result: OpenCodeDeveloperTeamApplyResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
   return {
     success: true,
@@ -445,19 +450,23 @@ function buildTeamInstallPlanFromInput(input: import("@deck/core").DeveloperTeam
 }
 
 function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApplyInput): Promise<import("@deck/core").DeveloperTeamApplyResult> {
+  // Resolve runner config directory — skills go to ~/.config/opencode/skills, NOT projectRoot
+  const configDir = join(process.env.HOME ?? "/home/user", ".config", "opencode");
+  const skillsDir = join(configDir, "skills");
+
   // Separate standalone skills from agent-bound skills
   const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
   const plan: OpenCodeDeveloperTeamInstallPlan = {
     projectRoot: input.projectRoot,
-    agentsDir: `${input.projectRoot}/.opencode/agents`,
-    skillsDir: `${input.projectRoot}/.opencode/skills`,
+    agentsDir: join(configDir, "agents"),
+    skillsDir: join(configDir, "skills"),
     agents: [],
     skills: input.plan.files
       .filter((f) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
       .map((f) => ({
         agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
         relativePath: f.path,
-        absolutePath: `${input.projectRoot}/${f.path}`,
+        absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
         content: f.content,
       })),
     standaloneSkills: input.plan.files
@@ -465,7 +474,7 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
       .map((f) => ({
         skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
         relativePath: f.path,
-        absolutePath: `${input.projectRoot}/${f.path}`,
+        absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
         content: f.content,
       })),
     memoryDiagnostics: [],
@@ -475,7 +484,7 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
     mermaidPluginStatus: "missing",
   };
 
-  const result: OpenCodeDeveloperTeamApplyResult = applyOpenCodeDeveloperTeamInstall(plan);
+  const result: OpenCodeDeveloperTeamApplyResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
   return Promise.resolve({
     results: result.results,

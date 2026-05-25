@@ -15,7 +15,7 @@ import type { RiskResult } from "../contracts/risk";
 
 // These remain here for pipeline runtime use only.
 // Prompt generation uses packages/core instead.
-export const ORCHESTRATOR_PERSONALITIES = ["guia", "pragmatica", "ahorro-extremo"] as const;
+export const ORCHESTRATOR_PERSONALITIES = ["guia", "pragmatica"] as const;
 export type OrchestratorPersonality = (typeof ORCHESTRATOR_PERSONALITIES)[number];
 export const DEFAULT_ORCHESTRATOR_PERSONALITY: OrchestratorPersonality = "pragmatica";
 
@@ -48,14 +48,6 @@ function formatBlockReason(facts: BlockReasonFacts, personality: unknown): strin
   const p = normalizePersonality(personality);
   const { missingFields, invalidFields, enforcementMode, auditType, isCritical = false } = facts;
 
-  if (p === "ahorro-extremo") {
-    const parts: string[] = [];
-    if (missingFields.length > 0) parts.push(`missing=[${missingFields.join(",")}]`);
-    if (invalidFields.length > 0) parts.push(`invalid=[${invalidFields.join(",")}]`);
-    const base = `Self-audit invalid in ${enforcementMode} mode: ${parts.join(", ")}`;
-    return isCritical ? `${base} [CRITICAL]` : base;
-  }
-
   if (p === "guia") {
     const parts: string[] = [];
     if (missingFields.length > 0) parts.push(`Missing fields (${missingFields.length}): ${missingFields.join(", ")}`);
@@ -78,21 +70,7 @@ function formatSkipReason(facts: SkipReasonFacts, personality: unknown): string 
   const p = normalizePersonality(personality);
   const { riskScore, threshold, tier, overrideName, overrideExpiresAt } = facts;
 
-  if (p === "ahorro-extremo") {
-    if (overrideName && overrideExpiresAt) return `${tier ?? "Critical"} tier overridden by "${overrideName}" (expires ${overrideExpiresAt})`;
-    return `Risk score ${riskScore} below threshold ${threshold}; quality agents skipped`;
-  }
-
-  if (p === "guia") {
-    if (overrideName && overrideExpiresAt) {
-      return `Quality agents were skipped because the ${tier ?? "critical"} risk tier was explicitly overridden by "${overrideName}", which expires ${overrideExpiresAt}. Overrides allow experienced users to proceed when they have external context the orchestrator cannot see. Without a valid override, the orchestrator would require a full review before continuing.`;
-    }
-    const tierLabel = tier ? ` (${tier} tier)` : "";
-    const whyItMatters = riskScore < threshold ? ` A valid risk assessment is needed before the orchestrator can decide whether to invoke quality agents. Scores below ${threshold} indicate standard-tier projects where the cost of quality agent invocation outweigh the expected benefit.` : "";
-    return `Risk score ${riskScore}${tierLabel} is below the quality routing threshold of ${threshold}; no quality agents will be invoked.${whyItMatters}`;
-  }
-
-  // pragmatica
+// pragmatica
   if (overrideName && overrideExpiresAt) return `${tier ?? "Critical"} tier overridden by "${overrideName}" expiring ${overrideExpiresAt}`;
   return `Risk score ${riskScore} below standard threshold ${threshold}; no quality agents needed`;
 }

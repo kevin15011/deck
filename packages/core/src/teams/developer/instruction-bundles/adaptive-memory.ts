@@ -16,7 +16,7 @@ export function buildAdaptiveMemoryInstructionBundle(): CapabilityInstructionBun
       surface: "agent",
       markdown: `## Adaptive Memory
 
-Adaptive memory is configured via \`.deck/config.json\` (field: \`adaptiveMemory.activeProvider\`). The active provider injects its tool instructions into agent prompts. You MUST follow the provider-specific tools and container conventions.
+Adaptive memory is provided by the runner's configured memory system. The active provider injects its tool instructions into agent prompts. You MUST follow the provider-specific tools and container conventions.
 
 ### Container Tag Conventions
 
@@ -85,7 +85,7 @@ Soft maximum of 7 memories per session. Prefer saving fewer high-quality observa
 
 ### Provider: Supermemory
 
-When \`adaptiveMemory.activeProvider\` is \`supermemory\`, use these tools:
+When the configured memory provider is \`supermemory\`, use these tools:
 
 - **\`supermemory_memory\`** (action: "save") — commit a memory to the configured container
 - **\`supermemory_recall\`** (query: "...") — retrieve relevant memories from memory
@@ -154,14 +154,14 @@ Call the memory save operation IMMEDIATELY after any of these lifecycle moments:
 
 ### Provider: Engram
 
-When \`adaptiveMemory.activeProvider\` is \`engram\`, use Engram's documented tool interface. The Engram adapter injects its specific instructions; follow those instead of these generic ones.`,
+When the configured memory provider is \`engram\`, use Engram's documented tool interface. The Engram adapter injects its specific instructions; follow those instead of these generic ones.`,
     },
     {
       packageId: "adaptive-memory",
       surface: "session",
       markdown: `## Adaptive Memory
 
-Adaptive memory is configured via \`.deck/config.json\` (field: \`adaptiveMemory.activeProvider\`). The active provider injects its tool instructions into agent prompts.
+Adaptive memory is provided by the runner's configured memory system. The active provider injects its tool instructions into agent prompts.
 
 ### Container Tag Conventions
 
@@ -237,7 +237,7 @@ If memory operations fail or tools are unavailable, agents continue working norm
       surface: "skill",
       markdown: `## Adaptive Memory
 
-Adaptive memory is configured via \`.deck/config.json\` (field: \`adaptiveMemory.activeProvider\`). The active provider injects its tool instructions into agent prompts. You MUST follow the provider-specific tools and container conventions.
+Adaptive memory is provided by the runner's configured memory system. The active provider injects its tool instructions into agent prompts. You MUST follow the provider-specific tools and container conventions.
 
 ### Container Tag Conventions
 
@@ -279,7 +279,7 @@ If memory operations error or tools are unavailable: continue working normally. 
 
 ### Provider: Supermemory
 
-When \`adaptiveMemory.activeProvider\` is \`supermemory\`, use these tools:
+When the configured memory provider is \`supermemory\`, use these tools:
 
 - **\`supermemory_memory\`** (action: "save") — commit a memory to the configured container
 - **\`supermemory_recall\`** (query: "...") — retrieve relevant memories from memory
@@ -342,7 +342,7 @@ Tool binding is prepared by the Supermemory adapter; do not call raw MCP tools d
 
 ### Provider: Engram
 
-When \`adaptiveMemory.activeProvider\` is \`engram\`, use Engram's documented tool interface. The Engram adapter injects its specific instructions; follow those instead of these generic ones.`,
+When the configured memory provider is \`engram\`, use Engram's documented tool interface. The Engram adapter injects its specific instructions; follow those instead of these generic ones.`,
     },
   ];
 

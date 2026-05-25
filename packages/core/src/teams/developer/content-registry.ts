@@ -32,7 +32,6 @@ import {
   getOrchestratorSystemPrompt,
 } from "./orchestrator-content";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "../../config/deck-config";
-import { SUB_AGENT_AHORRO_EXTREMO_FRAGMENT } from "./sub-agent-personality-content";
 import { EXPLORER_AGENT_BODY, EXPLORER_SKILL_BODY } from "./explorer-content";
 import { PROPOSAL_AGENT_BODY, PROPOSAL_SKILL_BODY } from "./proposal-content";
 import { SPEC_AGENT_BODY, SPEC_SKILL_BODY } from "./spec-content";
@@ -221,11 +220,9 @@ function applyAgentContentComposition(
   agentId: string,
   bundle: CapabilityInstructionBundle | undefined,
 ): AgentContent {
-  // Step 2: append sub-agent personality fragment for non-orchestrator agents
+  // Step 2: no sub-agent personality fragment (removed ahorro-extremo)
   const isOrchestrator = agentId === "deck-developer-orchestrator";
-  const withFragment = isOrchestrator
-    ? withAuthority
-    : appendSubAgentPersonalityFragment(withAuthority);
+  const withFragment = isOrchestrator ? withAuthority : withAuthority;
 
   // Step 3: append capability instructions if provided
   if (!bundle) {
@@ -242,13 +239,6 @@ function applyAgentContentComposition(
       bundle,
       { surface: "skill", skillId: `${agentId}-skill` },
     ),
-  };
-}
-
-function appendSubAgentPersonalityFragment(content: AgentContent): AgentContent {
-  return {
-    agentBody: `${content.agentBody.trimEnd()}\n\n${SUB_AGENT_AHORRO_EXTREMO_FRAGMENT}\n`,
-    skillBody: `${content.skillBody.trimEnd()}\n\n${SUB_AGENT_AHORRO_EXTREMO_FRAGMENT}\n`,
   };
 }
 

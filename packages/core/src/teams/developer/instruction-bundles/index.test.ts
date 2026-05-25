@@ -194,7 +194,7 @@ describe("composeCapabilityInstructions", () => {
     const result = composeCapabilityInstructions(base, bundle, agentContext);
 
     expect(result).toContain("## Package Instructions (configured)");
-    expect(result).toContain("These instructions are enabled by `.deck/config.json`");
+    expect(result).toContain("These instructions are enabled by the runner's native package instruction system");
     expect(result).toContain("Codebase Memory");
   });
 

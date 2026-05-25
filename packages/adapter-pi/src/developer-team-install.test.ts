@@ -1109,7 +1109,7 @@ describe("buildDeveloperTeamInstallPlan with capability instruction injection", 
     const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
     expect(orchestrator.content).toContain("## Package Instructions (configured)");
     expect(orchestrator.content).toContain("Prefer search_graph, trace_path, get_code_snippet");
-    expect(orchestrator.content).toContain(".deck/config.json");
+    expect(orchestrator.content).toContain("runner's native package instruction system");
   });
 
   test("plan with capabilityInstructions bundle includes package instruction section in skill content", () => {
@@ -1227,7 +1227,7 @@ describe("buildDeveloperTeamInstallPlan with capability instruction injection", 
 
   test("orchestratorPersonality option flows to agent content", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
-      orchestratorPersonality: "ahorro-extremo",
+      orchestratorPersonality: "guia",
     });
 
     // The personality is passed to getAgentContent → content registry → prompt variant selection

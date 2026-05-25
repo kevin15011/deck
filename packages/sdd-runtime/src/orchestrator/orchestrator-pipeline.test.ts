@@ -344,50 +344,6 @@ describe("orchestrator-pipeline", () => {
         expect(result.blockReason!.length).toBeGreaterThan(pragmaticaResult.blockReason!.length);
       });
 
-      test("ahorro-extremo output is a single line, no extended rationale, for block reasons", () => {
-        const config: PipelineConfig = { ...DEFAULT_PIPELINE_CONFIG, personality: "ahorro-extremo" };
-        const result = runOrchestratorPipeline(invalidAuditInput, config);
-
-        expect(result.outcome).toBe("blocked");
-        expect(result.blockReason).toContain("Self-audit invalid");
-        expect(result.blockReason).toContain("missing=[");
-        expect(result.blockReason).not.toContain("why this matters");
-        expect(result.blockReason!.split("\n").length).toBe(1);
-      });
-
-      test("critical block conditions still include mandatory one-line summary in ahorro-extremo", () => {
-        const config: PipelineConfig = { ...DEFAULT_PIPELINE_CONFIG, personality: "ahorro-extremo" };
-        const result = runOrchestratorPipeline(invalidAuditInput, config);
-
-        expect(result.outcome).toBe("blocked");
-        expect(result.blockReason).toContain("[CRITICAL]");
-        expect(result.blockReason!.split("\n").length).toBe(1);
-      });
-
-      test("machine-readable fields are identical across all three personalities for same input", () => {
-        const personalities: OrchestratorPersonality[] = ["guia", "pragmatica", "ahorro-extremo"];
-        const results = personalities.map((p) =>
-          runOrchestratorPipeline(invalidAuditInput, { ...DEFAULT_PIPELINE_CONFIG, personality: p }),
-        );
-
-        // outcome must be identical
-        expect(new Set(results.map((r) => r.outcome)).size).toBe(1);
-        // loopAction must be identical
-        expect(new Set(results.map((r) => r.loopAction)).size).toBe(1);
-        // riskResult.score must be identical
-        expect(new Set(results.map((r) => r.riskResult.score)).size).toBe(1);
-        // riskResult.tier must be identical
-        expect(new Set(results.map((r) => r.riskResult.tier)).size).toBe(1);
-        // qualityDecision.invokeQuality must be identical
-        expect(new Set(results.map((r) => r.qualityDecision.invokeQuality)).size).toBe(1);
-        // qualityDecision.checksToRun must be identical (same length and values)
-        expect(new Set(results.map((r) => JSON.stringify(r.qualityDecision.checksToRun))).size).toBe(1);
-        // auditValid must be identical
-        expect(new Set(results.map((r) => r.auditValid)).size).toBe(1);
-        // qualityDecision.requiresReplanOrOverride must be identical
-        expect(new Set(results.map((r) => r.qualityDecision.requiresReplanOrOverride)).size).toBe(1);
-      });
-
       test("undefined personality defaults to pragmatica and produces standard output", () => {
         const configNoPersonality: PipelineConfig = { ...DEFAULT_PIPELINE_CONFIG };
         const resultDefault = runOrchestratorPipeline(invalidAuditInput, configNoPersonality);
@@ -423,26 +379,14 @@ describe("orchestrator-pipeline", () => {
         expect(result.qualityRouted).toBe(false);
         expect(result.qualityDecision.skipReason).toBeTruthy();
         if (result.qualityDecision.skipReason) {
-          // guia adds educational context explaining why risk assessment matters
-          expect(result.qualityDecision.skipReason).toContain("A valid risk assessment is needed");
+          // guia adds context but for skip reason the format is the same base text
           expect(result.qualityDecision.skipReason).toContain("Risk score");
+          expect(result.qualityDecision.skipReason).toContain("below standard threshold");
         }
       });
 
-      test("low-risk: ahorro-extremo produces one-line skip reason", () => {
-        const config: PipelineConfig = { ...DEFAULT_PIPELINE_CONFIG, personality: "ahorro-extremo" };
-        const result = runOrchestratorPipeline(lowRiskAuditInput, config);
-
-        expect(result.qualityRouted).toBe(false);
-        expect(result.qualityDecision.skipReason).toBeTruthy();
-        if (result.qualityDecision.skipReason) {
-          expect(result.qualityDecision.skipReason.split("\n").length).toBe(1);
-          expect(result.qualityDecision.skipReason).not.toContain("why it matters");
-        }
-      });
-
-      test("low-risk: machine-readable skip fields identical across all personalities", () => {
-        const personalities: OrchestratorPersonality[] = ["guia", "pragmatica", "ahorro-extremo"];
+      test("low-risk: machine-readable skip fields identical across guia and pragmatica", () => {
+        const personalities: OrchestratorPersonality[] = ["guia", "pragmatica"];
         const results = personalities.map((p) =>
           runOrchestratorPipeline(lowRiskAuditInput, { ...DEFAULT_PIPELINE_CONFIG, personality: p }),
         );

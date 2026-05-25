@@ -33,6 +33,7 @@ import type {
 } from "@deck/core";
 import type { TeamEntry } from "@deck/core";
 import { getModelCatalog } from "@deck/core";
+import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Environment catalog
@@ -261,18 +262,24 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
 }
 
 async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyInput): Promise<RunnerDeveloperTeamApplyResult> {
+  // Pi writes to ~/.pi/agent/ (per preflight.ts config candidates)
+  const homeDir = process.env.HOME ?? "/home/user";
+  const piConfigDir = join(homeDir, ".pi", "agent");
+  const piAgentsDir = join(piConfigDir, "agents");
+  const piSkillsDir = join(piConfigDir, "skills");
+
   // Separate standalone skills from agent-bound skills
   const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
   const plan: DeveloperTeamInstallPlan = {
     projectRoot: input.projectRoot,
-    agentsDir: `${input.projectRoot}/.pi/agents`,
-    skillsDir: `${input.projectRoot}/.pi/skills`,
+    agentsDir: piAgentsDir,
+    skillsDir: piSkillsDir,
     agents: input.plan.files
       .filter((f: { path: string }) => f.path.includes("/agents/"))
       .map((f: { path: string; content: string }) => ({
         agent: { id: f.path.split("/").pop()!.replace(".md", ""), name: "", description: "" } as any,
         relativePath: f.path,
-        absolutePath: `${input.projectRoot}/${f.path}`,
+        absolutePath: join(piAgentsDir, f.path.split("/").pop()!),
         content: f.content,
       })),
     skills: input.plan.files
@@ -280,7 +287,7 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
       .map((f: { path: string; content: string }) => ({
         agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "" } as any,
         relativePath: f.path,
-        absolutePath: `${input.projectRoot}/${f.path}`,
+        absolutePath: join(piSkillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
         content: f.content,
       })),
     standaloneSkills: input.plan.files
@@ -288,7 +295,7 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
       .map((f: { path: string; content: string }) => ({
         skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
         relativePath: f.path,
-        absolutePath: `${input.projectRoot}/${f.path}`,
+        absolutePath: join(piSkillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
         content: f.content,
       })),
     memoryDiagnostics: [],
@@ -438,14 +445,51 @@ function buildTeamInstallPlanFromInput(input: import("@deck/core").DeveloperTeam
 }
 
 function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApplyInput): Promise<import("@deck/core").DeveloperTeamApplyResult> {
-  const modelAssignments: DeveloperTeamModelAssignments = {};
-  const thinkingAssignments: DeveloperTeamThinkingAssignments = {};
+  // Pi writes to ~/.pi/agent/ (per preflight.ts config candidates)
+  const homeDir = process.env.HOME ?? "/home/user";
+  const piConfigDir = join(homeDir, ".pi", "agent");
+  const piAgentsDir = join(piConfigDir, "agents");
+  const piSkillsDir = join(piConfigDir, "skills");
 
-  for (const file of input.plan.files) {
-    if (file.path.includes("/agents/")) {
-      const agentId = file.path.split("/").pop()!.replace(".md", "");
-      // Extract model/thinking from content if present - for now use empty
-    }
+  // Separate standalone skills from agent-bound skills
+  const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
+  const plan: DeveloperTeamInstallPlan = {
+    projectRoot: input.projectRoot,
+    agentsDir: piAgentsDir,
+    skillsDir: piSkillsDir,
+    agents: input.plan.files
+      .filter((f: { path: string }) => f.path.includes("/agents/"))
+      .map((f: { path: string; content: string }) => ({
+        agent: { id: f.path.split("/").pop()!.replace(".md", ""), name: "", description: "" } as any,
+        relativePath: f.path,
+        absolutePath: join(piAgentsDir, f.path.split("/").pop()!),
+        content: f.content,
+      })),
+    skills: input.plan.files
+      .filter((f: { path: string }) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
+      .map((f: { path: string; content: string }) => ({
+        agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "" } as any,
+        relativePath: f.path,
+        absolutePath: join(piSkillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
+        content: f.content,
+      })),
+    standaloneSkills: input.plan.files
+      .filter((f: { path: string }) => standaloneSkillIds.some((id) => f.path.includes(id)))
+      .map((f: { path: string; content: string }) => ({
+        skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
+        relativePath: f.path,
+        absolutePath: join(piSkillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
+        content: f.content,
+      })),
+    memoryDiagnostics: [],
+  };
+
+  const result: DeveloperTeamApplyResult = applyDeveloperTeamInstall(plan);
+
+  return Promise.resolve({
+    results: result.results,
+  });
+}
   }
 
   // Separate standalone skills from agent-bound skills

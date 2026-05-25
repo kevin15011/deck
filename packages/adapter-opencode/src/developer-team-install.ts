@@ -271,8 +271,8 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   },
 ): OpenCodeDeveloperTeamInstallPlan {
   const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
-  const agentsDir = join(projectRoot, ".opencode", "agents");
-  const skillsDir = join(projectRoot, ".opencode", "skills");
+  const agentsDir = join(configDir, "agents");
+  const skillsDir = join(configDir, "skills");
 
   const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options, configDir);
 
@@ -301,16 +301,16 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
 
   // Build skill files
   const skills: OpenCodePlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
-    const relativePath = `.opencode/skills/${agent.skillId}/SKILL.md`;
-    const absolutePath = join(projectRoot, relativePath);
+    const relativePath = `skills/${agent.skillId}/SKILL.md`;
+    const absolutePath = join(skillsDir, agent.skillId, "SKILL.md");
     const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions, resolvedPersonality);
     return { agent, relativePath, absolutePath, content };
   });
 
   // Build standalone skill files (verbatim, no generated frontmatter)
   const standaloneSkills: OpenCodePlannedStandaloneSkillFile[] = (options?.standaloneSkills ?? []).map((skill) => {
-    const relativePath = `.opencode/skills/${skill.skillId}/SKILL.md`;
-    const absolutePath = join(projectRoot, relativePath);
+    const relativePath = `skills/${skill.skillId}/SKILL.md`;
+    const absolutePath = join(skillsDir, skill.skillId, "SKILL.md");
     return { skillId: skill.skillId, relativePath, absolutePath, content: skill.body };
   });
 

@@ -73,7 +73,7 @@ const ALL_SURFACES_MUST_PRESERVE = [
   "Project — project-specific",
 
   // Core adaptive memory config
-  "Adaptive memory is configured via `.deck/config.json`",
+  "Adaptive memory is provided by the runner's configured memory system",
   "The active provider injects its tool instructions into agent prompts",
 
   // New sections added in Task 2 (must appear in all surfaces)

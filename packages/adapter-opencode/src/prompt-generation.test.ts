@@ -24,7 +24,7 @@ describe("buildPromptGenerationPlan", () => {
   test("each prompt file references the matching skill path", () => {
     const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
     for (const planned of plan) {
-      expect(planned.content).toContain(".opencode/skills/");
+      expect(planned.content).toContain("/skills/");
       expect(planned.content).toContain("/SKILL.md");
     }
   });
@@ -46,12 +46,13 @@ describe("buildPromptGenerationPlan", () => {
     }
   });
 
-  test("prompt content references skill file with absolute path", () => {
+  test("prompt content references skill file with runner-stable path", () => {
     const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
     for (const planned of plan) {
-      // The skill path should be an absolute path in the content
-      expect(planned.content).toContain("/tmp/project/.opencode/skills/");
+      // The skill path should be runner-stable (under configDir, not projectRoot)
+      expect(planned.content).toContain("/skills/");
       expect(planned.content).toContain("/SKILL.md");
+      expect(planned.content).not.toContain("/tmp/project/.opencode/skills/");
     }
   });
 

@@ -83,7 +83,7 @@ export function buildPromptGenerationPlan(
   const promptsDir = join(configDir, "prompts", "deck-developer");
 
   return DEVELOPER_TEAM_AGENTS.map((agent): PlannedPromptFile => {
-    const skillPath = join(projectRoot, ".opencode", "skills", agent.skillId, "SKILL.md");
+    const skillPath = join(configDir, "skills", agent.skillId, "SKILL.md");
     const promptPath = join(promptsDir, `${agent.id}.md`);
     const content = buildPromptContent(agent, skillPath, capabilityInstructions, personality);
 

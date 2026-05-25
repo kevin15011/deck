@@ -172,5 +172,5 @@ export function composeCapabilityInstructions(
 
   const fragmentTexts = matching.map((f) => f.markdown).join("\n\n");
 
-  return `${base.trimEnd()}\n\n## Package Instructions (configured)\n\nThese instructions are enabled by \`.deck/config.json\` package instruction toggles.\n\n${fragmentTexts}\n`;
+  return `${base.trimEnd()}\n\n## Package Instructions (configured)\n\nThese instructions are enabled by the runner's native package instruction system.\n\n${fragmentTexts}\n`;
 }

@@ -31,7 +31,7 @@ export type DeckAdaptiveMemoryConfig = {
 // Orchestrator Personality Config
 // ---------------------------------------------------------------------------
 
-export const ORCHESTRATOR_PERSONALITIES = ["guia", "pragmatica", "ahorro-extremo"] as const;
+export const ORCHESTRATOR_PERSONALITIES = ["guia", "pragmatica"] as const;
 export type OrchestratorPersonality = (typeof ORCHESTRATOR_PERSONALITIES)[number];
 export const DEFAULT_ORCHESTRATOR_PERSONALITY: OrchestratorPersonality = "pragmatica";
 

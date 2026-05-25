@@ -192,7 +192,7 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
 });
 
 describe("applyOpenCodeDeveloperTeamInstall", () => {
-  test("writes skill files to .opencode/skills/ with correct content", () => {
+  test("writes skill files to configDir/skills/ with correct content", () => {
     const projectRoot = createTempProject();
     try {
       const configDir = createTempConfigDir(projectRoot);
@@ -203,6 +203,8 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
       expect(existsSync(orchestratorSkill.absolutePath)).toBe(true);
       const content = readFileSync(orchestratorSkill.absolutePath, "utf-8");
       expect(content).toContain("disable-model-invocation: true");
+      // Skills should be under configDir, not projectRoot
+      expect(orchestratorSkill.absolutePath).toContain(`${configDir}/skills/`);
     } finally {
       cleanup(projectRoot);
     }
@@ -502,7 +504,7 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
 describe("orchestratorPersonality in buildOpenCodeDeveloperTeamInstallPlan", () => {
   test("explicit personality option flows to generated skill content", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      personality: "ahorro-extremo",
+      personality: "guia",
     });
 
     // Verify personality option was consumed and content was generated
@@ -514,7 +516,7 @@ describe("orchestratorPersonality in buildOpenCodeDeveloperTeamInstallPlan", () 
     expect(orchestratorEntry).toBeDefined();
     expect(orchestratorEntry.mode).toBe("primary");
     // Verify the resolved personality is captured on the plan
-    expect(plan.personality).toBe("ahorro-extremo");
+    expect(plan.personality).toBe("guia");
   });
 
   test("falls back to pragmatica when config read fails", () => {
