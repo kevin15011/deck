@@ -15,6 +15,14 @@
 export type ParsedArgs =
   | { command: "tui" }
   | { command: "doctor" }
+  | { command: "version" }
+  | {
+      command: "upgrade";
+      flags: {
+        /** Automatic yes mode - skip confirmations */
+        yes?: boolean;
+      };
+    }
   | {
       command: "pi-launch";
       teamId: string;
@@ -72,6 +80,40 @@ export function parseArgs(argv: string[]): ParsedArgs {
       };
     }
     return { command: "doctor" };
+  }
+
+  if (first === "version") {
+    if (rest.length > 0) {
+      return {
+        command: "error",
+        message: "El comando `deck version` no acepta argumentos.",
+      };
+    }
+    return { command: "version" };
+  }
+
+  if (first === "upgrade") {
+    // Parse flags for upgrade command
+    let yesMode = false;
+    for (const flag of rest) {
+      if (flag === "--yes" || flag === "-y") {
+        yesMode = true;
+      } else if (flag.startsWith("--yes=") || flag.startsWith("-y=")) {
+        const value = parseBooleanFlag(flag.slice(flag.indexOf("=") + 1));
+        yesMode = value === true;
+      } else {
+        return {
+          command: "error",
+          message: `Flag desconocido para upgrade: ${flag}. Usa --help para ver el uso.`,
+        };
+      }
+    }
+    return {
+      command: "upgrade",
+      flags: {
+        ...(yesMode ? { yes: true } : {}),
+      },
+    };
   }
 
   if (first !== "pi") {

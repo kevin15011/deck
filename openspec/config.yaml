@@ -1,4 +1,7 @@
 schema: spec-driven
+initialized: true
+last_index: "2026-05-25T11:23:00Z"
+index_mode: full
 
 context: |
   Tech stack: TypeScript, Bun (runtime + package manager), React, Ink (CLI TUI)

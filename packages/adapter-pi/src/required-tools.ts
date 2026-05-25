@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import type { CapabilityId } from "./capability-catalog";
 import { createToolStatus, type EnvironmentToolStatus } from "./tool-status";
+import { spawnSync as nodeSpawnSync } from "node:child_process";
 
 export type RequiredToolStatus = {
   name: string;
@@ -55,7 +56,7 @@ export function getCapabilityDetectorMappings(): CapabilityDetectorMapping[] {
 }
 
 export function reviewPiRequiredTools(options: ReviewPiRequiredToolsOptions): PiRequiredToolsReview {
-  const runCommand = options.runCommand ?? runCommandSync;
+  const runCommand = options.runCommand ?? runDefaultCommandSync;
   const commandExists = options.commandExists ?? commandExistsInPath;
   const result = runCommand(options.command, ["list"]);
 
@@ -116,17 +117,14 @@ function commandExistsInPath(command: string): boolean {
   return path.split(":").some((directory) => existsSync(`${directory}/${command}`));
 }
 
-function runCommandSync(command: string, args: string[]): CommandResult {
+function runDefaultCommandSync(command: string, args: string[]): CommandResult {
   try {
-    const result = Bun.spawnSync([command, ...args], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const result = nodeSpawnSync(command, args, { stdout: "pipe", stderr: "pipe", windowsHide: true });
 
     return {
-      exitCode: result.exitCode,
-      stdout: result.stdout.toString(),
-      stderr: result.stderr.toString(),
+      exitCode: result.status ?? 1,
+      stdout: result.stdout?.toString() ?? "",
+      stderr: result.stderr?.toString() ?? "",
     };
   } catch (error) {
     return {

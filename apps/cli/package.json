@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "deck": "bun run src/main.tsx"
+    "deck": "bun run src/main.tsx",
+    "build:binary": "bun run ../../scripts/build-binaries.ts"
   },
   "dependencies": {
     "@deck/adapter-engram": "workspace:*",
@@ -14,6 +15,7 @@
     "@deck/core": "workspace:*",
     "ink": "latest",
     "picocolors": "latest",
-    "react": "latest"
+    "react": "latest",
+    "react-devtools-core": "^7.0.1"
   }
 }

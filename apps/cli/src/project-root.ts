@@ -2,16 +2,25 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, dirname, parse as parsePath } from "node:path";
 
 /**
- * Resolves the project root directory by walking up from `startDir`
- * looking for workspace markers characteristic of a Deck project.
+ * Resolve project root with optional backward compatibility.
  *
- * Markers checked (any ONE of these qualifies a directory as project root):
- * 1. `package.json` containing a `"workspaces"` field
- * 2. `definition.md` present alongside both `apps/` and `packages/` directories
- *
- * Falls back to `startDir` if no ancestor qualifies.
+ * @param startDirOrOptions - Directory to start searching from, or options object
+ * @returns Project root, null, or fallback based on options
  */
-export function resolveProjectRoot(startDir: string = process.cwd()): string {
+export function resolveProjectRoot(startDirOrOptions?: string | { fallback?: string | null; require?: boolean }): string | null {
+  const startDir = typeof startDirOrOptions === "string" ? startDirOrOptions : (typeof startDirOrOptions === "undefined" ? process.cwd() : undefined);
+  const options = typeof startDirOrOptions === "object" ? startDirOrOptions : undefined;
+
+  const root = startDir ? resolveProjectRootInternal(startDir) : resolveProjectRootInternal();
+  if (root) return root;
+  if (options?.require) return options.fallback ?? process.cwd();
+  return options?.fallback ?? null;
+}
+
+/**
+ * Internal implementation - actual monorepo detection.
+ */
+function resolveProjectRootInternal(startDir: string = process.cwd()): string | null {
   let current = startDir;
   const { root: fsRoot } = parsePath(current);
 
@@ -22,18 +31,25 @@ export function resolveProjectRoot(startDir: string = process.cwd()): string {
 
     const parent = dirname(current);
     if (parent === current || parent === fsRoot) {
-      // Reached filesystem root without finding markers
       break;
     }
     current = parent;
   }
 
-  // Check filesystem root as last resort
   if (isDeckProjectRoot(fsRoot)) {
     return fsRoot;
   }
 
-  return startDir;
+  return null;
+}
+
+/**
+ * @deprecated Use resolveProjectRoot() instead. This alias maintains backward compatibility.
+ * @param startDir - Directory to start searching from
+ * @returns Project root or startDir fallback (never null)
+ */
+export function resolveProjectRootWithFallback(startDir: string = process.cwd()): string {
+  return resolveProjectRoot(startDir) ?? startDir;
 }
 
 function isDeckProjectRoot(dir: string): boolean {

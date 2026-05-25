@@ -1,4 +1,5 @@
 import type { InstallableOpenCodeTool } from "./installation-plan";
+import { spawn as nodeSpawn } from "node:child_process";
 
 export type OpenCodeToolInstallResult = {
   tool: string;
@@ -18,7 +19,7 @@ export async function installOpenCodeTools(
   command: string | undefined,
   plan: InstallableOpenCodeTool[],
   onResult: (result: OpenCodeToolInstallResult) => void,
-  runInstallCommand: RunInstallCommand = runInstallCommandWithBun,
+  runInstallCommand: RunInstallCommand = runDefaultInstallCommand,
 ): Promise<OpenCodeToolInstallResult[]> {
   if (!command) return [];
 
@@ -59,12 +60,29 @@ export async function installOpenCodeTools(
   return results;
 }
 
-async function runInstallCommandWithBun(command: string, args: string[]): Promise<InstallCommandResult> {
-  const process = Bun.spawn([command, ...args], { stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-    process.exited,
-  ]);
-  return { exitCode, stdout, stderr };
+async function runDefaultInstallCommand(command: string, args: string[]): Promise<InstallCommandResult> {
+  return new Promise((resolve) => {
+    const process = nodeSpawn(command, args, { stdout: "pipe", stderr: "pipe" });
+    let stdout = "";
+    let stderr = "";
+
+    if (process.stdout) {
+      process.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+    }
+    if (process.stderr) {
+      process.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+    }
+
+    process.on("close", (code) => {
+      resolve({ exitCode: code ?? 1, stdout, stderr });
+    });
+
+    process.on("error", (error) => {
+      resolve({ exitCode: 1, stdout, stderr: error.message });
+    });
+  });
 }

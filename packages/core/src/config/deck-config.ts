@@ -1,6 +1,22 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+// Import global config path resolver from T5
+// Lazy import to avoid circular dependencies
+let globalPaths: typeof import("../../apps/cli/src/runtime/paths.js") | null = null;
+
+async function getGlobalPaths() {
+  if (!globalPaths) {
+    try {
+      globalPaths = await import("../../apps/cli/src/runtime/paths.js");
+    } catch {
+      // Global paths module not available (e.g., in tests or before paths.ts is built)
+      globalPaths = null;
+    }
+  }
+  return globalPaths;
+}
+
 export const DECK_CONFIG_VERSION = 1;
 export const DECK_CONFIG_RELATIVE_PATH = join(".deck", "config.json");
 
@@ -199,6 +215,120 @@ export function readDeckConfig(projectRoot: string): NormalizedDeckConfig {
   return validateDeckConfig(parsed, { configPath });
 }
 
+// ============================================================================
+// Global Config APIs (Task 6)
+// ============================================================================
+
+/**
+ * Error code for global config operations.
+ */
+export type GlobalConfigErrorCode =
+  | "GLOBAL_CONFIG_PATH_RESOLUTION_FAILED"
+  | "GLOBAL_CONFIG_READ_ERROR"
+  | "GLOBAL_CONFIG_WRITE_ERROR";
+
+/**
+ * Error class for global config operations.
+ */
+export class GlobalConfigError extends Error {
+  readonly code: GlobalConfigErrorCode;
+
+  constructor(code: GlobalConfigErrorCode, message: string) {
+    super(message);
+    this.name = "GlobalConfigError";
+    this.code = code;
+  }
+}
+
+/**
+ * Get the global Deck config file path.
+ *
+ * Uses the path resolver from Task 5 (apps/cli/src/runtime/paths.ts).
+ *
+ * @returns Full path to global config.json
+ * @throws {GlobalConfigError} If path resolution fails
+ */
+export async function getGlobalDeckConfigPath(): Promise<string> {
+  const paths = await getGlobalPaths();
+  if (!paths) {
+    throw new GlobalConfigError(
+      "GLOBAL_CONFIG_PATH_RESOLUTION_FAILED",
+      "Cannot resolve global config path: path resolver not available",
+    );
+  }
+  return paths.getGlobalDeckConfigPath();
+}
+
+/**
+ * Read the global Deck config.
+ *
+ * Reads from the global config file at $XDG_CONFIG_HOME/.deck/config.json
+ * (or fallback locations). Returns default config if no global config exists.
+ *
+ * @returns Normalized global Deck config
+ * @throws {GlobalConfigError} If read fails
+ */
+export async function readGlobalDeckConfig(): Promise<NormalizedDeckConfig> {
+  const paths = await getGlobalPaths();
+  if (!paths) {
+    // Return default if path resolver not available
+    return getDefaultDeckConfig();
+  }
+
+  const configPath = await paths.getGlobalDeckConfigPath();
+
+  if (!existsSync(configPath)) {
+    return getDefaultDeckConfig();
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(configPath, "utf-8"));
+  } catch (error) {
+    throw new GlobalConfigError(
+      "GLOBAL_CONFIG_READ_ERROR",
+      `Global config is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  return validateDeckConfig(parsed, { configPath });
+}
+
+/**
+ * Write the global Deck config.
+ *
+ * Writes to the global config file at $XDG_CONFIG_HOME/.deck/config.json
+ * (or default location). Creates directories as needed.
+ *
+ * @param config - Config object to write
+ * @returns Normalized config that was written
+ * @throws {GlobalConfigError} If write fails
+ */
+export async function writeGlobalDeckConfig(config: unknown): Promise<NormalizedDeckConfig> {
+  const paths = await getGlobalPaths();
+  if (!paths) {
+    throw new GlobalConfigError(
+      "GLOBAL_CONFIG_WRITE_ERROR",
+      "Cannot write global config: path resolver not available",
+    );
+  }
+
+  const configPath = await paths.getGlobalDeckConfigPath();
+  const normalized = validateDeckConfig(config, { configPath });
+
+  try {
+    mkdirSync(dirname(configPath), { recursive: true });
+    writeFileSync(configPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
+  } catch (error) {
+    throw new GlobalConfigError(
+      "GLOBAL_CONFIG_WRITE_ERROR",
+      `Failed to write global config: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  return normalized;
+}
+
 export function writeDeckConfig(projectRoot: string, config: unknown): NormalizedDeckConfig {
   const configPath = getDeckConfigPath(projectRoot);
   const normalized = validateDeckConfig(config, { configPath });
@@ -265,12 +395,13 @@ export function resolveActiveMemoryProvider(options?: {
   config?: unknown;
   projectRoot?: string;
 }): ActiveMemoryProviderResolution {
+  // Cache configPath to avoid double resolution
   const configPath = options?.projectRoot ? getDeckConfigPath(options.projectRoot) : undefined;
   const hasConfigFile = configPath ? existsSync(configPath) : false;
   const config =
     options?.config !== undefined
       ? validateDeckConfig(options.config, { configPath })
-      : options?.projectRoot
+      : configPath && options?.projectRoot
         ? readDeckConfig(options.projectRoot)
         : getDefaultDeckConfig();
 

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { spawnSync as nodeSpawnSync } from "node:child_process";
 
 export type OpenCodePreflightResult = {
   version: string;
@@ -24,7 +25,7 @@ type InspectOpenCodeEnvironmentOptions = {
 
 export function inspectOpenCodeEnvironment(options: InspectOpenCodeEnvironmentOptions): OpenCodePreflightResult {
   const homeDirectory = options.homeDirectory ?? homedir();
-  const runCommand = options.runCommand ?? runCommandSync;
+  const runCommand = options.runCommand ?? runDefaultCommandSync;
   const pathExists = options.pathExists ?? existsSync;
 
   const versionResult = runCommand(options.command, ["--version"]);
@@ -45,11 +46,7 @@ function getConfigDirectoryCandidates(homeDirectory: string): string[] {
   return [join(homeDirectory, ".config", "opencode"), join(homeDirectory, ".opencode")];
 }
 
-function runCommandSync(command: string, args: string[]): CommandResult {
-  try {
-    const result = Bun.spawnSync([command, ...args], { stdout: "pipe", stderr: "pipe" });
-    return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
-  } catch (error) {
-    return { exitCode: 1, stdout: "", stderr: error instanceof Error ? error.message : "Unable to run command." };
-  }
+function runDefaultCommandSync(command: string, args: string[]): CommandResult {
+  const result = nodeSpawnSync(command, args, { stdout: "pipe", stderr: "pipe", windowsHide: true });
+  return { exitCode: result.status ?? 1, stdout: result.stdout?.toString() ?? "", stderr: result.stderr?.toString() };
 }

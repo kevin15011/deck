@@ -5,7 +5,13 @@
   "type": "module",
   "scripts": {
     "deck": "bun run --cwd apps/cli deck",
+    "build": "bun run scripts/build-binaries.ts",
+    "build:dry-run": "bun run scripts/build-binaries.ts --dry-run",
+    "deck:run": "bun run build:dry-run && ./dist/cli/deck",
     "test": "bun test"
+  },
+  "bin": {
+    "deck": "./dist/cli/deck"
   },
   "workspaces": [
     "apps/*",

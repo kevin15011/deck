@@ -75,7 +75,7 @@ import {
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
-import { readDeckConfig, writeDeckConfig, type AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
+import { readDeckConfig, writeDeckConfig, readGlobalDeckConfig, writeGlobalDeckConfig, getDefaultDeckConfig, type AdaptiveMemoryActiveProvider, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import { buildCapabilityInstructionBundle, getEnabledPackageInstructionIds } from "@deck/core";
 
 import {
@@ -89,6 +89,7 @@ import {
 import { getEnvironmentOptions, getHomeMenuOptions } from "../menu-options";
 import { resolveProjectRoot } from "../project-root";
 import { detectSelectedRuntimes, type EnvironmentId, type RuntimeStatus } from "../runtime-detection";
+import { spawnSync } from "../runtime/process";
 import { MenuList } from "./components/menu-list";
 import { ScreenFrame } from "./screen-frame";
 import {
@@ -152,6 +153,58 @@ type Screen =
 const HELP = "j/k or ↑/↓: navigate • space: toggle • enter: continue • esc: back • q: quit";
 
 type MemoryProviderChoice = AdaptiveMemoryActiveProvider;
+
+// ============================================================================
+// Config resolution helpers (Task 7)
+// ============================================================================
+
+/**
+ * Resolve Deck config from project root or global config.
+ *
+ * This allows the TUI to work from any directory — when inside a Deck monorepo,
+ * it uses project-local config; otherwise, it uses global config.
+ *
+ * @param projectRoot - Resolved project root (may be null)
+ * @returns Config object
+ */
+async function resolveDeckConfig(projectRoot: string | null): Promise<NormalizedDeckConfig> {
+  if (projectRoot) {
+    try {
+      return readDeckConfig(projectRoot);
+    } catch {
+      // Fall through to global config
+    }
+  }
+  // Use global config when project root is unavailable
+  try {
+    return await readGlobalDeckConfig();
+  } catch {
+    return getDefaultDeckConfig();
+  }
+}
+
+/**
+ * Write Deck config to project root or global config.
+ *
+ * @param config - Config to write
+ * @param projectRoot - Resolved project root (may be null)
+ */
+async function persistDeckConfig(config: NormalizedDeckConfig, projectRoot: string | null): Promise<void> {
+  if (projectRoot) {
+    try {
+      writeDeckConfig(projectRoot, config);
+      return;
+    } catch {
+      // Fall through to global config
+    }
+  }
+  // Use global config when project root is unavailable
+  try {
+    await writeGlobalDeckConfig(config);
+  } catch {
+    // Silently fail — UI should not crash on config write errors
+  }
+}
 
 function redactSecret(value: string): string {
   return value.length > 0 ? "[redacted]" : "";
@@ -275,6 +328,9 @@ export function DeckApp() {
     getTeamsForEnvironment("pi-development").map((team) => team.id),
   );
 
+  // Project root resolved once at startup (can be null for global config fallback)
+  const [localResolvedProjectRoot] = useState<string | null>(() => resolveProjectRoot());
+
   // Model configuration state
   const [detectedProviders, setDetectedProviders] = useState<PiProvider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<PiProvider | null>(null);
@@ -308,9 +364,14 @@ export function DeckApp() {
 
   // Personality selection state
   const [selectedPersonality, setSelectedPersonality] = useState<"guia" | "pragmatica">(() => {
+    // Use resolvedProjectRoot from state, which can be null
     try {
-      const config = readDeckConfig(resolveProjectRoot());
-      return config.orchestratorPersonality;
+      if (localResolvedProjectRoot) {
+        const config = readDeckConfig(localResolvedProjectRoot);
+        return config.orchestratorPersonality;
+      }
+      // Fallback to default when outside monorepo
+      return "pragmatica";
     } catch {
       return "pragmatica";
     }
@@ -440,7 +501,8 @@ export function DeckApp() {
         setToolsReview(review);
         const inventory = buildPiRunnerCapabilityInventory(review, preflight, { runnerScope: "pi" });
         setDashboardInventory(inventory);
-        const piConfig = readDeckConfig(resolveProjectRoot());
+        // Use resolvedProjectRoot from state, which can be null - fall back to default config
+        const piConfig = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
         setDashboardState(createDefaultRunnerDashboardState({
           runtime: { runnerCommand: detectedPi.command, preflight, toolsReview: review },
           capabilityStatuses: Object.fromEntries(
@@ -488,7 +550,8 @@ export function DeckApp() {
         // Build OpenCode capability inventory and route to the same runner dashboard
         const inventory = buildOpenCodeRunnerCapabilityInventory(review, { runnerScope: "opencode", includeInternal: true });
         setDashboardInventory(inventory as any);
-        const opencodeConfig = readDeckConfig(resolveProjectRoot());
+        // Use resolvedProjectRoot from state, which can be null - fall back to default config
+        const opencodeConfig = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
         setDashboardState(createDefaultRunnerDashboardState({
           runtime: { runnerCommand: detectedOpenCode.command, preflight, toolsReview: review as any },
           runnerScope: "opencode",
@@ -550,8 +613,10 @@ export function DeckApp() {
       setDashboardActionResults([]);
       const isOpenCode = dashboardState.runnerScope === "opencode";
       const resolvedMemoryProvider = isOpenCode && memoryProvider ? memoryProvider : undefined;
+      // Use stored project root, not the function
+      const projectRoot = localResolvedProjectRoot ?? process.cwd();
       const results = await runRunnerReviewPlan(dashboardState.plan!, {
-        projectRoot: resolveProjectRoot(),
+        projectRoot: projectRoot,
         runnerCommand: dashboardState.runtime.runnerCommand,
         dashboardState,
         supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
@@ -632,7 +697,8 @@ export function DeckApp() {
     let cancelled = false;
 
     function runInstall() {
-      const projectRoot = resolveProjectRoot();
+      // Use require: true for backward compatibility - file ops always need a path
+      const projectRoot = resolveProjectRoot({ require: true });
 
       // Determine which adapter to use based on the install context
       // When coming from the install flow, the runtime matches selectedEnvironments
@@ -935,7 +1001,8 @@ export function DeckApp() {
       if (!selected) return;
       setSelectedPersonality(selected.id);
       try {
-        const projectRoot = resolveProjectRoot();
+        // Use require: true for backward compatibility - writes need a path
+        const projectRoot = resolveProjectRoot({ require: true });
         const existingConfig = readDeckConfig(projectRoot);
         writeDeckConfig(projectRoot, {
           ...existingConfig,
@@ -966,7 +1033,8 @@ export function DeckApp() {
         return;
       }
       const runner = selected.id as "pi" | "opencode";
-      const config = readDeckConfig(resolveProjectRoot());
+      // Use resolvedProjectRoot from state, which can be null - fall back to default config
+      const config = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
       const instructions = loadRunnerPackageInstructionsFromConfig(config, runner);
       setConfigurePackagesRunner(runner);
       setConfigurePackagesCursor(0);
@@ -998,7 +1066,8 @@ export function DeckApp() {
       }
 
       if (selected.id === "apply" && configurePackagesRunner) {
-        const projectRoot = resolveProjectRoot();
+        // Use require: true for backward compatibility - writes need a path
+        const projectRoot = resolveProjectRoot({ require: true });
         const existingConfig = readDeckConfig(projectRoot);
         const newPackageInstructions = {
           ...existingConfig.packageInstructions,
@@ -1331,9 +1400,11 @@ export function DeckApp() {
         const runtime: "pi" | "opencode" = dashboardState.runnerScope === "opencode" ? "opencode" : "pi";
         setModelConfigRuntime(runtime);
         hydrateDeveloperTeamModelConfig(runtime);
+        // Use require: true for backward compatibility - reads need a path
+        const targetRoot = resolveProjectRoot({ require: true });
         const assignments = runtime === "opencode"
           ? readOpenCodeDeveloperTeamModelConfigAssignments()
-          : readDeveloperTeamModelConfigAssignments(resolveProjectRoot());
+          : readDeveloperTeamModelConfigAssignments(targetRoot);
         setDashboardState((state) => ({
           ...state,
           teams: {
@@ -1503,7 +1574,8 @@ export function DeckApp() {
       }
 
       const config = buildMemoryProviderConfig(choice, values);
-      writeDeckConfig(resolveProjectRoot(), config);
+      // Use require: true for backward compatibility - writes need a path
+      writeDeckConfig(resolveProjectRoot({ require: true }), config);
       setMemoryProvider(createMemoryProviderForSelection(choice, values));
       if (choice === "supermemory") {
         setMemoryStatus("Active adaptive-memory provider: Supermemory MCP. Token: [redacted]. Pi MCP config: ~/.pi/agent/mcp.json.");
@@ -1535,7 +1607,9 @@ export function DeckApp() {
       setModelAssignments(assignments.modelAssignments);
       setThinkingAssignments(assignments.thinkingAssignments as any);
     } else {
-      const assignments = readDeveloperTeamModelConfigAssignments(resolveProjectRoot());
+      // Use require: true for backward compatibility - reads need a path
+      const targetRoot = resolveProjectRoot({ require: true });
+      const assignments = readDeveloperTeamModelConfigAssignments(targetRoot);
       setModelAssignments(assignments.modelAssignments);
       setThinkingAssignments(assignments.thinkingAssignments);
     }
@@ -1566,7 +1640,8 @@ export function DeckApp() {
   }
 
   function applyDeveloperTeamModelConfig() {
-    const projectRoot = resolveProjectRoot();
+    // Use require: true for backward compatibility - writes need a path
+    const projectRoot = resolveProjectRoot({ require: true });
 
     if (modelConfigRuntime === "opencode") {
       const deckConfig = readDeckConfig(projectRoot);
@@ -1711,12 +1786,8 @@ export function DeckApp() {
   }
 
   function runOpenCodeCommand(command: string, args: string[]) {
-    try {
-      const result = Bun.spawnSync([command, ...args], { stdout: "pipe", stderr: "pipe" });
-      return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
-    } catch {
-      return { exitCode: 1, stdout: "", stderr: "Unable to run command." };
-    }
+    const result = spawnSync(command, args);
+    return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
   }
 
   function humanizeProviderName(providerId: string): string {
@@ -1734,10 +1805,10 @@ export function DeckApp() {
   }
 
   function runPiCommand(command: string, args: string[]) {
-    const result = Bun.spawnSync([command, ...args], { stdout: "pipe", stderr: "pipe" });
+    const result = spawnSync(command, args);
     return {
-      stdout: new TextDecoder().decode(result.stdout),
-      stderr: new TextDecoder().decode(result.stderr),
+      stdout: result.stdout,
+      stderr: result.stderr,
       exitCode: result.exitCode,
     };
   }
@@ -1883,7 +1954,8 @@ export function DeckApp() {
         <SupermemorySetupScreen screen={screen} values={supermemorySetup} error={supermemoryError} />
       ) : null}
       {screen === "developer-team-review" ? (
-        <DeveloperTeamReviewScreen projectRoot={resolveProjectRoot()} cursor={developerTeamCursor} dashboardContext={dashboardDeveloperTeamContext()} />
+        // Use require: true for backward compatibility - prop expects string
+        <DeveloperTeamReviewScreen projectRoot={resolveProjectRoot({ require: true })} cursor={developerTeamCursor} dashboardContext={dashboardDeveloperTeamContext()} />
       ) : null}
       {screen === "developer-team-installing" ? (
         <DeveloperTeamInstallingScreen currentStep={agentAssignmentIndex} totalSteps={DEVELOPER_TEAM_AGENTS.length} />

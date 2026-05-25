@@ -1,6 +1,7 @@
 import type { TechnicalActionKind } from "./capability-catalog";
 import type { InstallablePiTool } from "./installation-plan";
 import type { InternalRunnerPackageInstallAction } from "./internal-runner-packages";
+import { spawn as nodeSpawn } from "node:child_process";
 
 export type PiToolInstallResultStatus = "installed" | "manual" | "failed";
 
@@ -26,7 +27,7 @@ export async function installPiTools(
   command: string | undefined,
   plan: InstallablePiTool[],
   onResult: (result: PiToolInstallResult) => void,
-  runInstallCommand: RunInstallCommand = runInstallCommandWithBun,
+  runInstallCommand: RunInstallCommand = runDefaultInstallCommand,
 ): Promise<PiToolInstallResult[]> {
   const results: PiToolInstallResult[] = [];
 
@@ -85,18 +86,31 @@ export async function installPiTools(
   return results;
 }
 
-async function runInstallCommandWithBun(command: string, args: string[]): Promise<InstallCommandResult> {
-  const process = Bun.spawn([command, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-    process.exited,
-  ]);
+async function runDefaultInstallCommand(command: string, args: string[]): Promise<InstallCommandResult> {
+  return new Promise((resolve) => {
+    const process = nodeSpawn(command, args, { stdout: "pipe", stderr: "pipe" });
+    let stdout = "";
+    let stderr = "";
 
-  return { exitCode, stdout, stderr };
+    if (process.stdout) {
+      process.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+    }
+    if (process.stderr) {
+      process.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+    }
+
+    process.on("close", (code) => {
+      resolve({ exitCode: code ?? 1, stdout, stderr });
+    });
+
+    process.on("error", (error) => {
+      resolve({ exitCode: 1, stdout, stderr: error.message });
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +148,7 @@ export async function installInternalRunnerPackages(
   command: string | undefined,
   actions: InternalRunnerPackageInstallAction[],
   onResult: (result: InternalRunnerInstallResult) => void,
-  runInstallCommand: RunInstallCommand = runInstallCommandWithBun,
+  runInstallCommand: RunInstallCommand = runDefaultInstallCommand,
 ): Promise<InternalRunnerInstallResult[]> {
   // Convert internal install actions to InstallablePiTool format for the executor.
   const tools: InstallablePiTool[] = actions.map((action) => ({

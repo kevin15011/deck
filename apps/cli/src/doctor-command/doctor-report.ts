@@ -6,7 +6,7 @@
  */
 
 import pc from "picocolors";
-import type { DoctorCategoryResult, DoctorCheckItem, DoctorDiagnosticsResult, DoctorRuntimeResult, DoctorStatus } from "./types";
+import type { DoctorCategoryResult, DoctorCheckItem, DoctorDiagnosticsResult, DoctorRuntimeResult, DoctorStatus, DoctorBinaryResult } from "./types";
 
 // ---------------------------------------------------------------------------
 // TTY detection
@@ -102,6 +102,55 @@ function renderRuntime(runtime: DoctorRuntimeResult): void {
 }
 
 // ---------------------------------------------------------------------------
+// Binary section rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Render binary-specific diagnostics.
+ */
+function renderBinary(binary: DoctorBinaryResult): void {
+  // Build Info
+  if (binary.buildInfo) {
+    console.log(c(pc.bold, "▸ Binary"));
+    console.log();
+    console.log(`  ${c(pc.green, ICONS.ok)} ${c(pc.bold, "Build Information")}`);
+    console.log(`    Version:   ${binary.buildInfo.version}`);
+    console.log(`    Commit:   ${binary.buildInfo.commit}`);
+    console.log(`    Date:     ${binary.buildInfo.date}`);
+    console.log(`    Target:   ${binary.buildInfo.target}`);
+    console.log(`    Channel:  ${binary.buildInfo.channel}`);
+    console.log();
+  }
+
+  // Executable Path
+  if (binary.executablePath) {
+    console.log(`  ${c(pc.green, ICONS.ok)} ${c(pc.bold, "Executable")}`);
+    console.log(`    Path:     ${binary.executablePath}`);
+    console.log();
+  }
+
+  // Global Config
+  console.log(
+    `  ${binary.globalConfigExists ? c(pc.green, ICONS.ok) : c(pc.yellow, ICONS.warning)} ${c(pc.bold, "Global Config")}`
+  );
+  console.log(`    Directory: ${binary.globalConfigDir}`);
+  console.log(`    Exists:   ${binary.globalConfigExists ? "Yes" : "No (will be created)"}`);
+  console.log();
+
+  // Bundled Skills
+  console.log(c(pc.green, ICONS.ok) + " Bundled Skills: " + binary.bundledSkillCount);
+  console.log();
+
+  // Upgrade Available
+  if (binary.upgradeAvailable) {
+    console.log(c(pc.green, ICONS.ok) + " Upgrade available");
+  } else {
+    console.log(c(pc.dim, "─") + " No upgrade available");
+  }
+  console.log();
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -109,7 +158,7 @@ function renderRuntime(runtime: DoctorRuntimeResult): void {
  * Render the doctor diagnostics result to stdout.
  *
  * Output is organized in sections: Runtimes, Packages (per runtime),
- * Memory Providers, and MCP Configuration.
+ * Memory Providers, MCP Configuration, and Binary (if running as binary).
  *
  * Each item shows a status icon (✓/⚠/✗), the diagnostic message,
  * and an actionable fix suggestion for non-OK items.
@@ -152,6 +201,11 @@ export function renderDoctorReport(result: DoctorDiagnosticsResult): void {
     for (const category of result.mcp) {
       renderCategory(category);
     }
+  }
+
+  // ── Binary (if available) ─────────────────────────────────────────
+  if (result.binary) {
+    renderBinary(result.binary);
   }
 
   // Footer summary

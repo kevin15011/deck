@@ -2,6 +2,8 @@ import React from "react";
 import { render, renderToString } from "ink";
 
 import { parseArgs } from "./cli-args";
+import { getBuildInfo } from "./runtime/build-info";
+import { spawnInherited } from "./runtime/process";
 import { runPiLaunch } from "./pi-launch-command";
 import { resolveProjectRoot } from "./project-root";
 import { createRunnerCapabilityRegistry, type RunnerCapabilityCatalog } from "./runner-capability-registry";
@@ -33,6 +35,35 @@ if (parsed.command === "doctor") {
   }
 }
 
+if (parsed.command === "version") {
+  const info = getBuildInfo();
+  console.log(`deck ${info.version}`);
+  console.log(`commit: ${info.commit}`);
+  console.log(`date: ${info.date}`);
+  console.log(`target: ${info.target}`);
+  console.log(`channel: ${info.channel}`);
+  process.exit(0);
+}
+
+if (parsed.command === "upgrade") {
+  try {
+    const { runUpgrade } = await import("./upgrade-command/index.js");
+    const flags = parsed.flags;
+
+    // Build args array for upgrade command
+    const args: string[] = [];
+    if (flags.yes) {
+      args.push("--yes");
+    }
+
+    const exitCode = await runUpgrade(args);
+    process.exit(exitCode);
+  } catch (err) {
+    console.error("deck upgrade failed:", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+}
+
 if (parsed.command === "pi-launch") {
   const projectRoot = resolveProjectRoot();
   const result = await runPiLaunch({
@@ -57,15 +88,14 @@ if (parsed.command === "pi-launch") {
 
   // Spawn Pi with the launch plan
   const plan = result.plan;
-  const child = Bun.spawn([plan.command, ...plan.args], {
+  const child = spawnInherited(plan.command, plan.args, {
     cwd: plan.cwd,
     env: plan.env,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
   });
 
-  const exitCode = await child.exited;
+  const exitCode = await new Promise<number>((resolve) => {
+    child.on("close", (code) => resolve(code ?? 1));
+  });
   process.exit(exitCode);
 } else if (process.stdin.isTTY) {
   render(<DeckApp />, {

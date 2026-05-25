@@ -40,11 +40,36 @@ export interface DoctorRuntimeResult {
 }
 
 /**
+ * Result of binary-specific diagnostics.
+ */
+export interface DoctorBinaryResult {
+  /** Build info (version, commit, date, target, channel) */
+  buildInfo: {
+    version: string;
+    commit: string;
+    date: string;
+    target: string;
+    channel: string;
+  } | null;
+  /** Path to the running executable */
+  executablePath: string | null;
+  /** Global config directory path */
+  globalConfigDir: string;
+  /** Whether global config directory exists */
+  globalConfigExists: boolean;
+  /** Number of bundled skills */
+  bundledSkillCount: number;
+  /** Whether upgrade check is available */
+  upgradeAvailable: boolean;
+}
+
+/**
  * Complete result of the doctor diagnostics run.
  */
 export interface DoctorDiagnosticsResult {
   runtimes: DoctorRuntimeResult[];
   memory: DoctorCategoryResult[];
   mcp: DoctorCategoryResult[];
+  binary?: DoctorBinaryResult;
   hasCriticalErrors: boolean;
 }

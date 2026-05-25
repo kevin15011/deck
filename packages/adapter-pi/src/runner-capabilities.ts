@@ -388,7 +388,7 @@ function buildInstallPlan(input: import("@deck/core").RunnerInstallPlanInput): i
 
 function applyInstallPlan(options: import("@deck/core").RunnerInstallApplyOptions): Promise<readonly import("@deck/core").RunnerInstallResult[]> {
   const { installPiTools } = require("./install-tools");
-  const { buildPiInstallationPlan } = require("./install-plan");
+  const { buildPiInstallationPlan } = require("./installation-plan");
 
   const installableTools: InstallablePiTool[] = options.tools.map((tool: import("@deck/core").InstallableTool) => ({
     id: tool.id as InstallablePiToolId,

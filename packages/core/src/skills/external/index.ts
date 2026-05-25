@@ -12,6 +12,32 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
+// Error types (Task 22)
+// ---------------------------------------------------------------------------
+
+/**
+ * Error code for missing skill lookup.
+ */
+export const SKILL_NOT_FOUND = "SKILL_NOT_FOUND";
+
+export type SkillLookupErrorCode = typeof SKILL_NOT_FOUND;
+
+/**
+ * Error class for skill lookup failures.
+ */
+export class SkillLookupError extends Error {
+  readonly code: SkillLookupErrorCode;
+  readonly skillId: string;
+
+  constructor(skillId: string, message: string) {
+    super(message);
+    this.name = "SkillLookupError";
+    this.code = SKILL_NOT_FOUND;
+    this.skillId = skillId;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Skill definitions
 // ---------------------------------------------------------------------------
 
@@ -41,18 +67,64 @@ export const STANDALONE_SKILLS: readonly StandaloneSkillDefinition[] = [
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Try to load generated content (works in binary mode)
+let generatedContent: Record<string, string> | undefined;
+try {
+  // eslint-disable-next-line import/extensions
+  const generated = require("./content.generated.js") as {
+    SKILL_CONTENT: Record<string, string>;
+  };
+  if (generated?.SKILL_CONTENT) {
+    generatedContent = generated.SKILL_CONTENT;
+  }
+} catch {
+  // Generated content not available - fall back to file reads
+}
+
 /**
  * Read the raw body of a standalone skill by skillId.
  * Returns the verbatim SKILL.md content including frontmatter.
+ *
+ * In binary mode: Uses generated content map.
+ * In development mode: Falls back to reading source files.
+ *
+ * @param skillId - The skill identifier to look up
+ * @returns Skill body content
+ * @throws {SkillLookupError} When skill is not found (in binary mode)
  */
-export function getStandaloneSkillBody(skillId: string): string | undefined {
+export function getStandaloneSkillBody(skillId: string): string {
   const def = STANDALONE_SKILLS.find((s) => s.skillId === skillId);
-  if (!def) return undefined;
+  if (!def) {
+    // Skill definition doesn't exist
+    throw new SkillLookupError(
+      skillId,
+      `Skill ${skillId} not found in bundled resources. Reinstall deck binary.`,
+    );
+  }
 
+  // Try generated content first (binary mode)
+  if (generatedContent) {
+    const content = generatedContent[skillId];
+    if (content !== undefined) {
+      return content;
+    }
+    // Skill not in generated content map - suggests binary reinstall needed
+    throw new SkillLookupError(
+      skillId,
+      `Skill ${skillId} not found in bundled resources. Reinstall deck binary.`,
+    );
+  }
+
+  // Fall back to file read (development mode)
   try {
-    return readFileSync(join(__dirname, def.sourcePath), "utf-8");
+    const content = readFileSync(join(__dirname, def.sourcePath), "utf-8");
+    return content;
   } catch {
-    return undefined;
+    // File doesn't exist or can't be read
+    throw new SkillLookupError(
+      skillId,
+      `Skill ${skillId} not found in bundled resources. Reinstall deck binary.`,
+    );
   }
 }
 
