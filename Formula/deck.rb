@@ -19,7 +19,7 @@ class Deck < Formula
 
   # VERSION must be updated per release
   # Follows semver from GitHub release tag
-  VERSION = "REPLACE_ME"
+  VERSION = "0.0.2"
 
   # SHA-256 checksums - UPDATE THESE PER RELEASE
   # Run: shasum -a 256 deck_vVERSION_darwin-x64.tar.gz

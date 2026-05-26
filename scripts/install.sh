@@ -282,14 +282,40 @@ install_binary() {
 
     success "Installed ${BINARY_NAME} to ${install_dir}/${BINARY_NAME}"
 
-    # Check if install dir is in PATH
-    if [[ ":$PATH:" != *":${install_dir}:"* ]]; then
-        warn "${install_dir} is not in your PATH"
-        echo ""
-        warn "Add this to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
-        echo -e "  ${DIM}export PATH=\"\$PATH:${install_dir}\"${NC}"
-        echo ""
+    # Store install_dir for use by add_to_path
+    INSTALL_DIR="$install_dir"
+}
+
+# ============================================================================
+# Shell detection
+# ============================================================================
+
+detect_shell() {
+    if [ -n "$ZSH_VERSION" ]; then
+        SHELL_RC="$HOME/.zshrc"
+    elif [ -n "$BASH_VERSION" ]; then
+        SHELL_RC="$HOME/.bashrc"
+    else
+        SHELL_RC=""
     fi
+}
+
+# ============================================================================
+# Add to PATH silently
+# ============================================================================
+
+add_to_path() {
+    if [ -z "$SHELL_RC" ] || [ ! -f "$SHELL_RC" ]; then
+        return
+    fi
+
+    if grep -qF -- "$install_dir" "$SHELL_RC" 2>/dev/null; then
+        return
+    fi
+
+    echo "" >> "$SHELL_RC"
+    echo "# Deck installer" >> "$SHELL_RC"
+    echo 'export PATH="$PATH:'"${install_dir}"'"' >> "$SHELL_RC"
 }
 
 # ============================================================================
@@ -352,9 +378,10 @@ print_next_steps() {
     echo -e "${GREEN}${BOLD}Installation complete!${NC}"
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
-    echo -e "  ${CYAN}1.${NC} Run ${BOLD}${BINARY_NAME}${NC} to start the TUI installer"
-    echo -e "  ${CYAN}2.${NC} Select your AI agent(s) (Pi, OpenCode, etc.)"
-    echo -e "  ${CYAN}3.${NC} Configure your development environment"
+    echo -e "  ${CYAN}1.${NC} Restart your shell or run: ${BOLD}source ~/.zshrc${NC} (or ~/.bashrc)"
+    echo -e "  ${CYAN}2.${NC} Run ${BOLD}${BINARY_NAME}${NC} to start the TUI installer"
+    echo -e "  ${CYAN}3.${NC} Select your AI agent(s) (Pi, OpenCode, etc.)"
+    echo -e "  ${CYAN}4.${NC} Configure your development environment"
     echo ""
     echo -e "${DIM}For help: ${BINARY_NAME} --help${NC}"
     echo ""
@@ -398,6 +425,8 @@ main() {
 
     check_prerequisites
     install_binary
+    detect_shell
+    add_to_path
 
     verify_installation
     print_next_steps
