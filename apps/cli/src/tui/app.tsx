@@ -1,21 +1,23 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { readFileSync, existsSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 
 // ---------------------------------------------------------------------------
-// Debug logger — writes to /tmp/deck-tui.log for diagnosing silent crashes
+// Debug logger — writes to /tmp/deck-tui.log when DECK_DEBUG is enabled.
 // ---------------------------------------------------------------------------
 const LOG_FILE = "/tmp/deck-tui.log";
-let _logStream: ReturnType<typeof import("node:fs").createWriteStream> | null = null;
 function _ts() { return new Date().toISOString().slice(11, 23); }
 function log(msg: string) {
+  if (!process.env.DECK_DEBUG) return;
   const line = `${_ts()} ${msg}\n`;
   try { appendFileSync(LOG_FILE, line); } catch {}
 }
 // Initialize log file
-try { writeFileSync(LOG_FILE, `=== Deck TUI session ${new Date().toISOString()} ===\n`); } catch {}
+if (process.env.DECK_DEBUG) {
+  try { writeFileSync(LOG_FILE, `=== Deck TUI session ${new Date().toISOString()} ===\n`); } catch {}
+}
 import {
   type InstallableOpenCodeTool,
   type InstallableOpenCodeToolId,
@@ -55,7 +57,7 @@ import {
   reviewOpenCodeTools,
   buildOpenCodeRunnerCapabilityInventory,
   installOpenCodeTools,
-  buildOpenCodeInstallationPlan,
+  OPENCODE_INSTALLABLE_TOOLS,
 } from "@deck/adapter-opencode";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/external";
@@ -101,7 +103,7 @@ import {
 import { reduceRunnerDashboard } from "./runner-dashboard/reducer";
 import { createDefaultRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type RunnerDashboardState } from "./runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
-import { getAdapter } from "./runner-adapters";
+import { getAdapter } from "../runner-adapters";
 import { HomeScreen } from "./screens/home-screen";
 import { DoctorScreen } from "./screens/doctor-screen";
 
@@ -661,7 +663,6 @@ export function DeckApp() {
           // Use the package names as tool IDs directly — the plan builder already determined these need installing
           const selectedToolIds = packages.map(p => p.name).filter(Boolean);
           // Get the tools from the catalog (not re-reviewing installed status — plan already decided)
-          const { OPENCODE_INSTALLABLE_TOOLS } = require("@deck/adapter-opencode") as { OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] };
           const toolsToInstall = OPENCODE_INSTALLABLE_TOOLS.filter(t => selectedToolIds.includes(t.id));
           log(`installPackages (OpenCode): matched ${toolsToInstall.length}/${selectedToolIds.length} tools from catalog`);
           if (toolsToInstall.length === 0) {

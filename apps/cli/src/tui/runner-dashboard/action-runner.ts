@@ -13,7 +13,7 @@ import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } 
 
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
-function log(msg: string) { try { appendFileSync(LOG, `${_ts()} [action-runner] ${msg}\n`); } catch {} }
+function log(msg: string) { if (!process.env.DECK_DEBUG) return; try { appendFileSync(LOG, `${_ts()} [action-runner] ${msg}\n`); } catch {} }
 
 export type RunnerActionRunStatus = "executed" | "informational" | "skipped" | "failed";
 

@@ -181,6 +181,11 @@ export function appendSupermemoryEnvToShellConfig(
       continue;
     }
     try {
+      const existing = readFileSync(config.path, "utf-8");
+      if (/^\s*export\s+SUPERMEMORY_API_KEY=/m.test(existing)) {
+        results.push(`SUPERMEMORY_API_KEY export already present in ${config.name}.`);
+        continue;
+      }
       appendFileSync(config.path, exportLine, "utf-8");
       results.push(`Added SUPERMEMORY_API_KEY export to ${config.name}.`);
     } catch {

@@ -49,7 +49,10 @@ export function createDefaultAdapterRegistry(): AdapterRegistry {
  * Throws RunnerNotRegisteredError if the runner is not found.
  */
 export function getAdapter(runnerId: string): import("@deck/core").RunnerAdapter {
-  return _getDefaultRegistry().get(runnerId);
+  const registry = _getDefaultRegistry();
+  return registry.tryGet(runnerId)
+    ?? registry.resolveByEnvironment(runnerId)
+    ?? registry.get(runnerId);
 }
 
 /**

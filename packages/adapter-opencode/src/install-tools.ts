@@ -6,6 +6,7 @@ import { join } from "node:path";
 const DEBUG_LOG = "/tmp/deck-install-debug.log";
 
 function debugLog(...args: unknown[]): void {
+  if (!process.env.DECK_DEBUG) return;
   const msg = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
   const timestamp = new Date().toISOString();
   const line = `[${timestamp}] ${msg}\n`;
