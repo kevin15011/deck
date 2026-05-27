@@ -27,6 +27,12 @@ type InstallCommandResult = {
 
 type RunInstallCommand = (command: string, args: string[]) => Promise<InstallCommandResult>;
 
+/** Shell to use for script execution — bash if available (mac/linux compatibility) */
+function getShellCommand(): string {
+  // mac uses bash as sh, linux often uses dash which lacks pipefail
+  return process.platform === "darwin" ? "sh" : (existsSync("/bin/bash") ? "/bin/bash" : "sh");
+}
+
 export async function installOpenCodeTools(
   command: string | undefined,
   plan: InstallableOpenCodeTool[],
@@ -76,7 +82,8 @@ export async function installOpenCodeTools(
 
         // Pipe stdout to shell
         debugLog(`[install-tools] ${tool.name}: Executing shell script...`);
-        const shellProcess = nodeSpawn("sh", ["-s"], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+        const shell = getShellCommand();
+        const shellProcess = nodeSpawn(shell, ["-s"], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
         shellProcess.stdin?.write(stdout);
         shellProcess.stdin?.end();
 
