@@ -1772,17 +1772,14 @@ export function DeckApp() {
     const output = listModelsResult.stdout || listModelsResult.stderr || "";
     if (listModelsResult.exitCode === 0 && output.trim().length > 0) {
       const models = parseOpenCodeModelsOutput(output);
-      console.error(`[detectOpenCodeModelInventoryForTui] parsed ${models.length} models`);
       const providers = [...new Set(models.map((m) => m.providerId))].map((id) => ({ id, displayName: humanizeProviderName(id), envVars: [] }));
       const modelsByProvider: Record<string, Array<{ id: string; displayName: string; providerId: string }>> = {};
       for (const model of models) {
         if (!modelsByProvider[model.providerId]) modelsByProvider[model.providerId] = [];
         modelsByProvider[model.providerId].push(model);
       }
-      console.error(`[detectOpenCodeModelInventoryForTui] returning ${providers.length} providers`);
       return { providers, modelsByProvider };
     }
-    console.error(`[detectOpenCodeModelInventoryForTui] fallback empty — exitCode=${listModelsResult.exitCode} output="${output.slice(0, 200)}"`);
     return { providers: [] as Array<{ id: string; displayName: string; envVars: string[] }>, modelsByProvider: {} };
   }
 
