@@ -7,7 +7,7 @@
     "deck": "bun run --cwd apps/cli deck",
     "build": "bun run scripts/build-binaries.ts",
     "build:dry-run": "bun run scripts/build-binaries.ts --dry-run",
-    "deck:run": "bun run build:dry-run && ./dist/cli/deck",
+    "deck:run": "DECK_DEBUG=1 bun run build:dry-run && DECK_DEBUG=1 ./dist/cli/deck",
     "test": "bun test"
   },
   "bin": {
