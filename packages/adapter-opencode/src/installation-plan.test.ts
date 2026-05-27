@@ -14,9 +14,24 @@ describe("buildOpenCodeInstallationPlan", () => {
     });
 
     expect(plan).toEqual([
-      { id: "rtk", name: "RTK", module: "rtk-ai/rtk", required: false, installKind: "external" },
-      { id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "external" },
-      { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "opencode-plugin" },
+      {
+        id: "rtk",
+        name: "RTK",
+        module: "rtk-ai/rtk",
+        required: false,
+        installKind: "shell-script-plus-mcp",
+        shellInstallUrl: "https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh",
+        postInstallCommand: ["rtk", "init", "-g", "--opencode"],
+      },
+      {
+        id: "codebase-memory",
+        name: "codebase-memory",
+        module: "DeusData/codebase-memory-mcp",
+        required: false,
+        installKind: "shell-script",
+        shellInstallUrl: "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh",
+      },
+      { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "mcp-server" },
     ]);
   });
 

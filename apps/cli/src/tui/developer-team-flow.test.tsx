@@ -589,7 +589,7 @@ describe("Developer Team TUI screens", () => {
       const result = getNextScreenAfterEnvironmentSelection({
         selectedEnvironments: ["pi-development"],
         hasPiCommand: true,
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
       expect(result).toBe("personality-selection");
     });
@@ -599,7 +599,7 @@ describe("Developer Team TUI screens", () => {
       const result = getNextScreenAfterPersonalitySelection({
         selectedEnvironments: ["pi-development"],
         hasPiCommand: true,
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
       expect(result).toBe("pi-preflight-checking");
     });
@@ -609,7 +609,7 @@ describe("Developer Team TUI screens", () => {
       const result = getNextScreenAfterPersonalitySelection({
         selectedEnvironments: ["pi-development", "opencode-development"],
         hasPiCommand: true,
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
       expect(result).toBe("pi-preflight-checking");
     });
@@ -619,7 +619,7 @@ describe("Developer Team TUI screens", () => {
       const result = getNextScreenAfterPersonalitySelection({
         selectedEnvironments: ["opencode-development"],
         hasPiCommand: false,
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
       expect(result).toBe("opencode-preflight-checking");
     });
@@ -629,7 +629,7 @@ describe("Developer Team TUI screens", () => {
       const result = getNextScreenAfterEnvironmentSelection({
         selectedEnvironments: [],
         hasPiCommand: false,
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
       expect(result).toBe("complete");
     });

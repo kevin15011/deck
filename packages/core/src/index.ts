@@ -119,6 +119,45 @@ export * from "./memory/adaptive-memory-contract";
 export * from "./memory/adaptive-memory-governance";
 export * from "./memory/adaptive-context-renderer";
 
+// Runner adapter interface and DTOs (TUI-facing runner abstraction)
+// Note: RunnerId is already exported from runner-capability.ts (this avoids duplicate export)
+export type {
+  RunnerAdapter,
+  EnvironmentId,
+  DeveloperTeamModelAssignments,
+  DeveloperTeamThinkingAssignments,
+  RunnerThinkingLevel,
+  RuntimeDetectionInput,
+  RuntimeStatus,
+  CapabilityInventoryInput,
+  CapabilityInventory,
+  CapabilityCatalogEntry,
+  DashboardState,
+  ReviewPlan,
+  InstallationPlan,
+  InstallationStep,
+  RunnerActionContext,
+  RunnerActionRunResult,
+  ModelCatalogContext,
+  DeveloperTeamAdapterInstallInput,
+  RunnerMcpConfigInput,
+  RunnerMcpConfigResult,
+  FlowState,
+  NextScreen,
+  RunnerAction,
+  RunnerActionStatus,
+  RunnerPlanDiagnostic,
+  RunnerPlanDiagnosticSeverity,
+} from "./runner-adapter";
+
+// Adapter registry — CLI-side registration with runtime lookup
+export {
+  createAdapterRegistry,
+  type AdapterRegistry,
+  RunnerNotRegisteredError,
+  DuplicateRunnerError,
+} from "./adapter-registry";
+
 // Spec Registry — OpenSpec types, path helpers, and event model
 export * from "./spec-registry";
 

@@ -1,63 +1,29 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
+
+// ---------------------------------------------------------------------------
+// Debug logger — writes to /tmp/deck-tui.log for diagnosing silent crashes
+// ---------------------------------------------------------------------------
+const LOG_FILE = "/tmp/deck-tui.log";
+let _logStream: ReturnType<typeof import("node:fs").createWriteStream> | null = null;
+function _ts() { return new Date().toISOString().slice(11, 23); }
+function log(msg: string) {
+  const line = `${_ts()} ${msg}\n`;
+  try { appendFileSync(LOG_FILE, line); } catch {}
+}
+// Initialize log file
+try { writeFileSync(LOG_FILE, `=== Deck TUI session ${new Date().toISOString()} ===\n`); } catch {}
 import {
-  buildOpenCodeInstallationPlan,
-  buildOpenCodeRunnerCapabilityInventory,
-  buildOpenCodeRunnerReviewPlan,
-  getSelectableOpenCodeTools,
-  inspectOpenCodeEnvironment,
-  installOpenCodeTools,
-  reviewOpenCodeTools,
-  buildOpenCodeDeveloperTeamInstallPlan,
-  applyOpenCodeDeveloperTeamInstall,
-  verifyOpenCodeDeveloperTeamInstall,
-  backupDeveloperTeamFiles as backupOpenCodeDeveloperTeamFiles,
-  rollbackDeveloperTeamFiles as rollbackOpenCodeDeveloperTeamFiles,
-  DEFAULT_OPENCODE_MODELS,
-  OPENCODE_THINKING_LEVELS,
-  readOpenCodeDeveloperTeamModelConfigAssignments,
-  supportsThinkingForOpenCodeModel,
-  getDefaultThinkingForOpenCodeModel,
-  getTeamsForEnvironment as getOpenCodeTeamsForEnvironment,
-  resolveThinkingForOpenCodeModel,
   type InstallableOpenCodeTool,
   type InstallableOpenCodeToolId,
   type OpenCodePreflightResult,
   type OpenCodeToolsReview,
   type OpenCodeToolInstallResult,
-  writeSupermemoryOpenCodeMcpConfig,
 } from "@deck/adapter-opencode";
-import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/external";
 import {
-  buildDeveloperTeamInstallPlan,
-  applyDeveloperTeamInstall,
-  backupDeveloperTeamFiles,
-  buildModelInventoryFromPiListModels,
-  buildPiInstallationPlan,
-  buildPiRunnerCapabilityInventory,
-  detectConfiguredProviders,
-  getDefaultThinkingForModel,
-  getOptionalPiTools,
-  getTeamsForEnvironment,
-  inspectPiEnvironment,
-  installPiTools,
-  listModelsForProvider,
-  PI_THINKING_LEVELS,
-  readDeveloperTeamModelConfigAssignments,
-  resolveThinkingForModel,
-  reviewPiRequiredTools,
-  rollbackDeveloperTeamFiles,
-  supportsDeveloperTeamModel,
-  supportsThinkingForModel,
-  verifyDeveloperTeamInstall,
-  writeSupermemoryPiMcpConfig,
-  redactPiMcpConfigDiagnosticText,
-  type PiMcpConfigWriteResult,
-  DEVELOPER_TEAM_AGENTS,
-  type AgentApplyResult,
   type DeveloperTeamModelAssignments,
   type DeveloperTeamThinkingAssignments,
   type InstallablePiTool,
@@ -69,8 +35,30 @@ import {
   type PiToolInstallResult,
   type PiRunnerCapabilityInventory,
   type PiRunnerFullCapabilityInventory,
-  buildPiRunnerReviewPlan,
+  type PiThinkingLevel,
+  type AgentApplyResult,
+  type DeveloperTeamApplyResult,
+  PI_THINKING_LEVELS,
+  writeSupermemoryPiMcpConfig,
+  redactPiMcpConfigDiagnosticText,
+  type PiMcpConfigWriteResult,
+  buildPiInstallationPlan,
+  installPiTools,
+  inspectPiEnvironment,
+  reviewPiRequiredTools,
+  buildPiRunnerCapabilityInventory,
+  listModelsForProvider,
 } from "@deck/adapter-pi";
+import {
+  OPENCODE_THINKING_LEVELS,
+  inspectOpenCodeEnvironment,
+  reviewOpenCodeTools,
+  buildOpenCodeRunnerCapabilityInventory,
+  installOpenCodeTools,
+  buildOpenCodeInstallationPlan,
+} from "@deck/adapter-opencode";
+import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
+import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/external";
 
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
@@ -104,17 +92,16 @@ import {
   SupermemorySetupScreen,
   type SupermemorySetupValues,
 } from "./screens/developer-team-screens";
-import { runRunnerReviewPlan, type RunnerActionRunResult } from "./pi-runner-dashboard/action-runner";
+import { runRunnerReviewPlan, type RunnerActionRunResult } from "./runner-dashboard/action-runner";
 import {
   getDashboardContinueEffect,
   getDashboardToggleAction,
   type RunnerDashboardContinueEffect,
-} from "./pi-runner-dashboard/input-handler";
-import { reduceRunnerDashboard } from "./pi-runner-dashboard/reducer";
-import { createDefaultRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type RunnerDashboardState } from "./pi-runner-dashboard/state";
-import { RunnerDashboardScreens } from "./screens/pi-runner-dashboard-screens";
-import { getOpenCodeRunnerCapability, OPENCODE_RUNNER_CAPABILITY_IDS, getUserFacingOpenCodeCapability } from "@deck/adapter-opencode";
-import { getPiRunnerCapability, PI_RUNNER_CAPABILITY_IDS, getUserFacingCapability } from "@deck/adapter-pi";
+} from "./runner-dashboard/input-handler";
+import { reduceRunnerDashboard } from "./runner-dashboard/reducer";
+import { createDefaultRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type RunnerDashboardState } from "./runner-dashboard/state";
+import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
+import { getAdapter } from "./runner-adapters";
 import { HomeScreen } from "./screens/home-screen";
 import { DoctorScreen } from "./screens/doctor-screen";
 
@@ -306,10 +293,33 @@ export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupVal
   };
 }
 
+// Global log function — set by DeckApp via useEffect
+let globalAddLog: ((message: string) => void) | null = null;
+
+// Global error handlers for debugging silent crashes
+if (typeof process !== "undefined") {
+  process.on("unhandledRejection", (reason) => {
+    const msg = `[unhandledRejection] ${reason}`;
+    globalAddLog?.(msg);
+    console.error(msg);
+  });
+  process.on("uncaughtException", (error) => {
+    const msg = `[uncaughtException] ${error}`;
+    globalAddLog?.(msg);
+    console.error(msg);
+  });
+}
+
 export function DeckApp() {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [screen, setScreen] = useState<Screen>("home");
+  const [logs, setLogs] = useState<string[]>([]);
+
+  // Helper to add logs (keeps last 20)
+  function addLog(message: string) {
+    setLogs((prev) => [...prev.slice(-20), `[${new Date().toLocaleTimeString()}] ${message}`]);
+  }
   const [cursor, setCursor] = useState(0);
   const [homeCursor, setHomeCursor] = useState(0);
   const [selectedEnvironments, setSelectedEnvironments] = useState<EnvironmentId[]>([]);
@@ -317,7 +327,7 @@ export function DeckApp() {
   const [piPreflight, setPiPreflight] = useState<PiPreflightResult | null>(null);
   const [toolsReview, setToolsReview] = useState<PiRequiredToolsReview | null>(null);
   const [selectedOptionalTools, setSelectedOptionalTools] = useState<InstallablePiToolId[]>(
-    getOptionalPiTools().map((tool) => tool.id),
+    getAdapter("pi").getSelectableTools().map((tool: any) => tool.id),
   );
   const [openCodePreflight, setOpenCodePreflight] = useState<OpenCodePreflightResult | null>(null);
   const [openCodeToolsReview, setOpenCodeToolsReview] = useState<OpenCodeToolsReview | null>(null);
@@ -325,7 +335,7 @@ export function DeckApp() {
   const [developerTeamResults, setDeveloperTeamResults] = useState<AgentApplyResult[]>([]);
   const [developerTeamCursor, setDeveloperTeamCursor] = useState(0);
   const [selectedTeams, setSelectedTeams] = useState<string[]>(
-    getTeamsForEnvironment("pi-development").map((team) => team.id),
+    getAdapter("pi").getTeams("pi-development").map((team: any) => team.id),
   );
 
   // Project root resolved once at startup (can be null for global config fallback)
@@ -355,6 +365,7 @@ export function DeckApp() {
   const [dashboardCompletionStatus, setDashboardCompletionStatus] = useState<string | undefined>(undefined);
   const [dashboardState, setDashboardState] = useState<RunnerDashboardState>(() => createDefaultRunnerDashboardState());
   const [dashboardInventory, setDashboardInventory] = useState<PiRunnerFullCapabilityInventory>({});
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardActionResults, setDashboardActionResults] = useState<RunnerActionRunResult[]>([]);
 
   // Configure packages standalone flow
@@ -380,35 +391,38 @@ export function DeckApp() {
   // Runtime-agnostic capability resolver — dispatches to the correct adapter based on runnerScope
   const dashboardCapabilityResolver = useMemo(() => ({
     getCapability: (capabilityId: string) => {
-      if (dashboardState.runnerScope === "opencode") {
-        return getUserFacingOpenCodeCapability(capabilityId as any) as any;
-      }
-      return getUserFacingCapability(capabilityId as any) as any;
+      return getAdapter(dashboardState.runnerScope).getCapability(capabilityId) as any;
     },
     getUserFacingIds: () => {
-      if (dashboardState.runnerScope === "opencode") {
-        return OPENCODE_RUNNER_CAPABILITY_IDS as string[];
-      }
-      return PI_RUNNER_CAPABILITY_IDS as string[];
+      return getAdapter(dashboardState.runnerScope).getCapabilityIds() as string[];
     },
   }), [dashboardState.runnerScope]);
 
   // Runtime-agnostic plan builder — dispatches to the correct adapter based on runnerScope
   const dashboardPlanBuilder = useMemo(() => {
     return (state: RunnerDashboardState, inventory: unknown) => {
-      if (state.runnerScope === "opencode") {
-        return buildOpenCodeRunnerReviewPlan(
+      log(`dashboardPlanBuilder: called. runnerScope=${state.runnerScope} selectedCaps=${JSON.stringify(state.selectedCapabilities)} inventoryType=${typeof inventory}`);
+      try {
+        const adapter = getAdapter(state.runnerScope);
+        log(`dashboardPlanBuilder: adapter=${adapter.runnerId}`);
+        const plan = adapter.buildReviewPlan(
           {
-            runnerScope: state.runnerScope,
+            runnerId: state.runnerScope as any,
             selectedCapabilities: state.selectedCapabilities,
-            adaptiveMemory: state.adaptiveMemory,
-            teams: state.teams,
-            runtime: { toolsReview: state.runtime.toolsReview as OpenCodeToolsReview | undefined },
+            adaptiveMemory: state.adaptiveMemory as any,
+            teams: state.teams as any,
+            runtime: { toolsReview: state.runtime.toolsReview as any },
+            packageInstructions: state.packageInstructions as any,
           },
-          inventory as Parameters<typeof buildOpenCodeRunnerReviewPlan>[1],
+          inventory as Parameters<ReturnType<typeof getAdapter>["buildReviewPlan"]>[1],
         );
+        log(`dashboardPlanBuilder: SUCCESS. planSteps=${Array.isArray(plan) ? plan.length : "not-array"}`);
+        return plan;
+      } catch (error) {
+        const msg = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
+        log(`dashboardPlanBuilder: FAILED: ${msg}`);
+        throw error;
       }
-      return buildPiRunnerReviewPlan(state as any, inventory as PiRunnerCapabilityInventory);
     };
   }, []);
 
@@ -429,7 +443,16 @@ export function DeckApp() {
     [],
   );
 
+  // Set up global log function reference for process handlers
+  useEffect(() => {
+    globalAddLog = addLog;
+    return () => {
+      globalAddLog = null;
+    };
+  }, []);
+
   useInput((input, key) => {
+    try {
     if (screen === "pi-runner-dashboard") {
       handleDashboardInput(input, key);
       return;
@@ -473,6 +496,10 @@ export function DeckApp() {
 
     if (key.return) {
       continueFromCurrent();
+    }
+    } catch (error) {
+      const msg = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
+      log(`useInput UNCAUGHT: ${msg}`);
     }
   });
 
@@ -564,7 +591,7 @@ export function DeckApp() {
             "developer-team": {
               teamId: "developer-team",
               label: "Developer Team",
-              selected: false,
+              selected: true,
             },
           },
           packageInstructions: loadRunnerPackageInstructionsFromConfig(opencodeConfig, "opencode"),
@@ -607,14 +634,20 @@ export function DeckApp() {
   useEffect(() => {
     if (screen !== "pi-runner-dashboard" || dashboardState.screen !== "install-progress" || !dashboardState.plan) return;
 
+    log(`useEffect[install-progress]: STARTING. screen=${screen} dashboardScreen=${dashboardState.screen} hasPlan=${!!dashboardState.plan}`);
+
     let cancelled = false;
 
     async function runDashboardInstall() {
+      log(`runDashboardInstall: starting`);
       setDashboardActionResults([]);
-      const isOpenCode = dashboardState.runnerScope === "opencode";
-      const resolvedMemoryProvider = isOpenCode && memoryProvider ? memoryProvider : undefined;
+      const adapter = getAdapter(dashboardState.runnerScope);
+      log(`runDashboardInstall: adapter=${adapter.runnerId} projectRoot=${localResolvedProjectRoot ?? process.cwd()}`);
+      const resolvedMemoryProvider = memoryProvider;
       // Use stored project root, not the function
       const projectRoot = localResolvedProjectRoot ?? process.cwd();
+      const environmentId = adapter.environmentIds[0];
+      log(`runDashboardInstall: calling runRunnerReviewPlan`);
       const results = await runRunnerReviewPlan(dashboardState.plan!, {
         projectRoot: projectRoot,
         runnerCommand: dashboardState.runtime.runnerCommand,
@@ -622,68 +655,81 @@ export function DeckApp() {
         supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
         memoryProvider: resolvedMemoryProvider,
         resolvedMemoryProvider,
-        writeMcpConfig: isOpenCode ? writeSupermemoryOpenCodeMcpConfig : undefined,
-        installTeamBundle: (() => {
-          if (isOpenCode) {
-            return async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments }) => {
-              const deckConfig = readDeckConfig(projectRoot);
-              const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
-              const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
-              const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
-              const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
-                ...(options?.memoryProvider ? { memoryProvider: options.memoryProvider } : {}),
-                ...(options?.modelAssignments ? { configModelOverrides: options.modelAssignments } : {}),
-                ...(options?.thinkingAssignments ? { reasoningEffortOverrides: options.thinkingAssignments as Record<string, import("@deck/adapter-opencode").OpenCodeThinkingLevel> } : {}),
-                capabilityInstructions,
-                standaloneSkills,
-              });
-              const backup = backupOpenCodeDeveloperTeamFiles(plan);
-              const applyResult = applyOpenCodeDeveloperTeamInstall(plan);
-              const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
-              if (!verifyResult.valid) {
-                rollbackOpenCodeDeveloperTeamFiles(backup);
-                throw new Error("Verification failed. Changes rolled back.");
-              }
-              return { results: applyResult.results ?? [] };
-            };
+        writeMcpConfig: adapter.writeMcpConfig?.bind(adapter),
+        installPackages: async (runnerCommand, packages, onResult) => {
+          log(`installPackages (OpenCode): installing ${packages.map(p => p.name).join(", ")}`);
+          // Use the package names as tool IDs directly — the plan builder already determined these need installing
+          const selectedToolIds = packages.map(p => p.name).filter(Boolean);
+          // Get the tools from the catalog (not re-reviewing installed status — plan already decided)
+          const { OPENCODE_INSTALLABLE_TOOLS } = require("@deck/adapter-opencode") as { OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] };
+          const toolsToInstall = OPENCODE_INSTALLABLE_TOOLS.filter(t => selectedToolIds.includes(t.id));
+          log(`installPackages (OpenCode): matched ${toolsToInstall.length}/${selectedToolIds.length} tools from catalog`);
+          if (toolsToInstall.length === 0) {
+            return packages.map(p => ({ success: true, message: `${p.name} already installed.` }));
           }
-          // Pi path
-          return async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments }) => {
-            const plan = buildDeveloperTeamInstallPlan(projectRoot, {
-              ...(options?.memoryProvider ? { memoryProvider: options.memoryProvider } : {}),
-              ...(options?.modelAssignments ? { modelAssignments: options.modelAssignments } : {}),
-              ...(options?.thinkingAssignments ? { thinkingAssignments: options.thinkingAssignments } : {}),
-              preserveMissingThinkingAssignments: true,
+          const installResults = await installOpenCodeTools("opencode", toolsToInstall, (r) => {
+            onResult({ success: r.success, message: r.message });
+          });
+          log(`installPackages (OpenCode): results=${installResults.map(r => `${r.tool}:${r.success}`).join(",")}`);
+          return installResults.map(r => ({ success: r.success, message: r.message }));
+        },
+        installTeamBundle: async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments }) => {
+          // Build capability instructions for OpenCode (Pi ignores undefined capabilityInstructions)
+          const deckConfig = readDeckConfig(projectRoot);
+          const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
+          const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+
+          const plan = adapter.buildDeveloperTeamInstallPlan({
+            projectRoot,
+            environmentId,
+            modelAssignments: options?.modelAssignments,
+            thinkingAssignments: options?.thinkingAssignments,
+            memoryProvider: options?.memoryProvider,
+            capabilityInstructions,
+          });
+
+          const backup = adapter.backupDeveloperTeamFiles(plan);
+
+          try {
+            const applyResult = await adapter.applyDeveloperTeamInstall({
+              projectRoot,
+              plan,
+              environmentId,
             });
-            const backup = backupDeveloperTeamFiles(plan);
-            try {
-              const applyResult = applyDeveloperTeamInstall(plan);
-              const verifyResult = verifyDeveloperTeamInstall(plan);
-              if (!verifyResult.valid) {
-                rollbackDeveloperTeamFiles(backup);
-                throw new Error("Verification failed. Changes rolled back.");
-              }
-              return { results: applyResult.results ?? [] };
-            } catch (error) {
-              rollbackDeveloperTeamFiles(backup);
-              throw error instanceof Error ? error : new Error(String(error));
+
+            const verifyResult = adapter.verifyDeveloperTeamInstall(plan);
+            if (!verifyResult.valid) {
+              adapter.rollbackDeveloperTeamFiles(backup);
+              throw new Error("Verification failed. Changes rolled back.");
             }
-          };
-        })(),
+
+            return { results: applyResult.results };
+          } catch (error) {
+            adapter.rollbackDeveloperTeamFiles(backup);
+            throw error instanceof Error ? error : new Error(String(error));
+          }
+        },
         onActionResult: (result: RunnerActionRunResult) => {
           if (!cancelled) setDashboardActionResults((current) => [...current, result]);
         },
       });
+
+      log(`runDashboardInstall: runRunnerReviewPlan DONE. results=${results.length} cancelled=${cancelled}`);
 
       if (!cancelled) {
         setDashboardActionResults(results);
         setDashboardCompletionStatus(getDashboardCompletionStatus());
         clearDashboardSupermemoryEphemeralState();
         setDashboardState((current) => reduceRunnerDashboard(current, { type: "complete" }, dashboardPlanBuilder));
+        log(`runDashboardInstall: state set to complete`);
       }
     }
 
-    void runDashboardInstall();
+    void runDashboardInstall().catch((err) => {
+      const msg = `[runDashboardInstall] FAILED: ${err instanceof Error ? err.stack : String(err)}`;
+      log(msg);
+      console.error(msg);
+    });
 
     return () => {
       cancelled = true;
@@ -696,121 +742,81 @@ export function DeckApp() {
 
     let cancelled = false;
 
-    function runInstall() {
+    async function runInstall() {
       // Use require: true for backward compatibility - file ops always need a path
       const projectRoot = resolveProjectRoot({ require: true });
 
-      // Determine which adapter to use based on the install context
-      // When coming from the install flow, the runtime matches selectedEnvironments
-      const isOpenCode = selectedEnvironments.includes("opencode-development") && !selectedEnvironments.includes("pi-development");
+      // Determine environmentId based on selected environments
+      const openCodeExclusive = selectedEnvironments.includes("opencode-development") && !selectedEnvironments.includes("pi-development");
+      const environmentId = openCodeExclusive ? "opencode-development" : "pi-development";
+      const adapter = getAdapter(environmentId);
 
-      if (isOpenCode) {
-        const deckConfig = readDeckConfig(projectRoot);
-        const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
-        const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+      // Build capability instructions and standalone skills (only used by OpenCode, Pi ignores them)
+      const deckConfig = readDeckConfig(projectRoot);
+      const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
+      const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+      const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
 
-        const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
-        const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}), capabilityInstructions, standaloneSkills });
-        const backup = backupOpenCodeDeveloperTeamFiles(plan);
+      const plan = adapter.buildDeveloperTeamInstallPlan({
+        projectRoot,
+        environmentId,
+        modelAssignments,
+        thinkingAssignments,
+        memoryProvider,
+        capabilityInstructions,
+        standaloneSkills,
+      });
 
-        try {
-          const applyResult = applyOpenCodeDeveloperTeamInstall(plan);
-          const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
+      const backup = adapter.backupDeveloperTeamFiles(plan);
 
-          if (!cancelled) {
-            if (!verifyResult.valid) {
-              rollbackOpenCodeDeveloperTeamFiles(backup);
-              setDeveloperTeamResults([]);
-              setInstallResults((current) => [
-                ...current,
-                { tool: "Developer Team", success: false, message: "Verification failed. Changes rolled back." },
-              ]);
-            } else {
-              setDeveloperTeamResults(applyResult.results as any);
-            }
+      try {
+        const applyResult = await adapter.applyDeveloperTeamInstall({ projectRoot, plan, environmentId });
+        const verifyResult = adapter.verifyDeveloperTeamInstall(plan);
 
-            const nextScreen = getNextScreenAfterDeveloperTeamInstall({
-              selectedEnvironments,
-              hasOpenCodeNext: false,
-            });
-
-            resetCursor(nextScreen);
-          }
-        } catch (error) {
-          if (!cancelled) {
-            rollbackOpenCodeDeveloperTeamFiles(backup);
+        if (!cancelled) {
+          if (!verifyResult.valid) {
+            adapter.rollbackDeveloperTeamFiles(backup);
             setDeveloperTeamResults([]);
             setInstallResults((current) => [
               ...current,
-              {
-                tool: "Developer Team",
-                success: false,
-                message: `Installation failed. Changes rolled back.${error instanceof Error ? ` ${error.message}` : ""}`,
-              },
+              { tool: "Developer Team", success: false, message: "Verification failed. Changes rolled back." },
             ]);
-
-            const nextScreen = getNextScreenAfterDeveloperTeamInstall({
-              selectedEnvironments,
-              hasOpenCodeNext: false,
-            });
-
-            resetCursor(nextScreen);
+          } else {
+            setDeveloperTeamResults(applyResult.results as any);
           }
+
+          const statuses = detectSelectedRuntimes(selectedEnvironments);
+          const hasOpenCodeInstalled = statuses.some((s) => s.runtime === "opencode" && s.installed && s.command);
+          const nextEnvironment = openCodeExclusive ? null : (selectedEnvironments.find((e) => e !== "pi-development") ?? null);
+          const nextScreen = getNextScreenAfterDeveloperTeamInstall({
+            selectedEnvironments,
+            nextEnvironment,
+          });
+
+          resetCursor(nextScreen);
         }
-      } else {
-        // Pi path
-        const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments, preserveMissingThinkingAssignments: true, ...(memoryProvider ? { memoryProvider } : {}) });
-        const backup = backupDeveloperTeamFiles(plan);
+      } catch (error) {
+        if (!cancelled) {
+          adapter.rollbackDeveloperTeamFiles(backup);
+          setDeveloperTeamResults([]);
+          setInstallResults((current) => [
+            ...current,
+            {
+              tool: "Developer Team",
+              success: false,
+              message: `Installation failed. Changes rolled back.${error instanceof Error ? ` ${error.message}` : ""}`,
+            },
+          ]);
 
-        try {
-          const applyResult = applyDeveloperTeamInstall(plan);
-          const verifyResult = verifyDeveloperTeamInstall(plan);
+          const statuses = detectSelectedRuntimes(selectedEnvironments);
+          const hasOpenCodeInstalled = statuses.some((s) => s.runtime === "opencode" && s.installed && s.command);
+          const nextEnvironment = openCodeExclusive ? null : (selectedEnvironments.find((e) => e !== "pi-development") ?? null);
+          const nextScreen = getNextScreenAfterDeveloperTeamInstall({
+            selectedEnvironments,
+            nextEnvironment,
+          });
 
-          if (!cancelled) {
-            if (!verifyResult.valid) {
-              rollbackDeveloperTeamFiles(backup);
-              setDeveloperTeamResults([]);
-              setInstallResults((current) => [
-                ...current,
-                { tool: "Developer Team", success: false, message: "Verification failed. Changes rolled back." },
-              ]);
-            } else {
-              setDeveloperTeamResults(applyResult.results);
-            }
-
-            const statuses = detectSelectedRuntimes(selectedEnvironments);
-            const hasOpenCode = statuses.some((s) => s.runtime === "opencode" && s.installed && s.command);
-            const nextScreen = getNextScreenAfterDeveloperTeamInstall({
-              selectedEnvironments,
-              hasOpenCodeNext:
-                selectedEnvironments.includes("opencode-development") && hasOpenCode && !openCodePreflight,
-            });
-
-            resetCursor(nextScreen);
-          }
-        } catch (error) {
-          if (!cancelled) {
-            rollbackDeveloperTeamFiles(backup);
-            setDeveloperTeamResults([]);
-            setInstallResults((current) => [
-              ...current,
-              {
-                tool: "Developer Team",
-                success: false,
-                message: `Installation failed. Changes rolled back.${error instanceof Error ? ` ${error.message}` : ""}`,
-              },
-            ]);
-
-            const statuses = detectSelectedRuntimes(selectedEnvironments);
-            const hasOpenCode = statuses.some((s) => s.runtime === "opencode" && s.installed && s.command);
-            const nextScreen = getNextScreenAfterDeveloperTeamInstall({
-              selectedEnvironments,
-              hasOpenCodeNext:
-                selectedEnvironments.includes("opencode-development") && hasOpenCode && !openCodePreflight,
-            });
-
-            resetCursor(nextScreen);
-          }
+          resetCursor(nextScreen);
         }
       }
     }
@@ -834,13 +840,13 @@ export function DeckApp() {
     if (screen === "model-environment-selection") return getEnvironmentOptions().length - 1;
     if (screen === "model-team-selection") {
       const env = selectedModelEnvironment ?? "pi-development";
-      const teams = env === "opencode-development" ? getOpenCodeTeamsForEnvironment(env) : getTeamsForEnvironment(env);
+      const teams = getAdapter(env).getTeams(env) as any[];
       return Math.max(0, teams.length - 1);
     }
     if (screen === "environment-selection") return getEnvironmentOptions().length - 1;
-    if (screen === "optional-tools") return getOptionalPiTools().length - 1;
+    if (screen === "optional-tools") return getAdapter("pi").getSelectableTools().length - 1;
     if (screen === "installation-review") return 1;
-    if (screen === "team-selection") return Math.max(0, getTeamsForEnvironment("pi-development").length - 1);
+    if (screen === "team-selection") return Math.max(0, getAdapter("pi").getTeams("pi-development").length - 1);
     if (screen === "memory-provider-selection") return 2;
     if (screen === "developer-team-review") return 1;
     if (screen === "agent-model-config-list") return DEVELOPER_TEAM_AGENTS.length;
@@ -848,7 +854,8 @@ export function DeckApp() {
     if (screen === "model-selection") return Math.max(0, providerModels.length - 1);
     if (screen === "agent-model-assignment") {
       const thinkingLevels = modelConfigRuntime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
-      const supportsThinking = modelConfigRuntime === "opencode" ? supportsThinkingForOpenCodeModel(selectedModel?.id) : supportsThinkingForModel(selectedModel ?? undefined);
+      const adapter = getAdapter(modelConfigRuntime);
+      const supportsThinking = selectedModel ? adapter.supportsThinking(selectedModel.id) : false;
       return selectedModel && supportsThinking ? thinkingLevels.length - 1 : 0;
     }
     if (screen === "no-providers") return 0;
@@ -883,7 +890,7 @@ export function DeckApp() {
     }
 
     if (screen === "team-selection") {
-      const teams = getTeamsForEnvironment("pi-development");
+      const teams = getAdapter("pi").getTeams("pi-development") as any[];
       const team = teams[cursor];
       if (!team) return;
       setSelectedTeams((current) =>
@@ -893,7 +900,7 @@ export function DeckApp() {
     }
 
     if (screen === "optional-tools") {
-      const tool = getOptionalPiTools()[cursor];
+      const tool = getAdapter("pi").getSelectableTools()[cursor] as any;
       if (!tool) return;
       setSelectedOptionalTools((current) =>
         current.includes(tool.id) ? current.filter((selected) => selected !== tool.id) : [...current, tool.id],
@@ -911,7 +918,7 @@ export function DeckApp() {
     }
   }
 
-  function continueFromCurrent() {
+  async function continueFromCurrent() {
     if (screen === "home") {
       const action = getHomeMenuOptions()[homeCursor]?.value;
       if (action === "start-installation") resetCursor("environment-selection");
@@ -947,7 +954,7 @@ export function DeckApp() {
 
     if (screen === "model-team-selection") {
       const env = selectedModelEnvironment ?? "pi-development";
-      const teams = env === "opencode-development" ? getOpenCodeTeamsForEnvironment(env) : getTeamsForEnvironment(env);
+      const teams = getAdapter(env).getTeams(env) as any[];
       const team = teams[modelTeamCursor];
       if (!team) return;
 
@@ -985,7 +992,7 @@ export function DeckApp() {
       const nextScreen = getNextScreenAfterEnvironmentSelection({
         selectedEnvironments,
         hasPiCommand: true, // not used by this helper
-        hasOpenCodeNext: selectedEnvironments.includes("opencode-development"),
+        nextEnvironment: selectedEnvironments[0] ?? null,
       });
       // Default cursor to Pragmática (index 1) on personality-selection screen
       resetCursor(nextScreen, nextScreen === "personality-selection" ? 1 : 0);
@@ -1015,7 +1022,7 @@ export function DeckApp() {
       const nextScreen = getNextScreenAfterPersonalitySelection({
         selectedEnvironments,
         hasPiCommand: true,
-        hasOpenCodeNext: selectedEnvironments.includes("opencode-development"),
+        nextEnvironment: selectedEnvironments[0] ?? null,
       });
       resetCursor(nextScreen);
       return;
@@ -1081,54 +1088,36 @@ export function DeckApp() {
           packageInstructions: newPackageInstructions,
         });
 
-        if (configurePackagesRunner === "opencode") {
-          const configDir = join(homedir(), ".config", "opencode");
-          
-          // Leer assignments existentes para preservar modelos
-          let configModelOverrides: Record<string, string> = {};
-          let reasoningEffortOverrides: Record<string, string> = {};
-          try {
-            const opencodeConfig = JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8"));
-            for (const [agentId, entry] of Object.entries(opencodeConfig.agent ?? {})) {
-              if (agentId.startsWith("deck-developer-") && entry && typeof entry === "object") {
-                if ("model" in entry) configModelOverrides[agentId] = entry.model as string;
-                if ("reasoningEffort" in entry) reasoningEffortOverrides[agentId] = entry.reasoningEffort as string;
-              }
-            }
-          } catch {}
-          
-          // Construir bundle de instrucciones
-          const enabledIds = Object.entries(configurePackagesToggles)
-            .filter(([, enabled]) => enabled)
-            .map(([id]) => id);
-          const bundle = buildCapabilityInstructionBundle(enabledIds as any);
-          
-          // Generar y aplicar plan
-          const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
-          const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
-            configDir,
-            capabilityInstructions: bundle,
-            configModelOverrides,
-            reasoningEffortOverrides: reasoningEffortOverrides as any,
-            standaloneSkills,
-          });
-          
-          try {
-            const result = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
-            const updatedCount = result.results.filter((r) => r.status === "updated").length;
-            const createdCount = result.results.filter((r) => r.status === "created").length;
-            setDashboardCompletionStatus(
-              `Package instructions applied. ${updatedCount} updated, ${createdCount} created.`,
-            );
-          } catch (error) {
-            setDashboardCompletionStatus(
-              `Failed to apply: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          }
-        } else {
-          setDashboardCompletionStatus(`Package instructions saved for Pi. Run 'deck pi developer' to apply changes.`);
+        const adapter = getAdapter(configurePackagesRunner);
+
+        // Construir bundle de instrucciones
+        const enabledIds = Object.entries(configurePackagesToggles)
+          .filter(([, enabled]) => enabled)
+          .map(([id]) => id);
+        const bundle = buildCapabilityInstructionBundle(enabledIds as any);
+
+        // Generar y aplicar plan vía adapter (el adapter lee assignments internamente)
+        const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
+        const plan = adapter.buildDeveloperTeamInstallPlan({
+          projectRoot,
+          environmentId: configurePackagesRunner as any,
+          capabilityInstructions: bundle,
+          standaloneSkills,
+        });
+
+        try {
+          const result = await adapter.applyDeveloperTeamInstall({ projectRoot, plan });
+          const updatedCount = result.results.filter((r) => r.status === "updated").length;
+          const createdCount = result.results.filter((r) => r.status === "created").length;
+          setDashboardCompletionStatus(
+            `Package instructions applied. ${updatedCount} updated, ${createdCount} created.`,
+          );
+        } catch (error) {
+          setDashboardCompletionStatus(
+            `Failed to apply: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
-        
+
         setConfigurePackagesRunner(null);
         setConfigurePackagesCursor(0);
         resetCursor("complete");
@@ -1152,7 +1141,7 @@ export function DeckApp() {
       const hasOpenCode = selectedEnvironments.includes("opencode-development");
       const nextScreen = getNextScreenAfterTeamSelection({
         selectedTeams,
-        hasOpenCodeNext: hasOpenCode,
+        nextEnvironment: selectedEnvironments[0] ?? null,
       });
 
       if (nextScreen === "developer-team-review") {
@@ -1216,7 +1205,7 @@ export function DeckApp() {
     if (screen === "model-selection") {
       const model = providerModels[cursor];
       if (!model) return;
-      if (modelConfigRuntime === "pi" && !supportsDeveloperTeamModel(model)) {
+      if (modelConfigRuntime === "pi" && !getAdapter("pi").supportsThinking(model.id)) {
         resetCursor("agent-model-config-list");
         return;
       }
@@ -1224,9 +1213,7 @@ export function DeckApp() {
       const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
       const existingThinking = agent ? thinkingAssignments[agent.id] : undefined;
 
-      const supportsThinking = modelConfigRuntime === "opencode"
-        ? supportsThinkingForOpenCodeModel(model.id)
-        : supportsThinkingForModel(model);
+      const supportsThinking = getAdapter(modelConfigRuntime).supportsThinking(model.id);
       const thinkingLevels = modelConfigRuntime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
 
       if (!supportsThinking) {
@@ -1243,9 +1230,7 @@ export function DeckApp() {
         return;
       }
 
-      const resolveThinking = modelConfigRuntime === "opencode"
-        ? resolveThinkingForOpenCodeModel(model.id, existingThinking as any)
-        : resolveThinkingForModel(model, existingThinking as any);
+      const resolveThinking = getAdapter(modelConfigRuntime).resolveThinking(model.id, existingThinking as any);
 
       const defaultThinking = resolveThinking ?? (modelConfigRuntime === "opencode" ? "low" : "low");
       const thinkingIndex = thinkingLevels.indexOf(defaultThinking as any);
@@ -1261,9 +1246,7 @@ export function DeckApp() {
       const thinkingLevels = modelConfigRuntime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
       const rawThinking = thinkingLevels[cursor] ?? "low";
 
-      const thinking = modelConfigRuntime === "opencode"
-        ? resolveThinkingForOpenCodeModel(selectedModel.id, rawThinking as any)
-        : resolveThinkingForModel(selectedModel, rawThinking as any);
+      const thinking = getAdapter(modelConfigRuntime).resolveThinking(selectedModel.id, rawThinking as any);
 
       setModelAssignments((current) => ({ ...current, [agent.id]: selectedModel.id }));
       setThinkingAssignments((current) => {
@@ -1313,7 +1296,7 @@ export function DeckApp() {
       const nextScreen = getNextScreenAfterDeveloperTeamReview({
         cursor: developerTeamCursor,
         selectedEnvironments,
-        hasOpenCodeNext: hasOpenCode,
+        nextEnvironment: selectedEnvironments[0] ?? null,
       });
 
       resetCursor(nextScreen);
@@ -1326,11 +1309,13 @@ export function DeckApp() {
 
   function handleDashboardInput(input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) {
     if (input === "q") {
+      log("handleDashboardInput: q pressed → exit");
       clearDashboardSupermemoryEphemeralState();
       exit();
       return;
     }
     if (key.escape) {
+      log("handleDashboardInput: escape pressed");
       if (dashboardState.screen === "dashboard") {
         clearDashboardSupermemoryEphemeralState();
         resetCursor("environment-selection");
@@ -1352,6 +1337,7 @@ export function DeckApp() {
       return;
     }
     if (key.return) {
+      log(`handleDashboardInput: Enter pressed. dashboardScreen=${dashboardState.screen} cursor=${dashboardState.cursor}`);
       continueDashboardCurrent();
     }
   }
@@ -1362,30 +1348,47 @@ export function DeckApp() {
   }
 
   function continueDashboardCurrent() {
+    log(`continueDashboardCurrent: screen=${dashboardState.screen} cursor=${dashboardState.cursor}`);
     const effect = getDashboardContinueEffect(dashboardState, {
       inventory: dashboardInventory,
       canRunPlan: canRunDashboardPlan(dashboardState),
     }, dashboardCapabilityResolver);
+    log(`continueDashboardCurrent: effect.type=${effect.type} action=${(effect as any).action?.type ?? "n/a"}`);
     applyDashboardContinueEffect(effect);
+    log(`continueDashboardCurrent: done`);
   }
 
   function applyDashboardContinueEffect(effect: RunnerDashboardContinueEffect) {
+    // Helper to safely dispatch reducer actions that use dashboardPlanBuilder
+    const safeDispatch = (action: RunnerDashboardAction) => {
+      try {
+        log(`safeDispatch: action=${action.type}`);
+        setDashboardError(null);
+        setDashboardState((state) => reduceRunnerDashboard(state, action, dashboardPlanBuilder));
+        log(`safeDispatch: action=${action.type} DONE`);
+      } catch (error) {
+        const msg = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
+        log(`safeDispatch ERROR: action=${action.type} error=${msg}`);
+        setDashboardError(`[dashboard error] ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+
     switch (effect.type) {
       case "dispatch":
         if (effect.action.type === "select-adaptive-memory" && effect.action.provider !== "supermemory") {
           clearDashboardSupermemoryEphemeralState();
         }
-        setDashboardState((state) => reduceRunnerDashboard(state, effect.action, dashboardPlanBuilder));
+        safeDispatch(effect.action);
         return;
       case "select-supermemory-and-open-setup":
-        setDashboardState((state) => reduceRunnerDashboard(state, effect.action, dashboardPlanBuilder));
+        safeDispatch(effect.action);
         setDashboardSupermemorySetupActive(true);
         setMemoryProviderChoice("supermemory");
         setSupermemoryError(undefined);
         resetCursor("supermemory-token");
         return;
       case "open-developer-team-model-config": {
-        const runtime: "pi" | "opencode" = dashboardState.runnerScope === "opencode" ? "opencode" : "pi";
+        const runtime = dashboardState.runnerScope;
         setModelConfigRuntime(runtime);
         hydrateDeveloperTeamModelConfig(runtime);
         const inventory = runtime === "opencode" ? detectOpenCodeModelInventoryForTui() : detectPiModelInventoryForTui();
@@ -1397,14 +1400,13 @@ export function DeckApp() {
         return;
       }
       case "reuse-developer-team-model-config": {
-        const runtime: "pi" | "opencode" = dashboardState.runnerScope === "opencode" ? "opencode" : "pi";
+        const runtime = dashboardState.runnerScope;
         setModelConfigRuntime(runtime);
         hydrateDeveloperTeamModelConfig(runtime);
         // Use require: true for backward compatibility - reads need a path
         const targetRoot = resolveProjectRoot({ require: true });
-        const assignments = runtime === "opencode"
-          ? readOpenCodeDeveloperTeamModelConfigAssignments()
-          : readDeveloperTeamModelConfigAssignments(targetRoot);
+        const adapter = getAdapter(runtime);
+        const assignments = adapter.readModelAssignments(targetRoot);
         setDashboardState((state) => ({
           ...state,
           teams: {
@@ -1602,17 +1604,10 @@ export function DeckApp() {
 
   function hydrateDeveloperTeamModelConfig(runtime?: "pi" | "opencode") {
     const effectiveRuntime = runtime ?? modelConfigRuntime;
-    if (effectiveRuntime === "opencode") {
-      const assignments = readOpenCodeDeveloperTeamModelConfigAssignments();
-      setModelAssignments(assignments.modelAssignments);
-      setThinkingAssignments(assignments.thinkingAssignments as any);
-    } else {
-      // Use require: true for backward compatibility - reads need a path
-      const targetRoot = resolveProjectRoot({ require: true });
-      const assignments = readDeveloperTeamModelConfigAssignments(targetRoot);
-      setModelAssignments(assignments.modelAssignments);
-      setThinkingAssignments(assignments.thinkingAssignments);
-    }
+    const adapter = getAdapter(effectiveRuntime);
+    const assignments = adapter.readModelAssignments();
+    setModelAssignments(assignments.modelAssignments);
+    setThinkingAssignments(assignments.thinkingAssignments);
   }
 
   function getThinkingLevelByCursor(index: number) {
@@ -1639,77 +1634,58 @@ export function DeckApp() {
     }));
   }
 
-  function applyDeveloperTeamModelConfig() {
-    // Use require: true for backward compatibility - writes need a path
+  async function applyDeveloperTeamModelConfig() {
     const projectRoot = resolveProjectRoot({ require: true });
+    const adapter = getAdapter(modelConfigRuntime);
 
-    if (modelConfigRuntime === "opencode") {
-      const deckConfig = readDeckConfig(projectRoot);
-      const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
-      const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+    // Build capability instructions (only used by OpenCode; Pi ignores undefined capabilityInstructions)
+    const deckConfig = readDeckConfig(projectRoot);
+    const enabledIds = getEnabledPackageInstructionIds(deckConfig, modelConfigRuntime);
+    const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
 
-      const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configModelOverrides: modelAssignments, reasoningEffortOverrides: thinkingAssignments as any, ...(memoryProvider ? { memoryProvider } : {}), capabilityInstructions, standaloneSkills });
-      const backup = backupOpenCodeDeveloperTeamFiles(plan);
+    const standaloneSkills =
+      modelConfigRuntime === "opencode"
+        ? getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }))
+        : undefined;
 
-      try {
-        const applyResult = applyOpenCodeDeveloperTeamInstall(plan);
-        const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
+    const plan = adapter.buildDeveloperTeamInstallPlan({
+      projectRoot,
+      environmentId: modelConfigRuntime === "opencode" ? "opencode-development" : "pi-development",
+      modelAssignments,
+      thinkingAssignments,
+      memoryProvider,
+      capabilityInstructions,
+      standaloneSkills,
+    });
 
-        if (!verifyResult.valid) {
-          rollbackOpenCodeDeveloperTeamFiles(backup);
-          setDeveloperTeamResults([]);
-          setInstallResults((current) => [
-            ...current,
-            { tool: "Developer Team models", success: false, message: "Verification failed. Changes rolled back." },
-          ]);
-          return;
-        }
+    const backup = adapter.backupDeveloperTeamFiles(plan);
 
-        setDeveloperTeamResults(applyResult.results as any);
-      } catch (error) {
-        rollbackOpenCodeDeveloperTeamFiles(backup);
+    try {
+      const applyResult = await adapter.applyDeveloperTeamInstall({ projectRoot, plan });
+      const verifyResult = adapter.verifyDeveloperTeamInstall(plan);
+
+      if (!verifyResult.valid) {
+        adapter.rollbackDeveloperTeamFiles(backup);
         setDeveloperTeamResults([]);
         setInstallResults((current) => [
           ...current,
-          {
-            tool: "Developer Team models",
-            success: false,
-            message: `Model configuration failed. Changes rolled back.${error instanceof Error ? ` ${error.message}` : ""}`,
-          },
+          { tool: "Developer Team models", success: false, message: "Verification failed. Changes rolled back." },
         ]);
+        return;
       }
-    } else {
-      const plan = buildDeveloperTeamInstallPlan(projectRoot, { modelAssignments, thinkingAssignments, preserveMissingThinkingAssignments: true, ...(memoryProvider ? { memoryProvider } : {}) });
-      const backup = backupDeveloperTeamFiles(plan);
 
-      try {
-        const applyResult = applyDeveloperTeamInstall(plan);
-        const verifyResult = verifyDeveloperTeamInstall(plan);
-
-        if (!verifyResult.valid) {
-          rollbackDeveloperTeamFiles(backup);
-          setDeveloperTeamResults([]);
-          setInstallResults((current) => [
-            ...current,
-            { tool: "Developer Team models", success: false, message: "Verification failed. Changes rolled back." },
-          ]);
-          return;
-        }
-
-        setDeveloperTeamResults(applyResult.results);
-      } catch (error) {
-        rollbackDeveloperTeamFiles(backup);
-        setDeveloperTeamResults([]);
-        setInstallResults((current) => [
-          ...current,
-          {
-            tool: "Developer Team models",
-            success: false,
-            message: `Model configuration failed. Changes rolled back.${error instanceof Error ? ` ${error.message}` : ""}`,
-          },
-        ]);
-      }
+      setDeveloperTeamResults(applyResult.results as any);
+    } catch (error) {
+      adapter.rollbackDeveloperTeamFiles(backup);
+      setDeveloperTeamResults([]);
+      setInstallResults((current) => [
+        ...current,
+        {
+          tool: "Developer Team models",
+          success: false,
+          message: `Model configuration failed. Changes rolled back.${error instanceof Error ? ` ${error.message}` : ""}`,
+        },
+      ]);
     }
   }
 
@@ -1824,7 +1800,7 @@ export function DeckApp() {
     const nextScreen = getNextScreenAfterPiToolInstall({
       selectedEnvironments,
       hasPiCommand: hasPi,
-      hasOpenCodeNext: selectedEnvironments.includes("opencode-development") && hasOpenCode && !openCodePreflight,
+      nextEnvironment: selectedEnvironments[0] ?? null,
     });
 
     resetCursor(nextScreen);
@@ -1903,7 +1879,7 @@ export function DeckApp() {
   }
 
   return (
-    <ScreenFrame title={screenTitle(screen, dashboardState.runnerScope)} help={HELP} width={stdout.columns || 72} height={stdout.rows || undefined}>
+    <ScreenFrame title={screenTitle(screen, dashboardState.runnerScope)} help={HELP} width={stdout.columns || 72} height={stdout.rows || undefined} logs={logs}>
       {screen === "home" ? <HomeScreen cursor={homeCursor} /> : null}
       {screen === "doctor" ? <DoctorScreen /> : null}
       {screen === "model-environment-selection" ? <ModelEnvironmentSelectionScreen cursor={modelEnvironmentCursor} /> : null}
@@ -1918,6 +1894,12 @@ export function DeckApp() {
       ) : null}
       {screen === "pi-runner-dashboard" ? (
         <RunnerDashboardScreens state={dashboardState} installResults={dashboardActionResults} completionStatus={dashboardCompletionStatus} canRunPlan={canRunDashboardPlan(dashboardState)} runBlockDiagnostics={getDashboardRunBlockDiagnostics(dashboardState)} capabilityResolver={dashboardCapabilityResolver} />
+      ) : null}
+      {dashboardError && screen === "pi-runner-dashboard" ? (
+        <Box marginTop={1} flexDirection="column">
+          <Text color="red" bold>DASHBOARD ERROR</Text>
+          <Text color="red">{dashboardError}</Text>
+        </Box>
       ) : null}
       {screen === "pi-preflight-checking" ? <CheckingScreen /> : null}
       {screen === "pi-preflight" && piPreflight ? <PiPreflightScreen preflight={piPreflight} /> : null}
@@ -1941,8 +1923,8 @@ export function DeckApp() {
           agentIndex={agentAssignmentIndex}
           totalAgents={DEVELOPER_TEAM_AGENTS.length}
           modelId={selectedModel.id}
-          defaultThinking={modelConfigRuntime === "opencode" ? getDefaultThinkingForOpenCodeModel(selectedModel.id) : getDefaultThinkingForModel(selectedModel.id)}
-          supportsThinking={modelConfigRuntime === "opencode" ? supportsThinkingForOpenCodeModel(selectedModel.id) : supportsThinkingForModel(selectedModel)}
+          defaultThinking={getAdapter(modelConfigRuntime).getDefaultThinking(selectedModel.id)}
+          supportsThinking={getAdapter(modelConfigRuntime).supportsThinking(selectedModel.id)}
           runtime={modelConfigRuntime}
         />
       ) : null}
@@ -1983,7 +1965,7 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",
     "personality-selection": "Choose orchestrator personality",
-    "pi-runner-dashboard": runnerScope === "opencode" ? "OpenCode Runner capability dashboard" : "Pi Runner capability dashboard",
+    "pi-runner-dashboard": `OpenCode Runner capability dashboard`,
     "pi-preflight-checking": "Checking Pi environment",
     "pi-preflight": "Pi Environment Preflight",
     "required-tools": "Review required tools",
@@ -2149,10 +2131,7 @@ function ModelEnvironmentSelectionScreen({ cursor }: { cursor: number }) {
 }
 
 function ModelTeamSelectionScreen({ cursor, environment }: { cursor: number; environment: EnvironmentId }) {
-  const teams =
-    environment === "opencode-development"
-      ? getOpenCodeTeamsForEnvironment(environment)
-      : getTeamsForEnvironment(environment);
+  const teams = getAdapter(environment).getTeams(environment) as any[];
 
   return (
     <Box flexDirection="column">
@@ -2242,7 +2221,7 @@ function OptionalToolsScreen({ cursor, selected }: { cursor: number; selected: I
         <MenuList
           cursor={cursor}
           multiselect
-          items={getOptionalPiTools().map((tool) => ({
+          items={getAdapter("pi").getSelectableTools().map((tool) => ({
             id: tool.id,
             label: tool.name,
             hint: "recommended",
@@ -2292,7 +2271,7 @@ function OpenCodeToolSelectionScreen({ cursor, selected }: { cursor: number; sel
 }
 
 function TeamSelectionScreen({ cursor, selected }: { cursor: number; selected: string[] }) {
-  const teams = getTeamsForEnvironment("pi-development");
+  const teams = getAdapter("pi").getTeams("pi-development") as any[];
   return (
     <Box flexDirection="column">
       <Text dimColor>Select teams for Pi Development Environment.</Text>

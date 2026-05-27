@@ -1,13 +1,19 @@
 /**
  * User-facing capability IDs for the OpenCode runner dashboard.
  */
-export type OpenCodeCapabilityId = "rtk" | "context-mode" | "codebase-memory" | "opencode-mermaid";
+export type OpenCodeCapabilityId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "opencode-mermaid";
 
 export type OpenCodeRunnerScope = "opencode" | "all";
 
 export type OpenCodeCapabilityStatus = "ready" | "missing" | "manual" | "pending" | "blocked";
 
-export type OpenCodeCapabilityInstallKind = "opencode-plugin" | "external" | "pending";
+export type OpenCodeCapabilityInstallKind =
+  | "opencode-plugin" // OpenCode plugin (in-process) added to plugin array in opencode.json
+  | "external" // Manual install required from external source
+  | "pending" // Install pending / not yet determined
+  | "mcp-server" // MCP server configured via mcp array in opencode.json
+  | "npm-package" // npm global package via `npm install -g`
+  | "shell-script"; // Binary installed via shell script (curl -fsSL <url> | sh)
 
 export type OpenCodeCapabilityToolMapping = {
   capabilityId: OpenCodeCapabilityId;
@@ -21,6 +27,7 @@ export type OpenCodeCapabilityToolMapping = {
   detector: {
     pluginNames?: string[];
     commands?: string[];
+    mcpServerNames?: string[];
     note?: string;
   };
   /** When true, this capability is internal and must not appear in user-facing selectors. */
@@ -35,7 +42,7 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
   "context-mode": {
     capabilityId: "context-mode",
     label: "context-mode",
-    description: "Context-mode runner capability for shared execution context.",
+    description: "Context-mode plugin for context window optimization and knowledge base.",
     runnerScope: "all",
     requirementLevel: "configurable",
     toolId: "context-mode",
@@ -46,24 +53,35 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
   "codebase-memory": {
     capabilityId: "codebase-memory",
     label: "codebase-memory",
-    description: "Codebase memory MCP capability; separate from Adaptive Memory providers.",
+    description: "Codebase memory MCP capability for code intelligence. Binary MCP server installed via shell script.",
     runnerScope: "all",
     requirementLevel: "configurable",
     toolId: "codebase-memory",
     source: "DeusData/codebase-memory-mcp",
-    installKind: "external",
-    detector: { pluginNames: ["codebase-memory"], commands: ["codebase-memory-mcp"] },
+    installKind: "shell-script",
+    detector: { commands: ["codebase-memory-mcp"] },
   },
   rtk: {
     capabilityId: "rtk",
     label: "RTK",
-    description: "RTK runner capability installed and verified outside OpenCode package automation.",
+    description: "RTK token optimizer for CLI commands. Installs as OpenCode plugin via rtk init.",
     runnerScope: "all",
     requirementLevel: "configurable",
     toolId: "rtk",
     source: "rtk-ai/rtk",
-    installKind: "external",
-    detector: { pluginNames: ["rtk"], commands: ["rtk"] },
+    installKind: "shell-script-plus-mcp",
+    detector: { commands: ["rtk"] },
+  },
+  context7: {
+    capabilityId: "context7",
+    label: "Context7",
+    description: "Context7 MCP server for enhanced context retrieval and management.",
+    runnerScope: "all",
+    requirementLevel: "configurable",
+    toolId: "context7",
+    source: "@upstash/context7-mcp",
+    installKind: "mcp-server",
+    detector: { mcpServerNames: ["context7"] },
   },
   "opencode-mermaid": {
     capabilityId: "opencode-mermaid",
@@ -91,6 +109,7 @@ export const OPENCODE_RUNNER_CAPABILITY_CATALOG: Record<
   "context-mode": FULL_OPENCODE_CAPABILITY_CATALOG["context-mode"] as OpenCodeCapabilityToolMapping,
   "codebase-memory": FULL_OPENCODE_CAPABILITY_CATALOG["codebase-memory"] as OpenCodeCapabilityToolMapping,
   rtk: FULL_OPENCODE_CAPABILITY_CATALOG.rtk as OpenCodeCapabilityToolMapping,
+  context7: FULL_OPENCODE_CAPABILITY_CATALOG.context7 as OpenCodeCapabilityToolMapping,
 } as const satisfies Record<Exclude<OpenCodeCapabilityId, "opencode-mermaid">, OpenCodeCapabilityToolMapping>;
 
 export const OPENCODE_RUNNER_CAPABILITY_IDS = Object.keys(OPENCODE_RUNNER_CAPABILITY_CATALOG) as Exclude<OpenCodeCapabilityId, "opencode-mermaid">[];

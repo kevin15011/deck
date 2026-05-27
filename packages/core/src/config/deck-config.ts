@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import type { AdapterRegistry } from "../adapter-registry";
+
 // Import global config path resolver from T5
 // Lazy import to avoid circular dependencies
 let globalPaths: typeof import("../../apps/cli/src/runtime/paths.js") | null = null;
@@ -55,11 +57,31 @@ export const DEFAULT_ORCHESTRATOR_PERSONALITY: OrchestratorPersonality = "pragma
 // Package Instruction Config
 // ---------------------------------------------------------------------------
 
-export const PACKAGE_INSTRUCTION_RUNNERS = ["pi", "opencode"] as const;
-export type PackageInstructionRunnerId = (typeof PACKAGE_INSTRUCTION_RUNNERS)[number];
+/** Dynamic runner ID for package instructions — validated at runtime against AdapterRegistry. */
+export type PackageInstructionRunnerId = string & {};
 
 export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk", "adaptive-memory"] as const;
 export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number];
+
+/**
+ * Validate runner keys against registered adapters.
+ *
+ * @param keys - Runner keys found in packageInstructions config
+ * @param registry - Adapter registry to validate against
+ * @throws DeckConfigError if any key is not registered
+ */
+export function validateRunnerKeys(keys: string[], registry: AdapterRegistry): void {
+  for (const key of keys) {
+    if (!registry.has(key)) {
+      const registered = registry.list().map((a) => a.runnerId);
+      throw new DeckConfigError(
+        "DECK_CONFIG_UNKNOWN_FIELD",
+        `Unknown runner key '${key}'. Registered runners: [${registered.join(", ")}].`,
+        { fieldPath: `packageInstructions.${key}` },
+      );
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // SDD Phase / Profile types
@@ -172,7 +194,6 @@ const SUPERMEMORY_FIELDS = new Set([
   "searchMode",
   "maxMemoriesPerSession",
 ]);
-const PACKAGE_INSTRUCTION_RUNNER_FIELDS = new Set(PACKAGE_INSTRUCTION_RUNNERS);
 const PACKAGE_INSTRUCTION_PACKAGE_FIELDS = new Set(PACKAGE_INSTRUCTION_PACKAGE_IDS);
 
 export function getDeckConfigPath(projectRoot: string): string {
@@ -339,7 +360,7 @@ export function writeDeckConfig(projectRoot: string, config: unknown): Normalize
 
 export function validateDeckConfig(
   config: unknown,
-  options?: { configPath?: string },
+  options?: { configPath?: string; registry?: AdapterRegistry },
 ): NormalizedDeckConfig {
   if (config === undefined || config === null) {
     return getDefaultDeckConfig();
@@ -366,6 +387,7 @@ export function validateDeckConfig(
   const packageInstructions = normalizePackageInstructionConfig(
     config.packageInstructions,
     options?.configPath,
+    options,
   );
 
   const orchestratorPersonality = normalizeOrchestratorPersonalityConfig(
@@ -537,8 +559,10 @@ function normalizeSupermemoryConfig(
 function normalizePackageInstructionConfig(
   value: unknown,
   configPath?: string,
+  options?: { registry?: AdapterRegistry },
 ): NormalizedDeckConfig["packageInstructions"] {
   // Default: all runners have all packages disabled
+  // getDefaultDeckConfig() provides defaults for pi + opencode for backward compat
   const defaultResult: NormalizedDeckConfig["packageInstructions"] = {
     pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
     opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
@@ -549,32 +573,34 @@ function normalizePackageInstructionConfig(
   }
 
   assertPlainObject(value, "packageInstructions", configPath);
-
-  // Validate each runner key
-  for (const runnerKey of Object.keys(value)) {
-    if (!PACKAGE_INSTRUCTION_RUNNER_FIELDS.has(runnerKey as PackageInstructionRunnerId)) {
-      throw new DeckConfigError(
-        "DECK_CONFIG_UNKNOWN_FIELD",
-        `Unknown Deck config field: packageInstructions.${runnerKey}`,
-        { configPath, fieldPath: `packageInstructions.${runnerKey}` },
-      );
-    }
+  // If empty object, return defaults for backward compat
+  if (Object.keys(value).length === 0) {
+    return defaultResult;
   }
 
-  // Normalize: start from defaults, apply provided values, validate
-  const result: NormalizedDeckConfig["packageInstructions"] = {
-    pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
-    opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
-  };
+  // Validate each runner key against registry if provided
+  if (options?.registry) {
+    validateRunnerKeys(Object.keys(value), options.registry);
+  }
 
-  for (const runner of PACKAGE_INSTRUCTION_RUNNERS) {
-    const runnerValue = value[runner];
+  // Normalize: start from empty object, apply provided values (any runner key allowed)
+  const result: NormalizedDeckConfig["packageInstructions"] = {};
+
+  for (const [runner, runnerValue] of Object.entries(value)) {
     if (runnerValue === undefined || runnerValue === null) {
-      // Keep defaults (all false)
+      // Skip null/undefined runner entries
       continue;
     }
 
     assertPlainObject(runnerValue, `packageInstructions.${runner}`, configPath);
+
+    // Initialize runner entry with default false for all packages
+    result[runner as PackageInstructionRunnerId] = {
+      "codebase-memory": false,
+      "context-mode": false,
+      rtk: false,
+      "adaptive-memory": false,
+    };
 
     // Validate each package key in this runner
     for (const pkgKey of Object.keys(runnerValue)) {
@@ -589,7 +615,7 @@ function normalizePackageInstructionConfig(
 
     // Normalize package booleans
     for (const pkg of PACKAGE_INSTRUCTION_PACKAGE_IDS) {
-      const pkgValue = runnerValue[pkg];
+      const pkgValue = (runnerValue as Record<string, unknown>)[pkg];
       if (pkgValue !== undefined) {
         if (typeof pkgValue !== "boolean") {
           throw new DeckConfigError(
@@ -598,7 +624,7 @@ function normalizePackageInstructionConfig(
             { configPath, fieldPath: `packageInstructions.${runner}.${pkg}` },
           );
         }
-        result[runner][pkg] = pkgValue;
+        result[runner as PackageInstructionRunnerId][pkg] = pkgValue;
       }
       // If undefined, keep default (false)
     }

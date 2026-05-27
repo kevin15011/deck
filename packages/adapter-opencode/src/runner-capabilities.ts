@@ -100,12 +100,20 @@ async function installTools(input: RunnerToolInstallInput): Promise<RunnerToolIn
   const { buildOpenCodeInstallationPlan, OPENCODE_INSTALLABLE_TOOLS } = require("./installation-plan");
   const { reviewOpenCodeTools } = require("./required-tools");
 
+  console.error("[runner-capabilities] installTools called, input:", JSON.stringify(input));
+
   const toolsReview = reviewOpenCodeTools();
-  const selectedToolIds = OPENCODE_INSTALLABLE_TOOLS.filter((t: InstallableOpenCodeTool) => t.required).map((t: InstallableOpenCodeTool) => t.id);
+  console.error("[runner-capabilities] toolsReview:", JSON.stringify(toolsReview.tools));
+
+  // All optional tools are selected by default for now - this should come from UI selection
+  const selectedToolIds = OPENCODE_INSTALLABLE_TOOLS.map((t: InstallableOpenCodeTool) => t.id);
+  console.error("[runner-capabilities] selectedToolIds:", JSON.stringify(selectedToolIds));
 
   const plan = buildOpenCodeInstallationPlan({ tools: toolsReview.tools, selectedToolIds });
+  console.error("[runner-capabilities] plan:", JSON.stringify(plan));
 
   const results: OpenCodeToolInstallResult[] = await installOpenCodeTools("opencode", plan, () => {});
+  console.error("[runner-capabilities] install results:", JSON.stringify(results));
   const firstResult = results[0];
 
   return {

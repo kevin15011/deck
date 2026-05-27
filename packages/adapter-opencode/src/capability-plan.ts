@@ -8,6 +8,12 @@ import { OPENCODE_INSTALLABLE_TOOLS } from "./installation-plan";
 import type { OpenCodeRunnerCapabilityInventory } from "./capability-inventory";
 import type { OpenCodeToolsReview } from "./required-tools";
 import type { CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
+import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
+import { appendFileSync } from "node:fs";
+
+const LOG = "/tmp/deck-tui.log";
+function _ts() { return new Date().toISOString().slice(11, 23); }
+function log(msg: string) { try { appendFileSync(LOG, `${_ts()} [capability-plan] ${msg}\n`); } catch {} }
 
 export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
 export type OpenCodeRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
@@ -47,7 +53,7 @@ export type OpenCodeRunnerReviewPlan = {
   ready: boolean;
 };
 
-type BuildOpenCodeRunnerReviewPlanState = {
+export type BuildOpenCodeRunnerReviewPlanState = {
   runnerScope?: string;
   selectedCapabilities?: Partial<Record<string, boolean>>;
   adaptiveMemory?: {
@@ -64,6 +70,7 @@ export function buildOpenCodeRunnerReviewPlan(
   state: BuildOpenCodeRunnerReviewPlanState,
   inventory: OpenCodeRunnerCapabilityInventory,
 ): OpenCodeRunnerReviewPlan {
+  log(`buildOpenCodeRunnerReviewPlan: START. inventoryKeys=${Object.keys(inventory).join(",")} selectedCaps=${JSON.stringify(state.selectedCapabilities ?? {})}`);
   const groups: OpenCodeRunnerReviewPlan["groups"] = {
     automaticInstalls: [],
     manualSteps: [],
@@ -73,11 +80,17 @@ export function buildOpenCodeRunnerReviewPlan(
   };
   const diagnostics: OpenCodeRunnerPlanDiagnostic[] = [];
 
+  try {
   addCapabilityActions(groups, diagnostics, state, inventory);
+  log(`buildOpenCodeRunnerReviewPlan: addCapabilityActions done`);
   addAdaptiveMemoryActions(groups, diagnostics, state);
+  log(`buildOpenCodeRunnerReviewPlan: addAdaptiveMemoryActions done`);
   addTeamActions(groups, diagnostics, state, inventory);
+  log(`buildOpenCodeRunnerReviewPlan: addTeamActions done`);
   addPackageInstructionActions(groups, diagnostics, state);
+  log(`buildOpenCodeRunnerReviewPlan: addPackageInstructionActions done`);
   addValidationActions(groups);
+  log(`buildOpenCodeRunnerReviewPlan: addValidationActions done`);
 
   const unresolved = [
     ...groups.manualSteps,
@@ -86,11 +99,17 @@ export function buildOpenCodeRunnerReviewPlan(
     ...groups.validations,
   ].some((action) => action.status === "manual" || action.status === "pending" || action.status === "blocked" || action.kind === "pending-source");
 
+  log(`buildOpenCodeRunnerReviewPlan: SUCCESS. ready=${!unresolved}`);
   return {
     groups,
     diagnostics,
     ready: !unresolved,
   };
+  } catch (error) {
+    const msg = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
+    log(`buildOpenCodeRunnerReviewPlan: FAILED: ${msg}`);
+    throw error;
+  }
 }
 
 function addCapabilityActions(
@@ -121,6 +140,84 @@ function addCapabilityActions(
         source: tool.module,
         status: "ready",
       });
+      continue;
+    }
+
+    if (capability.installKind === "mcp-server" && entry.status === "missing") {
+      // For MCP servers, we need to generate a config write action
+      // Determine the config based on the capability
+      const mcpConfig = getMcpServerConfig(capabilityId, capability.source);
+      if (mcpConfig) {
+        groups.automaticInstalls.push({
+          id: `capability.${capabilityId}.mcp-config`,
+          kind: "write-mcp-config",
+          title: `Configure ${capability.label} MCP`,
+          description: `Writes ${capability.label} MCP server config to opencode.json.`,
+          capabilityId,
+          toolId: capability.toolId,
+          source: capability.source,
+          status: "ready",
+        });
+        continue;
+      }
+    }
+
+    if (capability.installKind === "npm-package" && tool && entry.status === "missing") {
+      groups.automaticInstalls.push({
+        id: `capability.${capabilityId}.install`,
+        kind: "install-opencode-plugin",
+        title: `Install ${capability.label}`,
+        description: capability.description,
+        capabilityId,
+        toolId: tool.id,
+        source: tool.module,
+        status: "ready",
+      });
+      continue;
+    }
+
+    // shell-script: binary installed via curl | sh (e.g., codebase-memory)
+    if (capability.installKind === "shell-script" && tool && entry.status === "missing") {
+      groups.automaticInstalls.push({
+        id: `capability.${capabilityId}.install`,
+        kind: "install-opencode-plugin",
+        title: `Install ${capability.label}`,
+        description: capability.description,
+        capabilityId,
+        toolId: tool.id,
+        source: tool.id,
+        status: "ready",
+      });
+      continue;
+    }
+
+    // shell-script-plus-mcp: runs shell install AND writes MCP config (for tools like rtk and codebase-memory)
+    if (capability.installKind === "shell-script-plus-mcp" && tool && entry.status === "missing") {
+      const mcpConfig = getMcpServerConfig(capabilityId, capability.source);
+      // Generate shell install action — source is the tool ID (not the URL) so the action-runner can identify the tool
+      groups.automaticInstalls.push({
+        id: `capability.${capabilityId}.install`,
+        kind: "install-opencode-plugin",
+        title: `Install ${capability.label}`,
+        description: capability.description,
+        capabilityId,
+        toolId: tool.id,
+        source: tool.id,
+        status: "ready",
+      });
+      // Also generate MCP config write action if MCP config is known
+      if (mcpConfig) {
+        groups.automaticInstalls.push({
+          id: `capability.${capabilityId}.mcp-config`,
+          kind: "write-mcp-config",
+          title: `Configure ${capability.label} MCP`,
+          description: `Writes ${capability.label} MCP server config to opencode.json.`,
+          capabilityId,
+          toolId: capability.toolId,
+          source: capability.source,
+          status: "ready",
+        });
+      }
       continue;
     }
 
@@ -238,7 +335,7 @@ function addPackageInstructionActions(
 ): void {
   const runnerScope = state.runnerScope ?? "opencode";
   const opencodeBundle = state.packageInstructions?.[runnerScope];
-  if (!opencodeBundle || opencodeBundle.instructions.length === 0) return;
+  if (!opencodeBundle || !opencodeBundle.instructions || opencodeBundle.instructions.length === 0) return;
 
   groups.configWrites.push({
     id: "package-instructions.opencode.deck-config",
@@ -302,6 +399,22 @@ function addCapabilityDiagnostic(
     capabilityId,
     actionId,
   });
+}
+
+/**
+ * Returns MCP server configuration for a given capability.
+ * Returns null if the capability doesn't have a known MCP server config.
+ */
+function getMcpServerConfig(capabilityId: string, source: string | undefined): { type: "local" | "remote"; command?: string[]; url?: string; headers?: Record<string, string> } | null {
+  switch (capabilityId) {
+    case "context7":
+      return {
+        type: "local",
+        command: ["npx", "-y", "@upstash/context7-mcp"],
+      };
+    default:
+      return null;
+  }
 }
 
 function getUnresolvedTeamCapabilities(inventory: OpenCodeRunnerCapabilityInventory): OpenCodeCapabilityId[] {

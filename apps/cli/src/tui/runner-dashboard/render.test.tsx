@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToString } from "ink";
 import React from "react";
-import { PiRunnerDashboardScreens } from "../screens/pi-runner-dashboard-screens";
+import { RunnerDashboardScreens, PiRunnerDashboardScreens } from "../screens/runner-dashboard-screens";
 import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan } from "./state";
 
 /**

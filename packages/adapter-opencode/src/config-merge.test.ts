@@ -307,6 +307,30 @@ describe("mergeAndWrite", () => {
       cleanup(dir);
     }
   });
+  test("removes stale mcp.context-mode entry when context-mode plugin is present", () => {
+    const existing: OpenCodeConfig = {
+      plugin: ["context-mode"],
+      mcp: {
+        "context-mode": { type: "local", command: ["npx", "context-mode"] },
+        "other-server": { type: "local", command: ["npx", "other"] },
+      },
+    };
+    const merged = mergeConfig(existing, {}, []);
+    expect(merged.mcp).toBeDefined();
+    expect((merged.mcp as Record<string, unknown>)["context-mode"]).toBeUndefined();
+    expect((merged.mcp as Record<string, unknown>)["other-server"]).toBeDefined();
+  });
+
+  test("preserves mcp.context-mode when context-mode plugin is NOT present", () => {
+    const existing: OpenCodeConfig = {
+      plugin: ["some-other-plugin"],
+      mcp: {
+        "context-mode": { type: "local", command: ["npx", "context-mode"] },
+      },
+    };
+    const merged = mergeConfig(existing, {}, []);
+    expect((merged.mcp as Record<string, unknown>)["context-mode"]).toBeDefined();
+  });
 });
 
 describe("rollbackConfig", () => {

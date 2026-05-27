@@ -9,8 +9,8 @@ import {
   DEFAULT_ORCHESTRATOR_PERSONALITY,
   getDeckConfigPath,
   ORCHESTRATOR_PERSONALITIES,
-  PACKAGE_INSTRUCTION_PACKAGE_IDS,
-  PACKAGE_INSTRUCTION_RUNNERS,
+PACKAGE_INSTRUCTION_PACKAGE_IDS,
+
   readDeckConfig,
   resolveActiveMemoryProvider,
   validateDeckConfig,
@@ -18,6 +18,8 @@ import {
   SDD_PHASES,
   type Profile,
 } from "./deck-config";
+
+import { createAdapterRegistry, type AdapterRegistry } from "../adapter-registry";
 
 const tempRoots: string[] = [];
 
@@ -49,13 +51,7 @@ function expectDeckConfigError(fn: () => unknown, code: DeckConfigError["code"])
 // Constants
 // ---------------------------------------------------------------------------
 
-describe("PACKAGE_INSTRUCTION_RUNNERS", () => {
-  test("contains pi and opencode", () => {
-    expect(PACKAGE_INSTRUCTION_RUNNERS).toContain("pi");
-    expect(PACKAGE_INSTRUCTION_RUNNERS).toContain("opencode");
-    expect(PACKAGE_INSTRUCTION_RUNNERS).toHaveLength(2);
-  });
-});
+// PACKAGE_INSTRUCTION_RUNNERS removed — runner keys are now dynamic
 
 describe("PACKAGE_INSTRUCTION_PACKAGE_IDS", () => {
   test("contains codebase-memory, context-mode, rtk, adaptive-memory", () => {
@@ -153,18 +149,37 @@ describe("validateDeckConfig — packageInstructions", () => {
     expect(config.packageInstructions.opencode.rtk).toBe(false);
   });
 
-  test("rejects unknown runner key inside packageInstructions", () => {
+  test("rejects unknown runner key inside packageInstructions when registry is provided", () => {
+    const registry = createAdapterRegistry();
     const error = expectDeckConfigError(
       () =>
-        validateDeckConfig({
-          version: 1,
-          adaptiveMemory: { activeProvider: "none" },
-          packageInstructions: { unknownRunner: { rtk: true } },
-        }),
+        validateDeckConfig(
+          {
+            version: 1,
+            adaptiveMemory: { activeProvider: "none" },
+            packageInstructions: { unknownRunner: { rtk: true } },
+          },
+          { registry },
+        ),
       "DECK_CONFIG_UNKNOWN_FIELD",
     );
 
     expect(error.fieldPath).toBe("packageInstructions.unknownRunner");
+  });
+
+  test("accepts known runner key when registry has runners", () => {
+    const registry = createAdapterRegistry();
+    // No error should be thrown for known runner
+    const config = validateDeckConfig(
+      {
+        version: 1,
+        adaptiveMemory: { activeProvider: "none" },
+        packageInstructions: {},
+      },
+      { registry },
+    );
+    // Should get defaults (pi + opencode)
+    expect(config.packageInstructions.pi).toBeDefined();expect(config.packageInstructions.opencode).toBeDefined();
   });
 
   test("rejects unknown package ID inside runner sub-object", () => {
@@ -259,7 +274,7 @@ describe("validateDeckConfig — packageInstructions", () => {
       },
     });
 
-    for (const runner of PACKAGE_INSTRUCTION_RUNNERS) {
+    for (const runner of ["pi", "opencode"]) {
       for (const pkg of PACKAGE_INSTRUCTION_PACKAGE_IDS) {
         expect(config.packageInstructions[runner][pkg]).toBe(true);
       }

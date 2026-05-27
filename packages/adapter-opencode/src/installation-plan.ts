@@ -7,19 +7,33 @@ export type InstallableOpenCodeTool = {
   name: string;
   module: string;
   required: boolean;
-  installKind: "opencode-plugin" | "external";
-};
-
-type BuildOpenCodeInstallationPlanOptions = {
-  tools: OpenCodeToolStatus[];
-  selectedToolIds: InstallableOpenCodeToolId[];
+  installKind: "opencode-plugin" | "external" | "mcp-server" | "npm-package" | "shell-script" | "shell-script-plus-mcp";
+  /** For shell-script: curl URL to pipe to shell */
+  shellInstallUrl?: string;
+  /** For shell-script: command to run after successful shell install (e.g., ["rtk", "init", "-g", "--opencode"]) */
+  postInstallCommand?: string[];
 };
 
 export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [
-  { id: "rtk", name: "RTK", module: "rtk-ai/rtk", required: false, installKind: "external" },
+  {
+    id: "rtk",
+    name: "RTK",
+    module: "rtk-ai/rtk",
+    required: false,
+    installKind: "shell-script-plus-mcp",
+    shellInstallUrl: "https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh",
+    postInstallCommand: ["rtk", "init", "-g", "--opencode"],
+  },
   { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "opencode-plugin" },
-  { id: "codebase-memory", name: "codebase-memory", module: "DeusData/codebase-memory-mcp", required: false, installKind: "external" },
-  { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "opencode-plugin" },
+  {
+    id: "codebase-memory",
+    name: "codebase-memory",
+    module: "DeusData/codebase-memory-mcp",
+    required: false,
+    installKind: "shell-script",
+    shellInstallUrl: "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh",
+  },
+  { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "mcp-server" },
 ];
 
 export function buildOpenCodeInstallationPlan(options: BuildOpenCodeInstallationPlanOptions): InstallableOpenCodeTool[] {

@@ -401,8 +401,9 @@ describe("verifyOpenCodeDeveloperTeamInstall", () => {
   test("fails when skill file is missing", () => {
     const projectRoot = createTempProject();
     try {
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot);
-      // Don't apply
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      // Don't apply - skill files do not exist in configDir
       const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(false);
     } finally {

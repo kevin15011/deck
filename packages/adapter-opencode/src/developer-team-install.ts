@@ -280,7 +280,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     configDir?: string;
     cliModelOverride?: string;
     configModelOverrides?: Record<string, string>;
-    reasoningEffortOverrides?: Record<string, import("./model-config").OpenCodeThinkingLevel>;
+    reasoningEffortOverrides?: Record<string, string>;
     /** Optional personality override; when absent, reads from .deck/config.json */
     personality?: OrchestratorPersonality;
   },

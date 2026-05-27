@@ -156,23 +156,39 @@ export type WriteSupermemoryOpenCodeMcpConfigResult = {
 };
 
 /**
- * Appends the SUPERMEMORY_API_KEY export statement to ~/.bashrc.
- * This ensures the env var is available in future terminal sessions.
+ * Appends the SUPERMEMORY_API_KEY export statement to shell config files.
+ * Handles both macOS (zsh/.zshrc) and Linux (bash/.bashrc).
  */
-export function appendSupermemoryEnvToBashrc(
+export function appendSupermemoryEnvToShellConfig(
   options: { token: string; homeDir?: string },
-): { ok: boolean; bashrcPath: string } {
+): { ok: boolean; shellConfigs: string[] } {
   const homeDir = options.homeDir ?? process.env.HOME ?? "/home/user";
-  const bashrcPath = join(homeDir, ".bashrc");
-
   const exportLine = `export SUPERMEMORY_API_KEY="${options.token}"\n`;
 
-  try {
-    appendFileSync(bashrcPath, exportLine, "utf-8");
-    return { ok: true, bashrcPath };
-  } catch {
-    return { ok: false, bashrcPath };
+  const results: string[] = [];
+  let allOk = true;
+
+  // zsh is the default shell on macOS; bash is common on Linux
+  // We write to both for maximum compatibility
+  const shellConfigs = [
+    { path: join(homeDir, ".zshrc"), name: ".zshrc" },
+    { path: join(homeDir, ".bashrc"), name: ".bashrc" },
+  ];
+
+  for (const config of shellConfigs) {
+    // Skip if file doesn't exist on macOS (e.g., .bashrc on a clean macOS install)
+    if (!existsSync(config.path)) {
+      continue;
+    }
+    try {
+      appendFileSync(config.path, exportLine, "utf-8");
+      results.push(`Added SUPERMEMORY_API_KEY export to ${config.name}.`);
+    } catch {
+      allOk = false;
+    }
   }
+
+  return { ok: allOk, shellConfigs: results };
 }
 
 /**
@@ -249,11 +265,139 @@ export function writeSupermemoryOpenCodeMcpConfig(
     writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
     diagnostics.push(`Supermemory MCP server '${serverName}' configured in OpenCode at ${configPath}.`);
 
-    // Also write the env var export to ~/.bashrc so it's available in future shells.
-    const bashrcResult = appendSupermemoryEnvToBashrc({ token });
-    if (bashrcResult.ok) {
-      diagnostics.push("Added SUPERMEMORY_API_KEY export to ~/.bashrc.");
+    // Also write the env var export to shell configs (.zshrc, .bashrc) for cross-platform compatibility.
+    const shellResult = appendSupermemoryEnvToShellConfig({ token });
+    if (shellResult.ok) {
+      shellResult.shellConfigs.forEach((msg) => diagnostics.push(msg));
+    } else {
+      diagnostics.push("Warning: Could not update shell config files. You may need to manually set SUPERMEMORY_API_KEY.");
     }
+
+    return { ok: true, path: configPath, serverName, diagnostics };
+  } catch (error) {
+    diagnostics.push(`Failed to write opencode.json: ${error instanceof Error ? error.message : String(error)}`);
+    return { ok: false, path: configPath, serverName, diagnostics };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Generic MCP server config writer
+// ---------------------------------------------------------------------------
+
+export type OpenCodeMcpServerType = "local" | "remote";
+
+export type WriteOpenCodeMcpConfigOptions = {
+  /** Name of the MCP server (e.g., "context7", "supermemory") */
+  serverName: string;
+  /** Whether the server is local (npx command) or remote (URL) */
+  type: OpenCodeMcpServerType;
+  /** For local servers: the command to run (e.g., ["npx", "-y", "@upstash/context7-mcp"]) */
+  command?: string[];
+  /** For remote servers: the URL of the MCP server */
+  url?: string;
+  /** For remote servers: optional headers (e.g., Authorization) */
+  headers?: Record<string, string>;
+  /** Path to opencode.json (defaults to ~/.config/opencode/opencode.json) */
+  configPath?: string;
+  /** Home directory for default path resolution */
+  homeDir?: string;
+};
+
+export type WriteOpenCodeMcpConfigResult = {
+  ok: boolean;
+  path: string;
+  serverName: string;
+  diagnostics: string[];
+};
+
+/**
+ * Writes or updates a generic MCP server entry in OpenCode's opencode.json.
+ *
+ * Supports both local MCP servers (using command) and remote MCP servers (using url).
+ *
+ * Local example (context7):
+ *   {
+ *     "mcp": {
+ *       "context7": {
+ *         "type": "local",
+ *         "command": ["npx", "-y", "@upstash/context7-mcp"],
+ *         "enabled": true
+ *       }
+ *     }
+ *   }
+ *
+ * Remote example:
+ *   {
+ *     "mcp": {
+ *       "my-remote": {
+ *         "type": "remote",
+ *         "url": "https://mcp.example.com",
+ *         "headers": { "Authorization": "Bearer {env:MY_TOKEN}" },
+ *         "enabled": true
+ *       }
+ *     }
+ *   }
+ */
+export function writeOpenCodeMcpConfig(
+  options: WriteOpenCodeMcpConfigOptions,
+): WriteOpenCodeMcpConfigResult {
+  const homeDir = options.homeDir ?? process.env.HOME ?? "/home/user";
+  const configPath = options.configPath ?? join(homeDir, ".config", "opencode", "opencode.json");
+  const serverName = options.serverName.trim();
+
+  const diagnostics: string[] = [];
+
+  if (!serverName) {
+    diagnostics.push("MCP server name is required.");
+    return { ok: false, path: configPath, serverName: options.serverName, diagnostics };
+  }
+
+  if (options.type === "local" && !options.command) {
+    diagnostics.push("Local MCP server requires a command array.");
+    return { ok: false, path: configPath, serverName, diagnostics };
+  }
+
+  if (options.type === "remote" && !options.url) {
+    diagnostics.push("Remote MCP server requires a URL.");
+    return { ok: false, path: configPath, serverName, diagnostics };
+  }
+
+  let config: Record<string, unknown> = {};
+  if (existsSync(configPath)) {
+    try {
+      const content = readFileSync(configPath, "utf-8");
+      config = JSON.parse(content) as Record<string, unknown>;
+    } catch (error) {
+      diagnostics.push(`Unable to parse existing opencode.json: ${error instanceof Error ? error.message : String(error)}`);
+      return { ok: false, path: configPath, serverName, diagnostics };
+    }
+  }
+
+  const mcpSection = (config.mcp ?? {}) as Record<string, unknown>;
+
+  const serverEntry: Record<string, unknown> = {
+    type: options.type,
+    enabled: true,
+  };
+
+  if (options.type === "local" && options.command) {
+    serverEntry.command = options.command;
+  }
+
+  if (options.type === "remote" && options.url) {
+    serverEntry.url = options.url;
+    serverEntry.oauth = false;
+    if (options.headers) {
+      serverEntry.headers = options.headers;
+    }
+  }
+
+  mcpSection[serverName] = serverEntry;
+  config.mcp = mcpSection;
+
+  try {
+    writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+    diagnostics.push(`MCP server '${serverName}' configured in OpenCode at ${configPath}.`);
 
     return { ok: true, path: configPath, serverName, diagnostics };
   } catch (error) {

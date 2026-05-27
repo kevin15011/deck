@@ -493,7 +493,7 @@ function addPackageInstructionActions(
   state: BuildPiRunnerReviewPlanState,
 ): void {
   const runnerScope = state.runnerScope ?? "pi";
-  const piBundle = state.packageInstructions?.[runnerScope as "pi" | "opencode"];
+  const piBundle = state.packageInstructions?.[runnerScope];
   if (!piBundle || piBundle.instructions.length === 0) return;
 
   groups.configWrites.push({

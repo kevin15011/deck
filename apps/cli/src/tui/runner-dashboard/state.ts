@@ -96,7 +96,7 @@ export function loadRunnerPackageInstructionsFromConfig(
   config: { packageInstructions?: Record<string, Record<string, boolean>> },
   runnerScope: RunnerScope,
 ): Partial<Record<CapabilityId, boolean>> {
-  const runner = runnerScope === "opencode" ? "opencode" : "pi";
+  const runner = runnerScope as "pi" | "opencode";
   const runnerConfig = config?.packageInstructions?.[runner];
   if (!runnerConfig) return {};
   return { ...runnerConfig };

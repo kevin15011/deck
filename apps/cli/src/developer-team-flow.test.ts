@@ -14,7 +14,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterPiToolInstall({
         selectedEnvironments: ["pi-development"],
         hasPiCommand: true,
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("team-selection");
@@ -24,7 +24,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterPiToolInstall({
         selectedEnvironments: ["opencode-development"],
         hasPiCommand: false,
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
 
       expect(result).toBe("opencode-preflight-checking");
@@ -34,7 +34,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterPiToolInstall({
         selectedEnvironments: ["pi-development"],
         hasPiCommand: false,
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("complete");
@@ -44,7 +44,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterPiToolInstall({
         selectedEnvironments: ["pi-development", "opencode-development"],
         hasPiCommand: true,
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
 
       expect(result).toBe("team-selection");
@@ -55,7 +55,7 @@ describe("Developer Team flow helpers", () => {
     test("returns developer-team-review when Developer Team is selected", () => {
       const result = getNextScreenAfterTeamSelection({
         selectedTeams: ["developer-team"],
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("developer-team-review");
@@ -64,7 +64,7 @@ describe("Developer Team flow helpers", () => {
     test("returns next environment when no teams selected", () => {
       const result = getNextScreenAfterTeamSelection({
         selectedTeams: [],
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("complete");
@@ -73,7 +73,7 @@ describe("Developer Team flow helpers", () => {
     test("returns opencode-preflight-checking when no teams selected and OpenCode is next", () => {
       const result = getNextScreenAfterTeamSelection({
         selectedTeams: [],
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
 
       expect(result).toBe("opencode-preflight-checking");
@@ -82,7 +82,7 @@ describe("Developer Team flow helpers", () => {
     test("returns developer-team-review when Developer Team is among multiple selections", () => {
       const result = getNextScreenAfterTeamSelection({
         selectedTeams: ["developer-team", "future-team"],
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("developer-team-review");
@@ -94,7 +94,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterDeveloperTeamReview({
         cursor: 0,
         selectedEnvironments: ["pi-development"],
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("developer-team-installing");
@@ -104,7 +104,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterDeveloperTeamReview({
         cursor: 1,
         selectedEnvironments: ["pi-development"],
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("complete");
@@ -114,7 +114,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterDeveloperTeamReview({
         cursor: 1,
         selectedEnvironments: ["pi-development", "opencode-development"],
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
 
       expect(result).toBe("opencode-preflight-checking");
@@ -125,7 +125,7 @@ describe("Developer Team flow helpers", () => {
     test("returns opencode-preflight-checking when OpenCode is next", () => {
       const result = getNextScreenAfterDeveloperTeamInstall({
         selectedEnvironments: ["pi-development", "opencode-development"],
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
 
       expect(result).toBe("opencode-preflight-checking");
@@ -134,7 +134,7 @@ describe("Developer Team flow helpers", () => {
     test("returns complete when no more environments", () => {
       const result = getNextScreenAfterDeveloperTeamInstall({
         selectedEnvironments: ["pi-development"],
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("complete");
@@ -146,7 +146,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterEnvironmentSelection({
         selectedEnvironments: ["pi-development"],
         hasPiCommand: true,
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("personality-selection");
@@ -156,7 +156,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterEnvironmentSelection({
         selectedEnvironments: ["pi-development", "opencode-development"],
         hasPiCommand: true,
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
 
       expect(result).toBe("personality-selection");
@@ -166,7 +166,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterEnvironmentSelection({
         selectedEnvironments: [],
         hasPiCommand: false,
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("complete");
@@ -176,7 +176,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterEnvironmentSelection({
         selectedEnvironments: ["opencode-development"],
         hasPiCommand: false,
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
 
       expect(result).toBe("personality-selection");
@@ -188,7 +188,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterPersonalitySelection({
         selectedEnvironments: ["pi-development"],
         hasPiCommand: true,
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("pi-preflight-checking");
@@ -198,7 +198,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterPersonalitySelection({
         selectedEnvironments: ["pi-development", "opencode-development"],
         hasPiCommand: true,
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
 
       expect(result).toBe("pi-preflight-checking");
@@ -208,7 +208,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterPersonalitySelection({
         selectedEnvironments: ["opencode-development"],
         hasPiCommand: false,
-        hasOpenCodeNext: true,
+        nextEnvironment: "opencode-development",
       });
 
       expect(result).toBe("opencode-preflight-checking");
@@ -218,7 +218,7 @@ describe("Developer Team flow helpers", () => {
       const result = getNextScreenAfterPersonalitySelection({
         selectedEnvironments: [],
         hasPiCommand: false,
-        hasOpenCodeNext: false,
+        nextEnvironment: null,
       });
 
       expect(result).toBe("complete");

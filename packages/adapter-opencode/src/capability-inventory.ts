@@ -136,6 +136,7 @@ function isCapabilityInstalled(capabilityId: OpenCodeCapabilityId, installedName
     capability.source,
     ...(capability.detector.pluginNames ?? []),
     ...(capability.detector.commands ?? []),
+    ...(capability.detector.mcpServerNames ?? []),
     ...detectorNames,
   ].filter((value): value is string => Boolean(value));
 

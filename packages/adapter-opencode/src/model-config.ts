@@ -7,6 +7,9 @@
  * Canonical model defaults are consumed from @deck/core's ModelCatalog.
  * This module provides OpenCode-specific overlays: opencode.json reading
  * and reasoningEffort mapping.
+ *
+ * @deprecated Import DeveloperTeamModelAssignments and DeveloperTeamThinkingAssignments
+ * from @deck/core instead. These types are now runner-agnostic.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -14,6 +17,10 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import { getModelCatalog, type DeveloperTeamDefaultModelAssignment } from "@deck/core";
+import type {
+  DeveloperTeamModelAssignments as CoreModelAssignments,
+  DeveloperTeamThinkingAssignments as CoreThinkingAssignments,
+} from "@deck/core";
 import type { OpenCodeConfig } from "./types";
 
 export type OpenCodeModelConfig = {
@@ -25,8 +32,17 @@ export type OpenCodeThinkingLevel = "off" | "low" | "medium" | "high";
 
 export const OPENCODE_THINKING_LEVELS: readonly OpenCodeThinkingLevel[] = ["off", "low", "medium", "high"];
 
-export type DeveloperTeamModelAssignments = Record<string, string>;
-export type DeveloperTeamThinkingAssignments = Record<string, OpenCodeThinkingLevel>;
+/**
+ * @deprecated Use DeveloperTeamModelAssignments from @deck/core instead.
+ * This type is now runner-agnostic and lives in @deck/core.
+ */
+export type DeveloperTeamModelAssignments = CoreModelAssignments;
+
+/**
+ * @deprecated Use DeveloperTeamThinkingAssignments from @deck/core instead.
+ * This type is now runner-agnostic and lives in @deck/core.
+ */
+export type DeveloperTeamThinkingAssignments = CoreThinkingAssignments;
 
 // ---------------------------------------------------------------------------
 // Default model map — consumed from core ModelCatalog

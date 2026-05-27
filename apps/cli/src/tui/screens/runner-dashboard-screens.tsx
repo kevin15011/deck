@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { MenuList } from "../components/menu-list";
-import type { RunnerActionRunResult } from "../pi-runner-dashboard/action-runner";
+import type { RunnerActionRunResult } from "../runner-dashboard/action-runner";
 import {
   getAdaptiveMemorySummary,
   getDashboardSectionSummaries,
@@ -9,8 +9,8 @@ import {
   getRunnerCapabilitySummaries,
   getTeamCapabilityProfile,
   type CapabilityResolver,
-} from "../pi-runner-dashboard/selectors";
-import type { RunnerAction, RunnerDashboardState } from "../pi-runner-dashboard/state";
+} from "../runner-dashboard/selectors";
+import type { RunnerAction, RunnerDashboardState } from "../runner-dashboard/state";
 
 type DashboardRunDiagnostic = { message: string };
 

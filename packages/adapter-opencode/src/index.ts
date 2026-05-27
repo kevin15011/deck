@@ -12,6 +12,7 @@ export * from "./opencode-mcp-config";
 export * from "./preflight";
 export * from "./prompt-generation";
 export * from "./required-tools";
+export * from "./runner-adapter";
+export * from "./runner-capabilities";
 export * from "./team-catalog";
 export * from "./tool-status";
-export * from "./runner-capabilities";

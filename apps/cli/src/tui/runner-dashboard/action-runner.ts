@@ -5,10 +5,15 @@
  * Each adapter provides its own implementations for runtime-specific actions.
  */
 
+import { readFileSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
 import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
-import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "@deck/adapter-pi";
+import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "@deck/core";
+
+const LOG = "/tmp/deck-tui.log";
+function _ts() { return new Date().toISOString().slice(11, 23); }
+function log(msg: string) { try { appendFileSync(LOG, `${_ts()} [action-runner] ${msg}\n`); } catch {} }
 
 export type RunnerActionRunStatus = "executed" | "informational" | "skipped" | "failed";
 
@@ -43,8 +48,22 @@ export type TeamBundleInstallerFn = (
 
 /**
  * Generic MCP config writer — adapters provide their own.
+ * Supports both token-based (Supermemory) and config-based (MCP servers like Context7) writing.
  */
-export type McpConfigWriterFn = (options: { token: string; serverName?: string }) => { ok: boolean; path: string; diagnostics?: string[] };
+export type McpConfigWriterFn = (options: {
+  /** Server name (used by all types) */
+  serverName: string;
+  /** Token for Supermemory remote MCP (type: remote with auth) */
+  token?: string;
+  /** MCP server type: local (npx command) or remote (URL) */
+  type?: "local" | "remote";
+  /** For local MCP servers: command to execute (e.g., ["npx", "-y", "@upstash/context7-mcp"]) */
+  command?: string[];
+  /** For remote MCP servers: URL of the MCP server */
+  url?: string;
+  /** For remote MCP servers: optional headers */
+  headers?: Record<string, string>;
+}) => Promise<{ ok: boolean; path: string; diagnostics?: string[] }>;
 
 /**
  * Generic MCP config validator — adapters provide their own.
@@ -99,6 +118,10 @@ export async function runRunnerReviewPlan(
   plan: RunnerReviewPlan,
   dependencies: RunnerActionRunnerDependencies = {},
 ): Promise<RunnerActionRunResult[]> {
+  log(`runRunnerReviewPlan: START`);
+  log(`runRunnerReviewPlan: configWrites=${plan.groups.configWrites.length} automaticInstalls=${plan.groups.automaticInstalls.length} manualSteps=${plan.groups.manualSteps.length} teamApplications=${plan.groups.teamApplications.length} validations=${plan.groups.validations.length}`);
+  log(`runRunnerReviewPlan: has installPackages=${!!dependencies.installPackages} has writeMcpConfig=${!!dependencies.writeMcpConfig} has installTeamBundle=${!!dependencies.installTeamBundle} has validateMcpConfig=${!!dependencies.validateMcpConfig}`);
+
   const runBlockDiagnostics = getRunnerReviewPlanRunBlockDiagnostics(dependencies.dashboardState, {
     supermemoryToken: dependencies.supermemoryToken,
   });
@@ -123,12 +146,16 @@ export async function runRunnerReviewPlan(
 
   // Security boundary: visible config writes happen first.
   for (const action of plan.groups.configWrites) {
+    log(`runRunnerReviewPlan: configWrite ${action.id} kind=${action.kind} status=${action.status}`);
     const result = await runAndRecord(action);
+    log(`runRunnerReviewPlan: configWrite ${action.id} result=${result.status}`);
     if (action.kind === "write-mcp-config" && result.status === "failed") return results;
   }
 
   for (const action of [...plan.groups.automaticInstalls, ...plan.groups.manualSteps]) {
-    await runAndRecord(action);
+    log(`runRunnerReviewPlan: install/manual ${action.id} kind=${action.kind} status=${action.status}`);
+    const result = await runAndRecord(action);
+    log(`runRunnerReviewPlan: install/manual ${action.id} result=${result.status} msg=${result.message?.substring(0, 100)}`);
   }
 
   const memoryResolution = resolveMemoryProviderAfterConfigWrite(dependencies);
@@ -144,13 +171,18 @@ export async function runRunnerReviewPlan(
   };
 
   for (const action of plan.groups.teamApplications) {
+    log(`runRunnerReviewPlan: team ${action.id} kind=${action.kind}`);
     await runAndRecord(action, teamDependencies);
+    log(`runRunnerReviewPlan: team ${action.id} done`);
   }
 
   for (const action of plan.groups.validations) {
+    log(`runRunnerReviewPlan: validation ${action.id} kind=${action.kind}`);
     await runAndRecord(action);
+    log(`runRunnerReviewPlan: validation ${action.id} done`);
   }
 
+  log(`runRunnerReviewPlan: COMPLETE. total results=${results.length}`);
   return results;
 }
 
@@ -158,6 +190,8 @@ export async function runRunnerAction(
   action: RunnerAction,
   dependencies: RunnerActionRunnerDependencies = {},
 ): Promise<RunnerActionRunResult> {
+  log(`runRunnerAction: ${action.id} kind=${action.kind} status=${action.status}`);
+
   if (action.status === "blocked" || action.status === "pending" || action.kind === "pending-source" || action.kind === "noop") {
     return informationalResult(action, action.status === "blocked" ? "Blocked action requires follow-up before execution." : "Pending/no-op action recorded without execution.");
   }
@@ -175,12 +209,13 @@ export async function runRunnerAction(
         return writeDeckConfigAction(action, dependencies);
       case "write-pi-mcp-config":
       case "write-mcp-config":
-        return writeMcpConfigAction(action, dependencies);
+        return await writeMcpConfigAction(action, dependencies);
       case "apply-team-bundle":
         return await applyTeamBundleAction(action, dependencies);
       case "validate":
         return validateAction(action, dependencies);
       default:
+        log(`runRunnerAction: UNKNOWN KIND "${action.kind}" for ${action.id} — returning informational`);
         return informationalResult(action, "Action kind is informational for the dashboard runner.");
     }
   } catch (error) {
@@ -396,21 +431,48 @@ function writeDeckConfigAction(
   };
 }
 
-function writeMcpConfigAction(
+async function writeMcpConfigAction(
   action: RunnerAction,
   dependencies: RunnerActionRunnerDependencies,
-): RunnerActionRunResult {
-  const token = dependencies.supermemoryToken;
-  if (!token?.trim()) {
-    return skippedResult(action, "Supermemory token is required for MCP config write.");
-  }
-
+): Promise<RunnerActionRunResult> {
   const writer = dependencies.writeMcpConfig;
   if (!writer) {
     return skippedResult(action, "MCP config writer not provided; requires adapter-specific implementation.");
   }
 
-  const result = writer({ token: token.trim(), serverName: "supermemory" });
+  // Determine the MCP server type based on capabilityId
+  const capabilityId = action.capabilityId as string | undefined;
+
+  if (capabilityId === "context7") {
+    // Context7 is a local MCP server
+    const result = await writer({
+      serverName: "context7",
+      type: "local",
+      command: ["npx", "-y", "@upstash/context7-mcp"],
+    });
+    if (!result.ok) {
+      return {
+        actionId: action.id,
+        status: "failed",
+        message: `MCP config write failed at ${result.path ?? "unknown path"}.`,
+        diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+      };
+    }
+    return {
+      actionId: action.id,
+      status: "executed",
+      message: `Context7 MCP config written successfully at ${result.path}.`,
+      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+    };
+  }
+
+  // Default: Supermemory remote MCP (token-based)
+  const token = dependencies.supermemoryToken;
+  if (!token?.trim()) {
+    return skippedResult(action, "Supermemory token is required for MCP config write.");
+  }
+
+  const result = await writer({ token: token.trim(), serverName: "supermemory" });
   if (!result.ok) {
     return {
       actionId: action.id,
@@ -446,6 +508,8 @@ async function applyTeamBundleAction(
   const developerTeam = dependencies.dashboardState?.teams?.["developer-team"];
   const modelAssignments = developerTeam?.modelAssignments as DeveloperTeamModelAssignments | undefined;
   const thinkingAssignments = developerTeam?.thinkingAssignments as DeveloperTeamThinkingAssignments | undefined;
+
+  log(`applyTeamBundleAction: developerTeam.selected=${developerTeam?.selected} hasModelAssignments=${!!modelAssignments} modelKeys=${modelAssignments ? Object.keys(modelAssignments).join(",") : "none"} hasThinkingAssignments=${!!thinkingAssignments}`);
 
   const installerOptions: {
     memoryProvider?: AdaptiveMemoryProvider;

@@ -278,7 +278,7 @@ function capabilitySummary(state: RunnerDashboardState, capabilityId: Capability
     };
   }
 
-  const implementation = capability.implementations?.[state.runnerScope === "opencode" ? "opencode" : "pi"];
+  const implementation = capability.implementations?.[state.runnerScope as "pi" | "opencode"];
   const status = state.capabilityStatuses[capabilityId] ?? "unknown";
 
   return {

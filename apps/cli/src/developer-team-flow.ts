@@ -1,3 +1,5 @@
+import type { EnvironmentId } from "@deck/core";
+
 export type NextScreen =
   | "team-selection"
   | "developer-team-review"
@@ -11,23 +13,23 @@ export type NextScreen =
 type FlowContext = {
   selectedEnvironments: readonly string[];
   hasPiCommand: boolean;
-  hasOpenCodeNext: boolean;
+  nextEnvironment: EnvironmentId | null;
 };
 
 type ReviewContext = {
   cursor: number;
   selectedEnvironments: readonly string[];
-  hasOpenCodeNext: boolean;
+  nextEnvironment: EnvironmentId | null;
 };
 
 type AfterInstallContext = {
   selectedEnvironments: readonly string[];
-  hasOpenCodeNext: boolean;
+  nextEnvironment: EnvironmentId | null;
 };
 
 type TeamSelectionContext = {
   selectedTeams: readonly string[];
-  hasOpenCodeNext: boolean;
+  nextEnvironment: EnvironmentId | null;
 };
 
 export function getNextScreenAfterPiToolInstall(context: FlowContext): NextScreen {
@@ -37,7 +39,7 @@ export function getNextScreenAfterPiToolInstall(context: FlowContext): NextScree
     return "team-selection";
   }
 
-  return resolveNextEnvironment(context.hasOpenCodeNext);
+  return resolveNextEnvironment(context.nextEnvironment);
 }
 
 export function getNextScreenAfterTeamSelection(context: TeamSelectionContext): NextScreen {
@@ -45,7 +47,7 @@ export function getNextScreenAfterTeamSelection(context: TeamSelectionContext): 
     return "developer-team-review";
   }
 
-  return resolveNextEnvironment(context.hasOpenCodeNext);
+  return resolveNextEnvironment(context.nextEnvironment);
 }
 
 export function getNextScreenAfterDeveloperTeamReview(context: ReviewContext): NextScreen {
@@ -53,11 +55,11 @@ export function getNextScreenAfterDeveloperTeamReview(context: ReviewContext): N
     return "developer-team-installing";
   }
 
-  return resolveNextEnvironment(context.hasOpenCodeNext);
+  return resolveNextEnvironment(context.nextEnvironment);
 }
 
 export function getNextScreenAfterDeveloperTeamInstall(context: AfterInstallContext): NextScreen {
-  return resolveNextEnvironment(context.hasOpenCodeNext);
+  return resolveNextEnvironment(context.nextEnvironment);
 }
 
 export function getNextScreenAfterEnvironmentSelection(context: FlowContext): NextScreen {
@@ -84,9 +86,17 @@ export function getNextScreenAfterPersonalitySelection(context: FlowContext): Ne
   return "complete";
 }
 
-function resolveNextEnvironment(hasOpenCodeNext: boolean): NextScreen {
-  if (hasOpenCodeNext) {
-    return "opencode-preflight-checking";
+function resolveNextEnvironment(nextEnvironment: EnvironmentId | null): NextScreen {
+  if (nextEnvironment === null) {
+    return "complete";
+  }
+
+  // Generic environment-to-screen resolution based on environment ID pattern
+  if (nextEnvironment.endsWith("-development")) {
+    // For development environments, the preflight screen is the environment name
+    // with "-development" replaced by "-preflight-checking"
+    const baseName = nextEnvironment.replace("-development", "");
+    return `${baseName}-preflight-checking` as NextScreen;
   }
 
   return "complete";

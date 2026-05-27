@@ -8,9 +8,16 @@
  * The canonical model data is consumed from @deck/core's ModelCatalog.
  * This module provides Pi-specific overlays: env-var mapping,
  * `pi --list-models` parsing, and PiThinkingLevel mapping.
+ *
+ * @deprecated Import DeveloperTeamModelAssignments and DeveloperTeamThinkingAssignments
+ * from @deck/core instead. These types are now runner-agnostic.
  */
 
 import { getProviders, getModelsForProvider, type ModelProviderEntry } from "@deck/core";
+import type {
+  DeveloperTeamModelAssignments as CoreModelAssignments,
+  DeveloperTeamThinkingAssignments as CoreThinkingAssignments,
+} from "@deck/core";
 
 export type PiProvider = {
   id: string;
@@ -29,8 +36,17 @@ export type PiThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "x
 
 export const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
-export type DeveloperTeamModelAssignments = Record<string, string>;
-export type DeveloperTeamThinkingAssignments = Record<string, PiThinkingLevel>;
+/**
+ * @deprecated Use DeveloperTeamModelAssignments from @deck/core instead.
+ * This type is now runner-agnostic and lives in @deck/core.
+ */
+export type DeveloperTeamModelAssignments = CoreModelAssignments;
+
+/**
+ * @deprecated Use DeveloperTeamThinkingAssignments from @deck/core instead.
+ * This type is now runner-agnostic and lives in @deck/core.
+ */
+export type DeveloperTeamThinkingAssignments = CoreThinkingAssignments;
 
 export type DeveloperTeamModelConfigAssignments = {
   modelAssignments: DeveloperTeamModelAssignments;

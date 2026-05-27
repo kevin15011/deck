@@ -7,9 +7,10 @@ type ScreenFrameProps = {
   children: ReactNode;
   width?: number;
   height?: number;
+  logs?: string[];
 };
 
-export function ScreenFrame({ title, help, children, width, height }: ScreenFrameProps) {
+export function ScreenFrame({ title, help, children, width, height, logs }: ScreenFrameProps) {
   return (
     <Box
       borderStyle="round"
@@ -27,6 +28,14 @@ export function ScreenFrame({ title, help, children, width, height }: ScreenFram
       <Box marginTop={1} flexDirection="column" flexGrow={1}>
         {children}
       </Box>
+
+      {logs && logs.length > 0 ? (
+        <Box marginTop={1} flexDirection="column">
+          {logs.slice(-5).map((log, i) => (
+            <Text key={i} dimColor fontSize={9}>{log}</Text>
+          ))}
+        </Box>
+      ) : null}
 
       <Box marginTop={1}>
         <Text dimColor>{help}</Text>

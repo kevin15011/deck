@@ -40,7 +40,7 @@ export type CapabilityDashboardSection = "runner-capabilities" | "runner-ui-visu
 
 export type CapabilityInstallKind = "pi-package" | "external" | "pending";
 
-export type CapabilityRunnerImplementationTarget = Extract<RunnerScope, "pi" | "opencode">;
+export type CapabilityRunnerImplementationTarget = string;
 
 export type CapabilityImplementationId = "pi-mermaid" | "TBD" | (string & {});
 

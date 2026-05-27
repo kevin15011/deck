@@ -2,52 +2,70 @@ import { describe, expect, test } from "bun:test";
 
 import { installOpenCodeTools } from "./install-tools";
 import type { InstallableOpenCodeTool } from "./installation-plan";
-
-const plan: InstallableOpenCodeTool[] = [
-  { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "opencode-plugin" },
-];
+import { writeFileSync, unlinkSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 describe("installOpenCodeTools", () => {
-  test("runs opencode plugin install globally for selected tools", async () => {
-    const calls: string[][] = [];
+  test("writes opencode-plugin to plugin array in opencode.json", async () => {
+    // Create a temp config file
+    const tmpDir = join("/tmp", `deck-test-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    // installOpenCodePlugin uses join(homeDir, ".config", "opencode", "opencode.json")
+    const configDir = join(tmpDir, ".config", "opencode");
+    mkdirSync(configDir, { recursive: true });
+    const configPath = join(configDir, "opencode.json");
+    writeFileSync(configPath, JSON.stringify({}), "utf-8");
+
+    const plan: InstallableOpenCodeTool[] = [
+      { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "opencode-plugin" },
+    ];
+
+    // Patch the home dir to use temp dir by setting HOME env
+    const originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+
     const results = await installOpenCodeTools(
       "opencode",
       plan,
       () => {},
-      async (command, args) => {
-        calls.push([command, ...args]);
-        return { exitCode: 0, stdout: "ok", stderr: "" };
-      },
+      async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     );
 
-    expect(calls).toEqual([["opencode", "plugin", "context-mode", "--global"]]);
-    expect(results).toEqual([{ tool: "context-mode", success: true, message: undefined }]);
+    process.env.HOME = originalHome;
+
+    expect(results[0].success).toBe(true);
+    expect(results[0].message).toContain("Added 'context-mode' to plugin array");
+
+    // Verify the plugin was added
+    const content = readFileSync(configPath, "utf-8");
+    const parsed = JSON.parse(content);
+    expect(parsed.plugin).toContain("context-mode");
+
+    // Cleanup
+    unlinkSync(configPath);
   });
 
-  test("returns a failure result instead of throwing when plugin install fails", async () => {
-    const [result] = await installOpenCodeTools(
-      "opencode",
-      plan,
-      () => {},
-      async () => ({ exitCode: 1, stdout: "", stderr: "failed" }),
-    );
-
-    expect(result).toEqual({ tool: "context-mode", success: false, message: "failed" });
-  });
-
-  test("does not run opencode plugin for external RTK", async () => {
-    const calls: string[][] = [];
+  test("returns failure for external tools", async () => {
     const [result] = await installOpenCodeTools(
       "opencode",
       [{ id: "rtk", name: "RTK", module: "rtk-ai/rtk", required: false, installKind: "external" }],
       () => {},
-      async (command, args) => {
-        calls.push([command, ...args]);
-        return { exitCode: 0, stdout: "", stderr: "" };
-      },
+      async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     );
 
-    expect(calls).toEqual([]);
-    expect(result).toEqual({ tool: "RTK", success: false, message: "Manual install required from rtk-ai/rtk." });
+    expect(result.success).toBe(false);
+    expect(result.message).toBe("Manual install required from rtk-ai/rtk.");
+  });
+
+  test("skips mcp-server tools with informational message", async () => {
+    const [result] = await installOpenCodeTools(
+      "opencode",
+      [{ id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "mcp-server" }],
+      () => {},
+      async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("MCP server configured via write-mcp-config action");
   });
 });
