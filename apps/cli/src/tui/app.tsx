@@ -4,20 +4,31 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 
-// ---------------------------------------------------------------------------
-// Debug logger — writes to /tmp/deck-tui.log when DECK_DEBUG is enabled.
-// ---------------------------------------------------------------------------
 const LOG_FILE = "/tmp/deck-tui.log";
+const DEBUG_FILE = "/tmp/deck-debug.txt";
 function _ts() { return new Date().toISOString().slice(11, 23); }
 function log(msg: string) {
-  if (!process.env.DECK_DEBUG) return;
+  if (!process.env.DECK_DEBUG && !process.env.CI_DEBUG) return;
   const line = `${_ts()} ${msg}\n`;
   try { appendFileSync(LOG_FILE, line); } catch {}
+  try { appendFileSync(DEBUG_FILE, line); } catch {}
 }
+function debug(msg: string) {
+  const line = `${_ts()} ${msg}\n`;
+  try { appendFileSync(DEBUG_FILE, line); } catch {}
+  if (process.env.DECK_DEBUG_VERBOSE) console.error(`[deck] ${msg}`);
+}
+// Global error handlers
+// (Removed debug global handlers — use DECK_DEBUG_VERBOSE for detailed logging)
+
 // Initialize log file
 if (process.env.DECK_DEBUG) {
-  try { writeFileSync(LOG_FILE, `=== Deck TUI session ${new Date().toISOString()} ===\n`); } catch {}
+  console.error(`[deck-tui-init] DECK_DEBUG is set, writing to ${LOG_FILE} and ${DEBUG_FILE}`);
+  try { writeFileSync(LOG_FILE, `=== Deck TUI session ${new Date().toISOString()} ===\n`); } catch (e) { console.error(`[deck-tui-init] writeFileSync LOG failed: ${e}`); }
+  try { writeFileSync(DEBUG_FILE, `=== Deck DEBUG session ${new Date().toISOString()} ===\n`); } catch {}
 }
+
+debug("app.tsx module loaded — DECK_DEBUG active");
 import {
   type InstallableOpenCodeTool,
   type InstallableOpenCodeToolId,
@@ -50,6 +61,7 @@ import {
   reviewPiRequiredTools,
   buildPiRunnerCapabilityInventory,
   listModelsForProvider,
+  buildModelInventoryFromPiListModels,
 } from "@deck/adapter-pi";
 import {
   OPENCODE_THINKING_LEVELS,
@@ -454,6 +466,7 @@ export function DeckApp() {
   }, []);
 
   useInput((input, key) => {
+    try { appendFileSync("/tmp/deck-debug.txt", `useInput TOP: input="${input}" key=${JSON.stringify(key)} screen=${screen}\n`); } catch {}
     try {
     if (screen === "pi-runner-dashboard") {
       handleDashboardInput(input, key);
@@ -496,11 +509,15 @@ export function DeckApp() {
       return;
     }
 
-    if (key.return) {
-      continueFromCurrent();
+    if (key.return || input === "\n" || input === "\r") {
+      debug(`useInput: return/enter at screen=${screen} key.return=${key.return} input=${JSON.stringify(input)}`);
+      debug(`continueFromCurrent: calling...`);
+      continueFromCurrent().then(() => debug("continueFromCurrent: done")).catch(e => debug(`continueFromCurrent error: ${e}`));
+      debug(`continueFromCurrent: dispatched`);
     }
     } catch (error) {
       const msg = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
+      try { appendFileSync("/tmp/deck-debug.txt", `useInput UNCAUGHT: ${msg}\n`); } catch {}
       log(`useInput UNCAUGHT: ${msg}`);
     }
   });
@@ -989,7 +1006,8 @@ export function DeckApp() {
     }
 
     if (screen === "environment-selection") {
-      if (selectedEnvironments.length === 0) return;
+      debug(`continueFromCurrent: environment-selection screen, selectedEnvironments.length=${selectedEnvironments.length}`);
+      if (selectedEnvironments.length === 0) { debug("continueFromCurrent: no env selected, returning"); return; }
       const nextScreen = getNextScreenAfterEnvironmentSelection({
         selectedEnvironments,
         hasPiCommand: true, // not used by this helper
@@ -1309,6 +1327,7 @@ export function DeckApp() {
   }
 
   function handleDashboardInput(input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) {
+    debug(`handleDashboardInput ENTER: input="${input}" key=${JSON.stringify(key)} screen=${dashboardState.screen}`);
     if (input === "q") {
       log("handleDashboardInput: q pressed → exit");
       clearDashboardSupermemoryEphemeralState();
@@ -1390,14 +1409,29 @@ export function DeckApp() {
         return;
       case "open-developer-team-model-config": {
         const runtime = dashboardState.runnerScope;
+        debug(`open-developer-team-model-config: START runtime=${runtime}`);
         setModelConfigRuntime(runtime);
-        hydrateDeveloperTeamModelConfig(runtime);
-        const inventory = runtime === "opencode" ? detectOpenCodeModelInventoryForTui() : detectPiModelInventoryForTui();
+        debug(`open-developer-team-model-config: after setModelConfigRuntime`);
+        try {
+          hydrateDeveloperTeamModelConfig(runtime);
+          debug(`open-developer-team-model-config: after hydrateDeveloperTeamModelConfig`);
+        } catch (e) {
+          debug(`open-developer-team-model-config: hydrate ERROR: ${e}`);
+        }
+        let inventory;
+        try {
+          inventory = runtime === "opencode" ? detectOpenCodeModelInventoryForTui() : detectPiModelInventoryForTui();
+          debug(`open-developer-team-model-config: after detect inventory=${JSON.stringify({ providers: inventory.providers.length, modelsByProvider: Object.keys(inventory.modelsByProvider).length })}`);
+        } catch (e) {
+          debug(`open-developer-team-model-config: detect ERROR: ${e}`);
+          inventory = { providers: [], modelsByProvider: {} };
+        }
         setDetectedProviders(inventory.providers);
         setModelsByProvider(inventory.modelsByProvider);
         setModelConfigSource("dashboard");
-        if (inventory.providers.length === 0) resetCursor("no-providers");
-        else resetCursor("agent-model-config-list");
+        if (inventory.providers.length === 0) { debug("open-developer-team-model-config: no providers → no-providers"); resetCursor("no-providers"); }
+        else { debug("open-developer-team-model-config: has providers → agent-model-config-list"); resetCursor("agent-model-config-list"); }
+        debug("open-developer-team-model-config: END");
         return;
       }
       case "reuse-developer-team-model-config": {
@@ -1607,8 +1641,10 @@ export function DeckApp() {
     const effectiveRuntime = runtime ?? modelConfigRuntime;
     const adapter = getAdapter(effectiveRuntime);
     const assignments = adapter.readModelAssignments();
-    setModelAssignments(assignments.modelAssignments);
-    setThinkingAssignments(assignments.thinkingAssignments);
+    // Defensive: ensure we always pass an object to state setters
+    const safeAssignments = typeof assignments === "object" && assignments !== null ? assignments : {};
+    setModelAssignments(safeAssignments.modelAssignments ?? {});
+    setThinkingAssignments(safeAssignments.thinkingAssignments ?? {});
   }
 
   function getThinkingLevelByCursor(index: number) {
@@ -1732,18 +1768,21 @@ export function DeckApp() {
 
     // Step 2: Get available models from `opencode models`
     const listModelsResult = runOpenCodeCommand("opencode", ["models"]);
+    log(`detectOpenCodeModelInventoryForTui: opencode models exitCode=${listModelsResult.exitCode} stdoutLen=${listModelsResult.stdout?.length ?? 0} stderrLen=${listModelsResult.stderr?.length ?? 0}`);
     const output = listModelsResult.stdout || listModelsResult.stderr || "";
     if (listModelsResult.exitCode === 0 && output.trim().length > 0) {
       const models = parseOpenCodeModelsOutput(output);
+      console.error(`[detectOpenCodeModelInventoryForTui] parsed ${models.length} models`);
       const providers = [...new Set(models.map((m) => m.providerId))].map((id) => ({ id, displayName: humanizeProviderName(id), envVars: [] }));
       const modelsByProvider: Record<string, Array<{ id: string; displayName: string; providerId: string }>> = {};
       for (const model of models) {
         if (!modelsByProvider[model.providerId]) modelsByProvider[model.providerId] = [];
         modelsByProvider[model.providerId].push(model);
       }
+      console.error(`[detectOpenCodeModelInventoryForTui] returning ${providers.length} providers`);
       return { providers, modelsByProvider };
     }
-
+    console.error(`[detectOpenCodeModelInventoryForTui] fallback empty — exitCode=${listModelsResult.exitCode} output="${output.slice(0, 200)}"`);
     return { providers: [] as Array<{ id: string; displayName: string; envVars: string[] }>, modelsByProvider: {} };
   }
 

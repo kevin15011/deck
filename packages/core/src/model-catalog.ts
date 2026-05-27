@@ -267,6 +267,10 @@ const DEVELOPER_TEAM_DEFAULTS: readonly DeveloperTeamDefaultModelAssignment[] = 
   { agentId: "deck-developer-review", modelId: "opencode-go/kimi-k2.6" },
   // Archive — lightweight finalization
   { agentId: "deck-developer-archive", modelId: "opencode-go/deepseek-v4-flash" },
+  // Init — lightweight setup task
+  { agentId: "deck-init", modelId: "opencode-go/kimi-k2.6" },
+  // Onboard — interactive guidance
+  { agentId: "deck-onboard", modelId: "opencode-go/kimi-k2.6" },
 ];
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,6 @@ import {
   type MemoryToolBinding,
 } from "@deck/core/memory/adaptive-memory";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
-import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
 import { readDeckConfig } from "@deck/core/config/deck-config";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
 import type { CapabilityInstructionBundle } from "@deck/core";
@@ -55,14 +54,6 @@ export type OpenCodePlannedStandaloneSkillFile = {
   content: string;
 };
 
-/** SDD bootstrap skill file (deck-init, deck-onboard) */
-export type OpenCodePlannedSDDSkillFile = {
-  skillId: string;
-  relativePath: string;
-  absolutePath: string;
-  content: string;
-};
-
 export type OpenCodeDeveloperTeamInstallPlan = {
   projectRoot: string;
   agentsDir: string;
@@ -70,8 +61,6 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   agents: OpenCodePlannedAgentFile[];
   skills: OpenCodePlannedSkillFile[];
   standaloneSkills: OpenCodePlannedStandaloneSkillFile[];
-  /** SDD bootstrap skill files (deck-init, deck-onboard) */
-  sddSkillFiles: OpenCodePlannedSDDSkillFile[];
   memoryDiagnostics: MemoryDiagnostic[];
   /** Agent entries for opencode.json config merge */
   agentEntries: Record<string, AgentEntry>;
@@ -333,14 +322,6 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     return { skillId: skill.skillId, relativePath, absolutePath: join(skillsDir, skill.skillId, "SKILL.md"), content: skill.body };
   });
 
-  // Build SDD bootstrap skill files (deck-init, deck-onboard)
-  const sddSkillFiles: OpenCodePlannedSDDSkillFile[] = getBootstrapSkillFiles().map((skill) => ({
-    skillId: skill.skillId,
-    relativePath: skill.relativePath,
-    absolutePath: join(skillsDir, skill.relativePath),
-    content: skill.content,
-  }));
-
   // Prompt generation plan
   const promptGenerationPlan = buildPromptGenerationPlan({ configDir, projectRoot, capabilityInstructions, personality: resolvedPersonality });
 
@@ -357,7 +338,6 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     agents: [], // Skills are in skills[]
     skills,
     standaloneSkills,
-    sddSkillFiles,
     memoryDiagnostics,
     agentEntries,
     promptGenerationPlan,
@@ -440,26 +420,6 @@ export function applyOpenCodeDeveloperTeamInstall(
 
   // 3. Write standalone skills (verbatim, no generated frontmatter)
   for (const planned of plan.standaloneSkills) {
-    const skillDir = join(planned.absolutePath, "..");
-    if (!exists(skillDir)) {
-      mkdir(skillDir, { recursive: true });
-    }
-    if (exists(planned.absolutePath)) {
-      const existing = readFile(planned.absolutePath, "utf-8");
-      if (existing !== planned.content) {
-        writeFile(planned.absolutePath, planned.content, "utf-8");
-        results.push({ agentId: planned.skillId, kind: "skill" as const, status: "updated" as const, absolutePath: planned.absolutePath });
-      } else {
-        results.push({ agentId: planned.skillId, kind: "skill" as const, status: "unchanged" as const, absolutePath: planned.absolutePath });
-      }
-    } else {
-      writeFile(planned.absolutePath, planned.content, "utf-8");
-      results.push({ agentId: planned.skillId, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath });
-    }
-  }
-
-  // 4. Write SDD bootstrap skill files (deck-init, deck-onboard) with idempotency
-  for (const planned of plan.sddSkillFiles) {
     const skillDir = join(planned.absolutePath, "..");
     if (!exists(skillDir)) {
       mkdir(skillDir, { recursive: true });
@@ -567,26 +527,8 @@ export function verifyOpenCodeDeveloperTeamInstall(
     return { agentId: planned.agent.id, valid: issues.length === 0, issues };
   });
 
-  // Verify SDD bootstrap skill files
-  const sddSkillResults: OpenCodeBundleVerifyResult[] = plan.sddSkillFiles.map((planned) => {
-    const issues: string[] = [];
-
-    if (!exists(planned.absolutePath)) {
-      return { agentId: planned.skillId, valid: false, issues: ["File does not exist."] };
-    }
-
-    const content = readFile(planned.absolutePath, "utf-8");
-
-    // Basic validation: check for expected content presence
-    if (!content.includes("deck-init") && !content.includes("deck-onboard")) {
-      issues.push(`Missing expected SDD skill content.`);
-    }
-
-    return { agentId: planned.skillId, valid: issues.length === 0, issues };
-  });
-
   return {
-    valid: skillResults.every((r) => r.valid) && sddSkillResults.every((r) => r.valid),
+    valid: skillResults.every((r) => r.valid),
     agentResults: [],
     skillResults,
   };
@@ -614,12 +556,6 @@ export function backupDeveloperTeamFiles(
 
   const entries: FileBackupEntry[] = [
     ...plan.skills.map((planned) => {
-      if (exists(planned.absolutePath)) {
-        return { absolutePath: planned.absolutePath, previousContent: readFile(planned.absolutePath, "utf-8") };
-      }
-      return { absolutePath: planned.absolutePath, previousContent: null };
-    }),
-    ...plan.sddSkillFiles.map((planned) => {
       if (exists(planned.absolutePath)) {
         return { absolutePath: planned.absolutePath, previousContent: readFile(planned.absolutePath, "utf-8") };
       }

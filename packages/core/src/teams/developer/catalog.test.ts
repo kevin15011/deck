@@ -3,21 +3,26 @@ import { describe, expect, test } from "bun:test";
 import { getDeveloperTeamCatalog } from "./catalog";
 
 describe("Developer Team catalog (canonical)", () => {
-  test("includes all 12 agents with unique team-scoped IDs", () => {
+  test("includes all 14 agents with unique team-scoped IDs", () => {
     const catalog = getDeveloperTeamCatalog();
 
-    expect(catalog).toHaveLength(12);
+    expect(catalog).toHaveLength(14);
 
     const ids = catalog.map((a) => a.id);
     const uniqueIds = new Set(ids);
-    expect(uniqueIds.size).toBe(12);
+    expect(uniqueIds.size).toBe(14);
   });
 
-  test("all IDs are team-scoped with 'deck-developer-' prefix", () => {
+  test("all IDs are team-scoped or are deck-init/deck-onboard", () => {
     const catalog = getDeveloperTeamCatalog();
 
     for (const agent of catalog) {
-      expect(agent.id).toMatch(/^deck-developer-/);
+      // deck-developer-* agents must have team-scoped prefix
+      if (agent.id.startsWith("deck-developer-")) {
+        expect(agent.id).toMatch(/^deck-developer-/);
+      }
+      // deck-init and deck-onboard are standalone skills, not team-scoped
+      expect(agent.id).toMatch(/^deck-(developer-|init|onboard)/);
       expect(agent.name).toBe(agent.id);
       expect(agent.skillId).toBe(agent.id);
     }
@@ -40,6 +45,8 @@ describe("Developer Team catalog (canonical)", () => {
       "deck-developer-verify",
       "deck-developer-review",
       "deck-developer-archive",
+      "deck-init",
+      "deck-onboard",
     ]);
   });
 

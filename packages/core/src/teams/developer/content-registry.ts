@@ -1,5 +1,8 @@
 import { renderDeveloperTeamContextAuthorityGuidance } from "../../memory/adaptive-context-renderer";
 
+import { deckInitSkillContent } from "../../skills/bootstrap/deck-init-content";
+import { deckOnboardSkillContent } from "../../skills/bootstrap/deck-onboard-content";
+
 /**
  * Runner-agnostic content registry for the Developer Team.
  *
@@ -150,9 +153,29 @@ const REAL_CONTENT: Record<string, { agentBody: string; skillBody: string }> = {
     agentBody: ARCHIVE_AGENT_BODY,
     skillBody: ARCHIVE_SKILL_BODY,
   },
+  "deck-init": {
+    agentBody: extractBody(deckInitSkillContent),
+    skillBody: deckInitSkillContent,
+  },
+  "deck-onboard": {
+    agentBody: extractBody(deckOnboardSkillContent),
+    skillBody: deckOnboardSkillContent,
+  },
 };
 
 const CONTEXT_AUTHORITY_GUIDANCE = renderDeveloperTeamContextAuthorityGuidance();
+
+// ---------------------------------------------------------------------------
+// Internal: helper to extract body from bootstrap skill content
+// ---------------------------------------------------------------------------
+
+/** Extract body content from bootstrap skill content (skip YAML frontmatter). */
+function extractBody(content: string): string {
+  const lines = content.split('\n');
+  // Skip lines until we hit non-frontmatter content (starts with #)
+  const bodyStart = lines.findIndex(l => l.startsWith('#'));
+  return lines.slice(bodyStart).join('\n');
+}
 
 // ---------------------------------------------------------------------------
 // Internal: placeholder builders

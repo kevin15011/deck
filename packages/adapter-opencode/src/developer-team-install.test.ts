@@ -101,9 +101,9 @@ function cleanup(dir: string) {
 }
 
 describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
-  test("generates 12 agent entries for opencode.json", () => {
+  test("generates 14 agent entries for opencode.json", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    expect(Object.keys(plan.agentEntries)).toHaveLength(12);
+    expect(Object.keys(plan.agentEntries)).toHaveLength(14);
   });
 
   test("orchestrator has mode: primary", () => {
@@ -113,7 +113,10 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
 
   test("subagents have mode: subagent and hidden: true", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    const subagentIds = Object.keys(plan.agentEntries).filter((id) => id !== "deck-developer-orchestrator");
+    // Filter out orchestrator (primary mode)
+    const subagentIds = Object.keys(plan.agentEntries).filter(
+      (id) => id !== "deck-developer-orchestrator",
+    );
     for (const id of subagentIds) {
       expect(plan.agentEntries[id].mode).toBe("subagent");
       expect(plan.agentEntries[id].hidden).toBe(true);
@@ -163,19 +166,19 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     }
   });
 
-  test("generates prompt generation plan with 12 files", () => {
+  test("generates prompt generation plan with 14 files", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    expect(plan.promptGenerationPlan).toHaveLength(12);
+    expect(plan.promptGenerationPlan).toHaveLength(14);
   });
 
-  test("generates command generation plan with 14 commands", () => {
+test("generates command generation plan with 14 commands", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
     expect(plan.commandGenerationPlan).toHaveLength(14);
   });
 
-  test("generates skill files for all 12 agents", () => {
+  test("generates skill files for all 14 agents", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    expect(plan.skills).toHaveLength(12);
+    expect(plan.skills).toHaveLength(14);
     for (const skill of plan.skills) {
       expect(skill.content).toContain("disable-model-invocation: true");
       expect(skill.content).toContain("user-invocable: false");
@@ -293,6 +296,7 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
       const config = JSON.parse(readFileSync(configPath, "utf-8"));
       const keys = Object.keys(config.agent ?? {});
       expect(keys.filter((k) => k.startsWith("deck-developer-"))).toHaveLength(12);
+      expect(keys.filter((k) => k === "deck-init" || k === "deck-onboard")).toHaveLength(2);
     } finally {
       cleanup(projectRoot);
     }

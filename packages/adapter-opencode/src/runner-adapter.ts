@@ -544,10 +544,10 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
     this.#lastNativePlan = nativePlan;
 
     // Map to generic RunnerDeveloperTeamInstallPlan
+    // deck-init and deck-onboard are now proper agents in the skills array
     const files: Array<{ path: string; content: string }> = [
       ...nativePlan.skills.map((s) => ({ path: s.relativePath, content: s.content })),
       ...nativePlan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content })),
-      ...nativePlan.sddSkillFiles.map((s) => ({ path: s.relativePath, content: s.content })),
     ];
 
     return { files };

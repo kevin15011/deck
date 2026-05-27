@@ -16,9 +16,9 @@ function cleanup(dir: string) {
 }
 
 describe("buildPromptGenerationPlan", () => {
-  test("generates 12 prompt files", () => {
+  test("generates 14 prompt files", () => {
     const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
-    expect(plan).toHaveLength(12);
+    expect(plan).toHaveLength(14);
   });
 
   test("each prompt file references the matching skill path", () => {

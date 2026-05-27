@@ -118,6 +118,22 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = [
       "Closes the change, preserves traceability, and updates project AI notes when useful.",
     skillId: "deck-developer-archive",
   },
+  {
+    id: "deck-init",
+    name: "deck-init",
+    displayName: "Init Agent",
+    description:
+      "Initializes SDD context, indexes codebase with codebase-memory, and bootstraps OpenSpec.",
+    skillId: "deck-init",
+  },
+  {
+    id: "deck-onboard",
+    name: "deck-onboard",
+    displayName: "Onboard Agent",
+    description:
+      "Guides users through the SDD cycle with an interactive walkthrough.",
+    skillId: "deck-onboard",
+  },
 ] as const;
 
 export function getDeveloperTeamCatalog(): readonly DeveloperTeamAgent[] {
