@@ -557,7 +557,7 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
     const configDir = join(homedir(), ".config", "opencode");
     const skillsDir = join(configDir, "skills");
 
-    // Build native plan from the generic plan files
+    // Use stored native plan (has correct absolutePath) or rebuild from generic plan files
     const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
 
     const nativePlan: OpenCodeDeveloperTeamInstallPlan = {
@@ -565,22 +565,30 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
       agentsDir: join(configDir, "agents"),
       skillsDir: join(configDir, "skills"),
       agents: [],
-      skills: input.plan.files
+      skills: this.#lastNativePlan?.skills ?? input.plan.files
         .filter((f) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
-        .map((f) => ({
-          agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
-          relativePath: f.path,
-          absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
-          content: f.content,
-        })),
-      standaloneSkills: input.plan.files
+        .map((f) => {
+          const parts = f.path.split("/");
+          const skillId = parts[parts.length - 2] ?? "";
+          return {
+            agent: { id: skillId, name: "", description: "", skillId: "" } as any,
+            relativePath: f.path,
+            absolutePath: join(skillsDir, skillId, "SKILL.md"),
+            content: f.content,
+          };
+        }),
+      standaloneSkills: this.#lastNativePlan?.standaloneSkills ?? input.plan.files
         .filter((f) => standaloneSkillIds.some((id) => f.path.includes(id)))
-        .map((f) => ({
-          skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
-          relativePath: f.path,
-          absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
-          content: f.content,
-        })),
+        .map((f) => {
+          const parts = f.path.split("/");
+          const skillId = parts[parts.length - 2] ?? "";
+          return {
+            skillId,
+            relativePath: f.path,
+            absolutePath: join(skillsDir, skillId, "SKILL.md"),
+            content: f.content,
+          };
+        }),
       sddSkillFiles: [],
       memoryDiagnostics: [],
       agentEntries: this.#lastNativePlan?.agentEntries ?? {},
