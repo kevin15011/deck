@@ -355,4 +355,80 @@ describe("DeveloperTeamManifest", () => {
       }
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Orchestrator Invariants in manifest — REQ-IBC-001, REQ-IBC-002, REQ-IBC-003
+  // ---------------------------------------------------------------------------
+
+  describe("buildDeveloperTeamManifest with orchestrator invariants", () => {
+    test("orchestrator agent instruction contains invariant section", () => {
+      const result = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+      });
+
+      const orchestrator = result.manifest.agents.find(
+        (a) => a.agentId === "deck-developer-orchestrator",
+      );
+      expect(orchestrator).toBeDefined();
+      expect(orchestrator!.instruction).toContain("## Orchestrator Invariants");
+      expect(orchestrator!.instruction).toContain("INV-001");
+      expect(orchestrator!.instruction).toContain("INV-002");
+      expect(orchestrator!.instruction).toContain("INV-003");
+      expect(orchestrator!.instruction).toContain("INV-004");
+      expect(orchestrator!.instruction).toContain("INV-005");
+    });
+
+    test("orchestrator skill contains invariant section", () => {
+      const result = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+      });
+
+      const orchestratorSkill = result.manifest.skills.find(
+        (s) => s.agentId === "deck-developer-orchestrator",
+      );
+      expect(orchestratorSkill).toBeDefined();
+      expect(orchestratorSkill!.body).toContain("## Orchestrator Invariants");
+      expect(orchestratorSkill!.body).toContain("INV-001");
+      expect(orchestratorSkill!.body).toContain("INV-002");
+      expect(orchestratorSkill!.body).toContain("INV-003");
+      expect(orchestratorSkill!.body).toContain("INV-004");
+      expect(orchestratorSkill!.body).toContain("INV-005");
+    });
+
+    test("non-orchestrator agents do NOT contain invariant section", () => {
+      const result = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+      });
+
+      const nonOrchestrators = result.manifest.agents.filter(
+        (a) => a.agentId !== "deck-developer-orchestrator",
+      );
+      for (const agent of nonOrchestrators) {
+        expect(agent.instruction, `${agent.agentId} should NOT contain invariants`).not.toContain(
+          "## Orchestrator Invariants",
+        );
+      }
+    });
+
+    test("manifest content is runner-neutral — no Pi/OpenCode in invariant text", () => {
+      const result = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+      });
+
+      // All invariant text should be runner-neutral
+      const orchestrator = result.manifest.agents.find(
+        (a) => a.agentId === "deck-developer-orchestrator",
+      )!;
+      expect(orchestrator.instruction).not.toContain("Pi");
+      expect(orchestrator.instruction).not.toContain("OpenCode");
+      expect(orchestrator.instruction).not.toContain("opencode");
+
+      const orchestratorSkill = result.manifest.skills.find(
+        (s) => s.agentId === "deck-developer-orchestrator",
+      )!;
+      expect(orchestratorSkill.body).not.toContain("Pi");
+      expect(orchestratorSkill.body).not.toContain("OpenCode");
+      expect(orchestratorSkill.body).not.toContain("opencode");
+    });
+  });
 });

@@ -100,8 +100,8 @@ describe("buildDeveloperTeamInstallPlan", () => {
     expect(plan.projectRoot).toBe("/tmp/my-project");
     expect(plan.agentsDir).toBe("/tmp/my-project/.pi/agents");
     expect(plan.skillsDir).toBe("/tmp/my-project/.pi/skills");
-    expect(plan.agents).toHaveLength(12);
-    expect(plan.skills).toHaveLength(12);
+    expect(plan.agents).toHaveLength(14);
+    expect(plan.skills).toHaveLength(16);
 
     const agentIds = plan.agents.map((a) => a.agent.id);
     expect(agentIds).toContain("deck-developer-orchestrator");
@@ -311,9 +311,9 @@ describe("applyDeveloperTeamInstall", () => {
       const plan = buildDeveloperTeamInstallPlan(projectRoot);
       const result = applyDeveloperTeamInstall(plan);
 
-      expect(result.results).toHaveLength(26);
-      expect(result.results.filter((r) => r.kind === "agent")).toHaveLength(12);
-      expect(result.results.filter((r) => r.kind === "skill")).toHaveLength(14);
+      expect(result.results).toHaveLength(30);
+      expect(result.results.filter((r) => r.kind === "agent")).toHaveLength(14);
+      expect(result.results.filter((r) => r.kind === "skill")).toHaveLength(16);
       expect(result.results.every((r) => r.status === "created")).toBe(true);
 
       // Spot-check one agent file has valid frontmatter and body
@@ -438,9 +438,9 @@ describe("verifyDeveloperTeamInstall", () => {
 
       const verifyResult = verifyDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(true);
-      expect(verifyResult.agentResults).toHaveLength(12);
+      expect(verifyResult.agentResults).toHaveLength(14);
       expect(verifyResult.agentResults.every((r) => r.valid)).toBe(true);
-      expect(verifyResult.skillResults).toHaveLength(12);
+      expect(verifyResult.skillResults).toHaveLength(14);
       expect(verifyResult.skillResults.every((r) => r.valid)).toBe(true);
     } finally {
       cleanup(projectRoot);
@@ -455,9 +455,9 @@ describe("verifyDeveloperTeamInstall", () => {
       // Don't apply — verify should fail
       const verifyResult = verifyDeveloperTeamInstall(plan);
       expect(verifyResult.valid).toBe(false);
-      expect(verifyResult.agentResults).toHaveLength(12);
+      expect(verifyResult.agentResults).toHaveLength(14);
       expect(verifyResult.agentResults.every((r) => !r.valid)).toBe(true);
-      expect(verifyResult.skillResults).toHaveLength(12);
+      expect(verifyResult.skillResults).toHaveLength(14);
       expect(verifyResult.skillResults.every((r) => !r.valid)).toBe(true);
 
       // Each should report missing file
@@ -527,7 +527,7 @@ describe("backupDeveloperTeamFiles", () => {
       writeFileSync(plan.agents[0].absolutePath, "old-content", "utf-8");
 
       const backup = backupDeveloperTeamFiles(plan);
-      expect(backup.entries).toHaveLength(26); // 12 agents + 14 skills (12 agent skills + 2 SDD bootstrap)
+      expect(backup.entries).toHaveLength(30); // 14 agents + 16 skills (14 agent skills + 2 SDD bootstrap)
 
       // The pre-existing file should have its content captured
       const existingEntry = backup.entries.find((e) => e.absolutePath === plan.agents[0].absolutePath)!;
@@ -535,7 +535,7 @@ describe("backupDeveloperTeamFiles", () => {
 
       // Files that didn't exist should have null
       const missingEntries = backup.entries.filter((e) => e.previousContent === null);
-      expect(missingEntries).toHaveLength(25);
+      expect(missingEntries).toHaveLength(29);
     } finally {
       cleanup(projectRoot);
     }
@@ -1076,7 +1076,9 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
       expect(plan.memoryDiagnostics[0].providerId).toBe("supermemory");
       expect(JSON.stringify(plan.memoryDiagnostics)).not.toContain("x-supermemory-api-key");
       expect(orchestrator.content).not.toContain("Should not be injected.");
-      expect(orchestrator.content).not.toContain("execute");
+      // Note: We no longer assert "execute" is absent because INV-002 (Pure Delegator) contains "execute"
+      // instead verify no memory tool bindings
+      expect(orchestrator.content).not.toContain("Supermemory MCP");
       expect(orchestrator.content).not.toContain("search_docs");
       expect(orchestrator.content).toContain("tools: read,write,bash");
     } finally {
@@ -1310,5 +1312,73 @@ describe("buildDeveloperTeamInstallPlan (capability instructions)", () => {
     const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
     expect(explorer.content).toContain("## Package Instructions (configured)");
     expect(explorer.content).toContain("No config file needed.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Orchestrator Invariants Verification — REQ-BC-002, REQ-IBC-001, REQ-IBC-004
+// ---------------------------------------------------------------------------
+
+describe("verifyDeveloperTeamInstall with orchestrator invariants", () => {
+  test("orchestrator agent and skill contain invariant section", () => {
+    const plan = buildDeveloperTeamInstallPlan("/tmp/test-project");
+
+    const orchestrator = plan.agents.find(
+      (a) => a.agent.id === "deck-developer-orchestrator",
+    );
+    expect(orchestrator).toBeDefined();
+    expect(orchestrator!.content).toContain("## Orchestrator Invariants");
+    expect(orchestrator!.content).toContain("INV-001");
+    expect(orchestrator!.content).toContain("INV-002");
+    expect(orchestrator!.content).toContain("INV-003");
+    expect(orchestrator!.content).toContain("INV-004");
+    expect(orchestrator!.content).toContain("INV-005");
+
+    const orchestratorSkill = plan.skills.find(
+      (s) => s.agent.id === "deck-developer-orchestrator",
+    );
+    expect(orchestratorSkill).toBeDefined();
+    expect(orchestratorSkill!.content).toContain("## Orchestrator Invariants");
+    // Verify ALL 5 critical invariants are present in skill
+    expect(orchestratorSkill!.content).toContain("INV-001");
+    expect(orchestratorSkill!.content).toContain("INV-002");
+    expect(orchestratorSkill!.content).toContain("INV-003");
+    expect(orchestratorSkill!.content).toContain("INV-004");
+    expect(orchestratorSkill!.content).toContain("INV-005");
+  });
+
+  test("non-orchestrator agents do NOT contain invariant section", () => {
+    const plan = buildDeveloperTeamInstallPlan("/tmp/test-project");
+
+    const nonOrchestrators = plan.agents.filter(
+      (a) => a.agent.id !== "deck-developer-orchestrator",
+    );
+    for (const agent of nonOrchestrators) {
+      expect(
+        agent.content,
+        `${agent.agent.id} should NOT contain invariants`,
+      ).not.toContain("## Orchestrator Invariants");
+    }
+  });
+
+  test("verify function runs invariant checks for orchestrator surfaces", () => {
+    const projectRoot = createTempProject();
+    try {
+      ensurePiDirs(projectRoot);
+      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      applyDeveloperTeamInstall(plan);
+
+      const verifyResult = verifyDeveloperTeamInstall(plan);
+
+      expect(verifyResult.agentResults.length).toBeGreaterThan(0);
+      expect(verifyResult.skillResults.length).toBeGreaterThan(0);
+
+      const orchAgentResult = verifyResult.agentResults.find(
+        (r) => r.agentId === "deck-developer-orchestrator",
+      );
+      expect(orchAgentResult).toBeDefined();
+    } finally {
+      cleanup(projectRoot);
+    }
   });
 });

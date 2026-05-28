@@ -1,3 +1,5 @@
+import { prependOrchestratorInvariants, type OrchestratorInvariantSurface, type InvariantVerificationResult } from "./orchestrator-invariants";
+
 import { renderDeveloperTeamContextAuthorityGuidance } from "../../memory/adaptive-context-renderer";
 
 import { deckInitSkillContent } from "../../skills/bootstrap/deck-init-content";
@@ -224,6 +226,29 @@ function withContextAuthorityGuidance(content: AgentContent): AgentContent {
   };
 }
 
+/**
+ * Prepend orchestrator invariants to agent content.
+ * Only applies to orchestrator agent surfaces.
+ *
+ * @param content - Agent content with authority already applied
+ * @param agentId - Target agent ID
+ * @returns Content with invariants prepended for orchestrator agent only
+ */
+function withOrchestratorInvariants(
+  content: AgentContent,
+  agentId: string,
+): AgentContent {
+  // Only inject invariants into orchestrator agent
+  if (agentId !== "deck-developer-orchestrator") {
+    return content;
+  }
+
+  return {
+    agentBody: prependOrchestratorInvariants(content.agentBody, "agent"),
+    skillBody: prependOrchestratorInvariants(content.skillBody, "skill"),
+  };
+}
+
 function appendCapabilityInstructions(
   baseContent: string,
   bundle: CapabilityInstructionBundle | undefined,
@@ -314,7 +339,9 @@ export function getAgentContentResult(
 ): Result<AgentContent, AgentContentError> {
   const real = REAL_CONTENT[agentId];
   if (real) {
-    const withAuthority = withContextAuthorityGuidance(real);
+    // Apply composition order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) capability instructions
+    const withInvariants = withOrchestratorInvariants(real, agentId);
+    const withAuthority = withContextAuthorityGuidance(withInvariants);
     const composed = applyAgentContentComposition(
       withAuthority,
       agentId,
@@ -333,7 +360,9 @@ export function getAgentContentResult(
     if (catalogAgent) {
       // Agent exists in catalog but has no real content — fallback is appropriate
       const fallbackContent = getUnknownAgentContent(agentId, []);
-      const withAuthority = withContextAuthorityGuidance(fallbackContent);
+      // Apply same composition order as real content
+      const withInvariants = withOrchestratorInvariants(fallbackContent, agentId);
+      const withAuthority = withContextAuthorityGuidance(withInvariants);
       const composed = applyAgentContentComposition(
         withAuthority,
         agentId,
@@ -489,7 +518,11 @@ export function getTeamSessionInstructions(
   if (teamId === "developer-team") {
     const personality = options?.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
     const orchestratorPrompt = getOrchestratorSystemPrompt(personality);
-    const base = appendContextAuthorityGuidance(orchestratorPrompt);
+
+    // Compose order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) capability instructions
+    // Per Task 3 spec: prepend invariants BEFORE context-authority guidance
+    const withInvariants = prependOrchestratorInvariants(orchestratorPrompt, "session");
+    const base = appendContextAuthorityGuidance(withInvariants);
     if (!options?.capabilityInstructions) {
       return base;
     }

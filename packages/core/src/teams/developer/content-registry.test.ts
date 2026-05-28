@@ -699,6 +699,94 @@ describe("getAgentContent deprecated wrapper parity", () => {
 // Personality — Orchestrator System Prompt Variants
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Orchestrator Invariants Integration — REQ-IBC-001, REQ-IBC-002, REQ-IBC-003, REQ-IBC-004
+// ---------------------------------------------------------------------------
+
+describe("orchestrator invariant injection", () => {
+  test("session instructions contain '## Orchestrator Invariants' at start", () => {
+    const instructions = getTeamSessionInstructions("developer-team")!;
+    const invariantsIdx = instructions.indexOf("## Orchestrator Invariants");
+
+    expect(invariantsIdx).toBe(0); // Invariants at start of session instructions
+  });
+
+  test("session instructions do not have Package Instructions by default", () => {
+    const instructions = getTeamSessionInstructions("developer-team")!;
+    const packageInstrIdx = instructions.indexOf("## Package Instructions");
+
+    expect(packageInstrIdx).toBe(-1); // no capability instructions by default
+  });
+
+  test("orchestrator agent body contains invariant section", () => {
+    const content = getAgentContent("deck-developer-orchestrator")!;
+    expect(content.agentBody).toContain("## Orchestrator Invariants");
+    expect(content.agentBody).toContain("INV-001");
+    expect(content.agentBody).toContain("INV-002");
+    expect(content.agentBody).toContain("INV-003");
+    expect(content.agentBody).toContain("INV-004");
+    expect(content.agentBody).toContain("INV-005");
+  });
+
+  test("orchestrator skill body contains invariant section", () => {
+    const content = getAgentContent("deck-developer-orchestrator")!;
+    expect(content.skillBody).toContain("## Orchestrator Invariants");
+    expect(content.skillBody).toContain("INV-001");
+    expect(content.skillBody).toContain("INV-002");
+    expect(content.skillBody).toContain("INV-003");
+    expect(content.skillBody).toContain("INV-004");
+    expect(content.skillBody).toContain("INV-005");
+  });
+
+  test("non-orchestrator agents do NOT contain invariant section", () => {
+    const nonOrchestratorAgents = [
+      "deck-developer-explorer",
+      "deck-developer-spec",
+      "deck-developer-design",
+      "deck-developer-task",
+      "deck-developer-apply-general",
+      "deck-developer-apply-backend",
+      "deck-developer-apply-frontend",
+      "deck-developer-verify",
+      "deck-developer-review",
+      "deck-developer-archive",
+    ];
+
+    for (const id of nonOrchestratorAgents) {
+      const content = getAgentContent(id)!;
+      expect(content.agentBody, `${id} should NOT contain invariants`).not.toContain(
+        "## Orchestrator Invariants",
+      );
+      expect(content.skillBody, `${id} skill should NOT contain invariants`).not.toContain(
+        "## Orchestrator Invariants",
+      );
+    }
+  });
+
+  test("composition is idempotent — no duplicates on re-composition", () => {
+    const first = getAgentContent("deck-developer-orchestrator")!;
+    const second = getAgentContent("deck-developer-orchestrator")!;
+
+    // No duplicates of invariant section header
+    const headerMatches = first.agentBody.match(/^## Orchestrator Invariants$/gm);
+    expect(headerMatches).toHaveLength(1);
+  });
+
+  test("invariant section appears before context-authority guidance", () => {
+    const instructions = getTeamSessionInstructions("developer-team")!;
+    const invariantsIdx = instructions.indexOf("## Orchestrator Invariants");
+    const authorityIdx = instructions.indexOf("## Context Authority");
+
+    expect(invariantsIdx).toBe(0); // Invariants at start
+    expect(authorityIdx).toBeGreaterThan(0);
+    expect(invariantsIdx).toBeLessThan(authorityIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Personality — Orchestrator System Prompt Variants
+// ---------------------------------------------------------------------------
+
 describe("getTeamSessionInstructions with personality", () => {
   test("guia personality returns expanded teaching-tone variant", () => {
     const guiaInstructions = getTeamSessionInstructions("developer-team", { personality: "guia" });

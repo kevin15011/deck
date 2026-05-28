@@ -630,3 +630,87 @@ describe("orchestratorPersonality in buildOpenCodeDeveloperTeamInstallPlan", () 
     expect(plan.personality).toBe("pragmatica");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Orchestrator Invariants Verification — REQ-BC-002, REQ-IBC-001, REQ-IBC-004
+// ---------------------------------------------------------------------------
+
+describe("orchestrator invariant verification in verifyOpenCodeDeveloperTeamInstall", () => {
+  test("verification passes when orchestrator skill contains all critical invariants", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
+
+      expect(verifyResult.valid).toBe(true);
+
+      // Invariants present in orchestrator skill
+      const orchestratorSkill = plan.skills.find(
+        (s) => s.agent.id === "deck-developer-orchestrator",
+      )!;
+      expect(orchestratorSkill.content).toContain("## Orchestrator Invariants");
+      // Verify ALL 5 critical invariants are present
+      expect(orchestratorSkill.content).toContain("INV-001");
+      expect(orchestratorSkill.content).toContain("INV-002");
+      expect(orchestratorSkill.content).toContain("INV-003");
+      expect(orchestratorSkill.content).toContain("INV-004");
+      expect(orchestratorSkill.content).toContain("INV-005");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("orchestrator skill verification includes invariant checks in result", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
+
+      // Should have skill results for orchestrator
+      const orchResult = verifyResult.skillResults.find(
+        (r) => r.agentId === "deck-developer-orchestrator",
+      );
+      expect(orchResult).toBeDefined();
+
+      // Verification should pass with complete invariants
+      expect(orchResult!.valid).toBe(true);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("installed skill file on disk contains all critical invariants", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Read the actual file from disk to verify what was actually written
+      const orchestratorSkill = plan.skills.find(
+        (s) => s.agent.id === "deck-developer-orchestrator",
+      )!;
+      const diskContent = readFileSync(orchestratorSkill.absolutePath, "utf-8");
+
+      // Disk content must match planned content
+      expect(diskContent).toBe(orchestratorSkill.content);
+
+      // Verify all invariants are present in the actual disk file
+      expect(diskContent).toContain("## Orchestrator Invariants");
+      expect(diskContent).toContain("INV-001");
+      expect(diskContent).toContain("INV-002");
+      expect(diskContent).toContain("INV-003");
+      expect(diskContent).toContain("INV-004");
+      expect(diskContent).toContain("INV-005");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  });

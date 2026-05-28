@@ -6,6 +6,45 @@ import {
   buildCapabilityInstructionBundle,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
+// import { verifyInvariantPresence, type OrchestratorInvariantSurface } from "@deck/core/teams/developer/orchestrator-invariants";
+
+// Inline verification for adapter — uses core directly at runtime (Task 7)
+type OrchestratorInvariantSurface = "session" | "agent" | "skill" | "manifest";
+
+interface InvariantVerificationResult {
+  pass: boolean;
+  missing: string[];
+}
+
+/**
+ * Verify invariant presence inline (copied from core for adapter isolation)
+ */
+function verifyInvariantPresence(
+  content: string,
+  surface: OrchestratorInvariantSurface,
+): InvariantVerificationResult {
+  const criticalIds = [
+    "INV-001",
+    "INV-002",
+    "INV-003",
+    "INV-004",
+    "INV-005",
+  ];
+  const missing: string[] = [];
+
+  const hasHeader = /^## Orchestrator Invariants$/m.test(content);
+  if (!hasHeader) {
+    return { pass: false, missing: criticalIds };
+  }
+
+  for (const id of criticalIds) {
+    if (!content.includes(id)) {
+      missing.push(id);
+    }
+  }
+
+  return { pass: missing.length === 0, missing };
+}
 import {
   composeAdaptiveMemory,
   resolveMemoryInjection,
@@ -548,6 +587,17 @@ export function verifyDeveloperTeamInstall(
       issues.push(`Description mismatch for ${planned.agent.id}.`);
     }
 
+    // Task 7: Verify orchestrator invariant presence for agent surface
+    // Only verify for orchestrator agent
+    if ( planned.agent.id === "deck-developer-orchestrator") {
+      const invariantCheck = verifyInvariantPresence(content, "agent");
+      if (!invariantCheck.pass) {
+        for (const missingId of invariantCheck.missing) {
+          issues.push(`Missing orchestrator invariant ${missingId} on agent surface.`);
+        }
+      }
+    }
+
     return { agentId: planned.agent.id, valid: issues.length === 0, issues };
   });
 
@@ -571,6 +621,17 @@ export function verifyDeveloperTeamInstall(
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
       if (headingMatch && !content.includes(headingMatch[0])) {
         issues.push(`Missing expected heading "${headingMatch[0]}".`);
+      }
+    }
+
+    // Task 7: Verify orchestrator invariant presence for skill surface
+    // Only verify for orchestrator skill
+    if ( planned.agent.id === "deck-developer-orchestrator") {
+      const invariantCheck = verifyInvariantPresence(content, "skill");
+      if (!invariantCheck.pass) {
+        for (const missingId of invariantCheck.missing) {
+          issues.push(`Missing orchestrator invariant ${missingId} on skill surface.`);
+        }
       }
     }
 

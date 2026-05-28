@@ -7,6 +7,46 @@ import {
   buildCapabilityInstructionBundle,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
+// import { verifyOrchestratorInvariantPresence, type OrchestratorInvariantSurface } from "@deck/core/teams/developer/orchestrator-invariants";
+
+// Inline verification for adapter — uses core directly at runtime (Task 6)
+// TODO: restore import when @deck/core exports are fully typed
+type OrchestratorInvariantSurface = "session" | "agent" | "skill" | "manifest";
+
+interface InvariantVerificationResult {
+  pass: boolean;
+  missing: string[];
+}
+
+/**
+ * Verify invariant presence inline (copied from core for adapter isolation)
+ */
+function verifyInvariantPresence(
+  content: string,
+  surface: OrchestratorInvariantSurface,
+): InvariantVerificationResult {
+  const criticalIds = [
+    "INV-001",
+    "INV-002",
+    "INV-003",
+    "INV-004",
+    "INV-005",
+  ];
+  const missing: string[] = [];
+
+  const hasHeader = /^## Orchestrator Invariants$/m.test(content);
+  if (!hasHeader) {
+    return { pass: false, missing: criticalIds };
+  }
+
+  for (const id of criticalIds) {
+    if (!content.includes(id)) {
+      missing.push(id);
+    }
+  }
+
+  return { pass: missing.length === 0, missing };
+}
 import {
   composeAdaptiveMemory,
   resolveMemoryInjection,
@@ -538,6 +578,18 @@ export function verifyOpenCodeDeveloperTeamInstall(
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
       if (headingMatch && !content.includes(headingMatch[0])) {
         issues.push(`Missing expected heading "${headingMatch[0]}".`);
+      }
+    }
+
+    // Task 6: Verify orchestrator invariant presence
+    // Only verify for orchestrator skill, not other agents
+    if (planned.agent.id === "deck-developer-orchestrator") {
+      const surface: OrchestratorInvariantSurface = "skill";
+      const invariantCheck = verifyInvariantPresence(content, surface);
+      if (!invariantCheck.pass) {
+        for (const missingId of invariantCheck.missing) {
+          issues.push(`Missing orchestrator invariant ${missingId} on skill surface.`);
+        }
       }
     }
 
