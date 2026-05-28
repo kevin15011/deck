@@ -60,7 +60,7 @@ export const DEFAULT_ORCHESTRATOR_PERSONALITY: OrchestratorPersonality = "pragma
 /** Dynamic runner ID for package instructions — validated at runtime against AdapterRegistry. */
 export type PackageInstructionRunnerId = string & {};
 
-export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk", "adaptive-memory"] as const;
+export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk", "adaptive-memory", "serena"] as const;
 export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number];
 
 /**
@@ -207,8 +207,8 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
       activeProvider: "none",
     },
     packageInstructions: {
-      pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
-      opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
+      pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+      opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
     },
     orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
     profiles: [],
@@ -564,8 +564,8 @@ function normalizePackageInstructionConfig(
   // Default: all runners have all packages disabled
   // getDefaultDeckConfig() provides defaults for pi + opencode for backward compat
   const defaultResult: NormalizedDeckConfig["packageInstructions"] = {
-    pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
-    opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
+    pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+    opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
   };
 
   if (value === undefined || value === null) {
@@ -600,6 +600,7 @@ function normalizePackageInstructionConfig(
       "context-mode": false,
       rtk: false,
       "adaptive-memory": false,
+      serena: false,
     };
 
     // Validate each package key in this runner

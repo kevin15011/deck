@@ -1,0 +1,90 @@
+events:
+  - event: proposal-completed
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: "2026-05-28T00:00:00Z"
+    agent: deck-developer-proposal
+    summary: >
+      Proposal completed for adding Serena MCP package.
+      Covers intent, scope, approach, risks, rollback, and
+      acceptance direction.
+  - event: spec-completed
+    phase: spec
+    status: completed
+    artifact: spec.md
+    timestamp: "2026-05-28T00:00:00Z"
+    agent: deck-developer-spec
+    summary: >
+      Spec completed: 35 requirements (27 MUST, 8 SHOULD),
+      24 acceptance scenarios, 8 capabilities specified.
+      Registry deferred — serialized by orchestrator.
+  - event: design-completed
+    phase: design
+    status: completed
+    artifact: design.md
+    timestamp: "2026-05-28T00:00:00Z"
+    agent: deck-developer-design
+    summary: >
+      Design completed: 18 files affected, low risk level.
+      Key decisions: package ID "serena", context "ide",
+      memory/basic tools disabled, coexistence with codebase-memory.
+      Registry deferred — serialized by orchestrator.
+  - event: tasks-completed
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    timestamp: "2026-05-28T00:00:00Z"
+    agent: deck-developer-task
+    summary: >
+      Tasks completed: 13 tasks in 4 groups (G1 Core, G2 TUI,
+      G3 Doctor, G4 Config+Tests). All General Apply routed.
+      G1 is sequential chain; G2/G3/G4 parallelize after G1.
+      Estimated 100-400 lines changed, low review risk.
+  - event: apply-completed
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    timestamp: "2026-05-28T00:30:00Z"
+    agent: deck-developer-apply-general
+    summary: >
+      All 12 tasks completed successfully.
+      Created serena.ts bundle, registered in index.ts and deck-config.ts,
+      integrated with TUI (state, input-handler, action-runner, selectors),
+      added doctor diagnostics, updated .deck/config.json, created tests.
+      Bundle tests pass, typecheck passes.
+  - event: verify-completed
+    phase: verify
+    status: completed
+    artifact: verify-report.md
+    timestamp: "2026-05-28T00:40:00Z"
+    agent: deck-developer-verify
+    summary: >
+      Verification PASS. All 46 requirements/acceptance scenarios verified.
+      Tests: serena.test.ts, bundle-parity, index, reducer all pass.
+      Build: pass, Typecheck: pass.
+  - event: review-completed
+    phase: review
+    status: completed
+    artifact: review-report.md
+    timestamp: "2026-05-28T00:45:00Z"
+    agent: deck-developer-review
+    summary: >
+      Engineering quality review: APPROVED.
+      Architecture: Strong (clean separation).
+      Security: Strong (static command arrays, no injection risk).
+      Scalability: Strong (single package ID).
+      Maintainability: Strong (matches existing patterns).
+      Code Quality: Strong (well-documented).
+      Zero findings — implementation matches design spec exactly.
+  - event: archive-completed
+    phase: archive
+    status: archived
+    artifact: archive-report.md
+    timestamp: "2026-05-28T00:50:00Z"
+    agent: deck-developer-archive
+    summary: >
+      Change archived successfully.
+      All 12 tasks completed, verification PASS, review APPROVED.
+      Traceability preserved: requirements → tasks → implementation → verify → review.
+      Location: openspec/archive/add-serena-package/

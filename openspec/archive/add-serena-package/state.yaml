@@ -1,0 +1,54 @@
+phase: archive
+status: archived
+artifact: archive-report.md
+change_name: add-serena-package
+provenance:
+  agent: deck-developer-archive
+  model: MiniMax-M2.5
+  timestamp: "2026-05-28T00:50:00Z"
+  description: |
+    Change archived successfully.
+    All requirements verified, review approved, traceability preserved.
+    Location: openspec/archive/add-serena-package/
+  inputs:
+    - source: spec.md
+      description: Serena instruction bundle requirements
+    - source: design.md
+      description: Implementation architecture and file impacts
+    - source: tasks.md
+      description: 12 tasks from G1-G4 task groups
+    - source: apply-progress.md
+      description: All 12 tasks completed
+    - source: verify-report.md
+      description: PASS - all requirements verified
+    - source: review-report.md
+      description: APPROVE - zero findings
+artifacts:
+  - apply-progress.md
+  - design.md
+  - events.yaml
+  - proposal.md
+  - review-report.md
+  - spec.md
+  - state.yaml
+  - tasks.md
+  - verify-report.md
+  - archive-report.md
+tasks_completed:
+  - T1.1: Create serena.ts instruction bundle
+  - T1.2: Register in index.ts
+  - T1.3: Add to deck-config.ts
+  - T2.1: Update TUI state constants/defaults
+  - T2.2: Update input-handler fallback IDs
+  - T2.3: Update action-runner config write + MCP
+  - T2.4: Update selectors consumption signal
+  - T3.1: Add to doctor-diagnostics
+  - T4.1: Update .deck/config.json
+  - T4.2: Create serena.test.ts
+  - T4.3: Update bundle-parity + index tests
+  - T4.4: Update TUI tests
+verification_result: PASS
+review_rating: APPROVE
+next_phase: []
+blockers: []
+archive_target: openspec/archive/add-serena-package/

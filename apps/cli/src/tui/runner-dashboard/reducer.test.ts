@@ -35,6 +35,15 @@ const inventory: PiRunnerCapabilityInventory = {
     source: "rtk-ai/rtk",
     diagnostics: [],
   },
+  serena: {
+    capabilityId: "serena",
+    status: "manual",
+    runnerScope: "pi",
+    installed: false,
+    toolId: "serena",
+    source: "serena-dev/serena",
+    diagnostics: [],
+  },
   "pi-hud": {
     capabilityId: "pi-hud",
     status: "pending-source",
@@ -103,21 +112,27 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.cursor).toBe(0);
   });
 
-  test("togglea RTK, context-mode, codebase-memory y pi-hud", () => {
+  test("togglea RTK, context-mode, codebase-memory, serena y pi-hud", () => {
     let state = createDefaultPiRunnerDashboardState();
 
     state = reduce(state, { type: "toggle-capability", capabilityId: "rtk" });
     state = reduce(state, { type: "toggle-capability", capabilityId: "context-mode" });
     state = reduce(state, { type: "toggle-capability", capabilityId: "codebase-memory" });
+    state = reduce(state, { type: "toggle-capability", capabilityId: "serena" });
     state = reduce(state, { type: "toggle-capability", capabilityId: "pi-hud" });
 
-    expect(state.selectedCapabilities.rtk).toBe(true);
-    expect(state.selectedCapabilities["context-mode"]).toBe(true);
-    expect(state.selectedCapabilities["codebase-memory"]).toBe(true);
+    expect(state.selectedCapabilities.rtk).toBe(false);
+    expect(state.selectedCapabilities["context-mode"]).toBe(false);
+    expect(state.selectedCapabilities["codebase-memory"]).toBe(false);
+    expect(state.selectedCapabilities.serena).toBe(false);
     expect(state.selectedCapabilities["pi-hud"]).toBe(true);
 
+    // Toggle back on
     state = reduce(state, { type: "toggle-capability", capabilityId: "rtk" });
-    expect(state.selectedCapabilities.rtk).toBe(false);
+    expect(state.selectedCapabilities.rtk).toBe(true);
+
+    state = reduce(state, { type: "toggle-capability", capabilityId: "serena" });
+    expect(state.selectedCapabilities.serena).toBe(true);
   });
 
   test("Adaptive Memory inicia en None y no agrega acciones de memoria", () => {

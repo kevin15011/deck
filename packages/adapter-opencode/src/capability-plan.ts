@@ -412,6 +412,11 @@ function getMcpServerConfig(capabilityId: string, source: string | undefined): {
         type: "local",
         command: ["npx", "-y", "@upstash/context7-mcp"],
       };
+    case "serena":
+      return {
+        type: "local",
+        command: ["serena", "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+      };
     default:
       return null;
   }

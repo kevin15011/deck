@@ -85,7 +85,7 @@ export type ImplementationId = string;
  * Canonical package instruction IDs for instruction injection.
  * These are the packages that can be toggled via Configure Packages.
  */
-export const CANONICAL_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk"] as const;
+export const CANONICAL_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk", "serena"] as const;
 export type CanonicalInstructionPackageId = (typeof CANONICAL_INSTRUCTION_PACKAGE_IDS)[number];
 
 /**
@@ -212,6 +212,7 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
     "context-mode": true,
     "codebase-memory": true,
     rtk: true,
+    serena: true,
   },
   capabilityStatuses: {},
   adaptiveMemory: {

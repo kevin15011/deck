@@ -1,6 +1,6 @@
 import type { OpenCodeToolStatus } from "./required-tools";
 
-export type InstallableOpenCodeToolId = "rtk" | "context-mode" | "codebase-memory" | "context7";
+export type InstallableOpenCodeToolId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "serena";
 
 export type InstallableOpenCodeTool = {
   id: InstallableOpenCodeToolId;
@@ -34,6 +34,13 @@ export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [
     shellInstallUrl: "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh",
   },
   { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "mcp-server" },
+  {
+    id: "serena",
+    name: "Serena",
+    module: "oraios/serena",
+    required: false,
+    installKind: "mcp-server",
+  },
 ];
 
 export function buildOpenCodeInstallationPlan(options: BuildOpenCodeInstallationPlanOptions): InstallableOpenCodeTool[] {

@@ -3,6 +3,7 @@ import { buildAdaptiveMemoryInstructionBundle } from "./adaptive-memory";
 import { buildCodebaseMemoryInstructionBundle } from "./codebase-memory";
 import { buildContextModeInstructionBundle } from "./context-mode";
 import { buildRtkInstructionBundle } from "./rtk";
+import { buildSerenaInstructionBundle } from "./serena";
 
 // ---------------------------------------------------------------------------
 // Hash helper — deterministic hash for byte-exact comparison
@@ -42,6 +43,10 @@ const BASELINE_HASHES: Record<string, Record<string, number>> = {
   rtk: {
     agent: -74789039,
     skill: 1540221712,
+  },
+  serena: {
+    agent: 1042159158, // Updated: replaced OpenCode literals with generic "the runner"
+    skill: 484477006,
   },
 };
 
@@ -117,6 +122,22 @@ describe("bundle parity snapshots", () => {
       const skill = bundle.instructions.find((f) => f.surface === "skill");
       expect(skill).toBeDefined();
       expect(hash(skill!.markdown)).toBe(BASELINE_HASHES.rtk.skill);
+    });
+  });
+
+  describe("serena", () => {
+    const bundle = buildSerenaInstructionBundle();
+
+    test("agent fragment hash matches baseline", () => {
+      const agent = bundle.instructions.find((f) => f.surface === "agent");
+      expect(agent).toBeDefined();
+      expect(hash(agent!.markdown)).toBe(BASELINE_HASHES.serena.agent);
+    });
+
+    test("skill fragment hash matches baseline", () => {
+      const skill = bundle.instructions.find((f) => f.surface === "skill");
+      expect(skill).toBeDefined();
+      expect(hash(skill!.markdown)).toBe(BASELINE_HASHES.serena.skill);
     });
   });
 });

@@ -54,12 +54,13 @@ function expectDeckConfigError(fn: () => unknown, code: DeckConfigError["code"])
 // PACKAGE_INSTRUCTION_RUNNERS removed — runner keys are now dynamic
 
 describe("PACKAGE_INSTRUCTION_PACKAGE_IDS", () => {
-  test("contains codebase-memory, context-mode, rtk, adaptive-memory", () => {
+  test("contains codebase-memory, context-mode, rtk, adaptive-memory, serena", () => {
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("codebase-memory");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("context-mode");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("rtk");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("adaptive-memory");
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toHaveLength(4);
+    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("serena");
+    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toHaveLength(5);
   });
 });
 
@@ -77,8 +78,8 @@ describe("readDeckConfig", () => {
       version: 1,
       adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
-        pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
-        opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false },
+        pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+        opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
       },
       orchestratorPersonality: "pragmatica",
       profiles: [],
@@ -269,8 +270,8 @@ describe("validateDeckConfig — packageInstructions", () => {
       version: 1,
       adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
-        pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": true },
-        opencode: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": true },
+        pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": true, serena: true },
+        opencode: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": true, serena: true },
       },
     });
 

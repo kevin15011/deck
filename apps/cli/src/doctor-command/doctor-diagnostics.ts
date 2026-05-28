@@ -49,6 +49,7 @@ const MEMORY_PROVIDERS = [
 const KNOWN_OPENCODE_MCP_SERVERS = [
   { name: "supermemory", label: "Supermemory MCP" },
   { name: "codebase-memory-mcp", label: "Codebase Memory MCP" },
+  { name: "serena", label: "Serena MCP" },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -257,6 +258,7 @@ function checkClaudeOrCodexRuntime(runtime: "claude" | "codex", installed: boole
 function checkMemoryProviders(): DoctorCategoryResult[] {
   const results: DoctorCategoryResult[] = [];
 
+  // Check engram and supermemory
   for (const provider of MEMORY_PROVIDERS) {
     const items: DoctorCheckItem[] = [];
     try {
@@ -283,6 +285,32 @@ function checkMemoryProviders(): DoctorCategoryResult[] {
       items,
     });
   }
+
+  // Check Serena binary separately
+  const serenaItems: DoctorCheckItem[] = [];
+  try {
+    const available = memoryBinaryAvailable("serena");
+    serenaItems.push({
+      status: available ? "ok" : "warning",
+      message: available
+        ? "Serena binary found in PATH"
+        : "Serena binary not found in PATH",
+      suggestion: available
+        ? undefined
+        : "Install Serena MCP server for symbol editing capabilities",
+    });
+  } catch (err) {
+    serenaItems.push({
+      status: "error",
+      message: `Unable to check Serena: ${redact(String(err))}`,
+    });
+  }
+
+  results.push({
+    category: "Serena",
+    status: deriveCategoryStatus(serenaItems),
+    items: serenaItems,
+  });
 
   return results;
 }
@@ -330,13 +358,17 @@ function checkOpenCodeMcp(): DoctorCategoryResult {
           const record = entry as Record<string, unknown>;
           const hasUrl = typeof record["url"] === "string";
           const hasType = typeof record["type"] === "string";
+          // Local MCP has command array; remote MCP has url + type
+          const commandArr = Array.isArray(record["command"]) ? record["command"] : undefined;
+          const hasLocalConfig = commandArr && commandArr.length > 0;
+          const hasRemoteConfig = hasUrl && hasType;
           items.push({
-            status: hasUrl && hasType ? "ok" : "warning",
-            message: `${known.label}: ${hasUrl && hasType ? "configured" : "partial config"}`,
+            status: hasLocalConfig || hasRemoteConfig ? "ok" : "warning",
+            message: `${known.label}: ${hasLocalConfig ? "local" : hasRemoteConfig ? "remote" : "partial config"}`,
             suggestion:
-              hasUrl && hasType
+              hasLocalConfig || hasRemoteConfig
                 ? undefined
-                : `${known.label} is missing required fields (url, type)`,
+                : `${known.label} is missing required fields (command for local, or url/type for remote)`,
           });
         } else {
           items.push({

@@ -1,7 +1,7 @@
 /**
  * User-facing capability IDs for the OpenCode runner dashboard.
  */
-export type OpenCodeCapabilityId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "opencode-mermaid";
+export type OpenCodeCapabilityId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "opencode-mermaid" | "serena";
 
 export type OpenCodeRunnerScope = "opencode" | "all";
 
@@ -72,6 +72,17 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
     installKind: "shell-script-plus-mcp",
     detector: { commands: ["rtk"] },
   },
+  serena: {
+    capabilityId: "serena",
+    label: "Serena",
+    description: "Semantic code retrieval, editing and refactoring via LSP. MCP server providing IDE-level symbol operations.",
+    runnerScope: "all",
+    requirementLevel: "configurable",
+    toolId: "serena",
+    source: "oraios/serena",
+    installKind: "mcp-server",
+    detector: { commands: ["serena"], mcpServerNames: ["serena"] },
+  },
   context7: {
     capabilityId: "context7",
     label: "Context7",
@@ -109,6 +120,7 @@ export const OPENCODE_RUNNER_CAPABILITY_CATALOG: Record<
   "context-mode": FULL_OPENCODE_CAPABILITY_CATALOG["context-mode"] as OpenCodeCapabilityToolMapping,
   "codebase-memory": FULL_OPENCODE_CAPABILITY_CATALOG["codebase-memory"] as OpenCodeCapabilityToolMapping,
   rtk: FULL_OPENCODE_CAPABILITY_CATALOG.rtk as OpenCodeCapabilityToolMapping,
+  serena: FULL_OPENCODE_CAPABILITY_CATALOG.serena as OpenCodeCapabilityToolMapping,
   context7: FULL_OPENCODE_CAPABILITY_CATALOG.context7 as OpenCodeCapabilityToolMapping,
 } as const satisfies Record<Exclude<OpenCodeCapabilityId, "opencode-mermaid">, OpenCodeCapabilityToolMapping>;
 

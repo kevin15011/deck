@@ -391,12 +391,14 @@ function writeDeckConfigAction(
       "context-mode": piInstructions["context-mode"] ?? false,
       rtk: piInstructions.rtk ?? false,
       "adaptive-memory": piInstructions["adaptive-memory"] ?? false,
+      serena: piInstructions.serena ?? false,
     },
     opencode: {
       "codebase-memory": opencodeInstructions["codebase-memory"] ?? false,
       "context-mode": opencodeInstructions["context-mode"] ?? false,
       rtk: opencodeInstructions.rtk ?? false,
       "adaptive-memory": opencodeInstructions["adaptive-memory"] ?? false,
+      serena: opencodeInstructions.serena ?? false,
     },
   };
 
@@ -462,6 +464,29 @@ async function writeMcpConfigAction(
       actionId: action.id,
       status: "executed",
       message: `Context7 MCP config written successfully at ${result.path}.`,
+      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+    };
+  }
+
+  if (capabilityId === "serena") {
+    // Serena is a local MCP server
+    const result = await writer({
+      serverName: "serena",
+      type: "local",
+      command: ["serena", "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+    });
+    if (!result.ok) {
+      return {
+        actionId: action.id,
+        status: "failed",
+        message: `MCP config write failed at ${result.path ?? "unknown path"}.`,
+        diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+      };
+    }
+    return {
+      actionId: action.id,
+      status: "executed",
+      message: `Serena MCP config written successfully at ${result.path}.`,
       diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
     };
   }
