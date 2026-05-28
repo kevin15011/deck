@@ -65,8 +65,16 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Specialist only");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Recommend SDD");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Run SDD");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not ask for Automatic vs Interactive until this triage says **Run SDD**");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not ask Automatic vs Interactive unless triage says Run SDD");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Documentation-only requests are not automatically SDD");
+  });
+
+  // INV-004 strengthened wording — all surfaces
+  test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {
+    // Key clause: taking/delegating any step that may modify + protected types + prohibition
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not modify or delegate modifying work until this classification is made");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not ask Automatic vs Interactive unless triage says Run SDD");
   });
 
   test("contains apply routing to general, backend, or frontend", () => {
@@ -174,6 +182,12 @@ describe("ORCHESTRATOR_AGENT_BODY", () => {
 
   test("mentions SDD triage in agent body", () => {
     expect(ORCHESTRATOR_AGENT_BODY).toContain("Run SDD triage before asking for execution mode");
+  });
+
+  // INV-004 strengthened wording — agent body
+  test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {
+    expect(ORCHESTRATOR_AGENT_BODY).toContain("taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files");
+    expect(ORCHESTRATOR_AGENT_BODY).toContain("Do not modify or delegate modifying work until this classification is made");
   });
 
   test("does not contain placeholder comment", () => {
@@ -297,6 +311,29 @@ describe("ORCHESTRATOR_SKILL_BODY", () => {
   test("skill body contains post-Archive Git suggestion guidance", () => {
     expect(ORCHESTRATOR_SKILL_BODY).toContain("Post-Archive Git Suggestions");
     expect(ORCHESTRATOR_SKILL_BODY).toContain("advisory");
+  });
+
+  // INV-004 strengthened wording — skill body aligns with SKILL.md
+  test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do not modify or delegate modifying work until this classification is made");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do not ask Automatic vs Interactive unless triage says Run SDD");
+  });
+});
+
+describe("ORCHESTRATOR_PROMPT_GUIDA", () => {
+  // INV-004 strengthened wording — guida variant matches strengthened system prompt
+  test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files");
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("Do not modify or delegate modifying work until this classification is made");
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("Do not ask Automatic vs Interactive unless triage says Run SDD");
+  });
+
+  test("SDD triage gate lists all four categories", () => {
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Direct**");
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Specialist only**");
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Recommend SDD**");
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Run SDD**");
   });
 });
 

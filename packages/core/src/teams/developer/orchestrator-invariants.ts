@@ -152,13 +152,14 @@ export const INV_004_SDD_TRIAGE_GATE: OrchestratorInvariant = {
     "orchestrator-content.ts:146-159 (SDD Triage Gate)",
     "orchestrator-content.ts:432-452 (ORCHESTRATOR_PROMPT_GUIDA: SDD Triage Gate)",
   ],
-  condition: "Before asking for Execution Mode or launching SDD phases",
+  condition:
+    "Before asking for execution mode, launching SDD phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files",
   requiredAction:
-    "Classify the request as Direct, Specialist only, Recommend SDD, or Run SDD using the smallest workflow that preserves quality. Do not ask for Automatic vs Interactive until triage says Run SDD.",
+    "Classify the request as Direct, Specialist only, Recommend SDD, or Run SDD. Do not ask Automatic vs Interactive unless triage says Run SDD. Do not modify or delegate modifying work until this classification is made.",
   rationale:
-    "SDD is a heavyweight pipeline. Running it for every request with certain keywords wastes resources and frustrates users with unnecessary ceremony. Using the smallest appropriate workflow keeps the team responsive.",
+    "SDD is a heavyweight pipeline. Running it for every request with certain keywords wastes resources and frustrates users with unnecessary ceremony. Using the smallest appropriate workflow keeps the team responsive. Additionally, bypassing triage and modifying files directly undermines workflow safety.",
   violationConsequence:
-    "Users experience unnecessary SDD pipeline overhead for simple requests, or miss the full pipeline when it would benefit their work.",
+    "Users experience unnecessary SDD pipeline overhead for simple requests, or miss the full pipeline when it would benefit their work. The orchestrator may modify or delegate work without proper classification.",
 };
 
 /**

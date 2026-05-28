@@ -145,7 +145,7 @@ You may also suggest \`deck-onboard\` to users who want a guided walkthrough of 
 
 ## SDD Triage Gate
 
-Before asking for Execution Mode or launching SDD phases, classify the user request. SDD is a recommendation and execution path for meaningful change work, not a reflex triggered by words like "OpenSpec", "PRD", "requirements", or a long prompt.
+Before asking for execution mode, launching SDD phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files, classify the current user request as **Direct**, **Specialist only**, **Recommend SDD**, or **Run SDD**. Do not ask Automatic vs Interactive unless triage says Run SDD. Do not modify or delegate modifying work until this classification is made.
 
 Use the smallest workflow that preserves quality:
 
@@ -154,7 +154,7 @@ Use the smallest workflow that preserves quality:
 3. **Recommend SDD**: actively suggest SDD when the request has ambiguous scope, product requirements, architecture decisions, likely multi-file impact, testing strategy, migration risk, cross-cutting behavior, codebase structure changes, agent configuration changes, prompt changes, SDD workflow internals, OpenSpec/routing implications, or broad project impact.
 4. **Run SDD**: start the full SDD pipeline when the user explicitly asks for SDD, accepts the recommendation, or requests implementation/planning that clearly needs Proposal → Spec/Design → Tasks → Apply → Verify/Review → Archive.
 
-Do not ask for Automatic vs Interactive until this triage says **Run SDD**. If triage says **Recommend SDD**, ask one question: "This looks like it would benefit from SDD; do you want to run the SDD flow for it?" Then stop and wait.
+If triage says **Recommend SDD**, ask one question: "This looks like it would benefit from SDD; do you want to run the SDD flow for it?" Then stop and wait.
 
 Documentation-only requests are not automatically SDD. For example, "create a high-quality PRD from this information" should produce the PRD directly or delegate only a focused writing/review task unless the user also asks to run the full change lifecycle.
 
@@ -431,7 +431,7 @@ You may also suggest \`deck-onboard\` to users who want a guided walkthrough of 
 
 ## SDD Triage Gate — classify before acting
 
-Before asking for Execution Mode or launching SDD phases, classify the user request. SDD is a recommendation and execution path for meaningful change work, not a reflex triggered by words like "OpenSpec", "PRD", "requirements", or a long prompt.
+Before asking for execution mode, launching SDD phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files, classify the current user request as **Direct**, **Specialist only**, **Recommend SDD**, or **Run SDD**. Do not ask Automatic vs Interactive unless triage says Run SDD. Do not modify or delegate modifying work until this classification is made.
 
 Use the smallest workflow that preserves quality:
 
@@ -447,7 +447,7 @@ Use the smallest workflow that preserves quality:
 **4. Run SDD**: start the full SDD pipeline when the user explicitly asks for SDD, accepts the recommendation, or requests implementation/planning that clearly needs Proposal → Spec/Design → Tasks → Apply → Verify/Review → Archive.
   - Examples: "run SDD for this", "let's do the full SDD flow", "implement everything in the proposal"
 
-Do not ask for Automatic vs Interactive until this triage says **Run SDD**. If triage says **Recommend SDD**, ask one question: "This looks like it would benefit from SDD; do you want to run the SDD flow for it?" Then stop and wait.
+If triage says **Recommend SDD**, ask one question: "This looks like it would benefit from SDD; do you want to run the SDD flow for it?" Then stop and wait.
 
 Documentation-only requests are not automatically SDD. For example, "create a high-quality PRD from this information" should produce the PRD directly or delegate only a focused writing/review task unless the user also asks to run the full change lifecycle.
 
@@ -653,7 +653,7 @@ export const ORCHESTRATOR_AGENT_BODY = `# Orchestrator Agent
 ## Role
 
 - Receive user intent and decide the workflow (compact or full SDD).
-- Run SDD triage before asking for execution mode or launching phases.
+- Run SDD triage before asking for execution mode, launching phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files. Do not modify or delegate modifying work until this classification is made.
 - Delegate work to the correct specialist agent.
 - Synthesize results and ask for user confirmation when risk requires it.
 - Enforce workflow safety and artifact traceability via OpenSpec.
@@ -695,14 +695,14 @@ export const ORCHESTRATOR_SKILL_BODY = `# Orchestrator Skill
 
 ### Triage Gate
 
-Before asking for execution mode or launching phases, classify the request as **Direct**, **Specialist only**, **Recommend SDD**, or **Run SDD**.
+Before asking for execution mode, launching SDD phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files, classify the current user request as **Direct**, **Specialist only**, **Recommend SDD**, or **Run SDD**. Do not ask Automatic vs Interactive unless triage says Run SDD. Do not modify or delegate modifying work until this classification is made.
 
 - **Direct**: local, low-risk, already clear, or a single mechanical artifact.
 - **Specialist only**: bounded artifact or analysis task that benefits from one role, such as PRD writing, prompt review, focused exploration, evaluating agent configuration, or assessing workflow internals.
 - **Recommend SDD**: ambiguous scope, product requirements, architecture decisions, likely multi-file impact, testing strategy, migration risk, cross-cutting behavior, codebase structure changes, agent configuration changes, prompt changes, SDD workflow internals, OpenSpec/routing implications, or broad project impact.
 - **Run SDD**: explicit SDD request, accepted SDD recommendation, or implementation/planning that clearly needs the full phase pipeline.
 
-Do not infer full SDD from "OpenSpec", "PRD", "requirements", or prompt length alone. Do not ask for Automatic vs Interactive until triage says **Run SDD**. If triage says **Recommend SDD**, ask one question and wait.
+Do not infer full SDD from "OpenSpec", "PRD", "requirements", or prompt length alone. If triage says **Recommend SDD**, ask one question and wait.
 
 ### Dependency Graph
 

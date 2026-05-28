@@ -311,6 +311,22 @@ describe("ordering: invariants should be ordered by tier then ID", () => {
   });
 });
 
+describe("INV-004 SDD Triage Gate: strengthened condition and requiredAction", () => {
+  const inv_004 = ORCHESTRATOR_INVARIANTS.find((inv) => inv.id === "INV-004")!;
+
+  it("condition should reference modification/delegation of any step that may modify", () => {
+    expect(inv_004.condition).toContain("taking/delegating any step that may modify");
+  });
+
+  it("condition should enumerate protected artifact types", () => {
+    expect(inv_004.condition).toContain("code, configuration, prompts, OpenSpec artifacts, or project files");
+  });
+
+  it("requiredAction should prohibit modification before classification", () => {
+    expect(inv_004.requiredAction).toContain("Do not modify or delegate modifying work until this classification is made");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Type Export Tests
 // ---------------------------------------------------------------------------
