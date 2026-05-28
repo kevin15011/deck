@@ -33,6 +33,39 @@ import type {
 import { getModelCatalog } from "@deck/core";
 import { join } from "node:path";
 
+
+
+// ---------------------------------------------------------------------------
+// Build-native plan tracking (module-level for simplicity)
+// ---------------------------------------------------------------------------
+
+// Last built plan - used by verify fallback path when no apply captured.
+// Captured in build functions only (not apply, to preserve build-time metadata).
+let lastBuiltPlan: OpenCodeDeveloperTeamInstallPlan | undefined = undefined;
+let lastBuiltProjectRoot: string | undefined = undefined;
+
+/**
+ * Capture a built plan for later verify fallback.
+ * Called ONLY from build functions, NOT apply (to preserve complete built metadata).
+ */
+function captureBuiltPlan(plan: OpenCodeDeveloperTeamInstallPlan, projectRoot: string): void {
+  if (lastBuiltProjectRoot !== projectRoot) {
+    lastBuiltPlan = undefined;
+  }
+  lastBuiltPlan = plan;
+  lastBuiltProjectRoot = projectRoot;
+}
+
+/**
+ * Retrieve built plan if available for this projectRoot.
+ */
+function getBuiltPlan(projectRoot: string): OpenCodeDeveloperTeamInstallPlan | undefined {
+  if (lastBuiltPlan && lastBuiltProjectRoot === projectRoot) {
+    return lastBuiltPlan;
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Environment catalog
 // ---------------------------------------------------------------------------
@@ -268,6 +301,9 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
     standaloneSkills: input.manifest.standaloneSkills,
   });
 
+  // Capture the built plan for verify fallback
+  captureBuiltPlan(plan, input.projectRoot);
+
   // OpenCode writes skill files, prompt files, and command files
   const files: import("@deck/core").DeveloperTeamInstallFile[] = [
     ...plan.skills.map((s) => ({ path: s.relativePath, content: s.content })),
@@ -317,6 +353,9 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
 
   const result: OpenCodeDeveloperTeamApplyResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
+  // Note: Do NOT capture plan here - it is partial (reconstructed from files only).
+  // The built plan captured in buildTeamInstallPlan is preserved for verify.
+
   return {
     success: true,
     appliedFiles: result.results.map((r) => r.agentId),
@@ -324,9 +363,18 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
 }
 
 async function verifyTeamInstall(input: import("@deck/core").DeveloperTeamVerifyInput): Promise<RunnerDeveloperTeamVerifyResult> {
-  const plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
-    capabilityInstructions: input.capabilityInstructions,
-  });
+  // Try to use built plan first (preferred) - built with full runtime options
+  const capturedPlan = getBuiltPlan(input.projectRoot);
+  let plan: OpenCodeDeveloperTeamInstallPlan;
+  if (capturedPlan) {
+    // Use built plan with full runtime options
+    plan = capturedPlan;
+  } else {
+    // Fallback: rebuild with options from input
+    plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
+      capabilityInstructions: input.capabilityInstructions,
+    });
+  }
   const result: OpenCodeDeveloperTeamVerifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
 
   return {
@@ -449,6 +497,9 @@ function buildTeamInstallPlanFromInput(input: import("@deck/core").DeveloperTeam
     capabilityInstructions: input.capabilityInstructions,
   });
 
+  // Capture the built plan for verify fallback
+  captureBuiltPlan(plan, input.projectRoot);
+
   const files: import("@deck/core").DeveloperTeamInstallFile[] = [
     ...plan.skills.map((s) => ({ path: s.relativePath, content: s.content })),
     ...plan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content })),
@@ -494,6 +545,9 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
 
   const result: OpenCodeDeveloperTeamApplyResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
+  // Note: Do NOT capture plan here - it is partial (reconstructed from files only).
+  // The built plan captured in buildTeamInstallPlanFromInput is preserved for verify.
+
   return Promise.resolve({
     results: result.results,
     changedCount: result.changedCount,
@@ -502,7 +556,18 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
 }
 
 function verifyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamVerifyInput): Promise<import("@deck/core").DeveloperTeamVerifyResult> {
-  const plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot);
+  // Try to use built plan first (preferred) - built with full runtime options
+  const capturedPlan = getBuiltPlan(input.projectRoot);
+  let plan: OpenCodeDeveloperTeamInstallPlan;
+  if (capturedPlan) {
+    // Use built plan with full runtime options
+    plan = capturedPlan;
+  } else {
+    // Fallback: rebuild with options from input (may miss runtime options not in input)
+    plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
+      capabilityInstructions: input.capabilityInstructions,
+    });
+  }
   const result: OpenCodeDeveloperTeamVerifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
 
   return Promise.resolve({
