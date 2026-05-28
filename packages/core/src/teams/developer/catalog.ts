@@ -123,7 +123,7 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = [
     name: "deck-init",
     displayName: "Init Agent",
     description:
-      "Initializes SDD context, indexes codebase with codebase-memory, and bootstraps OpenSpec.",
+      "Trigger: deck init, initialize deck, startsdd. Initialize SDD context, index codebase, bootstrap openspec.",
     skillId: "deck-init",
   },
   {
@@ -131,7 +131,7 @@ export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = [
     name: "deck-onboard",
     displayName: "Onboard Agent",
     description:
-      "Guides users through the SDD cycle with an interactive walkthrough.",
+      "Trigger: deck onboard, start sdd, learn sdd. Interactive SDD walkthrough using Deck's developer team.",
     skillId: "deck-onboard",
   },
 ] as const;

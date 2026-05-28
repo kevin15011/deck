@@ -181,8 +181,14 @@ test("generates command generation plan with 14 commands", () => {
     expect(plan.skills).toHaveLength(14);
     for (const skill of plan.skills) {
       expect(skill.content).toContain("disable-model-invocation: true");
-      expect(skill.content).toContain("user-invocable: false");
-      expect(skill.content).toContain("delegate_only: true");
+      // deck-onboard is user-invocable, others are not
+      if (skill.agent.id === "deck-onboard") {
+        expect(skill.content).toContain("user-invocable: true");
+        expect(skill.content).not.toContain("delegate_only: true");
+      } else {
+        expect(skill.content).toContain("user-invocable: false");
+        expect(skill.content).toContain("delegate_only: true");
+      }
     }
   });
 

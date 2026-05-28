@@ -241,24 +241,29 @@ function buildSkillFileContent(
       })
     : { content: content.skillBody, toolBindings: [] as readonly MemoryToolBinding[] };
 
+  // deck-onboard is user-invocable (no delegate_only), others are delegated
+  const isUserInvocable = agent.skillId === "deck-onboard";
+
   return [
     "---",
     `name: ${agent.skillId}`,
     `description: "${agent.description}"`,
     "disable-model-invocation: true",
-    "user-invocable: false",
+    `user-invocable: ${isUserInvocable ? "true" : "false"}`,
     "license: MIT",
     "metadata:",
     "  author: gentleman-programming",
     '  version: "3.0"',
-    "  delegate_only: true",
+    isUserInvocable ? "" : "  delegate_only: true",
     "---",
-    "",
+
     skillResult.content,
-    "",
-  ].join("\n");
+
+].join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Plan
 // ---------------------------------------------------------------------------
 // Plan
 // ---------------------------------------------------------------------------
@@ -506,11 +511,23 @@ export function verifyOpenCodeDeveloperTeamInstall(
     if (!content.includes("disable-model-invocation: true")) {
       issues.push("Missing disable-model-invocation in frontmatter.");
     }
-    if (!content.includes("user-invocable: false")) {
-      issues.push("Missing user-invocable in frontmatter.");
-    }
-    if (!content.includes("delegate_only: true")) {
-      issues.push("Missing delegate_only in metadata.");
+
+    // deck-onboard is user-invocable: true, others are user-invocable: false
+    if (planned.agent.skillId === "deck-onboard") {
+      if (!content.includes("user-invocable: true")) {
+        issues.push("Missing user-invocable in frontmatter.");
+      }
+      // deck-onboard should NOT have delegate_only
+      if (content.includes("delegate_only: true")) {
+        issues.push("Unexpected delegate_only in deck-onboard (should be user-invocable, not delegated).");
+      }
+    } else {
+      if (!content.includes("user-invocable: false")) {
+        issues.push("Missing user-invocable in frontmatter.");
+      }
+      if (!content.includes("delegate_only: true")) {
+        issues.push("Missing delegate_only in metadata.");
+      }
     }
 
     const registryContent = getAgentContent(planned.agent.id, {

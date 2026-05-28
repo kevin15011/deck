@@ -718,7 +718,13 @@ export function DeckApp() {
             const verifyResult = adapter.verifyDeveloperTeamInstall(plan);
             if (!verifyResult.valid) {
               adapter.rollbackDeveloperTeamFiles(backup);
-              throw new Error("Verification failed. Changes rolled back.");
+              const diagnosticsMsg =
+                verifyResult.diagnostics.length > 0
+                  ? `\nDetails: ${verifyResult.diagnostics.slice(0, 3).join("; ")}${verifyResult.diagnostics.length > 3 ? ` (+${verifyResult.diagnostics.length - 3} more)` : ""}`
+                  : "";
+              const failMsg = `Verification failed. Changes rolled back.${diagnosticsMsg}`;
+              log(`[runDashboardInstall] verifyResult.valid=false diagnostics=${JSON.stringify(verifyResult.diagnostics)}`);
+              throw new Error(failMsg);
             }
 
             return { results: applyResult.results };
@@ -795,9 +801,15 @@ export function DeckApp() {
           if (!verifyResult.valid) {
             adapter.rollbackDeveloperTeamFiles(backup);
             setDeveloperTeamResults([]);
+            const diagnosticsMsg =
+              verifyResult.diagnostics.length > 0
+                ? `\nDetails: ${verifyResult.diagnostics.slice(0, 3).join("; ")}${verifyResult.diagnostics.length > 3 ? ` (+${verifyResult.diagnostics.length - 3} more)` : ""}`
+                : "";
+            const failMsg = `Verification failed. Changes rolled back.${diagnosticsMsg}`;
+            log(`[developer-team-installing] verifyResult.valid=false diagnostics=${JSON.stringify(verifyResult.diagnostics)}`);
             setInstallResults((current) => [
               ...current,
-              { tool: "Developer Team", success: false, message: "Verification failed. Changes rolled back." },
+              { tool: "Developer Team", success: false, message: failMsg },
             ]);
           } else {
             setDeveloperTeamResults(applyResult.results as any);
@@ -1704,9 +1716,15 @@ export function DeckApp() {
       if (!verifyResult.valid) {
         adapter.rollbackDeveloperTeamFiles(backup);
         setDeveloperTeamResults([]);
+        const diagnosticsMsg =
+          verifyResult.diagnostics.length > 0
+            ? `\nDetails: ${verifyResult.diagnostics.slice(0, 3).join("; ")}${verifyResult.diagnostics.length > 3 ? ` (+${verifyResult.diagnostics.length - 3} more)` : ""}`
+            : "";
+        const failMsg = `Verification failed. Changes rolled back.${diagnosticsMsg}`;
+        log(`[configureDeveloperTeamModels] verifyResult.valid=false diagnostics=${JSON.stringify(verifyResult.diagnostics)}`);
         setInstallResults((current) => [
           ...current,
-          { tool: "Developer Team models", success: false, message: "Verification failed. Changes rolled back." },
+          { tool: "Developer Team models", success: false, message: failMsg },
         ]);
         return;
       }

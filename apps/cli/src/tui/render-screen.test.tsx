@@ -70,4 +70,19 @@ describe("page based TUI screens", () => {
     expect(output).toContain("Verification failed");
     expect(output).toContain("rolled back");
   });
+
+  test("CompleteScreen shows rollback failure with diagnostics in install results", () => {
+    const output = renderToString(
+      <ScreenFrame title="Complete" help="help">
+        <CompleteScreen
+          results={[{ tool: "Developer Team", success: false, message: "Verification failed. Changes rolled back.\nDetails: Missing description field;" }]}
+          developerTeamResults={[]}
+        />
+      </ScreenFrame>,
+    );
+
+    expect(output).toContain("Developer Team");
+    expect(output).toContain("Verification failed");
+    expect(output).toContain("Details");
+  });
 });
