@@ -40,6 +40,38 @@ export type GeneratePromptFilesOptions = {
 };
 
 // ---------------------------------------------------------------------------
+// Skill Loading Gate builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the mandatory skill loading gate that prepends all generated prompts.
+ * This ensures the agent loads its corresponding skill BEFORE any reasoning or tool use.
+ */
+function buildSkillLoadingGate(skillId: string, skillPath: string): string {
+  return [
+    "# Skill Loading Gate",
+    "",
+    "**MANDATORY FIRST ACTION**: Before reading, analyzing, or using ANY tool, you MUST:",
+    "",
+    "1. Call the `skill` tool with `name` equal to your skillId:",
+    "   - tool: skill",
+    "   - arguments:",
+    `     name: "${skillId}"`,
+    "",
+    "2. Wait for the skill content to be loaded.",
+    "3. ONLY THEN proceed with reasoning, analysis, or tool invocations.",
+    "",
+    "**DO NOT** skip this step. The skill file is located at:",
+    `**${skillPath}**`,
+    "",
+    "This ensures you have the exact workflow, testing rules, and return formats for this agent role before starting work.",
+    "",
+    "---",
+    "",
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Prompt content builder using core content registry
 // ---------------------------------------------------------------------------
 
@@ -60,7 +92,11 @@ function buildPromptContent(
       content.agentBody)
     : content.agentBody;
 
+  // Prepend the Skill Loading Gate
+  const skillLoadingGate = buildSkillLoadingGate(agent.skillId, skillPath);
+
   return [
+    skillLoadingGate,
     baseContent,
     "",
     "---",

@@ -193,3 +193,35 @@ describe("core content integration", () => {
     }
   });
 });
+
+describe("skill loading gate", () => {
+  test("all prompts include skill loading gate header", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    for (const planned of plan) {
+      expect(planned.content).toContain("# Skill Loading Gate");
+      expect(planned.content).toContain("MANDATORY FIRST ACTION");
+    }
+  });
+
+  test("skill loading gate contains correct skillId for each agent", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    for (const planned of plan) {
+      expect(planned.content).toContain(`name: "${planned.agent.skillId}"`);
+    }
+  });
+
+  test("skill loading gate appears before agent body content", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    const backendAgent = plan.find((p) => p.agent.id === "deck-developer-apply-backend")!;
+    const skillGateIndex = backendAgent.content.indexOf("# Skill Loading Gate");
+    const backendHeaderIndex = backendAgent.content.indexOf("# Backend Apply Agent");
+    expect(skillGateIndex).toBeLessThan(backendHeaderIndex);
+  });
+
+  test("orchestrator prompt also has skill loading gate", () => {
+    const plan = buildPromptGenerationPlan({ configDir: "/tmp/.config/opencode", projectRoot: "/tmp/project" });
+    const orchestrator = plan.find((p) => p.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).toContain("# Skill Loading Gate");
+    expect(orchestrator.content).toContain(`name: "deck-developer-orchestrator"`);
+  });
+});

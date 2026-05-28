@@ -4,7 +4,7 @@ Tu entorno de IA, listo para trabajar.
 
 Deck es una herramienta CLI para instalar, configurar y mantener entornos de trabajo con IA. Prepara el terreno para que trabajes con agentes, memoria, workflows y configuraciones reproducibles sin fricción.
 
-**Versión actual**: v0.0.3
+**Versión actual**: v0.0.4
 
 ---
 
@@ -18,7 +18,7 @@ curl -fsSL https://raw.githubusercontent.com/kevin15011/deck/main/scripts/instal
 
 El instalador automático descarga binarios precompilados desde GitHub Releases. Requiere que existan releases con:
 
-- `deck_v{VERSION}_{OS}-{ARCH}.tar.gz` (ej: `deck_v0.0.3_linux-x64.tar.gz`)
+- `deck_v{VERSION}_{OS}-{ARCH}.tar.gz` (ej: `deck_v0.0.4_linux-x64.tar.gz`)
 - `checksums.txt` para verificación de integridad
 
 ⚠️ **Nota importante**: Si no hay releases publicados aún, la instalación desde fuente es el método confiable disponible actualmente.
