@@ -1,0 +1,33 @@
+phase: review
+status: approved
+artifacts:
+  - path: proposal.md
+    description: "Proposal to make OpenCode installer synchronize deck-developer-orchestrator SKILL.md from source and prevent prompt/skill drift"
+  - path: spec.md
+    description: "Requirements for installer-owned OpenCode skill synchronization and drift validation"
+  - path: design.md
+    description: "Technical design for canonical registry-driven OpenCode skill sync"
+  - path: tasks.md
+    description: "Atomic implementation tasks for installer verify hardening, stale/idempotency tests, drift detection tests, and optional smoke invariants"
+  - path: apply-progress.md
+    description: "Implementation progress for Tasks 1-4: verify hardening, stale/idempotency tests, drift detection tests, optional smoke"
+  - path: verify-report.md
+    description: "Verification report — passed with warnings for unrelated baseline typecheck failures"
+  - path: review-report.md
+    description: "Review report — approved with non-blocking minor findings"
+provenance:
+  initiated_by: user
+  date: "2026-05-28"
+  proposal_completed_by: proposal
+  related_change: strengthen-triage-before-modification
+  spec_completed: "2026-05-28"
+  design_completed: "2026-05-28"
+  tasks_completed: "2026-05-28"
+  apply_completed: "2026-05-28"
+  verify_completed: "2026-05-28"
+  verify_status: passed_with_warnings
+  review_completed: "2026-05-28"
+  review_status: approved
+  review_minor_findings:
+    - Missing explicit test for absent canonical source variant
+    - Dead initialMtimes Map in idempotency test

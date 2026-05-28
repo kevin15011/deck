@@ -1,0 +1,49 @@
+phase: archive
+status: archived
+artifacts:
+  - path: proposal.md
+    description: "Proposal to strengthen INV-004 (SDD Triage Gate) before any modifying step"
+  - path: spec.md
+    description: "Requirements for enforcing triage before modifying steps"
+  - path: design.md
+    description: "Technical design for strengthening INV-004 across orchestrator content surfaces"
+  - path: tasks.md
+    description: "Atomic implementation tasks for strengthening triage gate across source, skill, and test files"
+  - path: apply-progress.md
+    description: "General Apply implementation progress — all tasks completed across 2 fix passes: BLOCKER/CRITICAL surfaces (system prompt, guida, skill body) updated with INV-004 wording, test assertions added for all 4 surfaces, all 515 tests passing"
+  - path: verify-report.md
+    description: "Final verification report — passed with warnings for pre-existing adapter-pi and typecheck baseline failures"
+  - path: review-report.md
+    description: "Final review report — approved with no remaining findings"
+  - path: archive-report.md
+    description: "Archive report — traceability, final summary, rollback plan, and diff context"
+provenance:
+  initiated_by: user
+  date: "2026-05-28"
+  apply_completed_by: general-apply
+  apply_agent: general
+  apply_phase_completed: "2026-05-28"
+  fix_pass_applied: "2026-05-28"
+  fix_pass_agent: general
+  fix_pass_findings:
+    - MAJOR: ORCHESTRATOR_AGENT_BODY not updated with strengthened triage gate
+    - MINOR: INV-004 strengthened assertions missing in invariants test
+    - Note: adapter-pi install test failures are pre-existing baseline
+    - Note: typecheck failures are pre-existing baseline (apps/cli TUI)
+  second_fix_pass_applied: "2026-05-28"
+  second_fix_pass_agent: general
+  second_fix_pass_findings:
+    - BLOCKER/CRITICAL: ORCHESTRATOR_SYSTEM_PROMPT still had old triage wording
+    - BLOCKER/CRITICAL: ORCHESTRATOR_PROMPT_GUIDA still had old triage wording
+    - BLOCKER/CRITICAL: ORCHESTRATOR_SKILL_BODY still had old triage wording and was misaligned with SKILL.md
+    - MAJOR: orchestrator-content.test.ts lacked INV-004 strengthened assertions across all surfaces
+    - All 4 content surfaces now updated with strengthened INV-004 wording
+    - Test assertions added for all 4 surfaces (system prompt, agent body, guida, skill body)
+    - adapter-pi install test failures remain pre-existing baseline
+    - typecheck failures remain pre-existing baseline (apps/cli TUI)
+  verify_completed: "2026-05-28"
+  verify_status: passed_with_warnings
+  review_completed: "2026-05-28"
+  review_status: approved
+  archive_completed: "2026-05-28"
+  archive_agent: archive

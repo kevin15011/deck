@@ -1,0 +1,42 @@
+- phase: proposal
+  status: completed
+  event: proposal-complete
+  artifact: proposal.md
+  date: "2026-05-28"
+  note: "Proposal created for reproducible OpenCode orchestrator skill synchronization via Deck installer; manual global hotfix treated as temporary state."
+- phase: spec
+  status: completed
+  event: spec-complete
+  artifact: spec.md
+  date: "2026-05-28"
+  note: "Registry-deferred spec reconciliation by orchestrator."
+- phase: design
+  status: completed
+  event: design-complete
+  artifact: design.md
+  date: "2026-05-28"
+  note: "Registry-deferred design reconciliation by orchestrator."
+- phase: tasks
+  status: completed
+  event: tasks-complete
+  artifact: tasks.md
+  date: "2026-05-28"
+  note: "4 tasks created: verify exact-match hardening (P0), stale/idempotency/all-skills tests (P0), drift detection tests (P0), optional smoke invariants (P2). No blockers. OQ-1 resolved by design. Ready for Apply."
+- phase: apply
+  status: completed
+  event: apply-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  note: "General Apply completed all 4 tasks: (1) verify hardened with exact-match check, (2) stale/idempotency/all-skills tests added, (3) drift detection tests added, (4) optional smoke already covered. All tests pass. Ready for Verify/Review."
+- phase: verify
+  status: passed_with_warnings
+  event: verify-passed-with-warnings
+  artifact: verify-report.md
+  date: "2026-05-28"
+  note: "Registry-deferred verification reconciled by orchestrator; related tests and build passed, repo-wide typecheck has unrelated baseline failures."
+- phase: review
+  status: approved
+  event: review-approved
+  artifact: review-report.md
+  date: "2026-05-28"
+  note: "Registry-deferred review reconciled by orchestrator; approved with non-blocking minor findings."

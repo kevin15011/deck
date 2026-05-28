@@ -1,0 +1,25 @@
+phase: apply
+status: completed
+artifacts:
+  - path: proposal.md
+    description: "Proposal to make OpenCode post-apply verification reuse the applied install plan or identical runtime options"
+  - path: spec.md
+    description: "Requirements for verifying OpenCode installs against the same content used by apply"
+  - path: design.md
+    description: "Design for reusing native install plan snapshot during verification"
+  - path: tasks.md
+    description: "Atomic implementation tasks: snapshot closure, verify fix, regression and drift tests"
+  - path: apply-progress.md
+    description: "Apply progress report documenting Task 1-8 implementation + focus fix (2026-05-28)"
+provenance:
+  initiated_by: user
+  date: "2026-05-28"
+  proposal_completed_by: proposal
+  related_change: installer-sync-opencode-skills
+  diagnosis: "Apply builds OpenCode install plan with runtime options, while verify rebuilds without the same options and compares against different expected content."
+  spec_completed: "2026-05-28"
+  design_completed: "2026-05-28"
+  tasks_completed: "2026-05-28"
+  apply_completed: "2026-05-28"
+  focus_fix_applied: "2026-05-28"
+  agent: general

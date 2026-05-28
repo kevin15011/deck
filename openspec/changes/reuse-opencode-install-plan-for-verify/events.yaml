@@ -1,0 +1,36 @@
+- phase: proposal
+  status: completed
+  event: proposal-complete
+  artifact: proposal.md
+  date: "2026-05-28"
+  note: "Proposal created for OpenCode verification to reuse the applied install plan or rebuild with identical runtime options, preserving exact-match drift detection without manual global config edits."
+- phase: spec
+  status: completed
+  event: spec-complete
+  artifact: spec.md
+  date: "2026-05-28"
+  note: "Registry-deferred spec reconciliation by orchestrator."
+- phase: design
+  status: completed
+  event: design-completed
+  artifact: design.md
+  date: "2026-05-28"
+  note: "Registry-deferred design reconciliation by orchestrator."
+- phase: tasks
+  status: completed
+  event: tasks-complete
+  artifact: tasks.md
+  date: "2026-05-28"
+  note: "8 atomic tasks created: 3 shared (snapshot closure + verify fixes), 4 backend tests (regression capabilityInstructions, personality, drift detection, fallback), 1 smoke verification. No blockers."
+- phase: apply
+  status: completed
+  event: apply-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  note: "All 8 tasks implemented: snapshot closure added, verify functions use cached native plan instead of rebuilding without options, regression tests added. Tests pass (166 pass, 1 unrelated pre-existing failure in install-tools.test.ts)."
+- phase: apply
+  status: completed
+  event: focus-fix-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  note: "Focus fix: removed snapshot capture from apply paths, fixed TypeError, enhanced tests. All tests pass."

@@ -1,0 +1,58 @@
+- phase: proposal
+  status: completed
+  event: proposal-complete
+  artifact: proposal.md
+  date: "2026-05-28"
+- phase: spec
+  status: completed
+  event: spec-complete
+  artifact: spec.md
+  date: "2026-05-28"
+- phase: design
+  status: completed
+  event: design-complete
+  artifact: design.md
+  date: "2026-05-28"
+- phase: tasks
+  status: completed
+  event: tasks-complete
+  artifact: tasks.md
+  date: "2026-05-28"
+- phase: apply
+  status: completed
+  agent: general
+  event: apply-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+- phase: apply
+  status: completed
+  agent: general
+  event: apply-fix-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  note: "Fix pass: ORCHESTRATOR_AGENT_BODY triage gate updated, INV-004 strengthened assertions added, adapter-pi failures documented as baseline"
+- phase: apply
+  status: completed
+  agent: general
+  event: apply-fix-2-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  note: "Second fix pass: ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_PROMPT_GUIDA, ORCHESTRATOR_SKILL_BODY updated with INV-004 strengthened wording; orchestrator-content.test.ts assertions added for all 4 surfaces; all 515 tests pass; adapter-pi failures and typecheck failures remain baseline"
+- phase: verify
+  status: passed_with_warnings
+  event: verify-passed-with-warnings
+  artifact: verify-report.md
+  date: "2026-05-28"
+  note: "Final verification passed; adapter-pi install and repo-wide typecheck failures documented as pre-existing baseline/out-of-scope."
+- phase: review
+  status: approved
+  event: review-completed
+  artifact: review-report.md
+  date: "2026-05-28"
+  note: "Final review approved with no remaining findings."
+- phase: archive
+  status: archived
+  event: archive-completed
+  artifact: archive-report.md
+  date: "2026-05-28"
+  note: "Archive completed. 8 requirements, 6 tasks, verify passed_with_warnings (baseline only), review approved. No follow-ups."
