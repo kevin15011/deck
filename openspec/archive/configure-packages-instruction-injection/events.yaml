@@ -1,0 +1,59 @@
+events:
+  - phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: "2026-05-21T00:00:00Z"
+    provenance: deck-developer-proposal
+  - phase: spec
+    status: completed
+    artifact: spec.md
+    timestamp: "2026-05-21T00:00:00Z"
+    provenance: deck-developer-spec
+  - phase: design
+    status: completed
+    artifact: design.md
+    timestamp: "2026-05-21T00:00:00Z"
+    provenance: deck-developer-design
+  - phase: tasks
+    status: completed
+    artifact: tasks.md
+    timestamp: "2026-05-21T00:00:00Z"
+    provenance: deck-developer-task
+  - phase: apply
+    status: in_progress
+    agent: frontend
+    artifact: apply-progress.md
+    timestamp: "2026-05-21T21:45:00Z"
+    provenance: deck-developer-apply-frontend
+    note: Tasks 8-11 complete (dashboard state+reducer+selectors, input handling, screen rendering, action runner); frontend tests pass (30 pass). Blocked by pre-existing adapter TypeScript errors (not caused by Tasks 8-11).
+  - phase: apply
+    status: completed
+    agent: general
+    artifact: apply-progress.md
+    timestamp: "2026-05-21T21:45:00Z"
+    provenance: deck-developer-apply-general
+    note: Fixes for Verify/Review issues — Issue 1: DeveloperTeamManifestInput now uses canonical CapabilityInstructionBundle type; Issue 2: OpenCode verifyOpenCodeDeveloperTeamInstall now passes capabilityInstructions to getAgentContent. Tests pass (core: 518, adapter-opencode: 114).
+  - phase: apply
+    status: completed
+    agent: frontend
+    artifact: apply-progress.md
+    timestamp: "2026-05-21T22:00:00Z"
+    provenance: deck-developer-apply-frontend
+    note: Post-Review fixes (Issue 3: Dashboard cross-runner config preservation, Issue 4: Config loading on startup via loadRunnerPackageInstructionsFromConfig in app.tsx, Issue 5: DRY package IDs with CANONICAL_INSTRUCTION_PACKAGE_IDS).
+  - phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    timestamp: "2026-05-21T21:45:00Z"
+    provenance: deck-developer-verify
+    note: 881/890 tests pass; 9 pre-existing failures excluded from change scope.
+  - phase: review
+    status: approve_with_comments
+    artifact: review-report.md
+    timestamp: "2026-05-21T22:00:00Z"
+    provenance: deck-developer-review
+    note: Approved after post-Review fixes resolved all BLOCKER and MAJOR findings.
+  - phase: archive
+    status: archived
+    artifact: archive-report.md
+    timestamp: "2026-05-21T22:30:00Z"
+    provenance: deck-developer-archive

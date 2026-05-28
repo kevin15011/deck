@@ -1,0 +1,9 @@
+changeId: fix-opencode-package-instructions
+currentPhase: explore
+status: completed
+provenance:
+  explorer: agent
+  model: kimi-k2.5
+  timestamp: 2025-05-22
+artifacts:
+  exploration: exploration.md

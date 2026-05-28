@@ -1,0 +1,55 @@
+events:
+  - event: proposal_created
+    phase: proposal
+    artifact: proposal.md
+    agent: deck-developer-proposal
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: Propuesta formal para el comando `deck doctor`.
+  - event: spec_created
+    phase: spec
+    artifact: spec.md
+    agent: deck-developer-spec
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: 23 requisitos (17 MUST, 4 SHOULD), 17 acceptance scenarios.
+  - event: design_created
+    phase: design
+    artifact: design.md
+    agent: deck-developer-design
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: Arquitectura orquestador + reporte separado, 5 archivos nuevos + 2 modificados.
+  - event: tasks_created
+    phase: tasks
+    artifact: tasks.md
+    agent: deck-developer-task
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: 9 tareas atómicas. General (6), Backend (2). Dependencias: T1→T3,T4 | T3,T4→T2,T6 | T5→T6.
+  - event: apply_phase_completed
+    phase: apply
+    artifact: apply-progress.md
+    agent: deck-developer-apply-general
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: "Apply: T1(types), T2(index), T4(report), T5(cli-args), T6(main), T8(report tests), T9(cli-args tests) — 57 tests pass."
+  - event: apply_phase_completed
+    phase: apply
+    artifact: apply-progress.md
+    agent: deck-developer-apply-backend
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: "Apply: T3(diagnostics orchestrator), T7(diagnostics tests 13 tests) — completed."
+  - event: verify_completed
+    phase: verify
+    artifact: verify-report.md
+    agent: deck-developer-verify
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: "Verify: PASS — 57 tests passing, all 23 requirements met, no critical findings."
+  - event: review_completed
+    phase: review
+    artifact: review-report.md
+    agent: deck-developer-review
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: "Review: APPROVE — all dimensions rated Strong, 0 blockers, 4 minor findings."
+  - event: archived
+    phase: archive
+    artifact: archive-report.md
+    agent: deck-developer-archive
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: "Archived to openspec/archive/deck-doctor-command/. 23 requirements traced, 0 follow-ups."

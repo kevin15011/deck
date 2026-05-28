@@ -1,0 +1,93 @@
+- event: proposal-created
+  phase: proposal
+  artifact: proposal.md
+  timestamp: "2026-05-23"
+  agent: deck-developer-proposal
+  model: opencode-go/kimi-k2.6
+  summary: >
+    Created formal change proposal for real Supermemory MCP integration.
+    The stub adapter in packages/adapter-supermemory will be replaced with
+    a functional implementation that performs real HTTP calls to the
+    Supermemory MCP endpoint via execute/search_docs tools, while preserving
+    governance, container tag scoping, fail-open behavior, and runtime-agnostic
+    credential resolution from Pi/OpenCode MCP config files.
+
+- event: model-correction
+  phase: proposal
+  timestamp: "2026-05-23"
+  agent: deck-developer-orchestrator
+  summary: >
+    Architecture model corrected after user clarification:
+    - Adapter does NOT make HTTP calls to Supermemory server
+    - Adapter generates instruction content (markdown) that tells agents HOW/WHEN/WHY to use Supermemory MCP tools
+    - Agent makes MCP calls directly to Supermemory server based on injected instructions
+    - buildInjection() must generate content without requiring authenticatedRuntimeValidated
+    - authenticatedRuntimeValidated only gates health probe, not instruction generation
+
+- event: spec-completed
+  phase: spec
+  artifact: spec.md
+  timestamp: "2026-05-23"
+  agent: deck-developer-spec
+  summary: >
+    Defined 6 capabilities (Instruction Generation, Instruction Content, Tool Bindings, Health Probe, Container Tag Scoping, Governance) with 28 requirements.
+    Key requirements: buildInjection() must work without auth validation, health must not gate instruction generation, instructions must declare OpenSpec authoritative/memory advisory, fail-open behavior declared.
+
+- event: design-completed
+  phase: design
+  artifact: design.md
+  timestamp: "2026-05-23"
+  agent: deck-developer-design
+  summary: >
+    Design selects Option B: stateful health() updated by external probe via configure(). Extends AdaptiveMemoryConfigureRequest with providerState bag. buildInjection() always succeeds if config valid. Components affected: adapter-supermemory/index.ts and adaptive-memory-contract.ts.
+
+- event: tasks-completed
+  phase: tasks
+  artifact: tasks.md
+  timestamp: "2026-05-23"
+  agent: deck-developer-task
+  summary: >
+    6 tasks created: Task 1 (extend AdaptiveMemoryConfigureRequest via General Apply), Tasks 2-4 (mutable auth state, remove buildInjection gate, update health — Backend Apply), Tasks 5-6 (update/add tests — Backend Apply). Sequential slices recommended. Open question: probe orchestrator responsibility deferred outside adapter scope.
+
+- event: apply-completed
+  phase: apply
+  artifact: apply-progress.md
+  timestamp: "2026-05-23"
+  agent: deck-developer-apply-general + deck-developer-apply-backend
+  summary: >
+    Tasks 1-6 implemented:
+    - Task 1: Added providerState bag to AdaptiveMemoryConfigureRequest
+    - Tasks 2-4: Made auth state mutable via configure(), removed auth gate from buildInjection(), updated health() to read mutable state
+    - Tasks 5-6: Updated existing test, added 5 new tests — all 10 tests pass
+
+- event: review-completed
+  phase: review
+  artifact: review-report.md
+  timestamp: "2026-05-23"
+  agent: deck-developer-review
+  summary: >
+    Engineering quality review approved with no blockers or major findings.
+    Architecture, security, maintainability, and integration all rated Strong.
+    Two minor findings: redundant container validation in createFragments,
+    and missing providerId defensive guard in configure().
+
+- event: verify-passed-with-warnings
+  phase: verify
+  artifact: verify-report.md
+  timestamp: "2026-05-23"
+  agent: deck-developer-verify
+  summary: >
+    All 6 tasks complete. All 10 tests pass. All spec requirements satisfied.
+    Typecheck reports 5 TS2532 errors in test file only (Object is possibly 'undefined'
+    when accessing bundle.toolBindings[0]). Production code compiles cleanly.
+    Overall: PASS WITH WARNINGS.
+
+- event: archive-completed
+  phase: archive
+  artifact: archive-report.md
+  timestamp: "2026-05-23"
+  agent: deck-developer-archive
+  summary: >
+    Change archived successfully. All 28 requirements verified and linked to implementation.
+    Archive report created with metrics, lessons learned, files changed, and git diff summary.
+    Status: COMPLETED. No blocking follow-ups.

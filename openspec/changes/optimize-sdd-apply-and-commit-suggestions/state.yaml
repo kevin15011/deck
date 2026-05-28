@@ -1,0 +1,227 @@
+change: optimize-sdd-apply-and-commit-suggestions
+current_phase: closed
+status: incomplete
+closure_reason: Implementation was incorrectly applied to .pi/ (generated adapter output) instead of packages/core/ and packages/sdd-runtime/ (source code). The core→adapter architecture was not understood before Apply phase. All planning artifacts (exploration, proposal, spec, design, tasks, review findings) remain valid and should be reused in a new SDD cycle that starts with Explorer focused on the core/adapter architecture.
+closed_at: "2026-05-23"
+phases:
+  explore:
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/exploration.md
+    completed_at: '2026-05-20'
+    provenance:
+      agent: deck-developer-explorer
+      repaired_by: deck-developer-orchestrator
+      repair_reason: Explorer Agent returned completed contract but official OpenSpec files were missing on verification; artifact and registry were mechanically reconstructed from the returned contract.
+  proposal:
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/proposal.md
+    completed_at: '2026-05-20'
+    provenance:
+      agent: deck-developer-proposal
+      source_artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/exploration.md
+      note: Updated proposal to cover expanded Exploration scope, preserving explore phase and scope amendment history.
+      verification:
+        performed_by: deck-developer-proposal
+        verified_at: '2026-05-20'
+        required_files_checked:
+          - openspec/changes/optimize-sdd-apply-and-commit-suggestions/proposal.md
+          - openspec/changes/optimize-sdd-apply-and-commit-suggestions/state.yaml
+          - openspec/changes/optimize-sdd-apply-and-commit-suggestions/events.yaml
+  spec:
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/spec.md
+    completed_at: '2026-05-20'
+    provenance:
+      agent: deck-developer-spec
+      registry_mode: deferred
+      reconciled_by: deck-developer-orchestrator
+      verification:
+        artifact_exists: true
+        byte_count: 26098
+        event_type: spec.completed
+  design:
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/design.md
+    completed_at: '2026-05-20'
+    provenance:
+      agent: deck-developer-design
+      registry_mode: deferred
+      reconciled_by: deck-developer-orchestrator
+      verification:
+        artifact_exists: true
+        byte_count: 26481
+        event_type: design.completed
+  task:
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/tasks.md
+    completed_at: '2026-05-20'
+    provenance:
+      agent: deck-developer-task
+      verification:
+        artifact_exists: true
+        byte_count: 16169
+        event_type: task.completed
+  apply:
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/apply-progress.md
+    execution_groups:
+      A:
+        tasks: [1, 4, 5]
+        status: completed
+        completed_at: '2026-05-20'
+        files_changed:
+          - .pi/skills/deck-developer-task/SKILL.md
+          - .pi/skills/deck-developer-proposal/SKILL.md
+          - .pi/skills/deck-developer-spec/SKILL.md
+          - .pi/skills/deck-developer-design/SKILL.md
+          - .pi/skills/deck-developer-explorer/SKILL.md
+          - .pi/skills/deck-developer-verify/SKILL.md
+          - .pi/skills/deck-developer-review/SKILL.md
+          - .pi/skills/deck-developer-archive/SKILL.md
+      B:
+        tasks: [2, 3]
+        status: completed
+        completed_at: '2026-05-20'
+        files_changed:
+          - .pi/skills/deck-developer-orchestrator/SKILL.md
+          - .pi/skills/deck-developer-apply-general/SKILL.md
+          - .pi/skills/deck-developer-apply-backend/SKILL.md
+          - .pi/skills/deck-developer-apply-frontend/SKILL.md
+    provenance:
+      agent: deck-developer-general-apply
+      tasks_completed:
+        - task_number: 1
+          title: Task skill — Execution-group output contract and Mermaid data
+          status: completed
+          file: .pi/skills/deck-developer-task/SKILL.md
+          byte_count: 20711
+        - task_number: 2
+          title: Orchestrator skill — Full orchestration update
+          status: completed
+          file: .pi/skills/deck-developer-orchestrator/SKILL.md
+          byte_count: 22045
+        - task_number: 3
+          title: Apply skills — Ordered task group acceptance
+          status: completed
+          files:
+            - .pi/skills/deck-developer-apply-general/SKILL.md
+            - .pi/skills/deck-developer-apply-backend/SKILL.md
+            - .pi/skills/deck-developer-apply-frontend/SKILL.md
+          byte_counts:
+            - 9875
+            - 10709
+            - 10892
+        - task_number: 4
+          title: Planning-phase skills — Self-verification and Mermaid data
+          status: completed
+          files:
+            - .pi/skills/deck-developer-proposal/SKILL.md
+            - .pi/skills/deck-developer-spec/SKILL.md
+            - .pi/skills/deck-developer-design/SKILL.md
+          byte_counts:
+            - 12306
+            - 14784
+            - 15369
+        - task_number: 5
+          title: Supporting-phase skills — Self-verification
+          status: completed
+          files:
+            - .pi/skills/deck-developer-explorer/SKILL.md
+            - .pi/skills/deck-developer-verify/SKILL.md
+            - .pi/skills/deck-developer-review/SKILL.md
+            - .pi/skills/deck-developer-archive/SKILL.md
+          byte_counts:
+            - 10248
+            - 11545
+            - 13471
+            - 12077
+      verification:
+        artifact_exists: true
+        byte_count: 10866
+  verify:
+    status: passed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/verify.md
+    completed_at: '2026-05-20'
+    provenance:
+      agent: deck-developer-verify
+      registry_mode: deferred
+      reconciled_by: deck-developer-orchestrator
+      verification:
+        artifact_exists: true
+        byte_count: 11959
+        event_type: verify.completed
+  review:
+    status: changes_requested
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/review.md
+    completed_at: '2026-05-20'
+    provenance:
+      agent: deck-developer-review
+      registry_mode: deferred
+      reconciled_by: deck-developer-orchestrator
+      verification:
+        artifact_exists: true
+        event_type: review.failed
+      findings:
+        blockers: 1
+        major: 2
+        minor: 2
+  apply_fixes:
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/apply-fixes-output.md
+    completed_at: '2026-05-20'
+    provenance:
+      agent: deck-developer-general-apply
+      note: Applied fixes for all 5 Review findings (1 BLOCKER, 2 MAJOR, 2 MINOR) returned to Apply. No phase advancement — current_phase remains review pending re-Verify/Re-Review cycle.
+      findings_addressed:
+        - id: 1
+          severity: BLOCKER
+          title: Archive self-verification is internally impossible
+          file: .pi/skills/deck-developer-archive/SKILL.md
+        - id: 2
+          severity: MAJOR
+          title: Parallel Apply fanout shared writes
+          files:
+            - .pi/skills/deck-developer-orchestrator/SKILL.md
+            - .pi/skills/deck-developer-apply-general/SKILL.md
+        - id: 3
+          severity: MAJOR
+          title: Deferred phase templates still require Registry Recorded
+          files:
+            - .pi/skills/deck-developer-spec/SKILL.md
+            - .pi/skills/deck-developer-design/SKILL.md
+            - .pi/skills/deck-developer-verify/SKILL.md
+            - .pi/skills/deck-developer-review/SKILL.md
+        - id: 4
+          severity: MINOR
+          title: Task skill Mermaid syntax invalid
+          file: .pi/skills/deck-developer-task/SKILL.md
+        - id: 5
+          severity: MINOR
+          title: Execution config override provenance too broad
+          file: .pi/skills/deck-developer-orchestrator/SKILL.md
+      verification:
+        artifact_exists: true
+        artifact_byte_count: 12077
+        apply_progress_updated: true
+artifacts:
+  exploration: openspec/changes/optimize-sdd-apply-and-commit-suggestions/exploration.md
+  proposal: openspec/changes/optimize-sdd-apply-and-commit-suggestions/proposal.md
+  spec: openspec/changes/optimize-sdd-apply-and-commit-suggestions/spec.md
+  design: openspec/changes/optimize-sdd-apply-and-commit-suggestions/design.md
+  tasks: openspec/changes/optimize-sdd-apply-and-commit-suggestions/tasks.md
+  apply_progress: openspec/changes/optimize-sdd-apply-and-commit-suggestions/apply-progress.md
+  verify: openspec/changes/optimize-sdd-apply-and-commit-suggestions/verify.md
+  review: openspec/changes/optimize-sdd-apply-and-commit-suggestions/review.md
+  apply_fixes_output: openspec/changes/optimize-sdd-apply-and-commit-suggestions/apply-fixes-output.md
+scope_amendments:
+  - added_at: '2026-05-20'
+    added_by: deck-developer-orchestrator
+    description: Include artifact/registry persistence hardening because Proposal and Explorer both reported successful writes before official files were verified present.
+  - added_at: '2026-05-20'
+    added_by: deck-developer-orchestrator
+    description: Include mandatory, runner-agnostic Mermaid diagrams in Orchestrator user-facing summaries after Proposal, Spec, Design, and Task for faster user comprehension; phase agents provide Mermaid source or diagram-ready data when useful, and diagrams remain explanatory and non-authoritative.
+blockers: []
+lessons_learned:
+  - Must understand core→adapter architecture before implementing changes to Developer Team behavior.
+  - .pi/ is gitignored output generated by @deck/adapter-pi; changes must go to packages/core/ and packages/sdd-runtime/.
+  - Explorer should have investigated the monorepo architecture before any implementation attempt.

@@ -1,0 +1,50 @@
+events:
+  - type: phase-completed
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    agent: deck-developer-proposal
+    timestamp: "2026-05-24T00:00:00Z"
+    message: Proposal artifact written and self-verified.
+  - type: phase-completed
+    phase: spec
+    status: completed
+    artifact: spec.md
+    agent: deck-developer-spec
+    timestamp: "2026-05-24T00:00:00Z"
+    message: Spec artifact written with 10 requirements, 10 acceptance scenarios, 3 open questions.
+  - type: phase-completed
+    phase: design
+    status: completed
+    artifact: design.md
+    agent: deck-developer-design
+    timestamp: "2026-05-24T00:00:00Z"
+    message: Design artifact written with two-phase architecture, file impact, and tradeoffs.
+  - type: phase-completed
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    agent: deck-developer-task
+    timestamp: "2026-05-24T00:00:00Z"
+    message: Tasks artifact written with 6 tasks across 2 phases, all routed to General Apply.
+  - type: phase-completed
+    phase: review
+    status: approved_with_changes
+    artifact: review-report.md
+    agent: deck-developer-review
+    timestamp: "2026-05-24T00:00:00Z"
+    message: Review complete. 2 MINOR findings (type cleanup, try/catch inconsistency) and 1 NIT (stale alias type). No BLOCKER or MAJOR issues.
+  - type: phase-completed
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    agent: deck-developer-apply-general
+    timestamp: "2026-05-25T01:34:00Z"
+    message: "2 MINOR issues resolved: type cleanup in installTeamBundle closures (DeveloperTeamModelAssignments/DeveloperTeamThinkingAssignments), try/catch/rollback added to Pi closure."
+  - type: phase-completed
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    agent: deck-developer-verify
+    timestamp: "2026-05-25T01:39:10Z"
+    message: "Re-check passed with warnings: modified-file typecheck passed and requested fix criteria are satisfied; targeted action-runner.test.ts still has the known 9 pre-existing failures."

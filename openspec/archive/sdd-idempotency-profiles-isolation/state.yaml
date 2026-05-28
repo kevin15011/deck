@@ -1,0 +1,102 @@
+changeName: sdd-idempotency-profiles-isolation
+status: archived
+currentPhase: archive
+phases:
+  proposal:
+    status: completed
+    artifact: proposal.md
+    date: "2026-05-24"
+  spec:
+    status: completed
+    artifact: spec.md
+    date: "2026-05-24"
+  design:
+    status: completed
+    artifact: design.md
+    date: "2026-05-24"
+  tasks:
+    status: completed
+    artifact: tasks.md
+    date: "2026-05-24"
+  apply:
+    status: completed
+    agent: backend
+    artifact: apply-progress.md
+    date: "2026-05-24"
+  review:
+    status: approved_with_changes
+    artifact: review-report.md
+    date: "2026-05-24"
+  verify:
+    status: failed
+    artifact: verify-report.md
+    date: "2026-05-25"
+  archive:
+    status: completed
+    artifact: archive-report.md
+    date: "2026-05-24"
+artifacts:
+  - phase: proposal
+    name: proposal.md
+    path: openspec/changes/sdd-idempotency-profiles-isolation/proposal.md
+    description: Change proposal covering idempotency counts, SDD profiles, and pipeline stage isolation
+  - phase: spec
+    name: spec.md
+    path: openspec/changes/sdd-idempotency-profiles-isolation/spec.md
+    description: Requirements and acceptance scenarios for idempotency, profiles, and pipeline isolation
+  - phase: design
+    name: design.md
+    path: openspec/changes/sdd-idempotency-profiles-isolation/design.md
+    description: Technical design for idempotent apply results, SDD profiles, and isolated orchestrator pipeline stages
+  - phase: tasks
+    name: tasks.md
+    path: openspec/changes/sdd-idempotency-profiles-isolation/tasks.md
+    description: 13 atomic implementation tasks grouped by domain with dependency graph and routing
+  - phase: apply
+    name: apply-progress.md
+    path: openspec/changes/sdd-idempotency-profiles-isolation/apply-progress.md
+    description: Backend apply progress for idempotency, profiles, and pipeline isolation tasks
+  - phase: review
+    name: review-report.md
+    path: openspec/changes/sdd-idempotency-profiles-isolation/review-report.md
+    description: Engineering quality review report with 1 blocker, 3 major, 3 minor, and 4 nit findings
+  - phase: verify
+    name: verify-report.md
+    path: openspec/changes/sdd-idempotency-profiles-isolation/verify-report.md
+    description: Verification report for idempotency, profiles, and pipeline isolation compliance
+  - phase: archive
+    name: archive-report.md
+    path: openspec/changes/sdd-idempotency-profiles-isolation/archive-report.md
+    description: Archive report closing the change — traceability, follow-ups, git context
+provenance:
+  - agent: deck-developer-proposal
+    timestamp: "2026-05-24T00:00:00Z"
+    action: created
+  - agent: deck-developer-spec
+    timestamp: "2026-05-24T00:00:00Z"
+    action: created-spec
+  - agent: deck-developer-design
+    timestamp: "2026-05-24T00:00:00Z"
+    action: created-design
+  - agent: deck-developer-task
+    timestamp: "2026-05-24T00:00:00Z"
+    action: created-tasks
+  - agent: backend
+    timestamp: "2026-05-24T00:00:00Z"
+    action: completed-apply
+  - agent: deck-developer-review
+    timestamp: "2026-05-24T00:00:00Z"
+    action: completed-review
+  - agent: deck-developer-verify
+    timestamp: "2026-05-25T00:00:00Z"
+    action: failed-verify
+  - agent: deck-developer-verify
+    timestamp: "2026-05-25T00:45:00Z"
+    action: failed-verify-recheck
+  - agent: deck-developer-archive
+    timestamp: "2026-05-24T00:00:00Z"
+    action: archived
+blockers:
+  - Typecheck fails with 19 TS errors in adapter-opencode/adapter-supermemory test surfaces.
+  - Full bun test fails with 30 failures across config, Pi Runner dashboard, Supermemory, boundary audit, and quality-router suites.
+  - Previous blocker for DeveloperTeamApplyResult counts is resolved.

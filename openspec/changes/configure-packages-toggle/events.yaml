@@ -1,0 +1,8 @@
+- timestamp: "2026-05-21T00:00:00Z"
+  phase: explore
+  status: completed
+  event: exploration-completed
+  artifact: exploration.md
+  provenance:
+    agent: deck-developer-explorer
+    model: opencode-go/kimi-k2.6

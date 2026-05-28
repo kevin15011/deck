@@ -1,0 +1,55 @@
+events:
+  - event: proposal-completed
+    phase: proposal
+    artifact: proposal.md
+    agent: deck-developer-proposal
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: Proposal for TUI Doctor Integration.
+  - event: spec_created
+    phase: spec
+    artifact: spec.md
+    agent: deck-developer-spec
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: 16 requisitos (12 MUST, 3 SHOULD, 1 MAY), 15 acceptance scenarios.
+  - event: design_created
+    phase: design
+    artifact: design.md
+    agent: deck-developer-design
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: Arquitectura standalone screen + Screen union + navigation maps.
+  - event: tasks_created
+    phase: tasks
+    artifact: tasks.md
+    agent: deck-developer-task
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: 3 tareas atómicas. T1 (General - menu-options), T2 (Frontend - DoctorScreen), T3 (Frontend - app.tsx wiring). T1+T2 parallel, T3 sequential.
+  - event: apply-phase-completed
+    phase: apply
+    artifact: apply-progress.md
+    agent: deck-developer-apply-general
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: Tasks 1 and 2 completed. Task 3 (TUI wiring) pending Frontend Apply.
+  - event: apply-phase-completed
+    phase: apply
+    artifact: apply-progress.md
+    agent: deck-developer-apply-frontend
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: Task 3 (app.tsx wiring) completed. All tasks complete. Ready for Verify/Review.
+  - event: verify-completed
+    phase: verify
+    artifact: verify-report.md
+    agent: deck-developer-verify
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: PASS — 31/31 tests pass, all 16 requirements compliant.
+  - event: review-completed
+    phase: review
+    artifact: review-report.md
+    agent: deck-developer-review
+    timestamp: "2026-05-23T00:00:00Z"
+    summary: APPROVE — all dimensions rated Strong, no blockers.
+  - event: change-archived
+    phase: archive
+    artifact: archive-report.md
+    agent: deck-developer-archive
+    timestamp: "2026-05-23T04:14:00Z"
+    summary: Change archived to openspec/archive/tui-doctor-integration/. Traceability preserved, no follow-ups.

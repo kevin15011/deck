@@ -1,0 +1,52 @@
+change: tui-model-fix
+phase: verify
+status: passed_with_warnings
+artifacts:
+  - path: proposal.md
+    phase: proposal
+    type: proposal
+  - path: spec.md
+    phase: spec
+    type: spec
+  - path: design.md
+    phase: design
+    type: design
+  - path: tasks.md
+    phase: tasks
+    type: tasks
+  - path: review-report.md
+    phase: review
+    type: review
+  - path: apply-progress.md
+    phase: apply
+    type: apply-progress
+  - path: verify-report.md
+    phase: verify
+    type: verify
+provenance:
+  - agent: deck-developer-proposal
+    timestamp: "2026-05-24T00:00:00Z"
+    artifact: proposal.md
+  - agent: deck-developer-spec
+    timestamp: "2026-05-24T00:00:00Z"
+    artifact: spec.md
+  - agent: deck-developer-design
+    timestamp: "2026-05-24T00:00:00Z"
+    artifact: design.md
+  - agent: deck-developer-task
+    timestamp: "2026-05-24T00:00:00Z"
+    artifact: tasks.md
+  - agent: deck-developer-review
+    timestamp: "2026-05-24T00:00:00Z"
+    artifact: review-report.md
+  - agent: deck-developer-apply-general
+    timestamp: "2026-05-25T01:34:00Z"
+    artifact: apply-progress.md
+    phase: apply
+    status: completed
+  - agent: deck-developer-verify
+    timestamp: "2026-05-25T01:39:10Z"
+    artifact: verify-report.md
+    phase: verify
+    status: passed_with_warnings
+blockers: []

@@ -1,0 +1,96 @@
+events:
+  - phase: spec
+    agent: orchestrator
+    status: completed
+    artifact: spec.md
+    timestamp: 2026-05-24
+  - phase: design
+    agent: orchestrator
+    status: completed
+    artifact: design.md
+    timestamp: 2026-05-24
+  - phase: apply
+    agent: general
+    status: completed
+    artifact: null
+    timestamp: 2026-05-24
+    summary: |
+      Tasks 1-4 completed: config schema, config tests, flow routing, flow routing tests.
+  - phase: apply
+    agent: backend
+    status: in_progress
+    artifact: apply-progress.md
+    timestamp: 2026-05-24
+    summary: |
+      Task 5 (personality-output.ts) completed. Tasks 6-7 remain.
+  - phase: apply
+    agent: general
+    status: completed
+    artifact: apply-progress.md
+    timestamp: 2026-05-24
+    summary: |
+      Task 4 (flow routing unit tests) completed. 21 tests pass.
+      Added tests for getNextScreenAfterEnvironmentSelection and
+      getNextScreenAfterPersonalitySelection covering all required scenarios.
+      All General Apply tasks (Tasks 1-4) are now complete.
+  - phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    timestamp: 2026-05-24
+    summary: |
+      Task 6 (orchestrator pipeline personality integration) completed.
+      PipelineConfig now accepts optional personality field; blockReason and
+      skipReason use personality-aware formatters. Machine-readable fields invariant.
+      13 pipeline tests pass. Task 7 (orchestrator tests) remains pending.
+  - phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    timestamp: 2026-05-24
+    summary: |
+      Task 7 (orchestrator personality tests) completed. Created personality-output.test.ts
+      with 30 tests and added 16 personality tests to orchestrator-pipeline.test.ts.
+      54 personality tests pass covering all three personalities (guia/pragmatica/ahorro-extremo),
+      formatBlockReason/formatSkipReason/formatLoopBreakerMessage, machine-readable field
+      invariance, and defaulting behavior. All backend tasks (5, 6, 7) now complete.
+  - phase: apply
+    agent: frontend
+    status: completed
+    artifact: apply-progress.md
+    timestamp: 2026-05-24
+    summary: |
+      Task 8 (TUI PersonalitySelectionScreen) completed.
+      Added personality-selection to Screen union, selectedPersonality state initialized
+      from config with "pragmatica" fallback, routing via getNextScreenAfterEnvironmentSelection
+      and getNextScreenAfterPersonalitySelection, cursor limit 2 with default=Pragmática (1).
+      PersonalitySelectionScreen renders three options with hints and persistent disclaimer.
+      Config write on confirm merges with existing config. Back navigation returns to environment-selection.
+      TypeScript compiles clean (0 errors in app.tsx). 21 developer-team-flow tests pass.
+  - phase: verify
+    agent: orchestrator
+    status: failed
+    artifact: verify-report.md
+    timestamp: 2026-05-24
+    summary: |
+      FAIL. Build check fails (script not found). Typecheck fails in action-runner.ts (TS2741).
+      Full test suite has 18 failures. 7/9 tasks fully evidenced, 1/9 partial, 1/9 not evidenced.
+      Task 9 incomplete. 22 REQ scenarios PASS, 5 WARN, 1 FAIL.
+  - phase: review
+    agent: orchestrator
+    status: completed
+    artifact: review-report.md
+    timestamp: 2026-05-24
+    summary: |
+      APPROVE WITH CHANGES. No blockers. 1 Major (override context lost in skipReason formatting).
+      4 Minor findings: type duplication, trailing colon edge case, unused `selected` prop,
+      misleading config test comment. 2 Nits.
+  - phase: archive
+    agent: archive
+    status: archived
+    artifact: archive-report.md
+    timestamp: 2026-05-24
+    summary: |
+      Change archived with documented follow-ups. Verify: FAIL, Review: APPROVE WITH CHANGES.
+      Open items: fix action-runner.ts typecheck, complete Task 9, fix override context loss,
+      address minor review findings. Archive location: openspec/archive/orchestrator-personality-selector/

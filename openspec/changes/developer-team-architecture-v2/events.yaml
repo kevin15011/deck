@@ -1,0 +1,131 @@
+# OpenSpec Events — developer-team-architecture-v2
+# Auto-generado por Orchestrator
+# Reconciliación: spec + design completados
+
+events:
+  - id: evt-20260523-proposal-001
+    phase: proposal
+    event: proposal-created
+    timestamp: "2026-05-23T00:00:00Z"
+    agent: deck-developer-proposal
+    artifact: proposal.md
+    summary: >
+      Propuesta creada para mejoras de arquitectura del Developer Team v2.
+      Aborda 4 problemas de alta/media prioridad (#1 duplicacion bundles,
+      #2 validacion RunnerCapabilities, #7 manifest strict, #9 fallback registry).
+      Difiere 5 problemas a SDDs futuros (#3 god object, #4 prompts sin estructura,
+      #5 versionamiento, #6 acoplamiento bundles, #8 runners no-filesystem).
+
+  - id: evt-20260523-spec-001
+    phase: spec
+    event: spec-created
+    timestamp: "2026-05-23T20:30:00Z"
+    agent: deck-developer-spec
+    artifact: spec.md
+    summary: >
+      Spec creada con 25 requisitos (19 MUST, 6 SHOULD, 0 MAY) para 4 capabilities:
+      instruction-bundle-fragments (5 reqs), validate-runner-capabilities (6 reqs),
+      manifest-validation (7 reqs), content-registry-fallback (7 reqs).
+      25 acceptance scenarios definidos. 5 open questions persisten (OQ-1 a OQ-5).
+
+  - id: evt-20260523-design-001
+    phase: design
+    event: design-created
+    timestamp: "2026-05-23T20:35:00Z"
+    agent: deck-developer-design
+    artifact: design.md
+    summary: >
+      Design creado con 4 componentes: common-fragments.ts (reusable markdown por surface),
+      validateRunnerCapabilities() + ValidationResult en runner-capability-validation.ts,
+      strict mode en manifest con ManifestBuildResult wrapper,
+      Result type + fallback en content-registry.ts.
+      14 archivos estimados (2 nuevos, 12 modificados).
+      4 open decisions pendientes para fase de tasks.
+
+  - id: evt-20260523-tasks-001
+    phase: tasks
+    event: tasks-created
+    timestamp: "2026-05-23T21:00:00Z"
+    agent: deck-developer-task
+    artifact: tasks.md
+    summary: >
+      17 tareas atómicas en 5 grupos: Shared/Contracts (3), Feature #1 Fragments (6),
+      Feature #9 Registry (3), Feature #7 Manifest (4), Integration (1).
+      2 tareas High complexity (Task 10 getAgentContentResult, Task 13 manifest strict).
+      Ejecución en 4 fases secuenciales con paralelismo dentro de cada fase.
+      2 open questions implementation-blocking (OQ-2 Result type, OQ-5 suggestions algorithm).
+      Review workload: Medium risk (400-800 líneas estimadas).
+
+  - id: evt-20260523-apply-phase2b-001
+    phase: apply
+    event: phase-2b-completed
+    timestamp: "2026-05-23T22:00:00Z"
+    agent: deck-developer-apply-general
+    artifact: apply-progress.md
+    summary: >
+      Phase 2b completed: Tasks 10, 11, 12 (Feature #9 — Content Registry Fallback).
+      getAgentContentResult() implemented with Levenshtein suggestions and fallback.
+      Deprecated wrapper getAgentContent() preserves backward compatibility.
+      56 tests pass (56 new + existing content-registry tests).
+
+  - id: evt-20260523-apply-phase3-001
+    phase: apply
+    event: phase-3-completed
+    timestamp: "2026-05-23T21:45:00Z"
+    agent: deck-developer-apply-general
+    artifact: apply-progress.md
+    summary: >
+      Phase 3 completed: Tasks 13, 14, 15, 16 (Feature #7 — Manifest Strict Mode).
+      ManifestBuildResult with strict mode validations implemented.
+      buildDeveloperTeamManifest returns { manifest, warnings, errors }.
+      buildDeveloperTeamManifestLegacy preserves backward compatibility.
+      Adapters reviewed — they have separate implementations not using core's function.
+      28 tests pass (manifest.test.ts).
+
+  - id: evt-20260523-apply-phase4-001
+    phase: apply
+    event: phase-4-completed
+    timestamp: "2026-05-23T22:30:00Z"
+    agent: deck-developer-apply-general
+    artifact: apply-progress.md
+    summary: >
+      Phase 4 completed: Task 17 (E2E Regression Test).
+      All 624 developer team tests pass across 15+ test files.
+      Install plan generation verified for both OpenCode and PI adapters.
+      Bundle parity tests pass. No regressions detected.
+
+  - id: evt-20260523-verify-001
+    phase: verify
+    event: verify-completed
+    timestamp: "2026-05-23T23:00:00Z"
+    agent: deck-developer-verify
+    artifact: verify-report.md
+    summary: >
+      Verification completed: 855 tests pass, 0 fail. 17/17 tasks complete.
+      4 features implemented: Result type, validateRunnerCapabilities, strict manifest mode, getAgentContentResult.
+      Tasks 5-8 deferred: common-fragments not consumed by builders (byte-a-byte parity preserved).
+      2 warnings: fallback content missing displayName; deprecated wrappers don't emit console.warn.
+
+  - id: evt-20260523-review-001
+    phase: review
+    event: review-completed
+    timestamp: "2026-05-23T23:15:00Z"
+    agent: deck-developer-review
+    artifact: review-report.md
+    summary: >
+      Review completed: APPROVE WITH CHANGES. Architecture solid for #2 and #9; #7 validation robust.
+      #1 deferred (conscious decision). No new issues introduced by fixes. 3 minor findings remain:
+      fallback content semantics misleading, suggestions algorithm counterintuitive prefix condition,
+      unused _suggestions parameter.
+
+  - id: evt-20260523-archive-001
+    phase: archive
+    event: change-completed
+    timestamp: "2026-05-23T23:30:00Z"
+    agent: deck-developer-archive
+    artifact: archive-report.md
+    summary: >
+      Change developer-team-architecture-v2 completed successfully.
+      4 features implemented, 4 deferred. All tests pass (855/855).
+      No regressions detected in install plan generation.
+      Deferred items documented for future SDDs.

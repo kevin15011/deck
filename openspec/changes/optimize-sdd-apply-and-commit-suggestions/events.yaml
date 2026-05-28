@@ -1,0 +1,191 @@
+change: optimize-sdd-apply-and-commit-suggestions
+events:
+  - type: explore.completed
+    phase: explore
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/exploration.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-explorer
+    repaired_by: deck-developer-orchestrator
+    note: Explorer Agent returned completed contract but official OpenSpec files were missing on verification; registry event was mechanically reconstructed from the returned contract.
+  - type: explore.scope_amended
+    phase: explore
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/exploration.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-orchestrator
+    note: Added artifact/registry persistence hardening to scope after Proposal and Explorer both reported successful writes before official files were verified present.
+  - type: proposal.completed
+    phase: proposal
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/proposal.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-proposal
+    note: Proposal updated from Exploration to include Apply batching, post-Archive Git suggestions, Explorer triage, role-based delegation outside SDD, artifact/registry persistence hardening, and execution configuration respect.
+  - type: proposal.completed
+    phase: proposal
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/proposal.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-proposal
+    note: Proposal refreshed/replaced to cover expanded Exploration scope; official artifact and registry paths verified after write.
+    verification:
+      required_files_checked:
+        - openspec/changes/optimize-sdd-apply-and-commit-suggestions/proposal.md
+        - openspec/changes/optimize-sdd-apply-and-commit-suggestions/state.yaml
+        - openspec/changes/optimize-sdd-apply-and-commit-suggestions/events.yaml
+  - type: proposal.scope_amended
+    phase: proposal
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/proposal.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-orchestrator
+    note: Refined Mermaid requirement. Orchestrator owns user-facing summaries. Add mandatory Mermaid diagrams to Orchestrator summaries after Proposal, Spec, Design, and Task. Diagrams remain non-authoritative.
+  - type: spec.completed
+    phase: spec
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/spec.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-spec
+    registry_mode: deferred
+    reconciled_by: deck-developer-orchestrator
+    note: Spec phase completed in registry-deferred mode. Spec.md verified on disk with exists=true and byte_count=26098. Registry serialized by Orchestrator after parallel Spec+Design completion.
+  - type: design.completed
+    phase: design
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/design.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-design
+    registry_mode: deferred
+    reconciled_by: deck-developer-orchestrator
+    note: Design phase completed in registry-deferred mode. Design.md verified on disk with exists=true and byte_count=26481. Registry serialized by Orchestrator after parallel Spec+Design completion.
+  - type: proposal.scope_refined
+    phase: proposal
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/proposal.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-orchestrator
+    note: Refined Mermaid guidance after user feedback. Diagrams in Orchestrator phase summaries should explain substantive Proposal/Spec/Design/Task outputs, not merely show SDD workflow progress/status.
+  - type: task.completed
+    phase: task
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/tasks.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-task
+    note: Task phase completed. 5 atomic tasks across 2 execution groups. All tasks unblocked. Task artifact verified on disk with exists=true and byte_count=16169.
+    verification:
+      artifact_exists: true
+      byte_count: 16169
+  - type: apply.group_a.completed
+    phase: apply
+    status: completed
+    execution_group: A
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/apply-progress.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-general-apply
+    note: Apply Group A completed. Tasks 1, 4, and 5 implemented. 8 skill files modified. Execution-group contract, self-verification hardening, and Mermaid source data added. Group B remains.
+    tasks_completed:
+      - 1
+      - 4
+      - 5
+    files_changed:
+      - .pi/skills/deck-developer-task/SKILL.md
+      - .pi/skills/deck-developer-proposal/SKILL.md
+      - .pi/skills/deck-developer-spec/SKILL.md
+      - .pi/skills/deck-developer-design/SKILL.md
+      - .pi/skills/deck-developer-explorer/SKILL.md
+      - .pi/skills/deck-developer-verify/SKILL.md
+      - .pi/skills/deck-developer-review/SKILL.md
+      - .pi/skills/deck-developer-archive/SKILL.md
+    verification:
+      artifact_exists: true
+      byte_count: 6884
+  - type: apply.group_b.completed
+    phase: apply
+    status: completed
+    execution_group: B
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/apply-progress.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-general-apply
+    note: Apply Group B completed. Tasks 2 and 3 implemented. 4 skill files modified. Full orchestration update and ordered-group acceptance in all three Apply skills. All 5 tasks complete.
+    tasks_completed:
+      - 2
+      - 3
+    files_changed:
+      - .pi/skills/deck-developer-orchestrator/SKILL.md
+      - .pi/skills/deck-developer-apply-general/SKILL.md
+      - .pi/skills/deck-developer-apply-backend/SKILL.md
+      - .pi/skills/deck-developer-apply-frontend/SKILL.md
+    verification:
+      artifact_exists: true
+      byte_count: 10866
+  - type: verify.completed
+    phase: verify
+    status: passed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/verify.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-verify
+    registry_mode: deferred
+    reconciled_by: deck-developer-orchestrator
+    note: Verify completed in registry-deferred mode. All 5 tasks complete. Static file/content verification confirms prompt/guidance implementation satisfies Spec requirements. Tests/build/typecheck skipped.
+    verification:
+      artifact_exists: true
+      byte_count: 11959
+  - type: review.failed
+    phase: review
+    status: changes_requested
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/review.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-review
+    registry_mode: deferred
+    reconciled_by: deck-developer-orchestrator
+    note: Engineering review found 1 blocker, 2 major issues, and 2 minor issues. Return to Apply for fixes before Archive.
+    findings:
+      blocker:
+        - Archive self-verification is internally impossible. Report written after source cleanup and verified against non-existent source path.
+        - Parallel Apply fanout shared writes without safe-write strategy.
+        - Deferred phase templates require Registry Recorded even when deferred.
+        - Task skill Mermaid templates use invalid subgraph syntax.
+        - Execution config override provenance too broad.
+  - type: apply.fixes.completed
+    phase: apply
+    subtype: fixes
+    status: completed
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/apply-fixes-output.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-general-apply
+    note: Applied all 5 Review findings. 8 files modified across 6 skills. Archive step ordering, Apply fanout safe-write, deferred registry recorded, Task Mermaid syntax, and override provenance fixed. Ready for re-Verify/Re-Review.
+    findings_fixed:
+      blocker: 1
+      major: 2
+      minor: 2
+    files_changed:
+      - .pi/skills/deck-developer-archive/SKILL.md
+      - .pi/skills/deck-developer-orchestrator/SKILL.md
+      - .pi/skills/deck-developer-apply-general/SKILL.md
+      - .pi/skills/deck-developer-spec/SKILL.md
+      - .pi/skills/deck-developer-design/SKILL.md
+      - .pi/skills/deck-developer-verify/SKILL.md
+      - .pi/skills/deck-developer-review/SKILL.md
+      - .pi/skills/deck-developer-task/SKILL.md
+    verification:
+      artifact_exists: true
+      apply_progress_updated: true
+  - type: change.incomplete
+    phase: apply
+    status: incomplete
+    artifact: openspec/changes/optimize-sdd-apply-and-commit-suggestions/apply-progress.md
+    timestamp: '2026-05-20'
+    actor: deck-developer-orchestrator
+    note: Change marked incomplete. Implementation was incorrectly applied to .pi/ (generated adapter output) instead of packages/core/ and packages/sdd-runtime/ (source code). The core→adapter architecture was not understood before Apply. All planning artifacts remain valid for reuse.
+    lesson_learned:
+      - Must understand core→adapter architecture before implementing changes to Developer Team behavior.
+      - .pi/ is gitignored output generated by @deck/adapter-pi; changes must go to packages/core/ and packages/sdd-runtime/.
+      - Explorer should have investigated the monorepo architecture before any implementation attempt.
+  - type: change.closed
+    phase: closed
+    status: incomplete
+    timestamp: '2026-05-23'
+    actor: deck-developer-archive
+    note: Change officially closed as incomplete. No further work will be performed on this SDD. All planning artifacts (proposal, spec, design, tasks) remain valid and were reused in optimize-sdd-v2-core-implementation which was also subsequently abandoned.
+

@@ -1,0 +1,93 @@
+change: adaptive-memory-tool-binding-fix
+events:
+  - event: proposal-created
+    phase: proposal
+    artifact: proposal.md
+    timestamp: "2026-05-23"
+    agent: deck-developer-proposal
+    model: opencode-go/kimi-k2.6
+    summary: >
+      Created formal change proposal for fixing adaptive memory tool bindings in Deck.
+      Four root causes identified: (1) OpenCode runner-capabilities.ts hardcodes
+      memoryBundle: undefined, (2) Supermemory auth probe missing in OpenCode adapter,
+      (3) adapter-supermemory commit() discards all candidates instead of persisting,
+      (4) adaptive-memory instructions are too generic to be actionable.
+  - event: spec-created
+    phase: spec
+    artifact: spec.md
+    timestamp: "2026-05-23"
+    agent: deck-developer-spec
+    model: opencode-go/kimi-k2.6
+    summary: >
+      Created formal spec with 17 requirements across 4 capabilities:
+      runner-opencode-manifest (REQ-ROM-001 to REQ-ROM-003),
+      adapter-supermemory-commit (REQ-AMS-001 to REQ-AMS-006),
+      opencode-supermemory-auth-probe (REQ-ASP-001 to REQ-ASP-004),
+      adaptive-memory-instructions (REQ-AMI-001 to REQ-AMI-004).
+  - event: design-created
+    phase: design
+    artifact: design.md
+    timestamp: "2026-05-23"
+    agent: deck-developer-design
+    model: opencode-go/kimi-k2.6
+    summary: >
+      Created technical design for four fixes: (1) runner-capabilities.ts memoryBundle
+      from plan, (2) adapter-supermemory commit() persistence via native fetch,
+      (3) OpenCode auth probe mirroring Pi pattern, (4) enhanced adaptive-memory instructions.
+      7 files impacted.
+  - event: tasks-created
+    phase: tasks
+    artifact: tasks.md
+    timestamp: "2026-05-23"
+    agent: deck-developer-task
+    model: opencode-go/kimi-k2.6
+    summary: >
+      Created 11 atomic tasks in 5 execution waves. Shared: Tasks 1-2 (General).
+      Backend: Tasks 3-6 (auth probe, wiring, manifest fix, adapter commit).
+      Backend tests: Tasks 8-11. Open questions: Supermemory REST payload (blocking),
+      MCP URL mismatch (allowed-with-stub), Memory ID format (non-blocking).
+  - event: apply-progress
+    phase: apply
+    artifact: apply-progress.md
+    timestamp: "2026-05-23"
+    agent: backend
+    model: minimax-coding-plan/MiniMax-M2.7
+    summary: >
+      Completed Tasks 1-6 and Verify Phase Fixes F1-F4. Fixed diagnostics type
+      incompatibility in opencode-mcp-config.ts (changed Array<{message: string}> to string[]).
+      Created opencode-mcp-config.test.ts with 7 test cases. Removed dead containerTag
+      variable in adapter-supermemory commit(). Added positive-path manifest test in
+      runner-capabilities.test.ts. Tests pass: 129 adapter-opencode, 16 adapter-supermemory, 19 core.
+  - event: verify-completed
+    phase: verify
+    artifact: verify-report.md
+    timestamp: "2026-05-24"
+    agent: deck-developer-verify
+    model: opencode-go/kimi-k2.6
+    summary: >
+      Re-verify PASS WITH WARNINGS. 164/164 tests pass. 0 critical findings.
+      16/17 requirements met (REQ-AMS-006 deferred as P2). 2 warnings: test file type
+      safety (19 mock adapter type errors in .test.ts files) and REQ-ROM-003 naming
+      gap (spec says supermemory_memory/supermemory_recall, actual is execute/search_docs).
+  - event: review-completed
+    phase: review
+    artifact: review-report.md
+    timestamp: "2026-05-24"
+    agent: deck-developer-review
+    model: opencode-go/kimi-k2.6
+    summary: >
+      Review PASS WITH CONCERNS. Architecture sound — auth probe stays runner-specific,
+      core remains agnostic, memoryBundle flows correctly. Fail-open semantics robust.
+      Concerns: missing test file (resolved by F2), pre-existing bashrc security issue
+      (not introduced by this change), dead containerTag variable (removed by F3).
+  - event: archive-completed
+    phase: archive
+    artifact: archive-report.md
+    timestamp: "2026-05-24"
+    agent: deck-developer-archive
+    model: minimax-coding-plan/MiniMax-M2.7
+    summary: >
+      SDD change complete. 10 implementation tasks + 4 verify-fix tasks completed.
+      164 tests passing. Deferred: Task 7 (loadContext/search, P2).
+      Warnings: test file type safety, naming gap, pre-existing bashrc concern.
+      Advisory git commit suggestions provided.

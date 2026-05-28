@@ -1,0 +1,28 @@
+change: deck-as-installer-runner-agnostic
+phase:
+  current: archive
+  status: in_progress
+artifacts:
+  proposal: openspec/changes/deck-as-installer-runner-agnostic/proposal.md
+  spec: openspec/changes/deck-as-installer-runner-agnostic/spec.md
+  design: openspec/changes/deck-as-installer-runner-agnostic/design.md
+  tasks: openspec/changes/deck-as-installer-runner-agnostic/tasks.md
+  apply-progress: openspec/changes/deck-as-installer-runner-agnostic/apply-progress.md
+provenance:
+  created: "2026-05-24"
+  author: deck-developer-spec
+  design:
+    agent: deck-developer-design
+    artifact: openspec/changes/deck-as-installer-runner-agnostic/design.md
+    completed_at: "2026-05-24T20:31:57Z"
+  tasks:
+    agent: deck-developer-task
+    artifact: openspec/changes/deck-as-installer-runner-agnostic/tasks.md
+    completed_at: "2026-05-24T21:00:00Z"
+  apply:
+    agent: general
+    artifact: openspec/changes/deck-as-installer-runner-agnostic/apply-progress.md
+    completed_at: "2026-05-24T22:30:00Z"
+  post-apply-fixes:
+    description: "Fixed core TS source files + adapter install paths after discovering initial apply only cleaned materialized artifacts, not canonical sources"
+    completed_at: "2026-05-24T23:30:00Z"

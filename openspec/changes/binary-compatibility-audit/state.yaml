@@ -1,0 +1,10 @@
+name: binary-compatibility-audit
+description: Exhaustive binary compatibility audit for Deck CLI to enable standalone binary compilation
+phase: explore
+status: completed
+artifact: exploration.md
+provenance:
+  - type: exploration
+    path: exploration.md
+    created: "2026-05-25"
+    by: deck-developer-explorer

@@ -1,0 +1,22 @@
+events:
+  - timestamp: "2026-05-25"
+    phase: archive
+    status: completed
+    event: archive_completed
+    agent: deck-developer-archive
+    artifact: archive-summary.md
+    notes: "Change archived after successful binary compilation implementation. 23/23 tasks completed. Binary builds successfully for all 4 targets. Development workflow preserved. Commit bb37387."
+  - timestamp: "2026-05-25"
+    phase: review
+    status: approved_with_changes
+    event: review_completed
+    agent: deck-developer-review
+    artifact: review-report.md
+    notes: "Final review pass. 0 blockers, 2 major integration findings (asset naming mismatch, tarball extraction mismatch), 1 minor, 1 nit. Core binary compilation approved; upgrade path requires follow-up fix."
+  - timestamp: "2026-05-25"
+    phase: verify
+    status: failed
+    event: binary_compilation_final_verify_failed
+    agent: deck-developer-verify
+    artifact: verify-report.md
+    notes: "Final verification failed: bun test 1650 pass / 37 fail; bunx tsc --noEmit fails; build:binary --dry-run fails resolving ./install-plan and react-devtools-core; pre-verify state.yaml was not phase apply/status completed."

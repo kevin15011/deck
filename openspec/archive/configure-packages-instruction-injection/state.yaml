@@ -1,0 +1,56 @@
+changeId: configure-packages-instruction-injection
+status: archived
+phases:
+  proposal:
+    status: completed
+    artifact: proposal.md
+    completedAt: "2026-05-21T00:00:00Z"
+  spec:
+    status: completed
+    artifact: spec.md
+    completedAt: "2026-05-21T00:00:00Z"
+  design:
+    status: completed
+    artifact: design.md
+    completedAt: "2026-05-21T00:00:00Z"
+  tasks:
+    status: completed
+    artifact: tasks.md
+    completedAt: "2026-05-21T00:00:00Z"
+    provenance: deck-developer-task
+  apply:
+    status: completed
+    agents:
+      - agent: general
+        artifact: apply-progress.md
+        completedAt: "2026-05-21T00:00:00Z"
+        note: Tasks 1-5 complete (config types+validation, instruction bundle types+helpers, per-package builders, content registry, manifest builder)
+      - agent: general
+        artifact: apply-progress.md
+        completedAt: "2026-05-21T21:45:00Z"
+        note: Tasks 6-7 complete (Pi adapter integration, OpenCode adapter integration). Tests: 451 pass.
+      - agent: frontend
+        artifact: apply-progress.md
+        completedAt: "2026-05-21T21:45:00Z"
+        note: Tasks 8-11 complete (dashboard state+reducer+selectors, input handling, screen rendering, action runner). Frontend tests: 30 pass.
+      - agent: general
+        artifact: apply-progress.md
+        completedAt: "2026-05-21T21:45:00Z"
+        note: Fixes for Verify/Review issues (Issue 1: DeveloperTeamManifestInput type consistency, Issue 2: OpenCode prompt generation capabilityInstructions passthrough). Tests: 114 pass (adapter-opencode), 518 pass (core).
+      - agent: frontend
+        artifact: apply-progress.md
+        completedAt: "2026-05-21T22:00:00Z"
+        note: Post-Review fixes (Issue 3: Dashboard cross-runner config preservation, Issue 4: Config loading on startup via loadRunnerPackageInstructionsFromConfig in app.tsx, Issue 5: DRY package IDs with CANONICAL_INSTRUCTION_PACKAGE_IDS).
+  verify:
+    status: passed_with_warnings
+    artifact: verify-report.md
+    completedAt: "2026-05-21T21:45:00Z"
+  review:
+    status: approve_with_comments
+    artifact: review-report.md
+    completedAt: "2026-05-21T22:00:00Z"
+  archive:
+    status: archived
+    artifact: archive-report.md
+    completedAt: "2026-05-21T22:30:00Z"
+    provenance: deck-developer-archive

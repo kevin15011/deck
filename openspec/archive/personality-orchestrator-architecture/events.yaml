@@ -1,0 +1,44 @@
+events:
+  - event: proposal-completed
+    phase: proposal
+    artifact: proposal.md
+    timestamp: "2026-05-24"
+  - event: spec-completed
+    phase: spec
+    artifact: spec.md
+    timestamp: "2026-05-24"
+  - event: design-completed
+    phase: design
+    artifact: design.md
+    timestamp: "2026-05-24"
+  - event: tasks-completed
+    phase: tasks
+    artifact: tasks.md
+    timestamp: "2026-05-24"
+  - event: apply-general-task5-completed
+    phase: apply
+    agent: general
+    artifact: apply-progress.md
+    task: "Task 5: OpenCode adapter reads personality at install time"
+    timestamp: "2026-05-24"
+  - event: apply-general-critical-findings-fixed
+    phase: apply
+    agent: general
+    artifact: apply-progress.md
+    task: "BLOCKER/Major findings: Pi adapter hardcoded path, missing try/catch, missing personality tests"
+    timestamp: "2026-05-24"
+  - event: verify-completed
+    phase: verify
+    artifact: verify-report.md
+    result: FAIL
+    timestamp: "2026-05-24"
+  - event: review-completed
+    phase: review
+    artifact: review-report.md
+    rating: APPROVE_WITH_CHANGES
+    timestamp: "2026-05-24"
+  - event: archive-completed
+    phase: archive
+    artifact: archive-report.md
+    archive_target: openspec/archive/personality-orchestrator-architecture/
+    timestamp: "2026-05-24"

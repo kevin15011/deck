@@ -1,0 +1,8 @@
+phase: explore
+status: completed
+artifacts:
+  - path: exploration.md
+    description: "Exploration of orchestrator invariant persistence strategies"
+provenance:
+  initiated_by: user
+  date: "2026-05-27"

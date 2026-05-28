@@ -1,0 +1,8 @@
+change: integrate-gentle-ai-skills
+phase: explore
+status: completed
+artifact: exploration.md
+provenance:
+  explorer: deck-developer-explorer
+  model: kimi-k2.6
+  completedAt: "2026-05-23T00:00:00Z"

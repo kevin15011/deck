@@ -1,0 +1,33 @@
+events:
+  - phase: proposal
+    status: completed
+    artifact: openspec/changes/deck-as-installer-runner-agnostic/proposal.md
+    timestamp: "2026-05-24"
+  - phase: spec
+    status: completed
+    artifact: openspec/changes/deck-as-installer-runner-agnostic/spec.md
+    timestamp: "2026-05-24"
+    agent: deck-developer-spec
+  - phase: design
+    status: completed
+    artifact: openspec/changes/deck-as-installer-runner-agnostic/design.md
+    timestamp: "2026-05-24T20:31:57Z"
+    agent: deck-developer-design
+    event: design-created
+  - phase: tasks
+    status: completed
+    artifact: openspec/changes/deck-as-installer-runner-agnostic/tasks.md
+    timestamp: "2026-05-24T21:00:00Z"
+    agent: deck-developer-task
+    event: tasks-created
+  - phase: apply
+    status: completed
+    artifact: openspec/changes/deck-as-installer-runner-agnostic/apply-progress.md
+    timestamp: "2026-05-24T22:30:00Z"
+    agent: general
+    event: apply-completed
+  - phase: post-apply-fixes
+    status: completed
+    timestamp: "2026-05-24T23:30:00Z"
+    event: post-apply-fixes-completed
+    description: "Fixed core TS source files and adapter install paths after discovery that initial apply only cleaned materialized artifacts"

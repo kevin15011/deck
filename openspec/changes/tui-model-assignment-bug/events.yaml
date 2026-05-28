@@ -1,0 +1,6 @@
+events:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    timestamp: "2026-05-24"
+    summary: "Investigated TUI installation model assignment bug. Found three related defects: (1) Pi dashboard installTeamBundle is undefined causing skipped team action, (2) TeamBundleInstallerFn type lacks modelAssignments/thinkingAssignments, (3) OpenCode installTeamBundle ignores dashboard assignments. Recommended short-term mitigation + structural fix."

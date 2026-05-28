@@ -1,0 +1,123 @@
+change: adaptive-memory-tool-binding-fix
+current_phase: archive
+status: completed
+artifacts:
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply-progress: apply-progress.md
+  verify-report: verify-report.md
+  review-report: review-report.md
+  archive-report: archive-report.md
+phases:
+  proposal:
+    status: completed
+    artifact: proposal.md
+    completedAt: "2026-05-23"
+  spec:
+    status: completed
+    artifact: spec.md
+    completedAt: "2026-05-23"
+  design:
+    status: completed
+    artifact: design.md
+    completedAt: "2026-05-23"
+  tasks:
+    status: completed
+    artifact: tasks.md
+    completedAt: "2026-05-23"
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    completedAt: "2026-05-23"
+    tasksCompleted:
+      - "Task 1: Expose memoryBundle on OpenCodeDeveloperTeamInstallPlan"
+      - "Task 2: Enhance adaptive-memory instruction bundle"
+      - "Task 3: Add validateSupermemoryOpenCodeMcpConfig auth probe"
+      - "Task 4: Wire auth probe into developer-team-install memory resolution"
+      - "Task 5: Fix buildDeveloperTeamManifest to read plan.memoryBundle"
+      - "Task 6: Implement fetch-based persistence in adapter-supermemory commit()"
+      - "Task F1: Fix diagnostics type incompatibility"
+      - "Task F2: Create opencode-mcp-config.test.ts"
+      - "Task F3: Remove dead containerTag variable"
+      - "Task F4: Add positive-path test in runner-capabilities.test.ts"
+  verify:
+    status: completed
+    artifact: verify-report.md
+    completedAt: "2026-05-24"
+    result: "PASS WITH WARNINGS"
+    testsPassed: 164
+    testsFailed: 0
+  review:
+    status: completed
+    artifact: review-report.md
+    completedAt: "2026-05-24"
+    result: "PASS WITH CONCERNS"
+  archive:
+    status: completed
+    artifact: archive-report.md
+    completedAt: "2026-05-24"
+provenance:
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: opencode-go/kimi-k2.6
+    artifact: proposal.md
+    timestamp: "2026-05-23"
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/kimi-k2.6
+    artifact: spec.md
+    timestamp: "2026-05-23"
+  - phase: design
+    agent: deck-developer-design
+    model: opencode-go/kimi-k2.6
+    artifact: design.md
+    timestamp: "2026-05-23"
+  - phase: tasks
+    agent: deck-developer-task
+    model: opencode-go/kimi-k2.6
+    artifact: tasks.md
+    timestamp: "2026-05-23"
+  - phase: apply
+    agent: backend
+    model: minimax-coding-plan/MiniMax-M2.7
+    artifact: apply-progress.md
+    timestamp: "2026-05-23"
+    tasksCompleted:
+      - "Task 1: Expose memoryBundle on OpenCodeDeveloperTeamInstallPlan"
+      - "Task 2: Enhance adaptive-memory instruction bundle"
+      - "Task 3: Add validateSupermemoryOpenCodeMcpConfig auth probe"
+      - "Task 4: Wire auth probe into developer-team-install memory resolution"
+      - "Task 5: Fix buildDeveloperTeamManifest to read plan.memoryBundle"
+      - "Task 6: Implement fetch-based persistence in adapter-supermemory commit()"
+      - "Task F1: Fix diagnostics type incompatibility"
+      - "Task F2: Create opencode-mcp-config.test.ts"
+      - "Task F3: Remove dead containerTag variable"
+      - "Task F4: Add positive-path test in runner-capabilities.test.ts"
+  - phase: verify
+    agent: deck-developer-verify
+    model: opencode-go/kimi-k2.6
+    artifact: verify-report.md
+    timestamp: "2026-05-24"
+    result: "PASS WITH WARNINGS"
+  - phase: review
+    agent: deck-developer-review
+    model: opencode-go/kimi-k2.6
+    artifact: review-report.md
+    timestamp: "2026-05-24"
+    result: "PASS WITH CONCERNS"
+  - phase: archive
+    agent: deck-developer-archive
+    model: minimax-coding-plan/MiniMax-M2.7
+    artifact: archive-report.md
+    timestamp: "2026-05-24"
+deferred:
+  - task: Task 7 (REQ-AMS-006)
+    description: Implement fetch-based loadContext and search in adapter-supermemory
+    reason: Scope reduction recommended in review workload forecast
+    priority: P2
+warnings:
+  - "19 TypeScript errors remain in .test.ts files (mock adapter type mismatches, runtime tests pass)"
+  - "REQ-ROM-003 naming gap: spec says supermemory_memory/supermemory_recall, actual tool names are execute/search_docs"
+  - "Pre-existing security concern: appendSupermemoryEnvToBashrc writes API key to ~/.bashrc without deduplication"

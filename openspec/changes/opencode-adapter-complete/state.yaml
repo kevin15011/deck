@@ -1,0 +1,29 @@
+change: opencode-adapter-complete
+current_phase: closed
+status: abandoned
+closure_reason: Planning artifacts exist (proposal.md, spec.md, design.md, tasks.md) but no formal SDD was tracked or executed. No state.yaml or events.yaml existed prior to archival. No implementation work was performed. Change abandoned before Apply phase.
+closed_at: "2026-05-23"
+planning_artifacts_exist: true
+artifacts:
+  proposal: openspec/changes/opencode-adapter-complete/proposal.md
+  spec: openspec/changes/opencode-adapter-complete/spec.md
+  design: openspec/changes/opencode-adapter-complete/design.md
+  tasks: openspec/changes/opencode-adapter-complete/tasks.md
+phases:
+  proposal:
+    status: orphaned
+    artifact: proposal.md
+    note: Artifact exists but no registry tracking; phase never officially started
+  spec:
+    status: orphaned
+    artifact: spec.md
+    note: Artifact exists but no registry tracking; phase never officially started
+  design:
+    status: orphaned
+    artifact: design.md
+    note: Artifact exists but no registry tracking; phase never officially started
+  tasks:
+    status: orphaned
+    artifact: tasks.md
+    note: Artifact exists but no registry tracking; phase never officially started
+provenance: []

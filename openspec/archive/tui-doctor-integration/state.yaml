@@ -1,0 +1,68 @@
+change: tui-doctor-integration
+name: TUI Doctor Integration
+phase: archive
+status: archived
+artifacts:
+  proposal.md:
+    path: openspec/archive/tui-doctor-integration/proposal.md
+  spec.md:
+    path: openspec/archive/tui-doctor-integration/spec.md
+  design.md:
+    path: openspec/archive/tui-doctor-integration/design.md
+  tasks.md:
+    path: openspec/archive/tui-doctor-integration/tasks.md
+  apply-progress.md:
+    path: openspec/archive/tui-doctor-integration/apply-progress.md
+  verify-report.md:
+    path: openspec/archive/tui-doctor-integration/verify-report.md
+  review-report.md:
+    path: openspec/archive/tui-doctor-integration/review-report.md
+  archive-report.md:
+    path: openspec/archive/tui-doctor-integration/archive-report.md
+provenance:
+  - agent: deck-developer-proposal
+    phase: proposal
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-spec
+    phase: spec
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-design
+    phase: design
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-task
+    phase: tasks
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-apply-general
+    phase: apply
+    timestamp: "2026-05-23T00:00:00Z"
+    tasks: [1, 2]
+    status: completed
+    artifact: apply-progress.md
+    note: "T1 (menu-options.ts) + T2 (doctor-screen.tsx) complete. T3 pending Frontend Apply."
+  - agent: deck-developer-apply-frontend
+    phase: apply
+    timestamp: "2026-05-23T00:00:00Z"
+    tasks: [3]
+    status: completed
+    artifact: apply-progress.md
+    note: "T3 (app.tsx wiring) complete. All tasks complete."
+  - agent: deck-developer-verify
+    phase: verify
+    timestamp: "2026-05-23T00:00:00Z"
+    status: completed
+    artifact: verify-report.md
+    note: "PASS — 31 tests pass, all requirements compliant."
+  - agent: deck-developer-review
+    phase: review
+    timestamp: "2026-05-23T00:00:00Z"
+    status: completed
+    artifact: review-report.md
+    note: "APPROVE — all dimensions Strong, no blockers."
+  - agent: deck-developer-archive
+    phase: archive
+    timestamp: "2026-05-23T04:14:00Z"
+    status: archived
+    artifact: archive-report.md
+    note: "Change archived to openspec/archive/tui-doctor-integration/"
+blockers: []
+open_questions: []

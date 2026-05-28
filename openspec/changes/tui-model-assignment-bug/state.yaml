@@ -1,0 +1,7 @@
+change_id: tui-model-assignment-bug
+phase: explore
+status: completed
+artifact: exploration.md
+provenance:
+  explorer: deck-developer-explorer
+  timestamp: "2026-05-24"

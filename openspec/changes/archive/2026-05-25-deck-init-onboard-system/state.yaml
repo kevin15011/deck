@@ -1,0 +1,54 @@
+schema: spec-driven
+change: deck-init-onboard-system
+version: "1.0"
+
+phase: archive
+status: archived
+
+artifacts:
+  proposal:
+    path: proposal.md
+    hash: null
+  spec:
+    path: spec.md
+    hash: null
+  design:
+    path: design.md
+    hash: null
+  tasks:
+    path: tasks.md
+    hash: null
+  verify:
+    path: verify-report.md
+    hash: null
+  archive:
+    path: archive-report.md
+    hash: null
+
+provenance:
+  created_by: deck-developer-orchestrator
+  created_at: "2026-05-25T00:00:00Z"
+  method: user-requested-sdd
+  spec_created_by: deck-developer-spec
+  spec_created_at: "2026-05-25T00:01:00Z"
+  design_created_by: deck-developer-design
+  design_created_at: "2026-05-25T00:02:00Z"
+  tasks_created_by: deck-developer-task
+  tasks_created_at: "2026-05-25T00:03:00Z"
+  verified_by: deck-developer-verify
+  verified_at: "2026-05-25T17:09:37Z"
+  archived_by: deck-developer-archive
+  archived_at: "2026-05-25T00:00:00Z"
+
+context: |
+  Deck is a standalone installer for runners (OpenCode primary).
+  Bootstrap skills (deck-init, deck-onboard) live in the runner.
+  OpenSpec is the only persistence layer.
+  Strict TDD is out of scope.
+  Deck already has its own SDD phases via developer team (12 agents).
+  Only 2 new bootstrap skills needed: deck-init and deck-onboard.
+  
+  ARCHIVED WITH VERIFICATION ISSUES:
+  - Core purity audit failures (forbidden string literals in skill content)
+  - Build check failure (no entrypoints)
+  - 1171/1172 tests passed, 1 core purity test failed

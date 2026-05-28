@@ -1,0 +1,5 @@
+- phase: explore
+  status: completed
+  artifact: exploration.md
+  timestamp: "2026-05-23T00:00:00Z"
+  note: "Investigated deck's current skill installation pipeline and gentle-ai skill locations. Recommended extending @deck/core with a Standalone Skill Catalog and adapters with a raw-file write mode."

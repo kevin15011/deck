@@ -1,0 +1,55 @@
+change: adaptive-memory-protocol
+status: archived
+phase: archive
+provenance:
+  - model: kimi-k2.6
+    tool: deck-developer-proposal
+    timestamp: "2026-05-21T00:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-spec
+    timestamp: "2026-05-22T00:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-design
+    timestamp: "2026-05-22T00:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-task
+    timestamp: "2026-05-22T00:00:00Z"
+  - model: kimi-k2.5
+    tool: deck-developer-explorer
+    timestamp: "2026-05-21T17:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-spec
+    timestamp: "2026-05-22T01:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-design
+    timestamp: "2026-05-22T01:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-task
+    timestamp: "2026-05-22T02:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-apply-general
+    timestamp: "2026-05-22T03:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-apply-general
+    timestamp: "2026-05-22T04:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-verify
+    timestamp: "2026-05-22T04:00:00Z"
+  - model: glm-5.1
+    tool: deck-developer-review
+    timestamp: "2026-05-22T04:00:00Z"
+  - model: glm-5
+    tool: deck-developer-archive
+    timestamp: "2026-05-22T05:00:00Z"
+artifacts:
+  proposal: openspec/changes/adaptive-memory-protocol/proposal.md
+  spec: openspec/changes/adaptive-memory-protocol/specs/adaptive-memory-protocol/spec.md
+  design: openspec/changes/adaptive-memory-protocol/design.md
+  tasks: openspec/changes/adaptive-memory-protocol/tasks.md
+  exploration: openspec/changes/adaptive-memory-protocol/exploration.md
+  apply-progress: openspec/changes/adaptive-memory-protocol/apply-progress.md
+  verify-report: openspec/changes/adaptive-memory-protocol/verify-report.md
+  review-report: openspec/changes/adaptive-memory-protocol/review-report.md
+archive_target: openspec/archive/adaptive-memory-protocol/
+  archive_artifact: openspec/changes/adaptive-memory-protocol/archive-report.md
+  next_phase: []

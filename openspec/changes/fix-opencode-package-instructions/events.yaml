@@ -1,0 +1,12 @@
+changeId: fix-opencode-package-instructions
+events:
+  - phase: explore
+    event: investigation_completed
+    timestamp: 2025-05-22
+    artifact: exploration.md
+    summary: >
+      Investigated why Package Instructions are not being injected into OpenCode prompts.
+      Root cause identified: opencode-launch-command.ts does not pass capabilityInstructions
+      to buildOpenCodeDeveloperTeamInstallPlan, while runner-capabilities.ts correctly
+      implements this pattern. Fix involves adding config reading and bundle building logic
+      to the CLI launcher.

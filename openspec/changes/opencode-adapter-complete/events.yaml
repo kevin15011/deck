@@ -1,0 +1,13 @@
+change: opencode-adapter-complete
+events:
+  - type: change.closed
+    phase: closed
+    status: abandoned
+    timestamp: "2026-05-23"
+    actor: deck-developer-archive
+    note: Change closed as abandoned. Planning artifacts exist (proposal.md, spec.md, design.md, tasks.md dated 2026-05-20) but no state.yaml or events.yaml existed prior to archival. No formal SDD was tracked or executed. No implementation work performed. Change abandoned before Apply phase could begin.
+    artifacts_found:
+      - proposal.md (17507 bytes)
+      - spec.md (13522 bytes)
+      - design.md (6763 bytes)
+      - tasks.md (6259 bytes)

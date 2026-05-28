@@ -1,0 +1,80 @@
+change_id: deck-doctor-command
+name: Comando deck doctor
+current_phase: archive
+status: archived
+artifacts:
+  proposal.md:
+    path: openspec/archive/deck-doctor-command/proposal.md
+    description: Propuesta formal del comando deck doctor
+    written_at: "2026-05-23T00:00:00Z"
+  spec.md:
+    path: openspec/archive/deck-doctor-command/spec.md
+    description: Especificación de requisitos y criterios de aceptación
+    written_at: "2026-05-23T00:00:00Z"
+  design.md:
+    path: openspec/archive/deck-doctor-command/design.md
+    description: Diseño técnico y arquitectura del comando
+    written_at: "2026-05-23T00:00:00Z"
+  tasks.md:
+    path: openspec/archive/deck-doctor-command/tasks.md
+    description: Tareas de implementación atómicas
+    written_at: "2026-05-23T00:00:00Z"
+  apply-progress.md:
+    path: openspec/archive/deck-doctor-command/apply-progress.md
+    description: Progreso de implementación
+    written_at: "2026-05-23T00:00:00Z"
+  verify-report.md:
+    path: openspec/archive/deck-doctor-command/verify-report.md
+    description: Reporte de verificación
+    written_at: "2026-05-23T00:00:00Z"
+  review-report.md:
+    path: openspec/archive/deck-doctor-command/review-report.md
+    description: Reporte de revisión
+    written_at: "2026-05-23T00:00:00Z"
+  archive-report.md:
+    path: openspec/archive/deck-doctor-command/archive-report.md
+    description: Reporte de archivo con trazabilidad completa
+    written_at: "2026-05-23T00:00:00Z"
+provenance:
+  - agent: deck-developer-proposal
+    action: create
+    phase: proposal
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-spec
+    action: create
+    phase: spec
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-design
+    action: create
+    phase: design
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-task
+    action: create
+    phase: tasks
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-apply-general
+    action: create
+    phase: apply
+    tasks: [T1, T2, T4, T5, T6, T8, T9]
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-apply-backend
+    action: create
+    phase: apply
+    tasks: [T3, T7]
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-verify
+    action: verify
+    phase: verify
+    result: PASS
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-review
+    action: review
+    phase: review
+    result: APPROVE
+    timestamp: "2026-05-23T00:00:00Z"
+  - agent: deck-developer-archive
+    action: archive
+    phase: archive
+    timestamp: "2026-05-23T00:00:00Z"
+open_questions: []
+blockers: []

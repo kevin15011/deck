@@ -1,0 +1,8 @@
+change: adaptive-memory-protocol-exploration
+current_phase: closed
+status: abandoned
+closure_reason: No formal SDD was initiated. Change existed as an exploration-only concept with no artifacts, no state tracking, and no implementation. Closed as abandoned exploration.
+closed_at: "2026-05-23"
+artifacts: {}
+phases: {}
+provenance: []

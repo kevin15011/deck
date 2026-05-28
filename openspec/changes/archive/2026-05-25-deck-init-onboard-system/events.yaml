@@ -1,0 +1,39 @@
+schema: spec-driven
+change: deck-init-onboard-system
+
+events:
+  - phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: "2026-05-25T00:00:00Z"
+    notes: Initial proposal created. Corrected from earlier version — Deck already has SDD phases via developer team. Only deck-init and deck-onboard are new.
+
+  - phase: spec
+    status: completed
+    artifact: spec.md
+    timestamp: "2026-05-25T00:01:00Z"
+    notes: Spec created with 3 capabilities (deck-init, deck-onboard, orchestrator-triage), 22 requirements, 9 acceptance scenarios. No open questions.
+
+  - phase: design
+    status: completed
+    artifact: design.md
+    timestamp: "2026-05-25T00:02:00Z"
+    notes: Technical design created for embedded bootstrap skills, runner installation, init-state reader, and orchestrator needs-init gate.
+
+  - phase: tasks
+    status: completed
+    artifact: tasks.md
+    timestamp: "2026-05-25T00:03:00Z"
+    notes: 9 tasks across 4 waves. Wave 1 (2 tasks, parallel): Bootstrap Registry + Init-State Reader. Wave 2 (5 tasks, partially parallel): Adapter injects x2, Orchestrator gate, Skill content x2. Wave 3 (1 task): Prompt rule. Wave 4 (1 task): Integration tests. 3 high-complexity tasks flagged for potential splitting.
+
+  - phase: verify
+    status: failed
+    artifact: verify-report.md
+    timestamp: "2026-05-25T17:09:37Z"
+    notes: Verification failed. Core package suite has 1 failing purity-audit test, and requested build check fails because bun build has no entrypoints.
+
+  - phase: archive
+    status: archived
+    artifact: archive-report.md
+    timestamp: "2026-05-25T18:00:00Z"
+    notes: Change archived with verification failures documented. Functional implementation complete (all 9 tasks, 1171/1172 tests passed). Critical issues: core purity audit failures (forbidden string literals), build configuration issue. Follow-up required to address purity violations.

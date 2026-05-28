@@ -1,0 +1,33 @@
+phase: archive
+status: archived
+artifacts:
+  - kind: proposal
+    path: proposal.md
+    status: completed
+  - kind: exploration
+    path: exploration.md
+    status: completed
+  - kind: spec
+    path: spec.md
+    status: completed
+  - kind: design
+    path: design.md
+    status: completed
+  - kind: tasks
+    path: tasks.md
+    status: completed
+  - kind: apply-progress
+    path: apply-progress.md
+    status: completed
+  - kind: verify-report
+    path: verify-report.md
+    status: passed_with_warnings
+  - kind: review-report
+    path: review-report.md
+    status: approved_with_changes
+  - kind: archive-report
+    path: archive-report.md
+    status: archived
+provenance:
+  actor: deck-developer-archive
+  timestamp: "2026-05-28T00:00:00Z"

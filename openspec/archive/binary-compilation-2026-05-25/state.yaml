@@ -1,0 +1,47 @@
+change: binary-compilation
+phase: archive
+status: completed
+artifacts:
+  - proposal.md
+  - spec.md
+  - design.md
+  - tasks.md
+  - apply-progress.md
+  - verify-report.md
+  - review-report.md
+  - archive-summary.md
+created_at: "2026-05-25"
+updated_at: "2026-05-25T17:05:00Z"
+provenance:
+  - agent: deck-developer-proposal
+    artifact: proposal.md
+    completed_at: "2026-05-25"
+  - agent: deck-developer-spec
+    artifact: spec.md
+    completed_at: "2026-05-25"
+  - agent: deck-developer-design
+    artifact: design.md
+    completed_at: "2026-05-25"
+  - agent: deck-developer-task
+    artifact: tasks.md
+    completed_at: "2026-05-25"
+  - agent: general
+    artifact: apply-progress.md
+    completed_at: "2026-05-25T16:30:00Z"
+  - agent: backend
+    artifact: apply-progress.md
+    completed_at: "2026-05-25T16:45:00Z"
+  - agent: final-cleanup
+    artifact: apply-progress.md
+    completed_at: "2026-05-25T17:00:00Z"
+  - agent: deck-developer-archive
+    artifact: archive-summary.md
+    completed_at: "2026-05-25T17:05:00Z"
+summary:
+  tasks_completed: 23
+  tests_passed: 1650
+  tests_failed_pre_existing: 37
+  binary_build: success
+  commit: bb37387
+  message: "feat(binary): add standalone binary compilation support"
+next_step: none

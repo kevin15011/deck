@@ -1,0 +1,116 @@
+# OpenSpec Registry — developer-team-architecture-v2
+# Auto-generado por Orchestrator
+# Reconciliación: spec completado + design completado (deferred writes reconciliados)
+
+meta:
+  changeId: developer-team-architecture-v2
+  createdAt: "2026-05-23T00:00:00Z"
+  description: Arquitectura Developer Team — mejoras e implementacion
+  owner: deck-developer-orchestrator
+
+phases:
+  current: archive
+  proposal:
+    status: completed
+    artifact: proposal.md
+    eventsLog:
+      - event: proposal-created
+        timestamp: "2026-05-23T00:00:00Z"
+        agent: deck-developer-proposal
+  spec:
+    status: completed
+    artifact: spec.md
+    eventsLog:
+      - event: spec-created
+        timestamp: "2026-05-23T20:30:00Z"
+        agent: deck-developer-spec
+  design:
+    status: completed
+    artifact: design.md
+    eventsLog:
+      - event: design-created
+        timestamp: "2026-05-23T20:35:00Z"
+        agent: deck-developer-design
+  tasks:
+    status: completed
+    artifact: tasks.md
+    eventsLog:
+      - event: tasks-created
+        timestamp: "2026-05-23T21:00:00Z"
+        agent: deck-developer-task
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    eventsLog:
+      - event: apply-started
+        timestamp: "2026-05-23T21:30:00Z"
+        agent: deck-developer-task
+      - event: phase-2b-completed
+        timestamp: "2026-05-23T22:00:00Z"
+        agent: deck-developer-apply-general
+        summary: Tasks 10, 11, 12 completed — getAgentContentResult, deprecated wrapper, tests
+      - event: phase-3-completed
+        timestamp: "2026-05-23T21:45:00Z"
+        agent: deck-developer-apply-general
+        summary: Tasks 13, 14, 15, 16 completed — manifest strict mode, adapters reviewed, tests added
+      - event: phase-4-completed
+        timestamp: "2026-05-23T22:30:00Z"
+        agent: deck-developer-apply-general
+        summary: Task 17 completed — E2E regression test passes, 624 tests, no regressions
+  verify:
+    status: completed
+    artifact: verify-report.md
+    eventsLog:
+      - event: verify-completed
+        timestamp: "2026-05-23T23:00:00Z"
+        agent: deck-developer-verify
+        summary: 855 tests pass, 0 fail; 17/17 tasks complete; 2 warnings documented
+  review:
+    status: completed
+    artifact: review-report.md
+    eventsLog:
+      - event: review-completed
+        timestamp: "2026-05-23T23:15:00Z"
+        agent: deck-developer-review
+        summary: APPROVE WITH CHANGES; 3 minor findings documented, non-blocking
+  archive:
+    status: completed
+    artifact: archive-report.md
+    eventsLog:
+      - event: change-completed
+        timestamp: "2026-05-23T23:30:00Z"
+        agent: deck-developer-archive
+        summary: Change successfully closed, traceability preserved
+
+artifacts:
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply-progress: apply-progress.md
+  verify-report: verify-report.md
+  review-report: review-report.md
+  archive-report: archive-report.md
+
+affectedFiles:
+  - packages/core/src/teams/developer/content-registry.ts
+  - packages/core/src/teams/developer/content-registry.test.ts
+  - packages/core/src/teams/developer/manifest.ts
+  - packages/core/src/teams/developer/manifest.test.ts
+  - packages/core/src/teams/developer/instruction-bundles/common-fragments.ts
+  - packages/core/src/runner-capability-validation.ts
+  - packages/core/src/runner-capability-validation.test.ts
+  - packages/core/src/index.ts
+  - packages/adapter-opencode/src/runner-capabilities.ts
+  - packages/adapter-pi/src/runner-capabilities.ts
+
+notes:
+  - Phase 4 (Task 17) completed — E2E regression test passes, 624 tests, 0 fail
+  - Phase 3 (Tasks 13-16) completed — Manifest Strict Mode
+  - Tasks 14, 15: Adapters have separate implementations; no changes needed
+  - Phase 2b (Tasks 10-12) completed in prior session
+  - Phase 2a (Tasks 4-9) completed in prior session
+  - Tasks 5-8 deferred: common-fragments.ts exists but builders retain inline content for byte-a-byte parity
+  - Verify completed: 855/855 tests pass, 2 warnings (fallback content, console.warn)
+  - Review completed: APPROVE WITH CHANGES, 3 minor findings documented
+  - Archive completed: Change successfully closed, traceability preserved

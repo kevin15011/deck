@@ -9,7 +9,6 @@ coverage/
 *.log
 .pi/
 .opencode/
-openspec/
 sdd/
 .deck/pi/profiles/
 .deck/pi/sessions/

@@ -1,0 +1,53 @@
+phase: archive
+status: archived
+change_name: personality-orchestrator-architecture
+artifacts:
+  proposal.md:
+    phase: proposal
+    status: complete
+    path: openspec/archive/personality-orchestrator-architecture/proposal.md
+  spec.md:
+    phase: spec
+    status: complete
+    path: openspec/archive/personality-orchestrator-architecture/spec.md
+  design.md:
+    phase: design
+    status: complete
+    path: openspec/archive/personality-orchestrator-architecture/design.md
+  tasks.md:
+    phase: tasks
+    status: complete
+    path: openspec/archive/personality-orchestrator-architecture/tasks.md
+  apply-progress.md:
+    phase: apply
+    agent: general
+    status: completed
+    path: openspec/archive/personality-orchestrator-architecture/apply-progress.md
+  verify-report.md:
+    phase: verify
+    status: completed
+    path: openspec/archive/personality-orchestrator-architecture/verify-report.md
+  review-report.md:
+    phase: review
+    status: completed
+    path: openspec/archive/personality-orchestrator-architecture/review-report.md
+  archive-report.md:
+    phase: archive
+    status: complete
+    path: openspec/archive/personality-orchestrator-architecture/archive-report.md
+provenance:
+  - phase: tasks
+    agent: deck-developer-task
+    timestamp: "2026-05-24"
+  - phase: apply
+    agent: general
+    timestamp: "2026-05-24"
+  - phase: verify
+    agent: deck-developer-verify
+    timestamp: "2026-05-24"
+  - phase: review
+    agent: deck-developer-review
+    timestamp: "2026-05-24"
+  - phase: archive
+    agent: deck-developer-archive
+    timestamp: "2026-05-24"

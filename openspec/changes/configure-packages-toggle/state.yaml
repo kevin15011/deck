@@ -1,0 +1,7 @@
+phase: explore
+status: completed
+artifact: exploration.md
+provenance:
+  agent: deck-developer-explorer
+  model: opencode-go/kimi-k2.6
+  date: 2026-05-21

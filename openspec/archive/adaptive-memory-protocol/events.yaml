@@ -1,0 +1,93 @@
+events:
+  - phase: proposal
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/proposal.md
+    timestamp: "2026-05-21T00:00:00Z"
+    model: kimi-k2.6
+    tool: deck-developer-proposal
+    summary: "Provider-agnostic adaptive memory protocol, stale routing file cleanup, and project-level auto-scoping from git."
+  - phase: spec
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/specs/adaptive-memory-protocol/spec.md
+    timestamp: "2026-05-22T00:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-spec
+    summary: "23 requirements across 5 capabilities, 15 acceptance scenarios."
+  - phase: design
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/design.md
+    timestamp: "2026-05-22T00:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-design
+    summary: "Static routing table in AGENTS.md, cached projectId in config, 11 skills unchanged."
+  - phase: tasks
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/tasks.md
+    timestamp: "2026-05-22T00:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-task
+    summary: "4 tasks: 2 parallel (projectId + protocol), then sequential cleanup + verification. All General Apply."
+  - phase: explore
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/exploration.md
+    timestamp: "2026-05-21T17:00:00Z"
+    model: kimi-k2.5
+    tool: deck-developer-explorer
+    summary: "Investigated Deck's package instruction system vs AGENTS.md management. Found Package Instruction pattern is correct approach, not AGENTS.md injection."
+  - phase: spec
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/specs/adaptive-memory-protocol/spec.md
+    timestamp: "2026-05-22T01:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-spec
+    summary: "v2 rewritten for Package Instruction model: 33 requirements, 27 scenarios, 6 capabilities."
+  - phase: design
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/design.md
+    timestamp: "2026-05-22T01:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-design
+    summary: "v2 rewritten: Package Instruction bundle, MemoryInjectionBundle for routing, 13 files impact."
+  - phase: tasks-v2
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/tasks.md
+    timestamp: "2026-05-22T02:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-task
+    summary: "v2 rewritten: 8 tasks across 5 groups (Contracts, Registration, Tests, Cleanup, Verification). 2 medium complexity, 6 low. 4-phase parallel plan."
+  - phase: apply
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/apply-progress.md
+    timestamp: "2026-05-22T03:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-apply-general
+    summary: "All 8 tasks implemented: adaptive-memory bundle, git utility, registration cleanup, stale bundle deletion, test updates, config update, routing file cleanup. Build passes."
+  - phase: apply-fix
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/apply-progress.md
+    timestamp: "2026-05-22T04:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-apply-general
+    summary: "Fixed 4 test failures: reducer.test.ts manualSteps, input-handler.test.ts cursor index, manifest.test.ts bundle label, content-registry.test.ts bundle label. All 143 tests pass."
+  - phase: verify
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/verify-report.md
+    timestamp: "2026-05-22T04:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-verify
+    summary: "All checklist items pass. 143 tests, 0 failures, 0 TS errors. Protocol is provider-agnostic, no stale references remain."
+  - phase: review
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/review-report.md
+    timestamp: "2026-05-22T04:00:00Z"
+    model: glm-5.1
+    tool: deck-developer-review
+    summary: "NEEDS_FIX for spec-level routing concern, but architecture, security, maintainability, scalability all PASS."
+  - phase: archive
+    status: completed
+    artifact: openspec/changes/adaptive-memory-protocol/archive-report.md
+    archive_target: openspec/archive/adaptive-memory-protocol/
+    timestamp: "2026-05-22T05:00:00Z"
+    model: glm-5
+    tool: deck-developer-archive
+    summary: "Change archived. Provider-agnostic behavioral protocol via Package Instruction bundle. Routing delegated to MemoryInjectionBundle. 33 requirements, 8 tasks, 143 tests pass. 3 follow-ups: spec clarification, config migration, behavioral instruction disposition."

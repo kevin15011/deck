@@ -1,0 +1,73 @@
+change: supermemory-mcp-integration
+status: completed
+phase: archive
+note: Model corrected — adapter generates agent instructions/bindings for MCP tools. buildInjection() works without authenticatedRuntimeValidated. health state updated via configure() providerState. Container tag: t: for team, projectId from repo name, English instructions.
+phases:
+  proposal:
+    status: completed
+    artifact: proposal.md
+    completedAt: "2026-05-23"
+    issue: Assumed adapter makes direct HTTP calls — incorrect model
+  spec:
+    status: completed
+    artifact: spec.md
+    completedAt: "2026-05-23"
+  design:
+    status: completed
+    artifact: design.md
+    completedAt: "2026-05-23"
+  tasks:
+    status: completed
+    artifact: tasks.md
+    completedAt: "2026-05-23"
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    completedAt: "2026-05-23"
+  verify:
+    status: passed_with_warnings
+    artifact: verify-report.md
+    completedAt: "2026-05-23"
+  review:
+    status: approved
+    artifact: review-report.md
+    completedAt: "2026-05-23"
+  archive:
+    status: completed
+    artifact: archive-report.md
+    completedAt: "2026-05-23"
+provenance:
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: opencode-go/kimi-k2.6
+    artifact: proposal.md
+    timestamp: "2026-05-23"
+    issue: Assumed adapter makes direct HTTP calls — incorrect model
+  - phase: spec
+    agent: deck-developer-spec
+    artifact: spec.md
+    timestamp: "2026-05-23"
+  - phase: design
+    agent: deck-developer-design
+    artifact: design.md
+    timestamp: "2026-05-23"
+  - phase: tasks
+    agent: deck-developer-task
+    artifact: tasks.md
+    timestamp: "2026-05-23"
+  - phase: apply
+    agent: deck-developer-apply-general + deck-developer-apply-backend
+    artifact: apply-progress.md
+    timestamp: "2026-05-23"
+  - phase: verify
+    agent: deck-developer-verify
+    artifact: verify-report.md
+    timestamp: "2026-05-23"
+  - phase: review
+    agent: deck-developer-review
+    artifact: review-report.md
+    timestamp: "2026-05-23"
+  - phase: archive
+    agent: deck-developer-archive
+    artifact: archive-report.md
+    timestamp: "2026-05-23"

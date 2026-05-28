@@ -1,0 +1,8 @@
+change: adaptive-memory-protocol-exploration
+events:
+  - type: change.closed
+    phase: closed
+    status: abandoned
+    timestamp: "2026-05-23"
+    actor: deck-developer-archive
+    note: Change closed as abandoned. No state.yaml or events.yaml existed. No exploration.md artifact found. No formal SDD was initiated. No implementation work performed.
