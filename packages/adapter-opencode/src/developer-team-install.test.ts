@@ -632,6 +632,308 @@ describe("orchestratorPersonality in buildOpenCodeDeveloperTeamInstallPlan", () 
 });
 
 // ---------------------------------------------------------------------------
+// Task 2: Tests for stale overwrite, byte idempotency, all-skills sync (REQ-INST-002, REQ-INST-003, REQ-INST-004)
+// ---------------------------------------------------------------------------
+
+describe("Task 2 — stale overwrite, byte idempotency, all-skills sync", () => {
+  // Task 2.1: Stale overwrite — REQ- INST-002
+  test("apply overwrites stale skill and returns status 'updated'", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // First apply
+      const firstResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Get orchestrator skill and corrupt it manually
+      const orchestratorSkill = plan.skills.find(
+        (s) => s.agent.id === "deck-developer-orchestrator",
+      )!;
+      writeFileSync(
+        orchestratorSkill.absolutePath,
+        "STALE CORRUPTED CONTENT -- should be overwritten",
+        "utf-8",
+      );
+
+      // Re-apply (should detect stale and overwrite)
+      const secondResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Verify content is now exactly what was planned
+      const currentContent = readFileSync(orchestratorSkill.absolutePath, "utf-8");
+      expect(currentContent).toBe(orchestratorSkill.content);
+
+      // Should report status 'updated' for the stale skill
+      const skillResult = secondResult.fileResults.find(
+        (r) => r.agentId === "deck-developer-orchestrator",
+      );
+      expect(skillResult?.status).toBe("updated");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  // Task 2.2: Byte idempotency — REQ-INST-003
+  test("re-applying unchanged content produces changedCount === 0", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // First apply
+      const firstResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Get initial mtimes
+      const initialMtimes = new Map<string, number>();
+      for (const skill of plan.skills) {
+        initialMtimes.set(skill.absolutePath, 0); // We'll read directly
+      }
+
+      // Re-apply
+      const secondResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // unchanged === 0 means all skills remained unchanged
+      expect(secondResult.changedCount).toBe(0);
+      expect(secondResult.unchangedCount).toBe(firstResult.changedCount + firstResult.unchangedCount);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  // Task 2.3: All-skills sync — REQ-INST-004
+  test("multiple stale skills are all updated on re-apply", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // First apply
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Corrupt multiple skills (but not all)
+      const skillsToCorrupt = [
+        plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!,
+        plan.skills.find((s) => s.agent.id === "deck-developer-explorer")!,
+        plan.skills.find((s) => s.agent.id === "deck-developer-spec")!,
+      ];
+      for (const skill of skillsToCorrupt) {
+        writeFileSync(skill.absolutePath, "CORRUPTION " + skill.agent.skillId, "utf-8");
+      }
+
+      // Re-apply
+      const secondResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Check corrupted skills were updated
+      for (const skill of skillsToCorrupt) {
+        const currentContent = readFileSync(skill.absolutePath, "utf-8");
+        expect(currentContent).toBe(skill.content);
+      }
+
+      // Check an uncorrupted skill remained unchanged
+      const uncorruptedSkill = plan.skills.find(
+        (s) =>
+          s.agent.id !== "deck-developer-orchestrator" &&
+          s.agent.id !== "deck-developer-explorer" &&
+          s.agent.id !== "deck-developer-spec",
+      )!;
+      const uncorruptedResult = secondResult.fileResults.find(
+        (r) => r.agentId === uncorruptedSkill.agent.id,
+      );
+      expect(uncorruptedResult?.status).toBe("unchanged");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  // Task 2.4: Verify exact-match — REQ-VAL-004
+  test("verify fails when installed content differs from planned content", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // Apply
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Corrupt one skill (keep frontmatter valid but change body)
+      const target = plan.skills[0];
+      const originalContent = readFileSync(target.absolutePath, "utf-8");
+      const corruptedContent = originalContent.replace(
+        /description: "[^"]*"/,
+        'description: "CORRUPTED DESCRIPTION"',
+      );
+      writeFileSync(target.absolutePath, corruptedContent, "utf-8");
+
+      // verify should fail with content mismatch
+      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
+      expect(verifyResult.valid).toBe(false);
+      expect(verifyResult.skillResults.some((r) => r.issues.some((i) => i.includes("Content mismatch")))).toBe(true);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  // Task 2.6: Status reports updated/unchanged correctly
+  test("apply reports 'updated' for stale and 'unchanged' for synced skills", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // First apply
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Track which skills should update
+      const staleSkills = [
+        plan.skills.find((s) => s.agent.id === "deck-developer-proposal")!,
+      ];
+      for (const skill of staleSkills) {
+        writeFileSync(skill.absolutePath, "STALE", "utf-8");
+      }
+
+      const secondResult = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Check stale skill reports 'updated'
+      for (const skill of staleSkills) {
+        const result = secondResult.fileResults.find((r) => r.agentId === skill.agent.id);
+        expect(result?.status).toBe("updated");
+      }
+
+      // Check non-stale skills remain 'unchanged'
+      const unchangedSkills = plan.skills.filter(
+        (s) => !staleSkills.some((ss) => ss.agent.id === s.agent.id),
+      );
+      for (const skill of unchangedSkills) {
+        const result = secondResult.fileResults.find((r) => r.agentId === skill.agent.id);
+        expect(result?.status).toBe("unchanged");
+      }
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 3: Drift detection tests — prompt/skill consistency (REQ-VAL-001, REQ-VAL-003)
+// ---------------------------------------------------------------------------
+
+describe("Task 3 — drift detection between prompt and skill", () => {
+  // Task 3.1: Prompt references correct skill path
+  test("prompt contains skill loading gate with matching absolutePath", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // Apply
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Find the orchestrator prompt
+      const orchestratorPrompt = plan.promptGenerationPlan.find(
+        (p) => p.agent.id === "deck-developer-orchestrator",
+      )!;
+      const promptContent = readFileSync(orchestratorPrompt.absolutePath, "utf-8");
+
+      // Find the orchestrator skill absolutePath from plan
+      const orchestratorSkill = plan.skills.find(
+        (s) => s.agent.id === "deck-developer-orchestrator",
+      )!;
+
+      // Verify prompt references the skill path
+      expect(promptContent).toContain(orchestratorSkill.absolutePath);
+      // Verify Skill Loading Gate syntax
+      expect(promptContent).toContain("Skill Loading Gate");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  // Task 3.2: Installed skill content equals planned content (all skills)
+  test("installed skill matches planned content (byte-for-byte)", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // Apply
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Verify each skill matches what was planned
+      for (const skill of plan.skills) {
+        const installed = readFileSync(skill.absolutePath, "utf-8");
+        expect(installed).toBe(skill.content);
+      }
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  // Task 3.3: Critical fragments present in skill
+  test("skill contains critical semantic fragments (heading, SDD Workflow, invariants)", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // Apply
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // Get installed orchestrator skill
+      const orchestratorSkill = plan.skills.find(
+        (s) => s.agent.id === "deck-developer-orchestrator",
+      )!;
+      const content = readFileSync(orchestratorSkill.absolutePath, "utf-8");
+
+      // Verify critical fragments (presence check, not exact match per REQ-VAL-003)
+      expect(content).toMatch(/# .*Orchestrator.*Skill/);
+      expect(content).toContain("## SDD Workflow");
+      expect(content).toContain("Visual Explanations");
+      expect(content).toContain("INV-001");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  // Task 3.4: Test passes with synchronized skill
+  test("verify passes after normal apply (synchronized)", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // Normal apply
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      // verify should pass
+      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
+      expect(verifyResult.valid).toBe(true);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  // Task 3.5: Test fails with desynchronized skill
+  test("verify fails when skill is desynchronized (corrupted)", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // Apply then corrupt
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      const target = plan.skills[0];
+      writeFileSync(target.absolutePath, "totally wrong content", "utf-8");
+
+      // verify should fail
+      const verifyResult = verifyOpenCodeDeveloperTeamInstall(plan);
+      expect(verifyResult.valid).toBe(false);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Orchestrator Invariants Verification — REQ-BC-002, REQ-IBC-001, REQ-IBC-004
 // ---------------------------------------------------------------------------
 

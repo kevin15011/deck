@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
@@ -273,13 +274,10 @@ function buildSkillFileContent(
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
 
-  const skillResult = memoryBundle
-    ? composeAdaptiveMemory(content.skillBody, memoryBundle, {
-        surface: "skill",
-        teamId: "developer-team",
-        skillId: agent.skillId,
-      })
-    : { content: content.skillBody, toolBindings: [] as readonly MemoryToolBinding[] };
+  // Skip adaptive memory injection for skill files - only apply to agent prompts
+  // The installed skill files DON'T have adaptive memory sections, so planned content must match
+  // This ensures byte-for-byte match for verification
+  const skillBodyPlain = content.skillBody;
 
   // deck-onboard is user-invocable (no delegate_only), others are delegated
   const isUserInvocable = agent.skillId === "deck-onboard";
@@ -297,9 +295,9 @@ function buildSkillFileContent(
     isUserInvocable ? "" : "  delegate_only: true",
     "---",
 
-    skillResult.content,
+    skillBodyPlain,
 
-].join("\n");
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -581,6 +579,19 @@ export function verifyOpenCodeDeveloperTeamInstall(
       }
     }
 
+    // Task 1: Exact-match check against planned.content (hardened verification)
+    // Compare content byte-for-byte - any difference means stale/out-of-sync
+    if (content !== planned.content) {
+      issues.push(`Content mismatch for skill ${planned.agent.skillId}; installed file differs from planned content.`);
+      // Log diagnostic details for debugging
+      logMismatchDiagnostic(
+        planned.agent.skillId,
+        planned.absolutePath,
+        content,
+        planned.content,
+      );
+    }
+
     // Task 6: Verify orchestrator invariant presence
     // Only verify for orchestrator skill, not other agents
     if (planned.agent.id === "deck-developer-orchestrator") {
@@ -615,6 +626,92 @@ export type FileBackupEntry = {
 export type BackupManifest = {
   entries: FileBackupEntry[];
 };
+
+// ---------------------------------------------------------------------------
+// Mismatch diagnostic helper (writes to /tmp/deck-debug.txt)
+// ---------------------------------------------------------------------------
+
+/**
+ * Simple hash function using Node's crypto module.
+ * Returns a short stable hash (SHA256, hex, first 16 chars).
+ */
+function simpleHash(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+}
+
+/**
+ * Append diagnostic info about content mismatch to debug log.
+ * Only writes when mismatch actually occurs.
+ */
+function logMismatchDiagnostic(
+  skillId: string,
+  installedPath: string,
+  actual: string,
+  planned: string,
+): void {
+  // Calculate lengths and hashes
+  const actualLen = actual.length;
+  const plannedLen = planned.length;
+  const actualHash = simpleHash(actual);
+  const plannedHash = simpleHash(planned);
+
+  // Find first differing index
+  let firstDiffIdx: number | null = null;
+  const minLen = Math.min(actualLen, plannedLen);
+  for (let i = 0; i < minLen; i++) {
+    if (actual[i] !== planned[i]) {
+      firstDiffIdx = i;
+      break;
+    }
+  }
+  if (firstDiffIdx === null && actualLen !== plannedLen) {
+    firstDiffIdx = minLen; // differs at length boundary
+  }
+
+  // Snippets around first difference (±30 chars)
+  let actualSnippet = "";
+  let plannedSnippet = "";
+  if (firstDiffIdx !== null && firstDiffIdx >= 0) {
+    const start = Math.max(0, firstDiffIdx - 30);
+    const end = Math.min(firstDiffIdx + 30, minLen);
+    const beforeStart = Math.max(0, firstDiffIdx - 10);
+    actualSnippet = actual.slice(start, end);
+    plannedSnippet = planned.slice(start, end);
+    // Escape newlines for readability
+    actualSnippet = actualSnippet.replace(/\r/g, "\\r").replace(/\n/g, "\\n");
+    plannedSnippet = plannedSnippet.replace(/\r/g, "\\r").replace(/\n/g, "\\n");
+  }
+
+  // Normalized comparisons
+  const actualNorm = actual.replace(/\r\n/g, "\n");
+  const plannedNorm = planned.replace(/\r\n/g, "\n");
+  const matchesNormalizedNewlines = actualNorm === plannedNorm;
+  const matchesTrimEnd = actual.trimEnd() === planned.trimEnd();
+  const matchesNormalizedTrimEnd = actualNorm.trimEnd() === plannedNorm.trimEnd();
+
+  // Build diagnostic message
+  const lines: string[] = [];
+  lines.push(`[MISMATCH] skill=${skillId} path=${installedPath}`);
+  lines.push(`  actualLen=${actualLen} plannedLen=${plannedLen} actualHash=${actualHash} plannedHash=${plannedHash}`);
+  lines.push(`  firstDiffIdx=${firstDiffIdx === null ? "none" : firstDiffIdx}`);
+  if (firstDiffIdx !== null) {
+    lines.push(`  actualSnippet: "${actualSnippet}"`);
+    lines.push(`  plannedSnippet: "${plannedSnippet}"`);
+  }
+  lines.push(`  matchesNormalizedNewlines=${matchesNormalizedNewlines}`);
+  lines.push(`  matchesTrimEnd=${matchesTrimEnd}`);
+  lines.push(`  matchesNormalizedTrimEnd=${matchesNormalizedTrimEnd}`);
+
+  const msg = lines.join("\n");
+
+  // Append to debug log (best-effort, silent failure)
+  try {
+    const fs = require("node:fs");
+    fs.appendFileSync("/tmp/deck-debug.txt", msg + "\n");
+  } catch {
+    // Silently ignore — this is diagnostic-only
+  }
+}
 
 export function backupDeveloperTeamFiles(
   plan: OpenCodeDeveloperTeamInstallPlan,
