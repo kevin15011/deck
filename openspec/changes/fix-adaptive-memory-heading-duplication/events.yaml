@@ -1,0 +1,7 @@
+events:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    agent: deck-developer-explorer
+    date: "2026-05-29"
+    summary: "Identified 3-heading duplication root cause (capabilityInstructions + memoryBundle + static skill text) and 0 backtick refs (bold instead of backtick in adaptive-memory.ts)"

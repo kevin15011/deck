@@ -1,0 +1,7 @@
+events:
+  - phase: explore
+    status: completed
+    agent: deck-developer-explorer
+    artifact: exploration.md
+    timestamp: "2026-05-29T20:50:00Z"
+    summary: "Traced Provider:Engram leak to memoryBundle===undefined causing filterProviderSections to skip. x-sm-project p: prefix is legacy format not matching sm_project_*."

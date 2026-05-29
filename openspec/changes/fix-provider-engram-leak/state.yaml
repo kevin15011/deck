@@ -1,0 +1,7 @@
+phase: explore
+status: completed
+artifact: exploration.md
+provenance:
+  agent: deck-developer-explorer
+  model: glm-5.1
+  date: "2026-05-29"

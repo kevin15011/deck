@@ -1,0 +1,6 @@
+events:
+  - phase: explore
+    event: exploration-complete
+    timestamp: "2026-05-29T19:30:00Z"
+    artifact: exploration.md
+    summary: "Root cause identified: two validation guards in deck-config.ts (lines 452, 486) still require userId despite token-only contract. Type says userId?: never but validation throws SUPERMEMORY_USER_ID_REQUIRED. TUI logs confirm failure at adaptive-memory.supermemory.deck-config write-deck-config action."

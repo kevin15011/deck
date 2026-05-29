@@ -1,0 +1,14 @@
+change: fix-supermemory-userid-validation
+status: exploring
+current_phase: explore
+artifacts:
+  exploration: exploration.md
+phases:
+  explore:
+    status: completed
+    artifact: exploration.md
+    completed_at: "2026-05-29T19:30:00Z"
+    provenance:
+      source: persistent install error "Supermemory configuration requires an explicit userId"
+      created_by: deck-developer-explorer
+      note: "Root cause: deck-config.ts normalizeAdaptiveMemoryConfig and buildResolution still require userId despite type saying never. Guards R11-R16 fixed TUI/adapter layers but missed core config validation."
