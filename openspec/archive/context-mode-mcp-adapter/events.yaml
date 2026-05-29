@@ -1,0 +1,76 @@
+- phase: proposal
+  status: completed
+  event: proposal-complete
+  artifact: proposal.md
+  date: "2026-05-28"
+- phase: spec
+  status: completed
+  event: spec-completed
+  artifact: spec.md
+  date: "2026-05-28"
+- phase: design
+  status: completed
+  event: design-completed
+  artifact: design.md
+  date: "2026-05-28"
+- phase: tasks
+  status: completed
+  event: tasks-completed
+  artifact: tasks.md
+  date: "2026-05-28"
+- phase: apply
+  agent: backend
+  status: completed
+  event: task-4-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  description: "Task 4 (context-mode getMcpServerConfig + writeMcpConfigFromCapability) complete"
+- phase: apply
+  agent: backend
+  status: completed
+  event: task-6-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  description: "Task 6 (capability-inventory detection via mcpServerNames/commands, not pluginNames) complete"
+- phase: apply
+  agent: general
+  status: completed
+  event: task-9-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  description: "Task 9 (install-tools.test.ts updated for npm-package-plus-mcp)"
+- phase: apply
+  agent: general
+  status: completed
+  event: task-10-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  description: "Task 10 (config-merge.test.ts updated - MCP wins over plugin)"
+- phase: apply
+  agent: general
+  status: completed
+  event: task-11-complete
+  artifact: context-mode-integration.test.ts
+  date: "2026-05-28"
+  description: "Task 11 (integration test covering full context-mode flow)"
+- phase: apply
+  agent: general
+  status: completed
+  event: task-12-complete
+  artifact: apply-progress.md
+  date: "2026-05-28"
+  description: "Task 12 (verified no tests assume plugin array for context-mode)"
+- phase: verify
+  agent: verify
+  status: passed
+  event: verify-completed
+  artifact: verify-report.md
+  date: "2026-05-29"
+  description: "174 tests pass, all requirements verified, user confirmed works"
+- phase: review
+  agent: review
+  status: approved
+  event: review-completed
+  artifact: review-report.md
+  date: "2026-05-29"
+  description: "1 MINOR (code duplication), 0 blockers — APPROVED"

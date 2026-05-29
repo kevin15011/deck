@@ -1,0 +1,28 @@
+phase: archive
+status: in_progress
+artifacts:
+  - path: proposal.md
+    description: "Formal proposal to migrate context-mode OpenCode installation from plugin to MCP"
+  - path: spec.md
+    description: "Formal specification for context-mode MCP adapter migration"
+  - path: design.md
+    description: "Technical design for context-mode MCP adapter migration"
+  - path: tasks.md
+    description: "Atomic implementation tasks for context-mode MCP adapter migration"
+  - path: apply-progress.md
+    description: "Apply progress report - all tasks complete"
+  - path: verify-report.md
+    description: "Verification report - 174 tests pass, all requirements satisfied"
+  - path: review-report.md
+    description: "Review report - APPROVED (1 MINOR, 0 blockers)"
+provenance:
+  initiated_by: user
+  date: "2026-05-28"
+  updated_by: orchestrator
+  update_date: "2026-05-29"
+  verify_result: passed
+  review_result: approved
+  review_findings:
+    - "MINOR: hardcoded cases in capability-plan.ts, runner-adapter.ts, action-runner.ts"
+    - "NIT: no auto-backup in write MCP direct"
+    - "NIT: UI logic in action-runner"
