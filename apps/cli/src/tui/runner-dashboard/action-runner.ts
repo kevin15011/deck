@@ -204,6 +204,7 @@ export async function runRunnerAction(
     switch (action.kind) {
       case "install-pi-package":
       case "install-opencode-plugin":
+      case "npm-install":
         return await runPackageInstall(action, dependencies);
       case "write-deck-config":
         return writeDeckConfigAction(action, dependencies);
@@ -487,6 +488,75 @@ async function writeMcpConfigAction(
       actionId: action.id,
       status: "executed",
       message: `Serena MCP config written successfully at ${result.path}.`,
+      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+    };
+  }
+
+  if (capabilityId === "context-mode") {
+    // context-mode is a local MCP server (npm global install)
+    const result = await writer({
+      serverName: "context-mode",
+      type: "local",
+      command: ["context-mode"],
+    });
+    if (!result.ok) {
+      return {
+        actionId: action.id,
+        status: "failed",
+        message: `MCP config write failed at ${result.path ?? "unknown path"}.`,
+        diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+      };
+    }
+    return {
+      actionId: action.id,
+      status: "executed",
+      message: `context-mode MCP config written successfully at ${result.path}.`,
+      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+    };
+  }
+
+  if (capabilityId === "rtk") {
+    // RTK is a local MCP server
+    const result = await writer({
+      serverName: "rtk",
+      type: "local",
+      command: ["rtk", "mcp", "start"],
+    });
+    if (!result.ok) {
+      return {
+        actionId: action.id,
+        status: "failed",
+        message: `MCP config write failed at ${result.path ?? "unknown path"}.`,
+        diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+      };
+    }
+    return {
+      actionId: action.id,
+      status: "executed",
+      message: `RTK MCP config written successfully at ${result.path}.`,
+      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+    };
+  }
+
+  if (capabilityId === "codebase-memory") {
+    // codebase-memory is a local MCP server
+    const result = await writer({
+      serverName: "codebase-memory-mcp",
+      type: "local",
+      command: ["codebase-memory-mcp"],
+    });
+    if (!result.ok) {
+      return {
+        actionId: action.id,
+        status: "failed",
+        message: `MCP config write failed at ${result.path ?? "unknown path"}.`,
+        diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+      };
+    }
+    return {
+      actionId: action.id,
+      status: "executed",
+      message: `codebase-memory MCP config written successfully at ${result.path}.`,
       diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
     };
   }
