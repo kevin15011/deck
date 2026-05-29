@@ -16,13 +16,15 @@
       "codebase-memory": true,
       "context-mode": true,
       "rtk": true,
-      "adaptive-memory": true
+      "adaptive-memory": true,
+      "serena": true
     },
     "opencode": {
       "codebase-memory": true,
       "context-mode": true,
       "rtk": true,
-      "adaptive-memory": true
+      "adaptive-memory": true,
+      "serena": true
     }
   },
   "orchestratorPersonality": "pragmatica",
