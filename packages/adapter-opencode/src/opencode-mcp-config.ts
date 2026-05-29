@@ -302,6 +302,8 @@ export type WriteOpenCodeMcpConfigOptions = {
   url?: string;
   /** For remote servers: optional headers (e.g., Authorization) */
   headers?: Record<string, string>;
+  /** Plugins to remove from the `plugin` array when writing MCP config (used for migration from plugin to MCP) */
+  pluginsToRemove?: string[];
   /** Path to opencode.json (defaults to ~/.config/opencode/opencode.json) */
   configPath?: string;
   /** Home directory for default path resolution */
@@ -399,6 +401,23 @@ export function writeOpenCodeMcpConfig(
 
   mcpSection[serverName] = serverEntry;
   config.mcp = mcpSection;
+
+  // Clean up legacy plugin entries if pluginsToRemove is specified
+  // This handles migration from opencode-plugin to MCP server
+  if (options.pluginsToRemove && options.pluginsToRemove.length > 0) {
+    const existingPlugins = Array.isArray(config.plugin) ? config.plugin : [];
+    const cleanedPlugins = existingPlugins.filter(
+      (p) => typeof p === "string" && !options.pluginsToRemove!.includes(p),
+    );
+
+    if (cleanedPlugins.length > 0) {
+      config.plugin = cleanedPlugins;
+    } else if (existingPlugins.length > 0) {
+      // If plugin array becomes empty after cleanup, keep as empty array
+      // Don't delete the key to preserve explicit empty state
+      config.plugin = [];
+    }
+  }
 
   try {
     writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");

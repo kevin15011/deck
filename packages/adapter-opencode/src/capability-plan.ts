@@ -191,7 +191,7 @@ function addCapabilityActions(
       continue;
     }
 
-    // shell-script-plus-mcp: runs shell install AND writes MCP config (for tools like rtk and codebase-memory)
+// shell-script-plus-mcp: runs shell install AND writes MCP config (for tools like rtk and codebase-memory)
     if (capability.installKind === "shell-script-plus-mcp" && tool && entry.status === "missing") {
       const mcpConfig = getMcpServerConfig(capabilityId, capability.source);
       // Generate shell install action — source is the tool ID (not the URL) so the action-runner can identify the tool
@@ -216,6 +216,55 @@ function addCapabilityActions(
           toolId: capability.toolId,
           source: capability.source,
           status: "ready",
+        });
+      }
+      continue;
+    }
+
+    // npm-package-plus-mcp: npm global install + MCP config (e.g., context-mode)
+    // NOTE: We check MCP config even when status is "ready" because the binary may exist
+    // but the MCP config may not have been written yet (e.g., prior plugin-only install).
+    if (capability.installKind === "npm-package-plus-mcp" && tool) {
+      const mcpConfig = getMcpServerConfig(capabilityId, capability.source);
+      // Generate npm install -g action ONLY if the binary is actually missing
+      if (entry.status === "missing") {
+        groups.automaticInstalls.push({
+          id: `capability.${capabilityId}.install`,
+          kind: "npm-install",
+          title: `Install ${capability.label}`,
+          description: capability.description,
+          capabilityId,
+          toolId: tool.id,
+          source: tool.module,
+          status: "ready",
+        });
+      }
+      // Always generate MCP config write action if MCP config is known.
+      // This handles the case where binary exists but MCP config was never written.
+      if (mcpConfig) {
+        groups.automaticInstalls.push({
+          id: `capability.${capabilityId}.mcp-config`,
+          kind: "write-mcp-config",
+          title: `Configure ${capability.label} MCP`,
+          description: `Writes ${capability.label} MCP server config to opencode.json.`,
+          capabilityId,
+          toolId: capability.toolId,
+          source: capability.source,
+          status: "ready",
+        });
+      }
+      // Check for legacy plugin detection in diagnostics - if present, generate migration/cleanup action
+      const hasLegacyPluginDiagnostic = entry.diagnostics?.some((d) => d.toLowerCase().includes("legacy plugin detected"));
+      if (hasLegacyPluginDiagnostic) {
+        groups.automaticInstalls.push({
+          id: `capability.${capabilityId}.migrate`,
+          kind: "migrate-plugin-to-mcp",
+          title: `Migrate ${capability.label} from plugin to MCP`,
+          description: `Removes legacy plugin entry and ensures clean MCP-only configuration.`,
+          capabilityId,
+          toolId: tool.id,
+          status: "ready",
+          diagnostics: ["legacy-plugin-detected"],
         });
       }
       continue;
@@ -411,6 +460,11 @@ function getMcpServerConfig(capabilityId: string, source: string | undefined): {
       return {
         type: "local",
         command: ["npx", "-y", "@upstash/context7-mcp"],
+      };
+    case "context-mode":
+      return {
+        type: "local",
+        command: ["context-mode"],
       };
     case "serena":
       return {

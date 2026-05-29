@@ -307,21 +307,26 @@ describe("mergeAndWrite", () => {
       cleanup(dir);
     }
   });
-  test("removes stale mcp.context-mode entry when context-mode plugin is present", () => {
+  test("removes stale context-mode plugin when mcp.context-mode is present (MCP wins)", () => {
     const existing: OpenCodeConfig = {
-      plugin: ["context-mode"],
+      plugin: ["context-mode", "other-plugin"],
       mcp: {
         "context-mode": { type: "local", command: ["npx", "context-mode"] },
         "other-server": { type: "local", command: ["npx", "other"] },
       },
     };
     const merged = mergeConfig(existing, {}, []);
+    // MCP is authoritative - plugin entry should be removed
+    expect(merged.plugin).toBeDefined();
+    expect(merged.plugin).not.toContain("context-mode");
+    expect(merged.plugin).toContain("other-plugin");
+    // MCP entries preserved
     expect(merged.mcp).toBeDefined();
-    expect((merged.mcp as Record<string, unknown>)["context-mode"]).toBeUndefined();
+    expect((merged.mcp as Record<string, unknown>)["context-mode"]).toBeDefined();
     expect((merged.mcp as Record<string, unknown>)["other-server"]).toBeDefined();
   });
 
-  test("preserves mcp.context-mode when context-mode plugin is NOT present", () => {
+  test("preserves mcp.context-mode when context-mode plugin is NOT present (MCP only)", () => {
     const existing: OpenCodeConfig = {
       plugin: ["some-other-plugin"],
       mcp: {

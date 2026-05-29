@@ -6,7 +6,7 @@ import { writeFileSync, unlinkSync, mkdirSync, existsSync, readFileSync } from "
 import { join } from "node:path";
 
 describe("installOpenCodeTools", () => {
-  test("writes opencode-plugin to plugin array in opencode.json", async () => {
+  test("executes npm install -g for npm-package-plus-mcp and does NOT write to plugin array", async () => {
     // Create a temp config file
     const tmpDir = join("/tmp", `deck-test-${Date.now()}`);
     mkdirSync(tmpDir, { recursive: true });
@@ -17,7 +17,7 @@ describe("installOpenCodeTools", () => {
     writeFileSync(configPath, JSON.stringify({}), "utf-8");
 
     const plan: InstallableOpenCodeTool[] = [
-      { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "opencode-plugin" },
+      { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
     ];
 
     // Patch the home dir to use temp dir by setting HOME env
@@ -34,12 +34,12 @@ describe("installOpenCodeTools", () => {
     process.env.HOME = originalHome;
 
     expect(results[0].success).toBe(true);
-    expect(results[0].message).toContain("Added 'context-mode' to plugin array");
+    expect(results[0].message).toBeUndefined();
 
-    // Verify the plugin was added
+    // Verify no plugin was added (MCP-only installation)
     const content = readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(content);
-    expect(parsed.plugin).toContain("context-mode");
+    expect(parsed.plugin).toBeUndefined();
 
     // Cleanup
     unlinkSync(configPath);

@@ -452,6 +452,16 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
             command: ["npx", "-y", "@upstash/context7-mcp"],
           });
         }
+        case "context-mode": {
+          // context-mode migrates from plugin to MCP
+          // Must remove "context-mode" from plugin array to avoid conflict
+          return writeOpenCodeMcpConfig({
+            serverName: "context-mode",
+            type: "local",
+            command: ["context-mode"],
+            pluginsToRemove: ["context-mode"],
+          });
+        }
         case "rtk": {
           // RTK MCP config — uses the rtk source for MCP server
           return writeOpenCodeMcpConfig({

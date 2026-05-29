@@ -129,12 +129,16 @@ function isCapabilityInstalled(capabilityId: OpenCodeCapabilityId, installedName
   const capability = getUserFacingOpenCodeCapability(capabilityId);
   if (!capability) return false;
 
+  // For npm-package-plus-mcp kind, detect via mcpServerNames and commands only (not pluginNames)
+  // This ensures context-mode detection uses MCP config, not legacy plugin array
+  const useMcpBasedDetection = capability.installKind === "npm-package-plus-mcp";
+
   const candidates = [
     capabilityId,
     capability.toolId,
     capability.label,
     capability.source,
-    ...(capability.detector.pluginNames ?? []),
+    ...(useMcpBasedDetection ? [] : capability.detector.pluginNames ?? []),
     ...(capability.detector.commands ?? []),
     ...(capability.detector.mcpServerNames ?? []),
     ...detectorNames,

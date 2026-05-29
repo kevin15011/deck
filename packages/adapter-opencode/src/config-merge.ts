@@ -138,12 +138,13 @@ export function mergeConfig(
     }
   }
 
-  // Fix Issue 2: Remove stale mcp.context-mode entry when context-mode is in plugins.
-  // OpenCode registers ZERO tools when BOTH plugin: ["context-mode"] AND mcp.context-mode
-  // exist. The plugin entry registers tools natively; the MCP duplicate suppresses them.
-  if (Array.isArray(merged.plugin) && merged.plugin.includes("context-mode")) {
-    if (merged.mcp && typeof merged.mcp === "object" && "context-mode" in merged.mcp) {
-      delete merged.mcp["context-mode"];
+  // Fix Issue 2: Remove stale plugin entry when mcp.context-mode exists.
+  // OpenCode registers ZERO tools when BOTH plugin: ["context-mode"] AND mcp.context-mode exist.
+  // MCP is the authoritative source now — remove legacy plugin entry instead.
+  // If only plugin exists (no MCP), leave it for now (migration handled elsewhere).
+  if (merged.mcp && typeof merged.mcp === "object" && "context-mode" in merged.mcp) {
+    if (Array.isArray(merged.plugin)) {
+      merged.plugin = merged.plugin.filter((p) => p !== "context-mode");
     }
   }
 

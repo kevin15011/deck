@@ -163,6 +163,33 @@ export async function installOpenCodeTools(
       continue;
     }
 
+    if (tool.installKind === "npm-package-plus-mcp") {
+      // Install npm package globally + MCP config handled separately (write-mcp-config action)
+      // Same as npm-package: execute npm install -g <module>
+      debugLog(`[install-tools] ${tool.name}: npm-package-plus-mcp install: npm install -g ${tool.module}`);
+      try {
+        const { stdout, stderr, exitCode } = await runInstallCommand("npm", ["install", "-g", tool.module]);
+        debugLog(`[install-tools] ${tool.name}: npm exitCode=${exitCode}`);
+        const result = {
+          tool: tool.name,
+          success: exitCode === 0,
+          message: exitCode === 0 ? undefined : (stderr || stdout).trim(),
+        };
+        results.push(result);
+        onResult(result);
+      } catch (error) {
+        debugLog(`[install-tools] ${tool.name}: npm ERROR - ${error instanceof Error ? error.message : String(error)}`);
+        const result = {
+          tool: tool.name,
+          success: false,
+          message: error instanceof Error ? error.message : "Unable to run npm install.",
+        };
+        results.push(result);
+        onResult(result);
+      }
+      continue;
+    }
+
     if (tool.installKind === "opencode-plugin") {
       // Install plugin via OpenCode's own plugin system, which registers it in the correct cache
       debugLog(`[install-tools] ${tool.name}: opencode-plugin install (opencode plugin ${tool.module} --global)`);

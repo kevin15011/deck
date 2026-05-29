@@ -13,7 +13,9 @@ export type OpenCodeCapabilityInstallKind =
   | "pending" // Install pending / not yet determined
   | "mcp-server" // MCP server configured via mcp array in opencode.json
   | "npm-package" // npm global package via `npm install -g`
-  | "shell-script"; // Binary installed via shell script (curl -fsSL <url> | sh)
+  | "npm-package-plus-mcp" // npm global package + MCP server configuration
+  | "shell-script" // Binary installed via shell script (curl -fsSL <url> | sh)
+  | "shell-script-plus-mcp"; // Shell script + MCP server configuration (e.g., rtk)
 
 export type OpenCodeCapabilityToolMapping = {
   capabilityId: OpenCodeCapabilityId;
@@ -42,13 +44,13 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
   "context-mode": {
     capabilityId: "context-mode",
     label: "context-mode",
-    description: "Context-mode plugin for context window optimization and knowledge base.",
+    description: "Context-mode MCP server for context window optimization and knowledge base.",
     runnerScope: "all",
     requirementLevel: "configurable",
     toolId: "context-mode",
     source: "context-mode",
-    installKind: "opencode-plugin",
-    detector: { pluginNames: ["context-mode"] },
+    installKind: "npm-package-plus-mcp",
+    detector: { commands: ["context-mode"], mcpServerNames: ["context-mode"] },
   },
   "codebase-memory": {
     capabilityId: "codebase-memory",
