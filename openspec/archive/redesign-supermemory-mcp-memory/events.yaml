@@ -1,0 +1,411 @@
+events:
+  - event: proposal.completed
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: "2026-05-29T00:00:00Z"
+    source: user request for Supermemory MCP-only redesign
+    actor: deck-developer-proposal
+    note: "Proposal artifact and registry created for redesign-supermemory-mcp-memory."
+  - event: proposal.repaired
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: "2026-05-29T00:00:00Z"
+    source: user request to repair Mermaid return/artifact
+    actor: deck-developer-proposal
+    note: "Repaired Mermaid summary source to ensure valid flowchart syntax in proposal artifact."
+  - event: spec.completed
+    phase: spec
+    status: completed
+    artifact: spec.md
+    timestamp: "2026-05-29T00:00:00Z"
+    source: proposal-redesign-supermemory-mcp-memory
+    actor: deck-developer-spec
+    note: "Registry-deferred Spec artifact reconciled by Orchestrator."
+  - event: design.completed
+    phase: design
+    status: completed
+    artifact: design.md
+    timestamp: "2026-05-29T00:00:00Z"
+    source: proposal-redesign-supermemory-mcp-memory plus Supermemory MCP docs/repo
+    actor: deck-developer-design
+    note: "Registry-deferred Design artifact reconciled by Orchestrator."
+  - event: tasks.completed
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    timestamp: "2026-05-29T00:00:00Z"
+    source: spec + design reconciliation for redesign-supermemory-mcp-memory
+    actor: deck-developer-task
+    note: "Tasks artifact created with 10 atomic tasks across Shared/Contracts, Backend, and Tests groups. All open questions classified as allowed-with-placeholder."
+  - event: apply.backend.task1.completed
+    phase: apply
+    status: completed
+    task_id: "1"
+    task_title: "Reescribir adapter Supermemory como provider MCP-only"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T00:00:00Z"
+    source: tasks.md Task 1
+    actor: deck-developer-apply-backend
+    note: "Task 1 completed: adapter rewritten to MCP-only with memory/recall/whoAmI tools, no REST, no searchMode, URL updated to https://mcp.supermemory.ai/mcp."
+  - event: apply.general.task2.completed
+    phase: apply
+    agent: general
+    status: completed
+    task_id: "2"
+    task_title: "Actualizar instruction bundle de memoria adaptativa"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T12:00:00Z"
+    source: tasks.md Task 2
+    note: "Task 2 completed: instruction bundle updated. Removed t:/o: scoping, updated to MCP tools memory/recall, added OFFICIAL CONTEXT hierarchy, fail-open."
+  - event: apply.backend.task3.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "3"
+    task_title: "Corregir provider selection en launch command"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T13:00:00Z"
+    source: tasks.md Task 3
+    note: "Task 3 completed: removed hardcode engram-only, DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS now includes supermemory, launch accepts supermemory as valid provider, fail-open implemented."
+  - event: apply.backend.task4.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "4"
+    task_title: "Actualizar runner-capability-registry metadata Supermemory"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T14:00:00Z"
+    source: tasks.md Task 4
+    actor: deck-developer-apply-backend
+    note: "Task 4 completed: registry metadata updated to MCP-only, tools memory/recall/whoAmI, userId required, teamId/orgId removed/deprecated."
+  - event: apply.backend.task5.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "5"
+    task_title: "Actualizar escritor/validador MCP config"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T13:00:00Z"
+    source: tasks.md Task 5
+    note: "Task 5 completed: validates new URL https://mcp.supermemory.ai/mcp, rejects deprecated URLs, supports x-sm-project header for project scoping, conservative merge handling."
+  - event: apply.general.task7.completed
+    phase: apply
+    agent: general
+    status: completed
+    task_id: "7"
+    task_title: "Actualizar prompt-generation para ordenamiento provider-specific"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T14:00:00Z"
+    source: tasks.md Task 7
+    note: "Task 7 completed: added memoryBundle parameter, implemented provider-specific filtering and injection, ensured OpenSpec authority hierarchy in prompts."
+  - event: apply.backend.task6.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "6"
+    task_title: "Actualizar developer-team-install para validación provider/tools"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T14:00:00Z"
+    source: tasks.md Task 6
+    actor: deck-developer-apply-backend
+    note: "Task 6 completed: added validateMemoryBundleTools() with VALIDATED_MEMORY_PROVIDERS map, tool obsolescence detection, provider inference, fail-open diagnostics."
+  - event: apply.backend.task8.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "8"
+    task_title: "Tests unitarios del adapter Supermemory"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T15:00:00Z"
+    source: tasks.md Task 8
+    actor: deck-developer-apply-backend
+    note: "Task 8 completed: 19 tests pass. Verifies memory/recall/whoAmI tools, rejects execute/search_docs, URL MCP v4, u:/p: scopes, MCP-only no-REST mode, security."
+  - event: apply.backend.task9.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "9"
+    task_title: "Tests de launch + config MCP"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T15:30:00Z"
+    source: tasks.md Task 9
+    actor: deck-developer-apply-backend
+    note: "Task 9 completed: 22 tests pass (16 MCP config + 6 launch). Verifies URL validation, auth header interpolation, x-sm-project, deprecated URL rejection, provider ID consistency, fail-open."
+  - event: apply.general.task10.completed
+    phase: apply
+    agent: general
+    status: completed
+    task_id: "10"
+    task_title: "Tests de prompt/instrucciones + regresión Engram"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T16:00:00Z"
+    source: tasks.md Task 10
+    actor: deck-developer-apply-general
+    note: "Task 10 completed: 16 tests pass. Verifies prompt/instruction cleanup, provider-specific isolation, user/project scoping, OpenSpec authority, and Engram regression."
+  - event: explore.post-apply-verification.completed
+    phase: explore
+    status: completed
+    artifact: exploration.md
+    timestamp: "2026-05-29T17:00:00Z"
+    source: user tested install — TUI still asks for teamId/orgId
+    actor: deck-developer-explorer
+    note: "Post-apply exploration found TUI gaps. 8 gaps identified. Led to contract final redefinition."
+  - event: artifacts.repair-spec-design-tasks
+    phase: repair
+    status: completed
+    artifacts: [spec.md, design.md, tasks.md]
+    timestamp: "2026-05-29T18:00:00Z"
+    source: user contract final redefinition — no container tags, token-only TUI, x-sm-project
+    actor: deck-developer-task
+    note: "Repaired spec.md (new REQ-SPM-006/007, REQ-APB-006, REQ-OMC-006, REQ-ASR-004; replaced u:/p: model), design.md (scoping, data flow, file impact, testing), tasks.md (added R1-R10 repair tasks). OQ-1 resolved. State moved to repair-in-progress."
+  - event: apply.general.repair.r1.completed
+    phase: apply
+    agent: general
+    status: completed
+    task_id: "R1"
+    task_title: "Eliminar container tags del instruction bundle"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T19:00:00Z"
+    source: tasks.md Task R1
+    note: "R1 completed: instruction bundle updated. Removed container tag conventions (u:/p:/t:/o:). Added Automatic Scoping section. Says to save memories as plain content. Scoping automatic via token-derived user, x-sm-project header."
+  - event: apply.general.repair.r8.completed
+    phase: apply
+    agent: general
+    status: completed
+    task_id: "R8"
+    task_title: "Tests prompt sin container tags"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T19:30:00Z"
+    source: tasks.md Task R8
+    note: "R8 completed: 30 tests pass. Verifies NO container tags in prompts, Automatic Scoping section present, token-derived user, x-sm-project scoping referenced."
+  - event: apply.backend.repair.r2.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "R2"
+    task_title: "Actualizar adapter para eliminar containerTag manual"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T20:00:00Z"
+    source: tasks.md Task R2
+    note: "R2 completed: adapter updated. Removed userId/projectId required, NO containerTag passed to MCP. Token-only config. Instructions mention automatic scoping."
+  - event: apply.backend.repair.r4.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "R4"
+    task_title: "MCP config x-sm-project obligatorio"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T20:30:00Z"
+    source: tasks.md Task R4
+    note: "R4 completed: deriveSmProjectIdentifier() always returns x-sm-project. Written config ALWAYS includes x-sm-project header. Derived from git remote or fallback."
+  - event: apply.backend.repair.r5.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "R5"
+    task_title: "Registry metadata sin userId"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T20:30:00Z"
+    source: tasks.md Task R5
+    note: "R5 completed: registry updated. Supermemory createProvider no longer requires userId. Token-only config."
+  - event: apply.backend.repair.r6.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "R6"
+    task_title: "Install sin container tags"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T21:00:00Z"
+    source: tasks.md Task R6
+    note: "R6 completed: verified no containerTag passed. Adapter already uses updated config."
+  - event: apply.backend.repair.r7.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "R7"
+    task_title: "Tests adapter sin container tags"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T21:00:00Z"
+    source: tasks.md Task R7
+    note: "R7 completed: 15 tests pass. Verifies token-only contract, NO userId required, automatic scoping in instructions."
+  - event: apply.backend.repair.r9.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_id: "R9"
+    task_title: "Tests MCP config x-sm-project"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T21:00:00Z"
+    source: tasks.md Task R9
+    note: "R9 completed: tests verify x-sm-project always in written config."
+  - event: apply.frontend.repair.r3.completed
+    phase: apply
+    agent: frontend
+    status: completed
+    task_id: "R3"
+    task_title: "Reparar TUI a token-only"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T22:00:00Z"
+    source: tasks.md Task R3
+    note: "R3 completed: TUI simplified to token-only. Removed userId/teamId/orgId screens. Updated flow, navigation, and hint text."
+  - event: apply.frontend.repair.r10.completed
+    phase: apply
+    agent: frontend
+    status: completed
+    task_id: "R10"
+    task_title: "Test TUI token-only"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T22:30:00Z"
+    source: tasks.md Task R10
+    note: "R10 completed: 3 token-only tests pass. Verifies token redacted, automatic scoping message, no userId/teamId/orgId in config."
+  - event: repair.completed
+    phase: repair
+    status: completed
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T22:30:00Z"
+    source: repair tasks R1-R10
+    actor: deck-developer-orchestrator
+    note: "Orchestrator reconciled repair registry and apply-progress after parallel repair waves. R1-R10 completed; ready for reinstall verification before Verify/Review."
+  - event: explore-2.post-repair-blocked.completed
+    phase: explore-2
+    status: completed
+    artifact: exploration-2.md
+    timestamp: "2026-05-29T23:30:00Z"
+    source: user tested install — "Review & Install is blocked until Supermemory setup is complete"
+    actor: deck-developer-explorer
+    note: "Found 5 residual userId guards in action-runner.ts (L110, L683), runner-dashboard-screens.tsx (L77), input-handler.ts (L114), and config write (L412). R3 updated screens but did not update the dashboard runner module guards."
+  - event: apply.frontend.hotfix-repair.completed
+    phase: apply
+    agent: frontend
+    status: completed
+    task_ids: ["R11", "R12", "R13"]
+    task_titles:
+      - "Eliminar userId guard en Review Plan preflight"
+      - "Actualizar mensaje input-handler a token-only"
+      - "Actualizar tests a contrato token-only"
+    artifact: apply-progress.md
+    timestamp: "2026-05-29T23:45:00Z"
+    source: hotfix repair additional — eliminate userId requirement from guarded flows
+    note: "R11-R13 completed: Removed userId check from getRunnerReviewPlanRunBlockDiagnostics(), updated message to token-only, updated test fixtures. Review & Install now works with configured && hasToken only."
+  - event: apply.backend.hotfix-downstream.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_ids: ["R14", "R15", "R16", "R17"]
+    task_titles:
+      - "Eliminar userId guard en capability-plan opencode"
+      - "Eliminar userId guard en capability-plan pi"
+      - "Eliminar userId guard en pi-launch-command"
+      - "Actualizar mensajes de diagnóstico capability-plan"
+    artifact: apply-progress.md
+    timestamp: "2026-05-30T00:15:00Z"
+    source: downstream token-only hotfix — remove residual userId guards from capability plan and launch
+    actor: deck-developer-apply-backend
+    note: "R14-R17 completed: capability-plan for OpenCode/Pi now computes Supermemory configured from configured only, Pi launch no longer requires userId, diagnostics no longer mention userId. Focused tests passed: 29 Pi capability-plan + 55 OpenCode developer-team-install."
+  - event: explore-3.core-userid-validation.completed
+    phase: explore-3
+    status: completed
+    artifact: exploration-3.md
+    timestamp: "2026-05-30T00:45:00Z"
+    source: user install failed — Supermemory configuration requires an explicit userId
+    actor: deck-developer-explorer
+    note: "Validated /tmp/deck-tui.log and found root cause in packages/core/src/config/deck-config.ts normalizeAdaptiveMemoryConfig/buildResolution still requiring userId."
+  - event: apply.backend.hotfix-core-validation.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_ids: ["R18", "R19", "R20", "R21", "R22"]
+    artifact: apply-progress.md
+    timestamp: "2026-05-30T01:00:00Z"
+    source: core config token-only hotfix
+    actor: deck-developer-apply-backend
+    note: "R18-R22 completed: core Deck config no longer requires Supermemory userId; action-runner/runner-adapter no longer write userId/teamId/orgId. Typechecks passed and literal explicit userId error removed from packages/."
+  - event: explore-4.completed
+    phase: explore
+    status: completed
+    artifact: exploration-4.md
+    timestamp: "2026-05-30T02:00:00Z"
+    source: post-hotfix verification — TUI stuck at personality-selection
+    actor: deck-developer-explorer
+    note: "Found data migration gap: SUPERMEMORY_FIELDS cleaned to 3 fields but .deck/config.json still has userId/teamId/orgId. assertKnownFields throws DECK_CONFIG_UNKNOWN_FIELD on read. personality-selection catch block swallows silently. Fix: strip deprecated fields on read + add debug logging."
+  - event: apply.backend.hotfix_stale_config_migration.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_ids: ["R23", "R24"]
+    task_titles:
+      - "Strip deprecated fields userId/teamId/orgId/projectId on read"
+      - "Add debug logging to personality-selection config catch"
+    artifact: apply-progress.md
+    timestamp: "2026-05-30T03:00:00Z"
+    source: stale config migration hotfix — strip deprecated fields on read, preserve other unknown fields enforcement
+    actor: deck-developer-apply-backend
+    note: "R23-R24 completed: deck-config.ts strips deprecated userId/teamId/orgId/projectId before assertKnownFields. Other unknown fields still fail. app.tsx logs config error codes without exposing secrets. Migration tests verify both behaviors. Local .deck/config.json migrated to clean output."
+- event: apply.completed
+    phase: apply
+    agent: general
+    status: completed
+    task_ids: ["R29", "R30"]
+    task_titles:
+      - "Eliminar TODAS menciones literales de container tags de adaptive-memory.ts"
+      - "Actualizar tests con validación estricta para container tag literals"
+    artifact: apply-progress.md
+    timestamp: "2026-05-30T20:30:00Z"
+    source: final repair for container tag literals
+    actor: deck-developer-apply-general
+    note: "R29/R30 completed: removed ALL literal u:, p:, t:, o: from adaptive-memory.ts header comment (line 15) and all 3 surface fragments (agent/session/skill). Tests updated to check for positive plain content phrase and strict literal absence. No container tag patterns remain. Build passes. Tests pass."
+  - event: apply.completed
+    phase: apply
+    agent: general
+    status: completed
+    task_ids: ["R31"]
+    task_titles:
+      - "Auto-inject instruction bundle cuando provider activo sin memoryBundle"
+    artifact: apply-progress.md
+    timestamp: "2026-05-30T21:00:00Z"
+    source: tool references fix
+    actor: deck-developer-apply-general
+    note: "R31 completed: When activeMemoryProviderFromConfig is provided but memoryBundle=undefined, prompt-generation.ts now auto-injects the default instruction bundle so prompts contain memory/recall tool references. Also added Provider sections to session surface fragment in adaptive-memory.ts. Tests pass (28 prompt-generation + 16 prompt-memory-injection). Build passes."
+  - event: apply.completed
+    phase: apply
+    agent: general
+    status: completed
+    task_ids: ["R32"]
+    task_titles:
+      - "Eliminar headings duplicados y refs sin backticks"
+    artifact: apply-progress.md
+    timestamp: "2026-05-30T22:00:00Z"
+    source: heading duplicate and tool ref bold fix
+    actor: deck-developer-apply-general
+    note: "R32 completed: Removed duplicate ## Adaptive Memory headings from instruction bundle fragments at lines 22/168/261 (composer adds section). Replaced bold tool refs (**memory**, **recall**) with exact backticks. Removed static Adaptive Memory section from orchestrator-content.ts at lines 913-915. Tests passing (537/537). Build passes. Generated prompts now have single heading and backtick refs."
+  - event: apply.backend_verify_fix.completed
+    phase: apply
+    agent: backend
+    status: completed
+    task_ids: ["VF1", "VF2", "VF3"]
+    task_titles:
+      - "Fix URL validation in validateSupermemoryOpenCodeMcpConfig"
+      - "Fix prompt-generation test backticks verification"
+      - "Fix opencode-mcp-config test non-exported import"
+    artifact: apply-progress.md
+    timestamp: "2026-05-30T22:00:00Z"
+    source: verify_blocker_fixes
+    note: "Verify blocker fixes: 1) Added URL validation per REQ-OMC-004 (accepts mcp.supermemory.ai/mcp, rejects deprecated/custom URLs). 2) Fixed prompt-generation test to check backticks instead of bold refs per R32 contract. 3) Removed non-exported function import from test. Tests now 149 pass / 0 fail (vs 145/4 before)."
+  - event: review.approved
+    phase: review
+    status: approved
+    artifact: review-report.md
+    timestamp: "2026-05-30T22:00:00Z"
+    source: review after apply completion
+    actor: deck-developer-review
+    note: "Review approved with no blockers or major findings."
+  - event: verify.passed
+    phase: verify
+    status: passed
+    artifact: verify-report.md
+    timestamp: "2026-05-30T23:00:00Z"
+    source: re-run verify after verify_fix
+    actor: deck-developer-verify
+    note: "Verify passed with warnings: targeted tests 149/0 pass, build dry-run pass, real OpenCode install pass; global typecheck remains out-of-scope baseline warning."

@@ -224,8 +224,8 @@ async function resolveLaunchMemoryProvider(options: RunPiLaunchOptions): Promise
 
   if (activeProvider === "supermemory") {
     const supermemory = resolved.supermemory;
-    if (!supermemory?.userId) {
-      const message = "Supermemory configuration is incomplete; userId is required. Launched without adaptive-memory injection.";
+    if (!supermemory?.configured) {
+      const message = "Supermemory configuration is incomplete; token is required. Launched without adaptive-memory injection.";
       return { diagnostics: [{ code: "memory_provider_unavailable", providerId: "supermemory", message }], memoryUnavailableReason: message };
     }
 
@@ -245,15 +245,11 @@ async function resolveLaunchMemoryProvider(options: RunPiLaunchOptions): Promise
 
     try {
       const provider = createSupermemoryMemoryProvider({
-        userId: supermemory.userId,
-        teamId: supermemory.teamId,
-        orgId: supermemory.orgId,
+        // Token-only: user identity derived from token, project via x-sm-project
         mcpServerName: runtimeValidation.serverName,
-        searchMode: supermemory.searchMode === "documents" ? "documents" : "memories",
-        maxMemoriesPerSession: supermemory.maxMemoriesPerSession,
         authenticatedRuntimeValidated: true,
       });
-      return { memoryInjection: provider.buildInjection({ teamId: options.teamId }), diagnostics };
+      return { memoryInjection: provider.buildInjection({}), diagnostics };
     } catch (error) {
       if (error instanceof Error && error.message.includes("Container tag")) return providerConstructionUnavailable("supermemory", "launch");
       const message = redactLaunchDiagnosticText(`Supermemory provider could not build validated adaptive-memory injection; launched without adaptive-memory injection. ${error instanceof Error ? error.message : String(error)}`);
@@ -371,8 +367,8 @@ export function resolvePiAdaptiveMemoryProvider(options: ResolvePiAdaptiveMemory
 
   if (activeProvider === "supermemory") {
     const supermemory = resolved.supermemory;
-    if (!supermemory?.userId) {
-      return unavailable("supermemory", `Supermemory configuration is incomplete; userId is required. ${capitalizedContext(context)} without adaptive-memory injection.`);
+    if (!supermemory?.configured) {
+      return unavailable("supermemory", `Supermemory configuration is incomplete; token is required. ${capitalizedContext(context)} without adaptive-memory injection.`);
     }
 
     const mcpValidation = validateSupermemoryPiMcpConfig({
@@ -390,12 +386,8 @@ export function resolvePiAdaptiveMemoryProvider(options: ResolvePiAdaptiveMemory
 
     try {
       const provider = createSupermemoryMemoryProvider({
-        userId: supermemory.userId,
-        teamId: supermemory.teamId,
-        orgId: supermemory.orgId,
+        // Token-only: user identity derived from token, project via x-sm-project
         mcpServerName: mcpValidation.serverName,
-        searchMode: supermemory.searchMode === "documents" ? "documents" : "memories",
-        maxMemoriesPerSession: supermemory.maxMemoriesPerSession,
         authenticatedRuntimeValidated: true,
       });
 

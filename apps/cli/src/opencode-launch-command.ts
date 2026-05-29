@@ -7,6 +7,7 @@ import {
   type MemoryDiagnostic,
 } from "@deck/adapter-opencode";
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
+import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import {
   resolveActiveMemoryProvider,
   readDeckConfig,
@@ -25,7 +26,13 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-const SUPPORTED_OPENCODE_LAUNCH_MEMORY_PROVIDER_IDS = ["engram"] as const;
+/**
+ * Default supported memory provider IDs for OpenCode launch.
+ * Derived from installer/config - includes both engram and supermemory.
+ * The launch will accept any provider that's been selected in the installer.
+ * Providers not selected/configured will fail-open with a diagnostic.
+ */
+const DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
 
 export type RunOpenCodeLaunchOptions = {
   teamId: string;
@@ -90,7 +97,7 @@ function resolveOpenCodeMemory(options: RunOpenCodeLaunchOptions): ResolvedMemor
   // Resolve from config
   if (options.activeProvider !== undefined) {
     if (options.activeProvider === "none") return { diagnostics };
-    if (!supportsProvider(options.activeProvider, options.supportedMemoryProviderIds ?? SUPPORTED_OPENCODE_LAUNCH_MEMORY_PROVIDER_IDS)) {
+    if (!supportsProvider(options.activeProvider, options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS)) {
       return {
         diagnostics: [
           {
@@ -108,12 +115,20 @@ function resolveOpenCodeMemory(options: RunOpenCodeLaunchOptions): ResolvedMemor
         return providerUnavailable("engram");
       }
     }
+    if (options.activeProvider === "supermemory") {
+      try {
+        // Token-only config: user identity derived from token
+        return { provider: createSupermemoryMemoryProvider({}), diagnostics };
+      } catch {
+        return providerUnavailable("supermemory");
+      }
+    }
     return { diagnostics };
   }
 
   // CLI override
   if (options.cliMemoryProvider) {
-    if (!supportsProvider(options.cliMemoryProvider, options.supportedMemoryProviderIds ?? SUPPORTED_OPENCODE_LAUNCH_MEMORY_PROVIDER_IDS)) {
+    if (!supportsProvider(options.cliMemoryProvider, options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS)) {
       return {
         diagnostics: [
           {
@@ -129,6 +144,14 @@ function resolveOpenCodeMemory(options: RunOpenCodeLaunchOptions): ResolvedMemor
         return { provider: createEngramMemoryProvider(), diagnostics };
       } catch {
         return providerUnavailable("engram");
+      }
+    }
+    if (options.cliMemoryProvider === "supermemory") {
+      try {
+        // Token-only config: user identity derived from token
+        return { provider: createSupermemoryMemoryProvider({}), diagnostics };
+      } catch {
+        return providerUnavailable("supermemory");
       }
     }
   }
@@ -205,7 +228,7 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     configDir,
     memoryInjection: resolvedMemory.memoryInjection,
     memoryProvider: resolvedMemory.provider,
-    supportedMemoryProviderIds: options.supportedMemoryProviderIds ?? SUPPORTED_OPENCODE_LAUNCH_MEMORY_PROVIDER_IDS,
+    supportedMemoryProviderIds: options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS,
     capabilityInstructions,
     standaloneSkills,
   });

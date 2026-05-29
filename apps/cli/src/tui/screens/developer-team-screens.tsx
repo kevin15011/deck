@@ -90,10 +90,14 @@ export function DeveloperTeamInstallingScreen({
 }
 
 export type SupermemorySetupValues = {
+  /** Token-only config: user identity is derived from token */
   token: string;
-  userId: string;
-  teamId: string;
-  orgId: string;
+  /** @deprecated - no longer used. User is derived from token */
+  userId?: never;
+  /** @deprecated - no longer used. Project scoping via x-sm-project header */
+  teamId?: never;
+  /** @deprecated - no longer used */
+  orgId?: never;
 };
 
 type MemoryProviderSelectionScreenProps = {
@@ -113,7 +117,7 @@ export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status
           items={[
             { id: "none", label: "None", hint: selectedProvider === "none" ? "active" : "disable adaptive memory" },
             { id: "engram", label: "Engram", hint: selectedProvider === "engram" ? "active" : "existing provider" },
-            { id: "supermemory", label: "Supermemory MCP", hint: selectedProvider === "supermemory" ? "active" : "requires token and userId" },
+            { id: "supermemory", label: "Supermemory MCP", hint: selectedProvider === "supermemory" ? "active" : "requires token only" },
           ]}
         />
       </Box>
@@ -123,27 +127,26 @@ export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status
 }
 
 type SupermemorySetupScreenProps = {
-  screen: "supermemory-token" | "supermemory-user-id" | "supermemory-team-id" | "supermemory-org-id";
+  screen: "supermemory-token"; // Simplified: only token required
   values: SupermemorySetupValues;
   error?: string;
 };
 
 export function SupermemorySetupScreen({ screen, values, error }: SupermemorySetupScreenProps) {
-  const field = screen === "supermemory-token" ? "token" : screen === "supermemory-user-id" ? "userId" : screen === "supermemory-team-id" ? "teamId" : "orgId";
-  const label = field === "token" ? "Supermemory token" : field;
-  const required = field === "token" || field === "userId";
+  // Token-only config: no userId/teamId/orgId fields
+  const field = "token";
+  const label = "Supermemory token";
+  const required = true;
   const value = values[field];
-  const displayValue = field === "token" && value.length > 0 ? "[redacted]" : value;
+  const displayValue = value.length > 0 ? "[redacted]" : "";
 
   return (
     <Box flexDirection="column">
-      <Text bold>{label}{required ? " (required)" : " (optional)"}</Text>
+      <Text bold>{label} {required ? "(required)" : ""}</Text>
       <Text dimColor>
         {field === "token"
-          ? "Token is written only to Pi's global MCP config (~/.pi/agent/mcp.json) and is never stored in Deck config."
-          : field === "userId"
-            ? "Required for scoped Supermemory memory."
-            : `Optional ${field}; leave blank to skip this scope.`}
+          ? "Token is written only to Pi's global MCP config (~/.pi/agent/mcp.json) and is never stored in Deck config. User identity is derived automatically from token. Project scoping handled via x-sm-project header."
+          : ""}
       </Text>
       <Box marginTop={1}>
         <Text>{label}: <Text color="cyan">{displayValue}</Text></Text>

@@ -152,10 +152,10 @@ describe("Pi Runner dashboard reducer", () => {
     state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
     state = reduce(state, {
       type: "update-supermemory",
-      values: { configured: true, hasToken: true, userId: "user-1", diagnostics: ["ok"] },
+      values: { configured: true, hasToken: true, diagnostics: ["ok"] },
     });
     expect(state.adaptiveMemory.provider).toBe("supermemory");
-    expect(state.adaptiveMemory.supermemory?.userId).toBe("user-1");
+    expect(state.adaptiveMemory.supermemory?.hasToken).toBe(true);
 
     state = reduce(state, { type: "select-adaptive-memory", provider: "engram" });
     expect(state.adaptiveMemory.provider).toBe("engram");

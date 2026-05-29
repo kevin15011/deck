@@ -140,9 +140,7 @@ type Screen =
   | "no-providers"
   | "memory-provider-selection"
   | "supermemory-token"
-  | "supermemory-user-id"
-  | "supermemory-team-id"
-  | "supermemory-org-id"
+  // Removed: userId/teamId/orgId screens — token-only config
   | "developer-team-review"
   | "developer-team-installing"
   | "opencode-preflight-checking"
@@ -212,17 +210,14 @@ function redactSecret(value: string): string {
 }
 
 export function buildSupermemoryDeckConfig(values: SupermemorySetupValues) {
+  // Token-only config: no userId/teamId/orgId stored
+  // User identity derived from token, project via x-sm-project header in MCP config
   return {
     version: 1,
     adaptiveMemory: {
       activeProvider: "supermemory" as const,
       supermemory: {
         mcpServerName: "supermemory",
-        userId: values.userId.trim(),
-        ...(values.teamId.trim() ? { teamId: values.teamId.trim() } : {}),
-        ...(values.orgId.trim() ? { orgId: values.orgId.trim() } : {}),
-        searchMode: "memories" as const,
-        maxMemoriesPerSession: 7,
       },
     },
   };
@@ -237,12 +232,8 @@ export function createMemoryProviderForSelection(choice: MemoryProviderChoice, v
   if (choice === "engram") return createEngramMemoryProvider();
   if (choice === "supermemory" && values) {
     return createSupermemoryMemoryProvider({
-      userId: values.userId,
-      teamId: values.teamId.trim() || undefined,
-      orgId: values.orgId.trim() || undefined,
+      // Token-only: no userId/teamId/orgId — user derived from token
       mcpServerName: "supermemory",
-      searchMode: "memories",
-      maxMemoriesPerSession: 7,
     });
   }
   return undefined;
@@ -280,17 +271,15 @@ export function handOffSupermemoryCredentialToPiMcp(
 }
 
 export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupValues):
-  | { ok: true; values: { configured: true; hasToken: true; userId: string; teamId?: string; organizationId?: string; diagnostics: string[] }; status: string }
+  | { ok: true; values: { configured: true; hasToken: true; diagnostics: string[] }; status: string }
   | { ok: false; message: string } {
   const normalizedValues = {
     token: values.token.trim(),
-    userId: values.userId.trim(),
-    teamId: values.teamId.trim(),
-    orgId: values.orgId.trim(),
   };
 
-  if (!normalizedValues.token || !normalizedValues.userId) {
-    return { ok: false, message: "Supermemory dashboard setup requires token and userId before Review/Install." };
+  // Token-only: userId no longer required
+  if (!normalizedValues.token) {
+    return { ok: false, message: "Supermemory dashboard setup requires token before Review/Install." };
   }
 
   return {
@@ -298,12 +287,11 @@ export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupVal
     values: {
       configured: true,
       hasToken: true,
-      userId: normalizedValues.userId,
-      ...(normalizedValues.teamId ? { teamId: normalizedValues.teamId } : {}),
-      ...(normalizedValues.orgId ? { organizationId: normalizedValues.orgId } : {}),
+      // userId no longer stored: derived from token automatically
+      // teamId/orgId removed: project scoping via x-sm-project header
       diagnostics: ["Supermemory token captured ephemerally for Review & Install; no Pi MCP config was written yet."],
     },
-    status: "Dashboard Adaptive Memory: Supermemory listo para Review & Install. Token: [redacted]; Pi MCP config se escribirá al ejecutar Run.",
+    status: "Dashboard Adaptive Memory: Supermemory ready for Review & Install. Token: [redacted]; Pi MCP config will include x-sm-project header.",
   };
 }
 
@@ -372,7 +360,7 @@ export function DeckApp() {
   const [modelConfigRuntime, setModelConfigRuntime] = useState<"pi" | "opencode">("pi");
   const [memoryProvider, setMemoryProvider] = useState<AdaptiveMemoryProvider | undefined>(undefined);
   const [memoryProviderChoice, setMemoryProviderChoice] = useState<MemoryProviderChoice>("none");
-  const [supermemorySetup, setSupermemorySetup] = useState<SupermemorySetupValues>({ token: "", userId: "", teamId: "", orgId: "" });
+  const [supermemorySetup, setSupermemorySetup] = useState<SupermemorySetupValues>(() => ({ token: "" }));
   const [supermemoryError, setSupermemoryError] = useState<string | undefined>(undefined);
   const [memoryStatus, setMemoryStatus] = useState<string | undefined>(undefined);
   const [dashboardSupermemorySetupActive, setDashboardSupermemorySetupActive] = useState(false);
@@ -1047,7 +1035,10 @@ export function DeckApp() {
           orchestratorPersonality: selected.id,
         });
       } catch (error) {
-        // Config write error — stay on screen, user can retry
+        // Log config errors with error code only (no sensitive details)
+        const errCode = error instanceof Error ? (error as { code?: string }).code : undefined;
+        debug(`personality-selection config error: ${errCode ?? "UNKNOWN"}`);
+        // Stay on screen, user can retry
         return;
       }
       const nextScreen = getNextScreenAfterPersonalitySelection({
@@ -1488,15 +1479,12 @@ export function DeckApp() {
     }
   }
 
-  function isSupermemoryInputScreen(value: Screen): value is "supermemory-token" | "supermemory-user-id" | "supermemory-team-id" | "supermemory-org-id" {
-    return value === "supermemory-token" || value === "supermemory-user-id" || value === "supermemory-team-id" || value === "supermemory-org-id";
+  function isSupermemoryInputScreen(value: Screen): value is "supermemory-token" {
+    return value === "supermemory-token";
   }
 
   function supermemoryFieldForScreen(value: Screen): keyof SupermemorySetupValues | undefined {
     if (value === "supermemory-token") return "token";
-    if (value === "supermemory-user-id") return "userId";
-    if (value === "supermemory-team-id") return "teamId";
-    if (value === "supermemory-org-id") return "orgId";
     return undefined;
   }
 
@@ -1528,27 +1516,13 @@ export function DeckApp() {
 
   function continueSupermemorySetup() {
     setSupermemoryError(undefined);
+    // Token-only: after token is entered, complete setup directly
     if (screen === "supermemory-token") {
       if (!supermemorySetup.token.trim()) {
         setSupermemoryError("Supermemory token is required and must be stored outside Deck config.");
         return;
       }
-      resetCursor("supermemory-user-id");
-      return;
-    }
-    if (screen === "supermemory-user-id") {
-      if (!supermemorySetup.userId.trim()) {
-        setSupermemoryError("Supermemory configuration requires an explicit userId.");
-        return;
-      }
-      resetCursor("supermemory-team-id");
-      return;
-    }
-    if (screen === "supermemory-team-id") {
-      resetCursor("supermemory-org-id");
-      return;
-    }
-    if (screen === "supermemory-org-id") {
+      // Complete setup: go to dashboard review or developer-team-review
       if (dashboardSupermemorySetupActive) {
         if (persistDashboardSupermemorySelection(supermemorySetup)) {
           setDashboardSupermemorySetupActive(false);
@@ -1559,7 +1533,9 @@ export function DeckApp() {
       if (persistMemoryProviderSelection("supermemory", supermemorySetup)) {
         resetCursor("developer-team-review");
       }
+      return;
     }
+    // Removed: userId/teamId/orgId screens — token-only config
   }
 
   function persistDashboardSupermemorySelection(values: SupermemorySetupValues): boolean {
@@ -1596,10 +1572,11 @@ export function DeckApp() {
     const diagnostics: { message: string }[] = [];
     if (state.adaptiveMemory.provider === "supermemory") {
       const setup = state.adaptiveMemory.supermemory;
-      if (!setup?.configured || !setup.hasToken || !setup.userId) {
-        diagnostics.push({ message: "Supermemory requiere userId y token efímero antes de ejecutar Review/Install." });
+      // Token-only: userId removed, project scoping via x-sm-project header
+      if (!setup?.configured || !setup.hasToken) {
+        diagnostics.push({ message: "Supermemory requires token to run Review/Install." });
       } else if (!token.trim()) {
-        diagnostics.push({ message: "Supermemory requiere reingresar el token efímero antes de ejecutar Review/Install." });
+        diagnostics.push({ message: "Supermemory requires re-entering the token before running Review/Install." });
       }
     }
     return diagnostics;
@@ -1906,9 +1883,7 @@ export function DeckApp() {
         "no-providers": "team-selection",
         "memory-provider-selection": "agent-model-config-list",
         "supermemory-token": "memory-provider-selection",
-        "supermemory-user-id": "supermemory-token",
-        "supermemory-team-id": "supermemory-user-id",
-        "supermemory-org-id": "supermemory-team-id",
+        // Removed: userId/teamId/orgId screens — token-only
         "developer-team-review": "memory-provider-selection",
         "developer-team-installing": "developer-team-review",
         "opencode-preflight-checking": "environment-selection",
@@ -2034,10 +2009,8 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "agent-model-assignment": "Select reasoning level",
     "no-providers": "No providers detected",
     "memory-provider-selection": "Adaptive memory provider",
+    // Removed: userId/teamId/orgId screens — token-only config
     "supermemory-token": "Supermemory MCP token",
-    "supermemory-user-id": "Supermemory userId",
-    "supermemory-team-id": "Supermemory teamId",
-    "supermemory-org-id": "Supermemory orgId",
     "developer-team-review": "Developer Team",
     "developer-team-installing": "Installing Developer Team",
     "opencode-preflight-checking": "Checking OpenCode environment",

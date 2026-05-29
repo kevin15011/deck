@@ -80,8 +80,9 @@ export type RunnerCapabilityCatalog = {
 /**
  * Creates the registry of available memory providers.
  *
- * Providers are registered here (at composition time) rather than hardcoded
- * in core. This allows the CLI to control which providers are available.
+ * CONTRACT (Repair 2026-05-29):
+ * - Supermemory NO requiere userId/teamId/orgId manual.
+ * - El usuario se deriva del token. Solo token es input manual.
  */
 export function createMemoryProviders(): readonly MemoryProviderRegistration[] {
   return [
@@ -94,19 +95,10 @@ export function createMemoryProviders(): readonly MemoryProviderRegistration[] {
     {
       id: "supermemory",
       displayName: "Supermemory MCP",
-      description: "MCP-based adaptive memory with personal container and team scoping.",
-      createProvider: (config?: Record<string, string>) => {
-        if (!config?.userId) {
-          throw new Error("Supermemory memory provider requires userId in config.");
-        }
-        return createSupermemoryMemoryProvider({
-          userId: config.userId,
-          teamId: config.teamId,
-          orgId: config.orgId,
-          mcpServerName: "supermemory",
-          searchMode: "memories",
-          maxMemoriesPerSession: 7,
-        });
+      description: "MCP-only adaptive memory with automatic user/project scoping. Uses tools: memory, recall, whoAmI. No team/org scopes. Token-only config.",
+      createProvider: () => {
+        // CONTRACT: token-only — no userId required
+        return createSupermemoryMemoryProvider();
       },
     },
   ];

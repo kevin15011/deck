@@ -1,0 +1,340 @@
+change: redesign-supermemory-mcp-memory
+status: applied
+current_phase: apply
+artifacts:
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply_progress: apply-progress.md
+phases:
+  proposal:
+    status: completed
+    artifact: proposal.md
+    completed_at: "2026-05-29T00:00:00Z"
+    provenance:
+      source: user request for Supermemory MCP-only redesign
+      created_by: deck-developer-proposal
+      note: "Created proposal for MCP-only Supermemory adaptive-memory redesign focused on individual user and project/repository scopes."
+  spec:
+    status: completed
+    artifact: spec.md
+    completed_at: "2026-05-29T00:00:00Z"
+    provenance:
+      source: proposal-redesign-supermemory-mcp-memory
+      created_by: deck-developer-spec
+      note: "Registry-deferred Spec completed with requirements and scenarios for Supermemory MCP-only adaptive-memory redesign."
+  spec-repair:
+    status: completed
+    artifact: spec.md
+    completed_at: "2026-05-29T18:00:00Z"
+    provenance:
+      source: user contract final redefinition — no container tags, token-only TUI, x-sm-project
+      created_by: deck-developer-task
+      note: "Spec repaired: replaced u:/p: container tag model with token-derived user identity and x-sm-project project scoping. Added REQ-SPM-006 (no container tags), REQ-SPM-007 (TUI token-only), REQ-APB-006 (prompts without container tags), REQ-OMC-006 (x-sm-project mandatory), REQ-ASR-004 (adapter without container tags). Resolved OQ-1."
+  design:
+    status: completed
+    artifact: design.md
+    completed_at: "2026-05-29T00:00:00Z"
+    provenance:
+      source: proposal-redesign-supermemory-mcp-memory plus Supermemory MCP docs/repo
+      created_by: deck-developer-design
+      note: "Registry-deferred Design completed with MCP-only architecture, provider selection, prompt binding, scoping, and fallback strategy."
+  design-repair:
+    status: completed
+    artifact: design.md
+    completed_at: "2026-05-29T18:00:00Z"
+    provenance:
+      source: user contract final redefinition
+      created_by: deck-developer-task
+      note: "Design repaired: scoping model updated to automatic (token→user, x-sm-project→project), container tags removed from data flow and state/persistence, TUI added to file impact, testing strategy updated."
+  tasks:
+    status: completed
+    artifact: tasks.md
+    completed_at: "2026-05-29T00:00:00Z"
+    provenance:
+      source: spec + design reconciliation for redesign-supermemory-mcp-memory
+      created_by: deck-developer-task
+      note: "10 atomic tasks across Shared/Contracts, Backend, and Tests groups. All open questions allowed-with-placeholder."
+  tasks-repair:
+    status: completed
+    artifact: tasks.md
+    completed_at: "2026-05-29T18:00:00Z"
+    provenance:
+      source: repaired spec + repaired design
+      created_by: deck-developer-task
+      note: "Repair tasks R1-R10 added. Original tasks 1-10 preserved as completed. R1-R10 cover: instruction bundle cleanup (R1), adapter containerTag removal (R2), TUI token-only (R3), x-sm-project mandatory (R4), registry metadata (R5), install cleanup (R6), and tests R7-R10."
+  apply:
+    status: completed
+    agent: mixed
+    note: "Apply completed: Tasks 1-10 finished across backend and general apply agents."
+    tasks:
+      task_1:
+        status: completed
+        title: "Reescribir adapter Supermemory como provider MCP-only"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T00:00:00Z"
+      task_2:
+        status: completed
+        title: "Actualizar instruction bundle de memoria adaptativa"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T12:00:00Z"
+      task_3:
+        status: completed
+        title: "Corregir provider selection en launch command"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T13:00:00Z"
+      task_4:
+        status: completed
+        title: "Actualizar runner-capability-registry metadata Supermemory"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T13:30:00Z"
+      task_5:
+        status: completed
+        title: "Actualizar escritor/validador MCP config"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T13:00:00Z"
+      task_6:
+        status: completed
+        title: "Actualizar developer-team-install para validación provider/tools"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T13:30:00Z"
+      task_7:
+        status: completed
+        title: "Actualizar prompt-generation para ordenamiento provider-specific"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T14:00:00Z"
+      task_8:
+        status: completed
+        title: "Tests unitarios del adapter Supermemory"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T15:00:00Z"
+      task_9:
+        status: completed
+        title: "Tests de launch + config MCP"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T15:30:00Z"
+      task_10:
+        status: completed
+        title: "Tests de prompt/instrucciones + regresión Engram"
+        artifact: apply-progress.md
+        completed_at: "2026-05-29T16:00:00Z"
+  repair:
+    status: completed
+    agent: mixed
+    note: "Repair completed: R1-R10 finished. Final contract is token-only Supermemory setup, automatic user identity from token, project/repository scope by x-sm-project, and no manual container tags."
+    tasks:
+      task_r1:
+        status: completed
+        title: "Eliminar container tags del instruction bundle"
+      task_r2:
+        status: completed
+        title: "Actualizar adapter para eliminar containerTag manual"
+      task_r3:
+        status: completed
+        title: "Reparar TUI a token-only"
+      task_r4:
+        status: completed
+        title: "MCP config x-sm-project obligatorio"
+      task_r5:
+        status: completed
+        title: "Registry metadata sin userId"
+      task_r6:
+        status: completed
+        title: "Install sin container tags"
+      task_r7:
+        status: completed
+        title: "Tests adapter sin container tags"
+      task_r8:
+        status: completed
+        title: "Tests prompt sin container tags"
+      task_r9:
+        status: completed
+        title: "Tests MCP config x-sm-project"
+      task_r10:
+        status: completed
+        title: "Test TUI token-only"
+      task_r11:
+        status: completed
+        title: "Eliminar userId guard en Review Plan preflight"
+      task_r12:
+        status: completed
+        title: "Actualizar mensaje input-handler a token-only"
+      task_r13:
+        status: completed
+        title: "Actualizar tests a contrato token-only"
+      task_r14:
+        status: completed
+        title: "Eliminar userId guard en capability-plan opencode"
+      task_r15:
+        status: completed
+        title: "Eliminar userId guard en capability-plan pi"
+      task_r16:
+        status: completed
+        title: "Eliminar userId guard en pi-launch-command"
+      task_r17:
+        status: completed
+        title: "Actualizar mensajes de diagnóstico capability-plan"
+  explore:
+    status: completed
+    artifact: exploration.md
+    completed_at: "2026-05-29T17:00:00Z"
+    provenance:
+      source: post-apply verification — user tested install, TUI still asks for teamId/orgId
+      created_by: deck-developer-explorer
+      note: "Post-apply exploration found TUI gaps. 8 gaps identified. Led to contract final redefinition and repair tasks R1-R10."
+  explore-2:
+    status: completed
+    artifact: exploration-2.md
+    completed_at: "2026-05-29T23:30:00Z"
+    provenance:
+      source: post-repair verification — TUI "Review & Install is blocked until Supermemory setup is complete" after token-only repair
+      created_by: deck-developer-explorer
+      note: "Found 5 residual guards still requiring userId in action-runner.ts, runner-dashboard-screens.tsx, input-handler.ts, and state.ts type divergence. buildDashboardSupermemorySetupUpdate no longer writes userId but guards still check it."
+  explore-3:
+    status: completed
+    artifact: exploration-3.md
+    completed_at: "2026-05-30T00:45:00Z"
+    provenance:
+      source: post-repair verification — explicit userId validation error
+      created_by: deck-developer-explorer
+      note: "Validated tmp logs and found core deck-config validation still requiring Supermemory userId."
+  explore-4:
+    status: completed
+    artifact: exploration-4.md
+    completed_at: "2026-05-30T02:00:00Z"
+    provenance:
+      source: post-hotfix verification — TUI stuck at personality-selection screen after Supermemory token-only repairs
+      created_by: deck-developer-explorer
+      note: "Root cause: data migration gap. SUPERMEMORY_FIELDS cleaned to token-only (3 fields) but existing .deck/config.json still has userId/teamId/orgId. readDeckConfig → assertKnownFields throws DECK_CONFIG_UNKNOWN_FIELD. catch block in personality-selection handler swallows error silently."
+registry:
+  created_at: "2026-05-29T00:00:00Z"
+  updated_at: "2026-05-30T19:00:00Z"
+  repair_additional:
+    status: completed
+    agent: frontend
+    note: "Hotfix repair additional completed. Removed userId requirement from Review & Install flow. Updated guards, messages, and tests to token-only contract."
+    tasks:
+      task_r11:
+        status: completed
+        title: "Eliminar userId guard en Review Plan preflight"
+      task_r12:
+        status: completed  
+        title: "Actualizar mensaje input-handler a token-only"
+      task_r13:
+        status: completed
+        title: "Actualizar tests a contrato token-only"
+  hotfix_stale_config_migration:
+    status: completed
+    agent: backend
+    note: "Hotfix stale config migration completed. Deprecated fields stripped on read, other unknown fields still fail. Debug logging added to personality-selection."
+    tasks:
+      task_r23:
+        status: completed
+        title: "Strip deprecated fields userId/teamId/orgId/projectId on read"
+      task_r24:
+        status: completed
+        title: "Add debug logging to personality-selection config catch"
+  hotfix_core_validation:
+    status: completed
+    agent: backend
+    note: "Hotfix core validation completed. Removed userId requirement from deck-config.ts normalization and resolution functions. Supermemory now token-only, no explicit userId required."
+    tasks:
+      task_r18:
+        status: completed
+        title: "Remover userId validation de deck-config.ts normalizeAdaptiveMemoryConfig"
+      task_r19:
+        status: completed
+        title: "Remover userId validation de deck-config.ts buildResolution"
+  repair_leak_fix:
+    status: completed
+    agent: general
+    note: "Provider leak fix completed. Added explicit provider fallback detection from MCP config, R25 prevents Engram leak in Supermemory prompts, R26 fixes x-sm-project legacy prefix."
+    tasks:
+      task_r25:
+        status: completed
+        title: "RQ-R25: Provider fallback desde MCP config cuando memoryBundle undefined"
+      task_r26:
+        status: completed
+        title: "RQ-R26: Corregir x-sm-project derivate sin prefijo legacy p:"
+  explore-5:
+    status: completed
+    artifact: exploration-5.md
+    completed_at: "2026-05-30T18:00:00Z"
+    provenance:
+      source: post-reinstall verification — x-sm-project written as sm-project- instead of sm_project_
+      created_by: deck-developer-explorer
+      note: "Confirmed bug in deriveSmProjectIdentifier regex /[^a-z0-9-]/g strips underscores from sm_project_ prefix. Line 231 opencode-mcp-config.ts. Authorization env interpolation correct. Single write path."
+  hotfix_sm_project_underscore:
+    status: completed
+    agent: backend
+    note: "Hotfix sm_project_ underscore completed. Regex fixed from /[^a-z0-9-]/g to /[^a-z0-9_-]/g to preserve sm_project_ prefix. Tests added."
+    tasks:
+      task_r27:
+        status: completed
+        title: "Corregir regex en deriveSmProjectIdentifier para preservar sm_project_ prefix"
+  cleanup_duplicate_adaptive_memory:
+    status: completed
+    agent: general
+    note: "Cleanup completed. Consolidated duplicate Adaptive Memory sections in orchestrator-content.ts. Instruction bundles remain authoritative. Tests updated and passing."
+    tasks:
+      task_r28:
+        status: completed
+        title: "Consolidar secciones Adaptive Memory duplicadas en orchestrator"
+  repair_final_no_tags:
+    status: completed
+    agent: general
+    note: "Final repair completed. Removed ALL literal u:, p:, t:, o: from adaptive-memory fragments. Tests updated with stricter validation. Build passes."
+    tasks:
+      task_r29:
+        status: completed
+        title: "Eliminar TODAS menciones literales de container tags de adaptive-memory.ts"
+      task_r30:
+        status: completed
+        title: "Actualizar tests con validación estricta para literals"
+  r31_tool_refs_fix:
+    status: completed
+    agent: general
+    note: "R31 fix completed. When activeMemoryProviderFromConfig is provided but memoryBundle=undefined, the prompt generation now auto-injects the default instruction bundle so prompts contain memory/recall tool references. Also added Provider sections to session surface fragment. Tests passing."
+    tasks:
+      task_r31:
+        status: completed
+        title: "Auto-inJECT instruction bundle cuando provider activo sin memoryBundle"
+  r32_heading_refs_fix:
+    status: completed
+    agent: general
+    note: "R32 fix completed. Removed duplicate ## Adaptive Memory headings from instruction bundle fragments (compositor adds section). Replaced bold tool refs (**memory**, **recall**) with exact backticks. Removed static Adaptive Memory section from orchestrator-content.ts. Build passes."
+    tasks:
+      task_r32:
+        status: completed
+        title: "Eliminar headings duplicados y refs sin backticks"
+  verify_fix:
+    status: completed
+    agent: backend
+    note: "Verify blocker fixes completed. 1) Added URL validation to validateSupermemoryOpenCodeMcpConfig per REQ-OMC-004 (accepts mcp.supermemory.ai/mcp, rejects deprecated/custom URLs). 2) Fixed prompt-generation test to check backticks instead of bold refs. 3) Removed non-exported function import from opencode-mcp-config test. Targeted tests now 149 pass (vs 145/4 fail)."
+    tasks:
+      task_vf1:
+        status: completed
+        title: "Fix URL validation in validateSupermemoryOpenCodeMcpConfig"
+      task_vf2:
+        status: completed
+        title: "Fix prompt-generation test backticks verification"
+      task_vf3:
+        status: completed
+        title: "Fix opencode-mcp-config test non-exported import"
+  verify:
+    status: passed
+    artifact: verify-report.md
+    completed_at: "2026-05-30T23:00:00Z"
+    provenance:
+      source: re-run verify after verify_fix
+      created_by: deck-developer-verify
+      note: "Verify passed with warnings: targeted tests 149/0 pass, build dry-run pass, real OpenCode install pass; global typecheck remains out-of-scope baseline warning."
+  review:
+    status: approved
+    artifact: review-report.md
+    completed_at: "2026-05-30T22:00:00Z"
+    provenance:
+      source: review after apply completion
+      created_by: deck-developer-review
+      note: "Review approved with no blockers or major findings."

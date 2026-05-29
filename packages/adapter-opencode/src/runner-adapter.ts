@@ -251,9 +251,6 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
         supermemory: state.adaptiveMemory.supermemory ? {
           configured: state.adaptiveMemory.supermemory.configured,
           hasToken: state.adaptiveMemory.supermemory.hasToken,
-          userId: state.adaptiveMemory.supermemory.userId,
-          teamId: state.adaptiveMemory.supermemory.teamId,
-          organizationId: state.adaptiveMemory.supermemory.organizationId,
         } : undefined,
       } : undefined,
       teams: state.teams as Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }> | undefined,

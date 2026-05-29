@@ -62,7 +62,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
     });
 
     const diagnostics = getPiRunnerReviewPlanRunBlockDiagnostics(state);
-    expect(diagnostics.join(" ")).toContain("userId");
+    expect(diagnostics.join(" ")).not.toContain("userId");
     expect(diagnostics.join(" ")).not.toContain(TOKEN_SENTINEL);
 
     const writes: NormalizedDeckConfig[] = [];
@@ -86,19 +86,16 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
   test("dashboard Supermemory setup stores only ephemeral/redacted state and does not call Pi MCP writer before Run", () => {
     const setup = buildDashboardSupermemorySetupUpdate({
       token: TOKEN_SENTINEL,
-      userId: "user-1",
-      teamId: "team-1",
-      orgId: "org-1",
     });
 
-    expect(setup.ok).toBe(true);
+expect(setup.ok).toBe(true);
     if (!setup.ok) return;
     expect(setup.values).toMatchObject({
       configured: true,
       hasToken: true,
-      userId: "user-1",
-      teamId: "team-1",
-      organizationId: "org-1",
+      diagnostics: [
+        "Supermemory token captured ephemerally for Review & Install; no Pi MCP config was written yet."
+      ],
     });
     expect(JSON.stringify(setup)).not.toContain(TOKEN_SENTINEL);
     expect(setup.values.diagnostics.join(" ")).toContain("no Pi MCP config was written yet");

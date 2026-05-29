@@ -54,25 +54,35 @@ function countSaveTriggerMatrix(markdown: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Per-surface content expectations
+// Repair Contract (2026-05-29): NO container tags
+// All memory saves are plain content. Scoping is automatic.
 // ---------------------------------------------------------------------------
+
+/**
+ * REQ-R8-001: Prompts must NOT contain container tag instructions like u:, p:, t:, o:
+ * as prefixes for scoping. They should say to save memories as plain content.
+ */
+const NO_CONTAINER_TAG_INSTRUCTIONS = [
+  "DO NOT use container tags",
+  "Save memories as plain content",
+  "Scoping is automatic",
+];
+
+/**
+ * REQ-R8-002: Prompts must mention automatic scoping.
+ */
+const SCOPING_AUTOMATIC_INSTRUCTIONS = [
+  "Automatic Scoping",
+  "Derived from your Supermemory token",
+  "x-sm-project header",
+];
 
 /**
  * Rules shared across ALL surfaces (agent, session, skill).
  * These existed before the change and must remain after.
  */
 const ALL_SURFACES_MUST_PRESERVE = [
-  // Container tag conventions
-  "`u:`",
-  "User — personal learnings",
-  "`t:`",
-  "Team — team conventions",
-  "`o:`",
-  "Organization — org-wide standards",
-  "`p:`",
-  "Project — project-specific",
-
-  // Core adaptive memory config
+  // Core adaptive memory config (must preserve)
   "Adaptive memory is provided by the runner's configured memory system",
   "The active provider injects its tool instructions into agent prompts",
 
@@ -113,7 +123,6 @@ const ALL_SURFACES_MUST_PRESERVE = [
  */
 const AGENT_ONLY_MUST_PRESERVE = [
   // These sections are only in agent surface
-  "### Topic Keys", // Skill has "### Suggested Topic Keys" but not standalone "### Topic Keys"
   "reuse the same topic key",
   "### Session Limit",
   "Soft maximum of 7 memories",
@@ -126,8 +135,8 @@ const AGENT_SKILL_ONLY_MUST_PRESERVE = [
   // Provider sections — these exist only in agent and skill, not session
   "Provider: Supermemory",
   "Provider: Engram",
-  "supermemory_memory",
-  "supermemory_recall",
+  "memory",
+  "recall",
 
   // Detailed sections that session doesn't have (but agent/skill differ slightly)
   "### When to Save",
@@ -144,13 +153,89 @@ const AGENT_SKILL_ONLY_MUST_PRESERVE = [
 ];
 
 // ---------------------------------------------------------------------------
-// Tests
+// REQ-R8: Tests for repair contract
 // ---------------------------------------------------------------------------
 
-describe("buildAdaptiveMemoryInstructionBundle", () => {
+describe("buildAdaptiveMemoryInstructionBundle repair contract (REQ-R8)", () => {
   const bundle = buildAdaptiveMemoryInstructionBundle();
-
   const surfaces: CapabilityInstructionSurface[] = ["agent", "session", "skill"];
+
+  // -------------------------------------------------------------------------
+  // REQ-R8-001: No container tags in prompts
+  // -------------------------------------------------------------------------
+
+  describe("NO container tag literals (REQ-R8-001)", () => {
+    for (const surface of surfaces) {
+      test(`${surface} surface does NOT contain container tag literals`, () => {
+        const fragment = bundle.instructions.find((f) => f.surface === surface);
+        expect(fragment).toBeDefined();
+
+        const md = fragment!.markdown;
+
+        // Positive check: mentions plain content save (case insensitive)
+        const containsPlainContent = md.toLowerCase().includes("save memories as plain content");
+        expect(containsPlainContent).toBe(true);
+
+        // CRITICAL: explicitly DO NOT contain literals u:, p:, t:, o: anywhere
+        // The literals "u:", "p:", etc. should NOT appear anywhere in prompts
+        expect(md).not.toMatch(/\b`u:`/);  // inline code form
+        expect(md).not.toMatch(/\b`p:`/);  // inline code form
+        expect(md).not.toMatch(/\b`t:`/);  // inline code form
+        expect(md).not.toMatch(/\b`o:`/); // inline code form
+
+        // Also check pipe-table form if present
+        expect(md).not.toMatch(/\|\s*`u:`\s*\|/);
+        expect(md).not.toMatch(/\|\s*`p:`\s*\|/);
+        expect(md).not.toMatch(/\|\s*`t:`\s*\|/);
+        expect(md).not.toMatch(/\|\s*`o:`\s*\|/);
+
+        // Check that tool calls do NOT include containerTag parameter
+        expect(md).not.toMatch(/containerTag\?:\s*string/);
+      });
+    }
+
+    test("agent surface says memories are saved as plain content", () => {
+      const fragment = bundle.instructions.find((f) => f.surface === "agent");
+      expect(fragment).toBeDefined();
+      expect(fragment!.markdown).toContain("Save memories as plain content");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // REQ-R8-002: Automatic scoping mentioned
+  // -------------------------------------------------------------------------
+
+  describe("Automatic scoping (REQ-R8-002)", () => {
+    for (const surface of surfaces) {
+      test(`${surface} surface mentions automatic scoping`, () => {
+        const fragment = bundle.instructions.find((f) => f.surface === surface);
+        expect(fragment).toBeDefined();
+
+        const md = fragment!.markdown;
+
+        // At least one of the automatic scoping instructions should be present
+        const hasScopingMention = SCOPING_AUTOMATIC_INSTRUCTIONS.some((instruction) =>
+          md.includes(instruction)
+        );
+        expect(hasScopingMention).toBe(true);
+      });
+    }
+
+    test("agent surface explains user scope from token", () => {
+      const fragment = bundle.instructions.find((f) => f.surface === "agent");
+      expect(fragment).toBeDefined();
+      const md = fragment!.markdown;
+      expect(md).toContain("Derived from your Supermemory token");
+      expect(md).toContain("no userId needed");
+    });
+
+    test("agent surface explains project scope from x-sm-project", () => {
+      const fragment = bundle.instructions.find((f) => f.surface === "agent");
+      expect(fragment).toBeDefined();
+      const md = fragment!.markdown;
+      expect(md).toContain("x-sm-project");
+    });
+  });
 
   // -------------------------------------------------------------------------
   // REQ-AMI-001: Decision Examples section with ≥5 entries per surface
@@ -253,7 +338,7 @@ describe("buildAdaptiveMemoryInstructionBundle", () => {
   });
 
   // -------------------------------------------------------------------------
-  // REQ-AMI-004: No existing rule text is missing or contradicted
+  // REQ-AMI-004: No existing rule text is missing or contradicted (OpenSpec hierarchy + fail-open preserved)
   // -------------------------------------------------------------------------
 
   describe("backward compatibility (REQ-AMI-004)", () => {
@@ -324,22 +409,42 @@ describe("buildAdaptiveMemoryInstructionBundle", () => {
       expect(skill).toBeDefined();
       expect(session).toBeDefined();
 
-      // Agent and skill have Provider sections
+      // FIX(R31): Session NOW HAS Provider sections (required for orchestrator tool references)
+      expect(session!.markdown).toContain("Provider: Supermemory");
+      expect(session!.markdown).toContain("Provider: Engram");
+      expect(session!.markdown).toContain("memory");
+      expect(session!.markdown).toContain("recall");
+
+      // Agent and skill have Provider sections (unchanged)
       expect(agent!.markdown).toContain("Provider: Supermemory");
       expect(agent!.markdown).toContain("Provider: Engram");
-      expect(agent!.markdown).toContain("supermemory_memory");
-      expect(agent!.markdown).toContain("supermemory_recall");
+      expect(agent!.markdown).toContain("memory");
+      expect(agent!.markdown).toContain("recall");
 
       expect(skill!.markdown).toContain("Provider: Supermemory");
       expect(skill!.markdown).toContain("Provider: Engram");
-      expect(skill!.markdown).toContain("supermemory_memory");
-      expect(skill!.markdown).toContain("supermemory_recall");
+      expect(skill!.markdown).toContain("memory");
+      expect(skill!.markdown).toContain("recall");
+    });
 
-      // Session does NOT have Provider sections
-      expect(session!.markdown).not.toContain("Provider: Supermemory");
-      expect(session!.markdown).not.toContain("Provider: Engram");
-      expect(session!.markdown).not.toContain("supermemory_memory");
-      expect(session!.markdown).not.toContain("supermemory_recall");
+    test("OpenSpec hierarchy (OFFICIAL CONTEXT) is preserved", () => {
+      const agent = bundle.instructions.find((f) => f.surface === "agent");
+      expect(agent).toBeDefined();
+
+      const md = agent!.markdown;
+      expect(md).toContain("OPENSPEC IS OFFICIAL CONTEXT");
+      expect(md).toContain("ADAPTIVE MEMORY IS ADVISORY");
+      expect(md).toContain("OpenSpec artifact wins");
+    });
+
+    test("Fail-open is preserved", () => {
+      const agent = bundle.instructions.find((f) => f.surface === "agent");
+      expect(agent).toBeDefined();
+
+      const md = agent!.markdown;
+      expect(md).toContain("Fail-Open");
+      expect(md).toContain("continue working normally");
+      expect(md).toContain("Never block agent work");
     });
   });
 });

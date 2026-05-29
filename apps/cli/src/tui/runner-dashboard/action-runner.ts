@@ -107,7 +107,6 @@ export function getRunnerReviewPlanRunBlockDiagnostics(
   const setup = state.adaptiveMemory.supermemory;
   const diagnostics: string[] = [];
   if (!setup?.configured) diagnostics.push("Supermemory setup is not configured for Review & Install.");
-  if (!setup?.userId) diagnostics.push("Supermemory userId is required before Review & Install.");
   if (!setup?.hasToken) diagnostics.push("Supermemory token must be provided ephemerally for Review & Install.");
   if (setup?.hasToken && !options.supermemoryToken?.trim()) diagnostics.push("Supermemory credential was marked ready but the ephemeral credential is no longer available; re-enter setup before Review & Install.");
   diagnostics.push(...(setup?.diagnostics ?? []).filter(isBlockingSetupDiagnostic));
@@ -408,11 +407,7 @@ function writeDeckConfigAction(
     adaptiveMemory: provider === "supermemory"
       ? {
           activeProvider: "supermemory" as const,
-          supermemory: {
-            userId: supermemory?.userId,
-            teamId: supermemory?.teamId,
-            orgId: supermemory?.organizationId,
-          },
+          supermemory: {},
         }
       : provider === "engram"
         ? { activeProvider: "engram" as const }
@@ -680,12 +675,12 @@ function resolveMemoryProviderAfterConfigWrite(
 
   if (state.adaptiveMemory.provider === "supermemory") {
     const setup = state.adaptiveMemory.supermemory;
-    if (!setup?.configured || !setup?.userId) {
+    if (!setup?.configured) {
       return {
         blocker: {
           actionId: "adaptive-memory.supermemory.resolve",
           status: "failed",
-          message: "Supermemory userId and configuration are required before team bundle installation.",
+          message: "Supermemory configuration is required before team bundle installation.",
           diagnostics: ["Supermemory setup is incomplete."],
         },
       };

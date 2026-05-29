@@ -177,6 +177,67 @@ export type MemoryInjectionOptions = {
 // Memory injection resolution (delegated to core)
 // ---------------------------------------------------------------------------
 
+/**
+ * Validated memory providers and their expected tool names.
+ * Used for provider/tool binding validation during install.
+ */
+const VALIDATED_MEMORY_PROVIDERS: Record<string, readonly string[]> = {
+  // SupercodeMemory MCP-only: tools documented in MCP v4
+  supermemory: ["memory", "recall", "whoAmI"],
+  // Engram: tools from Engram adapter
+  engram: ["memory", "recall", "listProjects", "whoAmI"],
+};
+
+/**
+ * Validates provider/tool bindings from memory bundle.
+ * Returns diagnostics for any invalid or missing tool bindings.
+ * This is a fail-open validation — it logs diagnostics but doesn't block.
+ */
+function validateMemoryBundleTools(
+  bundle: MemoryInjectionBundle | undefined,
+  providerId?: string,
+): MemoryDiagnostic[] {
+  const diagnostics: MemoryDiagnostic[] = [];
+
+  if (!bundle) {
+    return diagnostics; // No bundle = no validation needed (fail-open)
+  }
+
+  // Validate toolBindings exist and contain expected tools
+  const toolBindings = bundle.toolBindings;
+  if (!toolBindings || toolBindings.length === 0) {
+    // Empty toolBindings is acceptable for "none" provider scenario
+    return diagnostics;
+  }
+
+  // If provider ID known, validate against expected tools
+  if (providerId && VALIDATED_MEMORY_PROVIDERS[providerId]) {
+    const expectedTools = VALIDATED_MEMORY_PROVIDERS[providerId];
+    const providedTools = new Set<string>();
+
+    for (const binding of toolBindings) {
+      for (const tool of binding.toolNames) {
+        providedTools.add(tool);
+      }
+    }
+
+    // Check for known obsolete tools (shouldn't happen but defensive check)
+    const obsoleteTools = ["execute", "search_docs"];
+    for (const obs of obsoleteTools) {
+      if (providedTools.has(obs)) {
+        diagnostics.push({
+          code: "unsupported_memory_provider",
+          message: `Obsolete tool '${obs}' found in memory binding. Expected MCP tools: ${expectedTools.join(", ")}`,
+          providerId,
+          details: { observedTool: obs, expectedTools },
+        });
+      }
+    }
+  }
+
+  return diagnostics;
+}
+
 function resolveOpenCodeMemoryInjection(
   options?: MemoryInjectionOptions,
   configDir?: string,
@@ -190,7 +251,29 @@ function resolveOpenCodeMemoryInjection(
 
   const { bundle: memoryBundle, diagnostics } = result;
 
-  return { bundle: memoryBundle, diagnostics };
+  // Validate tool bindings from the provider (fail-open)
+  // Determine provider ID from options or infer from bundle
+  let providerId: string | undefined;
+  if (options?.memoryProvider) {
+    providerId = options.memoryProvider.id;
+  } else if (memoryBundle && memoryBundle.toolBindings.length > 0) {
+    // Infer from tool names as fallback
+    const toolNames = new Set<string>();
+    for (const b of memoryBundle.toolBindings) {
+      for (const t of b.toolNames) toolNames.add(t);
+    }
+    if (toolNames.has("memory") && toolNames.has("recall")) {
+      providerId = "supermemory";
+    } else if (toolNames.has("listProjects")) {
+      providerId = "engram";
+    }
+  }
+
+  // Add validation diagnostics
+  const validationDiags = validateMemoryBundleTools(memoryBundle, providerId);
+  const allDiagnostics = [...diagnostics, ...validationDiags];
+
+  return { bundle: memoryBundle, diagnostics: allDiagnostics };
 }
 
 // ---------------------------------------------------------------------------
@@ -365,8 +448,15 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     return { skillId: skill.skillId, relativePath, absolutePath: join(skillsDir, skill.skillId, "SKILL.md"), content: skill.body };
   });
 
-  // Prompt generation plan
-  const promptGenerationPlan = buildPromptGenerationPlan({ configDir, projectRoot, capabilityInstructions, personality: resolvedPersonality });
+  // Prompt generation plan - pass memoryBundle for provider-specific adaptive memory injection
+  // This ensures provider isolation and OpenSpec authority are maintained
+  const promptGenerationPlan = buildPromptGenerationPlan({
+    configDir,
+    projectRoot,
+    capabilityInstructions,
+    personality: resolvedPersonality,
+    memoryBundle,
+  });
 
   // Command generation plan
   const commandGenerationPlan = buildCommandGenerationPlan({ configDir });

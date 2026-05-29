@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 
 export const SUPERMEMORY_MCP_SERVER_NAME = "supermemory";
 export const SUPERMEMORY_MCP_URL = "https://mcp.supermemory.ai/mcp";
@@ -104,6 +105,32 @@ export function validateSupermemoryOpenCodeMcpConfig(
     };
   }
 
+  // Validate URL: reject deprecated/custom URLs (REQ-OMC-004)
+  const trimmedUrl = url.trim().toLowerCase();
+  const validUrls = ["https://mcp.supermemory.ai/mcp"];
+  const deprecatedUrls = [
+    "https://supermemory-new.stlmcp.com",
+    "https://supermemory.stlmcp.com",
+  ];
+
+  if (validUrls.includes(trimmedUrl)) {
+    // Valid URL - proceed
+  } else if (deprecatedUrls.includes(trimmedUrl)) {
+    return {
+      ok: false,
+      path: configPath,
+      serverName,
+      diagnostics: [`OpenCode MCP server '${serverName}' uses deprecated URL; please use '${SUPERMEMORY_MCP_URL}' instead.`],
+    };
+  } else {
+    return {
+      ok: false,
+      path: configPath,
+      serverName,
+      diagnostics: [`OpenCode MCP server '${serverName}' uses unrecognized URL; expected '${SUPERMEMORY_MCP_URL}'.`],
+    };
+  }
+
   const headers = (serverEntry as Record<string, unknown>).headers;
   if (!isPlainRecord(headers)) {
     return {
@@ -197,25 +224,60 @@ export function appendSupermemoryEnvToShellConfig(
 }
 
 /**
+ * Derives a project identifier from git remote URL or cwd path.
+ * CONTRACT: Always returns x-sm-project (required).
+ *
+ * REQ-R26 (2026-05-29): NO legacy p: prefix. Use project-compatible format:
+ * - From git remote: sm_project_{org}-{repo} (e.g., "gentleman-programming-deck")
+ * - Fallback to directory: sm_project_{sanitized-dirname}
+ * - For explicit override, use value directly (e.g., "my-custom-project" NOT "p:my-custom-project")
+ */
+function deriveSmProjectIdentifier(cwd?: string): { projectId: string; derived: boolean; diagnostic?: string } {
+  const workDir = cwd ?? process.cwd();
+
+  // Try to get git remote URL
+  try {
+    const remoteUrl = execSync("git remote get-url origin", {
+      cwd: workDir,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "ignore"],
+    }).trim();
+
+    if (remoteUrl) {
+      // Normalize: extract org/repo from various git URL formats
+      let normalized = remoteUrl
+        .replace(/^.*github\.com[/:]/, "")
+        .replace(/\.git$/, "")
+        .replace(/^:/, "");
+
+      const parts = normalized.split("/");
+      if (parts.length >= 2) {
+        // REQ-R26: Use sm_project_ prefix, NOT legacy p:
+        // e.g., "gentleman-programming-deck" -> "sm_project_gentleman-programming-deck"
+        const projectId = `sm_project_${parts[0]}-${parts[1]}`.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+        return { projectId, derived: true };
+      }
+    }
+  } catch {
+    // Ignore - will fall back to path-based derivation
+  }
+
+  // Fall back to directory name
+  // REQ-R26: Allow underscore in project names (sm_project_<name>)
+  const dirName = workDir.split(/[/\\]/).pop()?.toLowerCase().replace(/[^a-z0-9_]/g, "-") || "unknown";
+  // REQ-R26: Use sm_project_ prefix, NOT legacy p:
+  const diagnostic = `Could not derive x-sm-project from git remote; using directory name '${dirName}'.`;
+  return { projectId: `sm_project_${dirName}`, derived: false, diagnostic };
+}
+
+/**
  * Writes or updates the Supermemory MCP server config in OpenCode's opencode.json.
  *
- * OpenCode MCP format (remote) with Bearer token via env var interpolation:
- *   {
- *     "mcp": {
- *       "supermemory": {
- *         "type": "remote",
- *         "url": "https://mcp.supermemory.ai/mcp",
- *         "oauth": false,
- *         "headers": {
- *           "Authorization": "Bearer {env:SUPERMEMORY_API_KEY}"
- *         }
- *       }
- *     }
- *   }
- *
- * The token is written using OpenCode's env var interpolation syntax {env:VAR_NAME}
- * so OpenCode resolves it at runtime from the SUPERMEMORY_API_KEY environment variable.
- * The token value itself is NOT stored in opencode.json — only the interpolation reference.
+ * CONTRACT (Repair 2026-05-29):
+ * - x-sm-project header is REQUIRED (derived from git remote or fallback to directory)
+ * - User identity comes from token (not userId)
+ * - No manual container tags
+ * - NO legacy p: prefix in x-sm-project (use sm_project_ prefix)
  */
 export function writeSupermemoryOpenCodeMcpConfig(
   options: {
@@ -223,6 +285,11 @@ export function writeSupermemoryOpenCodeMcpConfig(
     serverName?: string;
     configPath?: string;
     homeDir?: string;
+    /**
+     * Optional explicit project ID override for x-sm-project.
+     * REQ-R26: Use value directly WITHOUT p: prefix (e.g., "my-project" NOT "p:my-project")
+     */
+    explicitProjectId?: string;
   },
 ): WriteSupermemoryOpenCodeMcpConfigResult {
   const homeDir = options.homeDir ?? process.env.HOME ?? "/home/user";
@@ -237,9 +304,19 @@ export function writeSupermemoryOpenCodeMcpConfig(
     return { ok: false, path: configPath, serverName, diagnostics };
   }
 
-  // Token is written using OpenCode's env var interpolation syntax.
-  // OpenCode resolves {env:SUPERMEMORY_API_KEY} at runtime from the environment.
-  // The raw token value is never stored in opencode.json.
+  // REQ-R26: Determine x-sm-project value
+  let smProjectHeader: string;
+  if (options.explicitProjectId !== undefined && options.explicitProjectId.trim() !== "") {
+    // Use explicit override value directly (NO p: prefix)
+    smProjectHeader = options.explicitProjectId.trim();
+  } else {
+    // Derive from git remote or directory (NO p: prefix)
+    const projectDerivation = deriveSmProjectIdentifier();
+    if (projectDerivation.diagnostic) {
+      diagnostics.push(projectDerivation.diagnostic);
+    }
+    smProjectHeader = projectDerivation.projectId;
+  }
 
   let config: Record<string, unknown> = {};
   if (existsSync(configPath)) {
@@ -254,12 +331,14 @@ export function writeSupermemoryOpenCodeMcpConfig(
 
   const mcpSection = (config.mcp ?? {}) as Record<string, unknown>;
 
+  // ALWAYS include x-sm-project header (REQUIRED per contract)
   mcpSection[serverName] = {
     type: "remote",
     url: SUPERMEMORY_MCP_URL,
     oauth: false,
     headers: {
       Authorization: `Bearer {env:SUPERMEMORY_API_KEY}`,
+      "x-sm-project": smProjectHeader,
     },
     enabled: true,
   };

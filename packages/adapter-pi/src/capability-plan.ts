@@ -288,7 +288,7 @@ function addAdaptiveMemoryActions(
   }
 
   const supermemory = state.adaptiveMemory?.supermemory;
-  const configured = Boolean(supermemory?.configured && supermemory.userId);
+  const configured = Boolean(supermemory?.configured);
   const hasToken = Boolean(supermemory?.hasToken);
   const supermemoryReady = configured && hasToken;
   groups.configWrites.push({
@@ -322,7 +322,7 @@ function addAdaptiveMemoryActions(
     severity: supermemoryReady ? "info" : "warning",
     message: supermemoryReady
       ? "Supermemory uses config/validation/provider handoff only; no package install action is generated."
-      : "Supermemory requires non-secret userId config plus Pi MCP token handoff before provider injection; no package install action is generated.",
+      : "Supermemory requires token configuration before provider injection; no package install action is generated.",
     actionId: "adaptive-memory.supermemory.deck-config",
   });
 }

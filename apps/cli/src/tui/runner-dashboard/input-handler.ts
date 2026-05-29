@@ -111,7 +111,7 @@ export function getDashboardContinueEffect(
       if (!options.canRunPlan) {
         return {
           type: "block-review-install",
-          status: "Supermemory requires userId and ephemeral token captured before executing Review & Install.",
+          status: "Supermemory requires token captured before executing Review & Install.",
         };
       }
       return { type: "dispatch", action: { type: "start-install" } };

@@ -5,10 +5,7 @@
     "supermemory": {
       "mcpServerName": "supermemory",
       "searchMode": "memories",
-      "maxMemoriesPerSession": 7,
-      "userId": "kevin",
-      "teamId": "developer",
-      "orgId": "GCO"
+      "maxMemoriesPerSession": 7
     }
   },
   "packageInstructions": {

@@ -7,14 +7,20 @@
  * The adapter only formats for OpenCode's agent-prompt file convention.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import { getAgentContent, getTeamSessionInstructions } from "@deck/core/teams/developer/content-registry";
+import { buildAdaptiveMemoryInstructionBundle } from "../../core/src/teams/developer/instruction-bundles/adaptive-memory";
 import type { CapabilityInstructionBundle } from "@deck/core";
 import { type OrchestratorPersonality } from "@deck/core/config/deck-config";
+import { type MemoryInjectionBundle, ADAPTIVE_MEMORY_SECTION_HEADING, ADAPTIVE_MEMORY_AUXILIARY_POLICY } from "@deck/core/memory/adaptive-memory";
+
+// Provider IDs for isolation - ensure prompts don't mix tools from different providers
+const VALID_SUPERMEMORY_TOOL_NAMES = ["memory", "recall", "whoAmI"];
+const VALID_ENGRAM_TOOL_NAMES = ["mem_save", "mem_recall", "mem_context", "mem_search", "mem_get_observation"];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +39,14 @@ export type GeneratePromptFilesOptions = {
   capabilityInstructions?: CapabilityInstructionBundle;
   /** Optional orchestrator personality for session prompt selection. */
   personality?: OrchestratorPersonality;
+  /** Optional memory injection bundle for provider-specific instructions (supermemory/engram). */
+  memoryBundle?: MemoryInjectionBundle;
+  /**
+   * Detected active memory provider from MCP config.
+   * Used for provider filtering when memoryBundle is undefined (REQ-R25).
+   * Pass "supermemory" or "engram" if MCP config has Supermemory server enabled.
+   */
+  activeMemoryProviderFromConfig?: "supermemory" | "engram";
   /** Override writeFile for DI in tests */
   writeFile?: (path: string, content: string, encoding: "utf-8") => void;
   /** Override mkdir for DI in tests */
@@ -71,15 +85,174 @@ function buildSkillLoadingGate(skillId: string, skillPath: string): string {
   ].join("\n");
 }
 
+/**
+ * Determine the active memory provider from tool bindings or explicit config.
+ * Returns "supermemory" or "engram" based on the tools present or explicit config.
+ *
+ * REQ-R25 (2026-05-29): When memoryBundle is undefined but MCP config has Supermemory
+ * enabled, use the explicit provider for filtering to prevent Engram leak.
+ *
+ * R31 FIX: When explicitProvider is provided, prioritize it over bundle.toolBindings check.
+ * This ensures provider detection works when we're injecting the default instruction bundle
+ * (which has NO toolBindings) but the provider is known from config.
+ */
+function determineActiveProvider(
+  bundle: MemoryInjectionBundle | undefined,
+  explicitProvider?: "supermemory" | "engram",
+): "supermemory" | "engram" | "unknown" {
+  // R31 FIX: Priority is explicitProvider > bundle.tools check
+  if (explicitProvider === "supermemory" || explicitProvider === "engram") {
+    return explicitProvider;
+  }
+
+  if (!bundle || bundle.toolBindings.length === 0) {
+    return "unknown";
+  }
+
+  // Collect all tool names from bindings
+  const toolNames = new Set<string>();
+  for (const binding of bundle.toolBindings) {
+    for (const tool of binding.toolNames) {
+      toolNames.add(tool);
+    }
+  }
+
+  // Supermemory has memory + recall (Engram has listProjects)
+  if (toolNames.has("memory") && toolNames.has("recall") && !toolNames.has("listProjects")) {
+    return "supermemory";
+  }
+  if (toolNames.has("listProjects") || toolNames.has("mem_save")) {
+    return "engram";
+  }
+
+  // Fallback: assume Supermemory if memory+recall present
+  if (toolNames.has("memory") && toolNames.has("recall")) {
+    return "supermemory";
+  }
+
+  return "unknown";
+}
+
+/**
+ * Filter markdown content to exclude the inactive provider section.
+ * Removes "### Provider: {otherProvider}" section and its content.
+ *
+ * Uses simple line-based filtering for robustness:
+ * - Find line starting with "### Provider: {inactive}"
+ * - Remove that line and all following lines until next "### " or "## " or end
+ */
+function filterProviderSections(
+  markdown: string,
+  activeProvider: "supermemory" | "engram" | "unknown",
+): string {
+  if (activeProvider === "unknown") {
+    return markdown;
+  }
+
+  const inactiveProvider = activeProvider === "supermemory" ? "engram" : "supermemory";
+
+  // Split into lines for easier processing
+  const lines = markdown.split("\n");
+  const filteredLines: string[] = [];
+  let skipping = false;
+
+  for (const line of lines) {
+    // Check if this line starts the inactive provider section (case-insensitive)
+    if (line.trim().toLowerCase() === `### provider: ${inactiveProvider}`.toLowerCase()) {
+      skipping = true;
+      continue;
+    }
+
+    // If we're skipping and hit a new section heading (### or ##), stop skipping
+    if (skipping && (line.startsWith("### ") || line.startsWith("## "))) {
+      skipping = false;
+    }
+
+    if (!skipping) {
+      filteredLines.push(line);
+    }
+  }
+
+  return filteredLines.join("\n").trim();
+}
+
+/**
+ * Filter tool bindings to only include validated tools for the active provider.
+ * This prevents cross-contamination between providers (e.g., Engram shouldn't receive Supermemory tools).
+ */
+function filterToolBindingsByProvider(
+  bundle: MemoryInjectionBundle,
+  providerId: string,
+): MemoryInjectionBundle["toolBindings"] {
+  const validToolNames =
+    providerId === "supermemory" ? VALID_SUPERMEMORY_TOOL_NAMES : VALID_ENGRAM_TOOL_NAMES;
+
+  return bundle.toolBindings.filter((binding) =>
+    binding.toolNames.every((toolName) => validToolNames.includes(toolName)),
+  );
+}
+
+/**
+ * Build provider-specific adaptive memory content section.
+ * Ensures provider isolation by excluding the inactive provider's section.
+ * REQ-R25 (2026-05-29): Active provider determines which section appears.
+ */
+function buildProviderAdaptiveMemorySection(
+  bundle: MemoryInjectionBundle | undefined,
+  surface: "session" | "agent" | "skill",
+  explicitProvider?: "supermemory" | "engram",
+): string {
+  if (!bundle || bundle.instructions.length === 0) {
+    return "";
+  }
+
+  // Determine active provider from explicit config or tool bindings
+  const activeProvider = determineActiveProvider(bundle, explicitProvider);
+
+  // Filter fragments by surface context
+  const matchingFragments = bundle.instructions.filter(
+    (fragment) => fragment.surface === surface,
+  );
+
+  if (matchingFragments.length === 0) {
+    return "";
+  }
+
+  // Filter markdown content to exclude inactive provider section
+  const filteredMarkdown = matchingFragments.map((fragment) => ({
+    ...fragment,
+    markdown: filterProviderSections(fragment.markdown, activeProvider),
+  }));
+
+  // Build the adaptive memory section with explicit hierarchy
+  const adaptiveSection = [
+    ADAPTIVE_MEMORY_SECTION_HEADING,
+    "",
+    ADAPTIVE_MEMORY_AUXILIARY_POLICY,
+    "",
+    ...filteredMarkdown.flatMap((fragment) => [fragment.markdown.trim(), ""]),
+  ]
+    .join("\n")
+    .trimEnd();
+
+  return `\n\n---\n\n${adaptiveSection}\n`;
+}
+
 // ---------------------------------------------------------------------------
 // Prompt content builder using core content registry
 // ---------------------------------------------------------------------------
 
+/**
+ * Build prompt content with optional explicit provider for filtering.
+ * REQ-R25 (2026-05-29): explicitProvider enables filtering even when memoryBundle is undefined.
+ */
 function buildPromptContent(
   agent: DeveloperTeamAgent,
   skillPath: string,
   capabilityInstructions: CapabilityInstructionBundle | undefined,
   personality: OrchestratorPersonality | undefined,
+  memoryBundle?: MemoryInjectionBundle,
+  explicitProvider?: "supermemory" | "engram",
 ): string {
   const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions, personality } : { personality });
   if (!content) {
@@ -92,13 +265,15 @@ function buildPromptContent(
       content.agentBody)
     : content.agentBody;
 
+  // Determine surface for memory injection
+  const memorySurface = agent.id === "deck-developer-orchestrator" ? "session" : "agent";
+  const providerMemoryContent = buildProviderAdaptiveMemorySection(memoryBundle, memorySurface, explicitProvider);
+
   // Prepend the Skill Loading Gate
   const skillLoadingGate = buildSkillLoadingGate(agent.skillId, skillPath);
 
-  return [
-    skillLoadingGate,
-    baseContent,
-    "",
+  // Append skill reference
+  const skillReference = [
     "---",
     "",
     "## Skill Reference",
@@ -106,22 +281,102 @@ function buildPromptContent(
     `Read your skill file at ${skillPath} and follow it exactly.`,
     "",
   ].join("\n");
+
+  // REQ-R26: Filter provider sections from capabilityInstructions based on active provider.
+  // When memoryBundle has tools OR explicitProvider from config, filter out the inactive provider's section
+  // from the composed content (agentBody/skillBody that includes adaptive-memory instructions).
+  const activeProvider = determineActiveProvider(memoryBundle, explicitProvider);
+  const filteredBaseContent =
+    activeProvider !== "unknown" ? filterProviderSections(baseContent, activeProvider) : baseContent;
+
+  // Build final content: skill gate + filtered base content + provider-specific memory + reference
+  return [
+    skillLoadingGate,
+    filteredBaseContent,
+    providerMemoryContent,
+    skillReference,
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
 // Generate plan
 // ---------------------------------------------------------------------------
 
+/**
+ * Detect if Supermemory MCP server is configured in opencode.json.
+ * Returns "supermemory" if supermemory server entry exists with valid config.
+ * This enables provider filtering even when memoryBundle is undefined (REQ-R25).
+ */
+function detectSupermemoryProviderFromConfig(configDir: string): "supermemory" | "engram" | null {
+  try {
+    const configPath = join(configDir, "opencode.json");
+    if (!existsSync(configPath)) {
+      return null;
+    }
+    const content = readFileSync(configPath, "utf-8");
+    const config = JSON.parse(content) as Record<string, unknown>;
+    const mcp = config.mcp as Record<string, unknown> | undefined;
+
+    if (!mcp) {
+      return null;
+    }
+
+    // Check for supermemory server entry
+    const smEntry = mcp.supermemory;
+    if (
+      smEntry &&
+      typeof smEntry === "object" &&
+      (smEntry as Record<string, unknown>).type === "remote"
+    ) {
+      return "supermemory";
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function buildPromptGenerationPlan(
-  options: { configDir: string; projectRoot: string; capabilityInstructions?: CapabilityInstructionBundle; personality?: OrchestratorPersonality },
+  options: {
+    configDir: string;
+    projectRoot: string;
+    capabilityInstructions?: CapabilityInstructionBundle;
+    personality?: OrchestratorPersonality;
+    /** Optional memory injection bundle for provider-specific adaptive memory injection. */
+    memoryBundle?: MemoryInjectionBundle;
+    /**
+     * Detected active memory provider from MCP config.
+     * Used for filtering when memoryBundle is undefined (REQ-R25).
+     * Auto-detects from opencode.json if not provided.
+     */
+    activeMemoryProviderFromConfig?: "supermemory" | "engram";
+  },
 ): PlannedPromptFile[] {
-  const { configDir, projectRoot, capabilityInstructions, personality } = options;
+  const { configDir, projectRoot, capabilityInstructions, personality, memoryBundle } = options;
+
+  // REQ-R25: Auto-detect provider from MCP config if not explicitly provided
+  const explicitProvider =
+    options.activeMemoryProviderFromConfig ?? detectSupermemoryProviderFromConfig(configDir);
+
+  // R31: If a provider is detected but no memoryBundle is provided,
+  // use the default instruction bundle so prompts include tool references.
+  // This ensures Supermemory prompts have `memory`/`recall` even without explicit bundle.
+  const effectiveMemoryBundle = memoryBundle ?? (explicitProvider ? buildAdaptiveMemoryInstructionBundle() : undefined);
+
   const promptsDir = join(configDir, "prompts", "deck-developer");
 
   return DEVELOPER_TEAM_AGENTS.map((agent): PlannedPromptFile => {
     const skillPath = join(configDir, "skills", agent.skillId, "SKILL.md");
     const promptPath = join(promptsDir, `${agent.id}.md`);
-    const content = buildPromptContent(agent, skillPath, capabilityInstructions, personality);
+    const content = buildPromptContent(
+      agent,
+      skillPath,
+      capabilityInstructions,
+      personality,
+      effectiveMemoryBundle,
+      explicitProvider ?? undefined,
+    );
 
     return { agent, absolutePath: promptPath, content };
   });

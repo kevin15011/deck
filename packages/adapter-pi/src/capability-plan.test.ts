@@ -420,7 +420,7 @@ describe("buildDeveloperTeamInstallPlan dashboard memory regression", () => {
 });
 
 describe("buildPiRunnerReviewPlan security and structural regressions", () => {
-  test("Supermemory with token but missing userId remains not ready and warns", () => {
+  test("Supermemory with token-only (no userId) is now ready", () => {
     const toolsReview = review(["sub-agents", "MCP packages"]);
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(
@@ -431,18 +431,13 @@ describe("buildPiRunnerReviewPlan security and structural regressions", () => {
       inventory,
     );
 
-    expect(plan.ready).toBe(false);
+    // Token-only: configured=true + hasToken=true = ready (no userId required)
+    expect(plan.ready).toBe(true);
     expect(plan.groups.configWrites).toContainEqual(
-      expect.objectContaining({ id: "adaptive-memory.supermemory.deck-config", kind: "write-deck-config", status: "pending" }),
+      expect.objectContaining({ id: "adaptive-memory.supermemory.deck-config", kind: "write-deck-config", status: "ready" }),
     );
     expect(plan.groups.configWrites).toContainEqual(
       expect.objectContaining({ id: "adaptive-memory.supermemory.pi-mcp-config", kind: "write-pi-mcp-config", status: "ready" }),
-    );
-    expect(plan.groups.validations).toContainEqual(
-      expect.objectContaining({ id: "adaptive-memory.supermemory.validate", kind: "validate", status: "pending" }),
-    );
-    expect(plan.diagnostics).toContainEqual(
-      expect.objectContaining({ code: "SUPERMEMORY_CONFIGURATION_REQUIRED", severity: "warning", actionId: "adaptive-memory.supermemory.deck-config" }),
     );
   });
 

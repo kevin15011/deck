@@ -1,36 +1,47 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { createSupermemoryMemoryProvider, SUPERMEMORY_MCP_TOOLS } from "./index";
+import { createSupermemoryMemoryProvider, SUPERMEMORY_MCP_TOOLS, SUPERMEMORY_MCP_SERVER_URL } from "./index";
 
-describe("createSupermemoryMemoryProvider", () => {
-  test("requires userId", () => {
-    expect(() => createSupermemoryMemoryProvider({ userId: "" })).toThrow(/userId/);
+describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-29)", () => {
+  test("NO userId required - token-only input", () => {
+    // CONTRACT: no userId required
+    const provider = createSupermemoryMemoryProvider();
+    expect(provider).toBeDefined();
+    expect(provider.id).toBe("supermemory");
   });
 
-  test("binds only validated MCP tools after authenticated runtime validation", () => {
-    const bundle = createSupermemoryMemoryProvider({ userId: "kevin", authenticatedRuntimeValidated: true }).buildInjection({ teamId: "developer-team" });
+  test("buildInjection produces bindings with memory/recall/whoAmI tools", () => {
+    const bundle = createSupermemoryMemoryProvider().buildInjection({ teamId: "developer-team" });
     expect(bundle.toolBindings).toHaveLength(1);
     expect(bundle.toolBindings[0].toolNames).toEqual(SUPERMEMORY_MCP_TOOLS);
     const tools = bundle.toolBindings.flatMap((binding) => [...binding.toolNames]);
-    expect(tools).toContain("execute");
-    expect(tools).toContain("search_docs");
-    expect(tools).not.toContain("context");
-    expect(tools).not.toContain("recall");
-    expect(tools).not.toContain("memory");
+    expect(tools).toContain("memory");
+    expect(tools).toContain("recall");
+    expect(tools).toContain("whoAmI");
+    expect(tools).not.toContain("execute");
+    expect(tools).not.toContain("search_docs");
   });
 
-  test("emits scoped governance guidance and candidate team status", () => {
-    const bundle = createSupermemoryMemoryProvider({ userId: "kevin", teamId: "deck", orgId: "org", authenticatedRuntimeValidated: true }).buildInjection({});
+  test("NO containerTag manual - instruction shows automatic scoping", () => {
+    const bundle = createSupermemoryMemoryProvider().buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
-    expect(text).toContain("u:kevin");
-    expect(text).toContain("candidate");
-    expect(text).toContain("at most 7");
-    expect(text).toContain("OpenSpec artifacts remain authoritative");
-    expect(text).toContain("supermemory.execute");
-    expect(text).toContain("supermemory.search_docs");
+    // NEW: instructions explain automatic scoping (NO container tags)
+    expect(text).toContain("User identity: derived from your Supermemory token");
+    expect(text).toContain("Project scoping: via x-sm-project header");
+    expect(text).toContain("No manual container tags");
+    // Can mention u: in the negative but not as live scopes
+    expect(text).not.toMatch(/\bu:[a-z0-9]/i); // No actual u: username
   });
 
-  test("health returns degraded and buildInjection succeeds when auth validation is not yet known", async () => {
-    const provider = createSupermemoryMemoryProvider({ userId: "kevin" });
+  test("NO container tag values (patterns) in prompts", () => {
+    const bundle = createSupermemoryMemoryProvider().buildInjection({});
+    const text = bundle.instructions.map((f) => f.markdown).join("\n");
+    // Explicitly verify NO container tag values like u:kevin, p:myrepo
+    expect(text).not.toMatch(/\bu:\w+/);
+    expect(text).not.toMatch(/\bp:\w+/);
+  });
+
+  test("health returns degraded when auth validation is not yet known", async () => {
+    const provider = createSupermemoryMemoryProvider();
     const health = await provider.health!();
     expect(health.status).toBe("degraded");
     expect(health.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_HEALTH_UNKNOWN");
@@ -40,220 +51,119 @@ describe("createSupermemoryMemoryProvider", () => {
     expect(bundle.toolBindings[0].metadata.authenticatedRuntimeValidated).toBe(false);
   });
 
-  test("uses governance validators for invalid containers and commit candidates", async () => {
-    expect(() => createSupermemoryMemoryProvider({ userId: "bad user" })).toThrow(/Container tag/);
-    const provider = createSupermemoryMemoryProvider({ userId: "kevin" });
-    const result = await provider.adapter!.commit({ candidates: [{
-      content: "contains secret token",
-      containerTag: "u:kevin",
-      highSignal: true,
-      scope: { scope: "personal", userId: "kevin" },
-      metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
-    }] });
-    expect(result.savedCount).toBe(0);
-    expect(result.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_GOVERNANCE_REJECTED");
+  test("health returns available after authenticatedRuntimeValidated is true", async () => {
+    const provider = createSupermemoryMemoryProvider({ authenticatedRuntimeValidated: true });
+    const health = await provider.health!();
+    expect(health.status).toBe("available");
+    expect(health.diagnostics).toHaveLength(0);
   });
 
-  test("buildInjection succeeds without authenticatedRuntimeValidated field", () => {
-    const bundle = createSupermemoryMemoryProvider({ userId: "test" }).buildInjection({ teamId: "developer-team" });
-    expect(bundle.instructions).toHaveLength(3);
-    expect(bundle.toolBindings[0].metadata.authenticatedRuntimeValidated).toBe(false);
-  });
-
-  test("buildInjection succeeds with authenticatedRuntimeValidated false", () => {
-    const bundle = createSupermemoryMemoryProvider({ userId: "test", authenticatedRuntimeValidated: false }).buildInjection({});
-    expect(bundle.instructions).toHaveLength(3);
-    expect(bundle.toolBindings).toHaveLength(1);
-    expect(bundle.toolBindings[0].metadata.authenticatedRuntimeValidated).toBe(false);
-  });
-
-  test("configure updates auth state and health reflects it", async () => {
-    const provider = createSupermemoryMemoryProvider({ userId: "kevin" });
-    expect((await provider.health!()).status).toBe("degraded");
-    await provider.adapter!.configure({ providerId: "supermemory", providerState: { authenticatedRuntimeValidated: true } });
-    expect((await provider.health!()).status).toBe("available");
-    expect((await provider.health!()).diagnostics).toHaveLength(0);
-  });
-
-  test("tool binding metadata includes serverQualifiedToolNames", () => {
-    const bundle = createSupermemoryMemoryProvider({ userId: "test" }).buildInjection({});
-    expect(bundle.toolBindings[0].metadata.serverQualifiedToolNames).toEqual(["supermemory.execute", "supermemory.search_docs"]);
+  test("tool binding metadata includes serverQualifiedToolNames with new tools", () => {
+    const bundle = createSupermemoryMemoryProvider().buildInjection({});
+    expect(bundle.toolBindings[0].metadata.serverQualifiedToolNames).toEqual([
+      "supermemory.memory",
+      "supermemory.recall",
+      "supermemory.whoAmI",
+    ]);
   });
 
   test("buildInjection with custom server name", () => {
-    const bundle = createSupermemoryMemoryProvider({ userId: "test", mcpServerName: "custom" }).buildInjection({});
+    const bundle = createSupermemoryMemoryProvider({ mcpServerName: "custom" }).buildInjection({});
     expect(bundle.toolBindings[0].serverName).toBe("custom");
-    expect(bundle.toolBindings[0].metadata.serverQualifiedToolNames).toEqual(["custom.execute", "custom.search_docs"]);
+    expect(bundle.toolBindings[0].metadata.serverQualifiedToolNames).toEqual([
+      "custom.memory",
+      "custom.recall",
+      "custom.whoAmI",
+    ]);
+  });
+
+  test("default URL is MCP v4 endpoint", () => {
+    const provider = createSupermemoryMemoryProvider();
+    const bundle = provider.buildInjection({});
+    expect(bundle.toolBindings[0].metadata.endpoint).toBe(SUPERMEMORY_MCP_SERVER_URL);
+    expect(SUPERMEMORY_MCP_SERVER_URL).toBe("https://mcp.supermemory.ai/mcp");
+  });
+
+  test("maintains maxMemoriesPerSession default", () => {
+    const bundle = createSupermemoryMemoryProvider().buildInjection({});
+    const text = bundle.instructions.map((f) => f.markdown).join("\n");
+    expect(text).toContain("at most 7");
+  });
+
+  test("custom maxMemoriesPerSession", () => {
+    const bundle = createSupermemoryMemoryProvider({ maxMemoriesPerSession: 3 }).buildInjection({});
+    const text = bundle.instructions.map((f) => f.markdown).join("\n");
+    expect(text).toContain("at most 3");
   });
 });
 
-describe("commit() persistence", () => {
+describe("MCP-only behavior: commit operations deferred to runtime", () => {
+  test("commit returns zero saved - MCP-only defers to runtime", async () => {
+    const provider = createSupermemoryMemoryProvider({ authenticatedRuntimeValidated: true });
+    const result = await provider.adapter!.commit({
+      candidates: [{
+        content: "Test memory",
+        highSignal: true,
+        scope: { scope: "personal" },
+        metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
+      }],
+    });
+
+    // MCP-only returns 0 saved count - defers to runtime MCP
+    expect(result.savedCount).toBe(0);
+    // Decision should indicate not persisted by adapter
+    expect(result.decisions[0].accepted).toBe(false);
+  });
+
+  test("search returns empty items - MCP-only defers to runtime", async () => {
+    const provider = createSupermemoryMemoryProvider({ authenticatedRuntimeValidated: true });
+    const result = await provider.adapter!.search({
+      scopes: [{ scope: "personal" }],
+      query: "test query",
+    });
+
+    // MCP-only returns empty - defers to runtime MCP
+    expect(result.items).toHaveLength(0);
+  });
+
+  test("loadContext returns diagnostic that context is via MCP tool", async () => {
+    const provider = createSupermemoryMemoryProvider({ authenticatedRuntimeValidated: true });
+    const result = await provider.adapter!.loadContext({
+      scopes: [{ scope: "personal" }],
+    });
+
+    expect(result.items).toHaveLength(0);
+    expect(result.diagnostics?.[0].message).toContain("MCP");
+  });
+});
+
+describe("no REST/fetch path in adapter", () => {
   const originalFetch = globalThis.fetch;
-  let fetchCalls: Array<{ url: string; options: RequestInit }>;
+  let fetchCalled = false;
 
   beforeEach(() => {
-    fetchCalls = [];
-    const mockFetch = (url: string | URL | globalThis.Request, options?: RequestInit): Promise<Response> => {
-      fetchCalls.push({ url: url.toString(), options: options ?? {} });
-      return Promise.resolve(new Response("{}", { status: 200 }));
-    };
-    globalThis.fetch = mockFetch;
+    fetchCalled = false;
+    globalThis.fetch = (() => {
+      fetchCalled = true;
+      throw new Error("fetch should NOT be called in MCP-only mode");
+    }) as typeof fetch;
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  test("successful commit: mock fetch returns 200 → savedCount: 1, accepted: true", async () => {
-    const provider = createSupermemoryMemoryProvider({ userId: "kevin", apiKey: "test-key" });
-    const result = await provider.adapter!.commit({
+  test("commit does NOT call fetch - MCP-only mode", async () => {
+    const provider = createSupermemoryMemoryProvider({ apiKey: "test-key" });
+    await provider.adapter!.commit({
       candidates: [{
-        content: "Fixed N+1 query in UserList",
-        containerTag: "u:kevin",
+        content: "Should not trigger fetch",
         highSignal: true,
-        scope: { scope: "personal", userId: "kevin" },
-        metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user", topicKey: "performance/user-list-query" },
-      }],
-    });
-
-    expect(result.savedCount).toBe(1);
-    expect(result.discardedCount).toBe(0);
-    expect(result.decisions[0].accepted).toBe(true);
-    expect(result.decisions[0].reason).toContain("persisted");
-    expect(fetchCalls).toHaveLength(1);
-    expect(fetchCalls[0].url).toContain("/api/memories/add");
-  });
-
-  test("per-candidate failure: first fetch throws, second succeeds → savedCount: 1, discardedCount: 1", async () => {
-    let callCount = 0;
-    globalThis.fetch = (url: string | URL | globalThis.Request): Promise<Response> => {
-      callCount++;
-      if (callCount === 1) {
-        return Promise.reject(new Error("Network failure"));
-      }
-      return Promise.resolve(new Response("{}", { status: 200 }));
-    };
-
-    const provider = createSupermemoryMemoryProvider({ userId: "kevin", apiKey: "test-key" });
-    const result = await provider.adapter!.commit({
-      candidates: [
-        {
-          content: "First memory",
-          containerTag: "u:kevin",
-          highSignal: true,
-          scope: { scope: "personal", userId: "kevin" },
-          metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
-        },
-        {
-          content: "Second memory",
-          containerTag: "u:kevin",
-          highSignal: true,
-          scope: { scope: "personal", userId: "kevin" },
-          metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
-        },
-      ],
-    });
-
-    expect(result.savedCount).toBe(1);
-    expect(result.discardedCount).toBe(1);
-    expect(result.decisions[0].accepted).toBe(false);
-    expect(result.decisions[0].reason).toContain("Network failure");
-    expect(result.decisions[1].accepted).toBe(true);
-  });
-
-  test("governance rejection: candidate with invalid scope → no fetch call, savedCount: 0", async () => {
-    globalThis.fetch = (url: string | URL | globalThis.Request): Promise<Response> => {
-      throw new Error("fetch should not be called");
-    };
-
-    const provider = createSupermemoryMemoryProvider({ userId: "kevin", apiKey: "test-key" });
-    const result = await provider.adapter!.commit({
-      candidates: [{
-        content: "contains secret token",
-        containerTag: "u:kevin",
-        highSignal: true,
-        scope: { scope: "personal", userId: "kevin" },
+        scope: { scope: "personal" },
         metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
       }],
     });
 
-    expect(result.savedCount).toBe(0);
-    expect(result.discardedCount).toBe(1);
-    expect(result.decisions[0].accepted).toBe(false);
-    expect(result.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_GOVERNANCE_REJECTED");
-  });
-
-  test("update existing memory: candidate with existingMemoryId → calls update endpoint, not create", async () => {
-    const provider = createSupermemoryMemoryProvider({ userId: "kevin", apiKey: "test-key" });
-    const result = await provider.adapter!.commit({
-      candidates: [{
-        content: "Updated memory content",
-        containerTag: "u:kevin",
-        highSignal: true,
-        scope: { scope: "personal", userId: "kevin" },
-        metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
-        // @ts-expect-error existingMemoryId is not in the official type but adapter handles it
-        existingMemoryId: "mem_abc123",
-      }],
-    });
-
-    expect(result.savedCount).toBe(1);
-    expect(result.decisions[0].accepted).toBe(true);
-    expect(fetchCalls[0].url).toContain("/api/memories/update");
-  });
-
-  test("missing apiKey with env var fallback: config.apiKey undefined but SUPERMEMORY_API_KEY env set → still persists", async () => {
-    const originalEnv = process.env.SUPERMEMORY_API_KEY;
-    process.env.SUPERMEMORY_API_KEY = "env-api-key";
-
-    try {
-      const provider = createSupermemoryMemoryProvider({ userId: "kevin" });
-      const result = await provider.adapter!.commit({
-        candidates: [{
-          content: "Memory with env fallback",
-          containerTag: "u:kevin",
-          highSignal: true,
-          scope: { scope: "personal", userId: "kevin" },
-          metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
-        }],
-      });
-
-      expect(result.savedCount).toBe(1);
-      expect(result.decisions[0].accepted).toBe(true);
-      expect(fetchCalls[0].options.headers?.["x-supermemory-api-key"]).toBe("env-api-key");
-    } finally {
-      if (originalEnv !== undefined) {
-        process.env.SUPERMEMORY_API_KEY = originalEnv;
-      } else {
-        delete process.env.SUPERMEMORY_API_KEY;
-      }
-    }
-  });
-
-  test("missing apiKey and no env var: → accepted: false with reason about missing credentials", async () => {
-    const originalEnv = process.env.SUPERMEMORY_API_KEY;
-    delete process.env.SUPERMEMORY_API_KEY;
-
-    try {
-      const provider = createSupermemoryMemoryProvider({ userId: "kevin" });
-      const result = await provider.adapter!.commit({
-        candidates: [{
-          content: "Memory without credentials",
-          containerTag: "u:kevin",
-          highSignal: true,
-          scope: { scope: "personal", userId: "kevin" },
-          metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
-        }],
-      });
-
-      expect(result.savedCount).toBe(0);
-      expect(result.discardedCount).toBe(1);
-      expect(result.decisions[0].accepted).toBe(false);
-      expect(result.decisions[0].reason).toContain("missing or invalid");
-    } finally {
-      if (originalEnv !== undefined) {
-        process.env.SUPERMEMORY_API_KEY = originalEnv;
-      }
-    }
+    expect(fetchCalled).toBe(false);
   });
 });

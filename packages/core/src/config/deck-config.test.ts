@@ -295,9 +295,6 @@ describe("validateDeckConfig", () => {
         activeProvider: "supermemory",
         supermemory: {
           mcpServerName: "supermemory",
-          userId: "user-123",
-          teamId: "team-123",
-          orgId: "org-123",
           searchMode: "memories",
           maxMemoriesPerSession: 7,
         },
@@ -305,37 +302,20 @@ describe("validateDeckConfig", () => {
     });
 
     expect(config.adaptiveMemory.activeProvider).toBe("supermemory");
-    expect(config.adaptiveMemory.supermemory?.userId).toBe("user-123");
-    expect(config.adaptiveMemory.supermemory?.teamId).toBe("team-123");
-    expect(config.adaptiveMemory.supermemory?.orgId).toBe("org-123");
+    expect(config.adaptiveMemory.supermemory?.mcpServerName).toBe("supermemory");
   });
 
-  test("requires userId when Supermemory is active", () => {
-    expectDeckConfigError(
-      () =>
-        validateDeckConfig({
-          version: 1,
-          adaptiveMemory: {
-            activeProvider: "supermemory",
-            supermemory: { mcpServerName: "supermemory" },
-          },
-        }),
-      "SUPERMEMORY_USER_ID_REQUIRED",
-    );
-  });
+  test("allows Supermemory without userId (token-only)", () => {
+    const config = validateDeckConfig({
+      version: 1,
+      adaptiveMemory: {
+        activeProvider: "supermemory",
+        supermemory: { mcpServerName: "supermemory" },
+      },
+    });
 
-  test("rejects empty userId when provided", () => {
-    expectDeckConfigError(
-      () =>
-        validateDeckConfig({
-          version: 1,
-          adaptiveMemory: {
-            activeProvider: "supermemory",
-            supermemory: { userId: "   " },
-          },
-        }),
-      "SUPERMEMORY_USER_ID_REQUIRED",
-    );
+    expect(config.adaptiveMemory.activeProvider).toBe("supermemory");
+    expect(config.adaptiveMemory.supermemory?.userId).toBeUndefined();
   });
 
   test("rejects token, credential, and secret-like fields anywhere in config", () => {
@@ -386,7 +366,7 @@ describe("writeDeckConfig", () => {
       version: 1,
       adaptiveMemory: {
         activeProvider: "supermemory",
-        supermemory: { userId: "user-123", searchMode: "memories" },
+        supermemory: { searchMode: "memories" },
       },
     });
 
@@ -431,7 +411,7 @@ describe("writeDeckConfig", () => {
           version: 1,
           adaptiveMemory: {
             activeProvider: "supermemory",
-            supermemory: { userId: "user-123", token: "do-not-store" },
+            supermemory: { mcpServerName: "supermemory", token: "do-not-store" },
           },
         }),
       "SUPERMEMORY_CREDENTIAL_IN_DECK_CONFIG",
@@ -684,22 +664,13 @@ describe("resolveActiveMemoryProvider", () => {
     expect(resolution.source).toBe("default");
   });
 
-  test("resolves CLI Supermemory only when non-secret config contains userId", () => {
+  test("resolves CLI Supermemory without userId (token-only)", () => {
     const valid = resolveActiveMemoryProvider({
       cliProvider: "supermemory" satisfies AdaptiveMemoryActiveProvider,
-      config: { version: 1, adaptiveMemory: { supermemory: { userId: "user-123" } } },
+      config: { version: 1, adaptiveMemory: { supermemory: { mcpServerName: "supermemory" } } },
     });
     expect(valid.activeProvider).toBe("supermemory");
-    expect(valid.supermemory?.userId).toBe("user-123");
-
-    expectDeckConfigError(
-      () =>
-        resolveActiveMemoryProvider({
-          cliProvider: "supermemory",
-          config: { version: 1, adaptiveMemory: {} },
-        }),
-      "SUPERMEMORY_USER_ID_REQUIRED",
-    );
+    expect(valid.supermemory?.userId).toBeUndefined();
   });
 
   test("reads project config file for resolver precedence", () => {
@@ -965,5 +936,73 @@ describe("Profile persistence round-trip", () => {
     expect(reRead.profiles[0].phaseOverrides?.verify).toEqual({ skip: true });
     expect(reRead.profiles[0].phaseOverrides?.spec).toEqual({ mode: "detailed" });
     expect(reRead.activeProfile).toBe("all-phases");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deprecated fields migration (R23/R24 hotfix)
+// ---------------------------------------------------------------------------
+
+describe("deprecated config fields migration", () => {
+  test("reads config with userId/teamId/orgId/projectId without error", () => {
+    const config = validateDeckConfig({
+      version: 1,
+      adaptiveMemory: {
+        activeProvider: "supermemory",
+        supermemory: {
+          mcpServerName: "supermemory",
+          searchMode: "memories",
+          maxMemoriesPerSession: 7,
+          userId: "kevin",
+          teamId: "developer",
+          orgId: "GCO",
+          projectId: "deck",
+        },
+      },
+      packageInstructions: {},
+      orchestratorPersonality: "pragmatica",
+    });
+
+    // Deprecated fields should be stripped, not present in output
+    expect(config.adaptiveMemory.supermemory).toBeDefined();
+    expect((config.adaptiveMemory.supermemory as { userId?: unknown }).userId).toBeUndefined();
+    expect((config.adaptiveMemory.supermemory as { teamId?: unknown }).teamId).toBeUndefined();
+    expect((config.adaptiveMemory.supermemory as { orgId?: unknown }).orgId).toBeUndefined();
+    expect((config.adaptiveMemory.supermemory as { projectId?: unknown }).projectId).toBeUndefined();
+  });
+
+  test("write then read produces clean output without deprecated fields", () => {
+    const root = createTempRoot();
+
+    // Simulate reading a stale config with deprecated fields
+    const staleConfig = {
+      version: 1,
+      adaptiveMemory: {
+        activeProvider: "supermemory",
+        supermemory: { userId: "kevin", teamId: "developer" },
+      },
+    };
+    writeDeckConfig(root, staleConfig);
+
+    // Read back
+    const readBack = readDeckConfig(root);
+    expect(readBack.adaptiveMemory.supermemory).toBeDefined();
+    expect((readBack.adaptiveMemory.supermemory as { userId?: unknown }).userId).toBeUndefined();
+    expect((readBack.adaptiveMemory.supermemory as { teamId?: unknown }).teamId).toBeUndefined();
+  });
+
+  test("other unknown fields still fail", () => {
+    expectDeckConfigError(
+      () =>
+        validateDeckConfig({
+          version: 1,
+          adaptiveMemory: {
+            supermemory: {
+              unknownField: "should fail",
+            },
+          },
+        }),
+      "DECK_CONFIG_UNKNOWN_FIELD",
+    );
   });
 });

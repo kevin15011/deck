@@ -30,12 +30,14 @@ export type SupermemorySearchMode = (typeof SUPERMEMORY_SEARCH_MODES)[number];
 export type DeckSupermemoryConfig = {
   /** Non-secret MCP server label used by Pi/MCP config. Defaults to "supermemory". */
   mcpServerName?: string;
-  /** Required when Supermemory is the active provider. Never a token or credential. */
-  userId?: string;
-  /** Optional only when a caller has an explicit/derived project identity; never invented here. */
-  projectId?: string;
-  teamId?: string;
-  orgId?: string;
+  /** @deprecated - user identity derived from token automatically */
+  userId?: never;
+  /** @deprecated - project scoping via x-sm-project header */
+  projectId?: never;
+  /** @deprecated - project scoping via x-sm-project header */
+  teamId?: never;
+  /** @deprecated - no longer used */
+  orgId?: never;
   searchMode?: SupermemorySearchMode;
   maxMemoriesPerSession?: number;
 };
@@ -187,10 +189,6 @@ const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "packageInstructi
 const ADAPTIVE_MEMORY_FIELDS = new Set(["activeProvider", "supermemory"]);
 const SUPERMEMORY_FIELDS = new Set([
   "mcpServerName",
-  "userId",
-  "projectId",
-  "teamId",
-  "orgId",
   "searchMode",
   "maxMemoriesPerSession",
 ]);
@@ -447,13 +445,6 @@ function buildResolution(
 ): ActiveMemoryProviderResolution {
   if (activeProvider === "supermemory") {
     const supermemory = config.adaptiveMemory.supermemory;
-    if (!hasNonEmptyString(supermemory?.userId)) {
-      throw new DeckConfigError(
-        "SUPERMEMORY_USER_ID_REQUIRED",
-        "Supermemory configuration requires an explicit userId.",
-        { configPath, fieldPath: "adaptiveMemory.supermemory.userId" },
-      );
-    }
     return { activeProvider, source, config, supermemory };
   }
 
@@ -481,15 +472,20 @@ function normalizeAdaptiveMemoryConfig(
     configPath,
   );
 
-  if (activeProvider === "supermemory" && !hasNonEmptyString(supermemory?.userId)) {
-    throw new DeckConfigError(
-      "SUPERMEMORY_USER_ID_REQUIRED",
-      "Supermemory configuration requires an explicit userId.",
-      { configPath, fieldPath: "adaptiveMemory.supermemory.userId" },
-    );
-  }
-
   return supermemory ? { activeProvider, supermemory } : { activeProvider };
+}
+
+const DEPRECATED_SUPERMEMORY_FIELDS = new Set(["userId", "teamId", "orgId", "projectId"]);
+
+/**
+ * Strip deprecated fields from a raw config object in place.
+ * These fields are no longer stored in config (identity now derived from token automatically).
+ */
+function stripDeprecatedSupermemoryFields(value: Record<string, unknown>): void {
+  for (const field of DEPRECATED_SUPERMEMORY_FIELDS) {
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete value[field];
+  }
 }
 
 function normalizeSupermemoryConfig(
@@ -509,6 +505,10 @@ function normalizeSupermemoryConfig(
   }
 
   assertPlainObject(value, "adaptiveMemory.supermemory", configPath);
+
+  // Strip deprecated fields BEFORE assertKnownFields to avoid "unknown field" rejection
+  stripDeprecatedSupermemoryFields(value);
+
   assertKnownFields(value, SUPERMEMORY_FIELDS, "adaptiveMemory.supermemory", configPath);
 
   const normalized: DeckSupermemoryConfig = {
@@ -524,34 +524,6 @@ function normalizeSupermemoryConfig(
       configPath,
     ),
   };
-
-  const userId = normalizeOptionalString(
-    value.userId,
-    "adaptiveMemory.supermemory.userId",
-    configPath,
-  );
-  if (userId !== undefined) normalized.userId = userId;
-
-  const projectId = normalizeOptionalString(
-    value.projectId,
-    "adaptiveMemory.supermemory.projectId",
-    configPath,
-  );
-  if (projectId !== undefined) normalized.projectId = projectId;
-
-  const teamId = normalizeOptionalString(
-    value.teamId,
-    "adaptiveMemory.supermemory.teamId",
-    configPath,
-  );
-  if (teamId !== undefined) normalized.teamId = teamId;
-
-  const orgId = normalizeOptionalString(
-    value.orgId,
-    "adaptiveMemory.supermemory.orgId",
-    configPath,
-  );
-  if (orgId !== undefined) normalized.orgId = orgId;
 
   return normalized;
 }
