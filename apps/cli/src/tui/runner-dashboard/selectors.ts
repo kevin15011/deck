@@ -253,6 +253,7 @@ export function getTeamCapabilityProfile(state: RunnerDashboardState, teamId: st
       "context-mode": state.selectedCapabilities["context-mode"] ? "compatible" : "not-used",
       "codebase-memory": state.selectedCapabilities["codebase-memory"] ? "consumes-directly" : "not-used",
       rtk: state.selectedCapabilities.rtk ? "compatible" : "not-used",
+      serena: state.selectedCapabilities.serena ? "consumes-directly" : "not-used",
       "adaptive-memory": state.adaptiveMemory.provider === "none" ? "not-used" : "consumes-directly",
     },
     diagnostics: installable

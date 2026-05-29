@@ -27,7 +27,7 @@ export function getDashboardToggleAction(
 ): RunnerDashboardAction | undefined {
   if (!resolver) {
     // Backward-compatible fallback for tests
-    const defaultIds = ["rtk", "context-mode", "codebase-memory", "pi-hud"];
+    const defaultIds = ["rtk", "context-mode", "codebase-memory", "serena", "pi-hud"];
     if (state.screen === "packages-detail") {
       const capabilityId = defaultIds[state.cursor];
       return capabilityId ? { type: "toggle-capability", capabilityId } : undefined;
@@ -59,7 +59,7 @@ export function getDashboardContinueEffect(
   // Backward-compatible default resolver for tests
   const effectiveResolver = resolver ?? {
     getCapability: () => undefined,
-    getUserFacingIds: () => ["rtk", "context-mode", "codebase-memory", "pi-hud"],
+    getUserFacingIds: () => ["rtk", "context-mode", "codebase-memory", "serena", "pi-hud"],
   };
 
   if (state.screen === "dashboard") {

@@ -11,6 +11,7 @@ const inventory: PiRunnerCapabilityInventory = {
   "context-mode": { capabilityId: "context-mode", status: "missing", runnerScope: "pi", installed: false, toolId: "context-mode", source: "npm:context-mode", diagnostics: [] },
   "codebase-memory": { capabilityId: "codebase-memory", status: "manual", runnerScope: "pi", installed: false, toolId: "codebase-memory", source: "DeusData/codebase-memory-mcp", diagnostics: [] },
   rtk: { capabilityId: "rtk", status: "manual", runnerScope: "pi", installed: false, toolId: "rtk", source: "rtk-ai/rtk", diagnostics: [] },
+  serena: { capabilityId: "serena", status: "manual", runnerScope: "pi", installed: false, toolId: "serena", source: "oraios/serena", diagnostics: [] },
   "pi-hud": { capabilityId: "pi-hud", status: "pending-source", runnerScope: "pi", installed: false, source: "TBD", diagnostics: [] },
 };
 
@@ -38,7 +39,7 @@ describe("Pi Runner dashboard input mapping", () => {
   test("space/enter togglea pi-hud desde Packages detail (no visual helpers)", () => {
     // REQ-DASH-002: Runner UI/visual helpers merged into Packages section
     // REQ-DASH-001: Mermaid not present; pi-hud is toggled from packages-detail
-    let state = createDefaultPiRunnerDashboardState({ screen: "packages-detail", cursor: 3 }); // cursor 3 = pi-hud
+    let state = createDefaultPiRunnerDashboardState({ screen: "packages-detail", cursor: 4 }); // cursor 4 = pi-hud (after serena at cursor 3)
     const action = getPiRunnerDashboardToggleAction(state);
     expect(action).toEqual({ type: "toggle-capability", capabilityId: "pi-hud" });
 
