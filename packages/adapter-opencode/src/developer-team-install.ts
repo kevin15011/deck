@@ -6,6 +6,7 @@ import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import {
   buildCapabilityInstructionBundle,
+  buildCapabilityToolPolicyBundle,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
 // import { verifyOrchestratorInvariantPresence, type OrchestratorInvariantSurface } from "@deck/core/teams/developer/orchestrator-invariants";
@@ -280,8 +281,8 @@ function resolveOpenCodeMemoryInjection(
 // Tools
 // ---------------------------------------------------------------------------
 
-/** Tools available to all subagents */
-const SUBAGENT_TOOLS: Record<string, boolean> = {
+/** Tools available to subagents by default */
+const SUBAGENT_BASE_TOOLS: Record<string, boolean> = {
   bash: true,
   edit: true,
   read: true,
@@ -303,20 +304,88 @@ const ORCHESTRATOR_TOOLS: Record<string, boolean> = {
 // Agent entry builder
 // ---------------------------------------------------------------------------
 
+/**
+ * Get target agents from tool policy bundle.
+ * Returns apply agents list from policy, falls back to empty array if no serena policy.
+ */
+function getTargetAgentsFromPolicy(
+  toolPolicyBundle?: ReturnType<typeof buildCapabilityToolPolicyBundle>,
+): readonly string[] {
+  return toolPolicyBundle?.policies?.serena?.targetAgents ?? [];
+}
+
+/**
+ * Build Serena tools dict from tool policy.
+ * Returns a Record<string, boolean> from policy.enabledTools, or empty if no serena policy.
+ */
+function buildSerenaToolsDict(
+  toolPolicyBundle?: ReturnType<typeof buildCapabilityToolPolicyBundle>,
+): Record<string, boolean> {
+  const enabledTools = toolPolicyBundle?.policies?.serena?.enabledTools;
+  if (!enabledTools || enabledTools.length === 0) {
+    return {};
+  }
+  return Object.fromEntries(enabledTools.map((t) => [t, true])) as Record<string, boolean>;
+}
+
+/**
+ * Resolve Serena tools for a specific agent based on role.
+ * Non-apply agents get only read-only tools.
+ * Apply agents get read-only + write tools.
+ */
+function resolveSerenaToolsForAgent(
+  agentId: string,
+  toolPolicyBundle?: ReturnType<typeof buildCapabilityToolPolicyBundle>,
+): Record<string, boolean> {
+  const policy = toolPolicyBundle?.policies?.serena;
+  if (!policy) {
+    return {};
+  }
+
+  const isApplyAgent = policy.targetAgents.includes(agentId as "deck-developer-apply-backend" | "deck-developer-apply-frontend" | "deck-developer-apply-general");
+  const readOnly = policy.readOnlyTools ?? [];
+  const write = policy.writeTools ?? [];
+
+  let allowedTools: string[];
+  if (isApplyAgent) {
+    // Apply agents get both read-only and write tools
+    allowedTools = [...readOnly, ...write];
+  } else {
+    // Non-apply agents get only read-only tools
+    allowedTools = [...readOnly];
+  }
+
+  return Object.fromEntries(allowedTools.map((t) => [t, true])) as Record<string, boolean>;
+}
+
 function buildAgentEntry(
   agent: DeveloperTeamAgent,
   promptReference: string,
-  options?: { cliModelOverride?: string; configModelOverrides?: Record<string, string>; reasoningEffortOverrides?: Record<string, import("./model-config").OpenCodeThinkingLevel> },
+  toolPolicyBundle?: ReturnType<typeof buildCapabilityToolPolicyBundle>,
+  options?: { cliModelOverride?: string; configModelOverrides?: Record<string, string>; reasoningEffortOverrides?: Record<string, string> },
 ): AgentEntry {
   const isOrchestrator = agent.id === "deck-developer-orchestrator";
-  const modelConfig = resolveModelConfig(agent.id, options?.cliModelOverride, options?.configModelOverrides, options?.reasoningEffortOverrides);
+  const serenaTools = resolveSerenaToolsForAgent(agent.id, toolPolicyBundle);
+  const modelConfig = resolveModelConfig(agent.id, options?.cliModelOverride, options?.configModelOverrides, options?.reasoningEffortOverrides as Record<string, "off" | "low" | "medium" | "high"> | undefined);
+
+  let tools: Record<string, boolean>;
+
+  if (isOrchestrator) {
+    tools = ORCHESTRATOR_TOOLS;
+  } else if (Object.keys(serenaTools).length > 0) {
+    // Combine base + Serena tools (role-based: read-only for non-apply, read+write for apply)
+    tools = { ...SUBAGENT_BASE_TOOLS, ...serenaTools };
+  } else {
+    // Default: base tools only
+    tools = SUBAGENT_BASE_TOOLS;
+  }
 
   const entry: AgentEntry = {
     description: agent.description,
     mode: isOrchestrator ? "primary" : "subagent",
     model: modelConfig.model,
     prompt: promptReference,
-    tools: isOrchestrator ? ORCHESTRATOR_TOOLS : SUBAGENT_TOOLS,
+    tools,
   };
 
   if (modelConfig.reasoningEffort) {
@@ -408,6 +477,14 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
 
   const capabilityInstructions = options?.capabilityInstructions;
 
+  // Build tool policies from capability instructions for dynamic tool resolution
+  const toolPolicyBundle =
+    capabilityInstructions && capabilityInstructions.instructions.length > 0
+      ? buildCapabilityToolPolicyBundle(
+          capabilityInstructions.instructions.map((f) => f.packageId) as Parameters<typeof buildCapabilityToolPolicyBundle>[0],
+        )
+      : undefined;
+
   // Resolve personality: use explicit option or read from config
   const resolvedPersonality: OrchestratorPersonality = options?.personality ?? (() => {
     try {
@@ -422,7 +499,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   const agentEntries: Record<string, AgentEntry> = {};
   for (const agent of DEVELOPER_TEAM_AGENTS) {
     const promptReference = buildPromptReference(configDir, agent.id);
-    agentEntries[agent.id] = buildAgentEntry(agent, promptReference, {
+    agentEntries[agent.id] = buildAgentEntry(agent, promptReference, toolPolicyBundle, {
       cliModelOverride: options?.cliModelOverride,
       configModelOverrides: options?.configModelOverrides,
       reasoningEffortOverrides: options?.reasoningEffortOverrides,

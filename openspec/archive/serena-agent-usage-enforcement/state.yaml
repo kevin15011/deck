@@ -1,0 +1,138 @@
+version: 1
+change: serena-agent-usage-enforcement
+created: 2026-05-30T00:00:00Z
+phases:
+  - name: explore
+    status: completed
+    artifact: exploration.md
+    completed: 2026-05-30T00:00:00Z
+  - name: proposal
+    status: completed
+    artifact: proposal.md
+    completed: 2026-05-30T00:00:00Z
+  - name: spec
+    status: completed
+    artifact: spec.md
+    completed: 2026-05-30T00:00:00Z
+  - name: design
+    status: amended
+    artifact: design.md
+    completed: 2026-05-31T13:00:00Z
+  - name: spec-amended
+    status: completed
+    artifact: spec.md
+    completed: 2026-05-31T13:00:00Z
+  - name: design-amended
+    status: completed
+    artifact: design.md
+    completed: 2026-05-31T13:00:00Z
+  - name: spec-amended-2
+    status: completed
+    artifact: spec.md
+    completed: 2026-05-31T14:00:00Z
+  - name: design-amended-2
+    status: completed
+    artifact: design.md
+    completed: 2026-05-31T14:00:00Z
+  - name: tasks
+    status: completed
+    artifact: tasks.md
+    completed: 2026-05-30T12:00:00Z
+  - name: tasks-amended
+    status: completed
+    artifact: tasks.md
+    completed: 2026-05-31T18:00:00Z
+  - name: apply
+    status: completed
+    artifact: apply-progress.md
+    completed: 2026-05-30T14:00:00Z
+  - name: apply-repair
+    status: completed
+    artifact: apply-progress.md
+    completed: 2026-05-30T16:00:00Z
+  - name: apply-repair-2
+    status: completed
+    artifact: apply-progress.md
+    completed: 2026-05-31T00:00:00Z
+  - name: apply-amended-tasks
+    status: completed
+    artifact: apply-progress.md
+    completed: 2026-05-31T19:00:00Z
+  - name: verify
+    status: passed
+    artifact: verify-report.md
+    completed: 2026-05-31T23:45:00Z
+  - name: apply-repair-3
+    status: completed
+    artifact: apply-progress.md
+    completed: 2026-05-31T20:00:00Z
+  - name: apply-cleanup
+    status: completed
+    artifact: apply-progress.md
+    completed: 2026-05-31T21:00:00Z
+  - name: apply-repair-final
+    status: completed
+    artifact: apply-progress.md
+    completed: 2026-05-31T22:00:00Z
+  - name: apply-r34-repair
+    status: completed
+    artifact: apply-progress.md
+    completed: 2026-05-31T23:00:00Z
+  - name: apply-assertion-repair
+    status: completed
+    artifact: apply-progress.md
+    completed: 2026-05-31T23:30:00Z
+  - name: explore
+    status: completed
+    artifact: exploration.md
+    completed: 2026-05-31T14:00:00Z
+  - name: review
+    status: approved
+    artifact: review-report.md
+    completed: 2026-05-31T23:45:00Z
+  - name: archive
+    status: archived
+    artifact: archive-report.md
+    completed: 2026-05-31T23:59:00Z
+artifacts:
+  - name: exploration.md
+    type: exploration
+    created: 2026-05-30T00:00:00Z
+    updated: 2026-05-31T14:00:00Z
+  - name: proposal.md
+    type: proposal
+    created: 2026-05-30T00:00:00Z
+  - name: spec.md
+    type: spec
+    created: 2026-05-30T00:00:00Z
+  - name: design.md
+    type: design
+    created: 2026-05-30T00:00:00Z
+    updated: 2026-05-31T13:00:00Z
+  - name: tasks.md
+    type: tasks
+    created: 2026-05-30T12:00:00Z
+    updated: 2026-05-31T18:00:00Z
+  - name: apply-progress.md
+    type: apply-progress
+    created: 2026-05-30T14:00:00Z
+  - name: verify-report.md
+    type: verify-report
+    created: 2026-05-30T15:00:00Z
+  - name: review-report.md
+    type: review-report
+    created: 2026-05-30T15:00:00Z
+  - name: archive-report.md
+    type: archive-report
+    created: 2026-05-31T23:59:00Z
+provenance:
+  - source: deck-configuration
+    detail: .deck/config.json tiene serena: true para pi y opencode
+  - source: instruction-bundles
+    detail: serena.ts con 15 tools habilitados
+  - source: subagent-tools
+    detail: SUBAGENT_TOOLS solo contiene {bash, edit, read, write}
+  - source: user-correction
+    detail: Serena es un paquete seleccionado por el installer; no validar CLI externa como prerrequisito para incluir instrucciones
+  - source: repair-actions
+    detail: Arreglado test silenciosamente cambiar contratos, consumida policy como fuente de verdad, typecheck apps/cli difiere (fuera del scope)

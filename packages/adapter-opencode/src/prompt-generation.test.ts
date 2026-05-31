@@ -432,3 +432,56 @@ describe("provider detection with implicit instruction bundle (R31)", () => {
     expect(plan).toHaveLength(14);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Serena capability instruction propagation (REQ-DPG-001)
+// ---------------------------------------------------------------------------
+
+describe("serena capability instruction propagation", () => {
+  test("with serena selected: apply prompts contain serena instructions", () => {
+    const { buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles");
+    const bundle = buildCapabilityInstructionBundle(["serena"]);
+
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      capabilityInstructions: bundle,
+    });
+
+    // Apply backend prompt should contain Serena
+    const applyBackend = plan.find((p) => p.agent.id === "deck-developer-apply-backend")!;
+    expect(applyBackend.content).toContain("Serena");
+    expect(applyBackend.content).toContain("find_symbol");
+  });
+
+  test("without serena selected: apply prompts do not contain serena instructions", () => {
+    const { buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles");
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      capabilityInstructions: bundle,
+    });
+
+    // Apply backend prompt should NOT contain Serena tool references
+    const applyBackend = plan.find((p) => p.agent.id === "deck-developer-apply-backend")!;
+    expect(applyBackend.content).not.toContain("Serena Package");
+    expect(applyBackend.content).not.toContain("find_symbol");
+  });
+
+  test("no regression: non-apply agents still get capability instructions", () => {
+    const { buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles");
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      capabilityInstructions: bundle,
+    });
+
+    // Explorer should still get codebase-memory
+    const explorer = plan.find((p) => p.agent.id === "deck-developer-explorer")!;
+    expect(explorer.content).toContain("Codebase Memory");
+  });
+});

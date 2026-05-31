@@ -29,10 +29,124 @@ function assertNotPlaceholder(content: string, label: string) {
 // APPLY_FRONTEND_AGENT_BODY
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// APPLY_FRONTEND_SKILL_BODY
+// ---------------------------------------------------------------------------
+
 describe("APPLY_FRONTEND_AGENT_BODY", () => {
   test("is not placeholder content", () => {
     assertNotPlaceholder(APPLY_FRONTEND_AGENT_BODY, "APPLY_FRONTEND_AGENT_BODY");
   });
+
+  test("contains identity header with Frontend Apply Agent name", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain("# Frontend Apply Agent");
+  });
+
+  test("describes frontend implementor role", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toMatch(/frontend implementor/i);
+  });
+
+  test("contains team-scoped ID reference", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain("deck-developer-apply-frontend");
+  });
+
+  test("instructs to follow matching skill", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain("Follow the matching skill");
+  });
+
+  test("states terminal behavior: no delegation", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toMatch(/terminal|do(es)? not delegate/i);
+  });
+
+  test("references artifact persistence behavior", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toMatch(/artifact|persist|store/i);
+  });
+
+  test("does not reference Pi-specific launcher behavior", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).not.toContain("pi launcher");
+    expect(APPLY_FRONTEND_AGENT_BODY).not.toContain("deck pi");
+    expect(APPLY_FRONTEND_AGENT_BODY).not.toContain("/sdd-");
+  });
+
+  test("prohibits silently changing backend contracts", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toMatch(/do(es)? not.*silently.*change.*backend.*contract/i);
+  });
+
+  test("prohibits backend implementation", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toMatch(/do(es)? not.*implement.*backend|server-side|api/i);
+  });
+});
+
+describe("APPLY_FRONTEND_SKILL_BODY", () => {
+  test("is not placeholder content", () => {
+    assertNotPlaceholder(APPLY_FRONTEND_SKILL_BODY, "APPLY_FRONTEND_SKILL_BODY");
+  });
+
+  test("contains skill title", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("# Frontend Apply Skill");
+  });
+
+  test("references apply-progress artifact under OpenSpec", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("openspec/");
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("apply-progress.md");
+  });
+
+  test("states terminal behavior: no delegation", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toMatch(/terminal|do(es)? not delegate/i);
+  });
+
+  test("describes frontend verification steps", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toMatch(/frontend.*test|build|typecheck|accessibility/i);
+  });
+
+  test("does not reference Pi-specific launcher behavior", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).not.toContain("pi launcher");
+    expect(APPLY_FRONTEND_SKILL_BODY).not.toContain("/sdd-");
+  });
+
+  test("contains structured return format for orchestrator consumption", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toMatch(/## Apply Progress|## Return Summary/i);
+  });
+});
+
+// REQ-SAE-001 to REQ-SAE-007: Serena enforcement tests
+describe("Serena enforcement rules", () => {
+  test("contains Serena enforcement section when package selected", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("Serena Enforcement");
+  });
+
+  test("mention find_symbol for symbolic operations", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("find_symbol");
+  });
+
+  test("mention replace_symbol_body for replacement", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("replace_symbol_body");
+  });
+
+  test("mention coexistance with codebase-memory", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("codebase-memory");
+  });
+
+  test("mention fallback reporting", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toMatch(/Fallback|report/i);
+  });
+
+test("does NOT validate CLI existence", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("No CLI validation");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// APPLY_FRONTEND_AGENT_BODY
+// ---------------------------------------------------------------------------
+
+describe("APPLY_FRONTEND_AGENT_BODY", () => {
+  test("is not placeholder content", () => {
+    assertNotPlaceholder(APPLY_FRONTEND_AGENT_BODY, "APPLY_FRONTEND_AGENT_BODY");
+  });
+
+  test("contains identity header", () => {
+});
 
   test("contains identity header with Frontend Apply Agent name", () => {
     expect(APPLY_FRONTEND_AGENT_BODY).toContain("# Frontend Apply Agent");

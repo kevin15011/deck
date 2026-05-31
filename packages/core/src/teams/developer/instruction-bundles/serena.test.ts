@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { buildSerenaInstructionBundle } from "./serena";
+import { buildSerenaInstructionBundle, getSerenaToolPolicy } from "./serena";
 import type { CapabilityInstructionSurface } from "./index";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const ENABLED_TOOLS = [
+// Policy-enabled tools: 11 total (6 read-only + 5 write-capable)
+const POLICY_ENABLED_TOOLS = [
   "find_symbol",
   "find_referencing_symbols",
   "find_implementations",
@@ -14,10 +15,14 @@ const ENABLED_TOOLS = [
   "get_symbols_overview",
   "get_diagnostics_for_file",
   "replace_symbol_body",
+  "rename_symbol",
   "insert_after_symbol",
   "insert_before_symbol",
   "safe_delete_symbol",
-  "rename_symbol",
+];
+
+// Tools excluded by policy but present in documentation
+const EXCLUDED_BY_POLICY_TOOLS = [
   "activate_project",
   "get_current_config",
   "initial_instructions",
@@ -40,6 +45,17 @@ const DISABLED_TOOLS = [
   "rename_memory",
 ];
 
+// REQ-SAE-006: Tools for apply agents (7 of 11 enabled)
+const SYMBOLIC_EDITING_TOOLS = [
+  "find_symbol",
+  "find_referencing_symbols",
+  "replace_symbol_body",
+  "rename_symbol",
+  "get_diagnostics_for_file",
+  "insert_after_symbol",
+  "insert_before_symbol",
+];
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -47,9 +63,9 @@ const DISABLED_TOOLS = [
 describe("buildSerenaInstructionBundle", () => {
   const bundle = buildSerenaInstructionBundle();
 
-  // REQ-SIB-001: Builder returns bundle with 2 fragments (agent + skill)
-  test("returns bundle with 2 fragments", () => {
-    expect(bundle.instructions).toHaveLength(2);
+  // REQ-SIB-001: Builder returns bundle with 4 fragments (agent + skill-readonly + skill-full + session)
+  test("returns bundle with 4 fragments", () => {
+    expect(bundle.instructions).toHaveLength(4);
   });
 
   // REQ-SIB-002: All fragments have packageId: "serena"
@@ -66,13 +82,13 @@ describe("buildSerenaInstructionBundle", () => {
     expect(surfaces).toContain("skill");
   });
 
-  // Agent fragment documents all enabled tools
-  test("agent markdown mentions all 15 enabled tools", () => {
+  // Agent fragment documents all policy-enabled tools
+  test("agent markdown mentions all 11 policy-enabled tools", () => {
     const agentFragment = bundle.instructions.find((f) => f.surface === "agent");
     expect(agentFragment).toBeDefined();
 
     const md = agentFragment!.markdown;
-    for (const tool of ENABLED_TOOLS) {
+    for (const tool of POLICY_ENABLED_TOOLS) {
       expect(md).toContain(tool);
     }
   });
@@ -118,5 +134,54 @@ describe("buildSerenaInstructionBundle", () => {
     expect(agentFragment).toBeDefined();
     expect(skillFragment).toBeDefined();
     expect(skillFragment!.markdown.length).toBeLessThan(agentFragment!.markdown.length);
+  });
+});
+
+// REQ-SAE-006: Tool policy tests
+describe("getSerenaToolPolicy", () => {
+  const policy = getSerenaToolPolicy();
+
+  test("returns policy for serena", () => {
+    expect(policy).toBeDefined();
+    expect(policy.packageId).toBe("serena");
+  });
+
+  test("declares 11 tools (6 read-only + 5 write) for apply agents", () => {
+    expect(policy.enabledTools).toHaveLength(11);
+    expect(policy.readOnlyTools).toHaveLength(6);
+    expect(policy.writeTools).toHaveLength(5);
+    for (const tool of SYMBOLIC_EDITING_TOOLS) {
+      expect(policy.enabledTools).toContain(tool);
+    }
+  });
+
+  test("target agents are the apply agents", () => {
+    expect(policy.targetAgents).toContain("deck-developer-apply-backend");
+    expect(policy.targetAgents).toContain("deck-developer-apply-frontend");
+    expect(policy.targetAgents).toContain("deck-developer-apply-general");
+  });
+
+  test("contains fallback reporting text in bundle", () => {
+    const bundle = buildSerenaInstructionBundle();
+    const agentFragment = bundle.instructions.find((f) => f.surface === "agent");
+    expect(agentFragment).toBeDefined();
+    expect(agentFragment!.markdown).toContain("Fallback");
+  });
+
+  test("does NOT validate CLI existence", () => {
+    const bundle = buildSerenaInstructionBundle();
+    const agentFragment = bundle.instructions.find((f) => f.surface === "agent");
+    expect(agentFragment).toBeDefined();
+    // Should not contain CLI validation text
+    expect(agentFragment!.markdown).not.toContain("CLI validation");
+    expect(agentFragment!.markdown).not.toContain("validate.*cli");
+    expect(agentFragment!.markdown).not.toContain("check.*binary");
+  });
+
+  test("contains priority rules for symbolic editing", () => {
+    const bundle = buildSerenaInstructionBundle();
+    const agentFragment = bundle.instructions.find((f) => f.surface === "agent");
+    expect(agentFragment).toBeDefined();
+    expect(agentFragment!.markdown).toContain("Tool Priority");
   });
 });

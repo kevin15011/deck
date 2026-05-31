@@ -14,7 +14,7 @@ import { buildAdaptiveMemoryInstructionBundle } from "./adaptive-memory";
 import { buildCodebaseMemoryInstructionBundle } from "./codebase-memory";
 import { buildContextModeInstructionBundle } from "./context-mode";
 import { buildRtkInstructionBundle } from "./rtk";
-import { buildSerenaInstructionBundle } from "./serena";
+import { buildSerenaInstructionBundle, getSerenaToolPolicy } from "./serena";
 import type { NormalizedDeckConfig } from "../../../config/deck-config";
 import type { PackageInstructionRunnerId, PackageInstructionPackageId } from "../../../config/deck-config";
 
@@ -44,6 +44,73 @@ export type CapabilityInstructionCompositionContext = {
   teamId?: string;
   agentId?: string;
   skillId?: string;
+};
+
+// ---------------------------------------------------------------------------
+// Capability Tool Policy Types
+// ---------------------------------------------------------------------------
+
+/**
+ * Target agents for capability tool policy.
+ * These are the apply agents that receive symbolic editing tools when package is selected.
+ */
+export type CapabilityToolPolicyTargetAgents = readonly [
+  "deck-developer-apply-backend",
+  "deck-developer-apply-frontend",
+  "deck-developer-apply-general",
+];
+
+/**
+ * Tool policy for a capability package.
+ * Declares which tools are enabled/disabled for specific agents and surfaces.
+ */
+export type CapabilityToolPolicy = {
+  /** Package ID this policy applies to */
+  packageId: CapabilityInstructionPackageId;
+  /** Tools enabled for the target agents */
+  enabledTools: readonly string[];
+  /** Tools explicitly disabled (not exposed to agents) */
+  disabledTools: readonly string[];
+  /** Target agents that receive enabled tools when package is selected */
+  targetAgents: CapabilityToolPolicyTargetAgents;
+  /** Read-only tools available to ALL agents (including non-apply) */
+  readOnlyTools?: readonly string[];
+  /** Write-capable tools available ONLY to apply agents */
+  writeTools?: readonly string[];
+};
+
+/**
+ * Resolve tools for a specific agent based on its role.
+ * Non-apply agents receive readOnlyTools only.
+ * Apply agents receive readOnlyTools + writeTools.
+ *
+ * @param agentId - The agent ID to resolve tools for
+ * @param policy - The capability tool policy
+ * @returns Array of tool names the agent can use
+ */
+export function resolveToolsForAgent(
+  agentId: string,
+  policy: CapabilityToolPolicy,
+): string[] {
+  const isApplyAgent = policy.targetAgents.includes(agentId as CapabilityToolPolicyTargetAgents[number]);
+  const readOnly = policy.readOnlyTools ?? [];
+  const write = policy.writeTools ?? [];
+
+  if (isApplyAgent) {
+    // Apply agents get both read-only and write tools
+    return [...readOnly, ...write];
+  }
+  // Non-apply agents get only read-only tools
+  return [...readOnly];
+}
+
+/**
+ * Bundle of capability tool policies per package.
+ * Used by adapters to resolve dynamic tool lists for agents.
+ */
+export type CapabilityToolPolicyBundle = {
+  /** Tool policies keyed by package ID */
+  policies: Partial<Record<CapabilityInstructionPackageId, CapabilityToolPolicy>>;
 };
 
 // ---------------------------------------------------------------------------
@@ -176,4 +243,48 @@ export function composeCapabilityInstructions(
   const fragmentTexts = matching.map((f) => f.markdown).join("\n\n");
 
   return `${base.trimEnd()}\n\n## Package Instructions (configured)\n\nThese instructions are enabled by the runner's native package instruction system.\n\n${fragmentTexts}\n`;
+}
+
+/**
+ * Get the tool policy for a specific package if available.
+ * Returns undefined when package doesn't have a defined tool policy.
+ */
+export function getCapabilityToolPolicy(
+  packageId: CapabilityInstructionPackageId,
+): CapabilityToolPolicy | undefined {
+  if (packageId === "serena") {
+    return getSerenaToolPolicy();
+  }
+  // Future packages can add their policies here
+  return undefined;
+}
+
+/**
+ * Build a CapabilityToolPolicyBundle from enabled package IDs.
+ * Returns empty policies when no relevant packages are enabled.
+ *
+ * This helper is parallel to buildCapabilityInstructionBundle() but operates on
+ * tool level rather than markdown text level. Used by adapters for dynamic tool
+ * resolution.
+ */
+export function buildCapabilityToolPolicyBundle(
+  packageIds: readonly CapabilityInstructionPackageId[],
+): CapabilityToolPolicyBundle {
+  const policies: Record<CapabilityInstructionPackageId, CapabilityToolPolicy> = {} as Record<
+    CapabilityInstructionPackageId,
+    CapabilityToolPolicy
+  >;
+
+  // Deduplicate while preserving order
+  const unique = packageIds.filter((pkg, idx) => packageIds.indexOf(pkg) === idx);
+
+  for (const pkg of unique) {
+    const policy = getCapabilityToolPolicy(pkg);
+    if (policy) {
+      policies[pkg] = policy;
+    }
+  }
+
+  // Cast to match the bundle type - empty when no policies added
+  return { policies: policies } as CapabilityToolPolicyBundle;
 }

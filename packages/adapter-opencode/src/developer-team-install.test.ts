@@ -12,8 +12,17 @@ import {
 } from "./developer-team-install";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
-import type { AdaptiveMemoryProvider, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
-import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
+import type {
+  AdaptiveMemoryProvider,
+  MemoryInjectionBundle,
+} from "@deck/core/memory/adaptive-memory";
+import type {
+  AdaptiveMemoryAdapter,
+  AdaptiveMemoryProviderIdentity,
+  AdaptiveMemoryHealthResult,
+  AdaptiveMemoryCommitResult,
+  AdaptiveMemoryContextResult,
+} from "@deck/core/memory/adaptive-memory-contract";
 
 // ---------------------------------------------------------------------------
 // Runner Isolation Verification
@@ -562,16 +571,22 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
     // When Supermemory provider is present but the OpenCode MCP config validation fails,
     // the resolveOpenCodeMemoryInjection still returns the bundle (auth probe is advisory only).
     // No diagnostic is emitted - the probe result doesn't affect bundle injection.
+    const mockIdentity: AdaptiveMemoryProviderIdentity = {
+      id: "supermemory",
+      displayName: "Supermemory",
+    };
+    const mockAdapter: AdaptiveMemoryAdapter = {
+      identity: mockIdentity,
+      health: async () => ({ status: "degraded" } as AdaptiveMemoryHealthResult),
+      configure: async () => {},
+      commit: async () => ({ savedCount: 0, discardedCount: 0, decisions: [] } as AdaptiveMemoryCommitResult),
+      loadContext: async () => ({ providerId: "mock", items: [] } as AdaptiveMemoryContextResult),
+      search: async () => ({ providerId: "mock", items: [] } as AdaptiveMemoryContextResult),
+    };
     const provider: AdaptiveMemoryProvider = {
       id: "supermemory",
       displayName: "Supermemory",
-      adapter: {
-        health: () => ({ status: "degraded" }),
-        configure: () => {},
-        commit: async () => ({ savedCount: 0, discardedCount: 0, results: [] }),
-        loadContext: async () => [],
-        search: async () => [],
-      },
+      adapter: mockAdapter,
       buildInjection: (): MemoryInjectionBundle => ({
         instructions: [],
         toolBindings: [{
@@ -1009,10 +1024,112 @@ describe("orchestrator invariant verification in verifyOpenCodeDeveloperTeamInst
       expect(diskContent).toContain("INV-002");
       expect(diskContent).toContain("INV-003");
       expect(diskContent).toContain("INV-004");
-      expect(diskContent).toContain("INV-005");
+expect(diskContent).toContain("INV-005");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dynamic tool resolution tests (REQ-DTI-001)
+// ---------------------------------------------------------------------------
+
+describe("dynamic tool resolution", () => {
+  test("without serena selected: subagents only have base tools", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      // Apply agent has basic tools
+      const applyBackendEntry = plan.agentEntries["deck-developer-apply-backend"];
+      expect(applyBackendEntry.tools).toEqual({
+        bash: true,
+        edit: true,
+        read: true,
+        write: true,
+      });
     } finally {
       cleanup(projectRoot);
     }
   });
 
+  test("with serena selected: apply agents get base + serena tools", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+
+      // Build capability bundle with serena enabled
+      const { buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles");
+      const capabilityInstructions = buildCapabilityInstructionBundle(["serena"]);
+
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+        configDir,
+        capabilityInstructions,
+      });
+
+      // Apply agents should have base + serena tools
+      const applyBackendEntry = plan.agentEntries["deck-developer-apply-backend"];
+      if (!applyBackendEntry || !applyBackendEntry.tools) throw new Error("applyBackendEntry or tools is undefined");
+      expect(applyBackendEntry.tools.find_symbol).toBe(true);
+      expect(applyBackendEntry.tools.replace_symbol_body).toBe(true);
+      expect(applyBackendEntry.tools.rename_symbol).toBe(true);
+      expect(applyBackendEntry.tools.get_diagnostics_for_file).toBe(true);
+
+      // Base tools still present
+      expect(applyBackendEntry.tools.bash).toBe(true);
+      expect(applyBackendEntry.tools.edit).toBe(true);
+    } finally {
+      cleanup(projectRoot);
+    }
   });
+
+  test("non-apply subagents receive read-only serena tools only", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+
+      const { buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles");
+      const capabilityInstructions = buildCapabilityInstructionBundle(["serena"]);
+
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+        configDir,
+        capabilityInstructions,
+      });
+
+      // Explorer should have read-only serena tools (not write tools)
+      const explorerEntry = plan.agentEntries["deck-developer-explorer"];
+      if (!explorerEntry || !explorerEntry.tools) throw new Error("explorerEntry or tools is undefined");
+      // Read-only tools: find_symbol, find_referencing_symbols, get_diagnostics_for_file
+      expect(explorerEntry.tools.find_symbol).toBe(true);
+      expect(explorerEntry.tools.find_referencing_symbols).toBe(true);
+      expect(explorerEntry.tools.get_diagnostics_for_file).toBe(true);
+      // Write tools should NOT be present for non-apply
+      expect(explorerEntry.tools.replace_symbol_body).toBeUndefined();
+      expect(explorerEntry.tools.rename_symbol).toBeUndefined();
+      expect(explorerEntry.tools.insert_after_symbol).toBeUndefined();
+      expect(explorerEntry.tools.insert_before_symbol).toBeUndefined();
+
+      // Should have base tools
+      expect(explorerEntry.tools.bash).toBe(true);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("orchestrator keeps delegation tools", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      const orchestratorEntry = plan.agentEntries["deck-developer-orchestrator"];
+      if (!orchestratorEntry || !orchestratorEntry.tools) throw new Error("orchestratorEntry or tools is undefined");
+      expect(orchestratorEntry.tools.delegate).toBe(true);
+      expect(orchestratorEntry.tools.delegation_list).toBe(true);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+});

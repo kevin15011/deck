@@ -6,6 +6,7 @@ import {
 } from "../../../config/deck-config";
 import {
   buildCapabilityInstructionBundle,
+  buildCapabilityToolPolicyBundle,
   composeCapabilityInstructions,
   getEnabledPackageInstructionIds,
   type CapabilityInstructionBundle,
@@ -130,7 +131,7 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("returns only enabled packages for pi runner", () => {
     const config = makeConfig({
-      pi: { "codebase-memory": true, "context-mode": false, rtk: true, "adaptive-memory": false },
+      pi: { "codebase-memory": true, "context-mode": false, rtk: true, "adaptive-memory": false, serena: false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "pi");
@@ -139,7 +140,7 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("returns only enabled packages for opencode runner", () => {
     const config = makeConfig({
-      opencode: { "codebase-memory": false, "context-mode": true, rtk: false, "adaptive-memory": false },
+      opencode: { "codebase-memory": false, "context-mode": true, rtk: false, "adaptive-memory": false, serena: false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "opencode");
@@ -154,7 +155,7 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("preserves canonical order even when enabled in different order", () => {
     const config = makeConfig({
-      pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": false },
+      pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": false, serena: false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "pi");
@@ -271,5 +272,47 @@ describe("composeCapabilityInstructions", () => {
     expect(result).toContain("# Explorer Agent");
     expect(result).toContain("Some important content");
     expect(result).toContain("## Package Instructions (configured)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCapabilityToolPolicyBundle
+// ---------------------------------------------------------------------------
+
+describe("buildCapabilityToolPolicyBundle", () => {
+  test("returns empty bundle when no packages enabled", () => {
+    const bundle = buildCapabilityToolPolicyBundle([]);
+    expect(bundle.policies).toEqual({});
+  });
+
+  test("returns empty policies when serena not in packageIds", () => {
+    const bundle = buildCapabilityToolPolicyBundle(["codebase-memory", "context-mode"]);
+    expect(bundle.policies.serena).toBeUndefined();
+  });
+
+  test("returns policy when serena is in packageIds", () => {
+    const bundle = buildCapabilityToolPolicyBundle(["serena"]);
+    expect(bundle.policies.serena).toBeDefined();
+    const policy = bundle.policies.serena!;
+    expect(policy.packageId).toBe("serena");
+    expect(policy.enabledTools).toHaveLength(11);
+    expect(policy.readOnlyTools).toHaveLength(6);
+    expect(policy.writeTools).toHaveLength(5);
+  });
+
+  test("apply agents are target agents", () => {
+    const bundle = buildCapabilityToolPolicyBundle(["serena"]);
+    const policy = bundle.policies.serena!;
+
+    expect(policy.targetAgents).toContain("deck-developer-apply-backend");
+    expect(policy.targetAgents).toContain("deck-developer-apply-frontend");
+    expect(policy.targetAgents).toContain("deck-developer-apply-general");
+  });
+
+  test("deduplicates packages", () => {
+    const bundle = buildCapabilityToolPolicyBundle(["serena", "serena", "codebase-memory"]);
+
+    // Should only have one serena policy
+    expect(Object.keys(bundle.policies).filter((k) => k === "serena")).toHaveLength(1);
   });
 });

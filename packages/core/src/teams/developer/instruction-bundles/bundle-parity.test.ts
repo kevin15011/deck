@@ -45,8 +45,8 @@ const BASELINE_HASHES: Record<string, Record<string, number>> = {
     skill: 1540221712,
   },
   serena: {
-    agent: 1042159158, // Updated: replaced OpenCode literals with generic "the runner"
-    skill: 484477006,
+    agent: 1623063198, // R34: added safe_delete_symbol to write-capable, removed installer wording
+    skill: 1329222104, // R33: skill split into read-only (non-apply) and full (apply) variants
   },
 };
 

@@ -106,3 +106,30 @@ describe("APPLY_GENERAL_SKILL_BODY", () => {
     expect(APPLY_GENERAL_SKILL_BODY).toMatch(/## Apply Progress|## Return Summary/i);
   });
 });
+
+// REQ-SAE-001 to REQ-SAE-007: Serena enforcement tests
+describe("Serena enforcement rules", () => {
+  test("contains Serena enforcement section when package selected", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("Serena Enforcement");
+  });
+
+  test("mention find_symbol for symbolic operations", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("find_symbol");
+  });
+
+  test("mention replace_symbol_body for replacement", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("replace_symbol_body");
+  });
+
+  test("mention coexistance with codebase-memory", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("codebase-memory");
+  });
+
+  test("mention fallback reporting", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toMatch(/Fallback|report/i);
+  });
+
+  test("does NOT validate CLI existence", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("No CLI validation");
+  });
+});
