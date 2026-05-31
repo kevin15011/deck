@@ -62,11 +62,27 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
   test("requires SDD triage before execution mode", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("SDD Triage Gate");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Direct");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Specialist only");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Specialist(s)");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Recommend SDD");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Run SDD");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not ask Automatic vs Interactive unless triage says Run SDD");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Documentation-only requests are not automatically SDD");
+  });
+
+  test("allows one or more specialists", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("one or more");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/Specialist\(s\)/);
+  });
+
+  test("contains parallel specialist launch section", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Parallel Specialist Launch");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Safe to parallelize");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Unsafe to parallelize");
+  });
+
+  test("dependency graph starts with Explorer", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("SDD flow order: Explore -> Proposal");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer runs **first**");
   });
 
   // INV-004 strengthened wording — all surfaces
@@ -207,7 +223,7 @@ describe("ORCHESTRATOR_SKILL_BODY", () => {
   test("contains SDD triage categories in skill body", () => {
     expect(ORCHESTRATOR_SKILL_BODY).toContain("Triage Gate");
     expect(ORCHESTRATOR_SKILL_BODY).toContain("**Direct**");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Specialist only**");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("**Specialist(s)**");
     expect(ORCHESTRATOR_SKILL_BODY).toContain("**Recommend SDD**");
     expect(ORCHESTRATOR_SKILL_BODY).toContain("**Run SDD**");
     expect(ORCHESTRATOR_SKILL_BODY).toContain("Do not infer full SDD from");
@@ -331,7 +347,7 @@ describe("ORCHESTRATOR_PROMPT_GUIDA", () => {
 
   test("SDD triage gate lists all four categories", () => {
     expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Direct**");
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Specialist only**");
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Specialist(s)**");
     expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Recommend SDD**");
     expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("**Run SDD**");
   });

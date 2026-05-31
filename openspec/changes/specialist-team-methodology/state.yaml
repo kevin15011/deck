@@ -1,0 +1,107 @@
+change-name: specialist-team-methodology
+phase: archive
+status: archived
+artifact: archive-report.md
+provenance:
+  - artifact_path: openspec/changes/specialist-team-methodology/exploration.md
+    created_by: deck-developer-explorer
+    phase: explore
+    status: completed
+  - artifact_path: openspec/changes/specialist-team-methodology/proposal.md
+    created_by: deck-developer-proposal
+    phase: proposal
+    status: completed
+  - artifact_path: openspec/changes/specialist-team-methodology/spec.md
+    created_by: deck-developer-spec
+    phase: spec
+    status: completed
+    registry_write: deferred-reconciled
+  - artifact_path: openspec/changes/specialist-team-methodology/design.md
+    created_by: deck-developer-design
+    phase: design
+    status: completed
+    registry_write: deferred-reconciled
+  - artifact_path: openspec/changes/specialist-team-methodology/tasks.md
+    created_by: deck-developer-task
+    phase: tasks
+    status: completed
+  - artifact_path: openspec/changes/specialist-team-methodology/apply-progress.md
+    created_by: deck-developer-apply-general
+    phase: apply
+    status: completed
+  - artifact_path: openspec/changes/specialist-team-methodology/verify-report.md
+    created_by: deck-developer-verify
+    phase: verify
+    status: passed
+  - artifact_path: openspec/changes/specialist-team-methodology/review-report.md
+    created_by: deck-developer-review
+    phase: review
+    status: approved
+  - artifact_path: openspec/changes/specialist-team-methodology/archive-report.md
+    created_by: deck-developer-archive
+    phase: archive
+    status: archived
+    archive_location: openspec/archive/specialist-team-methodology/
+description: Analizar metodología de equipo de especialistas vs fases SDD
+key_findings:
+  - catalog.ts ya define equipo de 14 agentes
+  - SDD vs Role-Based Delegation existe pero no enfatiza equipo como base
+  - SDD phase order lista Proposal primero, no Explorer - cambio críticas necesario
+  - wording de delegación predispose a especialista único
+  - Invariants (INV-001 a INV-005) deben preservarse
+risks:
+  - regtests breaking en orchestrator-*.test.ts por cambio de wording
+  - regresión en triage si wording cambia incorrectamente
+proposal_decisions:
+  - Developer Team debe encuadrarse como equipo de especialistas, no SDD primero
+  - Orchestrator debe coordinar, routear y sintetizar con conocimiento explícito del roster
+  - Triage debe permitir Direct / Specialist(s) / Recommend SDD / Run SDD
+  - Specialist(s) puede involucrar uno o más especialistas y paralelismo seguros
+  - Run SDD debe respetar flujo formal con Explorer antes de Proposal
+spec_summary:
+  requirements: 25
+  acceptance_scenarios: 15
+  open_questions: 2
+  key_requirements:
+    - Equipo de especialistas como identidad base, no SDD-default
+    - Triage preserva Direct / Specialist(s) / Recommend SDD / Run SDD
+    - Specialist(s) permite uno o más especialistas sin sesgo singular
+    - Paralelismo seguro sin dependencias ni conflictos
+    - Run SDD exige Explorer como primera fase y orden completo sin omisiones
+design_summary:
+  risk_level: medium
+  files_estimated: 6 modify + 2 unchanged/optional
+  key_decisions:
+    - Specialist only se redefine conceptualmente como Specialist(s)
+    - Orchestrator se refrasea como coordinador/router/sintetizador de especialistas
+    - Se recomienda considerar una invariant mínima para proteger Explorer-first
+    - Se preservan registry-deferred, Apply routing y configuración de modelos
+verify_summary:
+  result: pass
+  scope: focused post-install opencode surface verification
+  artifact: verify-report.md
+  tests: 201 passed, 0 failed
+  installed_paths_checked:
+    - /home/kevinlb/.config/opencode/skills/deck-developer-orchestrator/SKILL.md
+    - /home/kevinlb/.config/opencode/skills/deck-developer-*/SKILL.md
+  key_results:
+    - INV-001 through INV-006 present, with INV-005 exact marker restored
+    - Specialist(s), safe parallel launch, and Explorer-before-Proposal flow present
+    - No stale canonical Specialist only wording found
+review_summary:
+  result: approved
+  scope: general
+  artifact: review-report.md
+  files_reviewed: 7
+  findings_blocker: 0
+  findings_major: 0
+  findings_minor: 0
+  findings_nit: 0
+  key_results:
+    - Arquitectura alineada al Design
+    - INV-005 preservada con ID original
+    - INV-006 agregada como safeguards verificable
+    - Triage Specialist(s) implementado consistente
+    - Paralelismo seguro documentado
+    - Explorer-first en Run SDD verificado
+next_phase_recommended: archive

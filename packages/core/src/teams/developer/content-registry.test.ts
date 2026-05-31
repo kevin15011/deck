@@ -726,6 +726,7 @@ describe("orchestrator invariant injection", () => {
     expect(content.agentBody).toContain("INV-003");
     expect(content.agentBody).toContain("INV-004");
     expect(content.agentBody).toContain("INV-005");
+    expect(content.agentBody).toContain("INV-006");
   });
 
   test("orchestrator skill body contains invariant section", () => {
@@ -736,6 +737,7 @@ describe("orchestrator invariant injection", () => {
     expect(content.skillBody).toContain("INV-003");
     expect(content.skillBody).toContain("INV-004");
     expect(content.skillBody).toContain("INV-005");
+    expect(content.skillBody).toContain("INV-006");
   });
 
   test("non-orchestrator agents do NOT contain invariant section", () => {

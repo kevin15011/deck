@@ -155,7 +155,7 @@ export const INV_004_SDD_TRIAGE_GATE: OrchestratorInvariant = {
   condition:
     "Before asking for execution mode, launching SDD phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files",
   requiredAction:
-    "Classify the request as Direct, Specialist only, Recommend SDD, or Run SDD. Do not ask Automatic vs Interactive unless triage says Run SDD. Do not modify or delegate modifying work until this classification is made.",
+    "Classify the request as Direct, Specialist(s), Recommend SDD, or Run SDD. Do not ask Automatic vs Interactive unless triage says Run SDD. Do not modify or delegate modifying work until this classification is made.",
   rationale:
     "SDD is a heavyweight pipeline. Running it for every request with certain keywords wastes resources and frustrates users with unnecessary ceremony. Using the smallest appropriate workflow keeps the team responsive. Additionally, bypassing triage and modifying files directly undermines workflow safety.",
   violationConsequence:
@@ -189,6 +189,33 @@ export const INV_005_REGISTRY_DEFERRED_PARALLELISM: OrchestratorInvariant = {
     "Race conditions corrupt state.yaml/events.yaml, losing phase artifacts, provenance, or event history.",
 };
 
+/**
+ * INV-006: SDD Explorer-First Flow
+ *
+ * When Run SDD is selected, Explorer must run first before Proposal.
+ * The full SDD flow respects: Explorer → Proposal → Spec + Design → Tasks → Apply → Verify + Review → Archive.
+ *
+ * Source: orchestrator-content.ts, lines 118-131 (Dependency Graph)
+ * Source: orchestrator-content.ts, lines 146-159 (SDD Triage Gate: Run SDD)
+ */
+export const INV_006_SDD_EXPLORER_FIRST_FLOW: OrchestratorInvariant = {
+  id: "INV-006",
+  title: "SDD Explorer-First Flow",
+  tier: "critical",
+  surfaces: ["session", "agent", "skill", "manifest"],
+  sourceRefs: [
+    "orchestrator-content.ts:118-131 (Dependency Graph)",
+    "orchestrator-content.ts:146-159 (SDD Triage Gate: Run SDD)",
+  ],
+  condition: "When Run SDD is selected via triage",
+  requiredAction:
+    "Execute Explorer as the first phase before Proposal. The full SDD flow order must be: Explorer → Proposal → Spec + Design → Tasks → Apply → Verify + Review → Archive. Do not skip any phase.",
+  rationale:
+    "Without Explorer-first, Proposal lacks codebase context and generates lower-quality proposals. The exploration phase provides critical architectural and constraint information that informed Proposal decisions require.",
+  violationConsequence:
+    "Proposal operates without adequate codebase context, producing incomplete or misaligned change proposals that require later rework.",
+};
+
 // ---------------------------------------------------------------------------
 // Canonical Exports
 // ---------------------------------------------------------------------------
@@ -203,6 +230,7 @@ export const ORCHESTRATOR_INVARIANTS: readonly OrchestratorInvariant[] = [
   INV_003_SDD_INITIALIZATION_GATE,
   INV_004_SDD_TRIAGE_GATE,
   INV_005_REGISTRY_DEFERRED_PARALLELISM,
+  INV_006_SDD_EXPLORER_FIRST_FLOW,
 ];
 
 // ---------------------------------------------------------------------------

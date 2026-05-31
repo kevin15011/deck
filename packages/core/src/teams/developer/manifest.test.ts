@@ -376,6 +376,7 @@ describe("DeveloperTeamManifest", () => {
       expect(orchestrator!.instruction).toContain("INV-003");
       expect(orchestrator!.instruction).toContain("INV-004");
       expect(orchestrator!.instruction).toContain("INV-005");
+      expect(orchestrator!.instruction).toContain("INV-006");
     });
 
     test("orchestrator skill contains invariant section", () => {
@@ -392,7 +393,7 @@ describe("DeveloperTeamManifest", () => {
       expect(orchestratorSkill!.body).toContain("INV-002");
       expect(orchestratorSkill!.body).toContain("INV-003");
       expect(orchestratorSkill!.body).toContain("INV-004");
-      expect(orchestratorSkill!.body).toContain("INV-005");
+      expect(orchestratorSkill!.body).toContain("INV-006");
     });
 
     test("non-orchestrator agents do NOT contain invariant section", () => {

@@ -25,8 +25,8 @@ import {
 // ---------------------------------------------------------------------------
 
 describe("Schema: invariant records", () => {
-  it("should have exactly 5 critical invariants", () => {
-    expect(ORCHESTRATOR_INVARIANTS.length).toBe(5);
+  it("should have exactly 6 critical invariants", () => {
+    expect(ORCHESTRATOR_INVARIANTS.length).toBe(6);
   });
 
   it("all invariants should be critical tier", () => {
@@ -69,6 +69,7 @@ describe("Schema: invariant records", () => {
     expect(ids).toContain("INV-003");
     expect(ids).toContain("INV-004");
     expect(ids).toContain("INV-005");
+    expect(ids).toContain("INV-006");
   });
 });
 
@@ -101,13 +102,14 @@ describe("rendering: renderOrchestratorInvariants", () => {
       expect(output).toContain("## Orchestrator Invariants");
     });
 
-    it(`should render all 5 critical IDs for ${surface} surface`, () => {
+    it(`should render all 6 critical IDs for ${surface} surface`, () => {
       const output = renderOrchestratorInvariants({ surface });
       expect(output).toContain("INV-001");
       expect(output).toContain("INV-002");
       expect(output).toContain("INV-003");
       expect(output).toContain("INV-004");
       expect(output).toContain("INV-005");
+      expect(output).toContain("INV-006");
     });
 
     it(`should render titles for ${surface} surface`, () => {
@@ -116,6 +118,7 @@ describe("rendering: renderOrchestratorInvariants", () => {
       expect(output).toContain("Pure Delegator");
       expect(output).toContain("SDD Initialization Gate");
       expect(output).toContain("SDD Triage Gate");
+      expect(output).toContain("SDD Explorer-First Flow");
       expect(output).toContain("Registry-Deferred Parallelism");
     });
 
@@ -127,12 +130,13 @@ describe("rendering: renderOrchestratorInvariants", () => {
 
   it("should render only critical by default", () => {
     const output = renderOrchestratorInvariants({ surface: "session" });
-    // All 5 are critical, so all should render
+    // All 6 are critical, so all should render
     expect(output).toContain("INV-001");
     expect(output).toContain("INV-002");
     expect(output).toContain("INV-003");
     expect(output).toContain("INV-004");
     expect(output).toContain("INV-005");
+    expect(output).toContain("INV-006");
   });
 
   it("should respect tierMin filter", () => {
@@ -308,6 +312,40 @@ describe("ordering: invariants should be ordered by tier then ID", () => {
     expect(ids[2]).toBe("INV-003");
     expect(ids[3]).toBe("INV-004");
     expect(ids[4]).toBe("INV-005");
+    expect(ids[5]).toBe("INV-006");
+  });
+});
+
+describe("INV-006 SDD Explorer-First Flow", () => {
+  const inv_006 = ORCHESTRATOR_INVARIANTS.find((inv) => inv.id === "INV-006")!;
+
+  it("should exist", () => {
+    expect(inv_006).toBeTruthy();
+  });
+
+  it("should have critical tier", () => {
+    expect(inv_006.tier).toBe("critical");
+  });
+
+  it("should target all surfaces", () => {
+    expect(inv_006.surfaces).toContain("session");
+    expect(inv_006.surfaces).toContain("agent");
+    expect(inv_006.surfaces).toContain("skill");
+    expect(inv_006.surfaces).toContain("manifest");
+  });
+
+  it("should reference dependency graph in sourceRefs", () => {
+    expect(inv_006.sourceRefs.some((ref) => ref.includes("Dependency Graph"))).toBe(true);
+  });
+
+  it("condition should mention Run SDD", () => {
+    expect(inv_006.condition).toContain("Run SDD");
+  });
+
+  it("requiredAction should mandate Explorer before Proposal", () => {
+    expect(inv_006.requiredAction).toContain("Explorer");
+    expect(inv_006.requiredAction).toContain("Proposal");
+    expect(inv_006.requiredAction).toMatch(/→/);
   });
 });
 

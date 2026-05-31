@@ -23,13 +23,14 @@ describe("Task 2: Rendering and verification helpers", () => {
       expect(result).toContain("## Orchestrator Invariants");
     });
 
-    it("contains all 5 critical invariant IDs", () => {
+    it("contains all 6 critical invariant IDs", () => {
       const result = renderOrchestratorInvariants({ surface: "session" });
       expect(result).toContain("INV-001");
       expect(result).toContain("INV-002");
       expect(result).toContain("INV-003");
       expect(result).toContain("INV-004");
       expect(result).toContain("INV-005");
+      expect(result).toContain("INV-006");
     });
 
     it("filters by surface correctly", () => {
@@ -110,9 +111,12 @@ describe("Task 2: Rendering and verification helpers", () => {
 
 ### INV-005: Registry-Deferred Parallelism
 **Required Action**: Serialize updates...
+
+### INV-006: SDD Explorer-First Flow
+**Required Action**: Execute Explorer first...
 `;
 
-      const result = verifyOrchestratorInvariantPresence(fullOutput, {
+const result = verifyOrchestratorInvariantPresence(fullOutput, {
         surface: "session",
       });
 
@@ -151,7 +155,7 @@ INV-002: Pure Delegator
       });
 
       expect(result.pass).toBe(false);
-      expect(result.missing.length).toBe(5); // All 5
+      expect(result.missing.length).toBe(6); // All 6
     });
 
     it("detects duplicate section header as failure", () => {
@@ -181,8 +185,8 @@ INV-002: Pure Delegator
 });
 
 describe("Export verification", () => {
-  it("ORCHESTRATOR_INVARIANTS has exactly 5 records", () => {
-    expect(ORCHESTRATOR_INVARIANTS.length).toBe(5);
+  it("ORCHESTRATOR_INVARIANTS has exactly 6 records", () => {
+    expect(ORCHESTRATOR_INVARIANTS.length).toBe(6);
   });
 
   it("all records have tier: critical", () => {

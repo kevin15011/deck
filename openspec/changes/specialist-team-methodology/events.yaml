@@ -1,0 +1,128 @@
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_start
+  phase: explore
+  actor: deck-developer-explorer
+  note: Started exploration for specialist-team-methodology change
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: artifact_created
+  phase: explore
+  artifact: exploration.md
+  actor: deck-developer-explorer
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_completed
+  phase: explore
+  status: completed
+  actor: deck-developer-explorer
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_start
+  phase: proposal
+  actor: deck-developer-proposal
+  note: Started proposal for specialist-team-methodology change
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: artifact_created
+  phase: proposal
+  artifact: proposal.md
+  actor: deck-developer-proposal
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_completed
+  phase: proposal
+  status: completed
+  artifact: proposal.md
+  actor: deck-developer-proposal
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_completed
+  phase: spec
+  status: completed
+  artifact: spec.md
+  actor: deck-developer-spec
+  registry_write: deferred-reconciled
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_completed
+  phase: design
+  status: completed
+  artifact: design.md
+  actor: deck-developer-design
+  registry_write: deferred-reconciled
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_start
+  phase: tasks
+  actor: deck-developer-task
+  note: Started task breakdown for specialist-team-methodology change
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: artifact_created
+  phase: tasks
+  artifact: tasks.md
+  actor: deck-developer-task
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_completed
+  phase: tasks
+  status: completed
+  artifact: tasks.md
+  actor: deck-developer-task
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_start
+  phase: apply
+  actor: deck-developer-apply-general
+  note: Implemented specialist team methodology changes
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: artifact_created
+  phase: apply
+  artifact: apply-progress.md
+  actor: deck-developer-apply-general
+
+- timestamp: "2026-05-30T00:00:00Z"
+  event: phase_completed
+  phase: apply
+  status: completed
+  artifact: apply-progress.md
+  actor: deck-developer-apply-general
+
+- timestamp: "2026-05-30T14:00:00Z"
+  event: apply_fix_completed
+  phase: apply
+  status: completed
+  artifact: apply-progress.md
+  actor: deck-developer-apply-general
+  note: Fixed INV-005 restoration — previous apply renamed it to INV-007 breaking installer verification. Restored INV-005, preserved INV-006, removed INV-007 duplicate.
+
+- timestamp: "2026-05-31T02:25:00Z"
+  event: phase_completed
+  phase: verify
+  status: passed
+  artifact: verify-report.md
+  actor: deck-developer-verify
+  note: Focused post-install opencode verification passed; installed orchestrator skill contains INV-001..INV-006, INV-005 exact marker, Specialist(s), safe parallel launch, and Explorer-before-Proposal flow.
+
+- timestamp: "2026-05-31T02:30:00Z"
+  event: phase_completed
+  phase: review
+  status: approved
+  artifact: review-report.md
+  actor: deck-developer-review
+  note: Engineering quality review passed; implementation aligned to design, INV-005 preserved with original ID, INV-006 added as verifiable safeguard, Specialist(s) triage consistent, parallel specialist launch rule documented, Explorer-first in Run SDD verified.
+
+- timestamp: "2026-05-31T03:00:00Z"
+  event: phase_start
+  phase: archive
+  actor: deck-developer-archive
+  note: Started archive phase for specialist-team-methodology change
+
+- timestamp: "2026-05-31T03:05:00Z"
+  event: phase_completed
+  phase: archive
+  status: archived
+  artifact: archive-report.md
+  actor: deck-developer-archive
+  note: Archived to openspec/archive/specialist-team-methodology/; all artifacts preserved; state.yaml and events.yaml updated.
