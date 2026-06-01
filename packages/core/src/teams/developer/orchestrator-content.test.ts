@@ -6,6 +6,8 @@ import {
   ORCHESTRATOR_PROMPT_PRAGMATICA,
   ORCHESTRATOR_SKILL_BODY,
   ORCHESTRATOR_SYSTEM_PROMPT,
+  PERSONALITY_COMMUNICATION_GUIDA,
+  PERSONALITY_COMMUNICATION_PRAGMATICA,
   getOrchestratorSystemPrompt,
 } from "./orchestrator-content";
 
@@ -360,23 +362,29 @@ describe("ORCHESTRATOR_PROMPT_GUIDA", () => {
 describe("getOrchestratorSystemPrompt", () => {
   test("guia variant contains teaching tone indicators", () => {
     const guia = getOrchestratorSystemPrompt("guia");
-    expect(guia).toContain("Guia Personality");
-    expect(guia).toContain("Why delegation matters");
-    expect(guia).toContain("Rationale:");
-    // Expanded explanations present in guia
-    expect(guia).toContain("key insight");
+    expect(guia).toContain("Communication Style — Guia");
+    // Core present in composition
+    expect(guia).toContain("# Deck Developer Team");
+    // Still longer than core
     expect(guia.length).toBeGreaterThan(ORCHESTRATOR_SYSTEM_PROMPT.length);
   });
 
-  test("pragmatica variant matches ORCHESTRATOR_SYSTEM_PROMPT", () => {
+  test("pragmatica variant is composition (not identity)", () => {
     const pragmatica = getOrchestratorSystemPrompt("pragmatica");
-    expect(pragmatica).toBe(ORCHESTRATOR_SYSTEM_PROMPT);
+    // Core present
+    expect(pragmatica).toContain("# Deck Developer Team");
+    // Layer present
+    expect(pragmatica).toContain("Communication Style — Pragmatica");
+    // No longer equals core
+    expect(pragmatica).not.toBe(ORCHESTRATOR_SYSTEM_PROMPT);
   });
 
   test("default (no arg) returns pragmatica", () => {
     // @ts-expect-error - testing JS behavior where no arg returns pragmatica
     const defaultPrompt = getOrchestratorSystemPrompt();
-    expect(defaultPrompt).toBe(ORCHESTRATOR_SYSTEM_PROMPT);
+    // Same as pragmatica variant
+    expect(defaultPrompt).toContain("Communication Style — Pragmatica");
+    expect(defaultPrompt).toContain("# Deck Developer Team");
   });
 
   test("both variants (guia and pragmatica) are pairwise distinct", () => {
@@ -394,6 +402,71 @@ describe("getOrchestratorSystemPrompt", () => {
   });
 
   test("ORCHESTRATOR_PROMPT_PRAGMATICA exports the pragmatica variant", () => {
-    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).toBe(ORCHESTRATOR_SYSTEM_PROMPT);
+    // Composition check instead of identity
+    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).toContain("# Deck Developer Team");
+    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).toContain("Communication Style — Pragmatica");
+    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).not.toBe(ORCHESTRATOR_SYSTEM_PROMPT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Communication Layer Tests
+// ---------------------------------------------------------------------------
+
+describe("PERSONALITY_COMMUNICATION_GUIDA", () => {
+  test("contains guia communication style header", () => {
+    expect(PERSONALITY_COMMUNICATION_GUIDA).toContain("Communication Style — Guia");
+  });
+
+  test("does not contain operational keywords (triage, routing, registry, recovery)", () => {
+    // These are actual operational keywords that should NOT appear
+    expect(PERSONALITY_COMMUNICATION_GUIDA).not.toMatch(/triage/i);
+    expect(PERSONALITY_COMMUNICATION_GUIDA).not.toMatch(/routing/i);
+    expect(PERSONALITY_COMMUNICATION_GUIDA).not.toMatch(/registry/i);
+    expect(PERSONALITY_COMMUNICATION_GUIDA).not.toMatch(/recovery/i);
+  });
+
+  test("has reasonable line count (≤ 40 lines)", () => {
+    const lines = PERSONALITY_COMMUNICATION_GUIDA.split("\n").length;
+    expect(lines).toBeLessThanOrEqual(40);
+  });
+});
+
+describe("PERSONALITY_COMMUNICATION_PRAGMATICA", () => {
+  test("contains pragmatica communication style header", () => {
+    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).toContain("Communication Style — Pragmatica");
+  });
+
+  test("does not contain operational keywords (triage, routing, registry, recovery)", () => {
+    // These are actual operational keywords that should NOT appear
+    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).not.toMatch(/triage/i);
+    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).not.toMatch(/routing/i);
+    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).not.toMatch(/registry/i);
+    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).not.toMatch(/recovery/i);
+  });
+
+  test("has reasonable line count (≤ 40 lines)", () => {
+    const lines = PERSONALITY_COMMUNICATION_PRAGMATICA.split("\n").length;
+    expect(lines).toBeLessThanOrEqual(40);
+  });
+});
+
+describe("ORCHESTRATOR_PROMPT_GUIDA composition", () => {
+  test("starts with ORCHESTRATOR_SYSTEM_PROMPT (idempotency)", () => {
+    expect(ORCHESTRATOR_PROMPT_GUIDA.startsWith(ORCHESTRATOR_SYSTEM_PROMPT)).toBe(true);
+  });
+
+  test("contains full ORCHESTRATOR_SYSTEM_PROMPT", () => {
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain(ORCHESTRATOR_SYSTEM_PROMPT);
+  });
+});
+
+describe("ORCHESTRATOR_PROMPT_PRAGMATICA composition", () => {
+  test("starts with ORCHESTRATOR_SYSTEM_PROMPT (idempotency)", () => {
+    expect(ORCHESTRATOR_PROMPT_PRAGMATICA.startsWith(ORCHESTRATOR_SYSTEM_PROMPT)).toBe(true);
+  });
+
+  test("contains full ORCHESTRATOR_SYSTEM_PROMPT", () => {
+    expect(ORCHESTRATOR_PROMPT_PRAGMATICA).toContain(ORCHESTRATOR_SYSTEM_PROMPT);
   });
 });

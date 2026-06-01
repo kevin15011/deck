@@ -793,8 +793,9 @@ describe("getTeamSessionInstructions with personality", () => {
   test("guia personality returns expanded teaching-tone variant", () => {
     const guiaInstructions = getTeamSessionInstructions("developer-team", { personality: "guia" });
     expect(guiaInstructions).toBeDefined();
-    expect(guiaInstructions).toContain("Guia Personality");
-    expect(guiaInstructions).toContain("Why delegation matters");
+    expect(guiaInstructions).toContain("Communication Style — Guia");
+    // Core present in composition
+    expect(guiaInstructions).toContain("# Deck Developer Team");
   });
 
   test("pragmatica personality returns current ORCHESTRATOR_SYSTEM_PROMPT behavior", () => {
@@ -804,6 +805,8 @@ describe("getTeamSessionInstructions with personality", () => {
     expect(pragmaticaInstructions).toContain("deck-developer-orchestrator");
     // Pragmatica should contain the delegation table with 4+
     expect(pragmaticaInstructions).toContain("4+");
+    // Layer present
+    expect(pragmaticaInstructions).toContain("Communication Style — Pragmatica");
   });
 
   test("default (no personality) returns pragmatica variant — backward compatibility", () => {

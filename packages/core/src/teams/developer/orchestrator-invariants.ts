@@ -71,7 +71,6 @@ export const INV_001_EXECUTION_MODE_GATE: OrchestratorInvariant = {
   surfaces: ["session", "agent", "skill", "manifest"],
   sourceRefs: [
     "orchestrator-content.ts:161-168 (Execution Mode section)",
-    "orchestrator-content.ts:458-463 (ORCHESTRATOR_PROMPT_GUIDA: Execution Mode)",
   ],
   condition: "First change request in a session",
   requiredAction:
@@ -97,7 +96,6 @@ export const INV_002_PURE_DELEGATOR: OrchestratorInvariant = {
   surfaces: ["session", "agent", "skill", "manifest"],
   sourceRefs: [
     "orchestrator-content.ts:64-79 (Your Identity: Pure Delegator)",
-    "orchestrator-content.ts:322-337 (ORCHESTRATOR_PROMPT_GUIDA: Your Identity)",
   ],
   condition: "Any task that has a specialist agent capable of handling it",
   requiredAction:
@@ -123,7 +121,6 @@ export const INV_003_SDD_INITIALIZATION_GATE: OrchestratorInvariant = {
   surfaces: ["session", "agent", "skill", "manifest"],
   sourceRefs: [
     "orchestrator-content.ts:133-144 (SDD Initialization Gate)",
-    "orchestrator-content.ts:417-428 (ORCHESTRATOR_PROMPT_GUIDA: SDD Initialization Gate)",
   ],
   condition:
     "Before processing any SDD work, check whether the project has been initialized",
@@ -150,7 +147,6 @@ export const INV_004_SDD_TRIAGE_GATE: OrchestratorInvariant = {
   surfaces: ["session", "agent", "skill", "manifest"],
   sourceRefs: [
     "orchestrator-content.ts:146-159 (SDD Triage Gate)",
-    "orchestrator-content.ts:432-452 (ORCHESTRATOR_PROMPT_GUIDA: SDD Triage Gate)",
   ],
   condition:
     "Before asking for execution mode, launching SDD phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files",
@@ -177,7 +173,6 @@ export const INV_005_REGISTRY_DEFERRED_PARALLELISM: OrchestratorInvariant = {
   surfaces: ["session", "agent", "skill", "manifest"],
   sourceRefs: [
     "orchestrator-content.ts:181-182 (Artifact Store: parallel phase batching)",
-    "orchestrator-content.ts:493-502 (ORCHESTRATOR_PROMPT_GUIDA: Parallel phase batching)",
   ],
   condition:
     "When launching parallel phase batches (Spec+Design or Verify+Review)",

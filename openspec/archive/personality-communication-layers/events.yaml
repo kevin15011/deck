@@ -1,0 +1,106 @@
+# Events: personality-communication-layers
+
+- event: exploration_completed
+  phase: explore
+  timestamp: 2026-05-31
+  artifact: exploration.md
+  description: Completed exploration of personality system architecture, identified duplicated operational content, and recommended communication-only layers approach
+  status: completed
+
+- event: proposal_completed
+  phase: proposal
+  timestamp: 2026-05-31
+  artifact: proposal.md
+  description: Created proposal for shared operational core + thin communication layers replacing duplicated GUIDA prompt
+  status: completed
+
+- event: spec_completed
+  phase: spec
+  timestamp: 2026-05-31
+  artifact: spec.md
+  description: Created spec with 22 requirements (14 MUST, 8 SHOULD) and 16 acceptance scenarios covering core sharing, communication layers, backward compat, and quality constraints
+  status: completed
+
+- event: design_completed
+  phase: design
+  timestamp: 2026-05-31
+  artifact: design.md
+  description: Created design for core + communication layer composition, 4 files modified, append strategy, backward compat via export redefinition
+  status: completed
+
+- event: tasks_completed
+  phase: tasks
+  timestamp: 2026-05-31
+  artifact: tasks.md
+  description: Created 6 atomic tasks — 2 contracts (P0), 3 test/invariant updates (P0/P1), 1 verification gate (P0). 3 tasks parallelizable after contracts. All General Apply. Low review workload (~-250 net lines).
+  status: completed
+
+- event: apply_started
+  phase: apply
+  timestamp: 2026-05-31
+  artifact: apply-progress.md
+  description: General Apply started Tasks 1-2 — adding communication layer constants and redefining exports as compositions
+  status: in_progress
+
+- event: apply_task1_completed
+  phase: apply
+  timestamp: 2026-05-31
+  artifact: apply-progress.md
+  description: Task 1 complete — added PERSONALITY_COMMUNICATION_GUIDA (23 lines) and PERSONALITY_COMMUNICATION_PRAGMATICA (11 lines)
+  status: completed
+
+- event: apply_task2_completed
+  phase: apply
+  timestamp: 2026-05-31
+  artifact: apply-progress.md
+  description: Task 2 complete — redefined ORCHESTRATOR_PROMPT_GUIDA and ORCHESTRATOR_PROMPT_PRAGMATICA as compositions, removed ~326 line monolith
+  status: completed
+
+- event: apply_task3_completed
+  phase: apply
+  timestamp: 2026-05-31
+  artifact: apply-progress.md
+  description: Task 3 complete — updated orchestrator-content.test.ts: 6 existing tests updated, 14 new tests added (layer purity, composition, idempotency)
+  status: completed
+
+- event: apply_task4_completed
+  phase: apply
+  timestamp: 2026-05-31
+  artifact: apply-progress.md
+  description: Task 4 complete — updated content-registry.test.ts: 3 personality tests updated for new layer headers
+  status: completed
+
+- event: apply_task5_completed
+  phase: apply
+  timestamp: 2026-05-31
+  artifact: apply-progress.md
+  description: Task 5 complete — removed 5 GUIDA-specific sourceRefs from orchestrator-invariants.ts
+  status: completed
+
+- event: apply_task6_completed
+  phase: apply
+  timestamp: 2026-05-31
+  artifact: apply-progress.md
+  description: Task 6 complete — full test suite verification: 1915 pass, 50 fail (pre-existing). All changed files pass tests. Build success.
+  status: completed
+
+- event: verification-passed
+  phase: verify
+  timestamp: 2026-05-31
+  artifact: verify-report.md
+  description: Verification PASS — all 22 spec requirements satisfied, 137 tests pass (69 content + 68 registry), build and typecheck pass, 0 critical findings
+  status: completed
+
+- event: review-complete
+  phase: review
+  timestamp: 2026-05-31
+  artifact: review-report.md
+  description: Review APPROVE — 0 blockers, 0 major, 0 minor, 0 nit findings. Architecture clean, maintainable, backward compatible.
+  status: completed
+
+- event: archive_completed
+  phase: archive
+  timestamp: 2026-06-01
+  artifact: archive-report.md
+  description: Archive complete — change moved to openspec/archive/personality-communication-layers/
+  status: completed

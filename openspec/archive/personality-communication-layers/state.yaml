@@ -1,0 +1,63 @@
+# State: personality-communication-layers
+
+phase: archive
+status: archived
+change_name: personality-communication-layers
+created: 2026-05-31
+
+artifacts:
+  exploration:
+    path: exploration.md
+    description: Exploration report for personality system redesign
+    recorded: 2026-05-31
+  proposal:
+    path: proposal.md
+    description: Proposal for shared operational core + thin communication layers per personality
+    recorded: 2026-05-31
+  spec:
+    path: spec.md
+    description: Formal requirements and acceptance scenarios for personality communication layers
+    recorded: 2026-05-31
+  design:
+    path: design.md
+    description: Technical design for core + communication layer composition, file impact, and backward compatibility
+    recorded: 2026-05-31
+  tasks:
+    path: tasks.md
+    description: 6 atomic tasks for implementing communication layers — constants, compositions, tests, invariants, verification
+    recorded: 2026-05-31
+  apply-progress:
+    path: apply-progress.md
+    description: Progress report for Tasks 1-6 — all complete, 1915 tests pass, 50 pre-existing failures
+    recorded: 2026-05-31
+  verify-report:
+    path: verify-report.md
+    description: Verification report — all requirements satisfied, 137 tests pass, build/typecheck pass, 0 critical findings
+    recorded: 2026-05-31
+  review-report:
+    path: review-report.md
+    description: Review report — APPROVE, 0 blockers, 0 major, 0 minor, 0 nit
+    recorded: 2026-05-31
+
+provenance:
+  - source: user_request
+    description: User requested exploration of personality system for communication-only redesign
+    recorded: 2026-05-31
+  - source: proposal_agent
+    description: Proposal agent created proposal artifact from exploration findings
+    recorded: 2026-05-31
+  - source: spec_agent
+    description: Spec agent created spec artifact with 22 requirements and 16 acceptance scenarios
+    recorded: 2026-05-31
+  - source: design_agent
+    description: Design agent created design artifact with architecture, file impact, and tradeoffs
+    recorded: 2026-05-31
+  - source: task_agent
+    description: Task agent created 6 atomic tasks (2 Medium, 4 Low complexity) across 4 files, grouped in 3 execution phases
+    recorded: 2026-05-31
+  - source: verify_agent
+    description: Verify agent confirmed all requirements satisfied, tests pass, build/typecheck pass — PASS
+    recorded: 2026-05-31
+  - source: review_agent
+    description: Review agent approved implementation — 0 blockers, 0 major, 0 minor, 0 nit — APPROVE
+    recorded: 2026-05-31
