@@ -44,6 +44,8 @@ import type {
   RunnerMcpConfigResult,
   FlowState,
   NextScreen,
+  RunnerDeckInstallInput,
+  RunnerDeckInstallStatus,
 } from "@deck/core";
 
 import { getModelCatalog } from "@deck/core";
@@ -214,7 +216,7 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
   // Review and installation planning
   // -------------------------------------------------------------------------
 
-  buildReviewPlan(state: DashboardState, inventory: CapabilityInventory): ReviewPlan {
+  buildReviewPlan(state: DashboardState & { teams?: Record<string, unknown>; packageInstructions?: Record<string, unknown>; runtime?: { toolsReview?: unknown } }, inventory: CapabilityInventory): ReviewPlan {
     log(`buildReviewPlan: START. inventoryType=${typeof inventory} hasCapabilities=${!!inventory?.capabilities}`);
     try {
     // Normalize inventory: accept both CapabilityInventory (with .capabilities) 
@@ -541,7 +543,7 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
     const nativePlan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
       configModelOverrides: modelAssignments,
       reasoningEffortOverrides: thinkingAssignments,
-      memoryProvider: input.memoryProvider,
+      memoryProvider: input.memoryProvider as any,
       supportedMemoryProviderIds: ["engram", "supermemory"],
       capabilityInstructions: input.capabilityInstructions,
       standaloneSkills: input.standaloneSkills,
@@ -747,6 +749,78 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
 
   getSelectableTools(): unknown[] {
     return getSelectableOpenCodeTools();
+  }
+
+  // -------------------------------------------------------------------------
+  // Detection (added by `add-self-update-system` / T2.10)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Detect whether Deck-managed artifacts are installed for OpenCode.
+   *
+   * Scans the OpenCode config root (and the home-relative `~/.config/opencode/`
+   * fallback when no project root is supplied) for files Deck writes when it
+   * installs the Developer Team: `opencode.json`, `AGENTS.md`, the
+   * `skills/deck-*` directory, and `packageInstructions.json`.
+   *
+   * Returns `{ installed: false, managedPaths: [], diagnostics: [...] }` when
+   * the config root is missing or no Deck-managed files are found.
+   */
+  async detectDeckInstall(
+    input?: RunnerDeckInstallInput,
+  ): Promise<RunnerDeckInstallStatus> {
+    const { existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { homedir } = await import("node:os");
+
+    // OpenCode writes project-relative config at `<projectRoot>/.config/opencode`
+    // and falls back to `~/.config/opencode/` when no project root is given.
+    // Per the design we keep both candidates in scope for the upgrade sync.
+    //
+    // The home-relative root is computed from `process.env.HOME` first so
+    // tests can override it; we fall back to `os.homedir()` when the env var
+    // is not set (which on Linux/Unix reads passwd via getpwuid_r, so we
+    // still get a sensible default).
+    const configRoots: string[] = [];
+    if (input?.projectRoot) {
+      configRoots.push(join(input.projectRoot, ".config", "opencode"));
+    }
+    const envHome = process.env.HOME;
+    const effectiveHome = envHome && envHome.length > 0 ? envHome : homedir();
+    configRoots.push(join(effectiveHome, ".config", "opencode"));
+
+    const managedFiles = [
+      "opencode.json",
+      "AGENTS.md",
+      "packageInstructions.json",
+    ];
+
+    const managedPaths: string[] = [];
+    const diagnostics: string[] = [];
+
+    for (const root of configRoots) {
+      if (!existsSync(root)) {
+        diagnostics.push(`OpenCode config root not found: ${root}`);
+        continue;
+      }
+      for (const fileName of managedFiles) {
+        const p = join(root, fileName);
+        if (existsSync(p)) {
+          managedPaths.push(p);
+        }
+      }
+      // Skills dir — directory presence is enough signal for a Deck install
+      const skillsDir = join(root, "skills");
+      if (existsSync(skillsDir)) {
+        managedPaths.push(skillsDir);
+      }
+    }
+
+    return {
+      installed: managedPaths.length > 0,
+      managedPaths,
+      diagnostics,
+    };
   }
 }
 

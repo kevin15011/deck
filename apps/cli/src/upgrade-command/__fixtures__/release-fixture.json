@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "version": "1.2.0",
+  "tag_name": "v1.2.0",
+  "channel": "stable",
+  "published_at": "2026-06-02T12:00:00.000Z",
+  "release_notes_url": "https://github.com/gentleman-programming/deck/releases/tag/v1.2.0",
+  "items": [
+    {
+      "id": "binary-darwin-arm64-v1.2.0",
+      "kind": "binary",
+      "required": true,
+      "platform": "darwin-arm64",
+      "asset_name": "deck_v1.2.0_darwin-arm64.tar.gz",
+      "url": "https://github.com/gentleman-programming/deck/releases/download/v1.2.0/deck_v1.2.0_darwin-arm64.tar.gz",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "notes": "macOS Apple Silicon binary"
+    },
+    {
+      "id": "binary-linux-x64-v1.2.0",
+      "kind": "binary",
+      "required": true,
+      "platform": "linux-x64",
+      "asset_name": "deck_v1.2.0_linux-x64.tar.gz",
+      "url": "https://github.com/gentleman-programming/deck/releases/download/v1.2.0/deck_v1.2.0_linux-x64.tar.gz",
+      "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "notes": "Linux x86_64 binary"
+    },
+    {
+      "id": "content-prompts-skills-v1.2.0",
+      "kind": "content",
+      "required": false,
+      "asset_name": "deck_v1.2.0_content.tar.gz",
+      "url": "https://github.com/gentleman-programming/deck/releases/download/v1.2.0/deck_v1.2.0_content.tar.gz",
+      "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "notes": "Prompts, skills, subagents, MCP, and packageInstructions content bundle",
+      "content_kinds": ["prompts", "skills", "subagents", "mcp", "packageInstructions"]
+    },
+    {
+      "id": "migration-v1-to-v2",
+      "kind": "migration",
+      "required": true,
+      "asset_name": "deck_v1.2.0_migration.tar.gz",
+      "url": "https://github.com/gentleman-programming/deck/releases/download/v1.2.0/deck_v1.2.0_migration.tar.gz",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "notes": "Manifest v1 → v2 schema migration",
+      "from_schema_version": 1,
+      "to_schema_version": 2
+    },
+    {
+      "id": "advisory-homebrew-windows",
+      "kind": "advisory",
+      "required": false,
+      "asset_name": "deck_v1.2.0_advisory.json",
+      "url": "https://github.com/gentleman-programming/deck/releases/download/v1.2.0/deck_v1.2.0_advisory.json",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "notes": "Homebrew users should run `brew upgrade deck` instead of binary self-update.",
+      "severity": "warning",
+      "affected_versions": ["<=1.1.0"]
+    },
+    {
+      "id": "channel-eol-beta-2026",
+      "kind": "channel_eol",
+      "required": false,
+      "asset_name": "deck_v1.2.0_channel_eol.json",
+      "url": "https://github.com/gentleman-programming/deck/releases/download/v1.2.0/deck_v1.2.0_channel_eol.json",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "notes": "The beta channel is being retired. Switch to stable for the latest features.",
+      "successor_channel": "stable"
+    }
+  ]
+}

@@ -199,4 +199,104 @@ describe("parseArgs", () => {
       message: expect.stringContaining("no acepta argumentos adicionales"),
     });
   });
+
+  // -------------------------------------------------------------------------
+  // deck upgrade / deck update alias tests (T2.11)
+  // -------------------------------------------------------------------------
+
+  test("parses 'deck upgrade' as the upgrade command", () => {
+    const result = parseArgs(["upgrade"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "upgrade",
+      flags: {},
+    });
+  });
+
+  test("parses 'deck update' as the upgrade command (alias)", () => {
+    const result = parseArgs(["update"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "upgrade",
+      flags: {},
+    });
+  });
+
+  test("'deck update --yes' is treated the same as 'deck upgrade --yes'", () => {
+    const update = parseArgs(["update", "--yes"]);
+    const upgrade = parseArgs(["upgrade", "--yes"]);
+    expect(update).toEqual(upgrade);
+  });
+
+  test("'deck update -y' is treated the same as 'deck upgrade -y'", () => {
+    const update = parseArgs(["update", "-y"]);
+    const upgrade = parseArgs(["upgrade", "-y"]);
+    expect(update).toEqual(upgrade);
+  });
+
+  test("rejects unknown flags on 'deck update' just like 'deck upgrade'", () => {
+    const result = parseArgs(["update", "--bogus"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("update"),
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // deck rollback tests (REQ-RBK-001)
+  // -------------------------------------------------------------------------
+
+  test("parses 'deck rollback' as the rollback command", () => {
+    const result = parseArgs(["rollback"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "rollback",
+      flags: {},
+    });
+  });
+
+  test("'deck rollback --force' sets the force flag", () => {
+    const result = parseArgs(["rollback", "--force"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "rollback",
+      flags: { force: true },
+    });
+  });
+
+  test("'deck rollback --backup <id>' sets the backupId flag", () => {
+    const result = parseArgs(["rollback", "--backup", "2026-06-02T12-00-00-000Z-0000000001"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "rollback",
+      flags: { backupId: "2026-06-02T12-00-00-000Z-0000000001" },
+    });
+  });
+
+  test("'deck rollback --backup=<id>' (= syntax) also sets the backupId flag", () => {
+    const result = parseArgs(["rollback", "--backup=my-backup-id"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "rollback",
+      flags: { backupId: "my-backup-id" },
+    });
+  });
+
+  test("'deck rollback --backup' without a value is rejected", () => {
+    const result = parseArgs(["rollback", "--backup"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("--backup"),
+    });
+  });
+
+  test("'deck rollback' combines --force and --backup", () => {
+    const result = parseArgs(["rollback", "--force", "--backup", "abc-123"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "rollback",
+      flags: { force: true, backupId: "abc-123" },
+    });
+  });
+
+  test("'deck rollback' rejects unknown flags", () => {
+    const result = parseArgs(["rollback", "--bogus"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("rollback"),
+    });
+  });
 });

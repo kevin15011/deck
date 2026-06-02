@@ -2,7 +2,7 @@
  * Unit tests for installation logic.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, writeFileSync, unlinkSync, existsSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

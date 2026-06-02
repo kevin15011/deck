@@ -64,8 +64,48 @@ if (parsed.command === "upgrade") {
   }
 }
 
+if (parsed.command === "rollback") {
+  // `deck rollback` — REQ-RBK-001. Restore the most-recent backup, or
+  // a specific one if `--backup <id>` is supplied.
+  try {
+    const { rollbackLatest, rollbackBackup, resolveLatestBackupForCli } = await import(
+      "./upgrade-command/rollback.js"
+    );
+    const { readBackupManifest } = await import("./upgrade-command/backup-store.js");
+    const flags = parsed.flags;
+    const currentVersion = getBuildInfo().version;
+    if (flags.backupId) {
+      const manifest = readBackupManifest(flags.backupId);
+      const result = rollbackBackup(manifest, currentVersion, {
+        force: flags.force === true,
+      });
+      console.log(
+        `Rolled back from ${result.rolledBackFrom} to ${result.rolledBackTo} ` +
+          `(restored ${result.restoredCount}, deleted ${result.deletedCount})`,
+      );
+      process.exit(0);
+    }
+    const latest = resolveLatestBackupForCli();
+    if (!latest) {
+      console.error("No backup available to roll back to.");
+      process.exit(1);
+    }
+    const result = rollbackLatest(currentVersion, {
+      force: flags.force === true,
+    });
+    console.log(
+      `Rolled back from ${result.rolledBackFrom} to ${result.rolledBackTo} ` +
+        `(restored ${result.restoredCount}, deleted ${result.deletedCount})`,
+    );
+    process.exit(0);
+  } catch (err) {
+    console.error("deck rollback failed:", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+}
+
 if (parsed.command === "pi-launch") {
-  const projectRoot = resolveProjectRoot();
+  const projectRoot = resolveProjectRoot() ?? process.cwd();
   const result = await runPiLaunch({
     teamId: parsed.teamId,
     projectRoot,

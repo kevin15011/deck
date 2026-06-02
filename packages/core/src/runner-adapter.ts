@@ -476,6 +476,19 @@ export interface RunnerAdapter {
   reviewTools(): Promise<unknown>;
 
   // -------------------------------------------------------------------------
+  // Detection (optional — added by `add-self-update-system` / T2.9)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Detect whether Deck-managed artifacts are installed for this runner.
+   *
+   * Optional. When implemented, the upgrade orchestrator uses it to filter
+   * which runners receive a content sync update. Adapters that do not
+   * implement this method opt out of detection-driven sync.
+   */
+  detectDeckInstall?(input: RunnerDeckInstallInput): Promise<RunnerDeckInstallStatus>;
+
+  // -------------------------------------------------------------------------
   // Team file backup/restore (wraps backup/restore functions)
   // -------------------------------------------------------------------------
 
@@ -539,3 +552,34 @@ export interface RunnerAdapter {
    */
   getSelectableTools(): unknown[];
 }
+
+// ---------------------------------------------------------------------------
+// Detection facet (optional — added by `add-self-update-system` / T2.9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of `RunnerAdapter.detectDeckInstall`.
+ *
+ * Returned by an adapter when it can confirm a Deck-managed install is
+ * present at the runner's known config root. The upgrade sync uses this
+ * to filter which runners receive a sync update.
+ */
+export type RunnerDeckInstallStatus = {
+  /** True if Deck-managed artifacts were found for this runner. */
+  installed: boolean;
+  /**
+   * Absolute paths of the Deck-managed files detected at the runner's
+   * config root. Used by the backup step to capture the pre-sync state.
+   */
+  managedPaths: readonly string[];
+  /** Optional diagnostics explaining why detection succeeded/failed. */
+  diagnostics?: readonly string[];
+};
+
+/**
+ * Input for `RunnerAdapter.detectDeckInstall`.
+ */
+export type RunnerDeckInstallInput = {
+  /** The project root, if the runner uses project-scoped config. */
+  projectRoot?: string;
+};

@@ -129,6 +129,17 @@ jobs:
       contents: write
     if: needs.metadata.outputs.is_release == 'true'
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.1"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -145,6 +156,22 @@ jobs:
         run: |
           cat artifacts/deck-*/checksums.txt > release-assets/checksums.txt
 
+      - name: Generate release descriptor
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          ASSET_BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+          bun run scripts/prepare-release.ts \
+            --non-interactive \
+            --version "${VERSION#v}" \
+            --tag "${VERSION}" \
+            --channel stable \
+            --from-assets-dir release-assets \
+            --asset-base-url "${ASSET_BASE_URL}" \
+            --out release-assets/release.json
+          cat release-assets/release.json
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -158,6 +185,7 @@ jobs:
             release-assets/deck_v*_linux-arm64.tar.gz
             release-assets/deck_v*_darwin-arm64.tar.gz
             release-assets/checksums.txt
+            release-assets/release.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -170,6 +198,17 @@ jobs:
       contents: write
     if: needs.metadata.outputs.is_release == 'false'
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.1"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -186,6 +225,22 @@ jobs:
         run: |
           cat artifacts/deck-*/checksums.txt > release-assets/checksums.txt
 
+      - name: Generate release descriptor
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          ASSET_BASE_URL="https://github.com/${REPO}/releases/download/build-${VERSION}"
+          bun run scripts/prepare-release.ts \
+            --non-interactive \
+            --version "${VERSION}" \
+            --tag "build-${VERSION}" \
+            --channel dev \
+            --from-assets-dir release-assets \
+            --asset-base-url "${ASSET_BASE_URL}" \
+            --out release-assets/release.json
+          cat release-assets/release.json
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -199,5 +254,6 @@ jobs:
             release-assets/deck_v*_linux-arm64.tar.gz
             release-assets/deck_v*_darwin-arm64.tar.gz
             release-assets/checksums.txt
+            release-assets/release.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

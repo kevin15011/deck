@@ -118,9 +118,27 @@ import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 import { getAdapter } from "../runner-adapters";
 import { HomeScreen } from "./screens/home-screen";
 import { DoctorScreen } from "./screens/doctor-screen";
+import { UpgradeConfirmScreen } from "./screens/upgrade-screen";
+import { UpgradeProgressScreen, type UpgradeProgressStatus } from "./screens/upgrade-progress-screen";
+import { RollbackScreen, type RollbackScreenMode } from "./screens/rollback-screen";
+import {
+  DEFAULT_RELEASE_CHECK_TIMEOUT_MS,
+  runReleaseCheckWithTimeout,
+  type ReleaseCheckDeps,
+  type ReleaseCheckState,
+} from "./release-check";
+import type { ReleaseJson } from "../upgrade-command/release-descriptor";
+import { detectInstallKind, runUpgradeOrchestrator } from "../upgrade-command/orchestrator";
+import { getBuildInfo } from "../runtime/build-info";
+import { resolveLatestBackupForCli, rollbackLatest, RollbackError } from "../upgrade-command/rollback";
+import type { BackupManifest } from "../upgrade-command/backup-store";
 
 type Screen =
   | "home"
+  | "upgrade-confirm"
+  | "upgrade-progress"
+  | "rollback-confirm"
+  | "rollback-progress"
   | "model-environment-selection"
   | "model-team-selection"
   | "environment-selection"
@@ -389,6 +407,98 @@ export function DeckApp() {
       return "pragmatica";
     }
   });
+
+  // -------------------------------------------------------------------------
+  // T3.2 / T3.4 / T3.5: release-check + upgrade flow state
+  // -------------------------------------------------------------------------
+  // The release check is non-blocking: it is fired on mount and the home
+  // screen renders immediately. Result feeds the home banner and the
+  // "Update Deck" menu action. The check has a hard 5s timeout
+  // (DEFAULT_RELEASE_CHECK_TIMEOUT_MS).
+  const [releaseCheck, setReleaseCheck] = useState<ReleaseCheckState>({ kind: "pending" });
+  // The descriptor captured by the release check, used as input to the
+  // orchestrator when the user confirms the upgrade.
+  const [upgradeDescriptor, setUpgradeDescriptor] = useState<ReleaseJson | null>(null);
+  // Cursor for the upgrade confirm screen (0=Apply, 1=Cancel).
+  const [upgradeCursor, setUpgradeCursor] = useState(0);
+  // Progress status for the upgrade progress screen.
+  const [upgradeProgress, setUpgradeProgress] = useState<UpgradeProgressStatus>({
+    kind: "running",
+    phase: "Downloading",
+    completedCount: 0,
+  });
+  // Whether the binary item is to be skipped (Homebrew installs).
+  const [upgradeBinarySkipped, setUpgradeBinarySkipped] = useState(false);
+  // Rollback hint surfaced when a previous upgrade failed.
+  const [upgradeRollbackHint, setUpgradeRollbackHint] = useState<string | undefined>(undefined);
+
+  // -------------------------------------------------------------------------
+  // T-FIX-1: user-initiated rollback (REQ-RBK-002) — TUI surface
+  // -------------------------------------------------------------------------
+  // The latest restorable backup, discovered synchronously on mount. The
+  // home menu adds a "Roll back Deck" entry whenever this is non-null,
+  // and the user is routed to the rollback-confirm screen on selection.
+  const [rollbackManifest, setRollbackManifest] = useState<BackupManifest | null>(null);
+  // Cursor for the rollback confirm screen (0=Run rollback, 1=Cancel).
+  const [rollbackCursor, setRollbackCursor] = useState(0);
+  // Snapshot of the result displayed by the rollback progress screen.
+  const [rollbackStatus, setRollbackStatus] = useState<{
+    mode: RollbackScreenMode;
+    restoredCount?: number;
+    reason?: string;
+  } | null>(null);
+
+  /**
+   * Detect the most-recent restorable backup on mount so the home
+   * menu can offer a "Roll back Deck" entry. Resolves to `null` when
+   * no backup exists, when the disk is unreachable, or when the
+   * manifest is corrupt. Never throws.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const latest = resolveLatestBackupForCli();
+      if (!cancelled) setRollbackManifest(latest);
+    } catch (err) {
+      if (!cancelled) {
+        log(`rollback availability probe failed: ${err instanceof Error ? err.message : String(err)}`);
+        setRollbackManifest(null);
+      }
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * Fire-and-forget release check on mount.
+   *
+   * Cancels on unmount to avoid `setState` on an unmounted component.
+   * Hard timeout is enforced by `runReleaseCheckWithTimeout` — see
+   * `release-check.ts`.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const deps: ReleaseCheckDeps = {};
+    runReleaseCheckWithTimeout(DEFAULT_RELEASE_CHECK_TIMEOUT_MS, deps)
+      .then((state) => {
+        if (cancelled) return;
+        setReleaseCheck(state);
+        // Capture the descriptor so the upgrade confirm screen has it
+        // without re-fetching. The `descriptor` field is only present
+        // when the fetch came back as `descriptor`; for `available`
+        // results sourced from the legacy path we leave it null and the
+        // orchestrator will re-fetch on confirm.
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        log(`release-check failed: ${err instanceof Error ? err.message : String(err)}`);
+        setReleaseCheck({ kind: "network-error", error: err instanceof Error ? err.message : String(err) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Runtime-agnostic capability resolver — dispatches to the correct adapter based on runnerScope
   const dashboardCapabilityResolver = useMemo(() => ({
@@ -749,6 +859,97 @@ export function DeckApp() {
     };
   }, [dashboardState.screen, dashboardState.plan, dashboardState.runtime.runnerCommand, screen, supermemorySetup.token, selectedEnvironments, installedOpenCode?.command, openCodePreflight]);
 
+  // T3.5: orchestrator effect — fires when the user has confirmed the
+  // upgrade. Calls `runUpgradeOrchestrator` with the captured
+  // descriptor. The orchestrator returns once; we update the progress
+  // status to the matching terminal state (completed / failed /
+  // rolled_back) so the progress screen can render the outcome.
+  useEffect(() => {
+    if (screen !== "upgrade-progress") return;
+    if (!upgradeDescriptor) {
+      // No descriptor to apply — should not happen because the
+      // confirm screen is the only way to reach this state.
+      setUpgradeProgress({ kind: "failed", reason: "No release descriptor available." });
+      return;
+    }
+
+    let cancelled = false;
+    setUpgradeProgress({ kind: "running", phase: "Downloading", completedCount: 0 });
+
+    // Tick a coarse UI phase progress while the orchestrator runs.
+    // The orchestrator returns only when finished, so this is purely
+    // cosmetic — the actual upgrade work happens in the orchestrator.
+    const phases = ["Staging", "Migrating", "Replacing binary", "Syncing content", "Verifying"];
+    const tickers = phases.map((phase, idx) =>
+      setTimeout(() => {
+        if (cancelled) return;
+        setUpgradeProgress((current) =>
+          current.kind === "running" ? { kind: "running", phase, completedCount: idx + 1 } : current,
+        );
+      }, 800 * (idx + 1)),
+    );
+
+    const run = async () => {
+      try {
+        const currentVersion = getBuildInfo().version;
+        const result = await runUpgradeOrchestrator({
+          descriptor: upgradeDescriptor,
+          targetVersion: upgradeDescriptor.version,
+          currentVersion,
+          deps: {
+            installKind: detectInstallKind(),
+            currentBinaryPath: process.argv[0] ?? "",
+            projectRoot: localResolvedProjectRoot ?? process.cwd(),
+            // The real registry is used here; tests inject a fake.
+            adapterRegistry: {
+              list: () => [],
+              has: () => false,
+              get: () => {
+                throw new Error("No adapter available in the TUI upgrade path; use `deck upgrade` for the real path.");
+              },
+            },
+            readDeckConfig: () => getDefaultDeckConfig(),
+          },
+        });
+        if (cancelled) return;
+        if (result.status === "rolled_back") {
+          setUpgradeProgress({
+            kind: "rolled_back",
+            ...(result.backupId ? { backupId: result.backupId } : {}),
+            reason: "Upgrade failed; rolled back to the previous version.",
+          });
+          return;
+        }
+        if (result.status === "partial_failure") {
+          setUpgradeProgress({
+            kind: "rolled_back",
+            ...(result.backupId ? { backupId: result.backupId } : {}),
+            reason: "One or more steps failed; rolled back.",
+          });
+          return;
+        }
+        setUpgradeProgress({
+          kind: "completed",
+          version: upgradeDescriptor.version,
+          ...(result.backupId ? { backupId: result.backupId } : {}),
+        });
+      } catch (err) {
+        if (cancelled) return;
+        const reason = err instanceof Error ? err.message : String(err);
+        setUpgradeProgress({ kind: "failed", reason });
+        setUpgradeRollbackHint(
+          "Run `deck rollback` from the CLI to restore the last backup.",
+        );
+      }
+    };
+    void run();
+
+    return () => {
+      cancelled = true;
+      for (const t of tickers) clearTimeout(t);
+    };
+  }, [screen, upgradeDescriptor, localResolvedProjectRoot]);
+
   useEffect(() => {
     if (screen !== "developer-team-installing") return;
 
@@ -853,8 +1054,25 @@ export function DeckApp() {
     if (nextScreen === "developer-team-review") setDeveloperTeamCursor(0);
   }
 
+  /**
+   * Build the `RollbackAvailability` argument for `getHomeMenuOptions`
+   * from the discovered manifest. Returns `null` when no backup is
+   * available so the menu hides the "Roll back Deck" entry.
+   */
+  function rollbackAvailability(): { backupId: string; version: string } | null {
+    if (!rollbackManifest) return null;
+    return {
+      backupId: rollbackManifest.backupId,
+      version: rollbackManifest.deckVersionBefore,
+    };
+  }
+
   function getCursorLimit(): number {
-    if (screen === "home") return getHomeMenuOptions().length - 1;
+    if (screen === "home") return getHomeMenuOptions(releaseCheck, rollbackAvailability()).length - 1;
+    if (screen === "upgrade-confirm") return 1; // Apply, Cancel
+    if (screen === "upgrade-progress") return 0;
+    if (screen === "rollback-confirm") return 1; // Run rollback, Cancel
+    if (screen === "rollback-progress") return 0;
     if (screen === "model-environment-selection") return getEnvironmentOptions().length - 1;
     if (screen === "model-team-selection") {
       const env = selectedModelEnvironment ?? "pi-development";
@@ -894,6 +1112,8 @@ export function DeckApp() {
     if (screen === "developer-team-review") setDeveloperTeamCursor(next);
     if (screen === "configure-packages-runner-selection") setConfigurePackagesCursor(next);
     if (screen === "configure-packages-detail") setConfigurePackagesCursor(next);
+    if (screen === "upgrade-confirm") setUpgradeCursor(next);
+    if (screen === "rollback-confirm") setRollbackCursor(next);
   }
 
   function toggleCurrent() {
@@ -938,12 +1158,39 @@ export function DeckApp() {
 
   async function continueFromCurrent() {
     if (screen === "home") {
-      const action = getHomeMenuOptions()[homeCursor]?.value;
+      const action = getHomeMenuOptions(releaseCheck, rollbackAvailability())[homeCursor]?.value;
       if (action === "start-installation") resetCursor("environment-selection");
       if (action === "configure-packages") {
         setConfigurePackagesRunner(null);
         setConfigurePackagesCursor(0);
         resetCursor("configure-packages-runner-selection");
+        return;
+      }
+      if (action === "update-deck") {
+        // T3.1: the upgrade-tools placeholder is now a real action.
+        // We always allow entering the upgrade confirm flow even if
+        // the release check has not resolved yet (the screen itself
+        // will gracefully render an empty item list and the user can
+        // back out). The most useful path is "check resolved to
+        // available" which captures the full descriptor.
+        if (releaseCheck.kind === "available") {
+          setUpgradeDescriptor(releaseCheck.descriptor);
+          setUpgradeCursor(0);
+          setUpgradeBinarySkipped(detectInstallKind() === "homebrew");
+          setUpgradeRollbackHint(undefined);
+          resetCursor("upgrade-confirm");
+          return;
+        }
+        // Pending / none / network-error: surface a hint and stay on
+        // home. This keeps the TUI responsive and matches REQ-TUI-007
+        // (no banner / no upgrade option when the check failed).
+        addLog(
+          releaseCheck.kind === "pending"
+            ? "Release check still running; try again in a moment."
+            : releaseCheck.kind === "network-error"
+              ? `Release check failed (${releaseCheck.error}); cannot upgrade.`
+              : "No upgrade available."
+        );
         return;
       }
       if (action === "configure-models") {
@@ -953,6 +1200,21 @@ export function DeckApp() {
       }
       if (action === "doctor") resetCursor("doctor");
       if (action === "exit") exit();
+      // REQ-RBK-002: user-initiated rollback entry point in the TUI.
+      // The option is only rendered when a restorable backup exists,
+      // so a non-null `rollbackManifest` is guaranteed when the user
+      // picks this row. The confirm screen shows backup metadata; the
+      // apply handler lives in the rollback-confirm branch below.
+      if (action === "rollback-deck") {
+        if (!rollbackManifest) {
+          addLog("No backup available to roll back to.");
+          return;
+        }
+        setRollbackCursor(0);
+        setRollbackStatus({ mode: "confirm" });
+        resetCursor("rollback-confirm");
+        return;
+      }
       return;
     }
 
@@ -1327,6 +1589,77 @@ export function DeckApp() {
     if (screen === "complete") resetCursor("home");
 
     if (screen === "doctor") resetCursor("home");
+
+    // T3.4 / T3.5: upgrade confirm + progress enter handling.
+    if (screen === "upgrade-confirm") {
+      if (upgradeCursor === 0) {
+        // Apply — transition to the progress screen. The effect above
+        // fires the orchestrator.
+        resetCursor("upgrade-progress");
+      } else {
+        // Cancel — back to home.
+        setUpgradeRollbackHint(undefined);
+        resetCursor("home");
+      }
+      return;
+    }
+
+    if (screen === "upgrade-progress") {
+      if (
+        upgradeProgress.kind === "completed" ||
+        upgradeProgress.kind === "rolled_back" ||
+        upgradeProgress.kind === "failed"
+      ) {
+        // Terminal state: Enter returns to home.
+        resetCursor("home");
+      }
+      return;
+    }
+
+    // REQ-RBK-002: user-initiated rollback enter handling.
+    if (screen === "rollback-confirm") {
+      if (rollbackCursor === 0) {
+        // Apply — fire the rollback library. The library call is
+        // synchronous and mutates the filesystem, so we set the
+        // running state synchronously and resolve the result on the
+        // same tick. The "running" frame is brief by design; the
+        // terminal `completed` / `failed` frame is what the user
+        // will actually see.
+        if (!rollbackManifest) {
+          setRollbackStatus({ mode: "failed", reason: "No backup available." });
+          resetCursor("rollback-progress");
+          return;
+        }
+        setRollbackStatus({ mode: "running" });
+        try {
+          const result = rollbackLatest(rollbackManifest.deckVersionBefore);
+          setRollbackStatus({ mode: "completed", restoredCount: result.restoredCount });
+          addLog(
+            `Rollback to v${result.rolledBackTo} complete (${result.restoredCount} files restored).`,
+          );
+        } catch (err) {
+          const code = err instanceof RollbackError ? err.code : "UNKNOWN";
+          const message = err instanceof Error ? err.message : String(err);
+          setRollbackStatus({ mode: "failed", reason: `${code}: ${message}` });
+          addLog(`Rollback failed (${code}).`);
+        }
+        resetCursor("rollback-progress");
+      } else {
+        // Cancel — back to home.
+        setRollbackStatus(null);
+        resetCursor("home");
+      }
+      return;
+    }
+
+    if (screen === "rollback-progress") {
+      // Terminal state: Enter returns to home.
+      if (rollbackStatus && (rollbackStatus.mode === "completed" || rollbackStatus.mode === "failed")) {
+        setRollbackStatus(null);
+        resetCursor("home");
+      }
+      return;
+    }
   }
 
   function handleDashboardInput(input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) {
@@ -1891,6 +2224,10 @@ export function DeckApp() {
         "configure-packages-detail": "configure-packages-runner-selection",
         "doctor": "home",
         complete: "home",
+        "upgrade-confirm": "home",
+        "upgrade-progress": "home",
+        "rollback-confirm": "home",
+        "rollback-progress": "home",
       };
       next = previous[screen];
     }
@@ -1910,7 +2247,40 @@ export function DeckApp() {
 
   return (
     <ScreenFrame title={screenTitle(screen, dashboardState.runnerScope)} help={HELP} width={stdout.columns || 72} height={stdout.rows || undefined} logs={logs}>
-      {screen === "home" ? <HomeScreen cursor={homeCursor} /> : null}
+      {screen === "home" ? <HomeScreen cursor={homeCursor} releaseCheck={releaseCheck} /> : null}
+      {screen === "upgrade-confirm" ? (
+        releaseCheck.kind === "available" ? (
+          <UpgradeConfirmScreen
+            cursor={upgradeCursor}
+            version={releaseCheck.version}
+            {...(releaseCheck.tag ? { tag: releaseCheck.tag } : {})}
+            items={releaseCheck.items}
+            channel={releaseCheck.channel}
+            binarySkipped={upgradeBinarySkipped}
+            {...(upgradeRollbackHint ? { rollbackHint: upgradeRollbackHint } : {})}
+          />
+        ) : (
+          // Defensive: should not happen because the home menu action is
+          // only enabled when the release check resolves to `available`.
+          <Text color="yellow">No upgrade available. Press Enter to return to Home.</Text>
+        )
+      ) : null}
+      {screen === "upgrade-progress" ? (
+        <UpgradeProgressScreen status={upgradeProgress} targetVersion={upgradeDescriptor?.version ?? "0.0.0"} />
+      ) : null}
+      {/* REQ-RBK-002: user-initiated rollback surface in the TUI. */}
+      {screen === "rollback-confirm" && rollbackManifest ? (
+        <RollbackScreen cursor={rollbackCursor} backup={rollbackManifest} mode="confirm" />
+      ) : null}
+      {screen === "rollback-progress" && rollbackManifest && rollbackStatus ? (
+        <RollbackScreen
+          cursor={0}
+          backup={rollbackManifest}
+          mode={rollbackStatus.mode}
+          {...(rollbackStatus.restoredCount !== undefined ? { restoredCount: rollbackStatus.restoredCount } : {})}
+          {...(rollbackStatus.reason ? { reason: rollbackStatus.reason } : {})}
+        />
+      ) : null}
       {screen === "doctor" ? <DoctorScreen /> : null}
       {screen === "model-environment-selection" ? <ModelEnvironmentSelectionScreen cursor={modelEnvironmentCursor} /> : null}
       {screen === "model-team-selection" && selectedModelEnvironment ? (
@@ -1991,6 +2361,10 @@ export function DeckApp() {
 function screenTitle(screen: Screen, runnerScope?: string): string {
   const titles: Record<Screen, string> = {
     home: "Deck",
+    "upgrade-confirm": "Update Deck",
+    "upgrade-progress": "Update Deck",
+    "rollback-confirm": "Rollback Deck",
+    "rollback-progress": "Rollback Deck",
     "model-environment-selection": "Select runner for model config",
     "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",

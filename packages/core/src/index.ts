@@ -148,8 +148,9 @@ export type {
   RunnerActionStatus,
   RunnerPlanDiagnostic,
   RunnerPlanDiagnosticSeverity,
+  RunnerDeckInstallInput,
+  RunnerDeckInstallStatus,
 } from "./runner-adapter";
-
 // Adapter registry — CLI-side registration with runtime lookup
 export {
   createAdapterRegistry,

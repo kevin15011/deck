@@ -1,0 +1,96 @@
+phase: archive
+status: archived
+artifacts:
+  - path: proposal.md
+    phase: proposal
+    description: "Formal proposal for the repo-agnostic Deck self-update system, including release descriptors, XDG migration, TUI integration, atomic rollback, and multi-runner sync."
+  - path: spec.md
+    phase: spec
+    description: "Formal requirements: 64 MUST/SHOULD requirements across 10 capabilities, 44 acceptance Given/When/Then scenarios. Resolved by orchestrator registry-deferred reconciliation."
+  - path: design.md
+    phase: design
+    description: "Technical design with sequence diagrams, TypeScript/Zod schemas for state/manifest/config/release, file impact, error handling, testing strategy, 8 architecture decisions with rationale. Resolved by orchestrator registry-deferred reconciliation."
+  - path: tasks.md
+    phase: tasks
+    description: "23 atomic tasks across 3 groups (G1: 5 general, G2: 12 backend, G3: 6 frontend). All design open questions resolved. Zero blocked tasks. 3 high-complexity tasks flagged for potential split."
+  - path: apply-progress.md
+    phase: apply
+    description: "Apply completed across G1 General (5 tasks), G2 Backend (12 tasks), and G3 Frontend (6 tasks). Scoped tests pass for implemented areas; known baseline failures documented."
+  - path: verify-report.md
+    phase: verify
+    description: "Verification passed with warnings: 246/246 focused tests pass, self-update focused files have 0 type errors, remaining typecheck errors are known baseline outside self-update scope."
+  - path: review-report.md
+    phase: review
+    description: "Final review approved with findings: direct runner-adapter test type fixes verified; no blockers; baseline typecheck debt documented."
+provenance:
+  initiated_by: user
+  date: "2026-06-01"
+  related_changes:
+    - opencode-adapter-complete
+    - installer-sync-opencode-skills
+    - deck-as-installer-runner-agnostic
+  pre_sdd_exploration: "Pre-SDD Explorer pass completed; see session memory for full design constraints and findings"
+  proposal_completed: true
+  proposal_completed_by: proposal
+  proposal_date: "2026-06-01"
+  spec_completed: "2026-06-01"
+  spec_completed_by: spec
+  spec_metrics:
+    requirements_total: 64
+    requirements_must: 56
+    requirements_should: 3
+    scenarios: 44
+    capabilities: 10
+    open_questions_to_design: 7
+  design_completed: "2026-06-01"
+  design_completed_by: design
+  design_metrics:
+    architecture_decisions: 8
+    schemas: 6
+    sequence_diagrams: 5
+    open_questions_to_tasks: 4
+  tasks_completed: "2026-06-02"
+  tasks_completed_by: task
+  tasks_metrics:
+    tasks_total: 23
+    tasks_g1: 5
+    tasks_g2: 12
+    tasks_g3: 6
+    tasks_high_complexity: 3
+    tasks_blocked: 0
+    design_open_questions_resolved: 4
+  registry_reconciliation_notes: "Spec and Design ran in parallel (registry-deferred). Orchestrator reconciled state.yaml and events.yaml after both returned."
+  apply_completed: "2026-06-02"
+  apply_completed_by:
+    - deck-developer-apply-general
+    - deck-developer-apply-backend
+    - deck-developer-apply-frontend
+  apply_metrics:
+    groups_completed: 3
+    tasks_completed: 23
+    tasks_blocked: 0
+    g1_tests_passed: 68
+    g2_tests_passed: 218
+    g3_tests_passed: 51
+    known_baseline_failures: true
+  typecheck_fix_completed: "2026-06-02"
+  typecheck_fix_by: deck-developer-apply-general
+  typecheck_metrics:
+    errors_fixed: 16
+    errors_remaining: 44
+    files_modified: 5
+
+  upgrade_command_typecheck_fix_completed: "2026-06-02"
+  runner_adapter_test_typecheck_fix_completed: "2026-06-02"
+  verify_completed: "2026-06-02"
+  verify_status: passed_with_warnings
+  verify_tests_passed: 246
+  verify_self_update_type_errors: 0
+  verify_warning: "Repo-wide typecheck remains red due to known baseline errors outside self-update focused files."
+  review_completed: "2026-06-02"
+  review_status: approved_with_findings
+  review_blockers: 0
+  archive_completed: "2026-06-02"
+  archive_artifact: archive-report.md
+  archive_target: openspec/archive/add-self-update-system/
+  archive_event: archive-complete

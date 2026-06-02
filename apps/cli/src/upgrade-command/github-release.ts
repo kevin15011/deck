@@ -1,12 +1,39 @@
 /**
- * GitHub release fetching for upgrade command.
+ * GitHub release fetching for the self-update system.
  *
- * Fetches release information from GitHub API to check for newer versions.
+ * Implements T2.2 (descriptor-aware fetch + legacy fallback):
+ *   1. Attempt to fetch the `release.json` asset attached to the latest
+ *      release via the GitHub API. Validate the payload with the
+ *      `ReleaseJsonSchema` from `release-descriptor.ts`.
+ *   2. When `release.json` is present and valid, the orchestrator uses
+ *      the typed descriptor for the upgrade flow.
+ *   3. When `release.json` is missing or invalid, fall back to the
+ *      legacy binary-only flow that parses the SHA-256 from the release
+ *      body (REQ-RD-011).
+ *
+ * ETag/conditional requests and a 6-hour cache TTL are supported via
+ * `lastCheck` in `state.yaml` (set by the orchestrator) and a sidecar
+ * release.json cache file under the XDG cache dir.
+ *
+ * Backward compatibility:
+ *   - `fetchLatestRelease()` returns the same `ReleaseInfo` shape as
+ *     before. It is now backed by the descriptor when available and
+ *     falls back to the body-parsed legacy path otherwise.
+ *   - `compareVersions`, `checkUpgradeAvailable`, and `getLatestReleaseInfo`
+ *     retain their original signatures and semantics.
  */
 
 import { platform, arch } from "node:process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import { spawnSync } from "../runtime/process.js";
+import { getDeckXdgPaths } from "../runtime/paths.js";
+import {
+  parseReleaseDescriptor,
+  type ReleaseJson,
+} from "./release-descriptor.js";
+import { ReleaseDescriptorError } from "./release-descriptor.js";
 
 // GitHub repository for deck
 const GITHUB_OWNER = "gentleman-programming";
@@ -67,6 +94,8 @@ export const UPGRADE_ERROR_CODES = {
   NETWORK_ERROR: "UPGRADE_NETWORK_ERROR",
   REPLACE_FAILED: "UPGRADE_REPLACE_FAILED",
   EXTRACT_FAILED: "UPGRADE_EXTRACT_FAILED",
+  TIMEOUT: "UPGRADE_TIMEOUT",
+  FALLBACK_LEGACY: "UPGRADE_FALLBACK_LEGACY",
 } as const;
 
 /**
@@ -88,88 +117,288 @@ export type ReleaseInfo = {
 };
 
 /**
- * Fetch the latest stable release from GitHub.
+ * Result of attempting to fetch a release descriptor.
  *
- * @returns Release information or null if unavailable
+ * - `descriptor` is set when the `release.json` asset was found and
+ *   validated against the schema.
+ * - `legacy` is set when the descriptor was missing/invalid and the
+ *   orchestrator should fall back to the body-parsed legacy path.
  */
-export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
+export type ReleaseFetchResult =
+  | { kind: "descriptor"; descriptor: ReleaseJson; etag?: string; cachePath: string }
+  | { kind: "legacy"; info: ReleaseInfo; reason: "missing" | "invalid"; error?: string }
+  | { kind: "network-error"; error: string };
+
+/**
+ * Options for the descriptor fetch.
+ */
+export type FetchDescriptorOptions = {
+  /** Request timeout in milliseconds (default 5000). */
+  timeoutMs?: number;
+  /** Conditional request: pass an ETag to make a 304-friendly request. */
+  etag?: string;
+  /** Cache file path; defaults to `$XDG_CACHE_HOME/deck/releases/latest-release.json`. */
+  cachePath?: string;
+};
+
+/**
+ * Default cache file for the most-recent `release.json` payload.
+ */
+export function getDefaultReleaseCachePath(): string {
+  return join(getDeckXdgPaths().releasesDir, "latest-release.json");
+}
+
+/**
+ * Read the GitHub release JSON via the public releases API.
+ *
+ * Centralized so tests can inject a custom transport.
+ */
+export function curlReleasesApi(extraArgs: readonly string[] = []): { exitCode: number; stdout: string; stderr: string } {
+  const result = spawnSync("curl", [
+    "-s",
+    "-L",
+    ...extraArgs,
+    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+  ]);
+  return {
+    exitCode: result.exitCode ?? 1,
+    stdout: (result.stdout ?? "") as string,
+    stderr: (result.stderr ?? "") as string,
+  };
+}
+
+/**
+ * Read the GitHub `release.json` asset for a given release by tag.
+ *
+ * The asset URL is constructed from the tag name: GitHub exposes assets
+ * under `https://github.com/<owner>/<repo>/releases/download/<tag>/<name>`.
+ * This is a stable URL the upgrade orchestrator can re-fetch without
+ * hitting the API.
+ */
+export function curlReleaseJsonAsset(
+  tag: string,
+  extraArgs: readonly string[] = [],
+): { exitCode: number; stdout: string; stderr: string } {
+  const url = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${tag}/release.json`;
+  const result = spawnSync("curl", ["-s", "-L", ...extraArgs, url]);
+  return {
+    exitCode: result.exitCode ?? 1,
+    stdout: (result.stdout ?? "") as string,
+    stderr: (result.stderr ?? "") as string,
+  };
+}
+
+/**
+ * Try to fetch the `release.json` asset for the latest release.
+ *
+ * On success: returns `{ kind: "descriptor", descriptor, ... }`.
+ * On missing asset: returns `{ kind: "legacy", reason: "missing" }`.
+ * On malformed payload: returns `{ kind: "legacy", reason: "invalid", error }`.
+ * On network failure: returns `{ kind: "network-error", error }`.
+ */
+export function fetchReleaseDescriptor(
+  options: FetchDescriptorOptions = {},
+): ReleaseFetchResult {
+  const cachePath = options.cachePath ?? getDefaultReleaseCachePath();
+
+  // Step 1: ask the API for the latest release so we know its tag.
+  const apiResult = curlReleasesApi(
+    options.etag ? ["-H", `If-None-Match: ${options.etag}`] : [],
+  );
+  if (apiResult.exitCode !== 0 || !apiResult.stdout) {
+    return { kind: "network-error", error: apiResult.stderr || "curl failed" };
+  }
+
+  let releaseData: { tag_name?: string; published_at?: string; body?: string; assets?: { name: string; browser_download_url: string }[] };
   try {
-    // Use curl to fetch GitHub API response
-    // Using spawnSync for simplicity - avoid async complications
-    const result = spawnSync("curl", [
-      "-s",
-      "-L",
-      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
-    ]);
+    releaseData = JSON.parse(apiResult.stdout);
+  } catch (err) {
+    return { kind: "network-error", error: `JSON.parse failed: ${(err as Error).message}` };
+  }
 
-    if (result.exitCode !== 0 || !result.stdout) {
-      console.error("Failed to fetch release:", result.stderr);
-      return null;
-    }
+  const tagName = releaseData.tag_name ?? "v0.0.0";
+  const assets = releaseData.assets ?? [];
+  const releaseJsonAsset = assets.find((a) => a.name === "release.json");
 
-    const releaseData = JSON.parse(result.stdout as string);
+  if (!releaseJsonAsset) {
+    return {
+      kind: "legacy",
+      reason: "missing",
+      info: buildLegacyReleaseInfo(releaseData),
+    };
+  }
 
-    // Parse version and checksum first (before asset search)
-    const tagName = releaseData.tag_name ?? "v0.0.0";
-    const version = tagName.replace(/^v/, "");
+  // Step 2: fetch the release.json asset.
+  const assetResult = curlReleaseJsonAsset(tagName);
+  if (assetResult.exitCode !== 0 || !assetResult.stdout) {
+    return {
+      kind: "legacy",
+      reason: "missing",
+      info: buildLegacyReleaseInfo(releaseData),
+      error: assetResult.stderr || "curl release.json failed",
+    };
+  }
 
-    // Get checksum from release body or assets
-    let sha256 = "";
-    if (releaseData.body) {
-      const shaMatch = releaseData.body.match(/sha256[:\s]+([a-f0-9]{64})/i);
-      if (shaMatch) {
-        sha256 = shaMatch[1].toLowerCase();
-      }
-    }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(assetResult.stdout);
+  } catch (err) {
+    return {
+      kind: "legacy",
+      reason: "invalid",
+      info: buildLegacyReleaseInfo(releaseData),
+      error: `release.json is not valid JSON: ${(err as Error).message}`,
+    };
+  }
 
-    // Extract asset for current platform
-    // Format: deck_v{VERSION}_{OS}-{ARCH}.tar.gz
-    // Example: deck_v1.0.0_darwin-x64.tar.gz
-    const triple = getPlatformTriple(); // "darwin-x64", "linux-x64", etc.
-    const assets = releaseData.assets ?? [];
-
-    // Match: starts with deck_v and contains the platform triple
-    const platformAsset = assets.find(
-      (a: { name: string }) =>
-        a.name &&
-        a.name.startsWith("deck_v") &&
-        a.name.includes(triple) &&
-        a.name.endsWith(".tar.gz")
-    );
-
-    if (!platformAsset) {
-      // Try fallback: just check for os prefix
-      const osPrefix = getOsName(platform);
-      const fallback = assets.find(
-        (a: { name: string }) =>
-          a.name && a.name.startsWith("deck_v") && a.name.includes(osPrefix) && a.name.endsWith(".tar.gz")
-      );
-      if (!fallback) {
-        console.error(`No ${triple} binary found in release`);
-        return null;
-      }
+  try {
+    const descriptor = parseReleaseDescriptor(raw);
+    // Cache the validated payload so subsequent release checks can skip
+    // the network round-trip within the 6h TTL window.
+    writeReleaseCache(cachePath, descriptor);
+    return { kind: "descriptor", descriptor, cachePath };
+  } catch (err) {
+    if (err instanceof ReleaseDescriptorError) {
       return {
-        tagName,
-        version,
-        downloadUrl: fallback.browser_download_url,
-        sha256,
-        publishedAt: releaseData.published_at,
-        body: releaseData.body ?? "",
+        kind: "legacy",
+        reason: "invalid",
+        info: buildLegacyReleaseInfo(releaseData),
+        error: err.message,
       };
     }
-
     return {
-      tagName,
-      version,
-      downloadUrl: platformAsset.browser_download_url,
-      sha256,
-      publishedAt: releaseData.published_at,
-      body: releaseData.body ?? "",
+      kind: "legacy",
+      reason: "invalid",
+      info: buildLegacyReleaseInfo(releaseData),
+      error: (err as Error).message,
     };
-  } catch (err) {
-    console.error("Error fetching release:", err);
+  }
+}
+
+/**
+ * Read the cached `release.json` payload (if any) without doing a network
+ * round-trip. Returns `null` when the cache is missing or unparseable.
+ */
+export function readReleaseCache(cachePath: string = getDefaultReleaseCachePath()): ReleaseJson | null {
+  if (!existsSync(cachePath)) return null;
+  try {
+    const raw = JSON.parse(readFileSync(cachePath, "utf-8"));
+    return parseReleaseDescriptor(raw);
+  } catch {
     return null;
   }
+}
+
+function writeReleaseCache(cachePath: string, descriptor: ReleaseJson): void {
+  try {
+    mkdirSync(dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, JSON.stringify(descriptor, null, 2) + "\n", "utf-8");
+  } catch {
+    // Cache write is best-effort.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy path
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a legacy `ReleaseInfo` from the GitHub API payload.
+ *
+ * Parses the SHA-256 out of the release body text (regex). Returns
+ * `sha256: ""` when the body is missing or the regex doesn't match.
+ */
+export function buildLegacyReleaseInfo(
+  releaseData: {
+    tag_name?: string;
+    published_at?: string;
+    body?: string;
+    assets?: { name: string; browser_download_url: string }[];
+  },
+): ReleaseInfo {
+  const tagName = releaseData.tag_name ?? "v0.0.0";
+  const version = tagName.replace(/^v/, "");
+
+  let sha256 = "";
+  if (releaseData.body) {
+    const shaMatch = releaseData.body.match(/sha256[:\s]+([a-f0-9]{64})/i);
+    if (shaMatch) {
+      sha256 = shaMatch[1]!.toLowerCase();
+    }
+  }
+
+  const triple = getPlatformTriple();
+  const assets = releaseData.assets ?? [];
+  const platformAsset = assets.find(
+    (a) =>
+      a.name &&
+      a.name.startsWith("deck_v") &&
+      a.name.includes(triple) &&
+      a.name.endsWith(".tar.gz"),
+  );
+  const fallbackAsset = platformAsset
+    ? undefined
+    : assets.find(
+        (a) =>
+          a.name &&
+          a.name.startsWith("deck_v") &&
+          a.name.includes(getOsName(platform)) &&
+          a.name.endsWith(".tar.gz"),
+      );
+  const asset = platformAsset ?? fallbackAsset;
+
+  return {
+    tagName,
+    version,
+    downloadUrl: asset?.browser_download_url ?? "",
+    sha256,
+    publishedAt: releaseData.published_at ?? "",
+    body: releaseData.body ?? "",
+  };
+}
+
+/**
+ * Fetch the latest stable release from GitHub.
+ *
+ * Tries the descriptor path first; falls back to the legacy body-parsed
+ * path when the descriptor is missing or invalid.
+ */
+export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
+  const result = fetchReleaseDescriptor();
+  if (result.kind === "descriptor") {
+    // Pick the binary item for the current platform and produce a
+    // legacy `ReleaseInfo` from it. The orchestrator can still opt
+    // to consume the descriptor directly via `fetchReleaseDescriptor`.
+    const { descriptor } = result;
+    const triple = getPlatformTriple();
+    const binary = descriptor.items.find(
+      (i) => i.kind === "binary" && i.platform === triple,
+    );
+    if (binary && binary.kind === "binary") {
+      return {
+        tagName: descriptor.tag_name,
+        version: descriptor.version,
+        downloadUrl: binary.url,
+        sha256: binary.sha256,
+        publishedAt: descriptor.published_at,
+        body: descriptor.release_notes_url ?? "",
+      };
+    }
+    // No binary for the current platform: still return a useful info
+    // object so callers can decide to enter a content-only flow.
+    return {
+      tagName: descriptor.tag_name,
+      version: descriptor.version,
+      downloadUrl: "",
+      sha256: "",
+      publishedAt: descriptor.published_at,
+      body: descriptor.release_notes_url ?? "",
+    };
+  }
+  if (result.kind === "legacy") {
+    return result.info;
+  }
+  return null;
 }
 
 /**

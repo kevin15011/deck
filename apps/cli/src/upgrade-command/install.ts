@@ -6,7 +6,7 @@
  */
 
 import { basename, dirname, join } from "node:path";
-import { existsSync, mkdirSync, renameSync, unlinkSync, chmodSync, rmdirSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, unlinkSync, chmodSync, rmdirSync, rmSync } from "node:fs";
 
 import { spawnAsync } from "../runtime/process.js";
 import { UPGRADE_ERROR_CODES } from "./github-release.js";
@@ -120,7 +120,7 @@ async function extractTarball(archivePath: string, destDir: string): Promise<str
 function cleanupDir(dirPath: string): void {
   if (existsSync(dirPath)) {
     try {
-      rmdirSync(dirPath, { recursive: true });
+      rmSync(dirPath, { recursive: true });
     } catch {
       // Ignore cleanup errors
     }

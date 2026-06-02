@@ -21,5 +21,8 @@
     "@types/bun": "latest",
     "@types/react": "latest",
     "typescript": "latest"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }

@@ -2,7 +2,7 @@
  * Unit tests for upgrade command orchestrator.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "bun:test";
 
 describe("upgrade-command/index", () => {
   describe("exports", () => {

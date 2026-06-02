@@ -1,0 +1,90 @@
+- phase: change-initiated
+  status: in_progress
+  event: change-initiated
+  date: "2026-06-01"
+  actor: deck-developer-orchestrator
+  note: "Change initiated for repo-agnostic self-update/upgrade system. Pre-SDD exploration completed and design constraints agreed: XDG split storage, multi-runner architecture, release.json descriptor, sync reuses existing config.json packageInstructions."
+- phase: proposal
+  status: completed
+  event: proposal-complete
+  date: "2026-06-01"
+  actor: deck-developer-proposal
+  artifact: proposal.md
+  note: "Proposal completed for repo-agnostic self-update system with release descriptor, XDG migration, TUI upgrade signal, atomic rollback, and multi-runner sync scope."
+- phase: spec
+  status: completed
+  event: spec-complete
+  date: "2026-06-01"
+  actor: deck-developer-spec
+  artifact: spec.md
+  note: "Registry-deferred spec reconciliation by orchestrator. 64 requirements (56 MUST, 3 SHOULD), 44 Given/When/Then scenarios across 10 capabilities. 7 open questions forwarded to Design (backup retention, timeout, prerelease detection, schema migration, Homebrew detection, runner sync history, config format)."
+- phase: design
+  status: completed
+  event: design-complete
+  date: "2026-06-01"
+  actor: deck-developer-design
+  artifact: design.md
+  note: "Registry-deferred design reconciliation by orchestrator. 8 architecture decisions, 6 schemas, 5 sequence diagrams. 4 open questions forwarded to Tasks (CLI alias strategy, RunnerAdapter detection method, Homebrew content-sync, TUI test harness)."
+- phase: tasks
+  status: completed
+  event: tasks-complete
+  date: "2026-06-02"
+  actor: deck-developer-task
+  artifact: tasks.md
+  note: "23 atomic tasks: G1=5 general, G2=12 backend, G3=6 frontend. All 4 design open questions resolved. Zero blocked tasks. 3 high-complexity tasks (T2.4 state/manifest stores, T2.7 orchestrator, T2.8 runner sync). 5 sequential backend waves, 5 frontend waves. Review workload: medium risk (400-800 lines). Phase advanced to apply."
+
+- phase: apply
+  status: completed
+  event: apply-complete
+  date: "2026-06-02"
+  actor: deck-developer-orchestrator
+  artifact: apply-progress.md
+  note: "Apply reconciled by orchestrator after three sequential batches: G1 General (5/5 tasks), G2 Backend (12/12 tasks), G3 Frontend (6/6 tasks). Scoped tests passed: G1 68/68, G2 218/218, G3 51/51. Known unrelated baseline failures documented; zero blockers."
+
+- phase: apply
+  status: completed
+  event: typecheck-fix-complete
+  date: "2026-06-02"
+  actor: deck-developer-apply-general
+  artifact: apply-progress.md
+  note: "Fixed 16 typecheck errors in 5 changed files: main.tsx (projectRoot null), menu-options.test.ts (ReleaseCheckState fixture), core/index.ts (duplicate exports), runner-adapter.ts (teams property, AdaptiveMemoryProvider), app.tsx (rollback screen titles). Reduced changed-file errors from 59 to 44. Remaining 44 errors are pre-existing baseline in runner dashboard code."
+
+- phase: apply
+  status: completed
+  event: upgrade-command-typecheck-fix-complete
+  date: "2026-06-02"
+  actor: deck-developer-apply-backend
+  artifact: apply-progress.md
+  note: "Fixed 11 self-update-specific TypeScript errors in upgrade-command tests/source. upgrade-command tests pass 178/178; upgrade-command type errors remaining: 0."
+
+- phase: apply
+  status: completed
+  event: runner-adapter-test-typecheck-fix-complete
+  date: "2026-06-02"
+  actor: deck-developer-orchestrator
+  artifact: apply-progress.md
+  note: "Applied direct mechanical fix to runner-adapter tests after repeated apply-agent interruptions. Focused runner-adapter tests pass; matching TS errors for the two test files: 0."
+
+- phase: verify
+  status: passed_with_warnings
+  event: verify-passed-with-warnings
+  date: "2026-06-02"
+  actor: deck-developer-verify
+  artifact: verify-report.md
+  note: "Verification passed with warnings: 246/246 focused tests pass, self-update focused files have 0 type errors. Repo-wide typecheck remains red due to known baseline outside self-update scope."
+
+- phase: review
+  status: approved_with_findings
+  event: review-approved-with-findings
+  date: "2026-06-02"
+  actor: deck-developer-review
+  artifact: review-report.md
+  note: "Final review approved with findings: direct runner-adapter test type fixes verified; no blockers; baseline typecheck debt remains unrelated."
+
+- phase: archive
+  status: archived
+  event: archive-complete
+  date: "2026-06-02"
+  actor: deck-developer-archive
+  artifact: archive-report.md
+  note: "Change archived. All 23 tasks completed, 246 focused tests pass, 0 self-update type errors. Traceability preserved in archive-report.md. Known baseline typecheck warnings outside self-update scope."

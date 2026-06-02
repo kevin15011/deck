@@ -18,7 +18,9 @@ describe("page based TUI screens", () => {
     expect(output).toContain("Deck");
     expect(output).toContain("Your AI environment, configured.");
     expect(output).toContain("Start installation");
-    expect(output).toContain("Upgrade tools");
+    // T3.1: the upgrade-tools placeholder is now the real "Update Deck" action.
+    expect(output).toContain("Update Deck");
+    expect(output).not.toContain("Upgrade tools");
     expect(output).not.toContain("Pi Environment Preflight");
   });
 
