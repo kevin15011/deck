@@ -1,6 +1,6 @@
 import type { InstallableOpenCodeTool } from "./installation-plan";
 import { spawn as nodeSpawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, accessSync, constants } from "node:fs";
 import { join } from "node:path";
 
 const DEBUG_LOG = "/tmp/deck-install-debug.log";
@@ -11,6 +11,35 @@ function debugLog(...args: unknown[]): void {
   const timestamp = new Date().toISOString();
   const line = `[${timestamp}] ${msg}\n`;
   try { appendFileSync(DEBUG_LOG, line, "utf-8"); } catch {}
+}
+
+/**
+ * Check if a command exists in PATH and is executable.
+ * Also checks common user-tool bin directories (e.g., ~/.local/bin) since
+ * uv/pipx may install tools there and the current process PATH may not include them.
+ */
+export function commandExistsInPath(command: string): boolean {
+  const path = process.env.PATH ?? "";
+  const pathDirs = path.split(":");
+
+  // Add common user-tool bin directories that may not be in current PATH
+  // uv typically installs to ~/.local/bin, pipx uses similar paths
+  const homeDir = process.env.HOME ?? "";
+  const userBinDirs = homeDir ? [join(homeDir, ".local", "bin")] : [];
+  const allDirs = [...pathDirs, ...userBinDirs];
+
+  return allDirs.some((dir) => {
+    try {
+      const fullPath = join(dir, command);
+      // Use accessSync with execute permission to verify executability, not just existence
+      // This avoids false positives from directories or non-executable files
+      // constants.F_OK = 0 (existence), constants.X_OK = 1 (executable)
+      accessSync(fullPath, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export type OpenCodeToolInstallResult = {
@@ -33,13 +62,22 @@ function getShellCommand(): string {
   return process.platform === "darwin" ? "sh" : (existsSync("/bin/bash") ? "/bin/bash" : "sh");
 }
 
+export type InstallOpenCodeToolsOptions = {
+  /** Custom command existence checker (defaults to checking PATH) */
+  commandExists?: (command: string) => boolean;
+};
+
 export async function installOpenCodeTools(
   command: string | undefined,
   plan: InstallableOpenCodeTool[],
   onResult: (result: OpenCodeToolInstallResult) => void,
   runInstallCommand: RunInstallCommand = runDefaultInstallCommand,
+  options?: InstallOpenCodeToolsOptions,
 ): Promise<OpenCodeToolInstallResult[]> {
   if (!command) return [];
+
+  // Use injected commandExists or default to PATH-based check
+  const cmdExists = options?.commandExists ?? commandExistsInPath;
 
   const results: OpenCodeToolInstallResult[] = [];
 
@@ -253,6 +291,172 @@ export async function installOpenCodeTools(
       results.push(result);
       onResult(result);
       continue;
+    }
+
+    if (tool.installKind === "python-tool") {
+      // Serena is a Python tool that requires uv or pipx for installation
+      // Policy: Never install Python automatically. If python3 is missing, skip Serena entirely.
+      // If Python exists but neither uv nor pipx exists, warn/skip.
+      // Only write MCP config if final serena verification passes.
+      debugLog(`[install-tools] ${tool.name}: python-tool install starting`);
+
+      // Step 1: Check if Python exists (REQUIRED - never install Python)
+      debugLog(`[install-tools] ${tool.name}: Checking for python3...`);
+      const pythonExists = cmdExists("python3");
+      if (!pythonExists) {
+        // Python missing - skip Serena entirely, do not configure MCP
+        debugLog(`[install-tools] ${tool.name}: python3 not found - skipping Serena (Python is required but not installed)`);
+        const result = {
+          tool: tool.name,
+          success: false,
+          message: `Skipped: Python3 is not installed. Serena requires Python. Install Python3 first, then re-run Deck install.`,
+        };
+        results.push(result);
+        onResult(result);
+        continue;
+      }
+      debugLog(`[install-tools] ${tool.name}: python3 found`);
+
+      // Step 2: Check if serena already exists
+      debugLog(`[install-tools] ${tool.name}: Checking if serena is already in PATH...`);
+      const serenaExists = cmdExists("serena");
+      if (serenaExists) {
+        debugLog(`[install-tools] ${tool.name}: serena already in PATH - enabling MCP`);
+        const result = {
+          tool: tool.name,
+          success: true,
+          message: `Serena found in PATH. MCP configuration will be enabled.`,
+        };
+        results.push(result);
+        onResult(result);
+        continue;
+      }
+      debugLog(`[install-tools] ${tool.name}: serena not in PATH, trying to install...`);
+
+      // Step 3: Try to install via uv or pipx
+      const uvExists = cmdExists("uv");
+      const pipxExists = cmdExists("pipx");
+
+      if (uvExists) {
+        // Use uv to install
+        debugLog(`[install-tools] ${tool.name}: Installing via uv tool install serena`);
+        try {
+          const { stdout, stderr, exitCode } = await runInstallCommand("uv", ["tool", "install", "serena"]);
+          debugLog(`[install-tools] ${tool.name}: uv install exitCode=${exitCode}`);
+
+          if (exitCode !== 0) {
+            debugLog(`[install-tools] ${tool.name}: uv install failed: ${stderr || stdout}`);
+            const result = {
+              tool: tool.name,
+              success: false,
+              message: `Failed to install via uv: ${(stderr || stdout).trim()}`,
+            };
+            results.push(result);
+            onResult(result);
+            continue;
+          }
+
+          // Step 4: Verify serena is now in PATH after uv install
+          debugLog(`[install-tools] ${tool.name}: Verifying serena is now in PATH...`);
+          const serenaNowExists = cmdExists("serena");
+          if (!serenaNowExists) {
+            debugLog(`[install-tools] ${tool.name}: serena verification FAILED after uv install`);
+            const result = {
+              tool: tool.name,
+              success: false,
+              message: `Serena installation succeeded but 'serena' not found in PATH. The current shell may need to pick up the new bin directory (try: export PATH="$HOME/.local/bin:$PATH" or restart your terminal). MCP will not be configured.`,
+            };
+            results.push(result);
+            onResult(result);
+            continue;
+          }
+
+          debugLog(`[install-tools] ${tool.name}: serena verification PASSED after uv install`);
+          const result = {
+            tool: tool.name,
+            success: true,
+            message: `Serena installed via uv and verified. MCP configuration will be enabled.`,
+          };
+          results.push(result);
+          onResult(result);
+          continue;
+        } catch (error) {
+          debugLog(`[install-tools] ${tool.name}: uv install ERROR - ${error instanceof Error ? error.message : String(error)}`);
+          const result = {
+            tool: tool.name,
+            success: false,
+            message: `uv install failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+          };
+          results.push(result);
+          onResult(result);
+          continue;
+        }
+      } else if (pipxExists) {
+        // Use pipx to install
+        debugLog(`[install-tools] ${tool.name}: Installing via pipx install serena`);
+        try {
+          const { stdout, stderr, exitCode } = await runInstallCommand("pipx", ["install", "serena"]);
+          debugLog(`[install-tools] ${tool.name}: pipx install exitCode=${exitCode}`);
+
+          if (exitCode !== 0) {
+            debugLog(`[install-tools] ${tool.name}: pipx install failed: ${stderr || stdout}`);
+            const result = {
+              tool: tool.name,
+              success: false,
+              message: `Failed to install via pipx: ${(stderr || stdout).trim()}`,
+            };
+            results.push(result);
+            onResult(result);
+            continue;
+          }
+
+          // Step 4: Verify serena is now in PATH after pipx install
+          debugLog(`[install-tools] ${tool.name}: Verifying serena is now in PATH...`);
+          const serenaNowExists = cmdExists("serena");
+          if (!serenaNowExists) {
+            debugLog(`[install-tools] ${tool.name}: serena verification FAILED after pipx install`);
+            const result = {
+              tool: tool.name,
+              success: false,
+              message: `Serena installation succeeded but 'serena' not found in PATH. The current shell may need to pick up the new bin directory (try: export PATH="$HOME/.local/bin:$PATH" or restart your terminal). MCP will not be configured.`,
+            };
+            results.push(result);
+            onResult(result);
+            continue;
+          }
+
+          debugLog(`[install-tools] ${tool.name}: serena verification PASSED after pipx install`);
+          const result = {
+            tool: tool.name,
+            success: true,
+            message: `Serena installed via pipx and verified. MCP configuration will be enabled.`,
+          };
+          results.push(result);
+          onResult(result);
+          continue;
+        } catch (error) {
+          debugLog(`[install-tools] ${tool.name}: pipx install ERROR - ${error instanceof Error ? error.message : String(error)}`);
+          const result = {
+            tool: tool.name,
+            success: false,
+            message: `pipx install failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+          };
+          results.push(result);
+          onResult(result);
+          continue;
+        }
+      } else {
+        // Neither uv nor pipx exists - skip with warning
+        debugLog(`[install-tools] ${tool.name}: Neither uv nor pipx found - skipping Serena`);
+        const result = {
+          tool: tool.name,
+          success: false,
+          message: `Skipped: Python3 exists but neither 'uv' nor 'pipx' is installed. Install uv or pipx first, then re-run Deck install.`,
+        };
+        results.push(result);
+        onResult(result);
+        continue;
+      }
     }
 
     debugLog(`[install-tools] ${tool.name}: Unknown installKind "${tool.installKind}", falling through to opencode plugin install`);

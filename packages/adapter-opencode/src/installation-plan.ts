@@ -7,7 +7,7 @@ export type InstallableOpenCodeTool = {
   name: string;
   module: string;
   required: boolean;
-  installKind: "opencode-plugin" | "external" | "mcp-server" | "npm-package" | "npm-package-plus-mcp" | "shell-script" | "shell-script-plus-mcp";
+  installKind: "opencode-plugin" | "external" | "mcp-server" | "npm-package" | "npm-package-plus-mcp" | "shell-script" | "shell-script-plus-mcp" | "python-tool";
   /** For shell-script: curl URL to pipe to shell */
   shellInstallUrl?: string;
   /** For shell-script: command to run after successful shell install (e.g., ["rtk", "init", "-g", "--opencode"]) */
@@ -39,7 +39,7 @@ export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [
     name: "Serena",
     module: "oraios/serena",
     required: false,
-    installKind: "mcp-server",
+    installKind: "python-tool",
   },
 ];
 

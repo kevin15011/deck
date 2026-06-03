@@ -15,7 +15,8 @@ export type OpenCodeCapabilityInstallKind =
   | "npm-package" // npm global package via `npm install -g`
   | "npm-package-plus-mcp" // npm global package + MCP server configuration
   | "shell-script" // Binary installed via shell script (curl -fsSL <url> | sh)
-  | "shell-script-plus-mcp"; // Shell script + MCP server configuration (e.g., rtk)
+  | "shell-script-plus-mcp" // Shell script + MCP server configuration (e.g., rtk)
+  | "python-tool"; // Python tool installed via uv or pipx (e.g., serena)
 
 export type OpenCodeCapabilityToolMapping = {
   capabilityId: OpenCodeCapabilityId;
@@ -77,12 +78,12 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
   serena: {
     capabilityId: "serena",
     label: "Serena",
-    description: "Semantic code retrieval, editing and refactoring via LSP. MCP server providing IDE-level symbol operations.",
+    description: "Semantic code retrieval, editing and refactoring via LSP. Python tool installed via uv/pipx.",
     runnerScope: "all",
     requirementLevel: "configurable",
     toolId: "serena",
     source: "oraios/serena",
-    installKind: "mcp-server",
+    installKind: "python-tool",
     detector: { commands: ["serena"], mcpServerNames: ["serena"] },
   },
   context7: {

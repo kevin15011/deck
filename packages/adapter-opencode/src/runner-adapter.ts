@@ -392,7 +392,7 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
           };
         }
 
-        const result = this.writeMcpConfigFromCapability(capabilityId, action.source);
+        const result = await this.writeMcpConfigFromCapability(capabilityId, action.source);
         return {
           actionId: action.id,
           status: result.ok ? "executed" : "failed",
@@ -441,7 +441,7 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
     }
   }
 
-  private writeMcpConfigFromCapability(capabilityId: string, source?: string): { ok: boolean; diagnostics: string[] } {
+  private async writeMcpConfigFromCapability(capabilityId: string, source?: string): Promise<{ ok: boolean; diagnostics: string[] }> {
     try {
       switch (capabilityId) {
         case "context7": {
@@ -472,6 +472,23 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
         case "supermemory": {
           // Supermemory is handled separately via adaptive memory flow
           return { ok: true, diagnostics: ["Supermemory MCP config handled by adaptive memory provider."] };
+        }
+        case "serena": {
+          // Serena MCP config - verify serena command exists before writing config
+          // This prevents broken OpenCode startup from invalid MCP config
+          const { commandExistsInPath } = await import("./install-tools");
+          const serenaExists = commandExistsInPath("serena");
+          if (!serenaExists) {
+            return {
+              ok: false,
+              diagnostics: ["Serena command not found in PATH. Install serena via 'uv tool install serena' or 'pipx install serena' first."],
+            };
+          }
+          return writeOpenCodeMcpConfig({
+            serverName: "serena",
+            type: "local",
+            command: ["serena", "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+          });
         }
         default: {
           if (source) {

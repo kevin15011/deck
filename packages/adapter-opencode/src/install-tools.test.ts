@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 
-import { installOpenCodeTools } from "./install-tools";
+import { installOpenCodeTools, commandExistsInPath } from "./install-tools";
 import type { InstallableOpenCodeTool } from "./installation-plan";
 import { writeFileSync, unlinkSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -67,5 +67,121 @@ describe("installOpenCodeTools", () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toContain("MCP server configured via write-mcp-config action");
+  });
+
+  describe("python-tool (serena)", () => {
+    test("skips serena when python3 is missing", async () => {
+      const mockCommandExists = (cmd: string): boolean => {
+        return cmd === "uv" || cmd === "pipx";
+      };
+
+      const [result] = await installOpenCodeTools(
+        "opencode",
+        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
+        () => {},
+        async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        { commandExists: mockCommandExists },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Python3 is not installed");
+    });
+
+    test("succeeds when serena already exists in PATH", async () => {
+      const mockCommandExists = (cmd: string): boolean => {
+        return cmd === "python3" || cmd === "serena";
+      };
+
+      const [result] = await installOpenCodeTools(
+        "opencode",
+        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
+        () => {},
+        async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        { commandExists: mockCommandExists },
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("Serena found in PATH");
+    });
+
+    test("installs via uv and verifies success", async () => {
+      let callCount = 0;
+      const mockCommandExists = (cmd: string): boolean => {
+        if (cmd === "python3" || cmd === "uv") return true;
+        if (cmd === "serena") {
+          callCount++;
+          return callCount > 1;
+        }
+        return false;
+      };
+
+      const [result] = await installOpenCodeTools(
+        "opencode",
+        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
+        () => {},
+        async () => ({ exitCode: 0, stdout: "Installed serena", stderr: "" }),
+        { commandExists: mockCommandExists },
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("installed via uv");
+    });
+
+    test("fails when uv install succeeds but serena not in PATH", async () => {
+      const mockCommandExists = (cmd: string): boolean => {
+        return cmd === "python3" || cmd === "uv";
+      };
+
+      const [result] = await installOpenCodeTools(
+        "opencode",
+        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
+        () => {},
+        async () => ({ exitCode: 0, stdout: "Installed serena", stderr: "" }),
+        { commandExists: mockCommandExists },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("not found in PATH");
+    });
+
+    test("skips when neither uv nor pipx exists", async () => {
+      const mockCommandExists = (cmd: string): boolean => {
+        return cmd === "python3";
+      };
+
+      const [result] = await installOpenCodeTools(
+        "opencode",
+        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
+        () => {},
+        async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        { commandExists: mockCommandExists },
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("neither");
+    });
+
+    test("installs via pipx when uv not available", async () => {
+      let callCount = 0;
+      const mockCommandExists = (cmd: string): boolean => {
+        if (cmd === "python3" || cmd === "pipx") return true;
+        if (cmd === "serena") {
+          callCount++;
+          return callCount > 1;
+        }
+        return false;
+      };
+
+      const [result] = await installOpenCodeTools(
+        "opencode",
+        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
+        () => {},
+        async () => ({ exitCode: 0, stdout: "Installed serena", stderr: "" }),
+        { commandExists: mockCommandExists },
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("installed via pipx");
+    });
   });
 });

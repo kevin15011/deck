@@ -270,6 +270,36 @@ function addCapabilityActions(
       continue;
     }
 
+    // python-tool: Python-based tools like serena that need uv/pipx for installation
+    // This handles the case where serena is selected but not installed
+    if (capability.installKind === "python-tool" && tool && entry.status === "missing") {
+      groups.automaticInstalls.push({
+        id: `capability.${capabilityId}.install`,
+        kind: "install-opencode-plugin",
+        title: `Install ${capability.label}`,
+        description: capability.description,
+        capabilityId,
+        toolId: tool.id,
+        source: tool.module,
+        status: "ready",
+      });
+      // Also generate MCP config write action (will verify serena exists before writing)
+      const mcpConfig = getMcpServerConfig(capabilityId, capability.source);
+      if (mcpConfig) {
+        groups.automaticInstalls.push({
+          id: `capability.${capabilityId}.mcp-config`,
+          kind: "write-mcp-config",
+          title: `Configure ${capability.label} MCP`,
+          description: `Writes ${capability.label} MCP server config (requires ${tool.id} in PATH).`,
+          capabilityId,
+          toolId: capability.toolId,
+          source: capability.source,
+          status: "ready",
+        });
+      }
+      continue;
+    }
+
     const action = capability.installKind === "pending"
       ? buildPendingSourceAction(capabilityId, entry.status, entry.source)
       : buildManualExternalAction(capabilityId, tool?.module);
