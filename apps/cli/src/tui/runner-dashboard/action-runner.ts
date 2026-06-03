@@ -5,7 +5,8 @@
  * Each adapter provides its own implementations for runtime-specific actions.
  */
 
-import { readFileSync, existsSync, writeFileSync, appendFileSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, appendFileSync, readdirSync, statSync } from "node:fs";
+import { resolve as pathResolve } from "node:path";
 import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
@@ -30,7 +31,7 @@ export type RunnerActionRunResult = {
  */
 export type PackageInstallerFn = (
   runnerCommand: string | undefined,
-  packages: Array<{ name: string; source: string }>,
+  packages: Array<{ id: string; name: string; source: string }>,
   onResult: (result: { success: boolean; message?: string }) => void,
 ) => Promise<Array<{ success: boolean; message?: string }>>;
 
@@ -136,6 +137,10 @@ export async function runRunnerReviewPlan(
   }
 
   const results: RunnerActionRunResult[] = [];
+  
+  // Track failed install actions by capability prefix for MCP gating
+  const failedInstallCapabilities = new Set<string>();
+  
   const runAndRecord = async (action: RunnerAction, deps: RunnerActionRunnerDependencies = dependencies) => {
     const result = await runRunnerAction(action, deps);
     results.push(result);
@@ -143,18 +148,76 @@ export async function runRunnerReviewPlan(
     return result;
   };
 
-  // Security boundary: visible config writes happen first.
-  for (const action of plan.groups.configWrites) {
-    log(`runRunnerReviewPlan: configWrite ${action.id} kind=${action.kind} status=${action.status}`);
-    const result = await runAndRecord(action);
-    log(`runRunnerReviewPlan: configWrite ${action.id} result=${result.status}`);
-    if (action.kind === "write-mcp-config" && result.status === "failed") return results;
-  }
-
+  // Run installs first to track failures for MCP gating
   for (const action of [...plan.groups.automaticInstalls, ...plan.groups.manualSteps]) {
     log(`runRunnerReviewPlan: install/manual ${action.id} kind=${action.kind} status=${action.status}`);
     const result = await runAndRecord(action);
     log(`runRunnerReviewPlan: install/manual ${action.id} result=${result.status} msg=${result.message?.substring(0, 100)}`);
+    
+    // Track failed install actions by capability prefix
+    if (result.status === "failed" && action.id.startsWith("capability.")) {
+      // Extract capability prefix: capability.serena.install -> capability.serena
+      const parts = action.id.split(".");
+      if (parts.length >= 2) {
+        failedInstallCapabilities.add(`${parts[0]}.${parts[1]}`);
+      }
+    }
+  }
+
+  // Security boundary: visible config writes happen after installs
+  for (const action of plan.groups.configWrites) {
+    // Gate write-mcp-config actions by prior failed installs
+    if (action.kind === "write-mcp-config") {
+      const capabilityPrefix = action.id.replace(".mcp-config", "");
+      
+      // Check if the prerequisite install failed
+      if (failedInstallCapabilities.has(capabilityPrefix)) {
+        const skippedResult: RunnerActionRunResult = {
+          actionId: action.id,
+          status: "skipped",
+          message: `Skipped MCP config for '${capabilityPrefix}': install failed.`,
+          diagnostics: [`Dependency ${capabilityPrefix}.install reported failure.`],
+        };
+        results.push(skippedResult);
+        dependencies.onActionResult?.(skippedResult);
+        log(`runRunnerReviewPlan: configWrite ${action.id} SKIPPED (install failed)`);
+        continue;
+      }
+      
+      // For binary-requiring capabilities, verify executable exists on PATH
+      const capabilityId = action.capabilityId as string | undefined;
+      if (capabilityId && capabilityId !== "context7") {
+        // Serena, rtk, codebase-memory, context-mode require local binaries
+        const executableName = capabilityId === "serena" ? "serena" 
+          : capabilityId === "rtk" ? "rtk"
+          : capabilityId === "codebase-memory" ? "codebase-memory-mcp"
+          : capabilityId === "context-mode" ? "context-mode"
+          : null;
+        
+        if (executableName) {
+          // Cross-platform executable lookup (avoiding Unix-only `which` command)
+          const executableExists = checkExecutableExists(executableName);
+          if (!executableExists) {
+            // Executable not found on PATH - skip MCP write
+            const failedResult: RunnerActionRunResult = {
+              actionId: action.id,
+              status: "failed",
+              message: `Cannot write MCP config for '${capabilityId}': executable '${executableName}' not found on PATH.`,
+              diagnostics: [`Binary '${executableName}' not found in PATH.`],
+            };
+            results.push(failedResult);
+            dependencies.onActionResult?.(failedResult);
+            log(`runRunnerReviewPlan: configWrite ${action.id} FAILED (executable not found)`);
+            continue;
+          }
+        }
+      }
+    }
+    
+    log(`runRunnerReviewPlan: configWrite ${action.id} kind=${action.kind} status=${action.status}`);
+    const result = await runAndRecord(action);
+    log(`runRunnerReviewPlan: configWrite ${action.id} result=${result.status}`);
+    if (action.kind === "write-mcp-config" && result.status === "failed") return results;
   }
 
   const memoryResolution = resolveMemoryProviderAfterConfigWrite(dependencies);
@@ -241,6 +304,8 @@ async function runPackageInstall(
     return skippedResult(action, "Runner command is required to install packages; run preflight or provide dependencies.runnerCommand before installation.");
   }
 
+  // Use toolId (or id fallback) as the catalog lookup key; source is the module name for display
+  const packageId = action.toolId ?? action.id;
   const packageName = action.source ?? action.toolId ?? action.id;
   const runner = dependencies.installPackages;
   if (!runner) {
@@ -249,7 +314,7 @@ async function runPackageInstall(
 
   const installResults = await runner(
     dependencies.runnerCommand,
-    [{ name: packageName, source: action.source ?? "" }],
+    [{ id: packageId, name: packageName, source: action.source ?? "" }],
     dependencies.onInstallResult ?? (() => undefined),
   );
 
@@ -279,6 +344,7 @@ async function runInternalPackageInstall(
   dependencies: RunnerActionRunnerDependencies,
 ): Promise<RunnerActionRunResult> {
   const packageName = action.internalPackageId ?? action.id;
+  const packageId = action.toolId ?? action.id;
 
   // Primary: use installInternalRunnerPackages if provided
   if (dependencies.installInternalRunnerPackages) {
@@ -326,7 +392,7 @@ async function runInternalPackageInstall(
 
   const installResults = await runner(
     dependencies.runnerCommand,
-    [{ name: packageName, source: action.source ?? "" }],
+    [{ id: packageId, name: packageName, source: action.source ?? "" }],
     (result) => {
       dependencies.onActionResult?.({
         actionId: action.id,
@@ -762,6 +828,58 @@ function redactRaw(value: unknown): unknown {
 // Backward-compatible aliases for Pi-specific tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Cross-platform executable lookup
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if an executable exists on the system PATH.
+ * Works cross-platform (Windows, Linux, macOS) without relying on `which`.
+ */
+function checkExecutableExists(executableName: string): boolean {
+  const pathEnv = process.env.PATH;
+  if (!pathEnv) return false;
+
+  // Add .exe extension on Windows
+  const isWindows = process.platform === "win32";
+  const names = isWindows 
+    ? [executableName, `${executableName}.exe`, `${executableName}.cmd`, `${executableName}.bat`]
+    : [executableName];
+
+  const pathDirs = pathEnv.split(isWindows ? ";" : ":");
+
+  for (const dir of pathDirs) {
+    if (!dir) continue;
+    const resolvedDir = pathResolve(dir);
+    
+    // Check if directory exists
+    let dirEntries: string[] = [];
+    try {
+      if (existsSync(resolvedDir)) {
+        dirEntries = readdirSync(resolvedDir);
+      }
+    } catch {
+      continue; // Skip directories we can't read
+    }
+
+    for (const name of names) {
+      if (dirEntries.includes(name)) {
+        const fullPath = pathResolve(resolvedDir, name);
+        // Verify it's actually a file (not a directory with same name)
+        try {
+          const stat = statSync(fullPath);
+          if (stat.isFile()) {
+            return true;
+          }
+        } catch {
+          // stat failed, skip
+        }
+      }
+    }
+  }
+
+  return false;
+}
 export const getPiRunnerReviewPlanRunBlockDiagnostics = getRunnerReviewPlanRunBlockDiagnostics;
 export const runPiRunnerAction = runRunnerAction;
 export const runPiRunnerReviewPlan = runRunnerReviewPlan;

@@ -1,0 +1,82 @@
+changeId: fix-install-upgrade-regressions
+currentPhase: review
+status: completed
+provenance:
+  explorer: agent
+  model: minimax-m3
+  timestamp: 2026-06-03
+  modelFamily: MiniMax
+  opencodeVersion: deck 0.1.3
+  proposal:
+    agent: deck-developer-proposal
+    model: openai/gpt-5.5
+    timestamp: 2026-06-03
+  spec:
+    agent: deck-developer-spec
+    model: openai/gpt-5.5
+    timestamp: 2026-06-03
+    registryWrite: deferred-reconciled
+  design:
+    agent: deck-developer-design
+    model: openai/gpt-5.5
+    timestamp: 2026-06-03
+    registryWrite: deferred-reconciled
+  tasks:
+    agent: deck-developer-task
+    model: zai-coding-plan/glm-5.1
+    timestamp: 2026-06-03
+  apply:
+    agent: deck-developer-apply_general
+    model: alibaba-coding-plan/MiniMax-M2.5
+    timestamp: 2026-06-03
+    registryWrite: non-deferred
+    fixup:
+      timestamp: 2026-06-03
+      agent: deck-developer-apply_general
+      summary: >
+        Fixed REQ-UPGRADE-003 (unparseable legacy tag → error state),
+        cross-platform executable lookup (replaced `which`),
+        documented pre-existing test failures
+    fixup2:
+      timestamp: 2026-06-03
+      agent: deck-developer-apply_general
+      summary: >
+        Fixed TypeScript error at app.tsx(798,33) by explicitly typing
+        matchedIds as Set<string> (was inferred as Set<InstallableOpenCodeToolId>).
+        Changed file now typechecks correctly. Targeted tests pass.
+  verify:
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-06-03
+    status: passed
+    registryWrite: deferred-reconciled
+  review:
+    agent: deck-developer-review
+    model: openai/gpt-5.5
+    timestamp: 2026-06-03
+    status: approved
+    registryWrite: deferred-reconciled
+  archive:
+    agent: deck-developer-archive
+    model: alibaba-coding-plan/MiniMax-M2.5
+    timestamp: 2026-06-03
+    status: archived
+    registryWrite: non-deferred
+    artifact: archive-report.md
+  release-bump:
+    agent: deck-developer-apply_general
+    model: alibaba-coding-plan/MiniMax-M2.5
+    timestamp: 2026-06-03
+    status: completed
+    registryWrite: non-deferred
+    version: "0.1.4"
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply-progress: apply-progress.md
+  verify-report: verify-report.md
+  review-report: review-report.md
+  archive-report: archive-report.md

@@ -180,8 +180,26 @@ function descriptorToState(descriptor: ReleaseJson, currentVersion: string): Rel
   };
 }
 
+/**
+ * Check if a version string looks like semver (has at least major.minor).
+ * Used to validate that legacy tag-derived versions are parseable.
+ */
+function isLegacyVersionValid(version: string): boolean {
+  if (!version) return false;
+  const parts = version.split(".");
+  if (parts.length < 2) return false;
+  return parts.every((part, idx) => {
+    if (idx >= 2) return true;
+    return /^\d+$/.test(part);
+  });
+}
+
 function legacyToState(info: ReleaseInfo, currentVersion: string): ReleaseCheckState {
-  if (!info.version) return { kind: "none" };
+  // REQ-UPGRADE-003: Unparseable legacy tag must produce error state, not {kind:"none"}
+  if (!info.version) return { kind: "network-error", error: "Could not determine version from release tag" };
+  if (!isLegacyVersionValid(info.version)) {
+    return { kind: "network-error", error: `Tag version '${info.version}' is not a valid semantic version` };
+  }
   if (compareVersions(currentVersion, info.version) >= 0) {
     return { kind: "none" };
   }

@@ -774,20 +774,53 @@ export function DeckApp() {
         resolvedMemoryProvider,
         writeMcpConfig: adapter.writeMcpConfig?.bind(adapter),
         installPackages: async (runnerCommand, packages, onResult) => {
-          log(`installPackages (OpenCode): installing ${packages.map(p => p.name).join(", ")}`);
-          // Use the package names as tool IDs directly — the plan builder already determined these need installing
-          const selectedToolIds = packages.map(p => p.name).filter(Boolean);
+          log(`installPackages (OpenCode): installing ${packages.map(p => `${p.id}(${p.source})`).join(", ")}`);
+          // Use package.id as the catalog lookup key (not name/source)
+          const selectedToolIds = packages.map(p => p.id).filter(Boolean);
           // Get the tools from the catalog (not re-reviewing installed status — plan already decided)
           const toolsToInstall = OPENCODE_INSTALLABLE_TOOLS.filter(t => selectedToolIds.includes(t.id));
           log(`installPackages (OpenCode): matched ${toolsToInstall.length}/${selectedToolIds.length} tools from catalog`);
+          
+          // Handle each requested package - return failure for zero matches
           if (toolsToInstall.length === 0) {
-            return packages.map(p => ({ success: true, message: `${p.name} already installed.` }));
+            // No matches - return honest failure for each requested package
+            return packages.map(p => ({ 
+              success: false, 
+              message: `No installable OpenCode tool matched id "${p.id}".` 
+            }));
           }
+          
+          // Handle partial matches - packages not in catalog should fail
+          // Use Set<string> since pkg.id is string, but t.id is InstallableOpenCodeToolId (narrower)
+          const matchedIds: Set<string> = new Set(toolsToInstall.map(t => t.id));
+          const results: Array<{ success: boolean; message?: string }> = [];
+
+          for (const pkg of packages) {
+            if (!matchedIds.has(pkg.id)) {
+              // This package was requested but not found in catalog - honest failure
+              results.push({ 
+                success: false, 
+                message: `No installable OpenCode tool matched id "${pkg.id}".` 
+              });
+            }
+          }
+          
+          // Install matched tools
           const installResults = await installOpenCodeTools("opencode", toolsToInstall, (r) => {
             onResult({ success: r.success, message: r.message });
           });
-          log(`installPackages (OpenCode): results=${installResults.map(r => `${r.tool}:${r.success}`).join(",")}`);
-          return installResults.map(r => ({ success: r.success, message: r.message }));
+          
+          // Map install results to the matched tools
+          for (const tool of toolsToInstall) {
+            const installResult = installResults.find(r => r.tool === tool.id);
+            results.push({ 
+              success: installResult?.success ?? false, 
+              message: installResult?.message 
+            });
+          }
+          
+          log(`installPackages (OpenCode): results=${results.map(r => `${r.success ? "ok" : "fail"}`).join(",")}`);
+          return results;
         },
         installTeamBundle: async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments }) => {
           // Build capability instructions for OpenCode (Pi ignores undefined capabilityInstructions)

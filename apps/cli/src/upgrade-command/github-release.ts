@@ -253,6 +253,26 @@ export function fetchReleaseDescriptor(
 
   try {
     const descriptor = parseReleaseDescriptor(raw);
+    
+    // Step 3: Validate descriptor.version against normalized tag_name
+    const normalizedTagVersion = normalizeVersion(tagName);
+    const descriptorVersion = normalizeVersion(descriptor.version);
+    
+    // Check if both are semver-like and if they match
+    const tagIsValidSemver = isSemverLike(tagName);
+    const descriptorIsValidSemver = isSemverLike(descriptor.version);
+    
+    if (tagIsValidSemver && descriptorIsValidSemver && normalizedTagVersion !== descriptorVersion) {
+      // Descriptor version doesn't match tag - treat as invalid and fall back to legacy
+      // Do NOT cache the inconsistent descriptor
+      return {
+        kind: "legacy",
+        reason: "invalid",
+        info: buildLegacyReleaseInfo(releaseData),
+        error: `Descriptor version ${descriptor.version} does not match tag ${tagName}. Using legacy tag-based release info.`,
+      };
+    }
+    
     // Cache the validated payload so subsequent release checks can skip
     // the network round-trip within the 6h TTL window.
     writeReleaseCache(cachePath, descriptor);
@@ -399,6 +419,30 @@ export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
     return result.info;
   }
   return null;
+}
+
+/**
+ * Normalize a version string by stripping leading 'v' prefix.
+ * Used for comparing descriptor.version with tag_name.
+ */
+function normalizeVersion(version: string): string {
+  return version.replace(/^v/, "").trim();
+}
+
+/**
+ * Check if a version string looks like semver (has at least major.minor).
+ * Used to validate that tag_name and descriptor.version are comparable.
+ */
+function isSemverLike(version: string): boolean {
+  const normalized = normalizeVersion(version);
+  // Must have at least two numeric parts (major.minor)
+  const parts = normalized.split(".");
+  if (parts.length < 2) return false;
+  // First two parts must be numeric
+  return parts.every((part, idx) => {
+    if (idx >= 2) return true; // Ignore parts beyond major.minor
+    return /^\d+$/.test(part);
+  });
 }
 
 /**
