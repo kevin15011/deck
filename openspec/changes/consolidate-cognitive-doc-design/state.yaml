@@ -1,0 +1,76 @@
+name: consolidate-cognitive-doc-design
+description: Canonicalize cognitive-doc-design skill references in Developer Team content files
+provenance:
+  - artifact: exploration.md
+    phase: explore
+    status: completed
+    recorded: 2026-06-03
+  - artifact: proposal.md
+    phase: proposal
+    status: completed
+    recorded: 2026-06-03
+  - artifact: spec.md
+    phase: spec
+    status: completed
+    recorded: 2026-06-04
+  - artifact: design.md
+    phase: design
+    status: completed
+    recorded: 2026-06-04
+  - artifact: tasks.md
+    phase: tasks
+    status: completed
+    recorded: 2026-06-04
+previous_artifacts: []
+notes: |
+  Phase 3B exploration confirms:
+  - cognitive-doc-design skill exists at .opencode/skills/cognitive-doc-design/SKILL.md
+  - None of 7 target files reference cognitive-doc-design
+  - All 7 files follow using-agent-skills pattern in SKILL_BODY Rules sections
+  - Must preserve all inline artifact templates, outputs, registries
+  - Recommended: Add single canonical line to SKILL_BODY Rules, following Phase 3A pattern
+proposal:
+  phase: proposal
+  status: completed
+  artifact: proposal.md
+  recorded: 2026-06-03
+spec:
+  phase: spec
+  status: completed
+  artifact: spec.md
+  recorded: 2026-06-04
+design:
+  phase: design
+  status: completed
+  artifact: design.md
+  recorded: 2026-06-04
+tasks:
+  phase: tasks
+  status: completed
+  artifact: tasks.md
+  recorded: 2026-06-04
+current_phase: archive
+current_status: archived
+current_artifact: archive-report.md
+archive:
+  phase: archive
+  status: archived
+  artifact: archive-report.md
+  recorded: 2026-06-04
+  location: openspec/archive/consolidate-cognitive-doc-design/
+apply:
+  phase: apply
+  agent: general
+  status: completed
+  artifact: apply-progress.md
+  recorded: 2026-06-04
+verify:
+  phase: verify
+  status: passed_with_warnings
+  artifact: verify-report.md
+  recorded: 2026-06-04
+review:
+  phase: review
+  status: approved
+  artifact: review-report.md
+  recorded: 2026-06-04
