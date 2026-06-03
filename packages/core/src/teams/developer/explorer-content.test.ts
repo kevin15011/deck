@@ -187,3 +187,22 @@ describe("Git Safety Rule presence", () => {
     expect(EXPLORER_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });
+
+// Cognitive doc design canonical line test
+describe("Cognitive doc design canonical line", () => {
+  const CDD_CANONICAL_LINE =
+    "Follow the cognitive-doc-design skill for artifact structure and documentation patterns.";
+
+  test("SKILL_BODY contains cognitive-doc-design line exactly once", () => {
+    const matches = EXPLORER_SKILL_BODY.split(CDD_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("AGENT_BODY does NOT contain cognitive-doc-design line (immutability)", () => {
+    expect(EXPLORER_AGENT_BODY).not.toContain(CDD_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(EXPLORER_SKILL_BODY).toContain("## Rules");
+  });
+});

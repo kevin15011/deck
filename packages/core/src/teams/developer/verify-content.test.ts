@@ -140,6 +140,29 @@ describe("Canonical line replacement", () => {
   });
 });
 
+// Cognitive doc design canonical line test
+describe("Cognitive doc design canonical line", () => {
+  const CDD_CANONICAL_LINE =
+    "Follow the cognitive-doc-design skill for artifact structure and documentation patterns.";
+
+  test("SKILL_BODY contains cognitive-doc-design line exactly once", () => {
+    const matches = VERIFY_SKILL_BODY.split(CDD_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of cognitive-doc-design line", () => {
+    expect(VERIFY_SKILL_BODY).not.toContain(`- ${CDD_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain cognitive-doc-design line (immutability)", () => {
+    expect(VERIFY_AGENT_BODY).not.toContain(CDD_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(VERIFY_SKILL_BODY).toContain("## Rules");
+  });
+});
+
 // Git Safety Rule presence test
 describe("Git Safety Rule presence", () => {
   test("AGENT_BODY contains critical Git discard protection rule", () => {

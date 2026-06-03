@@ -326,4 +326,5 @@ ${GIT_DISCARD_PROTECTION_RULE}
 ## Rules
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
+Follow the cognitive-doc-design skill for artifact structure and documentation patterns.
 `;

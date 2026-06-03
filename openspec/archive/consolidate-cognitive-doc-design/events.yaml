@@ -1,0 +1,66 @@
+# Spec Registry Events - consolidate-cognitive-doc-design
+
+events:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    timestamp: 2026-06-03
+    notes: >
+      Explored 7 target files. Confirmed cognitive-doc-design not yet referenced.
+      Recommended: Add to SKILL_BODY Rules sections, following using-agent-skills pattern.
+      Must preserve inline artifact templates and output contracts.
+  - name: proposal.completed
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    timestamp: 2026-06-03
+    notes: >
+      Proposal created for Phase 3B cognitive-doc-design consolidation.
+      Preserves SDD artifact contracts and flags required prompt surfaces as an open question.
+  - name: spec.completed
+    phase: spec
+    status: completed
+    artifact: spec.md
+    timestamp: 2026-06-04
+  - name: design.completed
+    phase: design
+    status: completed
+    artifact: design.md
+    timestamp: 2026-06-04
+  - name: verify_passed_with_warnings
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    timestamp: 2026-06-04
+  - name: review_approved
+    phase: review
+    status: approved
+    artifact: review-report.md
+    timestamp: 2026-06-04
+- name: tasks.completed
+  phase: tasks
+  status: completed
+  artifact: tasks.md
+  timestamp: 2026-06-04
+  notes: >
+    5 atomic tasks created: 2 source-edit tasks (6 prose + 1 explorer),
+    2 test-assertion tasks (6 prose + 1 explorer), 1 verification task.
+    All Low complexity. No blockers. Ready for Apply agents.
+- name: apply.general.completed
+  phase: apply
+  agent: general
+  status: completed
+  artifact: apply-progress.md
+  timestamp: 2026-06-04
+  notes: >
+    All 5 tasks completed. Added canonical line to 7 SKILL_BODY files (6 prose + 1 explorer).
+    Extended test suites with cognitive-doc-design assertions. 239 tests pass.
+- name: archive.completed
+  phase: archive
+  status: archived
+  artifact: archive-report.md
+  timestamp: 2026-06-04
+  location: openspec/archive/consolidate-cognitive-doc-design/
+  notes: >
+    Change archived with full artifact preservation. All 8 requirements verified.
+    No follow-ups remain.
