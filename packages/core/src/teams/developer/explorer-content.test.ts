@@ -5,6 +5,9 @@ import {
   EXPLORER_SKILL_BODY,
 } from "./explorer-content";
 
+// Import git-safety for rule presence assertion
+import { GIT_SAFETY_SENTINEL } from "./git-safety";
+
 // ---------------------------------------------------------------------------
 // Placeholder detection — these tests guard against trivial/empty content
 // ---------------------------------------------------------------------------
@@ -171,5 +174,16 @@ describe("Explorer vs Orchestrator differentiation", () => {
     expect(EXPLORER_AGENT_BODY).not.toContain("Delegation Triggers");
     // Confirm orchestrator has them (sanity)
     expect(ORCHESTRATOR_AGENT_BODY).toContain("Delegation Triggers");
+  });
+});
+
+// Git Safety Rule presence test
+describe("Git Safety Rule presence", () => {
+  test("AGENT_BODY contains critical Git discard protection rule", () => {
+    expect(EXPLORER_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+
+  test("SKILL_BODY contains critical Git discard protection rule", () => {
+    expect(EXPLORER_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });

@@ -18,6 +18,7 @@
  *    (written after runtime frontmatter). Detailed methodology for
  *    compliance checking, test execution, matrix building, and reporting.
  */
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
@@ -46,6 +47,8 @@ export const VERIFY_AGENT_BODY = `# Verify Agent
 - Does not write specs, designs, or proposals.
 - Does not delegate further — you are the terminal verify agent.
 - Does not create or update canonical project AI notes directly; it may save an auxiliary memory summary only if the runtime provides a memory adapter.
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Compliance Focus
 
@@ -266,6 +269,8 @@ Return EXACTLY this format to the orchestrator:
 {If PASS WITH WARNINGS → return to Apply agents for fixes or proceed to Review.}
 {If PASS → proceed to Review.}
 \`\`\`
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 

@@ -18,6 +18,7 @@
  *    (written after runtime frontmatter). Detailed methodology for
  *    implementation, testing, progress reporting, and persistence.
  */
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
@@ -60,6 +61,8 @@ Responsibility contract:
 - Does not delegate further — you are a terminal apply agent.
 - Does not create or update canonical project AI notes directly; it may save an auxiliary memory summary only if the runtime provides a memory adapter.
 
+${GIT_DISCARD_PROTECTION_RULE}
+
 ## Project Context (auto-retrieved)
 
 <!-- Orchestrator will inject relevant project AI notes at runtime. -->
@@ -75,7 +78,7 @@ Follow the matching skill (\`deck-developer-apply-general\`) for detailed implem
 ## Return Contract
 
 Return a structured apply-progress report in the format defined by the matching skill. The orchestrator will use this to coordinate Verify and Review.
-`;
+`;;
 
 // ---------------------------------------------------------------------------
 // 2. Skill Body — written after frontmatter in the skill file
@@ -217,6 +220,8 @@ Return EXACTLY this format to the orchestrator:
 ### Next Step
 {Continue with remaining tasks, or ready for Verify/Review if all tasks complete.}
 \`\`\`
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 

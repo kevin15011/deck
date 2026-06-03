@@ -5,6 +5,9 @@ import {
   APPLY_GENERAL_SKILL_BODY,
 } from "./apply-general-content";
 
+// Import git-safety for rule presence assertion
+import { GIT_SAFETY_SENTINEL } from "./git-safety";
+
 // ---------------------------------------------------------------------------
 // Placeholder detection — these tests guard against trivial/empty content
 // ---------------------------------------------------------------------------
@@ -131,5 +134,16 @@ describe("Serena enforcement rules", () => {
 
   test("does NOT validate CLI existence", () => {
     expect(APPLY_GENERAL_SKILL_BODY).toContain("No CLI validation");
+  });
+});
+
+// Git Safety Rule presence test
+describe("Git Safety Rule presence", () => {
+  test("AGENT_BODY contains critical Git discard protection rule", () => {
+    expect(APPLY_GENERAL_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+
+  test("SKILL_BODY contains critical Git discard protection rule", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });

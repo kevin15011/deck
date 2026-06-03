@@ -5,6 +5,9 @@ import {
   VERIFY_SKILL_BODY,
 } from "./verify-content";
 
+// Import git-safety for rule presence assertion
+import { GIT_SAFETY_SENTINEL } from "./git-safety";
+
 // ---------------------------------------------------------------------------
 // Placeholder detection — these tests guard against trivial/empty content
 // ---------------------------------------------------------------------------
@@ -107,5 +110,16 @@ describe("VERIFY_SKILL_BODY", () => {
 
   test("contains structured return format for orchestrator consumption", () => {
     expect(VERIFY_SKILL_BODY).toMatch(/## Verify Report|## Return Summary/i);
+  });
+});
+
+// Git Safety Rule presence test
+describe("Git Safety Rule presence", () => {
+  test("AGENT_BODY contains critical Git discard protection rule", () => {
+    expect(VERIFY_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+
+  test("SKILL_BODY contains critical Git discard protection rule", () => {
+    expect(VERIFY_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });

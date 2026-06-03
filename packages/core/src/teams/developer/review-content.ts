@@ -18,6 +18,7 @@
  *    (written after runtime frontmatter). Detailed methodology for
  *    quality review, scoped assessment, and reporting.
  */
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
@@ -58,6 +59,8 @@ Review all provided artifacts and code changes within the assigned scope(s).
 - Does not delegate further — you are the terminal review agent.
 - Does not create or update canonical project AI notes directly; it may save an auxiliary memory summary only if the runtime provides a memory adapter.
 
+${GIT_DISCARD_PROTECTION_RULE}
+
 ## Engineering Quality Focus
 
 Review answers: "Is this good engineering?" It checks quality, not compliance. Be impartial and evidence-driven. Challenge weak or risky assumptions. Do not approve work just because it passes tests.
@@ -72,7 +75,7 @@ Review answers: "Is this good engineering?" It checks quality, not compliance. B
 
 ## Instructions
 
-Follow the matching skill (\`deck-developer-review\`) for detailed review methodology, scoped assessment rules, structured output template, artifact persistence, and return format.
+Follow the matching skill (\`deck-developer-review\`) for detailed review methodology, scoped assessment rules, structured output template, artifact persistence, and return format. Also reference code-review-and-quality for five-axis criteria (architecture, security, scalability, maintainability, best practices).
 
 ## Return Contract
 
@@ -122,7 +125,7 @@ Read the actual code changes for the assigned scope(s). Focus on:
 
 ### Step 3: Assess by Dimension
 
-For each dimension below, review the changes and assign a rating:
+Reference code-review-and-quality for five-axis criteria (architecture, security, scalability, maintainability, best practices). For each dimension below, review the changes and assign a rating:
 
 #### Architecture Quality
 - Are boundaries clear and respected?
@@ -298,8 +301,11 @@ Return EXACTLY this format to the orchestrator:
 {If APPROVE → proceed to Archive.}
 \`\`\`
 
+${GIT_DISCARD_PROTECTION_RULE}
+
 ## Rules
 
+- Reference code-review-and-quality for five-axis methodology, severity classification (BLOCKER/MAJOR/MINOR/NIT), and honesty in evidence-based assessments.
 - Do not check compliance or run tests — that is Verify Agent's job.
 - Do not implement fixes — report findings and return.
 - Do not write specs, designs, or proposals.

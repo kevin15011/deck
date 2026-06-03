@@ -5,6 +5,9 @@ import {
   APPLY_FRONTEND_SKILL_BODY,
 } from "./apply-frontend-content";
 
+// Import git-safety for rule presence assertion
+import { GIT_SAFETY_SENTINEL } from "./git-safety";
+
 // ---------------------------------------------------------------------------
 // Placeholder detection — these tests guard against trivial/empty content
 // ---------------------------------------------------------------------------
@@ -221,5 +224,16 @@ describe("APPLY_FRONTEND_SKILL_BODY", () => {
 
   test("contains structured return format for orchestrator consumption", () => {
     expect(APPLY_FRONTEND_SKILL_BODY).toMatch(/## Apply Progress|## Return Summary/i);
+  });
+});
+
+// Git Safety Rule presence test
+describe("Git Safety Rule presence", () => {
+  test("AGENT_BODY contains critical Git discard protection rule", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+
+  test("SKILL_BODY contains critical Git discard protection rule", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });

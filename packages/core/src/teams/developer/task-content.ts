@@ -19,6 +19,7 @@
  *    (written after runtime frontmatter). Detailed methodology for
  *    task breakdown, routing, structured output, and persistence.
  */
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
@@ -49,6 +50,8 @@ export const TASK_AGENT_BODY = `# Task Agent
 - Does not change architecture decisions or design tradeoffs — that is Design Agent's job.
 - Does not delegate further — you are the terminal task agent.
 - Does not create or update canonical project AI notes directly; it may save an auxiliary memory summary only if the runtime provides a memory adapter.
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Owner-Awareness and Dependency-Awareness
 
@@ -388,6 +391,8 @@ Return EXACTLY this format to the orchestrator:
 ### Next Step
 Ready for Apply agents (\`deck-developer-apply-general\`, \`deck-developer-apply-backend\`, \`deck-developer-apply-frontend\`) according to dependencies.
 \`\`\`
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 

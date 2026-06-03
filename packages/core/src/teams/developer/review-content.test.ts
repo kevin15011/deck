@@ -5,6 +5,9 @@ import {
   REVIEW_SKILL_BODY,
 } from "./review-content";
 
+// Import git-safety for rule presence assertion
+import { GIT_SAFETY_SENTINEL } from "./git-safety";
+
 // ---------------------------------------------------------------------------
 // Placeholder detection — these tests guard against trivial/empty content
 // ---------------------------------------------------------------------------
@@ -48,6 +51,11 @@ describe("REVIEW_AGENT_BODY", () => {
 
   test("instructs to follow matching skill", () => {
     expect(REVIEW_AGENT_BODY).toContain("Follow the matching skill");
+  });
+
+  test("references code-review-and-quality for five-axis criteria", () => {
+    expect(REVIEW_AGENT_BODY).toContain("code-review-and-quality");
+    expect(REVIEW_AGENT_BODY).toMatch(/five-axis/i);
   });
 
   test("states terminal behavior: no delegation", () => {
@@ -99,6 +107,16 @@ describe("REVIEW_SKILL_BODY", () => {
     expect(REVIEW_SKILL_BODY).toMatch(/BLOCKER|MAJOR|MINOR|NIT/i);
   });
 
+  test("references code-review-and-quality for five-axis criteria", () => {
+    expect(REVIEW_SKILL_BODY).toContain("code-review-and-quality");
+    expect(REVIEW_SKILL_BODY).toMatch(/five-axis/i);
+  });
+
+  test("references code-review-and-quality in Rules section", () => {
+    expect(REVIEW_SKILL_BODY).toContain("## Rules");
+    expect(REVIEW_SKILL_BODY).toMatch(/code-review-and-quality.*five-axis methodology/i);
+  });
+
   test("does not reference Pi-specific launcher behavior", () => {
     expect(REVIEW_SKILL_BODY).not.toContain("pi launcher");
     expect(REVIEW_SKILL_BODY).not.toContain("deck pi");
@@ -107,5 +125,16 @@ describe("REVIEW_SKILL_BODY", () => {
 
   test("contains structured return format for orchestrator consumption", () => {
     expect(REVIEW_SKILL_BODY).toMatch(/## Review Report|## Return Summary/i);
+  });
+});
+
+// Git Safety Rule presence test
+describe("Git Safety Rule presence", () => {
+  test("AGENT_BODY contains critical Git discard protection rule", () => {
+    expect(REVIEW_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+
+  test("SKILL_BODY contains critical Git discard protection rule", () => {
+    expect(REVIEW_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });

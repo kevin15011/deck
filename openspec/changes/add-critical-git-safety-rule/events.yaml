@@ -1,0 +1,58 @@
+# Events: add-critical-git-safety-rule
+
+events:
+  - timestamp: "2026-06-02"
+    phase: explore
+    status: completed
+    artifact: exploration.md
+    event: exploration-completed
+  - timestamp: "2026-06-02"
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    event: proposal-completed
+  - timestamp: "2026-06-02"
+    phase: spec
+    status: completed
+    artifact: spec.md
+    event: spec-completed
+  - timestamp: "2026-06-02"
+    phase: design
+    status: completed
+    artifact: design.md
+    event: design-completed
+  - timestamp: "2026-06-02"
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    event: tasks-completed
+  - timestamp: "2026-06-02"
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    event: apply-completed
+  - timestamp: "2026-06-02"
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    event: apply-recompleted
+  - timestamp: "2026-06-02"
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    event: apply-final-review-fix-completed
+  - timestamp: "2026-06-02"
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    event: verify.completed
+  - timestamp: "2026-06-02"
+    phase: review
+    status: approved
+    artifact: review-report.md
+    event: review.approved
+  - timestamp: "2026-06-02"
+    phase: archive
+    status: archived
+    artifact: archive-report.md
+    event: archive.completed

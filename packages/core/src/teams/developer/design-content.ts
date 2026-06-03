@@ -21,6 +21,7 @@
  *    (written after runtime frontmatter). Detailed methodology for
  * technical design, structured output, and persistence.
  */
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
@@ -48,6 +49,8 @@ export const DESIGN_AGENT_BODY = `# Design Agent
 - Does not break work into implementation tasks — that is Task Agent's job.
 - Does not delegate further — you are the terminal design agent.
 - Does not persist project AI notes.
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Domain and Stack Awareness
 
@@ -317,6 +320,8 @@ Return EXACTLY this format to the orchestrator:
 ### Next Step
 Ready for Task (\`deck-developer-task\`) to combine with Spec and break into implementation tasks.
 \`\`\`
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 

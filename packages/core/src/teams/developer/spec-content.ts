@@ -21,6 +21,7 @@
  *    requirement extraction, scenario authoring, structured output,
  *    and persistence.
  */
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
@@ -47,6 +48,8 @@ export const SPEC_AGENT_BODY = `# Spec Agent
 - Does not create implementation tasks or break work into development steps.
 - Does not delegate further — you are the terminal spec agent.
 - Does not persist project AI notes.
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Surface-Awareness
 
@@ -356,6 +359,8 @@ Return EXACTLY this format to the orchestrator:
 ### Next Step
 Ready for Design (\`deck-developer-design\`) and Task (\`deck-developer-task\`) consumption.
 \`\`\`
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 

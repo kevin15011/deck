@@ -5,6 +5,9 @@ import {
   ARCHIVE_SKILL_BODY,
 } from "./archive-content";
 
+// Import git-safety for rule presence assertion
+import { GIT_SAFETY_SENTINEL } from "./git-safety";
+
 // ---------------------------------------------------------------------------
 // Placeholder detection — these tests guard against trivial/empty content
 // ---------------------------------------------------------------------------
@@ -114,5 +117,16 @@ describe("ARCHIVE_SKILL_BODY", () => {
   // --- Need 5: Self-Verification ---
   test("skill body contains self-verification step", () => {
     expect(ARCHIVE_SKILL_BODY).toContain("Self-Verify Artifact");
+  });
+});
+
+// Git Safety Rule presence test
+describe("Git Safety Rule presence", () => {
+  test("AGENT_BODY contains critical Git discard protection rule", () => {
+    expect(ARCHIVE_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+
+  test("SKILL_BODY contains critical Git discard protection rule", () => {
+    expect(ARCHIVE_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });

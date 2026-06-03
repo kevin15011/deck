@@ -20,6 +20,7 @@
  *    (written after runtime frontmatter). Detailed methodology for
  *    proposal creation, structured output, and persistence.
  */
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
@@ -46,6 +47,8 @@ export const PROPOSAL_AGENT_BODY = `# Proposal Agent
 - Does not break work into tasks.
 - Does not delegate further — you are the terminal proposal agent.
 - Does not persist project AI notes.
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Project Context (auto-retrieved)
 
@@ -262,6 +265,8 @@ Return EXACTLY this format to the orchestrator:
 ### Next Step
 Ready for Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) in parallel.
 \`\`\`
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 

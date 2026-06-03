@@ -5,6 +5,9 @@ import {
   SPEC_SKILL_BODY,
 } from "./spec-content";
 
+// Import git-safety for rule presence assertion
+import { GIT_SAFETY_SENTINEL } from "./git-safety";
+
 // ---------------------------------------------------------------------------
 // Placeholder detection — these tests guard against trivial/empty content
 // ---------------------------------------------------------------------------
@@ -218,5 +221,16 @@ describe("Spec vs Proposal/Explorer differentiation", () => {
 
   test("return contract includes Mermaid Source field", () => {
     expect(SPEC_SKILL_BODY).toContain("Mermaid Source");
+  });
+});
+
+// Git Safety Rule presence test
+describe("Git Safety Rule presence", () => {
+  test("AGENT_BODY contains critical Git discard protection rule", () => {
+    expect(SPEC_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+
+  test("SKILL_BODY contains critical Git discard protection rule", () => {
+    expect(SPEC_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });

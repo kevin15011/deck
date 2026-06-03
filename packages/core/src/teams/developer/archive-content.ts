@@ -19,6 +19,7 @@
  *    (written after runtime frontmatter). Detailed methodology for
  *    closing changes, traceability, archiving, and project AI notes.
  */
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
@@ -46,6 +47,8 @@ export const ARCHIVE_AGENT_BODY = `# Archive Agent
 - Does not write specs, designs, or proposals.
 - Does not delegate further — you are the terminal archive agent.
 - Does not create one project AI note per session — deduplicate and update instead.
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Project AI Notes
 
@@ -291,6 +294,8 @@ Return EXACTLY this format to the orchestrator:
 ### Next Step
 {Change is closed. Ready for next change or session end. Orchestrator will present advisory Git suggestions based on this context.}
 \`\`\`
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 

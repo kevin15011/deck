@@ -31,6 +31,7 @@
  */
 
 import { ORCHESTRATOR_PERSONALITIES, DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "../../config/deck-config";
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 
 // ---------------------------------------------------------------------------
 // 1. System Prompt — shapes the session
@@ -389,6 +390,8 @@ export const ORCHESTRATOR_AGENT_BODY = `# Orchestrator Agent
 - Does not run heavy tests/builds.
 - Does not perform broad exploration inline.
 
+${GIT_DISCARD_PROTECTION_RULE}
+
 ## Project Standards (auto-resolved)
 
 <!-- Orchestrator will inject stack-specific rules at runtime. -->
@@ -622,4 +625,6 @@ If a session is interrupted or the user returns:
 - Read \`openspec/changes/*/state.yaml\` to recover the active change state.
 - Read the latest artifact for the current phase to resume where the workflow left off.
 - If an artifact exists without matching Spec Registry state/events, treat that phase as incomplete and repair/request repair before advancing.
+
+${GIT_DISCARD_PROTECTION_RULE}
 `;

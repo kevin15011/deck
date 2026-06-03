@@ -1,0 +1,79 @@
+# State: add-critical-git-safety-rule
+
+change: add-critical-git-safety-rule
+created: 2026-06-02
+
+phase: tasks
+status: completed
+artifact: tasks.md
+provenance: task
+
+previous_phases:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    provenance: explorer
+  - phase: proposal
+    status: completed
+    artifact: proposal.md
+    provenance: proposal
+  - phase: spec
+    status: completed
+    artifact: spec.md
+    provenance: spec
+  - phase: design
+    status: completed
+    artifact: design.md
+    provenance: design
+  - phase: tasks
+    status: completed
+    artifact: tasks.md
+    provenance: task
+  - phase: apply
+    status: completed
+    artifact: apply-progress.md
+    provenance: general
+
+current_phase: archive
+current_status: archived
+current_artifact: archive-report.md
+current_provenance: archive
+
+artifacts:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    provenance: explorer
+  - phase: proposal
+    status: completed
+    artifact: proposal.md
+    provenance: proposal
+  - phase: spec
+    status: completed
+    artifact: spec.md
+    provenance: spec
+  - phase: design
+    status: completed
+    artifact: design.md
+    provenance: design
+  - phase: tasks
+    status: completed
+    artifact: tasks.md
+    provenance: task
+  - phase: apply
+    status: completed
+    artifact: apply-progress.md
+    provenance: general
+    re_apply: true
+  - phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    provenance: verify
+  - phase: review
+    status: approved
+    artifact: review-report.md
+    provenance: review
+  - phase: archive
+    status: archived
+    artifact: archive-report.md
+    provenance: archive

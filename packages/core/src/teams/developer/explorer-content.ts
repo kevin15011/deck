@@ -20,6 +20,8 @@
  *    investigation, structured output, and persistence.
  */
 
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
+
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
 // ---------------------------------------------------------------------------
@@ -46,6 +48,8 @@ export const EXPLORER_AGENT_BODY = `# Explorer Agent
 - Does not delegate further — you are the terminal exploration agent.
 - Does not write tests.
 - Does not persist project AI notes.
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Project Context (auto-retrieved)
 
@@ -206,6 +210,8 @@ Return EXACTLY this format to the orchestrator:
 - **Recorded**: phase \`explore\`, status \`{completed|blocked}\`, event \`{event name}\`
 - **Registry Blocker**: {none, or describe why state/events could not be updated}
 \`\`\`
+
+${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 

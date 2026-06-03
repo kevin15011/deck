@@ -5,6 +5,9 @@ import {
   APPLY_BACKEND_SKILL_BODY,
 } from "./apply-backend-content";
 
+// Import git-safety for rule presence assertion
+import { GIT_SAFETY_SENTINEL } from "./git-safety";
+
 // ---------------------------------------------------------------------------
 // Placeholder detection — these tests guard against trivial/empty content
 // ---------------------------------------------------------------------------
@@ -136,5 +139,16 @@ describe("Serena enforcement rules", () => {
   test("does NOT validate CLI existence", () => {
     // The enforcement section explicitly says NOT to validate CLI - check the negation is present
     expect(APPLY_BACKEND_SKILL_BODY).toContain("No CLI validation");
+  });
+});
+
+// Git Safety Rule presence test
+describe("Git Safety Rule presence", () => {
+  test("AGENT_BODY contains critical Git discard protection rule", () => {
+    expect(APPLY_BACKEND_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+
+  test("SKILL_BODY contains critical Git discard protection rule", () => {
+    expect(APPLY_BACKEND_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });

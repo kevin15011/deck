@@ -11,6 +11,9 @@ import {
   getOrchestratorSystemPrompt,
 } from "./orchestrator-content";
 
+// Import git-safety for rule presence assertion
+import { GIT_SAFETY_SENTINEL } from "./git-safety";
+
 describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
   test("contains team identity header", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("# Deck Developer Team");
@@ -468,5 +471,16 @@ describe("ORCHESTRATOR_PROMPT_PRAGMATICA composition", () => {
 
   test("contains full ORCHESTRATOR_SYSTEM_PROMPT", () => {
     expect(ORCHESTRATOR_PROMPT_PRAGMATICA).toContain(ORCHESTRATOR_SYSTEM_PROMPT);
+  });
+});
+
+// Git Safety Rule presence test
+describe("Git Safety Rule presence", () => {
+  test("AGENT_BODY contains critical Git discard protection rule", () => {
+    expect(ORCHESTRATOR_AGENT_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+
+  test("SKILL_BODY contains critical Git discard protection rule", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });
