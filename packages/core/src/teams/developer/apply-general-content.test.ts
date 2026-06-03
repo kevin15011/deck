@@ -198,18 +198,25 @@ describe("Serena Enforcement preserved", () => {
   });
 });
 
-describe("Excluded files boundary", () => {
-  test("orchestrator AGENT_BODY still has original ## Rules bullets", () => {
-    // Orchestrator should NOT have been canonicalized
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("Do not");
+describe("Documentation and ADRs canonical line", () => {
+  const CANONICAL_LINE =
+    "Follow the `documentation-and-adrs` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.";
+
+  test("SKILL_BODY contains the canonical line exactly once", () => {
+    const matches = APPLY_GENERAL_SKILL_BODY.split(CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
   });
 
-  test("orchestrator SKILL_BODY still has original ## Rules bullets", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do not");
+  test("SKILL_BODY contains no bullet variants of canonical line", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
   });
 
-  test("explorer AGENT_BODY still has original ## Rules bullets", () => {
-    expect(EXPLORER_AGENT_BODY).toContain("Do not");
+  test("AGENT_BODY does NOT contain the canonical line (immutability)", () => {
+    expect(APPLY_GENERAL_AGENT_BODY).not.toContain(CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("## Rules");
   });
 });
 

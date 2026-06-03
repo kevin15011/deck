@@ -206,3 +206,25 @@ describe("Cognitive doc design canonical line", () => {
     expect(EXPLORER_SKILL_BODY).toContain("## Rules");
   });
 });
+
+describe("Documentation and ADRs canonical line", () => {
+  const CANONICAL_LINE =
+    "Follow the `documentation-and-adrs` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.";
+
+  test("SKILL_BODY contains the canonical line exactly once", () => {
+    const matches = EXPLORER_SKILL_BODY.split(CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of canonical line", () => {
+    expect(EXPLORER_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain the canonical line (immutability)", () => {
+    expect(EXPLORER_AGENT_BODY).not.toContain(CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(EXPLORER_SKILL_BODY).toContain("## Rules");
+  });
+});

@@ -229,6 +229,7 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 Follow the api-and-interface-design skill for stable API and interface design guidance.
+Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
 
 ## Serena Enforcement
 

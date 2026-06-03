@@ -1,0 +1,65 @@
+change-name: consolidate-documentation-and-adrs
+phase: archive
+status: archived
+provenance:
+  - type: exploration
+    source: deck-developer-explorer
+    triggered_by: orchestrator roadmap Phase 3E
+    date: "2026-06-03"
+  - type: proposal
+    source: deck-developer-proposal
+    triggered_by: orchestrator automatic proposal after Phase 1 completion
+    date: "2026-06-03"
+  - type: spec
+    source: deck-developer-spec
+    triggered_by: orchestrator Phase 3E spec phase
+    date: "2026-06-03"
+  - type: design
+    source: deck-developer-design
+    triggered_by: orchestrator Phase 3E design phase
+    date: "2026-06-03"
+  - type: tasks
+    source: deck-developer-task
+    triggered_by: orchestrator Phase 3E task phase
+    date: "2026-06-03"
+  - type: apply
+    source: deck-developer-apply-general
+    triggered_by: orchestrator Phase 3E apply wave
+    date: "2026-06-03"
+  - type: apply
+    source: deck-developer-apply-general
+    triggered_by: "verify-finding: explorer REQ-prompt-001 fix"
+    date: "2026-06-03"
+  - type: archive
+    source: deck-developer-archive
+    triggered_by: "verify and review passed; ready for close"
+    date: "2026-06-03"
+artifacts:
+  - type: exploration
+    path: exploration.md
+    purpose: investigate documentation-and-adrs consolidation targets and approach
+  - type: proposal
+    path: proposal.md
+    purpose: define Phase 3E intent, scope, risks, rollback, and acceptance direction
+  - type: spec
+    path: spec.md
+    purpose: formal requirements and acceptance scenarios for 4 capabilities
+  - type: design
+    path: design.md
+    purpose: technical architecture, treatment per target, testing strategy, tradeoffs
+  - type: tasks
+    path: tasks.md
+    purpose: 9 atomic implementation tasks for documentation-and-adrs consolidation
+  - type: archive-report
+    path: archive-report.md
+    purpose: final traceability report and close artifact
+dependencies:
+  - Phase 1 external skill availability completed
+  - docs/skills-integration-roadmap.md Phase 3E
+blockers: []
+notes:
+  - Phase 1 reported complete by orchestrator/user and external documentation-and-adrs skill exists
+  - selective reference plus inline contract preservation recommended
+  - Git safety already implemented and must remain unchanged
+  - Canonical sentence conflict between Spec REQ-prompt-002 and Design-proposed sentence — recommend Spec version
+  - Verify finding: explorer-content.ts fixed Rule line placement per established pattern

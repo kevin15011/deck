@@ -232,6 +232,7 @@ ${GIT_DISCARD_PROTECTION_RULE}
 ## Rules
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
+Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
 
 ## Serena Enforcement
 

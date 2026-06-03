@@ -224,5 +224,7 @@ ${GIT_DISCARD_PROTECTION_RULE}
 - If the request is too vague, state what clarification is needed.
 - Prefer codebase graph and search tools for structural discovery. Fall back to filesystem search only when needed.
 - Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
-- Follow the cognitive-doc-design skill for artifact structure and documentation patterns.
+Follow the cognitive-doc-design skill for artifact structure and documentation patterns.
+Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
+Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
 `;
