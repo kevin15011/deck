@@ -309,4 +309,7 @@ Follow the using-agent-skills skill for operating behaviors and failure mode gui
 Follow the cognitive-doc-design skill for artifact structure and documentation patterns.
 Follow the api-and-interface-design skill for stable API and interface design guidance.
 Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
+Follow the frontend-ui-engineering skill for production-quality UI/component, state, accessibility, responsive, loading/error/empty-state, and frontend quality guidance.
+Follow the security-and-hardening skill for security review of input validation, auth, secrets, injection, exposure, and external integration risks.
+Follow the performance-optimization skill for performance review of scalability, Core Web Vitals, load behavior, data access, bundle size, and latency risks.
 `;

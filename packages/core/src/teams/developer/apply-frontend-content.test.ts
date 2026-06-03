@@ -284,6 +284,62 @@ describe("Documentation and ADRs canonical line", () => {
   });
 });
 
+// Frontend UI engineering canonical line (Phase 3F: REQ-sel-001)
+describe("Frontend UI engineering canonical line", () => {
+  const FEUI_CANONICAL_LINE =
+    "Follow the frontend-ui-engineering skill for production-quality UI/component, state, accessibility, responsive, loading/error/empty-state, and frontend quality guidance.";
+
+  test("SKILL_BODY contains the line exactly once", () => {
+    const matches = APPLY_FRONTEND_SKILL_BODY.split(FEUI_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).not.toContain(`- ${FEUI_CANONICAL_LINE}`);
+    expect(APPLY_FRONTEND_SKILL_BODY).not.toContain(`* ${FEUI_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain the line (immutability)", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).not.toContain(FEUI_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("## Rules");
+  });
+});
+
+// Test-driven-development canonical line (Phase 3F: REQ-sel-004)
+describe("Test-driven-development canonical line", () => {
+  const TDD_CANONICAL_LINE =
+    "Follow the test-driven-development skill for RED-GREEN-REFACTOR, Prove-It testing, test pyramid, and real-over-mocks guidance when authoring or changing tests.";
+
+  test("SKILL_BODY contains the TDD line exactly once", () => {
+    const matches = APPLY_FRONTEND_SKILL_BODY.split(TDD_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of TDD line", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).not.toContain(`- ${TDD_CANONICAL_LINE}`);
+    expect(APPLY_FRONTEND_SKILL_BODY).not.toContain(`* ${TDD_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain the TDD line (immutability)", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).not.toContain(TDD_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("## Rules");
+  });
+
+  test("TDD line is placed after the frontend-ui-engineering line", () => {
+    const tddIdx = APPLY_FRONTEND_SKILL_BODY.indexOf(TDD_CANONICAL_LINE);
+    const feuiIdx = APPLY_FRONTEND_SKILL_BODY.indexOf(
+      "Follow the frontend-ui-engineering skill for production-quality UI/component, state, accessibility, responsive, loading/error/empty-state, and frontend quality guidance.",
+    );
+    expect(tddIdx).toBeGreaterThan(feuiIdx);
+  });
+});
+
 // Git Safety Rule presence test
 describe("Git Safety Rule presence", () => {
   test("AGENT_BODY contains critical Git discard protection rule", () => {

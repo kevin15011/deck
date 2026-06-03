@@ -1,0 +1,55 @@
+events:
+  - timestamp: "2026-06-03T00:00:00Z"
+    phase: explore
+    status: completed
+    artifact: exploration.md
+    event: exploration-completed
+    agent: deck-developer-explorer
+  - timestamp: "2026-06-03T00:00:00Z"
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    event: proposal-completed
+    agent: deck-developer-proposal
+  - timestamp: "2026-06-03T00:00:00Z"
+    phase: spec
+    status: completed
+    artifact: spec.md
+    event: spec-completed
+    agent: deck-developer-spec
+  - timestamp: "2026-06-03T00:00:00Z"
+    phase: design
+    status: completed
+    artifact: design.md
+    event: design-completed
+    agent: deck-developer-design
+  - timestamp: "2026-06-03T00:00:00Z"
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    event: tasks-completed
+    agent: deck-developer-task
+  - timestamp: "2026-06-03T00:00:00Z"
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    event: apply-completed
+    agent: deck-developer-apply-general
+  - timestamp: "2026-06-03T00:00:00Z"
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    event: verify-completed
+    agent: deck-developer-verify
+  - timestamp: "2026-06-03T00:00:00Z"
+    phase: review
+    status: approved
+    artifact: review-report.md
+    event: review-completed
+    agent: deck-developer-review
+  - timestamp: "2026-06-03T00:00:00Z"
+    phase: archive
+    status: archived
+    artifact: archive-report.md
+    event: archive-completed
+    agent: deck-developer-archive

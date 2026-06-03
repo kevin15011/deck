@@ -1,0 +1,56 @@
+phases:
+  explore:
+    status: completed
+    artifact: exploration.md
+    provenance:
+      - agent: deck-developer-explorer
+        event: exploration-completed
+  proposal:
+    status: completed
+    artifact: proposal.md
+    provenance:
+      - agent: deck-developer-proposal
+        event: proposal-completed
+  spec:
+    status: completed
+    artifact: spec.md
+    provenance:
+      - agent: deck-developer-spec
+        event: spec-completed
+  design:
+    status: completed
+    artifact: design.md
+    provenance:
+      - agent: deck-developer-design
+        event: design-completed
+  tasks:
+    status: completed
+    artifact: tasks.md
+    provenance:
+      - agent: deck-developer-task
+        event: tasks-completed
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    provenance:
+      - agent: deck-developer-apply-general
+        event: apply-completed
+  verify:
+    status: passed_with_warnings
+    artifact: verify-report.md
+    provenance:
+      - agent: deck-developer-verify
+        event: verify-completed
+  review:
+    status: approved
+    artifact: review-report.md
+    provenance:
+      - agent: deck-developer-review
+        event: review-completed
+  archive:
+    status: archived
+    artifact: archive-report.md
+    archive_location: openspec/archive/consolidate-remaining-skill-guidance
+    provenance:
+      - agent: deck-developer-archive
+        event: archive-completed

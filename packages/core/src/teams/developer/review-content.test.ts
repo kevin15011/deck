@@ -230,6 +230,82 @@ describe("Documentation and ADRs canonical line", () => {
   });
 });
 
+// Frontend UI engineering canonical line (Phase 3F: REQ-sel-002)
+describe("Frontend UI engineering canonical line", () => {
+  const FEUI_CANONICAL_LINE =
+    "Follow the frontend-ui-engineering skill for production-quality UI/component, state, accessibility, responsive, loading/error/empty-state, and frontend quality guidance.";
+
+  test("SKILL_BODY contains the line exactly once", () => {
+    const matches = REVIEW_SKILL_BODY.split(FEUI_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants", () => {
+    expect(REVIEW_SKILL_BODY).not.toContain(`- ${FEUI_CANONICAL_LINE}`);
+    expect(REVIEW_SKILL_BODY).not.toContain(`* ${FEUI_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain the line (immutability)", () => {
+    expect(REVIEW_AGENT_BODY).not.toContain(FEUI_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(REVIEW_SKILL_BODY).toContain("## Rules");
+  });
+
+  test("code-review-and-quality reference remains unchanged", () => {
+    expect(REVIEW_SKILL_BODY).toContain("code-review-and-quality");
+  });
+});
+
+// Security and hardening canonical line (Phase 3F: REQ-sel-006)
+describe("Security and hardening canonical line", () => {
+  const SEC_CANONICAL_LINE =
+    "Follow the security-and-hardening skill for security review of input validation, auth, secrets, injection, exposure, and external integration risks.";
+
+  test("SKILL_BODY contains the line exactly once", () => {
+    const matches = REVIEW_SKILL_BODY.split(SEC_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants", () => {
+    expect(REVIEW_SKILL_BODY).not.toContain(`- ${SEC_CANONICAL_LINE}`);
+    expect(REVIEW_SKILL_BODY).not.toContain(`* ${SEC_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain the line (immutability)", () => {
+    expect(REVIEW_AGENT_BODY).not.toContain(SEC_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(REVIEW_SKILL_BODY).toContain("## Rules");
+  });
+});
+
+// Performance optimization canonical line (Phase 3F: REQ-sel-007)
+describe("Performance optimization canonical line", () => {
+  const PERF_CANONICAL_LINE =
+    "Follow the performance-optimization skill for performance review of scalability, Core Web Vitals, load behavior, data access, bundle size, and latency risks.";
+
+  test("SKILL_BODY contains the line exactly once", () => {
+    const matches = REVIEW_SKILL_BODY.split(PERF_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants", () => {
+    expect(REVIEW_SKILL_BODY).not.toContain(`- ${PERF_CANONICAL_LINE}`);
+    expect(REVIEW_SKILL_BODY).not.toContain(`* ${PERF_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain the line (immutability)", () => {
+    expect(REVIEW_AGENT_BODY).not.toContain(PERF_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(REVIEW_SKILL_BODY).toContain("## Rules");
+  });
+});
+
 // Git Safety Rule presence test
 describe("Git Safety Rule presence", () => {
   test("AGENT_BODY contains critical Git discard protection rule", () => {

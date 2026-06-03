@@ -341,6 +341,30 @@ describe("Documentation and ADRs canonical line", () => {
   });
 });
 
+// Deprecation and migration canonical line (Phase 3F: REQ-sel-008)
+describe("Deprecation and migration canonical line", () => {
+  const DEP_CANONICAL_LINE =
+    "Follow the deprecation-and-migration skill for migration, replacement, removal, rollout, rollback, and backward-compatibility design decisions.";
+
+  test("SKILL_BODY contains the deprecation line exactly once", () => {
+    const matches = DESIGN_SKILL_BODY.split(DEP_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants", () => {
+    expect(DESIGN_SKILL_BODY).not.toContain(`- ${DEP_CANONICAL_LINE}`);
+    expect(DESIGN_SKILL_BODY).not.toContain(`* ${DEP_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain the deprecation line (immutability)", () => {
+    expect(DESIGN_AGENT_BODY).not.toContain(DEP_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(DESIGN_SKILL_BODY).toContain("## Rules");
+  });
+});
+
 // Git Safety Rule presence test
 describe("Git Safety Rule presence", () => {
   test("AGENT_BODY contains critical Git discard protection rule", () => {

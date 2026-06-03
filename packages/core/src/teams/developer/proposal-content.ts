@@ -273,4 +273,5 @@ ${GIT_DISCARD_PROTECTION_RULE}
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 Follow the cognitive-doc-design skill for artifact structure and documentation patterns.
 Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
+For proposals involving replacement, removal, or migration of existing systems, follow the deprecation-and-migration skill for deprecation strategy and migration planning.
 `;

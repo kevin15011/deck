@@ -218,6 +218,30 @@ describe("Documentation and ADRs canonical line", () => {
   });
 });
 
+// Test-driven-development canonical line (Phase 3F: REQ-sel-003)
+describe("Test-driven-development canonical line", () => {
+  const TDD_CANONICAL_LINE =
+    "Follow the test-driven-development skill for RED-GREEN-REFACTOR, Prove-It testing, test pyramid, and real-over-mocks guidance when authoring or changing tests.";
+
+  test("SKILL_BODY contains the TDD line exactly once", () => {
+    const matches = APPLY_BACKEND_SKILL_BODY.split(TDD_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of TDD line", () => {
+    expect(APPLY_BACKEND_SKILL_BODY).not.toContain(`- ${TDD_CANONICAL_LINE}`);
+    expect(APPLY_BACKEND_SKILL_BODY).not.toContain(`* ${TDD_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain the TDD line (immutability)", () => {
+    expect(APPLY_BACKEND_AGENT_BODY).not.toContain(TDD_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(APPLY_BACKEND_SKILL_BODY).toContain("## Rules");
+  });
+});
+
 // Git Safety Rule presence test
 describe("Git Safety Rule presence", () => {
   test("AGENT_BODY contains critical Git discard protection rule", () => {

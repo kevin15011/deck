@@ -549,6 +549,23 @@ No significant SDD prompt redundancy; production launch phase.
 
 No consolidation needed; unique adversarial dual-review workflow.
 
+#### Phase 3F selective no-op decisions
+
+The following skills are intentionally not referenced in Developer Team prompt bodies for this phase. They are either interactive/main-session skills, operational phases outside SDD, execution guidance for future task contexts, or low-overlap with autonomous SDD agents.
+
+| Skill | Decision | Rationale |
+|---|---|---|
+| `debugging-and-error-recovery` | No-op | Verify reports failures; Apply debugging guidance can be revisited in a future Apply-focused phase. |
+| `idea-refine` | No-op | Interactive user-dialogue workflow is incompatible with autonomous Explorer delegation. |
+| `interview-me` | No-op | Requires live one-question-at-a-time interview; autonomous agents should flag blockers instead. |
+| `git-workflow-and-versioning` | Keep inline/no-op | Orchestrator git suggestions are advisory; critical Git discard protection remains centralized. |
+| `doubt-driven-development` | Keep inline/no-op | In-flight adversarial review does not replace post-hoc Review or Deck orchestrator invariants. |
+| `ci-cd-and-automation` | No-op | CI/CD setup is outside current Developer Team prompt redundancy. |
+| `code-simplification` | No-op | Applies to explicit refactor/simplification tasks, not baseline implementation guidance. |
+| `comment-writer` | No-op | Human-facing collaboration comments are outside structured SDD artifacts. |
+| `shipping-and-launch` | No-op | Launch operations occur after SDD Archive. |
+| `judgment-day` | No-op | Unique standalone dual-review workflow; no prompt consolidation needed. |
+
 ---
 
 ## 5. Known Test/Verification Patterns

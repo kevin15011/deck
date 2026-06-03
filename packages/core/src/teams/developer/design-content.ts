@@ -329,4 +329,5 @@ Follow the using-agent-skills skill for operating behaviors and failure mode gui
 Follow the cognitive-doc-design skill for artifact structure and documentation patterns.
 Follow the api-and-interface-design skill for stable API and interface design guidance.
 Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
+Follow the deprecation-and-migration skill for migration, replacement, removal, rollout, rollback, and backward-compatibility design decisions.
 `;

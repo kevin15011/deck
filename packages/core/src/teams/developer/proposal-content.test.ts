@@ -288,6 +288,30 @@ describe("Documentation and ADRs canonical line", () => {
   });
 });
 
+// Conditional deprecation and migration canonical line (Phase 3F: REQ-sel-009)
+describe("Conditional deprecation and migration canonical line", () => {
+  const DEP_CANONICAL_LINE =
+    "For proposals involving replacement, removal, or migration of existing systems, follow the deprecation-and-migration skill for deprecation strategy and migration planning.";
+
+  test("SKILL_BODY contains the conditional deprecation line exactly once", () => {
+    const matches = PROPOSAL_SKILL_BODY.split(DEP_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants", () => {
+    expect(PROPOSAL_SKILL_BODY).not.toContain(`- ${DEP_CANONICAL_LINE}`);
+    expect(PROPOSAL_SKILL_BODY).not.toContain(`* ${DEP_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain the conditional deprecation line (immutability)", () => {
+    expect(PROPOSAL_AGENT_BODY).not.toContain(DEP_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(PROPOSAL_SKILL_BODY).toContain("## Rules");
+  });
+});
+
 // Git Safety Rule presence test
 describe("Git Safety Rule presence", () => {
   test("AGENT_BODY contains critical Git discard protection rule", () => {
