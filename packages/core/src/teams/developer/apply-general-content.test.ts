@@ -171,6 +171,27 @@ describe("Canonical line replacement", () => {
   });
 });
 
+describe("API and interface design canonical line", () => {
+  const AID_CANONICAL_LINE = "Follow the api-and-interface-design skill for stable API and interface design guidance.";
+
+  test("SKILL_BODY contains the line exactly once", () => {
+    const matches = APPLY_GENERAL_SKILL_BODY.split(AID_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY does not contain bullet variant", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).not.toContain(`- ${AID_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does not contain the line", () => {
+    expect(APPLY_GENERAL_AGENT_BODY).not.toContain(AID_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY contains ## Rules", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("## Rules");
+  });
+});
+
 describe("Serena Enforcement preserved", () => {
   test("SKILL_BODY contains ## Serena Enforcement section", () => {
     expect(APPLY_GENERAL_SKILL_BODY).toContain("## Serena Enforcement");

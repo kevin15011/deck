@@ -226,6 +226,7 @@ ${GIT_DISCARD_PROTECTION_RULE}
 ## Rules
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
+Follow the api-and-interface-design skill for stable API and interface design guidance.
 
 ## Serena Enforcement
 

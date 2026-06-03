@@ -179,6 +179,33 @@ describe("Cognitive doc design canonical line", () => {
   });
 });
 
+// API and interface design canonical line test
+describe("API and interface design canonical line", () => {
+  const AID_CANONICAL_LINE = "Follow the api-and-interface-design skill for stable API and interface design guidance.";
+
+  test("SKILL_BODY contains the line exactly once", () => {
+    const matches = REVIEW_SKILL_BODY.split(AID_CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY does not contain bullet variant", () => {
+    expect(REVIEW_SKILL_BODY).not.toContain(`- ${AID_CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does not contain the line", () => {
+    expect(REVIEW_AGENT_BODY).not.toContain(AID_CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY contains ## Rules", () => {
+    expect(REVIEW_SKILL_BODY).toContain("## Rules");
+  });
+
+  test("distinct from code-review-and-quality references", () => {
+    expect(REVIEW_SKILL_BODY).toContain("code-review-and-quality");
+    expect(REVIEW_SKILL_BODY).toContain(AID_CANONICAL_LINE);
+  });
+});
+
 // Git Safety Rule presence test
 describe("Git Safety Rule presence", () => {
   test("AGENT_BODY contains critical Git discard protection rule", () => {
