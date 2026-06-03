@@ -2,13 +2,13 @@
 /**
  * Generate skill content bundle.
  *
- * Reads all canonical external skill SKILL.md files and generates
- * a TypeScript module with skill content as a string map.
+ * Recursively reads all files in each skill directory and generates
+ * a TypeScript module with full skill bundles.
  *
  * Usage: bun scripts/generate-skill-bundle.ts
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,12 +17,30 @@ const ROOT = join(__dirname, "..");
 const EXTERNAL_SKILLS_DIR = join(ROOT, "packages/core/src/skills/external");
 const OUTPUT_FILE = join(EXTERNAL_SKILLS_DIR, "content.generated.ts");
 
-// Skill IDs and their source paths relative to EXTERNAL_SKILLS_DIR
-const SKILL_SOURCES: Record<string, string> = {
-  "judgment-day": "judgment-day/SKILL.md",
-  "cognitive-doc-design": "cognitive-doc-design/SKILL.md",
-  "comment-writer": "comment-writer/SKILL.md",
-};
+// Skill IDs (directories) to bundle - discovered from filesystem
+// Canonical 20 skills per REQ-ESI-002 + user-added using-agent-skills
+const CANONICAL_SKILLS = [
+  "api-and-interface-design",
+  "ci-cd-and-automation",
+  "code-review-and-quality",
+  "code-simplification",
+  "cognitive-doc-design",
+  "comment-writer",
+  "debugging-and-error-recovery",
+  "deprecation-and-migration",
+  "documentation-and-adrs",
+  "doubt-driven-development",
+  "frontend-ui-engineering",
+  "git-workflow-and-versioning",
+  "idea-refine",
+  "interview-me",
+  "judgment-day",
+  "performance-optimization",
+  "security-and-hardening",
+  "shipping-and-launch",
+  "test-driven-development",
+  "using-agent-skills",
+];
 
 function escapeStringForTs(str: string): string {
   // Escape backticks, ${, and backslashes for template literal
@@ -35,34 +53,94 @@ function escapeStringForTs(str: string): string {
     .replace(/\t/g, "\\t");
 }
 
-function generateBundle(): void {
-  const contentMap: Record<string, string> = {};
-  const errors: string[] = [];
+/**
+ * Check if a filename should be excluded (system artifacts).
+ */
+function shouldExclude(name: string): boolean {
+  // Skip Windows NTFS metadata files
+  if (name.endsWith(":Zone.Identifier")) return true;
+  // Skip macOS resource forks
+  if (name.startsWith("._")) return true;
+  return false;
+}
 
-  for (const [skillId, sourcePath] of Object.entries(SKILL_SOURCES)) {
-    const fullPath = join(EXTERNAL_SKILLS_DIR, sourcePath);
+/**
+ * Recursively walk a skill directory and collect all files.
+ * Returns a map of relative path to content.
+ */
+function walkSkillDirectory(skillDir: string): Record<string, string> {
+  const files: Record<string, string> = {};
 
-    if (!existsSync(fullPath)) {
-      errors.push(`Skill ${skillId} not found at ${fullPath}`);
-      continue;
-    }
+  function walk(dir: string, relPath: string = "") {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (shouldExclude(entry.name)) continue;
 
-    try {
-      const content = readFileSync(fullPath, "utf-8").trim();
-      if (!content) {
-        errors.push(`Skill ${skillId} at ${sourcePath} is empty`);
-        continue;
+      const fullPath = join(dir, entry.name);
+      const entryRelPath = relPath ? join(relPath, entry.name) : entry.name;
+
+      if (entry.isDirectory()) {
+        walk(fullPath, entryRelPath);
+      } else if (entry.isFile()) {
+        try {
+          const content = readFileSync(fullPath, "utf-8");
+          // Use POSIX forward-slash for cross-platform consistency
+          const normalizedPath = entryRelPath.replace(/\\/g, "/");
+          files[normalizedPath] = content;
+        } catch (err) {
+          // Fail loudly on unreadable files per REQ-ESCG-003
+          throw new Error(
+            `Unable to read file ${fullPath}: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
       }
-      contentMap[skillId] = content;
-    } catch (err) {
-      errors.push(`Failed to read ${sourcePath}: ${err}`);
     }
   }
 
-  // Check for declared skills with missing/empty content
-  for (const skillId of Object.keys(SKILL_SOURCES)) {
-    if (!contentMap[skillId]) {
-      errors.push(`Skill ${skillId} has no content in generated bundle`);
+  walk(skillDir);
+  return files;
+}
+
+function generateBundle(): void {
+  const bundles: Record<string, { SKILL: string; files: Record<string, string> }> = {};
+  const errors: string[] = [];
+
+  for (const skillId of CANONICAL_SKILLS) {
+    const skillDir = join(EXTERNAL_SKILLS_DIR, skillId);
+
+    if (!existsSync(skillDir)) {
+      errors.push(`Skill ${skillId} directory not found at ${skillDir}`);
+      continue;
+    }
+
+    // Walk directory for all files
+    const dirFiles = walkSkillDirectory(skillDir);
+
+    // Require SKILL.md
+    if (!dirFiles["SKILL.md"]) {
+      errors.push(`Skill ${skillId} is missing SKILL.md`);
+      continue;
+    }
+
+    const skillContent = dirFiles["SKILL.md"];
+    if (!skillContent) {
+      errors.push(`Skill ${skillId} SKILL.md is empty`);
+      continue;
+    }
+
+    // Separate SKILL.md body from other files
+    const { "SKILL.md": _skillBody, ...otherFiles } = dirFiles;
+
+    bundles[skillId] = {
+      SKILL: skillContent,
+      files: otherFiles,
+    };
+  }
+
+  // Check all canonical skills processed
+  for (const skillId of CANONICAL_SKILLS) {
+    if (!bundles[skillId]) {
+      errors.push(`Skill ${skillId} not bundled`);
     }
   }
 
@@ -74,7 +152,20 @@ function generateBundle(): void {
     process.exit(1);
   }
 
-  // Generate TypeScript module
+  // Generate TypeScript module with inline StandaloneSkillBundle type
+  const bundleEntries = Object.entries(bundles).map(([skillId, bundle]) => {
+    const filesObj = Object.entries(bundle.files)
+      .map(([filePath, content]) => `    "${escapeStringForTs(filePath)}": \`${escapeStringForTs(content)}\``,)
+      .join(",\n");
+
+    return `  "${skillId}": {
+    SKILL: \`${escapeStringForTs(bundle.SKILL)}\`,
+    files: {
+${filesObj}
+    },
+  }`;
+  });
+
   const tsContent = `/**
  * Generated skill content bundle.
  *
@@ -82,12 +173,22 @@ function generateBundle(): void {
  * Generated by: scripts/generate-skill-bundle.ts
  */
 
-// prettier-ignore
-export const SKILL_CONTENT: Record<string, string> = {
-${Object.entries(contentMap)
-  .map(([skillId, content]) => `  "${skillId}": \`${escapeStringForTs(content)}\`,`)
-  .join("\n")}
+/**
+ * Inline type matching StandaloneSkillBundle contract.
+ */
+type StandaloneSkillBundle = {
+  SKILL: string;
+  files: Record<string, string>;
 };
+
+// prettier-ignore
+export const STANDALONE_SKILL_BUNDLES: Record<string, StandaloneSkillBundle> = {
+${bundleEntries.join(",\n")}
+};
+
+// Alias for backward compatibility with consumers expecting SKILL_BUNDLES
+// prettier-ignore
+export const SKILL_BUNDLES = STANDALONE_SKILL_BUNDLES;
 `;
 
   // Write output
@@ -99,7 +200,7 @@ ${Object.entries(contentMap)
   writeFileSync(OUTPUT_FILE, tsContent, "utf-8");
 
   console.log(`Generated skill bundle: ${OUTPUT_FILE}`);
-  console.log(`  Skills bundled: ${Object.keys(contentMap).join(", ")}`);
+  console.log(`  Skills bundled: ${Object.keys(bundles).join(", ")}`);
 }
 
 // Run if called directly

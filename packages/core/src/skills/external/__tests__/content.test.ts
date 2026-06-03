@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import {
   STANDALONE_SKILLS,
   getStandaloneSkillBody,
+  getStandaloneSkill,
   getStandaloneSkills,
   SKILL_NOT_FOUND,
   SkillLookupError,
@@ -15,13 +16,9 @@ import {
 
 describe("external/skills content", () => {
   describe("STANDALONE_SKILLS", () => {
-    it("contains expected skill definitions", () => {
-      const skillIds = STANDALONE_SKILLS.map((s) => s.skillId);
-
-      // Should contain judgment-day, cognitive-doc-design, comment-writer
-      expect(skillIds).toContain("judgment-day");
-      expect(skillIds).toContain("cognitive-doc-design");
-      expect(skillIds).toContain("comment-writer");
+    it("contains exactly 20 skills (REQ-TEST-001)", () => {
+      const skills = getStandaloneSkills();
+      expect(skills.length).toBe(20);
     });
 
     it("each skill has valid sourcePath", () => {
@@ -103,6 +100,55 @@ describe("external/skills content", () => {
       expect(error.code).toBe(SKILL_NOT_FOUND);
       expect(error.skillId).toBe("test-skill");
       expect(error.message).toBe("Test error message");
+    });
+  });
+
+  describe("getStandaloneSkill", () => {
+    it("returns full bundle with SKILL and files (REQ-TEST-002)", () => {
+      const bundle = getStandaloneSkill("judgment-day");
+      const bodyFromAccessor = getStandaloneSkillBody("judgment-day");
+
+      expect(bundle.SKILL).toBe(bodyFromAccessor);
+    });
+
+    it("judgment-day bundle files is empty object (REQ-TEST-004)", () => {
+      const bundle = getStandaloneSkill("judgment-day");
+      expect(Object.keys(bundle.files)).toHaveLength(0);
+    });
+
+    it("idea-refine bundle has 4 files (REQ-TEST-005)", () => {
+      const bundle = getStandaloneSkill("idea-refine");
+      const fileKeys = Object.keys(bundle.files);
+      expect(fileKeys).toContain("examples.md");
+      expect(fileKeys).toContain("frameworks.md");
+      expect(fileKeys).toContain("refinement-criteria.md");
+      expect(fileKeys).toContain("scripts/idea-refine.sh");
+      expect(fileKeys).toHaveLength(4);
+    });
+
+    it("all 20 skills have non-empty SKILL body (REQ-TEST-006)", () => {
+      const skills = getStandaloneSkills();
+      for (const skill of skills) {
+        const bundle = getStandaloneSkill(skill.skillId);
+        expect(bundle.SKILL.length).toBeGreaterThan(0);
+      }
+    });
+
+    it("no system artifacts in bundle files (REQ-TEST-007)", () => {
+      const skills = getStandaloneSkills();
+      for (const skill of skills) {
+        const bundle = getStandaloneSkill(skill.skillId);
+        for (const filePath of Object.keys(bundle.files)) {
+          expect(filePath.endsWith(":Zone.Identifier")).toBe(false);
+          expect(filePath.startsWith("._")).toBe(false);
+        }
+      }
+    });
+
+    it("api-and-interface-design has valid frontmatter (REQ-TEST-008)", () => {
+      const body = getStandaloneSkillBody("api-and-interface-design");
+      expect(body.length).toBeGreaterThan(0);
+      expect(body.startsWith("---")).toBe(true);
     });
   });
 });

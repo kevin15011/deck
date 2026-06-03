@@ -1,0 +1,79 @@
+# Events: external-skills-bundle-install
+
+events:
+  - timestamp: "2026-06-02"
+    phase: explore
+    status: completed
+    artifact: exploration.md
+    event: exploration-completed
+  - timestamp: "2026-06-03"
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    event: proposal-completed
+  - timestamp: "2026-06-03"
+    phase: spec
+    status: completed
+    artifact: spec.md
+    event: spec-completed
+  - timestamp: "2026-06-03"
+    phase: design
+    status: completed
+    artifact: design.md
+    event: design-completed
+  - timestamp: "2026-06-03"
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    event: tasks-completed
+  - timestamp: "2026-06-04"
+    phase: apply
+    agent: general
+    status: completed
+    artifact: apply-progress.md
+    event: task-1-completed
+    description: "Task 1 complete — StandaloneSkillBundle type added"
+  - timestamp: "2026-06-04"
+    phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    event: tasks-2-3-4-completed
+    description: "Tasks 2, 3, 4 complete — generator + accessor + tests"
+  - timestamp: "2026-06-04"
+    phase: apply
+    agent: general
+    status: completed
+    artifact: apply-progress.md
+    event: task-5-completed
+    description: "Task 5 complete — full verification and regression check"
+  - timestamp: "2026-06-04"
+    phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    event: verify-findings-fixed
+    description: "Fixed verify findings: STANDALONE_SKILL_BUNDLES export, fail-loudly on unreadable, POSIX paths, verbatim content"
+  - timestamp: "2026-06-04"
+    phase: apply
+    agent: backend
+    status: completed
+    artifact: apply-progress.md
+    event: dev-mode-fallback-verbatim-content
+    description: "Removed .trim() from dev-mode fallback path to preserve verbatim SKILL.md content"
+  - timestamp: "2026-06-04"
+    phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    event: verify.completed
+  - timestamp: "2026-06-04"
+    phase: review
+    status: approved
+    artifact: review-report.md
+    event: review_approved
+  - timestamp: "2026-06-04"
+    phase: archive
+    status: archived
+    artifact: archive-report.md
+    event: archive-completed
+    description: "Change archived with full traceability report"
