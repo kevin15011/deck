@@ -1,0 +1,64 @@
+change: consolidate-documentation-and-adrs
+events:
+  - type: change.created
+    phase: explore
+    status: in_progress
+    timestamp: '2026-06-03'
+    actor: deck-developer-orchestrator
+    note: Automatic Phase 3E exploration launched from skills-integration-roadmap.
+  - type: explore.completed
+    phase: explore
+    status: completed
+    timestamp: '2026-06-03'
+    actor: deck-developer-explorer
+    note: Investigated 7 target agents for documentation-and-adrs overlap. Found three overlap areas: comment guidance (apply agents), alternatives/tradeoffs (proposal/design), review comment checking. Git safety already implemented. Recommended selective reference approach + inline preservation until Phase 1 verified.
+    artifact: exploration.md
+  - type: proposal.completed
+    phase: proposal
+    status: completed
+    timestamp: '2026-06-03'
+    actor: deck-developer-proposal
+    note: Created Phase 3E proposal after Phase 1 completion. Scope covers 7 target Developer Team content modules, preserves artifact-specific templates and Git safety, and recommends canonical documentation-and-adrs references with focused exported-surface tests.
+    artifact: proposal.md
+  - type: spec.completed
+    phase: spec
+    status: completed
+    timestamp: '2026-06-03'
+    actor: deck-developer-spec
+    note: Defined 4 capabilities (developer-team-prompt-guidance, developer-team-content-verification, critical-git-safety, sdd-artifact-contracts) with 11 requirements and acceptance scenarios.
+    artifact: spec.md
+  - type: design.completed
+    phase: design
+    status: completed
+    timestamp: '2026-06-03'
+    actor: deck-developer-design
+    note: Designed canonical sentence insertion into 7 SKILL_BODY ## Rules sections, per-module test strategy, resolved 3 proposal open questions, identified canonical sentence conflict with Spec.
+    artifact: design.md
+  - type: tasks.completed
+    phase: tasks
+    status: completed
+    timestamp: '2026-06-03'
+    actor: deck-developer-task
+    note: Created 9 tasks (7 parallel content edits + 1 test block task + 1 regression verification). Flagged canonical sentence conflict (Spec vs Design) as allowed-with-stub. All tasks ready for Apply.
+    artifact: tasks.md
+  - type: apply.completed
+    phase: apply
+    status: completed
+    timestamp: '2026-06-03'
+    actor: deck-developer-apply-general
+    note: Fixed backtick escaping in all 7 content files (apply-*, explorer, proposal, design, review). Added missing review-content.test.ts block. Changed explorer bullet to prose format for test compatibility. All 292 content tests + 28 git-safety tests pass (2 pre-existing env failures unrelated to change). git-safety.ts unchanged. Used Spec canonical sentence.
+    artifact: N/A — content-only changes to existing modules.
+  - type: apply.completed
+    phase: apply
+    status: completed
+    timestamp: '2026-06-03'
+    actor: deck-developer-apply-general
+    note: Fixed verify finding: explorer-content.ts REQ-prompt-001. Added using-agent-skills line before documentation-and-adrs per established pattern. Fixed backtick escape.
+    artifact: apply-progress.md
+  - type: archive.completed
+    phase: archive
+    status: archived
+    timestamp: '2026-06-03'
+    actor: deck-developer-archive
+    note: Archived change to openspec/archive/consolidate-documentation-and-adrs/. Traceability report produced. No follow-ups required. Critical Git safety preserved.
+    artifact: archive-report.md
