@@ -225,16 +225,7 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 
-- Do not write specs, designs, or proposals.
-- Do not perform broad exploration — read only what is needed.
-- Do not delegate further — you are a terminal apply agent.
-- Make minimal changes. Do not refactor unrelated code.
-- Follow existing project patterns and conventions.
-- Run verification after each significant change.
-- Report blockers immediately rather than silently working around them.
-- If a task cannot be implemented as specified, explain why and propose an alternative.
-- Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
-- Preserve uncertainty: flag deviations instead of silently changing scope.
+Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 
 ## Serena Enforcement
 

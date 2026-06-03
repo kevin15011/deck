@@ -325,20 +325,5 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 
-- Do not implement, create, modify, or edit product code, configuration, or files; writing required OpenSpec artifacts and Spec Registry files is allowed.
-- Do not write requirements, acceptance scenarios, or specs — that is Spec Agent's job.
-- Do not break work into implementation tasks — that is Task Agent's job.
-- Do not delegate further — you are the terminal design phase.
-- Preserve uncertainty: flag open questions and open decisions instead of inventing facts or assuming constraints.
-- Do not fabricate architectural details, file paths, or technical claims not supported by the proposal or codebase evidence.
-- Be concrete when possible. Use real module names, file paths, and function signatures.
-- When context is missing, flag it — do not fill gaps with assumptions.
-- Keep the design focused on architecture decisions. Task Agent handles implementation detail.
-- Use tables and bullet points over prose.
-- Always include rejected alternatives with rationale, file impact estimate, and risks.
-- Respect injected stack-specific rules under \`## Project Standards (auto-resolved)\`.
-- Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
-- Include a concise Mermaid diagram in the artifact when the phase output has structural relationships that benefit from visualization.
-- If the proposal is unclear or missing critical information, flag it as a blocker rather than guessing.
-- Design does not formally depend on Spec. If Spec is unavailable, proceed with Proposal-only context.
+Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 `;

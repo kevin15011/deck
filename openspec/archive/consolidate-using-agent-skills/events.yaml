@@ -1,0 +1,72 @@
+# Events for consolidate-using-agent-skills
+
+- event: exploration_started
+  occurred_at: 2026-06-02T00:00:00Z
+  artifact: exploration.md
+  phase: explore
+  agent: deck-developer-explorer
+
+- event: exploration_completed
+  occurred_at: 2026-06-02T00:00:00Z
+  artifact: exploration.md
+  phase: explore
+  outcome: ready_for_proposal
+
+- event: proposal_completed
+  occurred_at: 2026-06-02T00:00:00Z
+  artifact: proposal.md
+  phase: proposal
+  status: completed
+  agent: deck-developer-proposal
+
+- event: spec_completed
+  occurred_at: 2026-06-04T00:00:00Z
+  artifact: spec.md
+  phase: spec
+  status: completed
+  agent: deck-developer-spec
+
+- event: design_completed
+  occurred_at: 2026-06-04T00:00:00Z
+  artifact: design.md
+  phase: design
+  status: completed
+  agent: deck-developer-design
+
+- event: tasks_completed
+  occurred_at: 2026-06-04T00:00:00Z
+  artifact: tasks.md
+  phase: tasks
+  status: completed
+  agent: deck-developer-task
+  notes: OQ-002 resolved — all phase-specific Rules bullets already captured by AGENT_BODY Role/Non-Goals and using-agent-skills. 3 tasks, all General Apply, sequential dependency chain.
+
+- event: apply_completed
+  occurred_at: 2026-06-03T00:00:00Z
+  artifact: apply-progress.md
+  phase: apply
+  status: completed
+  agent: deck-developer-apply-general
+  notes: Canonical line replaced Rules bodies in 10 files. Added canonicalization tests (711 tests pass). Excluded files unchanged.
+
+- event: verify.completed
+  occurred_at: 2026-06-04T00:00:00Z
+  artifact: verify-report.md
+  phase: verify
+  status: passed_with_warnings
+  agent: deck-developer-verify
+
+- event: review.approved
+  occurred_at: 2026-06-04T00:00:00Z
+  artifact: review-report.md
+  phase: review
+  status: approved
+  agent: deck-developer-review
+
+- event: archive_completed
+  occurred_at: 2026-06-03T00:00:00Z
+  artifact: archive-report.md
+  phase: archive
+  status: archived
+  agent: deck-developer-archive
+  archive_target: openspec/archive/consolidate-using-agent-skills/

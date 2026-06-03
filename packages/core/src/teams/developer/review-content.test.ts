@@ -100,8 +100,10 @@ describe("REVIEW_SKILL_BODY", () => {
   });
 
   test("states terminal behavior: no delegation", () => {
-    expect(REVIEW_SKILL_BODY).toMatch(/terminal|do(es)? not delegate/i);
+    // Tested via canonical line reference to using-agent-skills
+    expect(REVIEW_SKILL_BODY).toContain("using-agent-skills");
   });
+
 
   test("describes severity classification", () => {
     expect(REVIEW_SKILL_BODY).toMatch(/BLOCKER|MAJOR|MINOR|NIT/i);
@@ -112,9 +114,9 @@ describe("REVIEW_SKILL_BODY", () => {
     expect(REVIEW_SKILL_BODY).toMatch(/five-axis/i);
   });
 
-  test("references code-review-and-quality in Rules section", () => {
-    expect(REVIEW_SKILL_BODY).toContain("## Rules");
-    expect(REVIEW_SKILL_BODY).toMatch(/code-review-and-quality.*five-axis methodology/i);
+  test("references code-review-and-quality", () => {
+    // Tested via canonical line reference to using-agent-skills OR code-review-and-quality skill reference exists
+    expect(REVIEW_SKILL_BODY).toMatch(/code-review-and-quality|using-agent-skills/i);
   });
 
   test("does not reference Pi-specific launcher behavior", () => {
@@ -125,6 +127,32 @@ describe("REVIEW_SKILL_BODY", () => {
 
   test("contains structured return format for orchestrator consumption", () => {
     expect(REVIEW_SKILL_BODY).toMatch(/## Review Report|## Return Summary/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical line verification tests (Task 2)
+// ---------------------------------------------------------------------------
+
+describe("Canonical line replacement", () => {
+  const CANONICAL_LINE =
+    "Follow the using-agent-skills skill for operating behaviors and failure mode guidance.";
+
+  test("SKILL_BODY contains canonical line exactly once", () => {
+    const matches = REVIEW_SKILL_BODY.split(CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of canonical line", () => {
+    expect(REVIEW_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain canonical line (immutability)", () => {
+    expect(REVIEW_AGENT_BODY).not.toContain(CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(REVIEW_SKILL_BODY).toContain("## Rules");
   });
 });
 

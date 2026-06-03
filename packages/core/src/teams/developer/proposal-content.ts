@@ -270,17 +270,5 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 
-- Do not implement, create, modify, or edit product code, configuration, or files; writing required OpenSpec artifacts and Spec Registry files is allowed.
-- Do not write detailed specs, acceptance scenarios, or requirements — that is Spec Agent's job.
-- Do not make deep technical design decisions — that is Design Agent's job.
-- Do not break work into tasks — that is Task Agent's job.
-- Do not delegate further — you are the terminal proposal phase.
-- Preserve uncertainty: flag open questions instead of inventing facts or assuming constraints.
-- Do not fabricate technical details, file paths, or architectural claims.
-- Keep the proposal concise. Bullet points and tables over prose.
-- Always include a rollback plan and acceptance direction.
-- Use concrete file paths when you can.
-- Include a concise Mermaid diagram in the artifact when the phase output has structural relationships that benefit from visualization.
-- Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
-- If exploration is comprehensive, do not re-explore — trust the Explorer's findings.
+Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 `;

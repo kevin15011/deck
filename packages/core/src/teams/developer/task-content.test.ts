@@ -110,7 +110,8 @@ describe("TASK_SKILL_BODY", () => {
   });
 
   test("states terminal behavior: no delegation", () => {
-    expect(TASK_SKILL_BODY).toMatch(/terminal|do(es)? not delegate/i);
+    // Tested via canonical line reference to using-agent-skills
+    expect(TASK_SKILL_BODY).toContain("using-agent-skills");
   });
 
   test("does not reference Pi-specific launcher behavior", () => {
@@ -139,6 +140,32 @@ describe("TASK_SKILL_BODY", () => {
 
   test("return contract includes Mermaid Source field", () => {
     expect(TASK_SKILL_BODY).toContain("Mermaid Source");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical line verification tests (Task 2)
+// ---------------------------------------------------------------------------
+
+describe("Canonical line replacement", () => {
+  const CANONICAL_LINE =
+    "Follow the using-agent-skills skill for operating behaviors and failure mode guidance.";
+
+  test("SKILL_BODY contains canonical line exactly once", () => {
+    const matches = TASK_SKILL_BODY.split(CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of canonical line", () => {
+    expect(TASK_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain canonical line (immutability)", () => {
+    expect(TASK_AGENT_BODY).not.toContain(CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(TASK_SKILL_BODY).toContain("## Rules");
   });
 });
 

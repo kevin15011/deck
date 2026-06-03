@@ -1,0 +1,64 @@
+# State: consolidate-using-agent-skills
+
+change: consolidate-using-agent-skills
+description: canonicalize generic operating behavior guidance to using-agent-skills skill in 10 content files
+created_at: 2026-06-02
+
+phase: proposal
+status: completed
+artifact: proposal.md
+provenance: deck-developer-proposal
+
+previous_phases:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    provenance: deck-developer-explorer (Phase 3A investigation)
+
+current_phase: review
+current_status: approved
+current_artifact: review-report.md
+current_provenance: deck-developer-review
+
+artifacts:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    provenance: deck-developer-explorer (Phase 3A investigation)
+  - phase: proposal
+    status: completed
+    artifact: proposal.md
+    provenance: deck-developer-proposal
+  - phase: spec
+    status: completed
+    artifact: spec.md
+    provenance: deck-developer-spec
+  - phase: design
+    status: completed
+    artifact: design.md
+    provenance: deck-developer-design
+  - phase: tasks
+    status: completed
+    artifact: tasks.md
+    provenance: deck-developer-task
+  - phase: apply
+    status: completed
+    artifact: apply-progress.md
+    provenance: deck-developer-apply-general
+  - phase: verify
+    status: passed_with_warnings
+    artifact: verify-report.md
+    provenance: deck-developer-verify
+  - phase: review
+    status: approved
+    artifact: review-report.md
+    provenance: deck-developer-review
+  - phase: archive
+    status: archived
+    artifact: archive-report.md
+    provenance: deck-developer-archive
+
+current_phase: archive
+current_status: archived
+current_artifact: archive-report.md
+current_provenance: deck-developer-archive

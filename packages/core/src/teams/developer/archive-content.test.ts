@@ -91,7 +91,8 @@ describe("ARCHIVE_SKILL_BODY", () => {
   });
 
   test("states terminal behavior: no delegation", () => {
-    expect(ARCHIVE_SKILL_BODY).toMatch(/terminal|do(es)? not delegate/i);
+    // Tested via canonical line reference to using-agent-skills
+    expect(ARCHIVE_SKILL_BODY).toContain("using-agent-skills");
   });
 
   test("describes traceability matrix", () => {
@@ -117,6 +118,32 @@ describe("ARCHIVE_SKILL_BODY", () => {
   // --- Need 5: Self-Verification ---
   test("skill body contains self-verification step", () => {
     expect(ARCHIVE_SKILL_BODY).toContain("Self-Verify Artifact");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical line verification tests (Task 2)
+// ---------------------------------------------------------------------------
+
+describe("Canonical line replacement", () => {
+  const CANONICAL_LINE =
+    "Follow the using-agent-skills skill for operating behaviors and failure mode guidance.";
+
+  test("SKILL_BODY contains canonical line exactly once", () => {
+    const matches = ARCHIVE_SKILL_BODY.split(CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of canonical line", () => {
+    expect(ARCHIVE_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain canonical line (immutability)", () => {
+    expect(ARCHIVE_AGENT_BODY).not.toContain(CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(ARCHIVE_SKILL_BODY).toContain("## Rules");
   });
 });
 

@@ -95,7 +95,8 @@ describe("APPLY_BACKEND_SKILL_BODY", () => {
   });
 
   test("states terminal behavior: no delegation", () => {
-    expect(APPLY_BACKEND_SKILL_BODY).toMatch(/terminal|do(es)? not delegate/i);
+    // Tested via canonical line reference to using-agent-skills
+    expect(APPLY_BACKEND_SKILL_BODY).toContain("using-agent-skills");
   });
 
   test("describes backend verification steps", () => {
@@ -139,6 +140,38 @@ describe("Serena enforcement rules", () => {
   test("does NOT validate CLI existence", () => {
     // The enforcement section explicitly says NOT to validate CLI - check the negation is present
     expect(APPLY_BACKEND_SKILL_BODY).toContain("No CLI validation");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical line verification tests (Task 2)
+// ---------------------------------------------------------------------------
+
+describe("Canonical line replacement", () => {
+  const CANONICAL_LINE =
+    "Follow the using-agent-skills skill for operating behaviors and failure mode guidance.";
+
+  test("SKILL_BODY contains canonical line exactly once", () => {
+    const matches = APPLY_BACKEND_SKILL_BODY.split(CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of canonical line", () => {
+    expect(APPLY_BACKEND_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain canonical line (immutability)", () => {
+    expect(APPLY_BACKEND_AGENT_BODY).not.toContain(CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(APPLY_BACKEND_SKILL_BODY).toContain("## Rules");
+  });
+});
+
+describe("Serena Enforcement preserved", () => {
+  test("SKILL_BODY contains ## Serena Enforcement section", () => {
+    expect(APPLY_BACKEND_SKILL_BODY).toContain("## Serena Enforcement");
   });
 });
 

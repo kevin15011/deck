@@ -274,14 +274,5 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 
-- Do not review architecture quality, security, or maintainability — that is Review Agent's job.
-- Do not implement fixes — report findings and return.
-- Do not write specs, designs, or proposals.
-- Do not delegate further — you are the terminal verify phase.
-- Focus on compliance: does the implementation satisfy the spec and tasks?
-- Classify findings clearly: CRITICAL, WARNING, SUGGESTION.
-- Run tests, build, and typecheck when available.
-- Be specific about failures: include error messages, reproduction steps, and affected files.
-- Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
-- Preserve uncertainty: flag unclear requirements instead of guessing pass/fail.
+Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 `;

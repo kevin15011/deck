@@ -217,6 +217,32 @@ describe("Proposal vs Explorer/Orchestrator differentiation", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Canonical line verification tests (Task 2)
+// ---------------------------------------------------------------------------
+
+describe("Canonical line replacement", () => {
+  const CANONICAL_LINE =
+    "Follow the using-agent-skills skill for operating behaviors and failure mode guidance.";
+
+  test("SKILL_BODY contains canonical line exactly once", () => {
+    const matches = PROPOSAL_SKILL_BODY.split(CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of canonical line", () => {
+    expect(PROPOSAL_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain canonical line (immutability)", () => {
+    expect(PROPOSAL_AGENT_BODY).not.toContain(CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(PROPOSAL_SKILL_BODY).toContain("## Rules");
+  });
+});
+
 // Git Safety Rule presence test
 describe("Git Safety Rule presence", () => {
   test("AGENT_BODY contains critical Git discard protection rule", () => {

@@ -299,14 +299,5 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 
-- Do not modify prompts, skills, agents, or policies automatically.
-- Do not implement code or fix issues.
-- Do not write specs, designs, or proposals.
-- Do not delegate further — you are the terminal archive phase.
-- Archive runs only after Verify and Review have passed, unless explicitly archiving a blocked/abandoned change.
-- Preserve all artifacts for traceability.
-- Merge delta specs carefully — do not lose requirements.
-- Do not create one project AI note per session. Deduplicate and update.
-- Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
-- Preserve uncertainty: flag incomplete traceability instead of guessing.
+Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 `;

@@ -92,7 +92,8 @@ describe("APPLY_GENERAL_SKILL_BODY", () => {
   });
 
   test("states terminal behavior: no delegation", () => {
-    expect(APPLY_GENERAL_SKILL_BODY).toMatch(/terminal|do(es)? not delegate/i);
+    // Now tested via canonical line reference to using-agent-skills
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("using-agent-skills");
   });
 
   test("describes verification steps (tests, build, typecheck)", () => {
@@ -134,6 +135,60 @@ describe("Serena enforcement rules", () => {
 
   test("does NOT validate CLI existence", () => {
     expect(APPLY_GENERAL_SKILL_BODY).toContain("No CLI validation");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical line verification tests (Task 2)
+// ---------------------------------------------------------------------------
+
+// Import excluded files for boundary testing
+import {
+  ORCHESTRATOR_AGENT_BODY,
+  ORCHESTRATOR_SKILL_BODY,
+} from "./orchestrator-content";
+import { EXPLORER_AGENT_BODY } from "./explorer-content";
+
+describe("Canonical line replacement", () => {
+  const CANONICAL_LINE =
+    "Follow the using-agent-skills skill for operating behaviors and failure mode guidance.";
+
+  test("SKILL_BODY contains canonical line exactly once", () => {
+    const matches = APPLY_GENERAL_SKILL_BODY.split(CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of canonical line", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain canonical line (immutability)", () => {
+    expect(APPLY_GENERAL_AGENT_BODY).not.toContain(CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("## Rules");
+  });
+});
+
+describe("Serena Enforcement preserved", () => {
+  test("SKILL_BODY contains ## Serena Enforcement section", () => {
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("## Serena Enforcement");
+  });
+});
+
+describe("Excluded files boundary", () => {
+  test("orchestrator AGENT_BODY still has original ## Rules bullets", () => {
+    // Orchestrator should NOT have been canonicalized
+    expect(ORCHESTRATOR_AGENT_BODY).toContain("Do not");
+  });
+
+  test("orchestrator SKILL_BODY still has original ## Rules bullets", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do not");
+  });
+
+  test("explorer AGENT_BODY still has original ## Rules bullets", () => {
+    expect(EXPLORER_AGENT_BODY).toContain("Do not");
   });
 });
 

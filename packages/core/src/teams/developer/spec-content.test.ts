@@ -130,11 +130,13 @@ describe("SPEC_SKILL_BODY", () => {
   // --- Constraints ---
 
   test("prohibits code implementation", () => {
-    expect(SPEC_SKILL_BODY).toMatch(/do not (implement|write|create|code)/i);
+    // Tested via canonical line reference to using-agent-skills
+    expect(SPEC_SKILL_BODY).toContain("using-agent-skills");
   });
 
   test("prohibits writing technical design or implementation tasks", () => {
-    expect(SPEC_SKILL_BODY).toMatch(/do not.*(write|create|produce).*(design|task|architect)/i);
+    // Tested via canonical line reference to using-agent-skills
+    expect(SPEC_SKILL_BODY).toContain("using-agent-skills");
   });
 
   // --- Artifact persistence ---
@@ -221,6 +223,32 @@ describe("Spec vs Proposal/Explorer differentiation", () => {
 
   test("return contract includes Mermaid Source field", () => {
     expect(SPEC_SKILL_BODY).toContain("Mermaid Source");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Canonical line verification tests (Task 2)
+// ---------------------------------------------------------------------------
+
+describe("Canonical line replacement", () => {
+  const CANONICAL_LINE =
+    "Follow the using-agent-skills skill for operating behaviors and failure mode guidance.";
+
+  test("SKILL_BODY contains canonical line exactly once", () => {
+    const matches = SPEC_SKILL_BODY.split(CANONICAL_LINE).length - 1;
+    expect(matches).toBe(1);
+  });
+
+  test("SKILL_BODY contains no bullet variants of canonical line", () => {
+    expect(SPEC_SKILL_BODY).not.toContain(`- ${CANONICAL_LINE}`);
+  });
+
+  test("AGENT_BODY does NOT contain canonical line (immutability)", () => {
+    expect(SPEC_AGENT_BODY).not.toContain(CANONICAL_LINE);
+  });
+
+  test("SKILL_BODY preserves ## Rules heading", () => {
+    expect(SPEC_SKILL_BODY).toContain("## Rules");
   });
 });
 

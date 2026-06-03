@@ -305,16 +305,5 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 ## Rules
 
-- Reference code-review-and-quality for five-axis methodology, severity classification (BLOCKER/MAJOR/MINOR/NIT), and honesty in evidence-based assessments.
-- Do not check compliance or run tests — that is Verify Agent's job.
-- Do not implement fixes — report findings and return.
-- Do not write specs, designs, or proposals.
-- Do not delegate further — you are the terminal review phase.
-- Be impartial and evidence-driven. Challenge weak or risky assumptions.
-- Do not approve work just because it passes tests.
-- Provide concrete, actionable recommendations for every BLOCKER and MAJOR finding.
-- Use specific file paths, line numbers, or code patterns as evidence.
-- Respect injected stack-specific rules under \`## Project Standards (auto-resolved)\`.
-- Do not reference runtime-specific launcher behavior. Stay environment-agnostic.
-- Preserve uncertainty: flag unclear areas instead of guessing ratings.
+Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 `;
