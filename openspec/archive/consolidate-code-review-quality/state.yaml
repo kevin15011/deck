@@ -1,0 +1,88 @@
+# OpenSpec Registry — consolidate-code-review-quality
+# Auto-generado por General Apply Agent
+
+meta:
+  changeId: consolidate-code-review-quality
+  createdAt: "2026-06-02T00:00:00Z"
+  description: Add code-review-and-quality references to review-content.ts
+  owner: deck-developer-apply-general
+
+phases:
+  current: archive
+  proposal:
+    status: completed
+    artifact: proposal.md
+    eventsLog:
+      - event: proposal-created
+        timestamp: "2026-06-02T00:00:00Z"
+        agent: deck-developer-proposal
+  spec:
+    status: completed
+    artifact: spec.md
+    eventsLog:
+      - event: spec-created
+        timestamp: "2026-06-02T00:00:00Z"
+        agent: deck-developer-spec
+  design:
+    status: completed
+    artifact: design.md
+    eventsLog:
+      - event: design-created
+        timestamp: "2026-06-02T00:00:00Z"
+        agent: deck-developer-design
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    provenance: packages/core/src/teams/developer/review-content.ts (modified 3 locations), packages/core/src/teams/developer/review-content.test.ts (modified)
+    eventsLog:
+      - event: apply-completed
+        timestamp: "2026-06-02T00:00:00Z"
+        agent: deck-developer-apply-general
+        artifact: apply-progress.md
+  verify:
+    status: passed_with_warnings
+    artifact: verify-report.md
+    provenance: Re-verified artifact repair; proposal/spec/design/tasks exist; focused and developer-team tests pass; build dry-run passes; generated build-info diff absent; repo-wide typecheck has unrelated existing failures; tasks.md still has Pending status markers.
+    eventsLog:
+      - event: verify-passed-with-warnings
+        timestamp: "2026-06-03T02:42:20.264Z"
+        agent: deck-developer-verify
+        artifact: verify-report.md
+  review:
+    status: approved
+    artifact: review-report.md
+    provenance: deck-developer-review general scope re-review; artifact repair, scoped source diff, and Review Agent contract reviewed
+    eventsLog:
+      - event: review-changes-requested
+        timestamp: "2026-06-03T00:00:00Z"
+        agent: deck-developer-review
+        artifact: review-report.md
+      - event: review-approved
+        timestamp: "2026-06-03T00:00:00Z"
+        agent: deck-developer-review
+        artifact: review-report.md
+  archive:
+    status: completed
+    artifact: archive-report.md
+    provenance: Archived to openspec/archive/consolidate-code-review-quality/
+    eventsLog:
+      - event: artifacts-recreated
+        timestamp: "2026-06-03T00:00:00Z"
+        agent: deck-developer-archive
+        artifact: proposal.md
+      - event: artifacts-recreated
+        timestamp: "2026-06-03T00:00:00Z"
+        agent: deck-developer-archive
+        artifact: spec.md
+      - event: artifacts-recreated
+        timestamp: "2026-06-03T00:00:00Z"
+        agent: deck-developer-archive
+        artifact: design.md
+      - event: artifacts-recreated
+        timestamp: "2026-06-03T00:00:00Z"
+        agent: deck-developer-archive
+        artifact: tasks.md
+      - event: archive-completed
+        timestamp: "2026-06-03T00:00:00Z"
+        agent: deck-developer-archive
+        artifact: archive-report.md

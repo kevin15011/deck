@@ -1,0 +1,59 @@
+# OpenSpec Events — consolidate-code-review-quality
+
+- event: apply-completed
+  timestamp: "2026-06-02T00:00:00Z"
+  agent: deck-developer-apply-general
+  artifact: apply-progress.md
+  description: Added code-review-and-quality references to review-content.ts (3 locations), updated tests
+- event: review-changes-requested
+  timestamp: "2026-06-03T00:00:00Z"
+  agent: deck-developer-review
+  artifact: review-report.md
+  description: Requested changes due unrelated build-info.generated.ts change and missing official artifacts
+
+- event: verify-passed-with-warnings
+  timestamp: "2026-06-02T00:00:00Z"
+  agent: deck-developer-verify
+  artifact: verify-report.md
+  description: Scoped tests and build passed; repo-wide typecheck has unrelated failures; spec/design/tasks artifacts missing from change directory.
+- event: artifacts-recreated
+  timestamp: "2026-06-03T00:00:00Z"
+  agent: deck-developer-archive
+  artifact: proposal.md
+  description: Recreated missing proposal.md based on current SDD state and prior phase summaries.
+- event: artifacts-recreated
+  timestamp: "2026-06-03T00:00:00Z"
+  agent: deck-developer-archive
+  artifact: spec.md
+  description: Recreated missing spec.md based on current SDD state and prior phase summaries.
+- event: artifacts-recreated
+  timestamp: "2026-06-03T00:00:00Z"
+  agent: deck-developer-archive
+  artifact: design.md
+  description: Recreated missing design.md based on current SDD state and prior phase summaries.
+- event: artifacts-recreated
+  timestamp: "2026-06-03T00:00:00Z"
+  agent: deck-developer-archive
+  artifact: tasks.md
+  description: Recreated missing tasks.md based on current SDD state and prior phase summaries.
+- event: archive-completed
+  timestamp: "2026-06-03T00:00:00Z"
+  agent: deck-developer-archive
+  artifact: archive-report.md
+  description: Change archived with all official artifacts present.
+- event: artifacts-archived
+  timestamp: "2026-06-03T03:00:00Z"
+  agent: deck-developer-archive
+  artifact: archive-report.md
+  description: All change artifacts moved to openspec/archive/consolidate-code-review-quality/.
+- event: review-approved
+  timestamp: "2026-06-03T00:00:00Z"
+  agent: deck-developer-review
+  artifact: review-report.md
+  description: Re-review approved after missing artifacts were repaired and unrelated generated metadata diff was absent.
+
+- event: verify-passed-with-warnings
+  timestamp: "2026-06-03T02:42:20.264Z"
+  agent: deck-developer-verify
+  artifact: verify-report.md
+  description: Re-verified after artifact repair; required artifacts exist; requested tests and build pass; generated build-info diff absent; warnings remain for tasks.md Pending markers and unrelated repo-wide typecheck failures.
