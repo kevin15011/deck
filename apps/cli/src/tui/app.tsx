@@ -898,7 +898,10 @@ export function DeckApp() {
           currentVersion,
           deps: {
             installKind: detectInstallKind(),
-            currentBinaryPath: process.argv[0] ?? "",
+            // Use process.execPath to correctly identify installed binary path.
+            // In compiled Bun binaries, process.argv[0] can be "bun" while
+            // process.execPath contains the actual binary path.
+            currentBinaryPath: process.execPath ?? process.argv[0] ?? "",
             projectRoot: localResolvedProjectRoot ?? process.cwd(),
             // The real registry is used here; tests inject a fake.
             adapterRegistry: {

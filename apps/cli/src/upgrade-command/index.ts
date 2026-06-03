@@ -104,11 +104,17 @@ export async function runUpgrade(args: string[]): Promise<number> {
   }
 
   // Check for dev mode - refuse to upgrade when running via bun run
-  const currentArgvZero = process.argv[0];
+  // Use process.execPath to correctly identify compiled binaries.
+  // In compiled Bun binaries, process.argv[0] can be "bun" while
+  // process.execPath contains the actual binary path.
+  const currentExecPath = process.execPath ?? process.argv[0];
   if (
-    currentArgvZero.includes("bun") ||
-    currentArgvZero.includes("deno") ||
-    currentArgvZero.includes("node")
+    currentExecPath.includes("bun") ||
+    currentExecPath.includes("deno") ||
+    currentExecPath.includes("node") ||
+    currentExecPath === "bun" ||
+    currentExecPath === "deno" ||
+    currentExecPath === "node"
   ) {
     console.error(
       "Refusing to upgrade: deck is running in development mode. " +
@@ -154,8 +160,8 @@ export async function runUpgrade(args: string[]): Promise<number> {
     return 0;
   }
 
-  // Get current binary path
-  const currentBinaryPath = process.argv[0];
+  // Get current binary path - use process.execPath for compiled binaries
+  const currentBinaryPath = process.execPath ?? process.argv[0];
 
   if (!currentBinaryPath || !existsSync(currentBinaryPath)) {
     console.error("Could not determine current binary path.");

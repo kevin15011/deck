@@ -49,6 +49,89 @@ import {
   type ReleaseJson,
 } from "../release-descriptor.js";
 import type { RunnerSyncAdapterRegistry } from "../runner-sync.js";
+import { detectInstallKind } from "../orchestrator.js";
+
+// ---------------------------------------------------------------------------
+// Tests for detectInstallKind (regression for compiled Bun binary detection)
+// ---------------------------------------------------------------------------
+
+describe("detectInstallKind", () => {
+  it("detects development mode when argv0 is 'bun'", () => {
+    // This simulates running via `bun run script.ts`
+    const result = detectInstallKind("bun");
+    expect(result).toBe("development");
+  });
+
+  it("detects development mode when argv0 is 'node'", () => {
+    const result = detectInstallKind("node");
+    expect(result).toBe("development");
+  });
+
+  it("detects development mode when argv0 is 'deno'", () => {
+    const result = detectInstallKind("deno");
+    expect(result).toBe("development");
+  });
+
+  it("detects development mode for paths containing runtime executables", () => {
+    // When running via bun run from /home/user/project
+    expect(detectInstallKind("/home/user/.bun/bin/bun")).toBe("development");
+    expect(detectInstallKind("/usr/local/bin/node")).toBe("development");
+    expect(detectInstallKind("/home/user/.deno/bin/deno")).toBe("development");
+  });
+
+  it("detects binary when execPath is an installed deck binary", () => {
+    // This is the key regression test: compiled Bun binary where argv[0]="bun"
+    // but execPath points to the real deck binary
+    const result = detectInstallKind("/usr/local/bin/deck");
+    expect(result).toBe("binary");
+  });
+
+  it("detects binary for production no-arg call with mocked execPath", () => {
+    // Regression test: compiled Bun binary in production, no argv0 provided.
+    // Should use process.execPath first, not process.argv[0].
+    // Save original values
+    const originalArgv = process.argv;
+    const originalExecPath = process.execPath;
+
+    try {
+      // Mock: argv[0] is "bun" (running via bun), but execPath is real binary
+      process.argv = ["bun"];
+      Object.defineProperty(process, "execPath", {
+        value: "/usr/local/bin/deck",
+        writable: true,
+      });
+
+      // Call without arguments - this is the production no-arg code path
+      const result = detectInstallKind();
+
+      expect(result).toBe("binary");
+    } finally {
+      // Restore original values
+      process.argv = originalArgv;
+      Object.defineProperty(process, "execPath", {
+        value: originalExecPath,
+        writable: true,
+      });
+    }
+  });
+
+  it("detects binary for common installation paths", () => {
+    expect(detectInstallKind("/usr/bin/deck")).toBe("binary");
+    expect(detectInstallKind("/usr/local/bin/deck")).toBe("binary");
+    expect(detectInstallKind("/home/linuxbrew/.linuxbrew/bin/deck")).toBe("binary");
+  });
+
+  it("detects homebrew for Homebrew Cellar paths", () => {
+    expect(detectInstallKind("/home/linuxbrew/Cellar/deck/1.0.0/bin/deck")).toBe("homebrew");
+    expect(detectInstallKind("/usr/local/Cellar/deck/1.0.0/bin/deck")).toBe("homebrew");
+    expect(detectInstallKind("/opt/homebrew/bin/deck")).toBe("homebrew");
+  });
+
+  it("returns binary for unrecognized paths (default case)", () => {
+    // Any path that is not dev runtime or homebrew defaults to binary
+    expect(detectInstallKind("/some/random/path/deck")).toBe("binary");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures

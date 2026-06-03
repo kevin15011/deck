@@ -140,18 +140,43 @@ export class OrchestratorError extends Error {
  * Detect the install kind of the running binary.
  *
  * - `binary` — installed via a release tarball (the default assumption).
- * - `homebrew` — `process.argv[0]` resolves to a Homebrew Cellar.
+ * - `homebrew` — `process.execPath` resolves to a Homebrew Cellar.
  * - `development` — running under `bun run` / `node` / `deno`.
  * - `unknown` — fallback when nothing matches.
+ *
+ * Note: In compiled Bun binaries, `process.argv[0]` can be the literal "bun"
+ * while `process.execPath` contains the actual binary path. We check
+ * execPath first to correctly identify installed binaries.
  */
-export function detectInstallKind(argv0: string = process.argv[0] ?? ""): "binary" | "homebrew" | "development" | "unknown" {
-  if (argv0.includes("bun") || argv0.includes("deno") || argv0.includes("node")) {
+export function detectInstallKind(argv0?: string): "binary" | "homebrew" | "development" | "unknown" {
+  // When called with no arguments (production use), prefer process.execPath over process.argv[0]
+  // to correctly handle compiled Bun binaries where argv[0] might be "bun" but execPath is the real binary.
+  // When called with explicit argv0 (tests), use that value for testing different scenarios.
+  let checkPath: string;
+  if (argv0 !== undefined) {
+    // Explicit argument provided (tests) - use it directly
+    checkPath = argv0 || process.execPath || "";
+  } else {
+    // No argument (production) - prefer execPath over argv[0]
+    checkPath = process.execPath || process.argv[0] || "";
+  }
+
+  // Check for development mode using the full path
+  if (
+    checkPath.includes("/bun") ||
+    checkPath.includes("/deno") ||
+    checkPath.includes("/node") ||
+    checkPath === "bun" ||
+    checkPath === "deno" ||
+    checkPath === "node"
+  ) {
     return "development";
   }
+  // Check for Homebrew-installed binary
   if (
-    argv0.includes("/Cellar/deck/") ||
-    argv0.includes("/homebrew/bin/deck") ||
-    argv0.includes("/homebrew/Cellar/")
+    checkPath.includes("/Cellar/deck/") ||
+    checkPath.includes("/homebrew/bin/deck") ||
+    checkPath.includes("/homebrew/Cellar/")
   ) {
     return "homebrew";
   }
@@ -243,6 +268,12 @@ export type OrchestratorResult = {
  * `readDeckConfig` uses a lazy dynamic import to keep this module loadable
  * in tests that don't have `@deck/core` available at the right path.
  */
+/**
+ * Build a default `OrchestratorDeps` from the running process.
+ *
+ * `readDeckConfig` uses a lazy dynamic import to keep this module loadable
+ * in tests that don't have `@deck/core` available at the right path.
+ */
 export async function buildDefaultOrchestratorDeps(): Promise<OrchestratorDeps> {
   let cached: import("@deck/core").NormalizedDeckConfig | undefined;
   const readDeckConfig = () => {
@@ -278,7 +309,10 @@ export async function buildDefaultOrchestratorDeps(): Promise<OrchestratorDeps> 
     },
     projectRoot: process.cwd(),
     readDeckConfig,
-    currentBinaryPath: process.argv[0] ?? "",
+    // Use process.execPath to correctly identify installed binary path.
+    // In compiled Bun binaries, process.argv[0] can be "bun" while
+    // process.execPath contains the actual binary path.
+    currentBinaryPath: process.execPath ?? process.argv[0] ?? "",
     installKind: detectInstallKind(),
   };
 }
