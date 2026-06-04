@@ -3,9 +3,15 @@
  *
  * Renders a structured `DoctorDiagnosticsResult` to console output with
  * visual status indicators and actionable fix suggestions.
+ *
+ * Updated by redesign-doctor-diagnostics to:
+ * - Use shared presentation model (doctor-presentation.ts)
+ * - Show executive summary at the start
+ * - Render new deck/binary/runner config sections
  */
 
 import pc from "picocolors";
+import { formatDoctorResult, formatExecutiveSummary } from "./doctor-presentation";
 import type { DoctorCategoryResult, DoctorCheckItem, DoctorDiagnosticsResult, DoctorRuntimeResult, DoctorStatus, DoctorBinaryResult } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -157,8 +163,26 @@ function renderBinary(binary: DoctorBinaryResult): void {
 /**
  * Render the doctor diagnostics result to stdout.
  *
- * Output is organized in sections: Runtimes, Packages (per runtime),
- * Memory Providers, MCP Configuration, and Binary (if running as binary).
+ * Uses the shared presentation model for consistent rendering between CLI and TUI.
+ *
+ * Output is organized:
+ * - Executive summary at the top
+ * - Sections in order: Deck → Runtimes → Memory → MCP → Binary → Runner Config
+ *
+ * Each item shows a status icon (✓/⚠/✗), the diagnostic message,
+ * and an actionable fix suggestion for non-OK items.
+ *
+ * ANSI colors are suppressed when stdout is not a TTY (non-interactive
+ * pipe or redirect), satisfying REQ-RPT-004 and REQ-RPT-005.
+ */
+/**
+ * Render the doctor diagnostics result to stdout.
+ *
+ * Uses the shared presentation model for consistent rendering between CLI and TUI.
+ *
+ * Output is organized:
+ * - Executive summary at the top
+ * - Sections in order: Deck → Runtimes → Memory → MCP → Binary → Runner Config
  *
  * Each item shows a status icon (✓/⚠/✗), the diagnostic message,
  * and an actionable fix suggestion for non-OK items.
@@ -167,14 +191,31 @@ function renderBinary(binary: DoctorBinaryResult): void {
  * pipe or redirect), satisfying REQ-RPT-004 and REQ-RPT-005.
  */
 export function renderDoctorReport(result: DoctorDiagnosticsResult): void {
+  // Use presentation model
+  const presentation = formatDoctorResult(result);
+
   console.log();
   console.log(c(pc.bold, "═".repeat(50)));
 
+    const summaryText = formatExecutiveSummary(presentation);
   const titleColor = result.hasCriticalErrors ? pc.red : pc.green;
-  const titleText = result.hasCriticalErrors ? "✗ Doctor Report — Critical Issues Found" : "✓ Doctor Report — All Checks Passed";
-  console.log(c(titleColor, ` ${titleText} `));
+  // Include backward-compatible title phrase
+  const titlePhrase = result.hasCriticalErrors ? "Critical Issues Found" : "All Checks Passed";
+  console.log(c(titleColor, ` Doctor Report — ${titlePhrase} `));
+  // Show executive summary on second line
+  console.log(c(pc.bold, ` ${summaryText} `));
   console.log(c(pc.bold, "═".repeat(50)));
   console.log();
+
+  // ── Deck Checks (Manifest, State, Config) ─────────────────────────────
+  const deckSections = result.deck ?? [];
+  if (deckSections.length > 0) {
+    console.log(c(pc.bold, "▸ Deck Installation"));
+    console.log();
+    for (const category of deckSections) {
+      renderCategory(category);
+    }
+  }
 
   // ── Runtimes ─────────────────────────────────────────────────────────────
   if (result.runtimes.length > 0) {
@@ -185,7 +226,7 @@ export function renderDoctorReport(result: DoctorDiagnosticsResult): void {
     }
   }
 
-  // ── Memory Providers ────────────────────────────────────────────────────
+  // ── Memory Providers ───────────────────────────────────────────────────
   if (result.memory.length > 0) {
     console.log(c(pc.bold, "▸ Memory Providers"));
     console.log();
@@ -203,7 +244,27 @@ export function renderDoctorReport(result: DoctorDiagnosticsResult): void {
     }
   }
 
-  // ── Binary (if available) ─────────────────────────────────────────
+  // ── Binary Validation ──────────────────────────────────────────────────
+  const binarySections = result.binaryCheck ?? [];
+  if (binarySections.length > 0) {
+    console.log(c(pc.bold, "▸ Binary Validation"));
+    console.log();
+    for (const category of binarySections) {
+      renderCategory(category);
+    }
+  }
+
+  // ── Runner Config ──────────────────────────────────────────────────────
+  const runnerConfigSections = result.runnerConfig ?? [];
+  if (runnerConfigSections.length > 0) {
+    console.log(c(pc.bold, "▸ Runner Configuration"));
+    console.log();
+    for (const category of runnerConfigSections) {
+      renderCategory(category);
+    }
+  }
+
+  // ── Binary (deck binary info, if available) ─────────────────────────────────────────
   if (result.binary) {
     renderBinary(result.binary);
   }
@@ -211,7 +272,10 @@ export function renderDoctorReport(result: DoctorDiagnosticsResult): void {
   // Footer summary
   const allOk = result.runtimes.every((r) => r.checks.every((c) => c.status === "ok"))
     && result.memory.every((c) => c.status === "ok")
-    && result.mcp.every((c) => c.status === "ok");
+    && result.mcp.every((c) => c.status === "ok")
+    && (result.deck ?? []).every((c) => c.status === "ok")
+    && (result.binaryCheck ?? []).every((c) => c.status === "ok")
+    && (result.runnerConfig ?? []).every((c) => c.status === "ok");
 
   if (allOk && !result.hasCriticalErrors) {
     console.log(c(pc.green, "All checks passed. Your environment looks good!"));
@@ -222,6 +286,7 @@ export function renderDoctorReport(result: DoctorDiagnosticsResult): void {
   }
   console.log();
 }
+
 
 /**
  * Determine whether `deck doctor` should exit with a non-zero code.

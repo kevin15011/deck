@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 
 import { runDoctorDiagnostics } from "../../doctor-command/doctor-diagnostics";
-import type { DoctorCategoryResult, DoctorCheckItem, DoctorDiagnosticsResult, DoctorRuntimeResult, DoctorStatus } from "../../doctor-command/types";
+import { formatDoctorResult, formatExecutiveSummary } from "../../doctor-command/doctor-presentation";
+import type { DoctorCategoryResult, DoctorCheckItem, DoctorDiagnosticsResult, DoctorRuntimeResult, DoctorStatus, DoctorPresentationModel } from "../../doctor-command/types";
 
 type DoctorScreenProps = {
   // No props — standalone screen
@@ -19,6 +20,16 @@ const STATUS_COLOR: Record<DoctorStatus, "green" | "yellow" | "red"> = {
   warning: "yellow",
   error: "red",
 };
+
+const SECTION_ORDER = [
+  "Manifest",
+  "State",
+  "Deck Config",
+  "Binaries",
+  "Runner Config",
+  "Memory",
+  "MCP",
+];
 
 function CheckItem({ item }: { item: DoctorCheckItem }) {
   const icon = STATUS_ICON[item.status] ?? "?";
@@ -68,7 +79,8 @@ function RuntimeSection({ runtime }: { runtime: DoctorRuntimeResult }) {
 
 function DiagnosticsReport({ result }: { result: DoctorDiagnosticsResult }) {
   const hasContent =
-    result.runtimes.length > 0 || result.memory.length > 0 || result.mcp.length > 0;
+    result.runtimes.length > 0 || result.memory.length > 0 || result.mcp.length > 0 ||
+    (result.deck?.length ?? 0) > 0 || (result.binaryCheck?.length ?? 0) > 0 || (result.runnerConfig?.length ?? 0) > 0;
 
   if (!hasContent) {
     return (
@@ -76,8 +88,34 @@ function DiagnosticsReport({ result }: { result: DoctorDiagnosticsResult }) {
     );
   }
 
+  // Use presentation model for ordered sections
+  const presentation = formatDoctorResult(result);
+
   return (
     <Box flexDirection="column">
+      {/* Executive summary at top */}
+      {presentation.summary ? (
+        <Box marginBottom={1}>
+          <Text bold>
+            {presentation.summary.error > 0
+              ? `✗ ${presentation.summary.error} errors`
+              : presentation.summary.warning > 0
+                ? `⚠ ${presentation.summary.warning} warnings`
+                : `✓ All OK`}
+          </Text>
+        </Box>
+      ) : null}
+
+      {/* Deck checks (Manifest, State, Config) */}
+      {result.deck && result.deck.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold underline>Deck Installation</Text>
+          {result.deck.map((category, i) => (
+            <CategorySection key={`deck-${i}-${category.category}`} category={category} />
+          ))}
+        </Box>
+      ) : null}
+
       {result.runtimes.length > 0 ? (
         <Box flexDirection="column">
           <Text bold underline>Runtimes</Text>
@@ -101,6 +139,26 @@ function DiagnosticsReport({ result }: { result: DoctorDiagnosticsResult }) {
           <Text bold underline>MCP</Text>
           {result.mcp.map((category, i) => (
             <CategorySection key={`mcp-${i}-${category.category}`} category={category} />
+          ))}
+        </Box>
+      ) : null}
+
+      {/* Binary validation */}
+      {result.binaryCheck && result.binaryCheck.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold underline>Binary Validation</Text>
+          {result.binaryCheck.map((category, i) => (
+            <CategorySection key={`binary-${i}-${category.category}`} category={category} />
+          ))}
+        </Box>
+      ) : null}
+
+      {/* Runner config */}
+      {result.runnerConfig && result.runnerConfig.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold underline>Runner Configuration</Text>
+          {result.runnerConfig.map((category, i) => (
+            <CategorySection key={`runner-${i}-${category.category}`} category={category} />
           ))}
         </Box>
       ) : null}
@@ -133,8 +191,22 @@ export function DoctorScreen(_props: DoctorScreenProps) {
     };
   }, []);
 
+  // Compute executive summary for display
+  const summaryText = result
+    ? formatExecutiveSummary(formatDoctorResult(result))
+    : null;
+
   return (
     <Box flexDirection="column">
+      {/* Executive summary at top - prominent */}
+      {summaryText && result && (
+        <Box marginBottom={1}>
+          <Text bold color={result.hasCriticalErrors ? "red" : "green"}>
+            {summaryText}
+          </Text>
+        </Box>
+      )}
+
       {result?.hasCriticalErrors ? (
         <Text color="red" bold>
           ⚠ Critical issues detected — review the report below.

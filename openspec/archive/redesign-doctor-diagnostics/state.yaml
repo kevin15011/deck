@@ -1,0 +1,231 @@
+change: redesign-doctor-diagnostics
+created: "2026-06-03"
+current_phase: archive
+current_status: archived
+current_artifact: archive-report.md
+current_provenance: deck-developer-archive
+
+phases:
+  explore:
+    status: completed
+    artifact: openspec/changes/redesign-doctor-diagnostics/exploration.md
+    completed_at: "2026-06-03"
+    provenance:
+      agent: deck-developer-explorer
+      source_request: "Rediseñar/mejorar el comando `deck doctor` y la pantalla TUI Doctor. Validar binarios de paquetes, paths, configuraciones de runners según lo que el usuario instaló. Actual: demasiado superficial."
+      verification:
+        artifact_exists: true
+        byte_count: 18264
+        required_files_checked:
+          - openspec/changes/redesign-doctor-diagnostics/exploration.md
+          - openspec/changes/redesign-doctor-diagnostics/state.yaml
+          - openspec/changes/redesign-doctor-diagnostics/events.yaml
+  proposal:
+    status: completed
+    artifact: openspec/changes/redesign-doctor-diagnostics/proposal.md
+    completed_at: "2026-06-03"
+    provenance:
+      agent: deck-developer-proposal
+      source_artifacts:
+        - openspec/changes/redesign-doctor-diagnostics/exploration.md
+        - openspec/changes/redesign-doctor-diagnostics/state.yaml
+        - openspec/changes/redesign-doctor-diagnostics/events.yaml
+      decision: "Option A completa: extender Doctor con Manifest/State/Deck Config/Binary/Runner Config + mejorar presentación CLI/TUI; sin --fix en primera iteración."
+  spec:
+    status: completed
+    artifact: openspec/changes/redesign-doctor-diagnostics/spec.md
+    completed_at: "2026-06-03"
+    provenance:
+      agent: deck-developer-spec
+      registry_write: deferred
+      reconciled_by: deck-developer-orchestrator
+      verification:
+        artifact_exists: true
+        byte_count: 22581
+      summary:
+        requirements: 21
+        scenarios: 27
+        blockers: none
+  design:
+    status: completed
+    artifact: openspec/changes/redesign-doctor-diagnostics/design.md
+    completed_at: "2026-06-03"
+    provenance:
+      agent: deck-developer-design
+      registry_write: deferred
+      reconciled_by: deck-developer-orchestrator
+      verification:
+        artifact_exists: true
+        byte_count: 20285
+      summary:
+        risk_level: Medium
+        blockers: none
+  tasks:
+    status: completed
+    artifact: openspec/changes/redesign-doctor-diagnostics/tasks.md
+    completed_at: "2026-06-03"
+    provenance:
+      agent: deck-developer-task
+      verification:
+        artifact_exists: true
+        byte_count: 13791
+      summary:
+        total_tasks: 7
+        groups:
+          shared: 2
+          checks_core: 2
+          presentation: 3
+        all_owners: General Apply
+        high_complexity: 1
+        open_questions_resolved: 5
+        blockers: none
+  apply:
+    status: completed_with_repair
+    artifact: openspec/changes/redesign-doctor-diagnostics/apply-progress.md
+    completed_at: "2026-06-03"
+    provenance:
+      agent: deck-developer-apply_general
+      verification:
+        artifact_exists: true
+        typecheck_clean: true (doctor files)
+      summary:
+        total_tasks: 8
+        completed: 8
+        files_created: 4
+        files_modified: 4
+        blockers_fixed: 8
+        major_findings_addressed: 6
+      repair:
+        - date: "2026-06-03"
+          trigger: "Review requested changes after initial apply"
+          findings_fixed:
+            - B1: Manifest missing detection - now checks file existence before readManifest
+            - B2: Missing binaries now error not warning
+            - B3: Runner config uses adapter validation
+            - B4: Deck config checks readability
+            - B5: Manifest drift paths redacted
+            - B6: Binary version output redacted
+            - B7: Title regression fixed
+            - B8: Test files created
+          test_results:
+            doctor-report: "15 pass"
+            doctor-checks: "9 pass"
+            doctor-presentation: "12 pass"
+            doctor-diagnostics: "13 pass"
+        - date: "2026-06-03"
+          trigger: "Second focused repair - verify/review blockers B4-B6, M5-M6"
+          findings_fixed:
+            - B4: Added injected access() function for real R_OK|X_OK readability probe
+            - B5: Added redactPath() helper to fold home/temp paths (~, {tmp})
+            - B6: Binary version output uses redactPath() not redact()
+            - M5: Spawn stdio piped, stdout/stderr capped at 4 KiB
+            - M6: Fixed drift math - shows all 10 displayed, residual = total - 10
+            - Cleaned up: removed // B-FIX:// M-FIX: markers and unused imports
+          test_results:
+            doctor-checks: "10 pass (added B4 readability test, updated B6 test)"
+            total: "50 pass"
+  verify:
+    status: passed_with_warnings
+    artifact: openspec/changes/redesign-doctor-diagnostics/verify-report.md
+    completed_at: "2026-06-03"
+    provenance:
+      agent: deck-developer-verify
+      registry_write: deferred
+      reconciled_by: deck-developer-orchestrator
+      verification:
+        artifact_exists: true
+        byte_count: 7216
+      summary:
+        focused_tests: "50/50 passed"
+        build: "pass (bun run build:dry-run)"
+        typecheck: "baseline fail outside changed doctor files; changed-file errors 0"
+        blockers: none
+  review:
+    status: approved_with_changes
+    artifact: openspec/changes/redesign-doctor-diagnostics/review-report.md
+    completed_at: "2026-06-03"
+    provenance:
+      agent: deck-developer-review
+      registry_write: deferred
+      reconciled_by: deck-developer-orchestrator
+      verification:
+        artifact_exists: true
+        byte_count: 24898
+      summary:
+        blockers: 0
+        majors: 0
+        minors: 7
+        nits: 4
+        non_gating_followups: true
+  archive:
+    status: archived
+    artifact: openspec/changes/redesign-doctor-diagnostics/archive-report.md
+    completed_at: "2026-06-03"
+    provenance:
+      agent: deck-developer-archive
+      target: openspec/archive/redesign-doctor-diagnostics/
+      verification:
+        artifact_exists: true
+        byte_count: 10456
+      summary:
+        total_requirements: 21
+        total_tasks: 8
+        verify_result: passed_with_warnings
+        review_rating: approved_with_changes
+        followups: 9
+
+previous_phases:
+  - explore
+  - proposal
+  - spec
+  - design
+  - tasks
+  - apply
+  - verify
+  - review
+  - archive
+
+artifacts:
+  - phase: explore
+    artifact: exploration.md
+    provenance: explorer
+  - phase: proposal
+    artifact: proposal.md
+    provenance: proposal
+  - phase: spec
+    artifact: spec.md
+    provenance: deck-developer-spec
+  - phase: design
+    artifact: design.md
+    provenance: deck-developer-design
+  - phase: tasks
+    artifact: tasks.md
+    provenance: deck-developer-task
+  - phase: apply
+    artifact: apply-progress.md
+    provenance: deck-developer-apply-general
+  - phase: verify
+    artifact: verify-report.md
+    provenance: deck-developer-verify
+  - phase: review
+    artifact: review-report.md
+    provenance: deck-developer-review
+  - phase: archive
+    artifact: archive-report.md
+    provenance: deck-developer-archive
+
+scope_amendments: []
+
+blockers: []
+
+next_phase_input:
+  ready_for_archive: true
+  archived: true
+  follow_ups_count: 9
+  follow_ups_priority:
+    - "M3: TUI icon/color duplication removal"
+    - "m2: M6 call-site test for drift message"
+    - "m3: XDG_CONFIG_HOME for runner config"
+    - "m4: binaryCheck -> binaryChecks rename"
+  ready_for_apply: false
+  ready_for_verify: false

@@ -7,6 +7,12 @@
  *
  * The function never throws — it always returns a structured result
  * (REQ-DIAG-008) and never exposes credentials in any message (REQ-DIAG-009).
+ *
+ * Extended by redesign-doctor-diagnostics to include:
+ * - Manifest/State/Deck Config checks (via doctor-checks.ts)
+ * - Binary validation (executable + version)
+ * - Runner config validation
+ * - Summary with counts by severity
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -17,12 +23,14 @@ import { inspectPiEnvironment, redact, redactDiagnostic, reviewPiRequiredTools, 
 import { inspectOpenCodeEnvironment, reviewOpenCodeTools } from "@deck/adapter-opencode";
 
 import { detectSelectedRuntimes, type EnvironmentId } from "../runtime-detection";
+import { runDeckChecks } from "./doctor-checks";
 import type {
   DoctorCategoryResult,
   DoctorCheckItem,
   DoctorDiagnosticsResult,
   DoctorRuntimeResult,
   DoctorStatus,
+  DoctorSummary,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -394,6 +402,52 @@ function checkOpenCodeMcp(): DoctorCategoryResult {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: Calculate summary from all category results
+// ---------------------------------------------------------------------------
+
+function calculateSummary(
+  deck: DoctorCategoryResult[],
+  binary: DoctorCategoryResult[],
+  runnerConfig: DoctorCategoryResult[],
+  runtimes: DoctorRuntimeResult[],
+  memory: DoctorCategoryResult[],
+  mcp: DoctorCategoryResult[],
+): DoctorSummary {
+  let ok = 0;
+  let warning = 0;
+  let error = 0;
+  const sections: string[] = [];
+
+  // Helper to count items in categories
+  const countCategory = (categories: DoctorCategoryResult[]) => {
+    for (const cat of categories) {
+      sections.push(cat.category);
+      if (cat.status === "error") error++;
+      else if (cat.status === "warning") warning++;
+      else ok++;
+    }
+  };
+
+  // Count all categories
+  countCategory(deck);
+  countCategory(binary);
+  countCategory(runnerConfig);
+
+  // Runtime checks (each runtime is one category)
+  for (const rt of runtimes) {
+    sections.push(rt.name);
+    if (rt.checks.some((c) => c.status === "error")) error++;
+    else if (rt.checks.some((c) => c.status === "warning")) warning++;
+    else ok++;
+  }
+
+  countCategory(memory);
+  countCategory(mcp);
+
+  return { ok, warning, error, sections };
+}
+
+// ---------------------------------------------------------------------------
 // Main orchestrator
 // ---------------------------------------------------------------------------
 
@@ -402,6 +456,8 @@ function checkOpenCodeMcp(): DoctorCategoryResult {
  *
  * Never throws — every sub-check is wrapped in try/catch so one failure
  * does not prevent others from running (REQ-DIAG-007).
+ *
+ * Extended to include deck-owned checks (manifest, state, config, binaries, runner config).
  *
  * @returns DoctorDiagnosticsResult
  */
@@ -475,18 +531,57 @@ export async function runDoctorDiagnostics(): Promise<DoctorDiagnosticsResult> {
   const opencodeMcpResult = checkOpenCodeMcp();
   const mcpResults: DoctorCategoryResult[] = [piMcpResult, opencodeMcpResult];
 
-  // 5. Determine hasCriticalErrors
+  // 5. Deck-owned checks (manifest, state, config, binaries, runner config)
+  let deckResults: DoctorCategoryResult[] = [];
+  let binaryResults: DoctorCategoryResult[] = [];
+  let runnerConfigResults: DoctorCategoryResult[] = [];
+  try {
+    const deckChecks = await runDeckChecks();
+    deckResults = deckChecks.deck;
+    binaryResults = deckChecks.binary;
+    runnerConfigResults = deckChecks.runnerConfig;
+  } catch (err) {
+    // If deck checks fail entirely, add error category
+    deckResults = [
+      {
+        category: "Deck Checks",
+        status: "error",
+        items: [{ status: "error", message: `Deck checks failed: ${redact(String(err))}` }],
+      },
+    ];
+  }
+
+  // 6. Calculate summary
+  const summary = calculateSummary(
+    deckResults,
+    binaryResults,
+    runnerConfigResults,
+    runtimes,
+    memoryResults,
+    mcpResults,
+  );
+
+  // 7. Determine hasCriticalErrors (including new deck/binary/runner checks)
   const noRuntimes = runtimes.length === 0 || runtimes.every((r) => r.installed === false);
   const hasCriticalErrors =
     noRuntimes ||
     memoryCritical ||
     mcpResults.some((r) => r.status === "error") ||
-    runtimes.some((r) => r.checks.some((c) => c.category === "Runtime" && c.status === "error"));
+    runtimes.some((r) => r.checks.some((c) => c.category === "Runtime" && c.status === "error")) ||
+    // New: deck, binary, runnerConfig critical errors
+    deckResults.some((r) => r.status === "error") ||
+    binaryResults.some((r) => r.status === "error") ||
+    runnerConfigResults.some((r) => r.status === "error");
 
   return {
     runtimes,
     memory: memoryResults,
     mcp: mcpResults,
     hasCriticalErrors,
+    // New fields from redesign-doctor-diagnostics
+    deck: deckResults,
+    binaryCheck: binaryResults,
+    runnerConfig: runnerConfigResults,
+    summary,
   };
 }

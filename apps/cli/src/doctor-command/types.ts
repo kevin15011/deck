@@ -64,6 +64,26 @@ export interface DoctorBinaryResult {
 }
 
 /**
+ * Summary of all diagnostics with counts by severity.
+ */
+export interface DoctorSummary {
+  ok: number;
+  warning: number;
+  error: number;
+  sections: string[];
+}
+
+/**
+ * Presentation model for CLI/TUI rendering.
+ * Contains summary + ordered sections for consistent display.
+ */
+export interface DoctorPresentationModel {
+  summary: DoctorSummary;
+  sections: DoctorCategoryResult[];
+  hasCriticalErrors: boolean;
+}
+
+/**
  * Complete result of the doctor diagnostics run.
  */
 export interface DoctorDiagnosticsResult {
@@ -72,4 +92,12 @@ export interface DoctorDiagnosticsResult {
   mcp: DoctorCategoryResult[];
   binary?: DoctorBinaryResult;
   hasCriticalErrors: boolean;
+  /** Manifest/State/XDG checks (optional, added by redesign) */
+  deck?: DoctorCategoryResult[];
+  /** Binary validation results (optional, added by redesign) */
+  binaryCheck?: DoctorCategoryResult[];
+  /** Runner config validation results (optional, added by redesign) */
+  runnerConfig?: DoctorCategoryResult[];
+  /** Summary with counts by severity (optional, added by redesign) */
+  summary?: DoctorSummary;
 }
