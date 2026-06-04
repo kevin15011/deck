@@ -6,10 +6,14 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { join } from "node:path";
+import { mkdirSync, rmSync } from "node:fs";
 
 describe("runtime/paths.ts", () => {
   type Module = typeof import("../paths");
   let mod: Module;
+  let tmpDir: string;
+  let originalHome: string | undefined;
 
   const savedEnv: Record<string, string | undefined> = {};
 
@@ -22,6 +26,12 @@ describe("runtime/paths.ts", () => {
   }
 
   beforeEach(async () => {
+    // Create temp dir and stub HOME to avoid reading real user config
+    tmpDir = join("/tmp", `deck-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(tmpDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+
     mod = await import("../paths");
     // The module caches XDG path lookups; reset the cache so each test
     // can manipulate the environment and observe fresh resolutions.
@@ -35,6 +45,17 @@ describe("runtime/paths.ts", () => {
     setEnv("XDG_CONFIG_HOME", savedEnv.XDG_CONFIG_HOME);
     setEnv("XDG_STATE_HOME", savedEnv.XDG_STATE_HOME);
     setEnv("XDG_CACHE_HOME", savedEnv.XDG_CACHE_HOME);
+    // Restore HOME and cleanup temp dir
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 
   // --- XDG split paths --------------------------------------------------
