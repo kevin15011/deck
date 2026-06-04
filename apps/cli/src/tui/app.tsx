@@ -812,7 +812,11 @@ export function DeckApp() {
           
           // Map install results to the matched tools
           for (const tool of toolsToInstall) {
-            const installResult = installResults.find(r => r.tool === tool.id);
+            // Match by tool.id (lowercase) or tool.name case-insensitively
+            const installResult = installResults.find(r => 
+              r.tool.toLowerCase() === tool.id.toLowerCase() || 
+              r.tool.toLowerCase() === tool.name.toLowerCase()
+            );
             results.push({ 
               success: installResult?.success ?? false, 
               message: installResult?.message 
