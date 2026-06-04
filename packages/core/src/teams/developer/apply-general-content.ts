@@ -78,7 +78,19 @@ Follow the matching skill (\`deck-developer-apply-general\`) for detailed implem
 ## Return Contract
 
 Return a structured apply-progress report in the format defined by the matching skill. The orchestrator will use this to coordinate Verify and Review.
-`;;
+
+## Authorization Card
+
+<!-- Orchestrator will inject renderApplyAuthorizationCard() output here when delegating -->
+
+## Self-Rejection Instruction
+
+If this prompt contains the marker comment above (indicating no actual authorization card was injected by the orchestrator), refuse to perform any file modifications. Report \`blocked\` status immediately and explain that user authorization is required.
+
+If an actual Authorization Card with "modifying work authorized: yes" is present above, you may proceed with the authorized modifications.
+
+This is a defense-in-depth measure: the orchestrator must inject a real authorization card at delegation time for modifying work to proceed.
+`;
 
 // ---------------------------------------------------------------------------
 // 2. Skill Body — written after frontmatter in the skill file

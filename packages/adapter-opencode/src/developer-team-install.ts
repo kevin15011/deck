@@ -58,6 +58,7 @@ import {
   type MemoryInjectionBundle,
   type MemoryToolBinding,
 } from "@deck/core/memory/adaptive-memory";
+import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { readDeckConfig } from "@deck/core/config/deck-config";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
@@ -467,6 +468,12 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     reasoningEffortOverrides?: Record<string, string>;
     /** Optional personality override; when absent, reads from .deck/config.json */
     personality?: OrchestratorPersonality;
+    /**
+     * Optional modification authorization for apply agents.
+     * When provided, authorization card is injected into apply-agent prompts (REQ-OA-005).
+     * This enables runtime authorization card injection during install-time prompt generation.
+     */
+    authorization?: ModificationAuthorization;
   },
 ): OpenCodeDeveloperTeamInstallPlan {
   const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
@@ -527,12 +534,14 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
 
   // Prompt generation plan - pass memoryBundle for provider-specific adaptive memory injection
   // This ensures provider isolation and OpenSpec authority are maintained
+  // REQ-OA-005: Pass authorization to enable runtime authorization card injection
   const promptGenerationPlan = buildPromptGenerationPlan({
     configDir,
     projectRoot,
     capabilityInstructions,
     personality: resolvedPersonality,
     memoryBundle,
+    authorization: options?.authorization,
   });
 
   // Command generation plan

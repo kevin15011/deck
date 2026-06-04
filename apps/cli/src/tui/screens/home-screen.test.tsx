@@ -42,6 +42,7 @@ describe("HomeScreen release-check banner (T3.3)", () => {
       version: "1.2.0",
       tag: "v1.2.0",
       channel: "stable",
+      reason: "newer-version",
       items: [
         {
           id: "binary-1",
@@ -80,6 +81,7 @@ describe("HomeScreen release-check banner (T3.3)", () => {
       version: "1.2.0",
       tag: "v1.2.0",
       channel: "stable",
+      reason: "newer-version",
       items: [
         {
           id: "binary-darwin",
@@ -105,6 +107,7 @@ describe("HomeScreen release-check banner (T3.3)", () => {
       version: "1.2.0",
       tag: "v1.2.0",
       channel: "stable",
+      reason: "newer-version",
       items: [
         {
           id: "content-1",
@@ -129,6 +132,7 @@ describe("HomeScreen release-check banner (T3.3)", () => {
       version: "1.2.0",
       tag: "v1.2.0",
       channel: "stable",
+      reason: "newer-version",
       items: [],
       descriptor: null,
       advisory: {
@@ -155,6 +159,7 @@ describe("HomeScreen release-check banner (T3.3)", () => {
       version: "1.2.0",
       tag: "v1.2.0",
       channel: "beta",
+      reason: "newer-version",
       items: [],
       descriptor: null,
       channelEol: {
@@ -180,6 +185,7 @@ describe("HomeScreen release-check banner (T3.3)", () => {
       version: "1.2.0",
       tag: "v1.2.0",
       channel: "stable",
+      reason: "newer-version",
       items: [],
       descriptor: null,
       advisory: {
@@ -208,5 +214,33 @@ describe("HomeScreen release-check banner (T3.3)", () => {
     expect(output).toContain("Migrate to the new release channel.");
     // Channel EOL banner is hidden when an advisory is present.
     expect(output).not.toContain("Channel deprecation notice");
+  });
+
+  test("renders 'New build available' for same-version-different-commit", () => {
+    const state: ReleaseCheckState = {
+      kind: "available",
+      version: "1.2.0",
+      tag: "v1.2.0",
+      channel: "stable",
+      reason: "same-version-different-commit",
+      currentCommit: "abc1234",
+      latestCommit: "def5678",
+      items: [
+        {
+          id: "binary-1",
+          kind: "binary",
+          required: true,
+          platform: "linux-x64",
+          asset_name: "deck_v1.2.0_linux-x64.tar.gz",
+          url: "https://example.com/a.tar.gz",
+          sha256: "a".repeat(64),
+          notes: "",
+        },
+      ],
+      descriptor: null,
+    };
+    const output = renderToString(<HomeScreen cursor={0} releaseCheck={state} />);
+    expect(output).toContain("New build available: v1.2.0");
+    expect(output).toContain("def5678");
   });
 });

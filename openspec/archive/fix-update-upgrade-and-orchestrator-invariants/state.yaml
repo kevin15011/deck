@@ -1,0 +1,28 @@
+phase: archive
+status: archived
+artifacts:
+  - path: exploration.md
+    description: "Exploration of update/upgrade detection bug (same-version different-commit) and orchestrator invariant enforcement gaps after process incident"
+  - path: proposal.md
+    description: "Proposal for commit-aware update detection and maximum-priority Orchestrator invariant/autonomy enforcement"
+  - path: spec.md
+    description: "Requirements and acceptance scenarios for update/upgrade detection and Orchestrator autonomy invariants"
+  - path: design.md
+    description: "Technical design for commit-aware update checks and layered Orchestrator authorization gates"
+  - path: tasks.md
+    description: "Atomic implementation tasks: incident disposition, Track A (commit-aware detection), Track B (orchestrator autonomy controls)"
+  - path: apply-progress.md
+    description: "Apply phase complete: all Tasks 1-10 completed + 5 repair cycles"
+  - path: verify-report.md
+    description: "Verification report: PASS WITH WARNINGS (pre-existing repo-wide typecheck, not change-related)"
+  - path: review-report.md
+    description: "Review report: APPROVE WITH CHANGES; M1 downgraded to MINOR, R2 ternary fixed"
+  - path: archive-report.md
+    description: "Archive report: final traceability, follow-ups, and git suggestion context"
+provenance:
+  initiated_by: user
+  date: "2026-06-04"
+  mode: automatic
+archive:
+  date: "2026-06-04"
+  location: openspec/archive/fix-update-upgrade-and-orchestrator-invariants/

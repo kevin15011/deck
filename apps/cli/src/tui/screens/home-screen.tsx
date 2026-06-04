@@ -80,10 +80,20 @@ function AvailableBanner({ releaseCheck }: { releaseCheck: Extract<ReleaseCheckS
   const summary = summarizeReleaseItems(releaseCheck.items, safePlatformTriple());
   const requiredCount = releaseCheck.items.filter((i) => i.required).length;
   const requiredLabel = requiredCount > 0 ? `${requiredCount} required` : "all optional";
+
+  // Use reason field to distinguish same-version updates from semver upgrades (REQ-UD-007)
+  const isSameVersionUpdate = releaseCheck.reason === "same-version-different-commit";
+  const bannerText = isSameVersionUpdate
+    ? `New build available: v${releaseCheck.version}`
+    : `Upgrade available: v${releaseCheck.version}`;
+
   return (
     <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor="green" paddingX={1}>
-      <Text color="green" bold>Upgrade available: v{releaseCheck.version}</Text>
+      <Text color="green" bold>{bannerText}</Text>
       <Text dimColor>{summary} · {requiredLabel}</Text>
+      {isSameVersionUpdate && releaseCheck.latestCommit && (
+        <Text dimColor>Commit: {releaseCheck.latestCommit.slice(0, 7)}</Text>
+      )}
     </Box>
   );
 }

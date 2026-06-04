@@ -12,6 +12,7 @@ import {
 } from "./developer-team-install";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
+import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import type {
   AdaptiveMemoryProvider,
   MemoryInjectionBundle,

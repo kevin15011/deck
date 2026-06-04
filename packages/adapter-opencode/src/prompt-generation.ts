@@ -17,6 +17,8 @@ import { buildAdaptiveMemoryInstructionBundle } from "../../core/src/teams/devel
 import type { CapabilityInstructionBundle } from "@deck/core";
 import { type OrchestratorPersonality } from "@deck/core/config/deck-config";
 import { type MemoryInjectionBundle, ADAPTIVE_MEMORY_SECTION_HEADING, ADAPTIVE_MEMORY_AUXILIARY_POLICY } from "@deck/core/memory/adaptive-memory";
+import { composeApplyAgentPrompt } from "@deck/core/teams/developer/orchestrator-content";
+import type { ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 
 // Provider IDs for isolation - ensure prompts don't mix tools from different providers
 const VALID_SUPERMEMORY_TOOL_NAMES = ["memory", "recall", "whoAmI"];
@@ -47,6 +49,12 @@ export type GeneratePromptFilesOptions = {
    * Pass "supermemory" or "engram" if MCP config has Supermemory server enabled.
    */
   activeMemoryProviderFromConfig?: "supermemory" | "engram";
+  /**
+   * Optional modification authorization for apply agents.
+   * When provided for apply agents (general/backend/frontend), the authorization card
+   * is injected at runtime into the prompt, satisfying REQ-OA-005.
+   */
+  authorization?: ModificationAuthorization;
   /** Override writeFile for DI in tests */
   writeFile?: (path: string, content: string, encoding: "utf-8") => void;
   /** Override mkdir for DI in tests */
@@ -242,9 +250,24 @@ function buildProviderAdaptiveMemorySection(
 // Prompt content builder using core content registry
 // ---------------------------------------------------------------------------
 
+// Apply agent IDs - these receive authorization card injection at runtime
+const APPLY_AGENT_IDS = [
+  "deck-developer-apply-general",
+  "deck-developer-apply-backend",
+  "deck-developer-apply-frontend",
+] as const;
+
 /**
  * Build prompt content with optional explicit provider for filtering.
  * REQ-R25 (2026-05-29): explicitProvider enables filtering even when memoryBundle is undefined.
+ *
+ * @param agent - The agent to build prompt for
+ * @param skillPath - Path to the skill file
+ * @param capabilityInstructions - Optional capability instructions bundle
+ * @param personality - Optional orchestrator personality
+ * @param memoryBundle - Optional memory injection bundle
+ * @param explicitProvider - Explicit provider for filtering
+ * @param authorization - Optional modification authorization for apply agents (injects real authorization card at runtime)
  */
 function buildPromptContent(
   agent: DeveloperTeamAgent,
@@ -253,6 +276,7 @@ function buildPromptContent(
   personality: OrchestratorPersonality | undefined,
   memoryBundle?: MemoryInjectionBundle,
   explicitProvider?: "supermemory" | "engram",
+  authorization?: ModificationAuthorization,
 ): string {
   const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions, personality } : { personality });
   if (!content) {
@@ -260,10 +284,18 @@ function buildPromptContent(
   }
 
   const isOrchestrator = agent.id === "deck-developer-orchestrator";
-  const baseContent = isOrchestrator
+  let baseContent = isOrchestrator
     ? (getTeamSessionInstructions("developer-team", { capabilityInstructions, personality }) ??
       content.agentBody)
     : content.agentBody;
+
+  // REQ-OA-005: Inject authorization card for apply agents when authorization is provided
+  // This ensures the apply agent receives real authorization context at runtime,
+  // making the Self-Rejection Instruction's "may proceed" clause reachable.
+  const isApplyAgent = APPLY_AGENT_IDS.includes(agent.id as (typeof APPLY_AGENT_IDS)[number]);
+  if (isApplyAgent && authorization) {
+    baseContent = composeApplyAgentPrompt(baseContent, authorization);
+  }
 
   // Determine surface for memory injection
   const memorySurface = agent.id === "deck-developer-orchestrator" ? "session" : "agent";
@@ -351,9 +383,14 @@ export function buildPromptGenerationPlan(
      * Auto-detects from opencode.json if not provided.
      */
     activeMemoryProviderFromConfig?: "supermemory" | "engram";
+    /**
+     * Optional modification authorization for apply agents.
+     * When provided, authorization card is injected into apply-agent prompts (REQ-OA-005).
+     */
+    authorization?: ModificationAuthorization;
   },
 ): PlannedPromptFile[] {
-  const { configDir, projectRoot, capabilityInstructions, personality, memoryBundle } = options;
+  const { configDir, projectRoot, capabilityInstructions, personality, memoryBundle, authorization } = options;
 
   // REQ-R25: Auto-detect provider from MCP config if not explicitly provided
   const explicitProvider =
@@ -362,7 +399,8 @@ export function buildPromptGenerationPlan(
   // R31: If a provider is detected but no memoryBundle is provided,
   // use the default instruction bundle so prompts include tool references.
   // This ensures Supermemory prompts have `memory`/`recall` even without explicit bundle.
-  const effectiveMemoryBundle = memoryBundle ?? (explicitProvider ? buildAdaptiveMemoryInstructionBundle() : undefined);
+  // Note: buildAdaptiveMemoryInstructionBundle returns CapabilityInstructionBundle, not MemoryInjectionBundle.
+  const effectiveCapabilityInstructions = capabilityInstructions ?? (explicitProvider ? buildAdaptiveMemoryInstructionBundle() : undefined);
 
   const promptsDir = join(configDir, "prompts", "deck-developer");
 
@@ -372,10 +410,11 @@ export function buildPromptGenerationPlan(
     const content = buildPromptContent(
       agent,
       skillPath,
-      capabilityInstructions,
+      effectiveCapabilityInstructions,
       personality,
-      effectiveMemoryBundle,
+      memoryBundle,
       explicitProvider ?? undefined,
+      authorization,
     );
 
     return { agent, absolutePath: promptPath, content };
@@ -410,4 +449,31 @@ export function applyPromptGeneration(
 export function buildPromptReference(configDir: string, agentId: string): string {
   const promptPath = join(configDir, "prompts", "deck-developer", `${agentId}.md`);
   return `{file:${promptPath}}`;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime authorization card injection (for orchestrator delegation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compose an apply-agent prompt with authorization card at runtime.
+ *
+ * This function is called by the orchestrator when delegating modifying work
+ * to an apply agent. It injects the authorization card (with change name,
+ * task IDs, allowed file scope, and refusal instruction) into the base
+ * apply-agent prompt.
+ *
+ * REQ-OA-005: The Orchestrator MUST inject a compact invariant/authorization
+ * card into every apply-agent prompt so that specialist agents can self-reject
+ * untriaged or unauthorized modifying work.
+ *
+ * @param basePrompt - The base apply-agent prompt content (e.g., from reading the prompt file)
+ * @param auth - The modification authorization from the orchestrator's delegation context
+ * @returns The composed prompt with authorization card prepended
+ */
+export function composeApplyAgentPromptWithAuth(
+  basePrompt: string,
+  auth: ModificationAuthorization,
+): string {
+  return composeApplyAgentPrompt(basePrompt, auth);
 }

@@ -485,3 +485,109 @@ describe("serena capability instruction propagation", () => {
     expect(explorer.content).toContain("Codebase Memory");
   });
 });
+describe("authorization card injection (REQ-OA-005)", () => {
+  // Use type assertion to match ModificationAuthorization type
+  const mockAuthorization = {
+    requestClassification: "Run SDD" as const,
+    userAuthorizedModification: true,
+    sddChange: "test-change",
+    explorerArtifact: "/tmp/openspec/changes/test-change/explorer-report.md",
+    proposalArtifact: "/tmp/openspec/changes/test-change/proposal.md",
+    specArtifact: "/tmp/openspec/changes/test-change/spec.md",
+    designArtifact: "/tmp/openspec/changes/test-change/design.md",
+    taskArtifact: "/tmp/openspec/changes/test-change/tasks.md",
+    allowedTargets: ["src/**", "packages/*"] as const,
+    blockedTargets: ["*.test.ts"] as const,
+  };
+
+  test("apply-general agent receives authorization card when authorization provided", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      authorization: mockAuthorization,
+    });
+
+    const applyGeneral = plan.find((p) => p.agent.id === "deck-developer-apply-general")!;
+    // Verify injection happened - card contains these elements
+    expect(applyGeneral.content).toContain("## Pre-Delegation Gate Checklist");
+    expect(applyGeneral.content).toContain("modifying work authorized: yes");
+    // INV-004 is triage check (shows "Triage completed")
+    expect(applyGeneral.content).toContain("Triage completed");
+    // INV-006 is Explorer-first check (shows "Explorer-first evidence")
+    expect(applyGeneral.content).toContain("Explorer-first evidence");
+  });
+
+  test("apply-backend agent receives authorization card when authorization provided", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      authorization: mockAuthorization,
+    });
+
+    const applyBackend = plan.find((p) => p.agent.id === "deck-developer-apply-backend")!;
+    expect(applyBackend.content).toContain("## Pre-Delegation Gate Checklist");
+    expect(applyBackend.content).toContain("modifying work authorized: yes");
+    expect(applyBackend.content).toContain("Triage completed");
+    expect(applyBackend.content).toContain("Explorer-first evidence");
+  });
+
+  test("apply-frontend agent receives authorization card when authorization provided", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      authorization: mockAuthorization,
+    });
+
+    const applyFrontend = plan.find((p) => p.agent.id === "deck-developer-apply-frontend")!;
+    expect(applyFrontend.content).toContain("## Pre-Delegation Gate Checklist");
+    expect(applyFrontend.content).toContain("modifying work authorized: yes");
+    expect(applyFrontend.content).toContain("Triage completed");
+    expect(applyFrontend.content).toContain("Explorer-first evidence");
+  });
+
+  test("non-apply agents do NOT receive authorization card even when authorization provided", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      authorization: mockAuthorization,
+    });
+
+    // Check for the injected gate checklist (not just the static text)
+    // Orchestrator should not have the injected gate
+    const orchestrator = plan.find((p) => p.agent.id === "deck-developer-orchestrator")!;
+    expect(orchestrator.content).not.toContain("## Pre-Delegation Gate Checklist");
+
+    // Explorer should not have the injected gate
+    const explorer = plan.find((p) => p.agent.id === "deck-developer-explorer")!;
+    expect(explorer.content).not.toContain("## Pre-Delegation Gate Checklist");
+
+    // Verify agents should not have the gate
+    const verify = plan.find((p) => p.agent.id === "deck-developer-verify")!;
+    expect(verify.content).not.toContain("## Pre-Delegation Gate Checklist");
+  });
+
+  test("apply agents without authorization have static placeholder only", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      // No authorization provided
+    });
+
+    const applyGeneral = plan.find((p) => p.agent.id === "deck-developer-apply-general")!;
+    // Should have static placeholder, not injected gate checklist
+    expect(applyGeneral.content).toContain("<!-- Orchestrator will inject");
+    expect(applyGeneral.content).not.toContain("## Pre-Delegation Gate Checklist");
+  });
+
+  test("authorization card includes change name and task artifact", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      authorization: mockAuthorization,
+    });
+
+    const applyGeneral = plan.find((p) => p.agent.id === "deck-developer-apply-general")!;
+    expect(applyGeneral.content).toContain("test-change");
+    expect(applyGeneral.content).toContain("tasks.md");
+  });
+});

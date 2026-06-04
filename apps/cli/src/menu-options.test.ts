@@ -32,6 +32,7 @@ describe("home menu options", () => {
       channel: "stable",
       items: [],
       descriptor: null,
+      reason: "newer-version",
     };
 
     const options = getHomeMenuOptions(releaseCheck);
@@ -86,6 +87,7 @@ describe("home menu options — user-initiated rollback (REQ-RBK-002)", () => {
       channel: "stable",
       items: [],
       descriptor: null,
+      reason: "newer-version",
     };
     const availability: RollbackAvailability = {
       backupId: "backup-1",

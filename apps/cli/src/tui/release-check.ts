@@ -20,7 +20,9 @@
 
 import {
   compareVersions,
+  decideReleaseAvailability,
   fetchReleaseDescriptor,
+  type AvailabilityDecision,
   type ReleaseFetchResult,
   type ReleaseInfo,
 } from "../upgrade-command/github-release.js";
@@ -66,8 +68,14 @@ export type ReleaseCheckState =
        * legacy body-parsed path (no `release.json` was attached).
        */
       descriptor: ReleaseJson | null;
+      /** Availability reason for display (REQ-UD-007) */
+      reason: "newer-version" | "same-version-different-commit";
+      /** Current commit (if available) for context */
+      currentCommit?: string;
+      /** Latest commit (if available) for context */
+      latestCommit?: string;
     }
-  | { kind: "none" }
+  | { kind: "none"; reason?: "same-build" | "local-newer" | "missing-commit" | "dev-build" }
   | { kind: "network-error"; error: string };
 
 /**
@@ -80,6 +88,8 @@ export type ReleaseCheckDeps = {
   fetchImpl?: () => ReleaseFetchResult;
   /** Returns the running Deck version; defaults to `getBuildInfo().version`. */
   currentVersion?: () => string;
+  /** Returns the running Deck commit; defaults to `getBuildInfo().commit`. */
+  currentCommit?: () => string | null | undefined;
   /** When set, sleeps before the fetch resolves (for test timing). */
   delayMs?: number;
 };
@@ -97,6 +107,7 @@ export async function runReleaseCheckWithTimeout(
 ): Promise<ReleaseCheckState> {
   const fetchImpl = deps.fetchImpl ?? defaultFetchImpl;
   const currentVersion = deps.currentVersion?.() ?? safeGetCurrentVersion();
+  const currentCommit = deps.currentCommit?.() ?? safeGetCurrentCommit();
 
   const work = Promise.resolve().then(async () => {
     if (deps.delayMs && deps.delayMs > 0) {
@@ -114,7 +125,7 @@ export async function runReleaseCheckWithTimeout(
 
   try {
     const result = await Promise.race([work, timeout]);
-    return toReleaseCheckState(result, currentVersion);
+    return toReleaseCheckState(result, currentVersion, currentCommit);
   } catch (err) {
     return { kind: "network-error", error: err instanceof Error ? err.message : String(err) };
   } finally {
@@ -134,16 +145,20 @@ function safeGetCurrentVersion(): string {
   }
 }
 
+function safeGetCurrentCommit(): string | null {
+  try {
+    return getBuildInfo().commit ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Translate the backend `ReleaseFetchResult` into a UI-state value.
  *
  * Logic:
- *   - `descriptor` → compare versions; if newer, return `available`,
- *     else `none`.
- *   - `legacy` (descriptor missing or invalid) → fall back to the
- *     legacy release body. If it is newer than the running version,
- *     return `available` (so the legacy upgrade action still works).
- *   - `network-error` → `network-error`.
+ *   - `network-error` → `network-error`
+ *   - `descriptor` or `legacy` → use decideReleaseAvailability for commit-aware comparison
  *
  * Exposed for tests that want to assert the mapping without firing
  * the timeout.
@@ -151,21 +166,53 @@ function safeGetCurrentVersion(): string {
 export function toReleaseCheckState(
   result: ReleaseFetchResult,
   currentVersion: string,
+  currentCommit?: string | null,
 ): ReleaseCheckState {
   if (result.kind === "network-error") {
     return { kind: "network-error", error: result.error };
   }
+
+  // Extract version and commit from the result
+  let latestVersion: string;
+  let latestCommit: string | null | undefined;
+
   if (result.kind === "descriptor") {
-    return descriptorToState(result.descriptor, currentVersion);
+    latestVersion = result.descriptor.version;
+    latestCommit = result.commit;
+  } else {
+    latestVersion = result.info.version;
+    latestCommit = result.info.commit;
   }
-  // legacy: best-effort, just compare versions
-  return legacyToState(result.info, currentVersion);
+
+  // Use the commit-aware availability decision helper
+  const decision = decideReleaseAvailability(
+    currentVersion,
+    currentCommit ?? null,
+    latestVersion,
+    latestCommit ?? null,
+  );
+
+  if (decision.kind === "network-error") {
+    return { kind: "network-error", error: "Could not determine version" };
+  }
+
+  if (decision.kind === "none") {
+    return { kind: "none", reason: decision.reason as "same-build" | "local-newer" | "missing-commit" | "dev-build" };
+  }
+
+  // Available - build the state with reason and commit context
+  if (result.kind === "descriptor") {
+    return descriptorToStateWithReason(result.descriptor, decision.reason, currentCommit ?? undefined, latestCommit ?? undefined);
+  }
+  return legacyToStateWithReason(result.info, decision.reason, currentCommit ?? undefined, latestCommit ?? undefined);
 }
 
-function descriptorToState(descriptor: ReleaseJson, currentVersion: string): ReleaseCheckState {
-  if (compareVersions(currentVersion, descriptor.version) >= 0) {
-    return { kind: "none" };
-  }
+function descriptorToStateWithReason(
+  descriptor: ReleaseJson,
+  reason: "newer-version" | "same-version-different-commit",
+  currentCommit?: string,
+  latestCommit?: string,
+): ReleaseCheckState {
   const advisory = descriptor.items.find((i): i is AdvisoryReleaseItem => i.kind === "advisory");
   const channelEol = descriptor.items.find((i): i is ChannelEolReleaseItem => i.kind === "channel_eol");
   return {
@@ -177,6 +224,9 @@ function descriptorToState(descriptor: ReleaseJson, currentVersion: string): Rel
     ...(advisory ? { advisory } : {}),
     ...(channelEol ? { channelEol } : {}),
     descriptor,
+    reason,
+    currentCommit,
+    latestCommit,
   };
 }
 
@@ -194,14 +244,16 @@ function isLegacyVersionValid(version: string): boolean {
   });
 }
 
-function legacyToState(info: ReleaseInfo, currentVersion: string): ReleaseCheckState {
+function legacyToStateWithReason(
+  info: ReleaseInfo,
+  reason: "newer-version" | "same-version-different-commit",
+  currentCommit?: string,
+  latestCommit?: string,
+): ReleaseCheckState {
   // REQ-UPGRADE-003: Unparseable legacy tag must produce error state, not {kind:"none"}
   if (!info.version) return { kind: "network-error", error: "Could not determine version from release tag" };
   if (!isLegacyVersionValid(info.version)) {
     return { kind: "network-error", error: `Tag version '${info.version}' is not a valid semantic version` };
-  }
-  if (compareVersions(currentVersion, info.version) >= 0) {
-    return { kind: "none" };
   }
   return {
     kind: "available",
@@ -210,6 +262,9 @@ function legacyToState(info: ReleaseInfo, currentVersion: string): ReleaseCheckS
     channel: "stable",
     items: [],
     descriptor: null,
+    reason,
+    currentCommit,
+    latestCommit,
   };
 }
 

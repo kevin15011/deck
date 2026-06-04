@@ -24,6 +24,7 @@ const PACKAGE_JSON = path.join(PROJECT_ROOT, "package.json");
 
 interface Args {
   version?: string;
+  commit?: string;
   target?: string;
   channel?: "stable" | "beta" | "dev";
   help?: boolean;
@@ -46,6 +47,11 @@ function parseArgs(argv: string[]): Args {
       if (i + 1 < rawArgs.length) {
         i++;
         args.version = rawArgs[i]!;
+      }
+    } else if (arg === "--commit") {
+      if (i + 1 < rawArgs.length) {
+        i++;
+        args.commit = rawArgs[i]!;
       }
     } else if (arg === "--target") {
       if (i + 1 < rawArgs.length) {
@@ -101,7 +107,8 @@ function getVersionFromPackageJson(): string {
 
 function generateBuildInfo(args: Args): string {
   const version = args.version ?? getVersionFromPackageJson();
-  const commit = getGitCommit();
+  // Use explicit --commit override if provided, otherwise get from git
+  const commit = args.commit ?? getGitCommit();
   const date = new Date().toISOString().split("T")[0]!;
   const target = args.target ?? `${os.platform()}-${os.arch()}`;
   const channel = args.channel ?? "stable";
@@ -136,6 +143,7 @@ Usage:
 
 Options:
   --version <semver>   Version string (semver). If omitted, reads from package.json
+  --commit <sha>       Explicit commit SHA. If omitted, uses git rev-parse HEAD
   --target <platform>  Target platform (e.g., linux-x64, darwin-arm64)
   --channel <channel> Release channel: stable, beta, or dev (default: stable)
   --help, -h         Show this help message
@@ -143,7 +151,7 @@ Options:
 Examples:
   bun run scripts/generate-build-info.ts
   bun run scripts/generate-build-info.ts --version 1.2.3 --target darwin-arm64 --channel beta
-  bun run scripts/generate-build-info.ts 1.2.3
+  bun run scripts/generate-build-info.ts --commit abc1234 1.2.3
 `);
     process.exit(0);
   }

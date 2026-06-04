@@ -350,3 +350,29 @@ describe("Git Safety Rule presence", () => {
     expect(APPLY_FRONTEND_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });
+
+// Authorization Card and Self-Rejection Instruction tests (REQ-OA-005, REQ-OA-009)
+describe("Authorization Card and Self-Rejection Instruction", () => {
+  test("AGENT_BODY contains Authorization Card section header", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain("## Authorization Card");
+  });
+
+  test("AGENT_BODY contains the orchestrator injection placeholder comment", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain(
+      "<!-- Orchestrator will inject renderApplyAuthorizationCard() output here when delegating -->"
+    );
+  });
+
+  test("AGENT_BODY contains Self-Rejection Instruction section", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain("## Self-Rejection Instruction");
+  });
+
+  test("AGENT_BODY contains refusal phrase for missing authorization", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain("refuse to perform any file modifications");
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain("Report `blocked` status");
+  });
+
+  test("AGENT_BODY contains defense-in-depth warning", () => {
+    expect(APPLY_FRONTEND_AGENT_BODY).toContain("defense-in-depth measure");
+  });
+});

@@ -41,6 +41,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -85,6 +86,10 @@ export type CliArgs = {
   fromAssetsDir?: string;
   /** Base URL for binary assets in the descriptor (e.g. https://github.com/owner/repo/releases/download/<tag>). */
   assetBaseUrl?: string;
+  /** Explicit commit SHA to validate against build-info.staleness (for REQ-RM-005). */
+  commit?: string;
+  /** Skip staleness check (use only when intentionally releasing stale metadata). */
+  skipStalenessCheck?: boolean;
 };
 
 export type BinaryItemInput = Omit<BinaryReleaseItem, "kind">;
@@ -171,6 +176,12 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
       case "--asset-base-url":
         args.assetBaseUrl = takeValue("--asset-base-url");
         break;
+      case "--commit":
+        args.commit = takeValue("--commit");
+        break;
+      case "--skip-staleness-check":
+        args.skipStalenessCheck = true;
+        break;
       default:
         if (flag?.startsWith("-")) {
           throw new Error(`Unknown flag: ${flag}`);
@@ -204,6 +215,8 @@ Flags:
   --out <path>             Write descriptor to this path (default: stdout)
   --from-assets-dir <dir>  Build binary items from every deck_v*.tar.gz in <dir>
   --asset-base-url <url>   Base URL for binary items when using --from-assets-dir
+  --commit <sha>          Explicit commit SHA for staleness validation (REQ-RM-005)
+  --skip-staleness-check   Skip build-info staleness validation (use only when intentional)
   -h, --help               Show this help
 
 The output is the OFFICIAL spec-shaped descriptor (snake_case per
@@ -618,6 +631,61 @@ async function runInteractive(args: CliArgs): Promise<ReleaseJson> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// REQ-RM-005: Build Info Staleness Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate that build-info.generated.ts commit matches current HEAD
+ * (or explicit --commit override) to prevent releasing stale metadata.
+ *
+ * Per REQ-RM-005: "Release preparation scripts MUST NOT silently preserve
+ * stale commit metadata."
+ */
+function validateBuildInfoStaleness(explicitCommit?: string): void {
+  const buildInfoPath = join(process.cwd(), "apps/cli/src/runtime/build-info.generated.ts");
+
+  if (!existsSync(buildInfoPath)) {
+    // Build info file doesn't exist - this is expected for dev builds
+    // Skip validation in this case
+    return;
+  }
+
+  const buildInfoContent = readFileSync(buildInfoPath, "utf-8");
+
+  // Extract commit from build-info.generated.ts (pattern: commit: "xxxx")
+  const commitMatch = buildInfoContent.match(/commit:\s*"([^"]+)"/);
+  if (!commitMatch) {
+    throw new Error("Could not extract commit from build-info.generated.ts");
+  }
+
+  const buildInfoCommit = commitMatch[1]!;
+
+  // Get current HEAD commit (or use explicit override)
+  const expectedCommit = explicitCommit ?? execSync("git rev-parse HEAD", { encoding: "utf-8" }).trim();
+
+  // Normalize commits for comparison: handle short SHA (7 chars) vs full SHA (40 chars)
+  // Both "8aaca9e" and "8aaca9eafcfb8aac7ce663f0bbe955e37f2ab9ab" refer to the same commit
+  const commitsMatch =
+    buildInfoCommit === expectedCommit ||
+    expectedCommit.startsWith(buildInfoCommit) ||
+    buildInfoCommit.startsWith(expectedCommit);
+
+  if (!commitsMatch) {
+    const suggestion = `Run: bun run scripts/generate-build-info.ts --commit ${expectedCommit}`;
+
+    throw new Error(
+      `REQ-RM-005 STALENESS CHECK FAILED: build-info.generated.ts commit (${buildInfoCommit}) does not match ${explicitCommit ? "explicit --commit" : "current HEAD"} (${expectedCommit}).\n` +
+      `This indicates stale build metadata. To proceed:\n` +
+      `  1. ${suggestion}\n` +
+      `  2. Re-run prepare-release.ts\n` +
+      `Alternatively, if this is intentional (e.g., backporting a release), you may override with --skip-staleness-check (if supported).`
+    );
+  }
+
+  console.error(`✓ REQ-RM-005: Build info staleness check passed (commit: ${buildInfoCommit})`);
+}
+
 function writeOutput(descriptor: ReleaseJson, out: string | undefined): void {
   const json = JSON.stringify(descriptor, null, 2) + "\n";
   if (out) {
@@ -631,6 +699,13 @@ function writeOutput(descriptor: ReleaseJson, out: string | undefined): void {
 export async function main(argv: readonly string[]): Promise<number> {
   try {
     const args = parseCliArgs(argv);
+
+    // REQ-RM-005: Validate build-info staleness before proceeding
+    if (!args.skipStalenessCheck) {
+      validateBuildInfoStaleness(args.commit);
+    } else {
+      console.error("⚠ Skipping REQ-RM-005 staleness check (--skip-staleness-check)");
+    }
 
     if (args.help) {
       process.stdout.write(HELP_TEXT);

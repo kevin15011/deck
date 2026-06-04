@@ -484,3 +484,48 @@ describe("Git Safety Rule presence", () => {
     expect(ORCHESTRATOR_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });
+
+// --- Review repair: Semantic static verification for Pre-Delegation Checklist and automatic mode text ---
+describe("Pre-Delegation Checklist and Automatic Mode (REQ-OA-004, REQ-OA-006)", () => {
+  test("system prompt contains Pre-Delegation Checklist section", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("## Pre-Delegation Checklist");
+  });
+
+  test("system prompt contains all six checklist items", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("1. **Classify the request**");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("2. **Confirm SDD workspace**");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("3. **Confirm Explorer-first evidence**");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("4. **Confirm required phase artifacts**");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("5. **Confirm user authorization**");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("6. **Emit blocked outcome if any item is missing**");
+  });
+
+  test("system prompt contains semantic blocking wording for triage (INV-004)", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("triage classification is present");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not modify or delegate modifying work");
+  });
+
+  test("system prompt contains semantic blocking wording for Explorer (INV-006)", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer-first evidence");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer phase completed");
+  });
+
+  test("system prompt contains semantic blocking wording for authorization", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("user authorization");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("explicit user consent");
+  });
+
+  test("system prompt contains automatic mode non-bypass text (REQ-OA-006)", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Automatic execution mode does NOT bypass");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("triage");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer-first");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("user authorization");
+  });
+
+  test("system prompt contains blocked outcome wording", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Emit blocked outcome");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("do NOT delegate");
+  });
+
+
+});

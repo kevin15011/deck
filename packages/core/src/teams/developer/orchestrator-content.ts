@@ -32,6 +32,7 @@
 
 import { ORCHESTRATOR_PERSONALITIES, DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "../../config/deck-config";
 import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
+import { renderDelegationGate, renderApplyAuthorizationCard, type ModificationAuthorization } from "./orchestrator-invariants";
 
 // ---------------------------------------------------------------------------
 // 1. System Prompt — shapes the session
@@ -186,6 +187,21 @@ On the first change request in a session, ask which execution mode the user pref
 - **Interactive** (default): after each phase, show summary and ask before proceeding.
 
 Cache the mode for the session.
+
+**IMPORTANT**: Automatic execution mode does NOT bypass triage, Explorer-first investigation, or user authorization requirements. The same workflow gates (SDD Triage Gate, Explorer-first, task artifact, explicit authorization) apply regardless of execution mode. Automatic mode is a convenience for phase sequencing only - it does not skip safety controls.
+
+## Pre-Delegation Checklist
+
+Before delegating any modifying work (Apply phase, file writes, prompt modifications, project changes):
+
+1. **Classify the request**: Confirm triage classification is present (Direct, Specialist(s), Recommend SDD, or Run SDD).
+2. **Confirm SDD workspace**: If classified as Run SDD, verify the SDD workspace is initialized.
+3. **Confirm Explorer-first evidence**: For Run SDD, verify Explorer phase completed and artifact exists.
+4. **Confirm required phase artifacts**: Verify the expected artifacts exist for the current phase.
+5. **Confirm user authorization**: Verify explicit user consent (proposal approval, task assignment, or equivalent) is present.
+6. **Emit blocked outcome if any item is missing**: If any checklist item fails, do NOT delegate. Report the specific missing gate with remediation guidance.
+
+**Never delegate modifying work without completing this checklist.**
 
 ## Artifact Store
 
@@ -356,6 +372,56 @@ export function getOrchestratorSystemPrompt(personality: OrchestratorPersonality
     default:
       return ORCHESTRATOR_PROMPT_PRAGMATICA;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Authorization Card Composition (for pre-delegation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compose an apply-agent prompt with authorization card.
+ *
+ * This helper injects the delegation gate and authorization card into
+ * apply-agent prompts at runtime, ensuring the authorization contract
+ * is enforced (REQ-OA-005, REQ-OA-009).
+ *
+ * ARCHITECTURAL LIMITATION (documented per Review feedback):
+ * ==========================================================
+ * The current core package architecture uses static content composition
+ * via `content-registry.ts` - agent bodies are assembled at build/load time,
+ * not at runtime during delegation. The adapters (adapter-opencode,
+ * adapter-pi) handle the actual agent invocation and retrieve content
+ * from the registry - there is no runtime composition path in this package.
+ *
+ * This function exists as the "nearest actual composition surface" per
+ * the spec/design intent. To achieve full REQ-OA-005 enforcement:
+ *
+ * Option A (preferred): Implement runtime composition in the adapter layer
+ *   (e.g., adapter-opencode/src/prompt-generation.ts) by calling this
+ *   function when assembling apply-agent prompts.
+ *
+ * Option B: The current static enforcement via the placeholder comment
+ *   `<!-- Orchestrator will inject renderApplyAuthorizationCard() output here -->`
+ *   in apply-*-content.ts files, combined with the Self-Rejection Instruction,
+ *   provides defense-in-depth at the apply-agent side.
+ *
+ * This function is tested in orchestrator-invariants.test.ts but has zero
+ * runtime call sites in the current implementation.
+ */
+export function composeApplyAgentPrompt(
+  basePrompt: string,
+  auth: ModificationAuthorization,
+): string {
+  const gate = renderDelegationGate(auth);
+  const card = renderApplyAuthorizationCard(auth);
+
+  return `${gate}
+
+${card}
+
+---
+
+${basePrompt}`;
 }
 
 // ---------------------------------------------------------------------------

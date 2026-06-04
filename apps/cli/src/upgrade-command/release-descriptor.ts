@@ -175,6 +175,8 @@ export const ReleaseJsonSchema = z.object({
   release_notes_url: z.string().url().optional(),
   /** Optional minimum Deck version required to apply this release. */
   min_deck_version: z.string().optional(),
+  /** Optional commit SHA that this release points to (for same-version update detection) */
+  commit: z.string().optional(),
   items: z.array(ReleaseItemSchema),
 });
 

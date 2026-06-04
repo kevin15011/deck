@@ -99,6 +99,22 @@ export const UPGRADE_ERROR_CODES = {
 } as const;
 
 /**
+ * Normalize a commit string for comparison.
+ *
+ * - Returns null for empty, undefined, or non-SHA-like strings.
+ * - Trims whitespace and validates against SHA pattern (7-40 hex chars).
+ * - Branch names like "main" return null (not reliable for commit comparison).
+ */
+export function normalizeCommit(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // SHA-like pattern: 7-40 hex characters
+  if (!/^[0-9a-f]{7,40}$/i.test(trimmed)) return null;
+  return trimmed.toLowerCase();
+}
+
+/**
  * Release information from GitHub API.
  */
 export type ReleaseInfo = {
@@ -114,6 +130,8 @@ export type ReleaseInfo = {
   publishedAt: string;
   /** Release notes */
   body: string;
+  /** Commit SHA that this release points to (target_commitish from GitHub API) */
+  commit: string | null;
 };
 
 /**
@@ -123,9 +141,10 @@ export type ReleaseInfo = {
  *   validated against the schema.
  * - `legacy` is set when the descriptor was missing/invalid and the
  *   orchestrator should fall back to the body-parsed legacy path.
+ * - `commit` is the commit SHA from target_commitish or descriptor.
  */
 export type ReleaseFetchResult =
-  | { kind: "descriptor"; descriptor: ReleaseJson; etag?: string; cachePath: string }
+  | { kind: "descriptor"; descriptor: ReleaseJson; etag?: string; cachePath: string; commit: string | null }
   | { kind: "legacy"; info: ReleaseInfo; reason: "missing" | "invalid"; error?: string }
   | { kind: "network-error"; error: string };
 
@@ -209,7 +228,7 @@ export function fetchReleaseDescriptor(
     return { kind: "network-error", error: apiResult.stderr || "curl failed" };
   }
 
-  let releaseData: { tag_name?: string; published_at?: string; body?: string; assets?: { name: string; browser_download_url: string }[] };
+  let releaseData: { tag_name?: string; published_at?: string; body?: string; assets?: { name: string; browser_download_url: string }[]; target_commitish?: string };
   try {
     releaseData = JSON.parse(apiResult.stdout);
   } catch (err) {
@@ -227,6 +246,9 @@ export function fetchReleaseDescriptor(
       info: buildLegacyReleaseInfo(releaseData),
     };
   }
+
+  // Extract commit from target_commitish for use in descriptor and legacy paths
+  const remoteCommit = normalizeCommit(releaseData.target_commitish);
 
   // Step 2: fetch the release.json asset.
   const assetResult = curlReleaseJsonAsset(tagName);
@@ -276,7 +298,12 @@ export function fetchReleaseDescriptor(
     // Cache the validated payload so subsequent release checks can skip
     // the network round-trip within the 6h TTL window.
     writeReleaseCache(cachePath, descriptor);
-    return { kind: "descriptor", descriptor, cachePath };
+
+    // Descriptor commit priority: descriptor build metadata > target_commitish fallback
+    const descriptorCommit = (descriptor as { commit?: string }).commit;
+    const commit = normalizeCommit(descriptorCommit) ?? remoteCommit;
+
+    return { kind: "descriptor", descriptor, cachePath, commit };
   } catch (err) {
     if (err instanceof ReleaseDescriptorError) {
       return {
@@ -327,6 +354,7 @@ function writeReleaseCache(cachePath: string, descriptor: ReleaseJson): void {
  *
  * Parses the SHA-256 out of the release body text (regex). Returns
  * `sha256: ""` when the body is missing or the regex doesn't match.
+ * Populates commit from target_commitish when it's a valid SHA.
  */
 export function buildLegacyReleaseInfo(
   releaseData: {
@@ -334,6 +362,7 @@ export function buildLegacyReleaseInfo(
     published_at?: string;
     body?: string;
     assets?: { name: string; browser_download_url: string }[];
+    target_commitish?: string;
   },
 ): ReleaseInfo {
   const tagName = releaseData.tag_name ?? "v0.0.0";
@@ -367,6 +396,9 @@ export function buildLegacyReleaseInfo(
       );
   const asset = platformAsset ?? fallbackAsset;
 
+  // Extract commit from target_commitish when it's a valid SHA
+  const commit = normalizeCommit(releaseData.target_commitish);
+
   return {
     tagName,
     version,
@@ -374,6 +406,7 @@ export function buildLegacyReleaseInfo(
     sha256,
     publishedAt: releaseData.published_at ?? "",
     body: releaseData.body ?? "",
+    commit,
   };
 }
 
@@ -389,7 +422,7 @@ export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
     // Pick the binary item for the current platform and produce a
     // legacy `ReleaseInfo` from it. The orchestrator can still opt
     // to consume the descriptor directly via `fetchReleaseDescriptor`.
-    const { descriptor } = result;
+    const { descriptor, commit } = result;
     const triple = getPlatformTriple();
     const binary = descriptor.items.find(
       (i) => i.kind === "binary" && i.platform === triple,
@@ -402,6 +435,7 @@ export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
         sha256: binary.sha256,
         publishedAt: descriptor.published_at,
         body: descriptor.release_notes_url ?? "",
+        commit: commit ?? null,
       };
     }
     // No binary for the current platform: still return a useful info
@@ -413,6 +447,7 @@ export async function fetchLatestRelease(): Promise<ReleaseInfo | null> {
       sha256: "",
       publishedAt: descriptor.published_at,
       body: descriptor.release_notes_url ?? "",
+      commit: commit ?? null,
     };
   }
   if (result.kind === "legacy") {
@@ -474,6 +509,75 @@ export function compareVersions(current: string, latest: string): number {
   }
 
   return 0;
+}
+
+/**
+ * Result of availability decision.
+ */
+export type AvailabilityDecision =
+  | { kind: "available"; reason: "newer-version" | "same-version-different-commit"; currentCommit?: string; latestCommit?: string }
+  | { kind: "none"; reason: "same-build" | "local-newer" | "missing-commit" | "dev-build" }
+  | { kind: "network-error" };
+
+/**
+ * Determine if an update/upgrade is available based on version and commit.
+ *
+ * Algorithm:
+ * 1. Remote semver greater → available, reason "newer-version"
+ * 2. Local semver greater → none, reason "local-newer"
+ * 3. Equal semver + either commit missing/unreliable → none, reason "missing-commit"
+ * 4. Equal semver + normalized commits equal (including short/full prefix) → none, reason "same-build"
+ * 5. Equal semver + both reliable commits differ → available, reason "same-version-different-commit"
+ *
+ * Dev/non-release builds (e.g., "0.0.0-dev") skip commit-based same-version detection.
+ */
+export function decideReleaseAvailability(
+  currentVersion: string,
+  currentCommit: string | null | undefined,
+  latestVersion: string,
+  latestCommit: string | null | undefined,
+): AvailabilityDecision {
+  const cmp = compareVersions(currentVersion, latestVersion);
+
+  // Case 1: Remote semver greater → upgrade available
+  if (cmp < 0) {
+    return { kind: "available", reason: "newer-version" };
+  }
+
+  // Case 2: Local semver greater → no update (local is newer)
+  if (cmp > 0) {
+    return { kind: "none", reason: "local-newer" };
+  }
+
+  // Equal semver - now check commit
+  // Check if this is a dev/non-release build - skip commit comparison for these
+  const isDevBuild = currentVersion.includes("-dev") || currentVersion === "0.0.0";
+
+  // Normalize commits for comparison
+  const localCommit = normalizeCommit(currentCommit);
+  const remoteCommit = normalizeCommit(latestCommit);
+
+  // Case 3: Either commit missing → no commit-based availability
+  if (!localCommit || !remoteCommit) {
+    return { kind: "none", reason: "missing-commit" };
+  }
+
+  // Case 4: Same commit (including short/long form) → no update
+  if (localCommit === remoteCommit || localCommit.startsWith(remoteCommit) || remoteCommit.startsWith(localCommit)) {
+    return { kind: "none", reason: "same-build" };
+  }
+
+  // Case 5: Same version, different commit → available (but not for dev builds)
+  if (isDevBuild) {
+    return { kind: "none", reason: "dev-build" };
+  }
+
+  return {
+    kind: "available",
+    reason: "same-version-different-commit",
+    currentCommit: localCommit,
+    latestCommit: remoteCommit,
+  };
 }
 
 /**

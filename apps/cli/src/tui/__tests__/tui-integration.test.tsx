@@ -109,6 +109,7 @@ describe("TUI self-update integration (T3.6)", () => {
       channel: "stable",
       items: fixtureDescriptor.items,
       descriptor: fixtureDescriptor,
+      reason: "newer-version",
     };
     const output = renderToString(<HomeScreen cursor={0} releaseCheck={state} />);
     expect(output).toContain("Upgrade available: v1.2.0");
@@ -200,6 +201,7 @@ describe("TUI self-update integration (T3.6)", () => {
       channel: "stable",
       items: [],
       descriptor: null,
+      reason: "newer-version",
     };
     const options = getHomeMenuOptions(state);
     const update = options.find((o) => o.value === "update-deck");
@@ -220,6 +222,7 @@ describe("TUI self-update integration (T3.6)", () => {
       kind: "descriptor",
       descriptor: fixtureDescriptor,
       cachePath: "/tmp/release.json",
+      commit: "8aaca9e",
     });
     const state = await runReleaseCheckWithTimeout(500, {
       fetchImpl,
@@ -237,6 +240,7 @@ describe("TUI self-update integration (T3.6)", () => {
       kind: "descriptor",
       descriptor: { ...fixtureDescriptor, version: "0.0.0-dev", tag_name: "v0.0.0-dev" },
       cachePath: "/tmp/release.json",
+      commit: null,
     });
     const state = await runReleaseCheckWithTimeout(500, {
       fetchImpl,
@@ -274,6 +278,7 @@ describe("TUI self-update integration (T3.6)", () => {
       sha256: "a".repeat(64),
       publishedAt: "2026-06-02T12:00:00.000Z",
       body: "",
+      commit: null,
     };
     const result: ReleaseFetchResult = { kind: "legacy", reason: "missing", info: legacy };
     expect(toReleaseCheckState(result, "1.0.0")).toEqual({
@@ -283,6 +288,7 @@ describe("TUI self-update integration (T3.6)", () => {
       channel: "stable",
       items: [],
       descriptor: null,
+      reason: "newer-version",
     });
   });
 
@@ -294,9 +300,10 @@ describe("TUI self-update integration (T3.6)", () => {
       sha256: "",
       body: "",
       publishedAt: "",
+      commit: null,
     };
     const result: ReleaseFetchResult = { kind: "legacy", reason: "missing", info: legacy };
-    expect(toReleaseCheckState(result, "0.0.0-dev")).toEqual({ kind: "none" });
+    expect(toReleaseCheckState(result, "0.0.0-dev")).toEqual({ kind: "none", reason: "missing-commit" });
   });
 });
 
