@@ -32,7 +32,7 @@ import type {
   AdaptiveMemoryProvider,
 } from "@deck/core";
 import type { TeamEntry } from "@deck/core";
-import { getModelCatalog } from "@deck/core";
+import { DEVELOPER_TEAM_AGENTS, getModelCatalog } from "@deck/core";
 import { join } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -240,7 +240,10 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
   const thinkingAssignments: DeveloperTeamThinkingAssignments = {};
 
   for (const agent of input.manifest.agents) {
-    modelAssignments[agent.agentId] = agent.model ?? "";
+    // Only include model assignments when model is explicitly set (non-empty)
+    if (agent.model) {
+      modelAssignments[agent.agentId] = agent.model;
+    }
     if (agent.reasoning) {
       thinkingAssignments[agent.agentId] = agent.reasoning as PiThinkingLevel;
     }
@@ -331,10 +334,11 @@ function readAssignments(input: import("@deck/core").RunnerModelAssignmentReadIn
   const assignments = readDeveloperTeamModelAssignments(input.projectRoot);
   const thinking = readDeveloperTeamThinkingAssignments(input.projectRoot);
 
-  const result = getModelCatalog().developerTeamDefaults.map((default_assignment) => ({
-    agentId: default_assignment.agentId,
-    modelId: assignments[default_assignment.agentId] ?? default_assignment.modelId,
-    reasoning: thinking[default_assignment.agentId] ?? default_assignment.reasoning,
+  // Iterate over canonical developer team agent list (not defaults, which may be empty)
+  const result = DEVELOPER_TEAM_AGENTS.map((agent) => ({
+    agentId: agent.id,
+    modelId: assignments[agent.id] ?? "",
+    reasoning: thinking[agent.id] as import("@deck/core").ReasoningLevel | undefined,
   }));
 
   return { assignments: result };

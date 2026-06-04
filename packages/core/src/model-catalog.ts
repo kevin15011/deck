@@ -240,38 +240,15 @@ const MODELS: readonly ModelEntry[] = [
 // ---------------------------------------------------------------------------
 // Developer Team default model assignments
 //
-// These defaults are consolidated from Pi and OpenCode model configs.
-// Each adapter maps these to its native representation (thinking/reasoningEffort).
+// REQ-MC-005: Developer Team model configuration is now EXPLICIT ONLY.
+// The only source of truth for models is the model installation/configuration
+// flow (via installer/config). There are NO hardcoded defaults in core.
+//
+// Adapters (OpenCode, Pi) must read model configuration from user config
+// files and NOT from any hardcoded defaults in the codebase.
 // ---------------------------------------------------------------------------
 
-const DEVELOPER_TEAM_DEFAULTS: readonly DeveloperTeamDefaultModelAssignment[] = [
-  // Orchestrator — highest capability model for coordination
-  { agentId: "deck-developer-orchestrator", modelId: "openai/gpt-5.5", reasoning: "high" },
-  // Explorer — fast, capable for exploration
-  { agentId: "deck-developer-explorer", modelId: "opencode-go/kimi-k2.6" },
-  // Proposal — similar to explorer for rapid drafting
-  { agentId: "deck-developer-proposal", modelId: "opencode-go/kimi-k2.6" },
-  // Spec — structured writing
-  { agentId: "deck-developer-spec", modelId: "zai-coding-plan/glm-5.1" },
-  // Design — structured reasoning
-  { agentId: "deck-developer-design", modelId: "openai/gpt-5.5" },
-  // Task — structured task breakdown
-  { agentId: "deck-developer-task", modelId: "zai-coding-plan/glm-5.1" },
-  // Apply agents — general-purpose coding
-  { agentId: "deck-developer-apply-general", modelId: "minimax-coding-plan/MiniMax-M2.7" },
-  { agentId: "deck-developer-apply-backend", modelId: "minimax-coding-plan/MiniMax-M2.7" },
-  { agentId: "deck-developer-apply-frontend", modelId: "minimax-coding-plan/MiniMax-M2.7" },
-  // Verify — checking and validation
-  { agentId: "deck-developer-verify", modelId: "openai/gpt-5.5" },
-  // Review — nuanced judgment
-  { agentId: "deck-developer-review", modelId: "opencode-go/kimi-k2.6" },
-  // Archive — lightweight finalization
-  { agentId: "deck-developer-archive", modelId: "opencode-go/deepseek-v4-flash" },
-  // Init — lightweight setup task
-  { agentId: "deck-init", modelId: "opencode-go/kimi-k2.6" },
-  // Onboard — interactive guidance
-  { agentId: "deck-onboard", modelId: "opencode-go/kimi-k2.6" },
-];
+const DEVELOPER_TEAM_DEFAULTS: readonly DeveloperTeamDefaultModelAssignment[] = [];
 
 // ---------------------------------------------------------------------------
 // Catalog export

@@ -269,9 +269,10 @@ function buildPlaceholderSkillBody(agent: DeveloperTeamAgent): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns all agent IDs that have a default model assignment in the catalog.
+ * Returns all canonical Developer Team agent IDs.
+ * (Previously returned defaults; now returns the full agent list since defaults may be empty.)
  */
-export function getCataloguedAgentIds(): readonly string[] {
+export function getDeveloperTeamAgentIds(): readonly string[] {
   return DEVELOPER_TEAM_AGENTS.map((a) => a.id);
 }
 

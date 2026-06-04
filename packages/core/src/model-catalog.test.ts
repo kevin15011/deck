@@ -54,9 +54,10 @@ describe("ModelCatalog", () => {
       }
     });
 
-    test("developer team defaults are defined", () => {
+    test("developer team defaults are empty (explicit-only contract)", () => {
       const defaults = getDeveloperTeamDefaults();
-      expect(defaults.length).toBeGreaterThan(0);
+      // REQ-MC-005: No hardcoded defaults - models must be explicitly configured
+      expect(defaults.length).toBe(0);
     });
 
     test("MODEL_CATALOG singleton matches getter functions", () => {
@@ -68,45 +69,16 @@ describe("ModelCatalog", () => {
   });
 
   describe("catalog completeness for all Developer Team agents", () => {
-    test("every Developer Team agent has a default model assignment", () => {
+    test("no default model assignments (explicit-only contract)", () => {
       const defaults = getDeveloperTeamDefaults();
-      for (const agent of DEVELOPER_TEAM_AGENTS) {
-        const assignment = defaults.find((d) => d.agentId === agent.id);
-        expect(assignment).toBeDefined();
-        expect(assignment?.modelId).toBeTruthy();
-      }
+      // REQ-MC-005: No hardcoded defaults - models must be explicitly configured
+      expect(defaults.length).toBe(0);
     });
 
-    test("every default model ID exists in the model catalog", () => {
+    test("model assignments require explicit configuration", () => {
       const defaults = getDeveloperTeamDefaults();
-      const models = getModels();
-      const modelIds = new Set(models.map((m) => m.id));
-
-      for (const defaultEntry of defaults) {
-        expect(modelIds.has(defaultEntry.modelId)).toBe(true);
-      }
-    });
-
-    test("every default provider ID exists in the provider catalog", () => {
-      const defaults = getDeveloperTeamDefaults();
-      const providers = getProviders();
-      const providerIds = new Set(providers.map((p) => p.id));
-
-      for (const defaultEntry of defaults) {
-        const [providerId] = defaultEntry.modelId.split("/");
-        expect(providerIds.has(providerId)).toBe(true);
-      }
-    });
-
-    test("catalogued defaults cover exactly the Developer Team agents", () => {
-      const defaults = getDeveloperTeamDefaults();
-      const agentIds = new Set(DEVELOPER_TEAM_AGENTS.map((a) => a.id));
-      const defaultAgentIds = new Set(defaults.map((d) => d.agentId));
-
-      expect(defaultAgentIds.size).toBe(agentIds.size);
-      for (const id of agentIds) {
-        expect(defaultAgentIds.has(id)).toBe(true);
-      }
+      // Empty defaults confirms explicit-only contract
+      expect(defaults).toEqual([]);
     });
   });
 
@@ -145,12 +117,13 @@ describe("ModelCatalog", () => {
       expect(getModelsForProvider("unknown-provider")).toEqual([]);
     });
 
-    test("getDefaultForAgent returns default for known agent", () => {
+    test("getDefaultForAgent returns undefined for all agents (explicit-only)", () => {
+      // REQ-MC-005: No hardcoded defaults
       const agents = DEVELOPER_TEAM_AGENTS;
-      const first = agents[0];
-      const defaultEntry = getDefaultForAgent(first.id);
-      expect(defaultEntry).toBeDefined();
-      expect(defaultEntry?.agentId).toBe(first.id);
+      for (const agent of agents) {
+        const defaultEntry = getDefaultForAgent(agent.id);
+        expect(defaultEntry).toBeUndefined();
+      }
     });
 
     test("getDefaultForAgent returns undefined for unknown agent", () => {

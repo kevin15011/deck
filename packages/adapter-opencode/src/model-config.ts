@@ -24,7 +24,7 @@ import type {
 import type { OpenCodeConfig } from "./types";
 
 export type OpenCodeModelConfig = {
-  model: string;
+  model?: string; // undefined when not explicitly configured
   reasoningEffort?: "low" | "medium" | "high";
 };
 
@@ -45,43 +45,18 @@ export type DeveloperTeamModelAssignments = CoreModelAssignments;
 export type DeveloperTeamThinkingAssignments = CoreThinkingAssignments;
 
 // ---------------------------------------------------------------------------
-// Default model map — consumed from core ModelCatalog
+// Model configuration - EXPLICIT ONLY
+//
+// REQ-MC-005: No hardcoded defaults. Models must be explicitly configured
+// by the user via installer/config flow. This adapter reads user config
+// from opencode.json and applies CLI overrides only.
 // ---------------------------------------------------------------------------
 
-// Build from core's canonical developerTeamDefaults, mapping to OpenCode's
-// reasoningEffort field name. The model IDs are canonical; the reasoning
-// mapping is OpenCode-specific.
-function buildDefaultOpenCodeModels(): Record<string, OpenCodeModelConfig> {
-  const catalog = getModelCatalog();
-  const result: Record<string, OpenCodeModelConfig> = {};
+// Empty defaults - no hardcoded models.
+// Models are only set when explicitly configured via CLI or config file.
+const EMPTY_DEFAULT_MODELS: Record<string, OpenCodeModelConfig> = Object.freeze({});
 
-  for (const assignment of catalog.developerTeamDefaults) {
-    result[assignment.agentId] = {
-      model: assignment.modelId,
-      reasoningEffort: assignment.reasoning ? mapReasoningToOpenCode(assignment.reasoning) : undefined,
-    };
-  }
-
-  return Object.freeze(result);
-}
-
-function mapReasoningToOpenCode(reasoning: import("@deck/core").ReasoningLevel): "low" | "medium" | "high" | undefined {
-  switch (reasoning) {
-    case "high":
-    case "xhigh":
-      return "high";
-    case "medium":
-      return "medium";
-    case "minimal":
-    case "low":
-      return "low";
-    case "off":
-    default:
-      return undefined;
-  }
-}
-
-export const DEFAULT_OPENCODE_MODELS: Readonly<Record<string, OpenCodeModelConfig>> = buildDefaultOpenCodeModels();
+export const DEFAULT_OPENCODE_MODELS: Readonly<Record<string, OpenCodeModelConfig>> = EMPTY_DEFAULT_MODELS;
 
 // ---------------------------------------------------------------------------
 // Thinking/reasoning helpers
@@ -127,13 +102,22 @@ export function resolveModelConfig(
   configOverrides?: Record<string, string>,
   reasoningEffortOverrides?: Record<string, OpenCodeThinkingLevel>,
 ): OpenCodeModelConfig {
-  const defaults = DEFAULT_OPENCODE_MODELS[agentId] ?? { model: "" };
+  const defaults = DEFAULT_OPENCODE_MODELS[agentId]; // undefined when no defaults
+
+  // If no defaults, no config, no CLI override, and no reasoning override: return empty/undefined
+  // This prevents inventing a model when none is configured
+  // Note: empty string cliOverride is treated as absent (falsy in || check below)
+  const hasModelOverride = cliOverride || (configOverrides && Object.prototype.hasOwnProperty.call(configOverrides, agentId));
+  const hasReasoningOverride = reasoningEffortOverrides && Object.prototype.hasOwnProperty.call(reasoningEffortOverrides, agentId);
+  if (!defaults && !hasModelOverride && !hasReasoningOverride) {
+    return {}; // Empty config - no model set
+  }
 
   const resolveEffort = (): "low" | "medium" | "high" | undefined => {
     const override = reasoningEffortOverrides?.[agentId];
     if (override === "off") return undefined;
     if (override !== undefined) return override;
-    return defaults.reasoningEffort;
+    return defaults?.reasoningEffort;
   };
 
   if (cliOverride !== undefined) {
@@ -142,6 +126,11 @@ export function resolveModelConfig(
 
   if (configOverrides && Object.prototype.hasOwnProperty.call(configOverrides, agentId)) {
     return { model: configOverrides[agentId], reasoningEffort: resolveEffort() };
+  }
+
+  // Handle reasoning-only override (no model)
+  if (hasReasoningOverride) {
+    return { reasoningEffort: resolveEffort() };
   }
 
   return { ...defaults };

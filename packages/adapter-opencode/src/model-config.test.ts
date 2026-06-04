@@ -3,68 +3,40 @@ import { describe, expect, test } from "bun:test";
 import { DEFAULT_OPENCODE_MODELS, resolveModelConfig } from "./model-config";
 
 describe("DEFAULT_OPENCODE_MODELS", () => {
-  test("contains all 12 developer team agents", () => {
-    const expected = [
-      "deck-developer-orchestrator",
-      "deck-developer-explorer",
-      "deck-developer-proposal",
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-apply-backend",
-      "deck-developer-apply-frontend",
-      "deck-developer-verify",
-      "deck-developer-review",
-      "deck-developer-archive",
-    ];
-    for (const agentId of expected) {
-      expect(DEFAULT_OPENCODE_MODELS[agentId]).toBeDefined();
-      expect(DEFAULT_OPENCODE_MODELS[agentId].model).toBeTruthy();
-    }
-  });
-
-  test("orchestrator has reasoningEffort: high", () => {
-    expect(DEFAULT_OPENCODE_MODELS["deck-developer-orchestrator"].reasoningEffort).toBe("high");
-  });
-
-  test("subagents do not have reasoningEffort set", () => {
-    const subagents = [
-      "deck-developer-explorer",
-      "deck-developer-proposal",
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-apply-backend",
-      "deck-developer-apply-frontend",
-      "deck-developer-verify",
-      "deck-developer-review",
-      "deck-developer-archive",
-    ];
-    for (const id of subagents) {
-      expect(DEFAULT_OPENCODE_MODELS[id].reasoningEffort).toBeUndefined();
-    }
+  // REQ-MC-005: No hardcoded defaults - this should be empty
+  test("is empty (no hardcoded defaults)", () => {
+    expect(Object.keys(DEFAULT_OPENCODE_MODELS).length).toBe(0);
   });
 });
 
 describe("resolveModelConfig", () => {
   test("returns defaults when no overrides", () => {
+    // REQ-MC-005: No hardcoded defaults - returns empty when nothing configured
     const config = resolveModelConfig("deck-developer-orchestrator");
-    expect(config.model).toBe("openai/gpt-5.5");
-    expect(config.reasoningEffort).toBe("high");
+    expect(config.model).toBeUndefined();
+    expect(config.reasoningEffort).toBeUndefined();
   });
 
   test("CLI override takes highest precedence", () => {
+    // REQ-MC-005: No defaults - no reasoningEffort without explicit config
     const config = resolveModelConfig("deck-developer-orchestrator", "anthropic/claude-sonnet-4");
     expect(config.model).toBe("anthropic/claude-sonnet-4");
-    expect(config.reasoningEffort).toBe("high"); // preserved from defaults
+    expect(config.reasoningEffort).toBeUndefined();
   });
 
   test("config file override is used when no CLI override", () => {
+    // REQ-MC-005: No defaults - no reasoningEffort without explicit config
     const overrides = { "deck-developer-orchestrator": "google/gemini-2.5-pro" };
     const config = resolveModelConfig("deck-developer-orchestrator", undefined, overrides);
     expect(config.model).toBe("google/gemini-2.5-pro");
+    expect(config.reasoningEffort).toBeUndefined();
+  });
+
+  test("reasoningEffort override is respected", () => {
+    // Verify reasoningEffort overrides work correctly
+    const reasoningOverrides = { "deck-developer-orchestrator": "high" as const };
+    const config = resolveModelConfig("deck-developer-orchestrator", "anthropic/claude-sonnet-4", undefined, reasoningOverrides);
+    expect(config.model).toBe("anthropic/claude-sonnet-4");
     expect(config.reasoningEffort).toBe("high");
   });
 
@@ -74,17 +46,17 @@ describe("resolveModelConfig", () => {
     expect(config.model).toBe("openai/gpt-4o");
   });
 
-  test("unknown agent returns empty model", () => {
+  test("unknown agent returns undefined model (no hardcoded defaults)", () => {
+    // REQ-MC-005: No hardcoded defaults for any agent
     const config = resolveModelConfig("unknown-agent");
-    expect(config.model).toBe("");
+    expect(config.model).toBeUndefined();
     expect(config.reasoningEffort).toBeUndefined();
   });
 
-  test("composable — changing model doesn't touch other fields", () => {
-    const defaults = DEFAULT_OPENCODE_MODELS["deck-developer-explorer"];
+  test("composable — CLI override sets model", () => {
+    // REQ-MC-005: No defaults, CLI override works correctly
     const config = resolveModelConfig("deck-developer-explorer", "anthropic/claude-haiku-4");
     expect(config.model).toBe("anthropic/claude-haiku-4");
-    // reasoningEffort should still be undefined (matching default)
-    expect(config.reasoningEffort).toBe(defaults.reasoningEffort);
+    expect(config.reasoningEffort).toBeUndefined(); // no default reasoning
   });
 });

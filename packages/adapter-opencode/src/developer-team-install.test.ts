@@ -156,16 +156,78 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     expect(tools!.delegation_read).toBe(true);
   });
 
-  test("model assignments match DEFAULT_OPENCODE_MODELS", () => {
+  test("no model assignments without explicit config (REQ-MC-005)", () => {
+    // REQ-MC-005: No hardcoded defaults - models must be explicitly configured
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    for (const [agentId, defaults] of Object.entries(DEFAULT_OPENCODE_MODELS)) {
-      expect(plan.agentEntries[agentId].model).toBe(defaults.model);
+    for (const [agentId, entry] of Object.entries(plan.agentEntries)) {
+      // Without explicit config, model should be undefined
+      expect(entry.model).toBeUndefined();
     }
   });
 
-  test("orchestrator has reasoningEffort: high", () => {
+  test("no reasoningEffort without explicit config", () => {
+    // REQ-MC-005: No hardcoded defaults
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    expect(plan.agentEntries["deck-developer-orchestrator"].reasoningEffort).toBeUndefined();
+  });
+
+  test("explicit model override from config flows to agent entries", () => {
+    // REQ-MC-005: Explicit config override takes precedence
+    const configOverrides = {
+      "deck-developer-orchestrator": "anthropic/claude-sonnet-4-20250514",
+    };
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      configModelOverrides: configOverrides,
+    });
+
+    expect(plan.agentEntries["deck-developer-orchestrator"].model).toBe("anthropic/claude-sonnet-4-20250514");
+    // Other agents should not have model
+    expect(plan.agentEntries["deck-developer-explorer"].model).toBeUndefined();
+  });
+
+  test("explicit reasoningEffort override flows to agent entries", () => {
+    // REQ-MC-005: Explicit reasoning override works
+    const reasoningOverrides = {
+      "deck-developer-orchestrator": "high" as const,
+    };
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      reasoningEffortOverrides: reasoningOverrides,
+    });
+
     expect(plan.agentEntries["deck-developer-orchestrator"].reasoningEffort).toBe("high");
+    // Other agents should not have reasoningEffort
+    expect(plan.agentEntries["deck-developer-explorer"].reasoningEffort).toBeUndefined();
+  });
+
+  test("multiple explicit model overrides for different agents", () => {
+    const configOverrides = {
+      "deck-developer-orchestrator": "anthropic/claude-sonnet-4-20250514",
+      "deck-developer-apply-backend": "openai/gpt-4o",
+    };
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      configModelOverrides: configOverrides,
+    });
+
+    expect(plan.agentEntries["deck-developer-orchestrator"].model).toBe("anthropic/claude-sonnet-4-20250514");
+    expect(plan.agentEntries["deck-developer-apply-backend"].model).toBe("openai/gpt-4o");
+    expect(plan.agentEntries["deck-developer-explorer"].model).toBeUndefined();
+  });
+
+  test("explicit model and reasoning overrides coexist", () => {
+    const configOverrides = {
+      "deck-developer-orchestrator": "anthropic/claude-sonnet-4-20250514",
+    };
+    const reasoningOverrides = {
+      "deck-developer-orchestrator": "high" as const,
+    };
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      configModelOverrides: configOverrides,
+      reasoningEffortOverrides: reasoningOverrides,
+    });
+
+    const orchestrator = plan.agentEntries["deck-developer-orchestrator"];
+    expect(orchestrator.model).toBe("anthropic/claude-sonnet-4-20250514");
+    expect(orchestrator.reasoningEffort).toBe("high");
   });
 
   test("prompt references use {file:/absolute/path} format", () => {

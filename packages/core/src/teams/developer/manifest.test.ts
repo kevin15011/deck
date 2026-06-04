@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildDeveloperTeamManifest, buildDeveloperTeamManifestLegacy, getCataloguedAgentIds, isManifestModelComplete } from "./manifest";
+import { buildDeveloperTeamManifest, buildDeveloperTeamManifestLegacy, getDeveloperTeamAgentIds, isManifestModelComplete } from "./manifest";
 import type { DeveloperTeamManifest, ManifestBuildResult } from "./manifest";
 
 import { DEVELOPER_TEAM_AGENTS } from "./catalog";
@@ -38,13 +38,15 @@ describe("DeveloperTeamManifest", () => {
       }
     });
 
-    test("agents have model assignments from catalog defaults", () => {
+    test("agents have no model without explicit overrides (explicit-only)", () => {
+      // REQ-MC-005: No hardcoded defaults
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
       });
 
       for (const agent of result.manifest.agents) {
-        expect(agent.model).toBeTruthy();
+        // Without explicit model assignment, model should be undefined
+        expect(agent.model).toBeUndefined();
       }
     });
 
@@ -72,7 +74,8 @@ describe("DeveloperTeamManifest", () => {
       }
     });
 
-    test("manifest with no model overrides uses catalog defaults", () => {
+    test("manifest with no model overrides has no model assignments", () => {
+      // REQ-MC-005: No hardcoded defaults
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
       });
@@ -80,8 +83,8 @@ describe("DeveloperTeamManifest", () => {
       for (const agent of result.manifest.agents) {
         const catalogEntry = DEVELOPER_TEAM_AGENTS.find((a) => a.id === agent.agentId);
         expect(catalogEntry).toBeDefined();
-        // model is from catalog defaults
-        expect(agent.model).toBeTruthy();
+        // Without explicit overrides, model should be undefined
+        expect(agent.model).toBeUndefined();
       }
     });
 
@@ -217,12 +220,13 @@ describe("DeveloperTeamManifest", () => {
   });
 
   describe("isManifestModelComplete", () => {
-    test("returns true when all agents have model assignments", () => {
+    test("returns false when no explicit model assignments (explicit-only contract)", () => {
+      // REQ-MC-005: No hardcoded defaults - manifest requires explicit model assignments
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
       });
 
-      expect(isManifestModelComplete(result.manifest)).toBe(true);
+      expect(isManifestModelComplete(result.manifest)).toBe(false);
     });
 
     test("returns false when any agent lacks a model", () => {
@@ -240,9 +244,9 @@ describe("DeveloperTeamManifest", () => {
     });
   });
 
-  describe("getCataloguedAgentIds", () => {
+  describe("getDeveloperTeamAgentIds", () => {
     test("returns all Developer Team agent IDs", () => {
-      const ids = getCataloguedAgentIds();
+      const ids = getDeveloperTeamAgentIds();
       expect(ids).toHaveLength(DEVELOPER_TEAM_AGENTS.length);
 
       for (const agent of DEVELOPER_TEAM_AGENTS) {

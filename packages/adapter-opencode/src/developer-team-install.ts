@@ -384,10 +384,14 @@ function buildAgentEntry(
   const entry: AgentEntry = {
     description: agent.description,
     mode: isOrchestrator ? "primary" : "subagent",
-    model: modelConfig.model,
     prompt: promptReference,
     tools,
   };
+
+  // Only set model if explicitly configured (not undefined or empty)
+  if (modelConfig.model) {
+    entry.model = modelConfig.model;
+  }
 
   if (modelConfig.reasoningEffort) {
     entry.reasoningEffort = modelConfig.reasoningEffort;

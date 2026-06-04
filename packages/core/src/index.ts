@@ -93,7 +93,7 @@ export * from "./model-catalog";
 export {
   buildDeveloperTeamManifest,
   buildDeveloperTeamManifestLegacy,
-  getCataloguedAgentIds,
+  getDeveloperTeamAgentIds,
   isManifestModelComplete,
   type ManifestBuildResult,
 } from "./teams/developer/manifest";

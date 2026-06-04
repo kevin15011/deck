@@ -30,7 +30,7 @@ import type {
   DeveloperTeamManifest,
   TeamEntry,
 } from "@deck/core";
-import { getModelCatalog } from "@deck/core";
+import { DEVELOPER_TEAM_AGENTS, getModelCatalog } from "@deck/core";
 import { join } from "node:path";
 
 
@@ -288,7 +288,10 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
   const reasoningAssignments: DeveloperTeamThinkingAssignments = {};
 
   for (const agent of input.manifest.agents) {
-    modelAssignments[agent.agentId] = agent.model ?? "";
+    // Only include model assignments when model is explicitly set (non-empty)
+    if (agent.model) {
+      modelAssignments[agent.agentId] = agent.model;
+    }
     if (agent.reasoning) {
       reasoningAssignments[agent.agentId] = agent.reasoning as OpenCodeThinkingLevel;
     }
@@ -394,23 +397,26 @@ function getCatalog(_input?: import("@deck/core").RunnerModelCatalogInput): impo
 function readAssignments(input: import("@deck/core").RunnerModelAssignmentReadInput): import("@deck/core").RunnerModelAssignments {
   const config = readOpenCodeDeveloperTeamModelConfigAssignments();
 
-  const result = getModelCatalog().developerTeamDefaults.map((default_assignment) => ({
-    agentId: default_assignment.agentId,
-    modelId: config.modelAssignments[default_assignment.agentId] ?? default_assignment.modelId,
-    reasoning: config.thinkingAssignments[default_assignment.agentId] ?? default_assignment.reasoning,
+  // Iterate over canonical developer team agent list (not defaults, which may be empty)
+  const result = DEVELOPER_TEAM_AGENTS.map((agent) => ({
+    agentId: agent.id,
+    modelId: config.modelAssignments[agent.id] ?? "",
+    reasoning: config.thinkingAssignments[agent.id],
   }));
 
   return { assignments: result };
 }
 
 function resolveAssignment(input: import("@deck/core").RunnerModelResolveInput): import("@deck/core").RunnerResolvedModelAssignment {
-  const defaults = getModelCatalog().developerTeamDefaults;
-  const defaultAssignment = defaults.find((a) => a.agentId === input.agentId);
+  // Read from global config (~/.config/opencode/opencode.json)
+  const config = readOpenCodeDeveloperTeamModelConfigAssignments();
+  const configuredModel = config.modelAssignments[input.agentId];
+  const configuredReasoning = config.thinkingAssignments[input.agentId];
 
   return {
     agentId: input.agentId,
-    modelId: input.modelId ?? defaultAssignment?.modelId ?? "",
-    reasoning: input.reasoning ?? defaultAssignment?.reasoning,
+    modelId: input.modelId ?? configuredModel ?? "",
+    reasoning: input.reasoning ?? configuredReasoning,
   };
 }
 
@@ -643,13 +649,15 @@ function readModelAssignments(_projectRoot: string): import("@deck/core").ModelC
 }
 
 function resolveAgentModel(agentId: string, overrides?: import("@deck/core").ModelOverrideOptions): import("@deck/core").ModelConfigResult {
-  const defaults = getModelCatalog().developerTeamDefaults;
-  const defaultAssignment = defaults.find((a) => a.agentId === agentId);
+  // Read from global config (~/.config/opencode/opencode.json)
+  const config = readOpenCodeDeveloperTeamModelConfigAssignments();
+  const configuredModel = config.modelAssignments[agentId];
+  const configuredReasoning = config.thinkingAssignments[agentId];
 
   return {
     agentId,
-    modelId: overrides?.modelId ?? defaultAssignment?.modelId ?? "",
-    reasoning: overrides?.reasoning ?? defaultAssignment?.reasoning,
+    modelId: overrides?.modelId ?? configuredModel ?? "",
+    reasoning: overrides?.reasoning ?? configuredReasoning,
   };
 }
 
