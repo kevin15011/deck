@@ -9,6 +9,7 @@ import type { CapabilityStatus, PiModel, PiProvider, PiThinkingLevel } from "@de
 import type { OpenCodeThinkingLevel } from "@deck/adapter-opencode";
 import type { AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
 import { MenuList } from "../components/menu-list";
+import { getAdapter } from "../../runner-adapters";
 
 type DeveloperTeamDashboardContext = {
   source?: "home" | "dashboard";
@@ -196,6 +197,7 @@ type ModelSelectionScreenProps = {
 
 export function ModelSelectionScreen({ cursor, provider, models, runtime = "pi" }: ModelSelectionScreenProps) {
   const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
+  // T8: Use resolver to differentiate "not compatible" vs "compatible"
   return (
     <Box flexDirection="column">
       <Text bold>Select a model for {provider.displayName}</Text>
@@ -203,13 +205,28 @@ export function ModelSelectionScreen({ cursor, provider, models, runtime = "pi" 
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
-          items={models.map((m) => ({
-            id: m.id,
-            label: m.displayName,
-            hint: runtime === "pi" && !supportsDeveloperTeamModel(m)
-              ? `${m.id} · not compatible with Developer Team conversation history`
-              : (runtime === "opencode" ? supportsThinkingForOpenCodeModel(m.id) : supportsThinkingForModel(m)) ? m.id : `${m.id} · Thinking not supported; using off`,
-          }))}
+          items={models.map((m) => {
+            // T8: Check if model supports thinking using the adapter's resolver
+            const supportsThinking = runtime === "opencode"
+              ? supportsThinkingForOpenCodeModel(m.id)
+              : supportsThinkingForModel(m);
+
+            let hint: string;
+            if (runtime === "pi" && !supportsDeveloperTeamModel(m)) {
+              hint = `${m.id} · not compatible with Developer Team conversation history`;
+            } else if (supportsThinking) {
+              hint = m.id; // Show model ID hint for supported models
+            } else {
+              // T8: Don't add extra "unsupported" copy - show model ID only
+              hint = m.id;
+            }
+
+            return {
+              id: m.id,
+              label: m.displayName,
+              hint,
+            };
+          })}
         />
       </Box>
     </Box>
@@ -272,16 +289,33 @@ type AgentModelConfigListScreenProps = {
   modelAssignments: Record<string, string>;
   thinkingAssignments: Record<string, PiThinkingLevel>;
   dashboardContext?: DeveloperTeamDashboardContext;
+  runtime?: "pi" | "opencode";
 };
 
-export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingAssignments, dashboardContext }: AgentModelConfigListScreenProps) {
+export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingAssignments, dashboardContext, runtime = "pi" }: AgentModelConfigListScreenProps) {
+  // T8: Only show thinking hint when model supports reasoning
   const agentItems = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const assigned = modelAssignments[agent.id];
     const thinking = thinkingAssignments[agent.id];
+
+    let hint: string;
+    if (!assigned) {
+      hint = "not configured";
+    } else {
+      // Check if model supports thinking - only show thinking hint if supported
+      const supportsThinking = runtime === "opencode"
+        ? supportsThinkingForOpenCodeModel(assigned)
+        : supportsThinkingForModel(assigned as any);
+
+      hint = supportsThinking && thinking
+        ? `${assigned} · thinking ${thinking}`
+        : assigned;
+    }
+
     return {
       id: agent.id,
       label: agent.displayName,
-      hint: assigned ? `${assigned} · thinking ${thinking ?? "default"}` : "not configured",
+      hint,
     };
   });
 

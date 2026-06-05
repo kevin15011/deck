@@ -89,6 +89,9 @@ export type {
 // Canonical model catalog
 export * from "./model-catalog";
 
+// Model reasoning capability resolver (hybrid runner > catalog > unknown)
+export * from "./model-reasoning-capability";
+
 // Developer Team manifest builder
 export {
   buildDeveloperTeamManifest,

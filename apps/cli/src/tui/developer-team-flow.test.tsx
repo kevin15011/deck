@@ -214,7 +214,7 @@ describe("Developer Team TUI screens", () => {
       expect(output).toContain("Claude Sonnet 4");
     });
 
-    test("keeps Kimi selectable with thinking off note", () => {
+    test("keeps Kimi selectable without extra unsupported copy (T8 compliance)", () => {
       const provider = { id: "opencode-go", displayName: "OpenCode Go", envVars: ["OPENCODE_API_KEY"] };
       const models = [
         { id: "opencode-go/kimi-k2.6", displayName: "Kimi K2.6", providerId: "opencode-go" },
@@ -222,10 +222,12 @@ describe("Developer Team TUI screens", () => {
       const output = renderToString(<ModelSelectionScreen cursor={0} provider={provider} models={models} />);
 
       expect(output).toContain("Kimi K2.6");
-      expect(output).toContain("Thinking not supported; using off");
+      // T8: No extra "unsupported" copy - shows model ID only (REQ-TUI-004)
+      expect(output).toContain("opencode-go/kimi-k2.6");
+      expect(output).not.toContain("Thinking not supported");
     });
 
-    test("keeps non-Kimi opencode-go models selectable with thinking off note", () => {
+    test("keeps non-Kimi opencode-go models selectable without extra copy", () => {
       const provider = { id: "opencode-go", displayName: "OpenCode Go", envVars: ["OPENCODE_API_KEY"] };
       const models = [
         { id: "opencode-go/qwen3.6-plus", displayName: "Qwen 3.6 Plus", providerId: "opencode-go" },
@@ -233,7 +235,9 @@ describe("Developer Team TUI screens", () => {
       const output = renderToString(<ModelSelectionScreen cursor={0} provider={provider} models={models} />);
 
       expect(output).toContain("Qwen 3.6 Plus");
-      expect(output).toContain("Thinking not supported; using off");
+      // T8: No extra "unsupported" copy - shows model ID only (REQ-TUI-004)
+      expect(output).toContain("opencode-go/qwen3.6-plus");
+      expect(output).not.toContain("Thinking not supported");
     });
   });
 

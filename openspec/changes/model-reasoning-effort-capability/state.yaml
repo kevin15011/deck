@@ -1,0 +1,142 @@
+phase: archive
+status: archived
+change: model-reasoning-effort-capability
+artifacts:
+  - path: openspec/changes/model-reasoning-effort-capability/exploration.md
+    phase: explorer
+    type: exploration
+    timestamp: "2026-06-04T00:00:00Z"
+  - path: openspec/changes/model-reasoning-effort-capability/proposal.md
+    phase: proposal
+    type: proposal
+    timestamp: "2026-06-04T00:00:00Z"
+  - path: openspec/changes/model-reasoning-effort-capability/proposal.md
+    phase: proposal
+    type: proposal-repair
+    timestamp: "2026-06-04T00:00:00Z"
+  - path: openspec/changes/model-reasoning-effort-capability/spec.md
+    phase: spec
+    type: spec
+    timestamp: "2026-06-04T00:00:00Z"
+  - path: openspec/changes/model-reasoning-effort-capability/design.md
+    phase: design
+    type: design
+    timestamp: "2026-06-04T00:00:00Z"
+  - path: openspec/changes/model-reasoning-effort-capability/tasks.md
+    phase: tasks
+    type: tasks
+    timestamp: "2026-06-04T00:00:00Z"
+  - path: openspec/changes/model-reasoning-effort-capability/apply-progress.md
+    phase: apply
+    agent: general
+    type: apply-progress
+    timestamp: "2026-06-04T00:00:00Z"
+    tasks_completed: [1, 2]
+  - path: openspec/changes/model-reasoning-effort-capability/apply-progress.md
+    phase: apply
+    agent: backend
+    type: apply-progress
+    timestamp: "2026-06-04T00:00:00Z"
+    tasks_completed: [3, 4, 5, 6]
+  - path: openspec/changes/model-reasoning-effort-capability/apply-progress.md
+    phase: apply
+    agent: frontend
+    type: apply-progress
+    timestamp: "2026-06-04T00:00:00Z"
+    tasks_completed: [7, 8, 9]
+  - path: openspec/changes/model-reasoning-effort-capability/apply-progress.md
+    phase: apply
+    agent: frontend
+    type: apply-fixes
+    timestamp: "2026-06-04T00:00:00Z"
+    fixes_completed:
+      - verify-typecheck-errors
+      - review-t7-cleanup-shape
+      - dead-state-removal
+      - defaults-reasoning-validation
+  - path: openspec/changes/model-reasoning-effort-capability/verify-report.md
+    phase: verify
+    type: verify-report
+    timestamp: "2026-06-04T00:00:00Z"
+    status: completed
+  - path: openspec/changes/model-reasoning-effort-capability/review-report.md
+    phase: review
+    type: review-report
+    timestamp: "2026-06-04T00:00:00Z"
+    status: completed
+  - path: openspec/changes/model-reasoning-effort-capability/archive-report.md
+    phase: archive
+    type: archive-report
+    timestamp: "2026-06-04T12:00:00Z"
+    status: archived
+  - path: openspec/changes/model-reasoning-effort-capability/apply-progress.md
+    phase: apply
+    agent: frontend
+    type: apply-progress-fix
+    timestamp: "2026-06-04T12:00:00Z"
+    fix_description: "Fix Verify/Review issues: TypeScript errors in T7 hydrateDeveloperTeamModelConfig, remove dead state modelSupportsReasoningById, fix null handling in applyDeveloperTeamModelConfig, validate defaults in resolveModelConfig"
+provenance:
+  user_request: |
+    "Hay un cambio que quiero hacer, en la instalación y configuración de modelos el nivel de esfuerzo aparece para todos los modelos, pero no todos usan realmente el nivel de esfuerzo. Quiero modificar esto en nuestra TUI y sistema"
+  mode: interactive
+  sdd_accepted: true
+  language: es
+  proposal_inputs:
+    explorer_artifact: openspec/changes/model-reasoning-effort-capability/exploration.md
+    user_decisions:
+      - "Limpiar/remover reasoningEffort para modelos sin soporte de reasoning."
+      - "En TUI, ocultar reasoning level y no ofrecer selección para modelos no compatibles."
+      - "Diferir actualización/workaround de Pi a una sesión posterior, evitando regresiones."
+      - "Usar fuente híbrida: capacidades del runner primero, catálogo de Deck como fallback, unknown => sin reasoning."
+  proposal_repair:
+    reason: "El usuario no aceptó catálogo-only como source of truth."
+    repaired_artifact: openspec/changes/model-reasoning-effort-capability/proposal.md
+    direction: "runner capabilities > Deck catalog fallback > default no reasoning"
+  registry_reconciliation:
+    mode: registry-deferred
+    reconciled_phases:
+      - spec
+      - design
+      - tasks
+    artifacts:
+      spec: openspec/changes/model-reasoning-effort-capability/spec.md
+      design: openspec/changes/model-reasoning-effort-capability/design.md
+      tasks: openspec/changes/model-reasoning-effort-capability/tasks.md
+      verify: openspec/changes/model-reasoning-effort-capability/verify-report.md
+      review: openspec/changes/model-reasoning-effort-capability/review-report.md
+  tasks_metadata:
+    total_tasks: 9
+    groups:
+      shared_contracts: 2
+      backend: 4
+      frontend: 3
+    parallelization: 3_phases_sequential
+    review_risk: medium
+    tdd_strict: true
+    open_questions_blocking: 0
+  verify_review_metadata:
+    verify_status: completed
+    review_status: completed
+    review_verdict: pass
+    blockers: 0
+    required_fixes: 0
+    warnings:
+      - pre-existing global typecheck/test failures remain outside this change
+      - non-blocking minor/nit review findings remain for optional follow-up
+  archive_metadata:
+    archive_status: archived
+    artifact: openspec/changes/model-reasoning-effort-capability/archive-report.md
+    final_summary: |
+      Cambio completado: capacidad híbrida de reasoning effort por modelo.
+      Resolver runner > catálogo > unknown implementado en core.
+      OpenCode filtra/limpia reasoningEffort para modelos sin soporte.
+      TUI oculta selector/hint para unsupported/unknown.
+      Pi anti-regresión intacta. 0 blockers, 0 major findings.
+    follow_ups:
+      - priority: low
+        description: Rename ReasoningCapabilityMap to ReasoningCapabilityByModel (MINOR)
+      - priority: low
+        description: Fix projectRoot "" vs undefined in adapters (MINOR)
+      - priority: low
+        description: Fix mock signature typecheck gaps in model-config.test.ts (MINOR)
+last_updated: "2026-06-04T12:00:00Z"

@@ -363,11 +363,23 @@ function buildAgentEntry(
   agent: DeveloperTeamAgent,
   promptReference: string,
   toolPolicyBundle?: ReturnType<typeof buildCapabilityToolPolicyBundle>,
-  options?: { cliModelOverride?: string; configModelOverrides?: Record<string, string>; reasoningEffortOverrides?: Record<string, string> },
+  options?: {
+    cliModelOverride?: string;
+    configModelOverrides?: Record<string, string>;
+    reasoningEffortOverrides?: Record<string, string>;
+    capabilityMap?: Record<string, boolean | null>;
+  },
 ): AgentEntry {
   const isOrchestrator = agent.id === "deck-developer-orchestrator";
   const serenaTools = resolveSerenaToolsForAgent(agent.id, toolPolicyBundle);
-  const modelConfig = resolveModelConfig(agent.id, options?.cliModelOverride, options?.configModelOverrides, options?.reasoningEffortOverrides as Record<string, "off" | "low" | "medium" | "high"> | undefined);
+  const modelConfig = resolveModelConfig(
+    agent.id,
+    options?.cliModelOverride,
+    options?.configModelOverrides,
+    options?.reasoningEffortOverrides as Record<string, "off" | "low" | "medium" | "high"> | undefined,
+    undefined, // catalog - use default
+    options?.capabilityMap,
+  );
 
   let tools: Record<string, boolean>;
 
@@ -393,6 +405,7 @@ function buildAgentEntry(
     entry.model = modelConfig.model;
   }
 
+  // Only include reasoningEffort when model supports it (filtered by resolveModelConfig)
   if (modelConfig.reasoningEffort) {
     entry.reasoningEffort = modelConfig.reasoningEffort;
   }
@@ -478,6 +491,12 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
      * This enables runtime authorization card injection during install-time prompt generation.
      */
     authorization?: ModificationAuthorization;
+    /**
+     * Optional map of modelId -> runner signal (true/false).
+     * When provided, runner signal takes precedence over catalog fallback.
+     * This enables the TUI to pass runtime capability detection results.
+     */
+    capabilityMap?: Record<string, boolean | null>;
   },
 ): OpenCodeDeveloperTeamInstallPlan {
   const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
@@ -514,6 +533,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
       cliModelOverride: options?.cliModelOverride,
       configModelOverrides: options?.configModelOverrides,
       reasoningEffortOverrides: options?.reasoningEffortOverrides,
+      capabilityMap: options?.capabilityMap,
     });
   }
 

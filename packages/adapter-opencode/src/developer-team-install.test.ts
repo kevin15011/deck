@@ -185,15 +185,16 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     expect(plan.agentEntries["deck-developer-explorer"].model).toBeUndefined();
   });
 
-  test("explicit reasoningEffort override flows to agent entries", () => {
-    // REQ-MC-005: Explicit reasoning override works
-    const reasoningOverrides = {
-      "deck-developer-orchestrator": "high" as const,
-    };
+  test("explicit reasoningEffort override flows to agent entries with model", () => {
+    // REQ-MC-005: Explicit reasoning override works when model is also set
+    const configOverrides = { "deck-developer-orchestrator": "anthropic/claude-sonnet-4" };
+    const reasoningOverrides = { "deck-developer-orchestrator": "high" as const };
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      configModelOverrides: configOverrides,
       reasoningEffortOverrides: reasoningOverrides,
     });
 
+    expect(plan.agentEntries["deck-developer-orchestrator"].model).toBe("anthropic/claude-sonnet-4");
     expect(plan.agentEntries["deck-developer-orchestrator"].reasoningEffort).toBe("high");
     // Other agents should not have reasoningEffort
     expect(plan.agentEntries["deck-developer-explorer"].reasoningEffort).toBeUndefined();
@@ -215,7 +216,7 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
 
   test("explicit model and reasoning overrides coexist", () => {
     const configOverrides = {
-      "deck-developer-orchestrator": "anthropic/claude-sonnet-4-20250514",
+      "deck-developer-orchestrator": "anthropic/claude-sonnet-4",
     };
     const reasoningOverrides = {
       "deck-developer-orchestrator": "high" as const,
@@ -226,7 +227,7 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     });
 
     const orchestrator = plan.agentEntries["deck-developer-orchestrator"];
-    expect(orchestrator.model).toBe("anthropic/claude-sonnet-4-20250514");
+    expect(orchestrator.model).toBe("anthropic/claude-sonnet-4");
     expect(orchestrator.reasoningEffort).toBe("high");
   });
 

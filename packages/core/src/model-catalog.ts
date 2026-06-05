@@ -37,6 +37,15 @@ export type ModelEntry = {
   displayName: string;
   providerId: string;
   capabilities: readonly ModelCapability[];
+  /**
+   * Explicit reasoning support flag.
+   * When explicitly set (true/false), takes priority over deriving from capabilities.
+   * If undefined, the resolver falls back to checking capabilities.includes("reasoning").
+   *
+   * Note: For the resolver, explicit supportsReasoning beats derived from capabilities.
+   * Example: A model with { capabilities: ["reasoning"], supportsReasoning: false }
+   * will be treated as NOT supporting reasoning (explicit false wins).
+   */
   supportsReasoning?: boolean;
 };
 

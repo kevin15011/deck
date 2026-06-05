@@ -1529,18 +1529,13 @@ export function DeckApp() {
     if (screen === "model-selection") {
       const model = providerModels[cursor];
       if (!model) return;
-      if (modelConfigRuntime === "pi" && !getAdapter("pi").supportsThinking(model.id)) {
-        resetCursor("agent-model-config-list");
-        return;
-      }
-      setSelectedModel(model as any);
-      const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
-      const existingThinking = agent ? thinkingAssignments[agent.id] : undefined;
 
+      // T7: Check if model supports thinking using the adapter's resolver
       const supportsThinking = getAdapter(modelConfigRuntime).supportsThinking(model.id);
-      const thinkingLevels = modelConfigRuntime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
 
       if (!supportsThinking) {
+        // Model doesn't support reasoning - clean up and skip assignment screen
+        const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
         if (agent) {
           setModelAssignments((current) => ({ ...current, [agent.id]: model.id }));
           setThinkingAssignments((current) => {
@@ -1553,6 +1548,12 @@ export function DeckApp() {
         resetCursor("agent-model-config-list");
         return;
       }
+
+      setSelectedModel(model as any);
+      const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
+      const existingThinking = agent ? thinkingAssignments[agent.id] : undefined;
+
+      const thinkingLevels = modelConfigRuntime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
 
       const resolveThinking = getAdapter(modelConfigRuntime).resolveThinking(model.id, existingThinking as any);
 
@@ -2002,11 +2003,24 @@ export function DeckApp() {
   function hydrateDeveloperTeamModelConfig(runtime?: "pi" | "opencode") {
     const effectiveRuntime = runtime ?? modelConfigRuntime;
     const adapter = getAdapter(effectiveRuntime);
-    const assignments = adapter.readModelAssignments();
-    // Defensive: ensure we always pass an object to state setters
-    const safeAssignments = typeof assignments === "object" && assignments !== null ? assignments : {};
-    setModelAssignments(safeAssignments.modelAssignments ?? {});
-    setThinkingAssignments(safeAssignments.thinkingAssignments ?? {});
+
+    // T7: Clean up thinkingAssignments for models without confirmed reasoning support
+    // Use both readModelAssignments and readThinkingAssignments to get the correct shapes
+    const modelAssigns = adapter.readModelAssignments("") || {};
+    const thinkingAssigns = adapter.readThinkingAssignments("") || {};
+
+    // Filter thinking assignments to only keep those for models that support reasoning
+    const cleanedThinking: DeveloperTeamThinkingAssignments = {};
+    for (const [agentId, modelId] of Object.entries(modelAssigns)) {
+      const supports = adapter.supportsThinking(modelId);
+      if (supports && thinkingAssigns[agentId]) {
+        cleanedThinking[agentId] = thinkingAssigns[agentId];
+      }
+      // If model doesn't support thinking, we don't preserve the thinking assignment (T7 cleanup)
+    }
+
+    setModelAssignments(modelAssigns);
+    setThinkingAssignments(cleanedThinking);
   }
 
   function getThinkingLevelByCursor(index: number) {
@@ -2035,6 +2049,13 @@ export function DeckApp() {
 
   async function applyDeveloperTeamModelConfig() {
     const projectRoot = resolveProjectRoot({ require: true });
+    if (!projectRoot) {
+      setInstallResults((current) => [
+        ...current,
+        { tool: "Developer Team models", success: false, message: "Project root not found." },
+      ]);
+      return;
+    }
     const adapter = getAdapter(modelConfigRuntime);
 
     // Build capability instructions (only used by OpenCode; Pi ignores undefined capabilityInstructions)
@@ -2060,7 +2081,11 @@ export function DeckApp() {
     const backup = adapter.backupDeveloperTeamFiles(plan);
 
     try {
-      const applyResult = await adapter.applyDeveloperTeamInstall({ projectRoot, plan });
+      const applyResult = await adapter.applyDeveloperTeamInstall({
+        projectRoot,
+        plan,
+        environmentId: modelConfigRuntime === "opencode" ? "opencode-development" : "pi-development",
+      });
       const verifyResult = adapter.verifyDeveloperTeamInstall(plan);
 
       if (!verifyResult.valid) {
@@ -2349,7 +2374,7 @@ export function DeckApp() {
       {screen === "installing" ? <Text>Installing selected tools...</Text> : null}
       {screen === "team-selection" ? <TeamSelectionScreen cursor={cursor} selected={selectedTeams} /> : null}
       {screen === "agent-model-config-list" ? (
-        <AgentModelConfigListScreen cursor={agentConfigCursor} modelAssignments={modelAssignments} thinkingAssignments={thinkingAssignments} dashboardContext={dashboardDeveloperTeamContext()} />
+        <AgentModelConfigListScreen cursor={agentConfigCursor} modelAssignments={modelAssignments} thinkingAssignments={thinkingAssignments} dashboardContext={dashboardDeveloperTeamContext()} runtime={modelConfigRuntime} />
       ) : null}
       {screen === "model-provider-selection" ? (
         <ModelProviderSelectionScreen cursor={cursor} providers={detectedProviders} runtime={modelConfigRuntime} />
