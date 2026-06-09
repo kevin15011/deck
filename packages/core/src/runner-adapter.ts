@@ -19,8 +19,8 @@ import type {
   RunnerDeveloperTeamInstallPlan,
   DeveloperTeamApplyInput,
   DeveloperTeamApplyResult,
-  AdaptiveMemoryProvider,
 } from "./runner-capability";
+import type { AdaptiveMemoryProvider } from "./memory/adaptive-memory";
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles";
 
 // ---------------------------------------------------------------------------

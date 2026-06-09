@@ -167,3 +167,8 @@ export * from "./spec-registry";
 
 // Bootstrap skills — deck-init and deck-onboard
 export * from "./skills/bootstrap";
+
+// Runner Capability / Parity Registry (Batch A - Core foundation)
+export * from "./runner-capability-registry";
+export * from "./runner-capability-parity";
+export * from "./shared-binary-usability";

@@ -6,6 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./runner-capability": "./src/runner-capability.ts",
+    "./runner-capability-registry": "./src/runner-capability-registry.ts",
+    "./runner-capability-parity": "./src/runner-capability-parity.ts",
     "./developer-team-catalog": "./src/developer-team-catalog.ts",
     "./team-catalog": "./src/team-catalog.ts",
     "./explorer-prompt": "./src/explorer-prompt.ts",
