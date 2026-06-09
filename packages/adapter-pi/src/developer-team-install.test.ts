@@ -12,6 +12,7 @@ import {
   backupDeveloperTeamFiles,
   rollbackDeveloperTeamFiles,
   verifyDeveloperTeamInstall,
+  cleanupLegacySddAgentFiles,
 } from "./developer-team-install";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "./model-config";
@@ -94,14 +95,14 @@ function ensurePiDirs(projectRoot: string) {
 }
 
 describe("buildDeveloperTeamInstallPlan", () => {
-  test("includes all 12 agents, 12 skills, and project .pi paths", () => {
+  test("includes all 14 agents, 14 skills + 2 sddSkillFiles, and project .pi paths", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/my-project");
 
     expect(plan.projectRoot).toBe("/tmp/my-project");
     expect(plan.agentsDir).toBe("/tmp/my-project/.pi/agents");
     expect(plan.skillsDir).toBe("/tmp/my-project/.pi/skills");
     expect(plan.agents).toHaveLength(14);
-    expect(plan.skills).toHaveLength(16);
+    expect(plan.skills).toHaveLength(12);
 
     const agentIds = plan.agents.map((a) => a.agent.id);
     expect(agentIds).toContain("deck-developer-orchestrator");
@@ -110,15 +111,17 @@ describe("buildDeveloperTeamInstallPlan", () => {
     expect(agentIds).toContain("deck-developer-apply-backend");
     expect(agentIds).toContain("deck-developer-apply-frontend");
 
+    // Skills exclude deck-init and deck-onboard (now in sddSkillFiles)
     const skillIds = plan.skills.map((s) => s.agent.id);
-    expect(skillIds).toEqual(agentIds);
+    const expectedSkillIds = agentIds.filter((id) => id !== "deck-init" && id !== "deck-onboard");
+    expect(skillIds).toEqual(expectedSkillIds);
   });
 
   test("each planned agent has .pi/agents relative path with team-scoped ID and valid content", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project");
 
     for (const planned of plan.agents) {
-      expect(planned.relativePath).toMatch(/^\.pi\/agents\/deck-developer-.*\.md$/);
+      expect(planned.relativePath).toMatch(/^\.pi\/agents\/[a-z][a-z0-9-]+\.md$/);
       expect(planned.absolutePath).toBe(join("/tmp/project", planned.relativePath));
       expect(planned.content).toContain("---");
       expect(planned.content).toContain(`name: ${planned.agent.name}`);
@@ -138,7 +141,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project");
 
     for (const planned of plan.skills) {
-      expect(planned.relativePath).toMatch(/^\.pi\/skills\/deck-developer-[^/]+\/SKILL\.md$/);
+      expect(planned.relativePath).toMatch(/^\.pi\/skills\/[a-z][a-z0-9-]+\/SKILL\.md$/);
       expect(planned.absolutePath).toBe(join("/tmp/project", planned.relativePath));
       expect(planned.content).toContain("---");
       expect(planned.content).toContain(`description: ${JSON.stringify(planned.agent.description)}`);
@@ -311,9 +314,9 @@ describe("applyDeveloperTeamInstall", () => {
       const plan = buildDeveloperTeamInstallPlan(projectRoot);
       const result = applyDeveloperTeamInstall(plan);
 
-      expect(result.results).toHaveLength(30);
+      expect(result.results).toHaveLength(28);
       expect(result.results.filter((r) => r.kind === "agent")).toHaveLength(14);
-      expect(result.results.filter((r) => r.kind === "skill")).toHaveLength(16);
+      expect(result.results.filter((r) => r.kind === "skill")).toHaveLength(14);
       expect(result.results.every((r) => r.status === "created")).toBe(true);
 
       // Spot-check one agent file has valid frontmatter and body
@@ -429,6 +432,84 @@ describe("applyDeveloperTeamInstall", () => {
   });
 });
 
+describe("applyDeveloperTeamInstall - profile materialization", () => {
+  test("materializes profile to .deck/pi/profiles/<team>/system-prompt.md", () => {
+    const projectRoot = createTempProject();
+    try {
+      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      const result = applyDeveloperTeamInstall(plan);
+
+      // Profile should be materialized at project-relative path
+      expect(result.profileDir).toContain(".deck/pi/profiles/developer-team");
+      expect(result.profileDir).toBe(join(projectRoot, ".deck", "pi", "profiles", "developer-team"));
+
+      // Profile file should exist
+      const systemPromptPath = join(result.profileDir, "system-prompt.md");
+      expect(existsSync(systemPromptPath)).toBe(true);
+
+      // Profile content should contain Developer Team content
+      const content = readFileSync(systemPromptPath, "utf-8");
+      expect(content).toContain("Developer Team");
+      expect(content).toContain("deck-developer-orchestrator");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("returns profileStatus 'created' on first install", () => {
+    const projectRoot = createTempProject();
+    try {
+      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      const result = applyDeveloperTeamInstall(plan);
+
+      expect(result.profileStatus).toBe("created");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("returns profileStatus 'unchanged' when profile content is same", () => {
+    const projectRoot = createTempProject();
+    try {
+      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+
+      // First apply
+      const first = applyDeveloperTeamInstall(plan);
+      expect(first.profileStatus).toBe("created");
+
+      // Second apply - profile should be unchanged
+      const second = applyDeveloperTeamInstall(plan);
+      expect(second.profileStatus).toBe("unchanged");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("orchestrator stub references profile path without duplicating full prompt", () => {
+    const projectRoot = createTempProject();
+    try {
+      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+      applyDeveloperTeamInstall(plan);
+
+      // Read orchestrator agent file
+      const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md");
+      const orchestratorContent = readFileSync(orchestratorPath, "utf-8");
+
+      // Should reference profile path
+      expect(orchestratorContent).toContain(".deck/pi/profiles/<team>/system-prompt.md");
+
+      // Should NOT contain full system prompt body (invariants, etc.) - that's in the profile
+      expect(orchestratorContent).not.toContain("## Orchestrator Invariants");
+      expect(orchestratorContent).not.toContain("INV-001");
+
+      // Should have stub indicator
+      expect(orchestratorContent).toContain("System prompt is sourced from profile");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+});
+
 describe("verifyDeveloperTeamInstall", () => {
   test("passes when all agent and skill files exist with correct content", () => {
     const projectRoot = createTempProject();
@@ -440,7 +521,7 @@ describe("verifyDeveloperTeamInstall", () => {
       expect(verifyResult.valid).toBe(true);
       expect(verifyResult.agentResults).toHaveLength(14);
       expect(verifyResult.agentResults.every((r) => r.valid)).toBe(true);
-      expect(verifyResult.skillResults).toHaveLength(14);
+      expect(verifyResult.skillResults).toHaveLength(12);
       expect(verifyResult.skillResults.every((r) => r.valid)).toBe(true);
     } finally {
       cleanup(projectRoot);
@@ -457,7 +538,7 @@ describe("verifyDeveloperTeamInstall", () => {
       expect(verifyResult.valid).toBe(false);
       expect(verifyResult.agentResults).toHaveLength(14);
       expect(verifyResult.agentResults.every((r) => !r.valid)).toBe(true);
-      expect(verifyResult.skillResults).toHaveLength(14);
+      expect(verifyResult.skillResults).toHaveLength(12);
       expect(verifyResult.skillResults.every((r) => !r.valid)).toBe(true);
 
       // Each should report missing file
@@ -527,7 +608,7 @@ describe("backupDeveloperTeamFiles", () => {
       writeFileSync(plan.agents[0].absolutePath, "old-content", "utf-8");
 
       const backup = backupDeveloperTeamFiles(plan);
-      expect(backup.entries).toHaveLength(30); // 14 agents + 16 skills (14 agent skills + 2 SDD bootstrap)
+      expect(backup.entries).toHaveLength(28); // 14 agents + 14 skills (12 agent skills + 2 SDD bootstrap)
 
       // The pre-existing file should have its content captured
       const existingEntry = backup.entries.find((e) => e.absolutePath === plan.agents[0].absolutePath)!;
@@ -535,7 +616,7 @@ describe("backupDeveloperTeamFiles", () => {
 
       // Files that didn't exist should have null
       const missingEntries = backup.entries.filter((e) => e.previousContent === null);
-      expect(missingEntries).toHaveLength(29);
+      expect(missingEntries).toHaveLength(27);
     } finally {
       cleanup(projectRoot);
     }
@@ -741,7 +822,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
     expect(orchestrator.content).toContain("## Adaptive Memory (provider-injected)");
     expect(orchestrator.content).toContain("## Adaptive Memory");
     expect(orchestrator.content).toContain("Agent-level Engram memory instructions.");
-    expect(orchestrator.content).toContain("Memory is auxiliary");
+    // Memory is auxiliary policy is in the profile system prompt, not the agent stub
+    expect(orchestrator.content).toContain("System prompt is sourced from profile");
   });
 
   test("plan with Engram provider includes Adaptive Memory section in skill content", () => {
@@ -961,21 +1043,22 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
             { surface: "skill", markdown: "Use validated Supermemory MCP tools only.", teamId: "developer-team" },
           ],
           toolBindings: [
-            { capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"], metadata: { authenticatedRuntimeValidated: true } },
+            { capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"] },
           ],
         }),
       };
 
       const plan = buildDeveloperTeamInstallPlan(projectRoot, { memoryProvider: supermemoryProvider, piMcpConfigPath: mcpPath });
-      const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+      // Use non-orchestrator agent since orchestrator has stub content (Task 7.2)
+      const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
 
       expect(plan.memoryDiagnostics).toHaveLength(0);
-      expect(orchestrator.content).toContain("Use Supermemory MCP as advisory context only.");
-      expect(orchestrator.content).toContain("supermemory.execute");
-      expect(orchestrator.content).toContain("supermemory.search_docs");
-      expect(orchestrator.content).not.toContain("tools: read,write,bash,execute");
-      expect(orchestrator.content).not.toContain("context,recall,memory");
-      expect(orchestrator.content).not.toContain("sentinel-token-install");
+      expect(explorer.content).toContain("Use Supermemory MCP as advisory context only.");
+      expect(explorer.content).toContain("supermemory.execute");
+      expect(explorer.content).toContain("supermemory.search_docs");
+      expect(explorer.content).not.toContain("tools: read,write,bash,execute");
+      expect(explorer.content).not.toContain("context,recall,memory");
+      expect(explorer.content).not.toContain("sentinel-token-install");
     } finally {
       cleanup(projectRoot);
     }
@@ -1001,23 +1084,26 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
         displayName: "Supermemory MCP",
         buildInjection: () => ({
           instructions: [{ surface: "agent", markdown: "Use custom Supermemory MCP server.", teamId: "developer-team" }],
-          toolBindings: [{ capability: "memory.search", serverName: "customSupermemory", toolNames: ["execute", "search_docs"], metadata: { authenticatedRuntimeValidated: true } }],
+          toolBindings: [{ capability: "memory.search", serverName: "customSupermemory", toolNames: ["execute", "search_docs"] }],
         }),
       };
 
       const plan = buildDeveloperTeamInstallPlan(projectRoot, { memoryProvider: supermemoryProvider, piMcpConfigPath: mcpPath });
-      const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+      // Use non-orchestrator agent since orchestrator has stub content (Task 7.2)
+      const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
 
       expect(plan.memoryDiagnostics).toHaveLength(0);
-      expect(orchestrator.content).toContain("customSupermemory.execute");
-      expect(orchestrator.content).toContain("customSupermemory.search_docs");
-      expect(orchestrator.content).not.toContain("tools: read,write,bash,execute");
+      expect(explorer.content).toContain("customSupermemory.execute");
+      expect(explorer.content).toContain("customSupermemory.search_docs");
+      expect(explorer.content).not.toContain("tools: read,write,bash,execute");
     } finally {
       cleanup(projectRoot);
     }
   });
 
-  test("plan with Supermemory provider omits injection when authenticated runtime validation is absent", () => {
+  test("plan with Supermemory provider injects tools even without authenticatedRuntimeValidated (gate removed)", () => {
+    // Task 7.1: Removed Pi-only gate - Pi now behaves like OpenCode
+    // With valid MCP config, Supermemory tools are injected regardless of authenticatedRuntimeValidated
     const projectRoot = createTempProject();
     try {
       const mcpPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
@@ -1036,18 +1122,22 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
         id: "supermemory",
         displayName: "Supermemory MCP",
         buildInjection: () => ({
-          instructions: [{ surface: "agent", markdown: "Should not be injected without authenticated runtime validation.", teamId: "developer-team" }],
+          instructions: [{ surface: "agent", markdown: "Use Supermemory MCP tools.", teamId: "developer-team" }],
+          // No authenticatedRuntimeValidated in metadata - previously this would block injection
           toolBindings: [{ capability: "memory.search", serverName: "customSupermemory", toolNames: ["execute", "search_docs"] }],
         }),
       };
 
       const plan = buildDeveloperTeamInstallPlan(projectRoot, { memoryProvider: supermemoryProvider, piMcpConfigPath: mcpPath });
-      const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+      // Use a non-orchestrator agent since orchestrator now has stub content
+      const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
 
-      expect(plan.memoryDiagnostics).toHaveLength(1);
-      expect(plan.memoryDiagnostics[0].code).toBe("memory_provider_unavailable");
-      expect(orchestrator.content).not.toContain("Should not be injected");
-      expect(orchestrator.content).not.toContain("customSupermemory.execute");
+      // No diagnostics - gate removed, injection happens with valid MCP config
+      expect(plan.memoryDiagnostics).toHaveLength(0);
+      // Memory content is injected in non-orchestrator agents
+      expect(explorer.content).toContain("Use Supermemory MCP tools.");
+      expect(explorer.content).toContain("customSupermemory.execute");
+      expect(explorer.content).toContain("customSupermemory.search_docs");
     } finally {
       cleanup(projectRoot);
     }
@@ -1069,18 +1159,18 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
         memoryProvider: supermemoryProvider,
         piMcpConfigPath: join(projectRoot, "missing-home", ".pi", "agent", "mcp.json"),
       });
-      const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+      // Use non-orchestrator agent since orchestrator has stub content (Task 7.2)
+      const explorer = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
 
       expect(plan.memoryDiagnostics).toHaveLength(1);
       expect(plan.memoryDiagnostics[0].code).toBe("memory_provider_unavailable");
       expect(plan.memoryDiagnostics[0].providerId).toBe("supermemory");
       expect(JSON.stringify(plan.memoryDiagnostics)).not.toContain("x-supermemory-api-key");
-      expect(orchestrator.content).not.toContain("Should not be injected.");
-      // Note: We no longer assert "execute" is absent because INV-002 (Pure Delegator) contains "execute"
-      // instead verify no memory tool bindings
-      expect(orchestrator.content).not.toContain("Supermemory MCP");
-      expect(orchestrator.content).not.toContain("search_docs");
-      expect(orchestrator.content).toContain("tools: read,write,bash");
+      // Non-orchestrator agents should not have memory injection when MCP config is missing
+      expect(explorer.content).not.toContain("Should not be injected.");
+      expect(explorer.content).not.toContain("Supermemory MCP");
+      expect(explorer.content).not.toContain("search_docs");
+      expect(explorer.content).toContain("tools: read,write,bash");
     } finally {
       cleanup(projectRoot);
     }
@@ -1327,17 +1417,16 @@ describe("verifyDeveloperTeamInstall with orchestrator invariants", () => {
       (a) => a.agent.id === "deck-developer-orchestrator",
     );
     expect(orchestrator).toBeDefined();
-    expect(orchestrator!.content).toContain("## Orchestrator Invariants");
-    expect(orchestrator!.content).toContain("INV-001");
-    expect(orchestrator!.content).toContain("INV-002");
-    expect(orchestrator!.content).toContain("INV-003");
-    expect(orchestrator!.content).toContain("INV-004");
-    expect(orchestrator!.content).toContain("INV-005");
+    expect(orchestrator!.content).toContain("## Orchestrator Behavior");
+    // Invariants are now referenced via profile (REQ-PROMPT-002 compliance)
+    expect(orchestrator!.content).toContain(".deck/pi/profiles/<team>/system-prompt.md");
+    expect(orchestrator!.content).toContain("behavior guidelines");
 
     const orchestratorSkill = plan.skills.find(
       (s) => s.agent.id === "deck-developer-orchestrator",
     );
     expect(orchestratorSkill).toBeDefined();
+    // Skill contains full invariant body (source of truth)
     expect(orchestratorSkill!.content).toContain("## Orchestrator Invariants");
     // Verify ALL 5 critical invariants are present in skill
     expect(orchestratorSkill!.content).toContain("INV-001");

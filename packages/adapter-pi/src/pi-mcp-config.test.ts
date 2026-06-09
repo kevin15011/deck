@@ -11,6 +11,10 @@ import {
   defaultPiMcpConfigPath,
   extractValidatedSupermemoryPiMcpServer,
   redactPiMcpConfigDiagnosticText,
+  writeCodebaseMemoryMcpConfig,
+  writeContextModeMcpConfig,
+  writeGatedLocalMcpConfig,
+  writeLocalMcpConfig,
   writeSupermemoryPiMcpConfig,
 } from "./pi-mcp-config";
 
@@ -267,6 +271,495 @@ describe("Pi global MCP config writer", () => {
       expect(result.action).toBe("failed");
       expect(existsSync(configPath)).toBe(false);
       expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
+    } finally {
+      cleanup(home);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Healthcheck-gated local MCP config write tests
+// REQ-PI-003, REQ-CBM-002: Gate config writes behind binary usability check
+// ---------------------------------------------------------------------------
+
+describe("writeGatedLocalMcpConfig", () => {
+  test("does NOT write config when binary is missing", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck returns "missing"
+      const result = await writeGatedLocalMcpConfig({
+        command: "definitely-not-a-real-command-12345",
+        serverName: "context-mode",
+        configPath,
+        homeDir: home,
+        healthcheck: async () => ({
+          status: "missing" as const,
+          command: "definitely-not-a-real-command-12345",
+          reason: "Command not found in PATH",
+        }),
+      });
+
+      // Config should NOT be written
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
+      expect(existsSync(configPath)).toBe(false);
+      expect(result.diagnostics[0]?.message).toContain("not found in PATH");
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("does NOT write config when binary is unusable (exists but fails healthcheck)", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck returns "unusable"
+      const result = await writeGatedLocalMcpConfig({
+        command: "broken-binary",
+        serverName: "codebase-memory",
+        configPath,
+        homeDir: home,
+        healthcheck: async () => ({
+          status: "unusable" as const,
+          command: "broken-binary",
+          reason: "Command exists but failed healthcheck: exit code 1",
+        }),
+      });
+
+      // Config should NOT be written
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
+      expect(existsSync(configPath)).toBe(false);
+      expect(result.diagnostics[0]?.message).toContain("failed healthcheck");
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("does NOT write config when binary is blocked", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck returns "blocked"
+      const result = await writeGatedLocalMcpConfig({
+        command: "blocked-binary",
+        serverName: "context-mode",
+        configPath,
+        homeDir: home,
+        healthcheck: async () => ({
+          status: "blocked" as const,
+          command: "blocked-binary",
+          reason: "Binary is blocked by system policy",
+        }),
+      });
+
+      // Config should NOT be written
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
+      expect(existsSync(configPath)).toBe(false);
+      expect(result.diagnostics[0]?.message).toContain("blocked");
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("WRITES config when binary is ready (healthcheck passes)", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck returns "ready"
+      const result = await writeGatedLocalMcpConfig({
+        command: "context-mode",
+        serverName: "context-mode",
+        configPath,
+        homeDir: home,
+        healthcheck: async () => ({
+          status: "ready" as const,
+          command: "context-mode",
+          version: "1.0.0",
+        }),
+      });
+
+      // Config SHOULD be written
+      expect(result.ok).toBe(true);
+      expect(result.action).toBe("created");
+      expect(existsSync(configPath)).toBe(true);
+
+      const config = readJson(configPath);
+      expect(config.mcpServers["context-mode"]).toEqual({
+        command: "context-mode",
+        args: [],
+        env: {},
+        transport: "process",
+      });
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("writes config with correct shape for codebase-memory-mcp", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      const result = await writeGatedLocalMcpConfig({
+        command: "codebase-memory-mcp",
+        serverName: "codebase-memory",
+        configPath,
+        homeDir: home,
+        healthcheck: async () => ({
+          status: "ready" as const,
+          command: "codebase-memory-mcp",
+          version: "2.1.0",
+        }),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.serverName).toBe("codebase-memory");
+
+      const config = readJson(configPath);
+      expect(config.mcpServers["codebase-memory"].command).toBe("codebase-memory-mcp");
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("updates existing config when binary is ready (not first time)", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // First write: create initial config
+      await writeGatedLocalMcpConfig({
+        command: "context-mode",
+        serverName: "context-mode",
+        configPath,
+        homeDir: home,
+        healthcheck: async () => ({
+          status: "ready" as const,
+          command: "context-mode",
+          version: "1.0.0",
+        }),
+      });
+
+      // Second write: update with new args
+      const result = await writeGatedLocalMcpConfig({
+        command: "context-mode",
+        serverName: "context-mode",
+        args: ["--verbose"],
+        configPath,
+        homeDir: home,
+        healthcheck: async () => ({
+          status: "ready" as const,
+          command: "context-mode",
+          version: "1.0.0",
+        }),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.action).toBe("updated");
+
+      const config = readJson(configPath);
+      expect(config.mcpServers["context-mode"].args).toEqual(["--verbose"]);
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("preserves unrelated servers when updating gated config", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // First create a Supermemory config
+      writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN });
+
+      // Then add context-mode via gated write
+      const result = await writeGatedLocalMcpConfig({
+        command: "context-mode",
+        serverName: "context-mode",
+        configPath,
+        homeDir: home,
+        healthcheck: async () => ({
+          status: "ready" as const,
+          command: "context-mode",
+          version: "1.0.0",
+        }),
+      });
+
+      expect(result.ok).toBe(true);
+
+      const config = readJson(configPath);
+      // Both servers should exist
+      expect(config.mcpServers.supermemory).toBeDefined();
+      expect(config.mcpServers["context-mode"]).toBeDefined();
+    } finally {
+      cleanup(home);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writeLocalMcpConfig (ungated) tests - baseline comparison
+// ---------------------------------------------------------------------------
+
+describe("writeLocalMcpConfig (ungated baseline)", () => {
+  test("writes config regardless of binary existence (ungated)", () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // This writes config even though the command doesn't exist
+      const result = writeLocalMcpConfig({
+        command: "definitely-not-a-real-command-99999",
+        serverName: "test-server",
+        configPath,
+        homeDir: home,
+      });
+
+      // Un gated - config IS written (for runtime validation)
+      expect(result.ok).toBe(true);
+      expect(result.action).toBe("created");
+      expect(existsSync(configPath)).toBe(true);
+    } finally {
+      cleanup(home);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Production path: writeContextModeMcpConfig - GATED with healthcheck
+// ---------------------------------------------------------------------------
+
+describe("writeContextModeMcpConfig (production path - gated)", () => {
+  test("DOES NOT write config when healthcheck returns missing", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck simulates missing binary
+      const healthcheckMissing = async () => ({
+        status: "missing" as const,
+        command: "context-mode",
+        reason: "Binary not found in PATH",
+      });
+
+      const result = await writeContextModeMcpConfig(
+        { configPath, homeDir: home },
+        healthcheckMissing,
+      );
+
+      // Gated - config is NOT written when binary is missing
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
+      expect(result.diagnostics[0]?.code).toBe("PI_MCP_CONFIG_WRITE_FAILED");
+      expect(existsSync(configPath)).toBe(false);
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("DOES NOT write config when healthcheck returns unusable", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck simulates unusable binary
+      const healthcheckUnusable = async () => ({
+        status: "unusable" as const,
+        command: "context-mode",
+        reason: "Binary failed --version check",
+      });
+
+      const result = await writeContextModeMcpConfig(
+        { configPath, homeDir: home },
+        healthcheckUnusable,
+      );
+
+      // Gated - config is NOT written when binary is unusable
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
+      expect(result.diagnostics[0]?.code).toBe("PI_MCP_CONFIG_WRITE_FAILED");
+      expect(existsSync(configPath)).toBe(false);
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("DOES NOT write config when healthcheck returns blocked", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck simulates blocked binary
+      const healthcheckBlocked = async () => ({
+        status: "blocked" as const,
+        command: "context-mode",
+        reason: "Binary permission denied",
+      });
+
+      const result = await writeContextModeMcpConfig(
+        { configPath, homeDir: home },
+        healthcheckBlocked,
+      );
+
+      // Gated - config is NOT written when binary is blocked
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
+      expect(result.diagnostics[0]?.code).toBe("PI_MCP_CONFIG_WRITE_FAILED");
+      expect(existsSync(configPath)).toBe(false);
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("WRITES config when healthcheck returns ready", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck simulates ready binary
+      const healthcheckReady = async () => ({
+        status: "ready" as const,
+        command: "context-mode",
+        version: "1.0.0",
+      });
+
+      const result = await writeContextModeMcpConfig(
+        { configPath, homeDir: home },
+        healthcheckReady,
+      );
+
+      // Gated but ready - config IS written
+      expect(result.ok).toBe(true);
+      expect(result.action).toBe("created");
+      expect(existsSync(configPath)).toBe(true);
+
+      const config = readJson(configPath);
+      expect(config.mcpServers["context-mode"]).toBeDefined();
+      expect(config.mcpServers["context-mode"].command).toBe("context-mode");
+    } finally {
+      cleanup(home);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Production path: writeCodebaseMemoryMcpConfig - GATED with healthcheck
+// ---------------------------------------------------------------------------
+
+describe("writeCodebaseMemoryMcpConfig (production path - gated)", () => {
+  test("DOES NOT write config when healthcheck returns missing", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck simulates missing binary
+      const healthcheckMissing = async () => ({
+        status: "missing" as const,
+        command: "codebase-memory-mcp",
+        reason: "Binary not found in PATH",
+      });
+
+      const result = await writeCodebaseMemoryMcpConfig(
+        { configPath, homeDir: home },
+        healthcheckMissing,
+      );
+
+      // Gated - config is NOT written when binary is missing
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
+      expect(result.diagnostics[0]?.code).toBe("PI_MCP_CONFIG_WRITE_FAILED");
+      expect(existsSync(configPath)).toBe(false);
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("DOES NOT write config when healthcheck returns unusable", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck simulates unusable binary
+      const healthcheckUnusable = async () => ({
+        status: "unusable" as const,
+        command: "codebase-memory-mcp",
+        reason: "Binary failed --version check",
+      });
+
+      const result = await writeCodebaseMemoryMcpConfig(
+        { configPath, homeDir: home },
+        healthcheckUnusable,
+      );
+
+      // Gated - config is NOT written when binary is unusable
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
+      expect(result.diagnostics[0]?.code).toBe("PI_MCP_CONFIG_WRITE_FAILED");
+      expect(existsSync(configPath)).toBe(false);
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("DOES NOT write config when healthcheck returns blocked", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck simulates blocked binary
+      const healthcheckBlocked = async () => ({
+        status: "blocked" as const,
+        command: "codebase-memory-mcp",
+        reason: "Binary permission denied",
+      });
+
+      const result = await writeCodebaseMemoryMcpConfig(
+        { configPath, homeDir: home },
+        healthcheckBlocked,
+      );
+
+      // Gated - config is NOT written when binary is blocked
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
+      expect(result.diagnostics[0]?.code).toBe("PI_MCP_CONFIG_WRITE_FAILED");
+      expect(existsSync(configPath)).toBe(false);
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("WRITES config when healthcheck returns ready", async () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+
+      // Healthcheck simulates ready binary
+      const healthcheckReady = async () => ({
+        status: "ready" as const,
+        command: "codebase-memory-mcp",
+        version: "2.0.0",
+      });
+
+      const result = await writeCodebaseMemoryMcpConfig(
+        { configPath, homeDir: home },
+        healthcheckReady,
+      );
+
+      // Gated but ready - config IS written
+      expect(result.ok).toBe(true);
+      expect(result.action).toBe("created");
+      expect(existsSync(configPath)).toBe(true);
+
+      const config = readJson(configPath);
+      expect(config.mcpServers["codebase-memory"]).toBeDefined();
+      expect(config.mcpServers["codebase-memory"].command).toBe("codebase-memory-mcp");
     } finally {
       cleanup(home);
     }

@@ -13,15 +13,17 @@ describe("buildPiInstallationPlan", () => {
         { name: "sub-agents", installed: false },
         { name: "MCP packages", installed: false },
       ],
-      selectedOptionalToolIds: ["rtk", "codebase-memory", "context7", "engram-memory"],
+      // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
+      selectedOptionalToolIds: ["rtk", "codebase-memory-mcp", "context7", "engram-memory"],
     });
 
+    // Updated for Batch C: new install kinds and sources
     expect(plan).toEqual([
       { id: "sub-agents", name: "sub-agents", source: "npm:pi-subagents", required: true, installKind: "pi-package" },
       { id: "mcp-packages", name: "MCP packages", source: "npm:pi-mcp-adapter", required: true, installKind: "pi-package" },
-      { id: "codebase-memory", name: "codebase-memory", source: "DeusData/codebase-memory-mcp", required: false, installKind: "external" },
-      { id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "external" },
-      { id: "context7", name: "Context7", source: "npm:@dreki-gg/pi-context7", required: false, installKind: "pi-package" },
+      { id: "codebase-memory-mcp", name: "codebase-memory-mcp", source: "DeusData/codebase-memory-mcp", required: false, installKind: "shared-binary-plus-mcp", capabilityId: "codebase-memory-mcp" },
+      { id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "shared-binary", capabilityId: "rtk" },
+      { id: "context7", name: "Context7", source: "npm:@upstash/context7-mcp", required: false, installKind: "npm-package-plus-mcp", capabilityId: "context7" },
       { id: "engram-memory", name: "Engram memory", source: "Gentleman-Programming/engram", required: false, installKind: "external" },
     ]);
   });
@@ -95,7 +97,8 @@ describe("PI_INSTALLABLE_TOOLS boundary", () => {
     expect(INTERNAL_INSTALLABLE_BOUNDARY).toHaveLength(1);
     expect(INTERNAL_INSTALLABLE_BOUNDARY[0]).toBe("pi-mermaid");
 
-    // 7 tools total (2 required + 5 optional); pi-mermaid is NOT in this catalog
-    expect(PI_INSTALLABLE_TOOLS).toHaveLength(7);
+    // Updated for Batch C: 8 tools total (2 required + 6 optional); pi-mermaid is NOT in this catalog
+    // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
+    expect(PI_INSTALLABLE_TOOLS).toHaveLength(8);
   });
 });

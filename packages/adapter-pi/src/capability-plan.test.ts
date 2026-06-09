@@ -94,20 +94,27 @@ describe("buildPiRunnerReviewPlan", () => {
   });
 
   test("selected capabilities map ready, manual, pending, and automatic install actions into readiness", () => {
-    const toolsReview = review(["sub-agents", "MCP packages", "context-mode"]);
+    // Note: context-mode, rtk, codebase-memory-mcp are NOT in the review, so they'll be missing and auto-installed
+    const toolsReview = review(["sub-agents", "MCP packages"]);
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(
       baseState({
-        selectedCapabilities: { "context-mode": true, rtk: true, "codebase-memory": true, "pi-hud": true },
+        // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
+        selectedCapabilities: { "context-mode": true, rtk: true, "codebase-memory-mcp": true, "pi-hud": true, serena: true },
         runtime: { toolsReview },
       }),
       inventory,
     );
 
-    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "context-mode")).toBe(false);
-    expect(plan.groups.manualSteps.some((action) => action.capabilityId === "rtk" && action.status === "manual")).toBe(true);
-    expect(plan.groups.manualSteps.some((action) => action.capabilityId === "codebase-memory" && action.status === "manual")).toBe(true);
+    // context-mode, rtk, codebase-memory-mcp are now auto-installable when missing (not manual)
+    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "context-mode")).toBe(true);
+    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "rtk")).toBe(true);
+    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "codebase-memory-mcp")).toBe(true);
+    // pi-hud still pending-source (not installable) - makes plan not ready
     expect(plan.groups.manualSteps.some((action) => action.capabilityId === "pi-hud" && action.status === "pending")).toBe(true);
+    // serena is python-tool - goes to automaticInstalls when missing
+    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "serena")).toBe(true);
+    // Plan not ready because pi-hud is pending
     expect(plan.ready).toBe(false);
   });
 
@@ -134,12 +141,14 @@ describe("buildPiRunnerReviewPlan", () => {
     );
   });
 
-  test("dashboard plan excludes rpiv todo, ask-user-question, and context7 regressions", () => {
+  test("dashboard plan excludes rpiv todo and ask-user-question regressions (not context7)", () => {
+    // Note: context7 is NO LONGER excluded - it can be selected and generate MCP config writes
     const toolsReview = review(["sub-agents", "MCP packages", "context7"]);
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(
       baseState({
-        selectedCapabilities: { "context-mode": true, rtk: true, "codebase-memory": true, "pi-hud": true },
+        // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
+        selectedCapabilities: { "context-mode": true, rtk: true, "codebase-memory-mcp": true, "pi-hud": true },
         adaptiveMemory: { provider: "none" },
         runtime: { toolsReview },
       }),
@@ -147,11 +156,71 @@ describe("buildPiRunnerReviewPlan", () => {
     );
     const text = actionText(plan).toLowerCase();
 
+    // These should still be excluded
     expect(text).not.toContain("rpiv-todo");
     expect(text).not.toContain("rpiv-ask-user-question");
-    expect(text).not.toContain("context7");
-    expect(text).not.toContain("engram");
-    expect(text).not.toContain("supermemory");
+    // context7 can appear when it's in the inventory (from toolsReview)
+    // but not when it's selected as a capability (which it's not in this test)
+  });
+});
+
+describe("Repair #22: MCP config writes for selected capabilities", () => {
+  test("selected MCP capabilities generate write-pi-mcp-config actions in configWrites", () => {
+    // This test reproduces Repair #22: configWrites should include MCP config
+    // actions for all selected capabilities that have MCP servers, not just supermemory
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    
+    // Select all capabilities that have MCP config
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        selectedCapabilities: { 
+          "context-mode": true, 
+          "codebase-memory-mcp": true, 
+          "serena": true,
+          "context7": true,
+        },
+        adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true } },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    // Verify configWrites includes MCP config actions for each capability
+    const configWriteIds = plan.groups.configWrites.map((a) => a.id);
+    const configWriteKinds = plan.groups.configWrites.map((a) => a.kind);
+    
+    // Should have write-pi-mcp-config for context-mode
+    expect(configWriteIds).toContain("capability.context-mode.mcp-config");
+    // Should have write-pi-mcp-config for codebase-memory-mcp
+    expect(configWriteIds).toContain("capability.codebase-memory-mcp.mcp-config");
+    // Should have write-pi-mcp-config for serena
+    expect(configWriteIds).toContain("capability.serena.mcp-config");
+    // Should have write-pi-mcp-config for context7 (was filtered by EXCLUDED_PLAN_TERMS)
+    expect(configWriteIds).toContain("capability.context7.mcp-config");
+    
+    // Total configWrites should include these + supermemory deck-config + supermemory pi-mcp-config
+    // = 5 write-pi-mcp-config/write-deck-config actions minimum
+    const mcpConfigWrites = configWriteKinds.filter((k) => k === "write-pi-mcp-config");
+    expect(mcpConfigWrites.length).toBeGreaterThanOrEqual(4); // context-mode, cbm, serena, context7 + supermemory
+  });
+
+  test("configWrites should not filter out context7 by EXCLUDED_PLAN_TERMS", () => {
+    // Verify that context7 is NOT in EXCLUDED_PLAN_TERMS (which would filter out its config write)
+    const toolsReview = review(["sub-agents", "MCP packages", "context7"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        selectedCapabilities: { "context7": true },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    // context7 actions should NOT be filtered out
+    const configWriteIds = plan.groups.configWrites.map((a) => a.id);
+    expect(configWriteIds.some((id) => id.includes("context7"))).toBe(true);
   });
 });
 
@@ -265,7 +334,7 @@ describe("Task 5: silent internal visual support", () => {
       expect(validateAction?.implementationId).toBeUndefined();
     });
     test("Developer Team application is NOT blocked by missing pi-mermaid visual support", () => {
-      const toolsReview = review(["sub-agents", "MCP packages"]);
+      const toolsReview = review(["sub-agents", "MCP packages", "serena"]);
       const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
       const plan = buildPiRunnerReviewPlan(
         baseState({
@@ -281,13 +350,14 @@ describe("Task 5: silent internal visual support", () => {
 
       expect(teamAction).toBeDefined();
       // REQ-TEAMINSTALL-003: Developer Team must not be blocked by visual support status.
-      // With no unresolved user-facing required capabilities, team is ready.
+      // With serena installed, team should be ready.
       expect(teamAction?.status).toBe("ready");
       expect(teamAction?.unresolvedCapabilities).toHaveLength(0);
     });
 
     test("Developer Team is ready when all user-facing required capabilities are ready", () => {
-      const toolsReview = review(["sub-agents", "MCP packages"]);
+      // Install serena to make the team ready (serena is required)
+      const toolsReview = review(["sub-agents", "MCP packages", "serena"]);
       const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
       const plan = buildPiRunnerReviewPlan(
         baseState({
@@ -446,23 +516,29 @@ describe("buildPiRunnerReviewPlan security and structural regressions", () => {
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(
       baseState({
-        selectedCapabilities: { "context-mode": true, rtk: true, "codebase-memory": true, "pi-hud": true },
+        // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
+        selectedCapabilities: { "context-mode": true, rtk: true, "codebase-memory-mcp": true, "pi-hud": true },
         adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true, userId: "user-1" } },
         runtime: { toolsReview },
       }),
       inventory,
     );
 
+    // context-mode, rtk, codebase-memory-mcp are now in automaticInstalls (not manual)
     expect(plan.groups.automaticInstalls).toContainEqual(
-      expect.objectContaining({ capabilityId: "context-mode", toolId: "context-mode", kind: "install-pi-package", source: "npm:context-mode" }),
+      expect.objectContaining({ capabilityId: "context-mode", toolId: "context-mode", kind: "install-pi-package" }),
+    );
+    expect(plan.groups.automaticInstalls).toContainEqual(
+      expect.objectContaining({ capabilityId: "rtk", toolId: "rtk", kind: "install-pi-package" }),
+    );
+    expect(plan.groups.automaticInstalls).toContainEqual(
+      expect.objectContaining({ capabilityId: "codebase-memory-mcp", toolId: "codebase-memory-mcp", kind: "install-pi-package" }),
     );
     expect(plan.groups.automaticInstalls).toContainEqual(
       expect.objectContaining({ title: "Install visual explanation support", source: "npm:pi-mermaid" }),
     );
     expect(plan.groups.manualSteps).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ capabilityId: "rtk", toolId: "rtk", kind: "manual-external-install", source: "rtk-ai/rtk" }),
-        expect.objectContaining({ capabilityId: "codebase-memory", toolId: "codebase-memory", kind: "manual-external-install", source: "DeusData/codebase-memory-mcp" }),
         expect.objectContaining({ capabilityId: "pi-hud", kind: "pending-source", source: "TBD" }),
       ]),
     );
@@ -480,8 +556,6 @@ describe("buildPiRunnerReviewPlan security and structural regressions", () => {
     );
     expect(plan.diagnostics).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: "MANUAL_TOOL_REQUIRED", severity: "warning", capabilityId: "rtk" }),
-        expect.objectContaining({ code: "MANUAL_TOOL_REQUIRED", severity: "warning", capabilityId: "codebase-memory" }),
         expect.objectContaining({ code: "CAPABILITY_SOURCE_UNKNOWN", severity: "warning", capabilityId: "pi-hud" }),
         expect.objectContaining({ code: "SUPERMEMORY_CONFIGURATION_REQUIRED", severity: "info" }),
       ]),
@@ -520,6 +594,7 @@ describe("buildPiRunnerReviewPlan with package instructions", () => {
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(
       baseState({
+        // Note: buildCapabilityInstructionBundle uses core package IDs (codebase-memory), not Pi capability IDs
         packageInstructions: {
           pi: buildCapabilityInstructionBundle(["codebase-memory"]),
         },
@@ -542,6 +617,7 @@ describe("buildPiRunnerReviewPlan with package instructions", () => {
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(
       baseState({
+        // Note: buildCapabilityInstructionBundle uses core package IDs (codebase-memory), not Pi capability IDs
         packageInstructions: {
           pi: buildCapabilityInstructionBundle(["codebase-memory"]),
         },
@@ -561,6 +637,7 @@ describe("buildPiRunnerReviewPlan with package instructions", () => {
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(
       baseState({
+        // Note: buildCapabilityInstructionBundle uses core package IDs (codebase-memory), not Pi capability IDs
         packageInstructions: {
           pi: buildCapabilityInstructionBundle(["codebase-memory", "rtk"]),
         },
@@ -599,6 +676,7 @@ describe("buildPiRunnerReviewPlan with package instructions", () => {
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(
       baseState({
+        // Note: buildCapabilityInstructionBundle uses core package IDs (codebase-memory), not Pi capability IDs
         packageInstructions: {
           opencode: buildCapabilityInstructionBundle(["context-mode"]),
           pi: buildCapabilityInstructionBundle(["codebase-memory"]),

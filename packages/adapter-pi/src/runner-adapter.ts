@@ -12,7 +12,7 @@
 import { inspectPiEnvironment, type PiPreflightResult } from "./preflight";
 import { buildPiRunnerCapabilityInventory, type PiRunnerCapabilityInventory, type PiRunnerFullCapabilityInventory } from "./capability-inventory";
 import { buildPiRunnerReviewPlan, type PiRunnerReviewPlan } from "./capability-plan";
-import { buildPiInstallationPlan, type InstallablePiToolId, type InstallablePiTool } from "./installation-plan";
+import { buildPiInstallationPlan, getPiInstallableTool, type InstallablePiToolId, type InstallablePiTool } from "./installation-plan";
 import { installPiTools, installInternalRunnerPackages } from "./install-tools";
 import { reviewPiRequiredTools, type PiRequiredToolsReview } from "./required-tools";
 import { getTeamsForEnvironment } from "./team-catalog";
@@ -29,7 +29,8 @@ import {
 import { PI_THINKING_LEVELS, supportsThinkingForModel, getDefaultThinkingForModel, resolveThinkingForModel } from "./model-config";
 import { getPiRunnerCapability, PI_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
 import { getOptionalPiTools } from "./installation-plan";
-import { writeSupermemoryPiMcpConfig } from "./pi-mcp-config";
+import { writeSupermemoryPiMcpConfig, writeContextModeMcpConfig, writeCodebaseMemoryMcpConfig, writeSerenaMcpConfig, writeContext7McpConfig, defaultPiMcpConfigPath } from "./pi-mcp-config";
+import { mergeSettingsPackages } from "./settings-merge";
 import type { InternalRunnerPackageInstallAction } from "./internal-runner-packages";
 import type { RequiredToolStatus } from "./required-tools";
 import type {
@@ -220,22 +221,75 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
 
     // Handle capability/tool installs
     if (action.kind === "install-pi-package" || action.kind === "install") {
+      // Look up the complete tool metadata from Pi catalog to preserve installKind
+      const toolId = action.toolId as InstallablePiToolId | undefined;
+      const catalogTool = toolId ? getPiInstallableTool(toolId) : undefined;
+
       const installableTool: InstallablePiTool = {
-        id: (action.toolId as InstallablePiToolId) ?? "sub-agents",
+        id: toolId ?? "sub-agents",
         name: action.title,
-        source: action.source ?? "",
+        source: action.source ?? catalogTool?.source ?? "",
         required: action.required ?? false,
-        installKind: "pi-package",
+        // Use installKind from catalog, not hardcoded. This ensures:
+        // - shared-binary-plus-mcp (context-mode, codebase-memory-mcp)
+        // - shared-binary (rtk)
+        // - python-tool (serena)
+        // - npm-package-plus-mcp (context7)
+        // are handled correctly instead of being treated as pi-package
+        installKind: catalogTool?.installKind ?? "pi-package",
+        capabilityId: catalogTool?.capabilityId,
       };
 
       const results = await installPiTools(context.runnerCommand ?? "pi", [installableTool], () => {});
       const result = results[0];
 
+      // After package install, merge settings to replace stale packages
+      const homeDir = process.env.HOME ?? "/home/kevinlb";
+      const settingsPath = `${homeDir}/.pi/agent/settings.json`;
+      const fs = require("node:fs");
+      
+      // Get current settings
+      let currentPackages: string[] = [];
+      try {
+        if (fs.existsSync(settingsPath)) {
+          const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+          currentPackages = settings.packages || [];
+        }
+      } catch {
+        // Ignore read errors
+      }
+
+      // Merge and replace stale packages
+      const mergeResult = mergeSettingsPackages({
+        settingsPath: fs.existsSync(settingsPath) ? settingsPath : undefined,
+        existingPackages: currentPackages,
+        readFile: (path) => fs.readFileSync(path, "utf-8"),
+        writeFile: (path, content) => fs.writeFileSync(path, content),
+      });
+
+      const allDiagnostics = [
+        ...(result.status === "failed" ? [result.message ?? "Install failed."] : []),
+        ...(result.installKind ? [`[installKind=${result.installKind}]`] : []),
+        ...mergeResult.diagnostics,
+      ];
+
+      // Map installPiTools result status to action-runner status
+      // Success statuses: installed, reused, manual-verified, manual
+      // Failure statuses: failed, blocked
+      const statusMap: Record<string, "executed" | "informational" | "failed"> = {
+        "installed": "executed",
+        "reused": "executed",
+        "manual-verified": "informational",
+        "manual": "informational",
+        "failed": "failed",
+        "blocked": "failed",
+      };
+
       return {
         actionId: action.id,
-        status: result.status === "installed" ? "executed" : result.status === "manual" ? "informational" : "failed",
+        status: statusMap[result.status] ?? "failed",
         message: result.message ?? "",
-        diagnostics: result.status === "failed" ? [result.message ?? "Install failed."] : [],
+        diagnostics: allDiagnostics,
       };
     }
 
@@ -261,11 +315,65 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
 
     // Handle config writes
     if (action.kind === "write-deck-config" || action.kind === "write-pi-mcp-config") {
+      // Write all required MCP configurations for Pi capabilities
+      const diagnostics: string[] = [];
+      const homeDir = process.env.HOME ?? "/home/kevinlb";
+      const mcpConfigPath = defaultPiMcpConfigPath(homeDir);
+
+      // Write context-mode MCP config (gated with healthcheck)
+      try {
+        const cmResult = await writeContextModeMcpConfig({ configPath: mcpConfigPath, homeDir });
+        const status = cmResult.ok ? "written" : "skipped";
+        diagnostics.push(`context-mode: ${status}`);
+      } catch (e) {
+        diagnostics.push("context-mode: error");
+      }
+
+      // Write codebase-memory-mcp MCP config (gated with healthcheck)
+      try {
+        const cbmResult = await writeCodebaseMemoryMcpConfig({ configPath: mcpConfigPath, homeDir });
+        const status = cbmResult.ok ? "written" : "skipped";
+        diagnostics.push(`codebase-memory-mcp: ${status}`);
+      } catch (e) {
+        diagnostics.push("codebase-memory-mcp: error");
+      }
+
+      // Write serena MCP config
+      try {
+        const serenaResult = writeSerenaMcpConfig({ configPath: mcpConfigPath, homeDir });
+        const status = serenaResult.ok ? "written" : "skipped";
+        diagnostics.push(`serena: ${status}`);
+      } catch (e) {
+        diagnostics.push("serena: error");
+      }
+
+      // Write context7 MCP config
+      try {
+        const c7Result = writeContext7McpConfig({ configPath: mcpConfigPath, homeDir });
+        const status = c7Result.ok ? "written" : "skipped";
+        diagnostics.push(`context7: ${status}`);
+      } catch (e) {
+        diagnostics.push("context7: error");
+      }
+
+      // Also write/update supermemory config if user has token (optional - won't fail if no token)
+      try {
+        const supermemoryToken = process.env.SUPERMEMORY_API_KEY;
+        if (supermemoryToken) {
+          const smResult = writeSupermemoryPiMcpConfig({ token: supermemoryToken, configPath: mcpConfigPath, homeDir });
+          diagnostics.push(smResult.ok ? "supermemory: updated" : "supermemory: unchanged");
+        } else {
+          diagnostics.push("supermemory: no-token");
+        }
+      } catch (e) {
+        diagnostics.push("supermemory: error");
+      }
+
       return {
         actionId: action.id,
         status: "executed",
-        message: "Configuration written.",
-        diagnostics: [],
+        message: "MCP configs processed",
+        diagnostics,
       };
     }
 
@@ -305,13 +413,31 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   }
 
   readModelAssignments(projectRoot?: string): DeveloperTeamModelAssignments {
-    const root = projectRoot ?? (typeof process !== "undefined" && process.cwd ? process.cwd() : ".");
-    return readDeveloperTeamModelAssignments(root);
+    // For Pi, read from the user's installed Pi agents directory (~/.pi/agent/agents)
+    // For OpenCode, read from project root (.pi/agents)
+    // This ensures model config persists correctly after applyDeveloperTeamInstall writes to ~/.pi/agent/agents
+    const homeDir = process.env.HOME ?? "/home/user";
+    const piAgentsDir = `${homeDir}/.pi/agent/agents`;
+    const modelAssignments = readDeveloperTeamModelAssignments(piAgentsDir, { exists: require("node:fs").existsSync, readFile: require("node:fs").readFileSync, agentsDir: piAgentsDir });
+    // If Pi agents dir is empty, fall back to project root (for migration/edge cases)
+    if (Object.keys(modelAssignments).length === 0 && projectRoot) {
+      return readDeveloperTeamModelAssignments(projectRoot, { agentsDir: undefined });
+    }
+    return modelAssignments;
   }
 
   readThinkingAssignments(projectRoot?: string): DeveloperTeamThinkingAssignments {
-    const root = projectRoot ?? (typeof process !== "undefined" && process.cwd ? process.cwd() : ".");
-    return readDeveloperTeamThinkingAssignments(root);
+    // For Pi, read from the user's installed Pi agents directory (~/.pi/agent/agents)
+    // For OpenCode, read from project root (.pi/agents)
+    // This ensures thinking config persists correctly after applyDeveloperTeamInstall writes to ~/.pi/agent/agents
+    const homeDir = process.env.HOME ?? "/home/user";
+    const piAgentsDir = `${homeDir}/.pi/agent/agents`;
+    const thinkingAssignments = readDeveloperTeamThinkingAssignments(piAgentsDir, { exists: require("node:fs").existsSync, readFile: require("node:fs").readFileSync, agentsDir: piAgentsDir });
+    // If Pi agents dir is empty, fall back to project root (for migration/edge cases)
+    if (Object.keys(thinkingAssignments).length === 0 && projectRoot) {
+      return readDeveloperTeamThinkingAssignments(projectRoot, { agentsDir: undefined });
+    }
+    return thinkingAssignments;
   }
 
   getThinkingLevels(_modelId?: string): readonly RunnerThinkingLevel[] {
@@ -669,5 +795,6 @@ function toInternalInstallAction(action: RunnerAction): InternalRunnerPackageIns
 }
 
 function isOptionalToolId(id: string): id is InstallablePiToolId {
-  return ["context-mode", "codebase-memory", "rtk", "context7", "engram-memory"].includes(id);
+  // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
+  return ["context-mode", "codebase-memory-mcp", "rtk", "context7", "engram-memory"].includes(id);
 }

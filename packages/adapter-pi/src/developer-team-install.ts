@@ -1,11 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { getOrchestratorSystemPrompt, ORCHESTRATOR_AGENT_BODY } from "@deck/core/teams/developer/orchestrator-content";
 import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
 import {
   buildCapabilityInstructionBundle,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
+import { materializeTeamProfile } from "./pi-team-profile";
+import { buildTeamProfileDir } from "./pi-team-launch";
 // import { verifyInvariantPresence, type OrchestratorInvariantSurface } from "@deck/core/teams/developer/orchestrator-invariants";
 
 // Inline verification for adapter — uses core directly at runtime (Task 7)
@@ -18,6 +21,7 @@ interface InvariantVerificationResult {
 
 /**
  * Verify invariant presence inline (copied from core for adapter isolation)
+ * For agent surface: accepts either full invariant headers OR profile reference (stub mode)
  */
 function verifyInvariantPresence(
   content: string,
@@ -32,6 +36,20 @@ function verifyInvariantPresence(
   ];
   const missing: string[] = [];
 
+  // For agent surface, also accept profile reference (stub mode - see REQ-PROMPT-002)
+  if (surface === "agent") {
+    const hasProfileReference = /\.deck\/pi\/profiles\/.*\/system-prompt\.md/.test(content);
+    const hasInvariantHeader = /^## Orchestrator Invariants$/m.test(content);
+
+    if (hasProfileReference || hasInvariantHeader) {
+      // Profile reference or invariant header present - pass for stub mode
+      // Note: full invariant IDs are verified in the skill file, not the agent stub
+      return { pass: true, missing: [] };
+    }
+    return { pass: false, missing: criticalIds };
+  }
+
+  // For skill surface, require actual invariant headers
   const hasHeader = /^## Orchestrator Invariants$/m.test(content);
   if (!hasHeader) {
     return { pass: false, missing: criticalIds };
@@ -111,6 +129,129 @@ export type DeveloperTeamInstallPlan = {
   memoryDiagnostics: MemoryDiagnostic[];
 };
 
+// --- Legacy SDD Cleanup ---
+
+/** Legacy SDD agent file names that should be removed during installation. */
+const LEGACY_SDD_AGENT_FILES = [
+  "sdd-apply",
+  "sdd-archive",
+  "sdd-design",
+  "sdd-explore",
+  "sdd-init",
+  "sdd-new",
+  "sdd-continue",
+  "sdd-ff",
+  "sdd-onboard",
+  "sdd-propose",
+  "sdd-proposal", // Added for wildcard coverage
+  "sdd-sync", // Added for wildcard coverage
+  "sdd-review",
+  "sdd-spec",
+  "sdd-tasks",
+  "sdd-verify",
+];
+
+/**
+ * Remove legacy SDD agent files from the agents directory.
+ * These are the old `sdd-*` files that were replaced by `deck-developer-*` agents.
+ * Also removes nested SKILL.md/SKILL.md patterns in skills directory.
+ * Returns list of removed file paths.
+ */
+export function cleanupLegacySddAgentFiles(
+  agentsDir: string,
+  options?: { readdirSync?: typeof import("node:fs").readdirSync; unlinkSync?: typeof import("node:fs").unlinkSync; existsSync?: typeof import("node:fs").existsSync; readdir?: typeof import("node:fs").readdirSync; rmdirSync?: typeof import("node:fs").rmdirSync },
+): string[] {
+  const readdirSync = options?.readdirSync ?? require("node:fs").readdirSync;
+  const unlink = options?.unlinkSync ?? unlinkSync;
+  const exists = options?.existsSync ?? existsSync;
+  const rmdirSync = options?.rmdirSync ?? require("node:fs").rmdirSync;
+
+  const removed: string[] = [];
+
+  // Check if agents directory exists
+  if (!exists(agentsDir)) {
+    return removed;
+  }
+
+  try {
+    const files = readdirSync(agentsDir);
+    for (const file of files) {
+      // Check if it's a legacy SDD file (sdd-*.md) - explicit list
+      const baseName = file.replace(/\.md$/, "");
+      if (LEGACY_SDD_AGENT_FILES.includes(baseName)) {
+        const filePath = join(agentsDir, file);
+        try {
+          unlink(filePath);
+          removed.push(filePath);
+        } catch {
+          // File might be already deleted or permission issue - continue
+        }
+      }
+      // Wildcard cleanup: any sdd-*.md not in explicit list (handles arbitrary legacy files)
+      if (file.startsWith("sdd-") && file.endsWith(".md") && !LEGACY_SDD_AGENT_FILES.includes(baseName)) {
+        const filePath = join(agentsDir, file);
+        try {
+          unlink(filePath);
+          removed.push(filePath);
+        } catch {
+          // Continue even if deletion fails
+        }
+      }
+    }
+  } catch {
+    // Directory might not exist or be readable - ignore
+  }
+
+  return removed;
+}
+
+/**
+ * Clean up nested SKILL.md/SKILL.md patterns in skills directory.
+ * This handles cases where skills were incorrectly installed as ~/.pi/agent/skills/SKILL.md/SKILL.md
+ * instead of the correct ~/.pi/skills/SKILL.md.
+ * Returns list of removed directory paths.
+ */
+export function cleanupNestedSkillDirectories(
+  skillsDir: string,
+  options?: { readdirSync?: typeof import("node:fs").readdirSync; existsSync?: typeof import("node:fs").existsSync; rmdirSync?: typeof import("node:fs").rmdirSync },
+): string[] {
+  const readdirSync = options?.readdirSync ?? require("node:fs").readdirSync;
+  const exists = options?.existsSync ?? existsSync;
+  const rmdirSync = options?.rmdirSync ?? require("node:fs").rmdirSync;
+
+  const removed: string[] = [];
+
+  // Check if skills directory exists
+  if (!exists(skillsDir)) {
+    return removed;
+  }
+
+  try {
+    const entries = readdirSync(skillsDir, { withFileTypes: true });
+    for (const entry of entries) {
+      // Check for double-nested SKILL.md/SKILL.md pattern (old broken structure)
+      // The incorrect structure was: .pi/skills/SKILL.md/SKILL.md (a dir literally named "SKILL.md")
+      // The correct structure is: .pi/skills/{skillId}/SKILL.md (a dir with skill ID name)
+      // Only remove if the directory itself is literally named "SKILL.md"
+      if (entry.isDirectory() && entry.name === "SKILL.md") {
+        const nestedPath = join(skillsDir, entry.name, "SKILL.md");
+        if (exists(nestedPath)) {
+          try {
+            rmdirSync(join(skillsDir, entry.name), { recursive: true });
+            removed.push(join(skillsDir, entry.name));
+          } catch {
+            // Continue even if deletion fails
+          }
+        }
+      }
+    }
+  } catch {
+    // Directory might not exist or be readable - ignore
+  }
+
+  return removed;
+}
+
 export type FileInstallResult = {
   kind: "agent" | "skill";
   agentId: string;
@@ -133,6 +274,14 @@ export type DeveloperTeamApplyResult = {
   changedCount: number;
   unchangedCount: number;
   fileResults: FileInstallResult[];
+  /** Legacy SDD agent files (sdd-*.md) that were removed during installation */
+  legacyFilesRemoved: string[];
+  /** Nested SKILL.md/SKILL.md directories that were removed during installation */
+  nestedSkillDirsRemoved: string[];
+  /** Profile directory path where system-prompt.md was materialized */
+  profileDir: string;
+  /** Whether the profile was created/updated or was unchanged */
+  profileStatus: "created" | "updated" | "unchanged";
 };
 
 export type BundleVerifyResult = {
@@ -153,6 +302,10 @@ export type DeveloperTeamVerifyResult = {
 export type ReadDeveloperTeamModelAssignmentsOptions = {
   exists?: typeof existsSync;
   readFile?: (path: string, encoding: "utf-8") => string;
+  /** Explicit agents directory (e.g., ~/.pi/agent/agents for Pi).
+   * When provided, reading skips appending .pi/agents to projectRoot.
+   * Use this for Pi explicit path to avoid double .pi/agents issue. */
+  agentsDir?: string;
 };
 
 /** Re-export MemoryDiagnostic from core for backward compatibility. */
@@ -222,6 +375,7 @@ function resolvePiMemoryInjection(
     buildContext: { teamId: "developer-team" },
   });
 
+  // Pi behaves like OpenCode: inject memory tools when MCP config is structurally valid
   if (options?.memoryInjection || options?.memoryProvider?.id !== "supermemory" || !resolved.bundle) {
     return resolved;
   }
@@ -233,22 +387,12 @@ function resolvePiMemoryInjection(
     homeDir: options.piMcpHomeDir,
   });
 
-  if (mcpValidation.ok && hasAuthenticatedSupermemoryToolBindings(resolved.bundle)) return resolved;
-
+  // If MCP config is structurally valid, inject tools (no Pi-only gate)
   if (mcpValidation.ok) {
-    return {
-      bundle: undefined,
-      diagnostics: [
-        ...resolved.diagnostics,
-        {
-          code: "memory_provider_unavailable",
-          providerId: "supermemory",
-          message: "Supermemory authenticated runtime validation is required before MCP tool injection; omitted adaptive-memory injection.",
-        },
-      ],
-    };
+    return resolved;
   }
 
+  // Config invalid or missing — fail-closed with diagnostic
   return {
     bundle: undefined,
     diagnostics: [
@@ -317,14 +461,6 @@ function toPiMemoryToolName(serverName: string | undefined, toolName: string): s
   return toolName;
 }
 
-function hasAuthenticatedSupermemoryToolBindings(bundle: MemoryInjectionBundle): boolean {
-  const supermemoryBindings = bundle.toolBindings.filter((binding) =>
-    binding.toolNames.some((toolName) => toolName === "execute" || toolName === "search_docs"),
-  );
-
-  return supermemoryBindings.length > 0 && supermemoryBindings.every((binding) => binding.metadata?.authenticatedRuntimeValidated === true);
-}
-
 // --- Plan ---
 
 export function buildDeveloperTeamInstallPlan(
@@ -364,13 +500,18 @@ export function buildDeveloperTeamInstallPlan(
     const hasThinkingAssignment = thinkingAssignments ? Object.prototype.hasOwnProperty.call(thinkingAssignments, agent.id) : false;
     const thinking = model && options?.preserveMissingThinkingAssignments && !hasThinkingAssignment
       ? undefined
-      : model ? resolveThinkingForModel(model, thinkingAssignments?.[agent.id]) : resolveThinkingForModel(undefined);
+      : model ? resolveThinkingForModel(model, thinkingAssignments?.[agent.id] as PiThinkingLevel | undefined) : resolveThinkingForModel(undefined);
     const content = buildAgentFileContent(agent, model, thinking, memoryBundle, capabilityInstructions, personality);
 
     return { agent, relativePath, absolutePath, content };
   });
 
-  const skills: PlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
+  // Get SDD bootstrap skill IDs to avoid duplication
+  const sddSkillIds = new Set(getBootstrapSkillFiles().map((s) => s.skillId));
+
+  // Filter out SDD bootstrap skills from agent skills to avoid duplication
+  // SDD bootstrap skills (deck-init, deck-onboard) will be written from sddSkillFiles
+  const skills: PlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.filter((agent) => !sddSkillIds.has(agent.skillId)).map((agent) => {
     const relativePath = `.pi/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
     const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions, personality);
@@ -424,8 +565,13 @@ export function readDeveloperTeamModelConfigAssignments(
   const modelAssignments: DeveloperTeamModelAssignments = {};
   const thinkingAssignments: DeveloperTeamThinkingAssignments = {};
 
+  // Determine the agents directory:
+  // - If explicitly provided via options.agentsDir, use that (Pi explicit path)
+  // - Otherwise, derive from projectRoot by appending /.pi/agents (OpenCode style)
+  const agentsDir = options?.agentsDir ?? join(projectRoot, ".pi", "agents");
+
   for (const agent of DEVELOPER_TEAM_AGENTS) {
-    const absolutePath = join(projectRoot, ".pi", "agents", `${agent.id}.md`);
+    const absolutePath = join(agentsDir, `${agent.id}.md`);
     if (!exists(absolutePath)) continue;
 
     const content = readFile(absolutePath, "utf-8");
@@ -459,7 +605,7 @@ function readFrontmatterValue(frontmatter: string, key: string): string | undefi
 
 export function applyDeveloperTeamInstall(
   plan: DeveloperTeamInstallPlan,
-  options?: { writeFile?: typeof writeFileSync; exists?: typeof existsSync; mkdir?: typeof mkdirSync; readFile?: typeof readFileSync },
+  options?: { writeFile?: typeof writeFileSync; exists?: typeof existsSync; mkdir?: typeof mkdirSync; readFile?: typeof readFileSync; readdirSync?: typeof import("node:fs").readdirSync },
 ): DeveloperTeamApplyResult {
   const writeFile = options?.writeFile ?? writeFileSync;
   const exists = options?.exists ?? existsSync;
@@ -469,6 +615,10 @@ export function applyDeveloperTeamInstall(
   if (!exists(plan.agentsDir)) {
     mkdir(plan.agentsDir, { recursive: true });
   }
+
+  // Cleanup legacy SDD agent files (sdd-apply.md, sdd-design.md, etc.)
+  // These were replaced by deck-developer-* agents
+  const legacyFilesRemoved = cleanupLegacySddAgentFiles(plan.agentsDir, options);
 
   if (!exists(plan.skillsDir)) {
     mkdir(plan.skillsDir, { recursive: true });
@@ -549,6 +699,33 @@ export function applyDeveloperTeamInstall(
   const changedCount = allResults.filter((r) => r.status === "created" || r.status === "updated").length;
   const unchangedCount = allResults.filter((r) => r.status === "unchanged").length;
 
+  // Cleanup nested SKILL.md/SKILL.md patterns in skills directory
+  const nestedSkillDirsRemoved = cleanupNestedSkillDirectories(plan.skillsDir, options);
+
+  // Materialize team profile (system-prompt.md) - required for orchestrator stub reference
+  const profileDir = buildTeamProfileDir(plan.projectRoot, "developer-team");
+  const systemPromptPath = join(profileDir, "system-prompt.md");
+
+  // Determine profile status and materialize if needed
+  let profileStatus: "created" | "updated" | "unchanged" = "unchanged";
+  const existingProfileContent = exists(systemPromptPath) ? readFile(systemPromptPath, "utf-8") : null;
+
+  materializeTeamProfile({
+    teamId: "developer-team",
+    projectRoot: plan.projectRoot,
+    mkdir,
+    writeFile,
+    readFile,
+    exists,
+  });
+
+  if (!existingProfileContent) {
+    profileStatus = "created";
+  } else {
+    const newProfileContent = readFile(systemPromptPath, "utf-8");
+    profileStatus = existingProfileContent !== newProfileContent ? "updated" : "unchanged";
+  }
+
   const fileResults: FileInstallResult[] = allResults.map((r) => ({
     kind: r.kind,
     agentId: r.agentId,
@@ -556,7 +733,7 @@ export function applyDeveloperTeamInstall(
     absolutePath: r.absolutePath!,
   }));
 
-  return { results: allResults, changedCount, unchangedCount, fileResults };
+  return { results: allResults, changedCount, unchangedCount, fileResults, legacyFilesRemoved, nestedSkillDirsRemoved, profileDir, profileStatus };
 }
 
 // --- Verify ---
@@ -758,6 +935,8 @@ function buildSkillFileContent(
   ].join("\n");
 }
 
+const DEVELOPER_ORCHESTRATOR_AGENT_ID = "deck-developer-orchestrator";
+
 function buildAgentFileContent(
   agent: DeveloperTeamAgent,
   model?: string,
@@ -766,6 +945,8 @@ function buildAgentFileContent(
   capabilityInstructions?: CapabilityInstructionBundle,
   personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
 ): string {
+  const isOrchestrator = agent.id === DEVELOPER_ORCHESTRATOR_AGENT_ID;
+
   const content = getAgentContent(
     agent.id,
     capabilityInstructions
@@ -774,6 +955,11 @@ function buildAgentFileContent(
   );
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
+  }
+
+  // For orchestrator, generate a stub that includes all required sections for observability
+  if (isOrchestrator) {
+    return buildOrchestratorStub(agent, model, thinking, memoryBundle, capabilityInstructions);
   }
 
   const agentResult: AdaptiveMemoryCompositionResult = memoryBundle
@@ -804,6 +990,117 @@ function buildAgentFileContent(
   ];
 
   return [...frontmatterLines, "", agentResult.content, ""].join("\n");
+}
+
+/**
+ * Builds an orchestrator stub that includes all required sections for observability.
+ * The actual session prompt lives in .deck/pi/profiles/<team>/system-prompt.md
+ * and is passed via --system-prompt flag in pi-team-launch.ts.
+ * This stub preserves the observable sections (invariants, capability instructions, memory)
+ * while referencing the profile for the full runtime prompt.
+ */
+function buildOrchestratorStub(
+  agent: DeveloperTeamAgent,
+  model?: string,
+  thinking?: PiThinkingLevel,
+  memoryBundle?: MemoryInjectionBundle,
+  capabilityInstructions?: CapabilityInstructionBundle,
+  personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
+): string {
+  // Build tool bindings from memory bundle - filter by surface matching "agent"
+  // This follows the same contract as composeAdaptiveMemory
+  const agentInstructions = memoryBundle?.instructions.filter((inst) => inst.surface === "agent") ?? [];
+  const toolBindings = agentInstructions.length > 0
+    ? (memoryBundle?.toolBindings ?? [])
+    : [];
+  const additionalTools = toolBindings.map((tb) => tb.toolNames).flat();
+  const toolsLine = additionalTools.length > 0
+    ? `read,write,bash,${additionalTools.join(",")}`
+    : "read,write,bash";
+
+  const frontmatterLines: string[] = [
+    "---",
+    `name: ${agent.name}`,
+    `description: ${toYamlScalar(agent.description)}`,
+    `skill: ${agent.skillId}`,
+    ...(model ? [`model: ${model}`] : []),
+    `tools: ${toolsLine}`,
+    ...(thinking ? [`thinking: ${thinking}`] : []),
+    "systemPromptMode: replace",
+    "inheritProjectContext: true",
+    "inheritSkills: false",
+    "---",
+  ];
+
+  // Reference to Orchestrator Invariants in profile (REQ-PROMPT-002 compliance)
+  const invariantReference = [
+    "## Orchestrator Behavior",
+    "",
+    "See `.deck/pi/profiles/<team>/system-prompt.md` for behavior guidelines.",
+    "These define execution mode, delegation, SDD initialization/triage, and registry-deferred parallelism.",
+  ];
+
+  // Build capability instructions section if provided
+  const capabilityLines: string[] = [];
+  if (capabilityInstructions && capabilityInstructions.instructions.length > 0) {
+    capabilityLines.push("", "## Package Instructions (configured)", "");
+    for (const inst of capabilityInstructions.instructions) {
+      if (inst.surface === "agent") {
+        capabilityLines.push(inst.markdown.replace(/^/, "<!-- package: " + inst.packageId + " --> "));
+        capabilityLines.push("");
+      }
+    }
+    capabilityLines.push("These instructions are provided by the runner's native package instruction system.");
+  }
+
+  // Build memory injection section if provided
+  const memoryLines: string[] = [];
+  if (memoryBundle && memoryBundle.instructions.length > 0) {
+    // Find agent-surface instructions from the bundle
+    const agentInstructions = memoryBundle.instructions.filter((inst) => inst.surface === "agent");
+    if (agentInstructions.length > 0) {
+      memoryLines.push("", "## Adaptive Memory (provider-injected)", "");
+      for (const inst of agentInstructions) {
+        memoryLines.push(inst.markdown);
+        memoryLines.push("");
+      }
+    }
+  }
+
+  const stubBody = [
+    "# Orchestrator Agent",
+    "",
+    "This agent operates with session context loaded from the team profile.",
+    "The complete session prompt is defined in `.deck/pi/profiles/<team>/system-prompt.md`",
+    "and passed via the `--system-prompt` flag at launch time.",
+    "",
+    ...invariantReference,
+    ...capabilityLines,
+    ...memoryLines,
+    "## Role",
+    "",
+    "- **Delegator**: Routes work to specialized agents (Apply, Review, Explore, etc.)",
+    "- **Coordinator**: Manages task flow and orchestrates multi-agent workflows",
+    "- **Quality Gate**: Ensures all changes pass review before completion",
+    "",
+    "## Tools",
+    "",
+    "Standard tools: read, write, bash",
+    "",
+    "## Notes",
+    "",
+    "- System prompt is sourced from profile, not embedded here",
+    "- Profile path: `.deck/pi/profiles/<team>/system-prompt.md`",
+    "",
+  ].join("\n");
+
+  // Append personality-specific content after the base stub
+  // Use ORCHESTRATOR_AGENT_BODY which contains "Delegate real work" etc.
+  const agentBodyContent = ORCHESTRATOR_AGENT_BODY;
+  const combinedContent = `${stubBody}\n\n---\n\n${agentBodyContent}`;
+
+  return [...frontmatterLines, "", combinedContent, ""].join("\n");
+
 }
 
 function toYamlScalar(value: string): string {

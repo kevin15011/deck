@@ -20,6 +20,7 @@ import {
 } from "./internal-runner-packages";
 import type { PiRunnerCapabilityInventory } from "./capability-inventory";
 import type { PiRequiredToolsReview } from "./required-tools";
+import { resolveRunnerParity, getParityGaps, type ParityReport, type ParityRuntimeHints } from "@deck/core";
 
 export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
 export type PiRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
@@ -60,6 +61,8 @@ export type PiRunnerReviewPlan = {
   };
   diagnostics: PiRunnerPlanDiagnostic[];
   ready: boolean;
+  /** Parity report exposing gaps and blockers for Pi runner */
+  parity?: ParityReport;
 };
 
 type BuildPiRunnerReviewPlanState = {
@@ -75,9 +78,53 @@ type BuildPiRunnerReviewPlanState = {
   packageInstructions?: Partial<Record<import("@deck/core/config/deck-config").PackageInstructionRunnerId, import("@deck/core/teams/developer/instruction-bundles").CapabilityInstructionBundle>>;
 };
 
-const EXCLUDED_PLAN_TERMS = ["@juicesharp/rpiv-todo", "@juicesharp/rpiv-ask-user-question", "context7"];
+const EXCLUDED_PLAN_TERMS = ["@juicesharp/rpiv-todo", "@juicesharp/rpiv-ask-user-question"];
+
+/**
+ * Capabilities that have MCP server configurations to write.
+ * These need write-pi-mcp-config actions regardless of install status.
+ * Note: codebase-memory-mcp writes to server name "codebase-memory" for OpenCode parity.
+ */
+const CAPABILITIES_WITH_MCP_CONFIG = new Set<CapabilityId>([
+  "context-mode",
+  "codebase-memory-mcp",
+  "serena",
+  "context7",
+]);
 
 type CapabilityToolPlanMetadata = ReturnType<typeof getCapabilityInstallableToolMappings>[number];
+
+/**
+ * Build runtime hints from inventory for parity resolution.
+ * Extracts binary availability and MCP server configuration from inventory.
+ */
+function buildParityRuntimeHints(inventory: PiRunnerCapabilityInventory): ParityRuntimeHints {
+  const binariesInPath: string[] = [];
+  const mcpServersConfigured: string[] = [];
+
+  for (const [capabilityId, entry] of Object.entries(inventory)) {
+    if (entry.status === "ready") {
+      // Check for binary capabilities
+      if (capabilityId === "rtk" || capabilityId === "codebase-memory-mcp" || capabilityId === "context-mode" || capabilityId === "serena") {
+        binariesInPath.push(capabilityId);
+      }
+      // Check for MCP server capabilities (codebase-memory-mcp writes to "codebase-memory" server name)
+      if (capabilityId === "codebase-memory-mcp" || capabilityId === "context7" || capabilityId === "serena") {
+        mcpServersConfigured.push(capabilityId);
+      }
+    }
+  }
+
+  // Check supermemory from adaptiveMemory state (passed through inventory metadata)
+  const supermemoryConfigured = (inventory as any)._supermemoryConfigured ?? false;
+
+  return {
+    binariesInPath: binariesInPath.length > 0 ? binariesInPath : undefined,
+    mcpServersConfigured: mcpServersConfigured.length > 0 ? mcpServersConfigured : undefined,
+    supermemoryConfigured,
+    projectIndexVerified: (inventory as any)._codebaseMemoryIndexed ?? undefined,
+  };
+}
 
 export function buildPiRunnerReviewPlan(
   state: BuildPiRunnerReviewPlanState,
@@ -92,6 +139,14 @@ export function buildPiRunnerReviewPlan(
   };
   const diagnostics: PiRunnerPlanDiagnostic[] = [];
   const runnerScope = state.runnerScope ?? "pi";
+
+  // Build runtime hints for parity resolution
+  const runtimeHints = buildParityRuntimeHints(inventory);
+
+  // Add supermemory state if available
+  if (state.adaptiveMemory?.supermemory?.configured) {
+    (runtimeHints as any).supermemoryConfigured = true;
+  }
 
   addPrerequisiteActions(groups, state.runtime?.toolsReview);
   addCapabilityActions(groups, diagnostics, state, inventory, runnerScope);
@@ -109,10 +164,14 @@ export function buildPiRunnerReviewPlan(
     ...cleanGroups.validations,
   ].some((action) => action.status === "manual" || action.status === "pending" || action.status === "blocked" || action.kind === "pending-source");
 
+  // Resolve parity report for Pi runner
+  const parity = resolveRunnerParity("pi", runtimeHints);
+
   return {
     groups: cleanGroups,
     diagnostics: diagnostics.filter((diagnostic) => !containsExcludedTerm(diagnostic.message)),
     ready: !unresolved,
+    parity,
   };
 }
 
@@ -153,9 +212,39 @@ function addCapabilityActions(
     const installKind = toolMetadata?.installKind ?? capability.installKind;
     const toolId = toolMetadata?.toolId ?? capability.toolId;
     const source = toolMetadata?.source ?? capability.source;
-    if (!entry || entry.status === "ready") continue;
 
-    if (installKind === "pi-package" && toolId && entry.status === "missing") {
+    // Generate write-pi-mcp-config action if this capability has MCP config
+    // This should happen for ALL selected capabilities with MCP config, regardless of install status
+    if (CAPABILITIES_WITH_MCP_CONFIG.has(capabilityId)) {
+      groups.configWrites.push({
+        id: `capability.${capabilityId}.mcp-config`,
+        kind: "write-pi-mcp-config",
+        title: `Configure ${capability.label} MCP`,
+        description: `Writes MCP configuration for ${capability.label}.`,
+        capabilityId,
+        toolId,
+        source,
+        status: "ready",
+      });
+    }
+
+    // If entry doesn't exist or is ready, skip install action (it's already available)
+    if (!entry || entry.status === "ready") {
+      continue;
+    }
+
+    // Handle automatic install kinds: pi-package, npm-package-plus-mcp, shared-binary-plus-mcp, shared-binary, python-tool
+    const isAutoInstallable = 
+      installKind === "pi-package" ||
+      installKind === "npm-package-plus-mcp" ||
+      installKind === "shared-binary-plus-mcp" ||
+      installKind === "shared-binary" ||
+      installKind === "python-tool";
+
+    // For auto-installable kinds, also handle "manual" status (used for shared-binary kinds)
+    const isInstallableStatus = entry.status === "missing" || entry.status === "manual";
+
+    if (isAutoInstallable && toolId && isInstallableStatus) {
       groups.automaticInstalls.push({
         id: `capability.${capabilityId}.install`,
         kind: "install-pi-package",

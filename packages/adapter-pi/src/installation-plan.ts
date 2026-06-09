@@ -1,3 +1,4 @@
+import { getCanonicalCapability } from "@deck/core";
 import type { CapabilityToolMapping } from "./capability-catalog";
 import type { InternalRunnerPackageId } from "./internal-runner-packages";
 import type { RequiredToolStatus } from "./required-tools";
@@ -8,8 +9,9 @@ export type InstallablePiToolId =
   | "sub-agents"
   | "mcp-packages"
   | "context-mode"
-  | "codebase-memory"
+  | "codebase-memory-mcp"
   | "rtk"
+  | "serena"
   | "context7"
   | "engram-memory";
 
@@ -18,7 +20,9 @@ export type InstallablePiTool = {
   name: string;
   source: string;
   required: boolean;
-  installKind: "pi-package" | "external";
+  installKind: "pi-package" | "external" | "python-tool" | "shared-binary-plus-mcp" | "shared-binary" | "npm-package-plus-mcp" | "npm-package" | "mcp-server" | "manual";
+  /** Canonical capability ID from the registry for parity tracking */
+  capabilityId?: string;
 };
 
 type BuildPiInstallationPlanOptions = {
@@ -29,10 +33,46 @@ type BuildPiInstallationPlanOptions = {
 export const PI_INSTALLABLE_TOOLS: InstallablePiTool[] = [
   { id: "sub-agents", name: "sub-agents", source: "npm:pi-subagents", required: true, installKind: "pi-package" },
   { id: "mcp-packages", name: "MCP packages", source: "npm:pi-mcp-adapter", required: true, installKind: "pi-package" },
-  { id: "context-mode", name: "context-mode", source: "npm:context-mode", required: false, installKind: "pi-package" },
-  { id: "codebase-memory", name: "codebase-memory", source: "DeusData/codebase-memory-mcp", required: false, installKind: "external" },
-  { id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "external" },
-  { id: "context7", name: "Context7", source: "npm:@dreki-gg/pi-context7", required: false, installKind: "pi-package" },
+  {
+    id: "context-mode",
+    name: "context-mode",
+    source: "context-mode (shared binary)",
+    required: false,
+    installKind: "shared-binary-plus-mcp",
+    capabilityId: "context-mode",
+  },
+  {
+    id: "codebase-memory-mcp",
+    name: "codebase-memory-mcp",
+    source: "DeusData/codebase-memory-mcp",
+    required: false,
+    installKind: "shared-binary-plus-mcp",
+    capabilityId: "codebase-memory-mcp",
+  },
+  {
+    id: "rtk",
+    name: "RTK",
+    source: "rtk-ai/rtk",
+    required: false,
+    installKind: "shared-binary",
+    capabilityId: "rtk",
+  },
+  {
+    id: "serena",
+    name: "Serena",
+    source: "serena (python tool)",
+    required: false,
+    installKind: "python-tool",
+    capabilityId: "serena",
+  },
+  {
+    id: "context7",
+    name: "Context7",
+    source: "npm:@upstash/context7-mcp",
+    required: false,
+    installKind: "npm-package-plus-mcp",
+    capabilityId: "context7",
+  },
   // Legacy technical tool kept for backward compatibility. The capability dashboard must not
   // expose Engram as a global selectable capability; engram-memory is only derived when
   // Adaptive Memory provider === "engram".
@@ -72,8 +112,10 @@ export type CapabilityPlanToolMetadata = Pick<CapabilityToolMapping, "capability
 
 const TOOL_TO_CAPABILITY: Partial<Record<InstallablePiToolId, CapabilityToolMapping["capabilityId"]>> = {
   "context-mode": "context-mode",
-  "codebase-memory": "codebase-memory",
+  "codebase-memory-mcp": "codebase-memory-mcp",
   rtk: "rtk",
+  serena: "serena",
+  context7: "context7",
 };
 
 export function getPiInstallableTool(toolId: InstallablePiToolId): InstallablePiTool | undefined {
@@ -122,4 +164,17 @@ export function getOptionalPiTools(): InstallablePiTool[] {
 
 function normalizeToolName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/**
+ * Resolve a tool's capabilityId against the canonical registry.
+ * REQ-MAP-004: Each tool must expose its capabilityId resolved against the registry.
+ */
+export function resolveToolCapabilityId(toolId: InstallablePiToolId): string | undefined {
+  const tool = getPiInstallableTool(toolId);
+  if (!tool?.capabilityId) return undefined;
+
+  // Verify it exists in the canonical registry
+  const canonical = getCanonicalCapability(tool.capabilityId);
+  return canonical?.id;
 }

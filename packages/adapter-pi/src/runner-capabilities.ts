@@ -30,7 +30,9 @@ import type {
   RunnerDeveloperTeamVerifyResult,
   DeveloperTeamManifest,
   AdaptiveMemoryProvider,
+  RunnerCapabilityCatalogEntry,
 } from "@deck/core";
+import { resolveRunnerParity, type ParityReport, type ParityReportEntry } from "@deck/core";
 import type { TeamEntry } from "@deck/core";
 import { DEVELOPER_TEAM_AGENTS, getModelCatalog } from "@deck/core";
 import { join } from "node:path";
@@ -161,6 +163,92 @@ function getPiCapability(capabilityId: string): import("@deck/core").RunnerCapab
 function getPiUserFacingIds(): readonly string[] {
   const { PI_RUNNER_CAPABILITY_IDS } = require("./capability-catalog");
   return PI_RUNNER_CAPABILITY_IDS as readonly string[];
+}
+
+/**
+ * Input type for Pi capability parity resolution.
+ * Matches the runtime hints structure expected by resolveRunnerParity.
+ */
+export type PiCapabilityParityInput = {
+  binariesInPath?: readonly string[];
+  mcpServersConfigured?: readonly string[];
+  supermemoryConfigured?: boolean;
+  projectIndexVerified?: boolean;
+};
+
+/**
+ * Output type for Pi capability parity report.
+ */
+export type PiCapabilityParityResult = {
+  runnerId: string;
+  capabilities: readonly {
+    capabilityId: string;
+    status: string;
+    severity: "info" | "warning" | "error";
+    code?: string;
+    message: string;
+    recommendedAction?: string;
+  }[];
+  gaps: readonly {
+    capabilityId: string;
+    status: string;
+    severity: "info" | "warning" | "error";
+    code?: string;
+    message: string;
+    recommendedAction?: string;
+  }[];
+  blockers: readonly {
+    capabilityId: string;
+    status: string;
+    severity: "info" | "warning" | "error";
+    code?: string;
+    message: string;
+    recommendedAction?: string;
+  }[];
+};
+
+/**
+ * Get Pi runner capability parity report.
+ * Uses resolveRunnerParity from core to compute gaps and blockers.
+ */
+function getPiCapabilityParity(input: PiCapabilityParityInput): PiCapabilityParityResult {
+  // Build runtime hints from input
+  const runtimeHints = {
+    binariesInPath: input.binariesInPath,
+    mcpServersConfigured: input.mcpServersConfigured,
+    supermemoryConfigured: input.supermemoryConfigured,
+    projectIndexVerified: input.projectIndexVerified,
+  };
+
+  const parityReport = resolveRunnerParity("pi", runtimeHints);
+
+  return {
+    runnerId: "pi",
+    capabilities: parityReport.capabilities.map((entry) => ({
+      capabilityId: entry.capabilityId,
+      status: entry.status,
+      severity: entry.severity,
+      code: entry.code,
+      message: entry.message,
+      recommendedAction: entry.recommendedAction,
+    })),
+    gaps: parityReport.gaps.map((entry) => ({
+      capabilityId: entry.capabilityId,
+      status: entry.status,
+      severity: entry.severity,
+      code: entry.code,
+      message: entry.message,
+      recommendedAction: entry.recommendedAction,
+    })),
+    blockers: parityReport.blockers.map((entry) => ({
+      capabilityId: entry.capabilityId,
+      status: entry.status,
+      severity: entry.severity,
+      code: entry.code,
+      message: entry.message,
+      recommendedAction: entry.recommendedAction,
+    })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -301,11 +389,11 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
         absolutePath: join(piSkillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
         content: f.content,
       })),
+    sddSkillFiles: [],
     memoryDiagnostics: [],
   };
 
   const result: DeveloperTeamApplyResult = applyDeveloperTeamInstall(plan);
-
   return {
     success: true,
     appliedFiles: result.results.map((r) => r.agentId),
@@ -485,6 +573,7 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
         absolutePath: join(piSkillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
         content: f.content,
       })),
+    sddSkillFiles: [],
     memoryDiagnostics: [],
   };
 
@@ -537,6 +626,7 @@ function backupTeamFiles(plan: import("@deck/core").RunnerDeveloperTeamInstallPl
         absolutePath: f.path,
         content: f.content,
       })),
+    sddSkillFiles: [],
     memoryDiagnostics: [],
   };
 
@@ -623,6 +713,7 @@ export function createPiRunnerCapabilities(): RunnerCapabilities {
     capabilities: {
       getCapability: getPiCapability,
       getUserFacingIds: getPiUserFacingIds,
+      // getParity is available as standalone function getPiCapabilityParity
     },
     install: {
       buildPlan: buildInstallPlan,

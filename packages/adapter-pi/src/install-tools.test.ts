@@ -9,6 +9,148 @@ import {
 import type { InternalRunnerPackageInstallAction } from "./internal-runner-packages";
 
 // ---------------------------------------------------------------------------
+// Repair #18: Tests for installKind dispatch (shared-binary, python-tool, etc.)
+// These tests verify that installPiTools respects installKind and correctly
+// maps result statuses (reused/installed/manual-verified should NOT become failed)
+// ---------------------------------------------------------------------------
+
+describe("installPiTools with installKind dispatch", () => {
+  test("shared-binary: returns reused when binary is already usable (ready)", async () => {
+    const results = await installPiTools(
+      "pi",
+      [{ id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "shared-binary" }],
+      () => {},
+      async () => ({ exitCode: 0, stdout: "", stderr: "" }), // pi install won't run
+    );
+
+    expect(results).toHaveLength(1);
+    const result = results[0];
+    // Status should be "reused" (success), NOT failed
+    expect(result.status).toBe("reused");
+    expect(result.success).toBe(true);
+    expect(result.installKind).toBe("shared-binary");
+    expect(result.message).toContain("Reusing existing");
+  });
+
+  test("shared-binary-plus-mcp: returns reused when context-mode binary is ready", async () => {
+    const results = await installPiTools(
+      "pi",
+      [{ id: "context-mode", name: "context-mode", source: "context-mode (shared binary)", required: false, installKind: "shared-binary-plus-mcp" }],
+      () => {},
+      async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    );
+
+    expect(results).toHaveLength(1);
+    const result = results[0];
+    expect(result.status).toBe("reused");
+    expect(result.success).toBe(true);
+    expect(result.installKind).toBe("shared-binary-plus-mcp");
+  });
+
+  test("shared-binary-plus-mcp: returns reused when codebase-memory-mcp binary is ready", async () => {
+    const results = await installPiTools(
+      "pi",
+      [{ id: "codebase-memory-mcp", name: "codebase-memory-mcp", source: "DeusData/codebase-memory-mcp", required: false, installKind: "shared-binary-plus-mcp" }],
+      () => {},
+      async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    );
+
+    expect(results).toHaveLength(1);
+    const result = results[0];
+    expect(result.status).toBe("reused");
+    expect(result.success).toBe(true);
+    expect(result.installKind).toBe("shared-binary-plus-mcp");
+  });
+
+  test("python-tool: returns reused when serena binary is ready", async () => {
+    const results = await installPiTools(
+      "pi",
+      [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
+      () => {},
+      async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    );
+
+    expect(results).toHaveLength(1);
+    const result = results[0];
+    expect(result.status).toBe("reused");
+    expect(result.success).toBe(true);
+    expect(result.installKind).toBe("python-tool");
+  });
+
+  test("python-tool: returns manual-verified when uv/pipx not available", async () => {
+    // Mock healthcheck to return "missing" (not ready)
+    // Mock uv/pipx to fail
+    const results = await installPiTools(
+      "pi",
+      [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
+      () => {},
+      async () => ({ exitCode: 1, stdout: "", stderr: "command not found" }),
+    );
+
+    expect(results).toHaveLength(1);
+    const result = results[0];
+    // Status should be "manual-verified" (success), NOT failed
+    expect(result.success).toBe(true);
+    expect(["manual-verified", "reused"]).toContain(result.status);
+  });
+
+  test("npm-package-plus-mcp: installs context7 via npx", async () => {
+    const calls: string[][] = [];
+    const results = await installPiTools(
+      "pi",
+      [{ id: "context7", name: "Context7", source: "npm:@upstash/context7-mcp", required: false, installKind: "npm-package-plus-mcp" }],
+      () => {},
+      async (command, args) => {
+        calls.push([command, ...args]);
+        return { exitCode: 0, stdout: "ok", stderr: "" };
+      },
+    );
+
+    expect(calls).toEqual([["npx", "-y", "@upstash/context7-mcp"]]);
+    expect(results[0].status).toBe("installed");
+    expect(results[0].success).toBe(true);
+    expect(results[0].installKind).toBe("npm-package-plus-mcp");
+  });
+
+  test("pi-package: uses pi install command", async () => {
+    const calls: string[][] = [];
+    const results = await installPiTools(
+      "pi",
+      [{ id: "sub-agents", name: "sub-agents", source: "npm:pi-subagents", required: true, installKind: "pi-package" }],
+      () => {},
+      async (command, args) => {
+        calls.push([command, ...args]);
+        return { exitCode: 0, stdout: "ok", stderr: "" };
+      },
+    );
+
+    expect(calls).toEqual([["pi", "install", "npm:pi-subagents"]]);
+    expect(results[0].status).toBe("installed");
+    expect(results[0].installKind).toBe("pi-package");
+  });
+
+  test("dispatch does NOT log to console - output leaks into Ink TUI", async () => {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args) => logs.push(args.join(" "));
+
+    try {
+      await installPiTools(
+        "pi",
+        [{ id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "shared-binary" }],
+        () => {},
+        async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      );
+
+      // Verify NO console.log with "[install-tools]" prefix - this would leak into TUI
+      expect(logs.some(l => l.includes("[install-tools]"))).toBe(false);
+    } finally {
+      console.log = originalLog;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Existing install-tools tests (preserved)
 // ---------------------------------------------------------------------------
 
@@ -49,13 +191,13 @@ describe("installPiTools", () => {
       async () => ({ exitCode: 1, stdout: "", stderr: "failed" }),
     );
 
-    expect(result).toEqual({
-      tool: "context-mode",
-      success: false,
-      actionKind: "install-pi-package",
-      status: "failed",
-      message: "failed",
-    });
+    expect(result.tool).toBe("context-mode");
+    expect(result.success).toBe(false);
+    expect(result.actionKind).toBe("install-pi-package");
+    expect(result.status).toBe("failed");
+    expect(result.message).toBe("failed");
+    expect(result.installKind).toBe("pi-package");
+    expect(result.exitCode).toBe(1);
   });
 
   test("does not run pi install for external RTK and returns manual review-plan result", async () => {
@@ -71,13 +213,12 @@ describe("installPiTools", () => {
     );
 
     expect(calls).toEqual([]);
-    expect(result).toEqual({
-      tool: "RTK",
-      success: true,
-      actionKind: "manual-external-install",
-      status: "manual",
-      message: "Manual external install required from rtk-ai/rtk.",
-    });
+    expect(result.tool).toBe("RTK");
+    expect(result.success).toBe(true);
+    expect(result.actionKind).toBe("manual-external-install");
+    expect(result.status).toBe("manual");
+    expect(result.message).toBe("Manual external install required from rtk-ai/rtk.");
+    expect(result.installKind).toBe("external");
   });
 
   test("returns manual external result when install command is unavailable", async () => {
@@ -95,22 +236,21 @@ describe("installPiTools", () => {
     );
 
     expect(emitted).toEqual(["RTK", "context-mode"]);
-    expect(results).toEqual([
-      {
-        tool: "RTK",
-        success: true,
-        actionKind: "manual-external-install",
-        status: "manual",
-        message: "Manual external install required from rtk-ai/rtk.",
-      },
-      {
-        tool: "context-mode",
-        success: false,
-        actionKind: "install-pi-package",
-        status: "failed",
-        message: "Pi install command is unavailable.",
-      },
-    ]);
+
+    // First result: external install - should succeed (manual)
+    expect(results[0].tool).toBe("RTK");
+    expect(results[0].success).toBe(true);
+    expect(results[0].actionKind).toBe("manual-external-install");
+    expect(results[0].status).toBe("manual");
+    expect(results[0].installKind).toBe("external");
+
+    // Second result: pi-package without command - should fail
+    expect(results[1].tool).toBe("context-mode");
+    expect(results[1].success).toBe(false);
+    expect(results[1].actionKind).toBe("install-pi-package");
+    expect(results[1].status).toBe("failed");
+    expect(results[1].message).toBe("Pi install command is unavailable.");
+    expect(results[1].installKind).toBe("pi-package");
   });
 });
 

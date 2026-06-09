@@ -3,14 +3,14 @@ import { describe, expect, test } from "bun:test";
 import { getDeveloperTeamCatalog } from "./developer-team-catalog";
 
 describe("Developer Team catalog", () => {
-  test("includes all 12 agents with unique IDs", () => {
+  test("includes all 14 agents with unique IDs (including deck-init and deck-onboard)", () => {
     const catalog = getDeveloperTeamCatalog();
 
-    expect(catalog).toHaveLength(12);
+    expect(catalog).toHaveLength(14);
 
     const ids = catalog.map((a) => a.id);
     const uniqueIds = new Set(ids);
-    expect(uniqueIds.size).toBe(12);
+    expect(uniqueIds.size).toBe(14);
   });
 
   test("contains required agent IDs in correct order", () => {
@@ -30,6 +30,8 @@ describe("Developer Team catalog", () => {
       "deck-developer-verify",
       "deck-developer-review",
       "deck-developer-archive",
+      "deck-init",
+      "deck-onboard",
     ]);
   });
 

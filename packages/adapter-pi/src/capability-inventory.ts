@@ -7,6 +7,7 @@ import {
   type InternalCapabilityId,
   type RunnerScope,
 } from "./capability-catalog";
+import { checkSharedBinaryUsability } from "@deck/core";
 import {
   detectInternalRunnerPackageStatus,
   INTERNAL_RUNNER_PACKAGE_IDS,
@@ -52,6 +53,25 @@ export type PiRunnerCapabilityInventory = Partial<Record<CapabilityId, PiRunnerC
  */
 export type PiRunnerFullCapabilityInventory = PiRunnerCapabilityInventory & {
   _internal?: Partial<Record<InternalCapabilityId, PiRunnerInternalCapabilityInventoryEntry>>;
+};
+
+/**
+ * Codebase-memory index lifecycle status.
+ * REQ-CBM-003: Report observable index lifecycle state.
+ */
+export type CodebaseMemoryIndexStatus =
+  | "not-indexed"
+  | "indexed-verified"
+  | "blocked"
+  | "gap";
+
+/**
+ * Codebase-memory index information for inventory.
+ */
+export type CodebaseMemoryIndexInfo = {
+  status: CodebaseMemoryIndexStatus;
+  recommendedAction?: string;
+  indexPath?: string;
 };
 
 export type BuildPiRunnerCapabilityInventoryConfig = {
@@ -139,11 +159,20 @@ export function buildPiRunnerCapabilityInventory(
 
     const mapping = detectorMappings.find((entry) => entry.capabilityId === capabilityId);
     const installed = isCapabilityInstalled(capabilityId, installedNames, mapping?.detectorNames ?? []);
+
+    // Map install kinds to status - external/manual require manual setup
+    // shared-binary and shared-binary-plus-mcp are treated as missing until verified (they may be reused)
+    const isExternalOrManual = capability.installKind === "external" ||
+      capability.installKind === "manual-verified" ||
+      capability.installKind === "manual";
+
     const status: CapabilityStatus = installed
       ? "ready"
-      : capability.installKind === "external"
+      : isExternalOrManual
         ? "manual"
-        : "missing";
+        : capability.installKind.startsWith("shared-")
+          ? "manual"  // Shared binaries may need setup/config even if they exist
+          : "missing";
 
     inventory[capabilityId] = {
       capabilityId,
@@ -234,4 +263,71 @@ function normalizeName(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+// ---------------------------------------------------------------------------
+// Codebase-memory index lifecycle detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Check the index lifecycle status of codebase-memory.
+ * REQ-CBM-003: Report observable index lifecycle.
+ *
+ * @param projectPath - Optional path to check for index. Defaults to current directory.
+ */
+export async function checkCodebaseMemoryIndexStatus(
+  projectPath?: string,
+): Promise<CodebaseMemoryIndexInfo> {
+  // Check for common index locations
+  const searchPaths = [
+    projectPath ? `${projectPath}/.codebase-memory` : undefined,
+    `${process.env.HOME ?? ""}/.codebase-memory`,
+    ".codebase-memory",
+  ].filter(Boolean) as string[];
+
+  for (const indexPath of searchPaths) {
+    try {
+      const { existsSync } = await import("node:fs");
+      if (existsSync(indexPath)) {
+        return {
+          status: "indexed-verified",
+          indexPath,
+          recommendedAction: undefined,
+        };
+      }
+    } catch {
+      // Continue checking other paths
+    }
+  }
+
+  return {
+    status: "not-indexed",
+    recommendedAction: "Run 'codebase-memory-mcp index' to index the project for codebase memory",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Binary detection helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if a shared binary is available and usable.
+ * Used for detecting rtk, serena, codebase-memory-mcp, context-mode.
+ */
+export async function checkBinaryUsability(
+  command: string,
+): Promise<{ available: boolean; usable: boolean }> {
+  try {
+    const result = await checkSharedBinaryUsability(command, {
+      healthcheckArgs: ["--version", "--help"],
+      timeoutMs: 3000,
+    });
+
+    return {
+      available: result.status !== "missing",
+      usable: result.status === "ready",
+    };
+  } catch {
+    return { available: false, usable: false };
+  }
 }

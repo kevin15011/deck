@@ -1,10 +1,18 @@
+import { getCanonicalCapability, type RunnerCapabilitySupportStatus } from "@deck/core";
 import type { InstallablePiToolId } from "./installation-plan";
 
 /**
  * User-facing capability IDs exposed in the Pi dashboard.
- * Excludes internal/deprecated capabilities like `runner-mermaid`.
+ * Includes canonical capability IDs from registry for parity tracking.
  */
-export type CapabilityId = "rtk" | "context-mode" | "codebase-memory" | "pi-hud" | "runner-mermaid";
+export type CapabilityId =
+  | "rtk"
+  | "context-mode"
+  | "codebase-memory-mcp"
+  | "serena"
+  | "context7"
+  | "pi-hud"
+  | "runner-mermaid";
 
 /**
  * Internal capability IDs used for inventory tracking but NOT exposed
@@ -38,7 +46,18 @@ export type TechnicalActionKind =
  */
 export type CapabilityDashboardSection = "runner-capabilities" | "runner-ui-visual-helpers";
 
-export type CapabilityInstallKind = "pi-package" | "external" | "pending";
+export type CapabilityInstallKind =
+  | "pi-package"
+  | "external"
+  | "pending"
+  | "python-tool"
+  | "shared-binary-plus-mcp"
+  | "shared-binary"
+  | "manual-verified"
+  | "manual"
+  | "npm-package-plus-mcp"
+  | "npm-package"
+  | "mcp-server";
 
 export type CapabilityRunnerImplementationTarget = string;
 
@@ -54,6 +73,7 @@ export type CapabilityImplementationMapping = {
 export type CapabilityDetector = {
   piPackageNames?: string[];
   commands?: string[];
+  mcpServerNames?: string[];
   note?: string;
 };
 
@@ -110,38 +130,70 @@ const FULL_CAPABILITY_CATALOG: Record<CapabilityId, CapabilityToolMapping | Inte
   "context-mode": {
     capabilityId: "context-mode",
     label: "context-mode",
-    description: "Context-mode runner capability for shared execution context.",
+    description: "Context-mode runner capability for shared execution context. Requires local MCP config.",
     section: "runner-capabilities",
     runnerScope: "all",
     requirementLevel: "configurable",
     toolId: "context-mode",
-    source: "npm:context-mode",
-    installKind: "pi-package",
-    detector: { piPackageNames: ["context-mode"] },
+    source: "context-mode (shared binary)",
+    installKind: "shared-binary-plus-mcp",
+    detector: { piPackageNames: ["context-mode"], commands: ["context-mode"] },
   },
-  "codebase-memory": {
-    capabilityId: "codebase-memory",
-    label: "codebase-memory",
-    description: "Codebase memory MCP capability; separate from Adaptive Memory providers.",
+  "codebase-memory-mcp": {
+    capabilityId: "codebase-memory-mcp",
+    label: "codebase-memory-mcp",
+    description: "Codebase Memory MCP local server backed by shared binary. Aligns with OpenCode naming.",
     section: "runner-capabilities",
     runnerScope: "all",
     requirementLevel: "configurable",
-    toolId: "codebase-memory",
     source: "DeusData/codebase-memory-mcp",
-    installKind: "external",
-    detector: { piPackageNames: ["codebase-memory", "codebase-memory-mcp"], commands: ["codebase-memory-mcp"] },
+    installKind: "shared-binary-plus-mcp",
+    detector: { commands: ["codebase-memory-mcp"] },
   },
   rtk: {
     capabilityId: "rtk",
     label: "RTK",
-    description: "RTK runner capability installed and verified outside Pi package automation.",
+    description: "RTK (Token Killer) - first-class Deck capability for CLI token optimization. Shared binary reuse.",
+    section: "runner-capabilities",
+    runnerScope: "all",
+    requirementLevel: "optional",
+    toolId: "rtk",
+    source: "rtk-ai/rtk",
+    installKind: "shared-binary",
+    detector: { piPackageNames: ["rtk"], commands: ["rtk"] },
+  },
+  serena: {
+    capabilityId: "serena",
+    label: "Serena",
+    description: "Serena symbolic editing capability. First-class Deck capability. Python tool with MCP integration.",
+    section: "runner-capabilities",
+    runnerScope: "pi",
+    requirementLevel: "configurable",
+    toolId: "serena",
+    source: "serena (python tool)",
+    installKind: "python-tool",
+    detector: { commands: ["serena"] },
+    /**
+     * Preselected by default (serena: true in state.ts).
+     * REQ-PI-002: Serena is mandatory for Pi parity.
+     * Changed to "configurable" to appear in TUI package list.
+     */
+  },
+  context7: {
+    capabilityId: "context7",
+    label: "Context7",
+    description: "Context7 MCP using standard @upstash/context7-mcp package. Standard preferred over wrapper.",
     section: "runner-capabilities",
     runnerScope: "all",
     requirementLevel: "configurable",
-    toolId: "rtk",
-    source: "rtk-ai/rtk",
-    installKind: "external",
-    detector: { piPackageNames: ["rtk"], commands: ["rtk"] },
+    toolId: "context7",
+    source: "npm:@upstash/context7-mcp",
+    installKind: "npm-package-plus-mcp",
+    detector: { mcpServerNames: ["context7"] },
+    /**
+     * Falls back to @dreki-gg/pi-context7 if standard MCP blocked.
+     * REQ-MCP-001: Converge to standard @upstash/context7-mcp unless blocker confirmed.
+     */
   },
   /**
    * runner-mermaid is INTERNAL.
@@ -199,8 +251,10 @@ export const PI_RUNNER_CAPABILITY_CATALOG: Record<
   CapabilityToolMapping
 > = {
   "context-mode": FULL_CAPABILITY_CATALOG["context-mode"] as CapabilityToolMapping,
-  "codebase-memory": FULL_CAPABILITY_CATALOG["codebase-memory"] as CapabilityToolMapping,
+  "codebase-memory-mcp": FULL_CAPABILITY_CATALOG["codebase-memory-mcp"] as CapabilityToolMapping,
   rtk: FULL_CAPABILITY_CATALOG.rtk as CapabilityToolMapping,
+  serena: FULL_CAPABILITY_CATALOG.serena as CapabilityToolMapping,
+  context7: FULL_CAPABILITY_CATALOG.context7 as CapabilityToolMapping,
   "pi-hud": FULL_CAPABILITY_CATALOG["pi-hud"] as CapabilityToolMapping,
 } as const satisfies Record<Exclude<CapabilityId, InternalCapabilityId>, CapabilityToolMapping>;
 
@@ -248,4 +302,32 @@ export function getUserFacingCapability(
     return entry as CapabilityToolMapping;
   }
   return undefined;
+}
+
+/**
+ * Resolve a Pi capability ID to its canonical registry capability ID.
+ * Returns the capability if it exists in the canonical registry.
+ * REQ-MAP-004: codebase-memory, codebase-memory-mcp, and rtk must map to their canonical IDs.
+ */
+export function resolveToCanonicalCapabilityId(
+  capabilityId: CapabilityId,
+): string | undefined {
+  const canonical = getCanonicalCapability(capabilityId);
+  return canonical?.id;
+}
+
+/**
+ * Validate that a Pi capability entry has a valid mapping to the canonical registry.
+ * Returns true if the capability exists in the registry or is a Pi-specific capability.
+ */
+export function validatePiCapabilityMapping(capabilityId: CapabilityId): boolean {
+  // These are Pi-specific capabilities not in the canonical registry
+  const piSpecificIds = ["pi-hud", "runner-mermaid"];
+
+  if (piSpecificIds.includes(capabilityId)) {
+    return true;
+  }
+
+  // All other capabilities must exist in the canonical registry
+  return resolveToCanonicalCapabilityId(capabilityId) !== undefined;
 }

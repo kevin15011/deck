@@ -7,32 +7,36 @@ import {
   PI_RUNNER_CAPABILITY_IDS,
   getPiRunnerCapability,
   getUserFacingCapability,
+  resolveToCanonicalCapabilityId,
+  validatePiCapabilityMapping,
 } from "./capability-catalog";
 
 describe("PI_RUNNER_CAPABILITY_CATALOG", () => {
   test("contains only user-facing capability entries — excludes runner-mermaid (internal)", () => {
     // REQ-DASH-001: runner-mermaid must not appear as a user-facing capability
+    // Only codebase-memory-mcp (not codebase-memory) is exposed in Pi TUI for OpenCode parity
     expect([...PI_RUNNER_CAPABILITY_IDS].sort()).toEqual([
-      "codebase-memory",
+      "codebase-memory-mcp",
       "context-mode",
+      "context7",
       "pi-hud",
       "rtk",
+      "serena",
     ]);
 
     const serialized = JSON.stringify(PI_RUNNER_CAPABILITY_CATALOG);
     expect(serialized).not.toContain("runner-mermaid");
     expect(serialized).not.toContain("@juicesharp/rpiv-todo");
     expect(serialized).not.toContain("@juicesharp/rpiv-ask-user-question");
-    expect(serialized.toLowerCase()).not.toContain("context7");
     expect(serialized).not.toContain("engram-memory");
+    // Note: context7 now uses standard @upstash/context7-mcp which is correct per REQ-MCP-001
   });
 
-  test("does not include legacy packages/context7 in any entry", () => {
-    for (const capabilityId of PI_RUNNER_CAPABILITY_IDS) {
-      const entry = PI_RUNNER_CAPABILITY_CATALOG[capabilityId];
-      expect(entry.source?.toLowerCase() ?? "").not.toContain("context7");
-      expect(entry.toolId?.toLowerCase() ?? "").not.toContain("context7");
-    }
+  test("uses standard @upstash/context7-mcp for context7 capability", () => {
+    // REQ-MCP-001: Context7 should use standard package
+    const context7 = PI_RUNNER_CAPABILITY_CATALOG["context7"];
+    expect(context7.source).toContain("@upstash/context7-mcp");
+    expect(context7.installKind).toBe("npm-package-plus-mcp");
   });
 });
 
@@ -57,12 +61,15 @@ describe("INTERNAL_CAPABILITY_ENTRIES", () => {
 
 describe("ALL_PI_RUNNER_CAPABILITY_IDS", () => {
   test("includes both user-facing and internal capability IDs", () => {
+    // Only codebase-memory-mcp is exposed (not codebase-memory) for OpenCode parity
     expect([...ALL_PI_RUNNER_CAPABILITY_IDS].sort()).toEqual([
-      "codebase-memory",
+      "codebase-memory-mcp",
       "context-mode",
+      "context7",
       "pi-hud",
       "rtk",
       "runner-mermaid",
+      "serena",
     ]);
   });
 });
@@ -106,15 +113,18 @@ describe("PI_RUNNER_CAPABILITY_CATALOG structural regressions", () => {
       expect(entry.capabilityId).toBe(capabilityId);
       expect(entry.section).toMatch(/runner-(capabilities|ui-visual-helpers)/);
       expect(entry.runnerScope).toMatch(/^(all|pi|opencode)$/);
-      expect(entry.installKind).toMatch(/^(pi-package|external|pending)$/);
+      // Updated to include new install kinds for Batch C
+      expect(entry.installKind).toMatch(/^(pi-package|external|pending|python-tool|shared-binary-plus-mcp|shared-binary|npm-package-plus-mcp|manual-verified)$/);
       expect(entry.detector).toBeTruthy();
     }
 
+    // Updated for Batch C: context-mode uses shared binary + MCP
     expect(PI_RUNNER_CAPABILITY_CATALOG["context-mode"]).toEqual(
-      expect.objectContaining({ capabilityId: "context-mode", toolId: "context-mode", source: "npm:context-mode" }),
+      expect.objectContaining({ capabilityId: "context-mode", toolId: "context-mode" }),
     );
+    // Updated for Batch C: rtk uses shared binary
     expect(PI_RUNNER_CAPABILITY_CATALOG.rtk).toEqual(
-      expect.objectContaining({ capabilityId: "rtk", toolId: "rtk", source: "rtk-ai/rtk", installKind: "external" }),
+      expect.objectContaining({ capabilityId: "rtk", toolId: "rtk", installKind: "shared-binary" }),
     );
   });
 
@@ -129,4 +139,31 @@ describe("PI_RUNNER_CAPABILITY_CATALOG structural regressions", () => {
 });
 
 // Type for test helper
-type CapabilityId = "rtk" | "context-mode" | "codebase-memory" | "pi-hud" | "runner-mermaid";
+type CapabilityId = "rtk" | "context-mode" | "codebase-memory-mcp" | "serena" | "context7" | "pi-hud" | "runner-mermaid";
+
+// ---------------------------------------------------------------------------
+// Tests for canonical capability resolution (Batch C)
+// ---------------------------------------------------------------------------
+
+describe("canonical capability resolution", () => {
+  test("resolveToCanonicalCapabilityId returns canonical ID for known capabilities", () => {
+    // Test that capabilities resolve to their canonical registry IDs
+    // Only codebase-memory-mcp is exposed in Pi TUI (not codebase-memory) for OpenCode parity
+    expect(resolveToCanonicalCapabilityId("context-mode")).toBe("context-mode");
+    expect(resolveToCanonicalCapabilityId("codebase-memory-mcp")).toBe("codebase-memory-mcp");
+    expect(resolveToCanonicalCapabilityId("rtk")).toBe("rtk");
+    expect(resolveToCanonicalCapabilityId("serena")).toBe("serena");
+    expect(resolveToCanonicalCapabilityId("context7")).toBe("context7");
+  });
+
+  test("validatePiCapabilityMapping returns true for all Pi capabilities", () => {
+    // All new capabilities should have valid mappings to the registry
+    for (const capabilityId of PI_RUNNER_CAPABILITY_IDS) {
+      expect(validatePiCapabilityMapping(capabilityId)).toBe(true);
+    }
+
+    // Internal capabilities should also validate
+    expect(validatePiCapabilityMapping("runner-mermaid")).toBe(true);
+    expect(validatePiCapabilityMapping("pi-hud")).toBe(true);
+  });
+});

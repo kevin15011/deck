@@ -33,7 +33,8 @@ describe("buildPiRunnerCapabilityInventory — user-facing capabilities", () => 
     expect(inventory["context-mode"]?.installed).toBe(true);
     expect(inventory.rtk?.status).toBe("manual");
     expect(inventory.rtk?.installed).toBe(false);
-    expect(inventory["codebase-memory"]?.status).toBe("manual");
+    // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
+    expect(inventory["codebase-memory-mcp"]?.status).toBe("manual");
   });
 
   test("keeps pi-hud pending-source for Pi and omits it for OpenCode", () => {

@@ -112,6 +112,8 @@ describe("buildPiTeamLaunchPlan", () => {
       "deck-developer-verify",
       "deck-developer-review",
       "deck-developer-archive",
+      "deck-init",
+      "deck-onboard",
     ]);
   });
 

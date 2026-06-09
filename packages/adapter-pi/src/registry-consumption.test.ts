@@ -30,7 +30,10 @@ const REAL_CONTENT_AGENTS: ReadonlyArray<{
 ];
 
 describe("Adapter consumes core registry for agent content", () => {
-  for (const { id, agentTitle, skillTitle } of REAL_CONTENT_AGENTS) {
+  // Task 7.2: orchestrator uses stub content instead of full registry body
+  const AGENTS_WITH_FULL_BODY = REAL_CONTENT_AGENTS.filter((a) => a.id !== "deck-developer-orchestrator");
+
+  for (const { id, agentTitle, skillTitle } of AGENTS_WITH_FULL_BODY) {
     test(`${id}: agent body matches core registry`, () => {
       const plan = buildDeveloperTeamInstallPlan("/tmp/project");
       const agent = plan.agents.find((a) => a.agent.id === id)!;
@@ -60,17 +63,31 @@ describe("Adapter consumes core registry for agent content", () => {
     });
   }
 
-  test("all 12 agent file bodies come from core registry", () => {
+  // Task 7.2: orchestrator has stub content referencing profile system prompt
+  test("deck-developer-orchestrator: uses stub content (Task 7.2)", () => {
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project");
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
+
+    // Orchestrator stub references the profile's system prompt
+    expect(orchestrator.content).toContain("session context loaded from the team profile");
+    expect(orchestrator.content).toContain(".deck/pi/profiles/<team>/system-prompt.md");
+    expect(orchestrator.content).toContain("--system-prompt");
+    // Does NOT contain full registry body
+    expect(orchestrator.content).not.toContain("## Orchestrator Invariants");
+  });
+
+  test("all non-orchestrator agent file bodies come from core registry", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project");
 
     for (const planned of plan.agents) {
+      if (planned.agent.id === "deck-developer-orchestrator") continue; // Task 7.2: stub content
       const registry = getAgentContent(planned.agent.id);
       expect(registry).toBeDefined();
       expect(planned.content).toContain(registry!.agentBody);
     }
   });
 
-  test("all 12 skill file bodies come from core registry", () => {
+  test("all skill file bodies come from core registry", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project");
 
     for (const planned of plan.skills) {
