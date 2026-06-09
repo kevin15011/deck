@@ -22,6 +22,10 @@ export type OpenCodeRunnerCapabilityInventoryEntry = {
   source?: string;
   implementationId?: string;
   diagnostics: string[];
+  /** Commands provided by this capability (for runtime detection hints) */
+  commands?: readonly string[];
+  /** MCP servers provided by this capability (for runtime detection hints) */
+  mcpServers?: readonly string[];
 };
 
 export type OpenCodeRunnerInternalCapabilityInventoryEntry = {

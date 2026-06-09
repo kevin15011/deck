@@ -1,5 +1,6 @@
 /**
  * User-facing capability IDs for the OpenCode runner dashboard.
+ * These map to canonical capability IDs in the Core registry.
  */
 export type OpenCodeCapabilityId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "opencode-mermaid" | "serena";
 
@@ -18,8 +19,25 @@ export type OpenCodeCapabilityInstallKind =
   | "shell-script-plus-mcp" // Shell script + MCP server configuration (e.g., rtk)
   | "python-tool"; // Python tool installed via uv or pipx (e.g., serena)
 
+/** Canonical capability ID from Core registry - maps to runner-capability-registry.ts */
+export type CanonicalCapabilityId =
+  | "rtk"
+  | "context-mode"
+  | "codebase-memory"
+  | "codebase-memory-mcp"
+  | "context7"
+  | "opencode-mermaid"
+  | "pi-mermaid"
+  | "serena"
+  | "supermemory-tool-bindings"
+  | "pi-orchestrator-prompt-persistence"
+  | "opencode-primary-orchestrator"
+  | "deck-init";
+
 export type OpenCodeCapabilityToolMapping = {
   capabilityId: OpenCodeCapabilityId;
+  /** Canonical capability ID from Core registry - used for registry validation */
+  canonicalCapabilityId?: CanonicalCapabilityId;
   label: string;
   description: string;
   runnerScope: OpenCodeRunnerScope;
@@ -44,6 +62,7 @@ export type OpenCodeCapabilityToolMapping = {
 const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCapabilityToolMapping> = {
   "context-mode": {
     capabilityId: "context-mode",
+    canonicalCapabilityId: "context-mode",
     label: "context-mode",
     description: "Context-mode MCP server for context window optimization and knowledge base.",
     runnerScope: "all",
@@ -55,6 +74,7 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
   },
   "codebase-memory": {
     capabilityId: "codebase-memory",
+    canonicalCapabilityId: "codebase-memory",
     label: "codebase-memory",
     description: "Codebase memory MCP capability for code intelligence. Binary MCP server installed via shell script.",
     runnerScope: "all",
@@ -66,6 +86,7 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
   },
   rtk: {
     capabilityId: "rtk",
+    canonicalCapabilityId: "rtk",
     label: "RTK",
     description: "RTK token optimizer for CLI commands. Installs as OpenCode plugin via rtk init.",
     runnerScope: "all",
@@ -77,6 +98,7 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
   },
   serena: {
     capabilityId: "serena",
+    canonicalCapabilityId: "serena",
     label: "Serena",
     description: "Semantic code retrieval, editing and refactoring via LSP. Python tool installed via uv/pipx.",
     runnerScope: "all",
@@ -88,6 +110,7 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
   },
   context7: {
     capabilityId: "context7",
+    canonicalCapabilityId: "context7",
     label: "Context7",
     description: "Context7 MCP server for enhanced context retrieval and management.",
     runnerScope: "all",
@@ -99,6 +122,7 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
   },
   "opencode-mermaid": {
     capabilityId: "opencode-mermaid",
+    canonicalCapabilityId: "opencode-mermaid",
     label: "Mermaid",
     description: "OpenCode visual documentation capability. Renders mermaid diagrams as ASCII art.",
     runnerScope: "opencode",
@@ -141,4 +165,50 @@ export function getUserFacingOpenCodeCapability(capabilityId: OpenCodeCapability
     return entry;
   }
   return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Registry Validation
+// ---------------------------------------------------------------------------
+
+import { getCanonicalCapability, getRunnerCapabilityMapping } from "@deck/core/runner-capability-registry";
+
+/**
+ * Validates that all OpenCode catalog entries have a corresponding canonical capability mapping.
+ * Returns an array of warnings for entries that don't map to the registry.
+ */
+export function validateOpenCodeCatalogAgainstRegistry(): readonly string[] {
+  const warnings: string[] = [];
+
+  for (const [id, entry] of Object.entries(FULL_OPENCODE_CAPABILITY_CATALOG) as [OpenCodeCapabilityId, OpenCodeCapabilityToolMapping][]) {
+    const canonicalId = entry.canonicalCapabilityId;
+    if (!canonicalId) {
+      warnings.push(`OpenCode capability '${id}' has no canonicalCapabilityId defined`);
+      continue;
+    }
+
+    // Check that the canonical capability exists in the registry
+    const canonical = getCanonicalCapability(canonicalId);
+    if (!canonical) {
+      warnings.push(`OpenCode capability '${id}' maps to canonical '${canonicalId}' but that capability does not exist in registry`);
+      continue;
+    }
+
+    // Check that there's a mapping for OpenCode runner
+    const mapping = getRunnerCapabilityMapping(canonicalId, "opencode");
+    if (!mapping) {
+      warnings.push(`OpenCode capability '${id}' (canonical: ${canonicalId}) has no mapping for runner 'opencode' in registry`);
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Get the canonical capability ID for an OpenCode capability.
+ * Returns undefined if no mapping exists.
+ */
+export function getCanonicalCapabilityId(capabilityId: OpenCodeCapabilityId): CanonicalCapabilityId | undefined {
+  const entry = FULL_OPENCODE_CAPABILITY_CATALOG[capabilityId];
+  return entry?.canonicalCapabilityId;
 }

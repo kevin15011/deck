@@ -20,6 +20,7 @@ describe("buildOpenCodeInstallationPlan", () => {
         module: "rtk-ai/rtk",
         required: false,
         installKind: "shell-script-plus-mcp",
+        capabilityId: "rtk",
         shellInstallUrl: "https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh",
         postInstallCommand: ["rtk", "init", "-g", "--opencode"],
       },
@@ -29,9 +30,10 @@ describe("buildOpenCodeInstallationPlan", () => {
         module: "DeusData/codebase-memory-mcp",
         required: false,
         installKind: "shell-script",
+        capabilityId: "codebase-memory",
         shellInstallUrl: "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/main/install.sh",
       },
-      { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "mcp-server" },
+      { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "mcp-server", capabilityId: "context7" },
     ]);
   });
 

@@ -10,6 +10,8 @@ import type { OpenCodeToolsReview } from "./required-tools";
 import type { CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
 import { appendFileSync } from "node:fs";
+import { resolveRunnerParity, type ParityReport } from "@deck/core/runner-capability-parity";
+import type { ParityRuntimeHints } from "@deck/core/runner-capability-registry";
 
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
@@ -51,6 +53,8 @@ export type OpenCodeRunnerReviewPlan = {
   };
   diagnostics: OpenCodeRunnerPlanDiagnostic[];
   ready: boolean;
+  /** Parity report from Core registry - contains capability status, gaps, and silent packages */
+  parity?: ParityReport;
 };
 
 export type BuildOpenCodeRunnerReviewPlanState = {
@@ -99,11 +103,26 @@ export function buildOpenCodeRunnerReviewPlan(
     ...groups.validations,
   ].some((action) => action.status === "manual" || action.status === "pending" || action.status === "blocked" || action.kind === "pending-source");
 
+  // Build runtime hints from inventory and invoke parity resolver
+  const runtimeHints = buildRuntimeHintsFromInventory(inventory);
+  log(`buildOpenCodeRunnerReviewPlan: runtimeHints=${JSON.stringify(runtimeHints)}`);
+
+  let parity: ParityReport | undefined;
+  try {
+    parity = resolveRunnerParity("opencode", runtimeHints);
+    log(`buildOpenCodeRunnerReviewPlan: parity resolved. gaps=${parity.gaps.length}, blockers=${parity.blockers.length}, silentPackages=${parity.silentPackages.length}`);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log(`buildOpenCodeRunnerReviewPlan: parity resolution failed: ${msg}`);
+    // Non-fatal - parity is optional, continue without it
+  }
+
   log(`buildOpenCodeRunnerReviewPlan: SUCCESS. ready=${!unresolved}`);
   return {
     groups,
     diagnostics,
     ready: !unresolved,
+    parity,
   };
   } catch (error) {
     const msg = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
@@ -516,4 +535,36 @@ function getUnresolvedTeamCapabilities(inventory: OpenCodeRunnerCapabilityInvent
     const status = inventory[capabilityId]?.status;
     return status !== "ready";
   });
+}
+
+/**
+ * Build runtime hints from inventory for parity resolution.
+ * Converts OpenCode inventory status to ParityRuntimeHints format.
+ */
+function buildRuntimeHintsFromInventory(inventory: OpenCodeRunnerCapabilityInventory): ParityRuntimeHints | undefined {
+  const binaries: string[] = [];
+  const mcpServers: string[] = [];
+
+  for (const [capabilityId, entry] of Object.entries(inventory)) {
+    if (entry.status === "ready") {
+      // Add commands and MCP servers from the entry's detector
+      if (entry.commands) {
+        binaries.push(...entry.commands);
+      }
+      if (entry.mcpServers) {
+        mcpServers.push(...entry.mcpServers);
+      }
+    }
+  }
+
+  // Return undefined if no binaries are available (no point resolving parity)
+  if (binaries.length === 0 && mcpServers.length === 0) {
+    return undefined;
+  }
+
+  return {
+    binariesInPath: binaries.length > 0 ? binaries : undefined,
+    mcpServersConfigured: mcpServers.length > 0 ? mcpServers : undefined,
+    projectIndexVerified: true, // OpenCode always has verified index
+  };
 }
