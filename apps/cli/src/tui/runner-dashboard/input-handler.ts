@@ -6,7 +6,7 @@
  */
 
 import type { RunnerDashboardAction } from "./reducer";
-import { getDashboardSectionSummaries, type CapabilityResolver } from "./selectors";
+import { getDashboardSectionSummaries, getToggleableCapabilityIds, type CapabilityResolver } from "./selectors";
 import type { RunnerDashboardState } from "./state";
 
 export type RunnerDashboardContinueEffect =
@@ -39,8 +39,13 @@ export function getDashboardToggleAction(
   }
 
   if (state.screen === "packages-detail") {
-    const capabilityIds = resolver.getUserFacingIds();
-    const capabilityId = capabilityIds[state.cursor];
+    // Use toggleable capability IDs (configurable + optional) to match UI rendering
+    const toggleableIds = getToggleableCapabilityIds(state, resolver);
+    // Cursor at toggleableIds.length = "Back to dashboard" position - no toggle action
+    if (state.cursor >= toggleableIds.length) {
+      return undefined;
+    }
+    const capabilityId = toggleableIds[state.cursor];
     return capabilityId ? { type: "toggle-capability", capabilityId } : undefined;
   }
 
@@ -73,9 +78,10 @@ export function getDashboardContinueEffect(
   }
 
   if (state.screen === "packages-detail") {
-    const capabilityIds = effectiveResolver.getUserFacingIds();
-    // Last item is "back"
-    if (state.cursor === capabilityIds.length) return { type: "dispatch", action: { type: "go-dashboard" } };
+    // Use toggleable capability IDs to match UI rendering (configurable + optional + back)
+    const toggleableIds = getToggleableCapabilityIds(state, effectiveResolver);
+    // Last item is "Back to dashboard" at index toggleableIds.length
+    if (state.cursor === toggleableIds.length) return { type: "dispatch", action: { type: "go-dashboard" } };
     const action = getDashboardToggleAction(state, effectiveResolver);
     return action ? { type: "dispatch", action } : { type: "none" };
   }

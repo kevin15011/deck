@@ -24,6 +24,8 @@ export type RunnerDashboardAction =
   | { type: "cursor"; cursor: number }
   | { type: "cursor-up" }
   | { type: "cursor-down" }
+  | { type: "cursor-up-with-limit"; packageCount: number }
+  | { type: "cursor-down-with-limit"; packageCount: number }
   | { type: "toggle-capability"; capabilityId: CapabilityId }
   | { type: "set-capability"; capabilityId: CapabilityId; selected: boolean }
   | { type: "set-capability-statuses"; statuses: Partial<Record<CapabilityId, CapabilityStatus>> }
@@ -68,6 +70,10 @@ export function reduceRunnerDashboard(
       return withClampedCursor({ ...state, cursor: state.cursor - 1 });
     case "cursor-down":
       return withClampedCursor({ ...state, cursor: state.cursor + 1 });
+    case "cursor-up-with-limit":
+      return withClampedCursor({ ...state, cursor: state.cursor - 1 }, action.packageCount);
+    case "cursor-down-with-limit":
+      return withClampedCursor({ ...state, cursor: state.cursor + 1 }, action.packageCount);
     case "toggle-capability":
       return setCapability(state, action.capabilityId, !state.selectedCapabilities[action.capabilityId]);
     case "set-capability":
@@ -257,11 +263,13 @@ function invalidatePlan(state: RunnerDashboardState): RunnerDashboardState {
   };
 }
 
-function withClampedCursor(state: RunnerDashboardState): RunnerDashboardState {
-  // Use a default package count for cursor clamping (will be overridden by the UI)
-  const limit = getCursorLimit(state, 5);
+function withClampedCursor(state: RunnerDashboardState, packageCount?: number): RunnerDashboardState {
+  // Use provided packageCount if available, otherwise fall back to default
+  // For packages-detail screen, this should be the toggleable count (configurable + optional)
+  const effectivePackageCount = packageCount ?? 5;
+  const limit = getCursorLimit(state, effectivePackageCount);
   if (limit <= 0) return { ...state, cursor: 0 };
-  return { ...state, cursor: clampCursor(state.cursor, state, 5) };
+  return { ...state, cursor: clampCursor(state.cursor, state, effectivePackageCount) };
 }
 
 function createEmptySupermemorySetup(): SupermemorySetupState {

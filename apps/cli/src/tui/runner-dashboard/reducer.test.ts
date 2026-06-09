@@ -97,9 +97,9 @@ describe("Pi Runner dashboard reducer", () => {
 
   test("cursor se limita por sección", () => {
     let state = createDefaultPiRunnerDashboardState();
-    // Dashboard has 5 sections: Packages, Adaptive Memory, Teams, Configure Packages, Review & Install
+    // Dashboard has 4 sections: Packages, Adaptive Memory, Teams, Review & Install
     state = reduce(state, { type: "cursor", cursor: 99 });
-    expect(state.cursor).toBe(4);
+    expect(state.cursor).toBe(3);
 
     state = reduce(state, { type: "navigate", screen: "adaptive-memory-detail" });
     state = reduce(state, { type: "cursor", cursor: 99 });
@@ -112,18 +112,19 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.cursor).toBe(0);
   });
 
-  test("togglea RTK, context-mode, codebase-memory, serena y pi-hud", () => {
+  test("togglea RTK, context-mode, codebase-memory-mcp, serena y pi-hud", () => {
     let state = createDefaultPiRunnerDashboardState();
 
     state = reduce(state, { type: "toggle-capability", capabilityId: "rtk" });
     state = reduce(state, { type: "toggle-capability", capabilityId: "context-mode" });
-    state = reduce(state, { type: "toggle-capability", capabilityId: "codebase-memory" });
+    // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
+    state = reduce(state, { type: "toggle-capability", capabilityId: "codebase-memory-mcp" });
     state = reduce(state, { type: "toggle-capability", capabilityId: "serena" });
     state = reduce(state, { type: "toggle-capability", capabilityId: "pi-hud" });
 
     expect(state.selectedCapabilities.rtk).toBe(false);
     expect(state.selectedCapabilities["context-mode"]).toBe(false);
-    expect(state.selectedCapabilities["codebase-memory"]).toBe(false);
+    expect(state.selectedCapabilities["codebase-memory-mcp"]).toBe(false);
     expect(state.selectedCapabilities.serena).toBe(false);
     expect(state.selectedCapabilities["pi-hud"]).toBe(true);
 
@@ -212,6 +213,9 @@ describe("Pi Runner dashboard reducer", () => {
     expect(firstRevision).toBe(state.planRevision);
     expect(allActionIds(state.plan).some((id) => id.includes("supermemory"))).toBe(true);
 
+    // Toggle OFF first (context-mode is already true by default), then back ON to invalidate
+    state = reduce(state, { type: "set-capability", capabilityId: "context-mode", selected: false });
+    expect(state.plan).toBeUndefined();
     state = reduce(state, { type: "set-capability", capabilityId: "context-mode", selected: true });
     expect(state.plan).toBeUndefined();
     expect(state.planGeneratedForRevision).toBeUndefined();

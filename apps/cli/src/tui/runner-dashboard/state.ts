@@ -210,9 +210,10 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   runnerScope: "pi",
   selectedCapabilities: {
     "context-mode": true,
-    "codebase-memory": true,
+    "codebase-memory-mcp": true,
     rtk: true,
     serena: true,
+    context7: true,
   },
   capabilityStatuses: {},
   adaptiveMemory: {

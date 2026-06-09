@@ -11,6 +11,7 @@ import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@dec
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "@deck/core";
+import { CODEBASE_MEMORY_MCP_SERVER_NAME } from "@deck/adapter-pi";
 
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
@@ -165,9 +166,11 @@ export async function runRunnerReviewPlan(
   }
 
   // Security boundary: visible config writes happen after installs
+  log(`runRunnerReviewPlan: processing ${plan.groups.configWrites.length} configWrites`);
   for (const action of plan.groups.configWrites) {
-    // Gate write-mcp-config actions by prior failed installs
-    if (action.kind === "write-mcp-config") {
+    // Gate write-mcp-config and write-pi-mcp-config actions by prior failed installs
+    if (action.kind === "write-mcp-config" || action.kind === "write-pi-mcp-config") {
+      log(`runRunnerReviewPlan: configWrite action ${action.id} kind=${action.kind} capabilityId=${action.capabilityId}`);
       const capabilityPrefix = action.id.replace(".mcp-config", "");
       
       // Check if the prerequisite install failed
@@ -187,10 +190,10 @@ export async function runRunnerReviewPlan(
       // For binary-requiring capabilities, verify executable exists on PATH
       const capabilityId = action.capabilityId as string | undefined;
       if (capabilityId && capabilityId !== "context7") {
-        // Serena, rtk, codebase-memory, context-mode require local binaries
+        // Serena, rtk, codebase-memory-mcp, context-mode require local binaries
         const executableName = capabilityId === "serena" ? "serena" 
           : capabilityId === "rtk" ? "rtk"
-          : capabilityId === "codebase-memory" ? "codebase-memory-mcp"
+          : capabilityId === "codebase-memory-mcp" ? "codebase-memory-mcp"
           : capabilityId === "context-mode" ? "context-mode"
           : null;
         
@@ -499,7 +502,19 @@ async function writeMcpConfigAction(
   action: RunnerAction,
   dependencies: RunnerActionRunnerDependencies,
 ): Promise<RunnerActionRunResult> {
-  const writer = dependencies.writeMcpConfig;
+  // Support both generic writeMcpConfig and Pi-specific writeSupermemoryPiMcpConfig (backward compat)
+  let writer = dependencies.writeMcpConfig;
+  if (!writer && dependencies.writeSupermemoryPiMcpConfig) {
+    // Adapt Pi-specific writer to generic interface for write-pi-mcp-config actions
+    writer = async (options) => {
+      // For supermemory (token-based), use the Pi-specific writer directly
+      if (options.token) {
+        return dependencies.writeSupermemoryPiMcpConfig!({ token: options.token, serverName: "supermemory" });
+      }
+      // For local MCP servers, call with the server config
+      return dependencies.writeSupermemoryPiMcpConfig!(options);
+    };
+  }
   if (!writer) {
     return skippedResult(action, "MCP config writer not provided; requires adapter-specific implementation.");
   }
@@ -599,10 +614,10 @@ async function writeMcpConfigAction(
     };
   }
 
-  if (capabilityId === "codebase-memory") {
-    // codebase-memory is a local MCP server
+  if (capabilityId === "codebase-memory" || capabilityId === "codebase-memory-mcp") {
+    // codebase-memory-mcp is a local MCP server. Uses canonical serverName from adapter-pi.
     const result = await writer({
-      serverName: "codebase-memory-mcp",
+      serverName: CODEBASE_MEMORY_MCP_SERVER_NAME,
       type: "local",
       command: ["codebase-memory-mcp"],
     });

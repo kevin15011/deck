@@ -62,6 +62,8 @@ import {
   buildPiRunnerCapabilityInventory,
   listModelsForProvider,
   buildModelInventoryFromPiListModels,
+  installInternalRunnerPackages,
+  mergeSettingsPackages,
 } from "@deck/adapter-pi";
 import {
   OPENCODE_THINKING_LEVELS,
@@ -113,6 +115,7 @@ import {
   type RunnerDashboardContinueEffect,
 } from "./runner-dashboard/input-handler";
 import { reduceRunnerDashboard } from "./runner-dashboard/reducer";
+import { getToggleableCapabilityIds } from "./runner-dashboard/selectors";
 import { createDefaultRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type RunnerDashboardState } from "./runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 import { getAdapter } from "../runner-adapters";
@@ -510,6 +513,13 @@ export function DeckApp() {
     },
   }), [dashboardState.runnerScope]);
 
+  // Compute toggleable capability count for cursor clamping (configurable + optional only)
+  const dashboardToggleableCount = useMemo(() => {
+    if (dashboardState.screen !== "packages-detail") return 5; // default
+    const toggleableIds = getToggleableCapabilityIds(dashboardState, dashboardCapabilityResolver);
+    return toggleableIds.length;
+  }, [dashboardState.screen, dashboardState.runnerScope]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Runtime-agnostic plan builder — dispatches to the correct adapter based on runnerScope
   const dashboardPlanBuilder = useMemo(() => {
     return (state: RunnerDashboardState, inventory: unknown) => {
@@ -764,16 +774,110 @@ export function DeckApp() {
       // Use stored project root, not the function
       const projectRoot = localResolvedProjectRoot ?? process.cwd();
       const environmentId = adapter.environmentIds[0];
+      // Log the plan action counts before execution
+      const planGroups = dashboardState.plan?.groups;
+      log(`runDashboardInstall: PLAN counts - automaticInstalls=${planGroups?.automaticInstalls?.length ?? 0}, manualSteps=${planGroups?.manualSteps?.length ?? 0}, configWrites=${planGroups?.configWrites?.length ?? 0}, teamApplications=${planGroups?.teamApplications?.length ?? 0}, validations=${planGroups?.validations?.length ?? 0}`);
+      
       log(`runDashboardInstall: calling runRunnerReviewPlan`);
+      const executionStart = Date.now();
       const results = await runRunnerReviewPlan(dashboardState.plan!, {
         projectRoot: projectRoot,
         runnerCommand: dashboardState.runtime.runnerCommand,
+        piCommand: "pi",
+        installInternalRunnerPackages: async (piCmd, installActions, onResult) => {
+          log(`installInternalRunnerPackages (Pi): installing \${installActions.map((a: any) => a.packageId).join(", ")}`);
+          const results = await installInternalRunnerPackages(piCmd ?? "pi", installActions as any, (r) => { onResult(r); });
+          
+          // After install, merge settings to replace stale packages
+          const homeDir = process.env.HOME ?? "";
+          const settingsPath = `${homeDir}/.pi/agent/settings.json`;
+          try {
+            if (require("node:fs").existsSync(settingsPath)) {
+              const settings = JSON.parse(require("node:fs").readFileSync(settingsPath, "utf-8"));
+              const mergeResult = mergeSettingsPackages({
+                settingsPath,
+                existingPackages: settings.packages || [],
+                readFile: (p) => require("node:fs").readFileSync(p, "utf-8"),
+                writeFile: (p, c) => require("node:fs").writeFileSync(p, c),
+              });
+              log(`mergeSettingsPackages: ${mergeResult.diagnostics.join(", ")}`);
+            }
+          } catch (err) {
+            log(`mergeSettingsPackages error: ${(err as Error).message}`);
+          }
+          
+          return results;
+        },
         dashboardState,
         supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
         memoryProvider: resolvedMemoryProvider,
         resolvedMemoryProvider,
-        writeMcpConfig: adapter.writeMcpConfig?.bind(adapter),
+        writeMcpConfig: async (options) => {
+          // For Pi runner, use the adapter's runAction for write-pi-mcp-config to write ALL MCP configs
+          if (dashboardState.runnerScope === "pi" && (options.serverName === "context-mode" || options.serverName === "codebase-memory-mcp" || options.serverName === "serena" || options.serverName === "context7" || options.serverName === "codebase-memory")) {
+            const action = {
+              id: `capability.${options.serverName}.mcp-config`,
+              kind: "write-pi-mcp-config" as const,
+              title: `Configure ${options.serverName} MCP`,
+              capabilityId: options.serverName,
+            };
+            // Convert to RunnerAction format expected by adapter
+            const piAction: import("@deck/core").RunnerAction = {
+              id: action.id,
+              kind: action.kind,
+              title: action.title,
+              capabilityId: action.capabilityId,
+            };
+            const actionResult = await adapter.runAction(piAction as any, { runnerCommand: "pi" } as any);
+            return {
+              ok: actionResult.status === "executed",
+              path: `${process.env.HOME ?? "/home/kevinlb"}/.pi/agent/mcp.json`,
+              diagnostics: actionResult.diagnostics,
+            };
+          }
+          // Fall back to default behavior for OpenCode or supermemory
+          return adapter.writeMcpConfig?.(options) ?? { ok: false, path: "", diagnostics: ["No MCP config writer available"] };
+        },
         installPackages: async (runnerCommand, packages, onResult) => {
+          // For Pi runner, delegate to adapter's runAction instead of using OpenCode catalog
+          if (dashboardState.runnerScope === "pi") {
+            log(`installPackages (Pi): delegating to adapter.runAction for ${packages.map(p => p.id).join(", ")}`);
+            const results: Array<{ success: boolean; message?: string }> = [];
+            
+            for (const pkg of packages) {
+              const action: import("@deck/core").RunnerAction = {
+                id: `capability.${pkg.id}.install`,
+                kind: "install-pi-package" as const,
+                title: `Install ${pkg.name}`,
+                capabilityId: pkg.id,
+                toolId: pkg.id,
+                source: pkg.source,
+              };
+              
+              try {
+                const actionResult = await adapter.runAction(action as any, { runnerCommand: "pi" } as any);
+                const success = actionResult.status === "executed";
+                results.push({
+                  success,
+                  message: actionResult.message || (success ? `Installed ${pkg.id}` : `Failed to install ${pkg.id}`),
+                });
+                onResult({ success, message: actionResult.message });
+              } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                log(`installPackages (Pi): error for ${pkg.id}: ${errorMsg}`);
+                results.push({
+                  success: false,
+                  message: errorMsg,
+                });
+                onResult({ success: false, message: errorMsg });
+              }
+            }
+            
+            log(`installPackages (Pi): results=${results.map(r => `${r.success ? "ok" : "fail"}`).join(",")}`);
+            return results;
+          }
+          
+          // For OpenCode runner, use the existing OpenCode catalog
           log(`installPackages (OpenCode): installing ${packages.map(p => `${p.id}(${p.source})`).join(", ")}`);
           // Use package.id as the catalog lookup key (not name/source)
           const selectedToolIds = packages.map(p => p.id).filter(Boolean);
@@ -873,7 +977,40 @@ export function DeckApp() {
         },
       });
 
-      log(`runDashboardInstall: runRunnerReviewPlan DONE. results=${results.length} cancelled=${cancelled}`);
+      log(`runDashboardInstall: runRunnerReviewPlan DONE. results=${results.length} cancelled=${cancelled} duration=${Date.now() - executionStart}ms`);
+      
+      // Log detailed action result counters
+      const statusCounts = { executed: 0, failed: 0, skipped: 0, informational: 0 };
+      const configWriteResults: string[] = [];
+      for (const r of results) {
+        statusCounts[r.status] = (statusCounts[r.status] ?? 0) + 1;
+        if (r.actionId.includes("mcp-config") || r.actionId.includes("pi-mcp-config")) {
+          configWriteResults.push(`${r.actionId}:${r.status}`);
+        }
+      }
+      log(`runDashboardInstall: RESULT counters - executed=${statusCounts.executed}, failed=${statusCounts.failed}, skipped=${statusCounts.skipped}, informational=${statusCounts.informational}`);
+      if (configWriteResults.length > 0) {
+        log(`runDashboardInstall: configWrites - ${configWriteResults.join(", ")}`);
+      }
+      
+      // After execution, verify and log MCP config state
+      const homeDir = process.env.HOME ?? "";
+      const mcpConfigPath = `${homeDir}/.pi/agent/mcp.json`;
+      const settingsPath = `${homeDir}/.pi/agent/settings.json`;
+      try {
+        if (require("node:fs").existsSync(mcpConfigPath)) {
+          const mcpConfig = JSON.parse(require("node:fs").readFileSync(mcpConfigPath, "utf-8"));
+          const mcpServers = Object.keys(mcpConfig.mcpServers ?? {}).sort().join(", ");
+          log(`runDashboardInstall: mcp.json servers after install: ${mcpServers || "(empty)"}`);
+        }
+        if (require("node:fs").existsSync(settingsPath)) {
+          const settings = JSON.parse(require("node:fs").readFileSync(settingsPath, "utf-8"));
+          const packages = (settings.packages ?? []).filter((p: string) => p.includes("context7")).join(", ");
+          log(`runDashboardInstall: settings.json context7 packages: ${packages || "(none)"}`);
+        }
+      } catch (e) {
+        log(`runDashboardInstall: post-install verification error: ${(e as Error).message}`);
+      }
 
       if (!cancelled) {
         setDashboardActionResults(results);
@@ -1505,18 +1642,18 @@ export function DeckApp() {
         // Finish button
         if (modelConfigSource === "install") {
           // Persist model assignments before moving to next step
-          applyDeveloperTeamModelConfig();
+          await applyDeveloperTeamModelConfig();
           resetCursor("memory-provider-selection");
         } else if (modelConfigSource === "dashboard") {
           // For OpenCode and Pi, the dashboard plan builder has no team-application actions,
           // so persist model changes to disk immediately on Finish.
           if (modelConfigRuntime === "opencode" || modelConfigRuntime === "pi") {
-            applyDeveloperTeamModelConfig();
+            await applyDeveloperTeamModelConfig();
           }
           syncDashboardDeveloperTeamModelConfig();
           resetCursor("pi-runner-dashboard");
         } else {
-          applyDeveloperTeamModelConfig();
+          await applyDeveloperTeamModelConfig();
           resetCursor("complete");
         }
       } else {
@@ -1722,11 +1859,21 @@ export function DeckApp() {
       return;
     }
     if (key.upArrow || input === "k") {
-      setDashboardState((current) => reduceRunnerDashboard(current, { type: "cursor-up" }, dashboardPlanBuilder));
+      // Use with-limit variant to support dynamic package counts for packages-detail screen
+      if (dashboardState.screen === "packages-detail") {
+        setDashboardState((current) => reduceRunnerDashboard(current, { type: "cursor-up-with-limit", packageCount: dashboardToggleableCount }, dashboardPlanBuilder));
+      } else {
+        setDashboardState((current) => reduceRunnerDashboard(current, { type: "cursor-up" }, dashboardPlanBuilder));
+      }
       return;
     }
     if (key.downArrow || input === "j") {
-      setDashboardState((current) => reduceRunnerDashboard(current, { type: "cursor-down" }, dashboardPlanBuilder));
+      // Use with-limit variant to support dynamic package counts for packages-detail screen
+      if (dashboardState.screen === "packages-detail") {
+        setDashboardState((current) => reduceRunnerDashboard(current, { type: "cursor-down-with-limit", packageCount: dashboardToggleableCount }, dashboardPlanBuilder));
+      } else {
+        setDashboardState((current) => reduceRunnerDashboard(current, { type: "cursor-down" }, dashboardPlanBuilder));
+      }
       return;
     }
     if (input === " ") {
@@ -2434,7 +2581,7 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",
     "personality-selection": "Choose orchestrator personality",
-    "pi-runner-dashboard": `OpenCode Runner capability dashboard`,
+    "pi-runner-dashboard": `Pi Runner Setup Dashboard`,
     "pi-preflight-checking": "Checking Pi environment",
     "pi-preflight": "Pi Environment Preflight",
     "required-tools": "Review required tools",

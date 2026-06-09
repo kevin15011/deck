@@ -219,6 +219,17 @@ export function getRunnerCapabilitySummaries(state: RunnerDashboardState, resolv
   );
 }
 
+/**
+ * Returns only toggleable capability IDs (configurable + optional requirement levels).
+ * This matches what the UI renders in PackagesDetail.
+ */
+export function getToggleableCapabilityIds(state: RunnerDashboardState, resolver?: CapabilityResolver): CapabilityId[] {
+  const summaries = getRunnerCapabilitySummaries(state, resolver);
+  return summaries
+    .filter((s) => s.requirementLevel === "configurable" || s.requirementLevel === "optional")
+    .map((s) => s.capabilityId);
+}
+
 export function getAdaptiveMemorySummary(state: RunnerDashboardState): AdaptiveMemorySummary {
   const provider = state.adaptiveMemory.provider;
   const configured = provider !== "supermemory" || Boolean(state.adaptiveMemory.supermemory?.configured);
