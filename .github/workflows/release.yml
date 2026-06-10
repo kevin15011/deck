@@ -161,6 +161,11 @@ jobs:
           VERSION: ${{ needs.metadata.outputs.version }}
           REPO: ${{ github.repository }}
         run: |
+          bun run scripts/generate-build-info.ts \
+            --version "${VERSION#v}" \
+            --commit "$GITHUB_SHA" \
+            --target linux-x64 \
+            --channel stable
           ASSET_BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
           bun run scripts/prepare-release.ts \
             --non-interactive \
@@ -230,6 +235,11 @@ jobs:
           VERSION: ${{ needs.metadata.outputs.version }}
           REPO: ${{ github.repository }}
         run: |
+          bun run scripts/generate-build-info.ts \
+            --version "${VERSION}" \
+            --commit "$GITHUB_SHA" \
+            --target linux-x64 \
+            --channel dev
           ASSET_BASE_URL="https://github.com/${REPO}/releases/download/build-${VERSION}"
           bun run scripts/prepare-release.ts \
             --non-interactive \
