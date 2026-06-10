@@ -75,6 +75,13 @@ describe("Pi Runner dashboard render", () => {
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
     expect(output).toContain("Pi Runner Setup Dashboard");
+  });
+
+  test("OpenCode runner muestra OpenCode Runner Setup Dashboard", () => {
+    const state = createDefaultPiRunnerDashboardState({ plan, runnerScope: "opencode" });
+    const output = renderToString(<PiRunnerDashboardScreens state={state} />);
+
+    expect(output).toContain("OpenCode Runner Setup Dashboard");
     expect(output).toContain("Packages");
     expect(output).toContain("Adaptive Memory");
     expect(output).toContain("Teams");

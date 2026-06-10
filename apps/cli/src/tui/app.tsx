@@ -2581,7 +2581,7 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",
     "personality-selection": "Choose orchestrator personality",
-    "pi-runner-dashboard": `Pi Runner Setup Dashboard`,
+    "pi-runner-dashboard": runnerScope === "opencode" ? "OpenCode Runner Setup Dashboard" : "Pi Runner Setup Dashboard",
     "pi-preflight-checking": "Checking Pi environment",
     "pi-preflight": "Pi Environment Preflight",
     "required-tools": "Review required tools",
