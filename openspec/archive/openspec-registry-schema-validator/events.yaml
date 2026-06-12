@@ -1,0 +1,170 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-explorer
+    notes:
+      - "Identified 10+ dialects in state.yaml across changes/ and archive/"
+      - "Found ~43% of active changes lack events.yaml"
+      - "Found artifact alignment gaps in consolidate-documentation-and-adrs"
+      - "Found YAML malformed in supermemory-mcp-integration/state.yaml"
+      - "Recommended canonical schema v1 + triple implementation (core lib + CLI + tests)"
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-proposal
+    notes:
+      - "Formalized scope for spec-registry-v1 and spec-registry-events-v1"
+      - "Confirmed read-only validator in packages/core, CLI command, contract tests, and registry schema docs as in-scope"
+      - "Deferred retroactive normalization, automatic migration, workflow changes, deck doctor integration, auto-reconciliation, CI gate, and exploration lifecycle states"
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-spec
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Registry-deferred Spec completed with 32 requirements and agent-first CLI JSON semantics"
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-design
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Registry-deferred Design completed with core API, CLI JSON contract, parser strategy, tests, and docs plan"
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    notes:
+      - "Created 13 atomic tasks: Shared/Contracts (4), Backend (2), CLI (5), Docs (1), Package (1)"
+      - "Core validator (Task 5) flagged as High complexity"
+      - "CLI canonical-strict mode deferred per user decision"
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Batch 1 Shared/Contracts completed: Tasks 1,2,3,4,7,8,12,13"
+      - "Created schema.ts (canonical constants), yaml.ts (parser adapter), types.ts (validator DTOs)"
+      - "Updated barrel export, CLI parser, CLI parser tests"
+      - "Created openspec/registry-schema.md full documentation"
+      - "Added yaml npm dependency"
+      - "Blocked: Tasks 5,6,9,10,11 (Backend Apply)"
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "Batch 2 Backend completed: Tasks 5,6,9,10,11"
+      - "Created validator.ts (core validateOpenSpecRegistry function)"
+      - "Created validator.test.ts (11 tests, all passing)"
+      - "Created openspec-validate-command.ts (CLI adapter)"
+      - "Created openspec-validate-command.test.ts (7 tests, all passing)"
+      - "Added spec-registry export to core package.json"
+      - "Routed openspec-validate in main.tsx"
+      - "All 64 tests pass (validator + CLI + parser)"
+  - phase: apply
+    status: completed
+    event: apply.fix_completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "Fix batch completed: corrected 5 MAJOR findings from Review APPROVE WITH WARNINGS"
+      - "MAJOR-1: Fixed duplicate key detection — moved seen Set inside per-MAP scope"
+      - "MAJOR-2: Fixed dead code in provenance legacy_shape check — restructured logic"
+      - "MAJOR-3: Aligned summary JSON to spec REQ-val-012 field names"
+      - "MAJOR-4: Renamed issue field code -> rule per spec REQ-val-005"
+      - "MAJOR-5: Added type safety — ValidationRuleCode used in DTO, missing codes declared"
+      - "All tests updated and passing (64 total)"
+  - phase: apply
+    status: completed
+    event: apply.fix_completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "Fix batch MAJOR-6 completed: Typecheck now passes"
+      - "Added yaml.parse_error, yaml.parse_warning, yaml.duplicate_key to ValidationRuleCode union and VALIDATION_RULE_CODES array"
+      - "TypeScript compiles without errors for spec-registry files"
+      - "All tests passing (64 total)"
+  - phase: apply
+    status: completed
+    event: apply.fix_completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "Fix batch CLI summary field names completed"
+      - "Fixed remaining old field names in CLI error fallbacks: checkedChanges->totalChanges, errors->totalErrors, warnings->totalWarnings"
+      - "Fixed human output render to use new field names"
+      - "All JSON output now spec-aligned per REQ-val-012"
+      - "CLI tests pass (7/7)"
+  - phase: apply
+    status: completed
+    event: apply.fix_completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "Fix MINOR-1 pre-archive completed"
+      - "Changed fallback error code->rule for consistency with spec (2 places)"
+      - "apps/cli/src/openspec-validate-command.ts lines 70, 170: runtime.error fallbacks now use rule field"
+      - "CLI tests pass (7/7)"
+  - phase: verify
+    status: passed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-verify
+    registry_write: deferred
+    notes:
+      - "Verify completed with PASS"
+      - "All 13 tasks complete, 119 tests passing"
+      - "All 6 MAJOR findings verified fixed"
+      - "Pre-existing typecheck warning in pi-launch-command.ts (unrelated)"
+  - phase: review
+    status: approved
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-review
+    registry_write: non-deferred
+    notes:
+      - "Review rating: APPROVE WITH WARNINGS"
+      - "All 6 MAJOR findings verified fixed during Apply"
+      - "MINOR-1 fixed pre-archive (code->rule in CLI error fallbacks)"
+      - "MINOR-2 items carried as documented deferrals (design rules, severity differentiation, mode option)"
+  - phase: archive
+    status: archived
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-archive
+    registry_write: non-deferred
+    notes:
+      - "Change archived successfully"
+      - "Traceability matrix: 38 requirements, 13 tasks, all verified"
+      - "Follow-ups: deck doctor integration, auto-reconciliation, CI gate, extended exploration lifecycle"

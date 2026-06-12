@@ -1,0 +1,88 @@
+schema: spec-registry-v1
+changeId: openspec-registry-schema-validator
+name: Registry schema canonical + validator read-only
+currentPhase: archive
+status: archived
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+  archive_report: archive-report.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Exploration of schema drift, dialects, and artifact alignment issues across changes/ and archive/"
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.5
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Created formal Spanish proposal for canonical registry schema and read-only validator"
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: deferred-reconciled
+    note: "Created formal requirements for agent-first OpenSpec registry validator"
+  - phase: design
+    agent: deck-developer-design
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: deferred-reconciled
+    note: "Created technical design for core validator API and agent-facing CLI JSON contract"
+  - phase: tasks
+    agent: deck-developer-task
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Created 13 atomic tasks: Shared/Contracts (4), Backend (2), CLI (5), Docs (1), Package (1)"
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Batch 1: Shared/Contracts complete (Tasks 1,2,3,4,7,8,12,13). Backend pending."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Batch 2: Backend complete (Tasks 5,6,9,10,11). Core validator, tests, CLI adapter all working."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Fix batch: corrected 5 MAJOR findings from Review. Fixed duplicate key global Set, dead code in provenance check, aligned summary to spec REQ-val-012, renamed code->rule, added type safety for ValidationRuleCode."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Fix batch MAJOR-6: Added yaml.parse_error, yaml.parse_warning, yaml.duplicate_key to ValidationRuleCode union and runtime array. Typecheck now passes."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Fix batch CLI summary: Fixed remaining old field names in error fallbacks (checkedChanges->totalChanges, errors->totalErrors, warnings->totalWarnings). All JSON output spec-aligned per REQ-val-012."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Fix MINOR-1 pre-archive: Changed fallback error code->rule for consistency with spec (2 places in openspec-validate-command.ts)."
+  - phase: archive
+    agent: deck-developer-archive
+    model: alibaba-coding-plan/MiniMax-M2.5
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Archived change with full traceability report. Verify: PASS, Review: APPROVE WITH WARNINGS (all MAJOR findings corrected during Apply, MINOR-1 fixed pre-archive)."

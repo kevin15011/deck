@@ -299,4 +299,96 @@ describe("parseArgs", () => {
       message: expect.stringContaining("rollback"),
     });
   });
+
+  // -------------------------------------------------------------------------
+  // deck openspec validate tests
+  // -------------------------------------------------------------------------
+
+  test("parses 'deck openspec validate' as openspec-validate command", () => {
+    const result = parseArgs(["openspec", "validate"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "openspec-validate",
+      flags: {},
+    });
+  });
+
+  test("parses 'deck openspec validate --json' with json flag", () => {
+    const result = parseArgs(["openspec", "validate", "--json"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "openspec-validate",
+      flags: { json: true },
+    });
+  });
+
+  test("parses 'deck openspec validate --json --change <id>' with change flag", () => {
+    const result = parseArgs(["openspec", "validate", "--json", "--change", "my-change"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "openspec-validate",
+      flags: { json: true, changeId: "my-change" },
+    });
+  });
+
+  test("parses 'deck openspec validate --change=<id>' (= syntax)", () => {
+    const result = parseArgs(["openspec", "validate", "--change=my-change"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "openspec-validate",
+      flags: { changeId: "my-change" },
+    });
+  });
+
+  test("parses 'deck openspec validate --json --change <id> --root <path>' with all flags", () => {
+    const result = parseArgs(["openspec", "validate", "--json", "--change", "my-change", "--root", "/path/to/project"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "openspec-validate",
+      flags: { json: true, changeId: "my-change", root: "/path/to/project" },
+    });
+  });
+
+  test("parses 'deck openspec validate --root=<path>' (= syntax)", () => {
+    const result = parseArgs(["openspec", "validate", "--root=/path/to/project"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "openspec-validate",
+      flags: { root: "/path/to/project" },
+    });
+  });
+
+  test("returns error for 'deck openspec validate --change' without value", () => {
+    const result = parseArgs(["openspec", "validate", "--change"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("--change requires a value"),
+    });
+  });
+
+  test("returns error for 'deck openspec validate --root' without value", () => {
+    const result = parseArgs(["openspec", "validate", "--root"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("--root requires a value"),
+    });
+  });
+
+  test("returns error for unknown flag on 'deck openspec validate'", () => {
+    const result = parseArgs(["openspec", "validate", "--bogus"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("openspec validate"),
+    });
+  });
+
+  test("returns error for 'deck openspec' without validate subcommand", () => {
+    const result = parseArgs(["openspec"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("Usage"),
+    });
+  });
+
+  test("returns error for 'deck openspec unknown' subcommand", () => {
+    const result = parseArgs(["openspec", "unknown"]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("Usage"),
+    });
+  });
 });

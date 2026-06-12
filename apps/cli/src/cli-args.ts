@@ -34,6 +34,17 @@ export type ParsedArgs =
       };
     }
   | {
+      command: "openspec-validate";
+      flags: {
+        /** Output JSON instead of human-readable text. */
+        json?: boolean;
+        /** Validate only this specific change id. */
+        changeId?: string;
+        /** Project root directory. */
+        root?: string;
+      };
+    }
+  | {
       command: "pi-launch";
       teamId: string;
       flags: {
@@ -165,6 +176,67 @@ export function parseArgs(argv: string[]): ParsedArgs {
       flags: {
         ...(force ? { force: true } : {}),
         ...(backupId ? { backupId } : {}),
+      },
+    };
+  }
+
+  if (first === "openspec") {
+    // `deck openspec validate` command
+    if (rest.length === 0 || rest[0] !== "validate") {
+      return {
+        command: "error",
+        message: "Usage: deck openspec validate [--json] [--change <id>] [--root <path>]",
+      };
+    }
+
+    // Parse subcommand and flags
+    const flags = rest.slice(1);
+    let jsonMode = false;
+    let changeId: string | undefined;
+    let rootDir: string | undefined;
+
+    for (let i = 0; i < flags.length; i += 1) {
+      const flag = flags[i]!;
+      if (flag === "--json") {
+        jsonMode = true;
+      } else if (flag === "--change") {
+        const value = flags[i + 1];
+        if (value === undefined || value.startsWith("--")) {
+          return {
+            command: "error",
+            message: `Flag --change requires a value.`,
+          };
+        }
+        changeId = value;
+        i += 1;
+      } else if (flag.startsWith("--change=")) {
+        changeId = flag.slice("--change=".length);
+      } else if (flag === "--root") {
+        const value = flags[i + 1];
+        if (value === undefined || value.startsWith("--")) {
+          return {
+            command: "error",
+            message: `Flag --root requires a value.`,
+          };
+        }
+        rootDir = value;
+        i += 1;
+      } else if (flag.startsWith("--root=")) {
+        rootDir = flag.slice("--root=".length);
+      } else {
+        return {
+          command: "error",
+          message: `Flag desconocido para openspec validate: ${flag}. Usa --help para ver el uso.`,
+        };
+      }
+    }
+
+    return {
+      command: "openspec-validate",
+      flags: {
+        ...(jsonMode ? { json: true } : {}),
+        ...(changeId ? { changeId } : {}),
+        ...(rootDir ? { root: rootDir } : {}),
       },
     };
   }

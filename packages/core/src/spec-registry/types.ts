@@ -12,6 +12,8 @@
  *   are designed neutrally to support future adapters.
  */
 
+import type { ValidationRuleCode } from "./schema";
+
 // ---------------------------------------------------------------------------
 // Change lifecycle
 // ---------------------------------------------------------------------------
@@ -190,3 +192,98 @@ export const VALID_EVENT_TYPES: readonly SpecRegistryEventType[] = [
   "sync.completed",
   "sync.failed",
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Validator DTOs (added by openspec-registry-schema-validator)
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for validating the OpenSpec registry.
+ */
+export type ValidateOpenSpecRegistryOptions = {
+  /** Project root containing openspec/. */
+  rootDir: string;
+  /** Validate one change id; searches changes/ first, archive/ second. */
+  changeId?: string;
+  /** Defaults to true when changeId is absent. */
+  includeArchive?: boolean;
+  /** Defaults to true. */
+  includeChanges?: boolean;
+  /** Validation mode: legacy-tolerant or canonical-strict. */
+  mode?: "legacy-tolerant" | "canonical-strict";
+};
+
+/**
+ * Severity level for validation issues.
+ */
+export type ValidationSeverity = "error" | "warning";
+
+/**
+ * Issue reported by the validator.
+ * Follows spec REQ-val-005: field is `rule` (rule identifier).
+ */
+export type OpenSpecRegistryValidationIssue = {
+  severity: ValidationSeverity;
+  /** Rule identifier (spec REQ-val-005: field is `rule`) */
+  rule: ValidationRuleCode;
+  message: string;
+  path: string;
+  changeId?: string;
+  file?: "state.yaml" | "events.yaml" | "artifact";
+  field?: string;
+  details?: Record<string, unknown>;
+};
+
+/**
+ * Validation result for a single change.
+ */
+export type OpenSpecRegistryChangeValidation = {
+  changeId: string;
+  location: "changes" | "archive";
+  path: string;
+  statePath: string;
+  eventsPath?: string;
+  detectedSchema?: string;
+  detectedEventsSchema?: string;
+  currentPhase?: string;
+  status?: string;
+  issueCounts: {
+    errors: number;
+    warnings: number;
+  };
+};
+
+/**
+ * Summary counts from validation.
+ * Follows spec REQ-val-012 field names.
+ */
+export type OpenSpecRegistryValidationSummary = {
+  /** Total changes checked (canonical + legacy) */
+  totalChanges: number;
+  /** Active changes in changes/ */
+  totalActiveChanges: number;
+  /** Archived changes in archive/ */
+  totalArchivedChanges: number;
+  /** Changes with at least one error */
+  changesWithErrors: number;
+  /** Changes with at least one warning but no errors */
+  changesWithWarnings: number;
+  /** Total errors across all changes */
+  totalErrors: number;
+  /** Total warnings across all changes */
+  totalWarnings: number;
+  /** Valid changes (no errors) */
+  validChanges: number;
+};
+
+/**
+ * Complete validation result for the registry.
+ */
+export type OpenSpecRegistryValidationResult = {
+  schema: "openspec-registry-validation-result-v1";
+  ok: boolean;
+  rootDir: string;
+  summary: OpenSpecRegistryValidationSummary;
+  issues: OpenSpecRegistryValidationIssue[];
+  changes: OpenSpecRegistryChangeValidation[];
+};

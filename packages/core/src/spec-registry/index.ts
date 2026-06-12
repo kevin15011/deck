@@ -9,3 +9,6 @@
 export * from "./types";
 export * from "./paths";
 export * from "./events";
+export * from "./schema";
+export * from "./yaml";
+export * from "./validator";

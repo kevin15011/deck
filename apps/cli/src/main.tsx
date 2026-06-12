@@ -104,6 +104,27 @@ if (parsed.command === "rollback") {
   }
 }
 
+if (parsed.command === "openspec-validate") {
+  try {
+    const { runOpenspecValidate } = await import("./openspec-validate-command");
+    const result = await runOpenspecValidate(parsed);
+
+    // Output based on mode
+    if (parsed.flags.json && result.json) {
+      console.log(JSON.stringify(result.json, null, 2));
+    } else if (result.human) {
+      console.log(result.human);
+    } else if (result.error) {
+      console.error(result.error);
+    }
+
+    process.exit(result.exitCode);
+  } catch (err) {
+    console.error("deck openspec validate failed:", err instanceof Error ? err.message : String(err));
+    process.exit(2);
+  }
+}
+
 if (parsed.command === "pi-launch") {
   const projectRoot = resolveProjectRoot() ?? process.cwd();
   const result = await runPiLaunch({
