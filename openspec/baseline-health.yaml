@@ -2,6 +2,7 @@
 # Minimal fingerprint record for known failures and quality gates
 # Used by Verify to distinguish known failures from new regressions
 # Regenerated: 2026-06-12 via Apply Batch 3 (ledger-only fix)
+# Updated: 2026-06-12 via General Apply (ledger classification fix - 6 new files)
 
 schema: baseline-health/v1
 updated: "2026-06-12"
@@ -221,7 +222,7 @@ repo_wide_commands:
     expected:
       status: known-failures
       error_count: 108
-      error_files:
+      error_files: 23
         - path: apps/cli/src/tui/app.tsx
           error_count: 44
           classification: pre-existing
@@ -350,8 +351,52 @@ repo_wide_commands:
           error_codes:
             - TS2322
           notes: "Pre-existing type error in required-tools.ts (1 error)."
+
+        - path: packages/adapter-supermemory/src/index.test.ts
+          error_count: 7
+          classification: pre-existing
+          error_codes:
+            - TS2352
+            - TS2532
+            - TS2741
+          notes: "Pre-existing test type errors in adapter-supermemory/src/index.test.ts (7 errors)."
+
+        - path: packages/adapter-supermemory/src/index.ts
+          error_count: 1
+          classification: pre-existing
+          error_codes:
+            - TS2322
+          notes: "Pre-existing type error in adapter-supermemory/src/index.ts (1 error)."
+
+        - path: packages/core/src/adapter-registry.test.ts
+          error_count: 1
+          classification: pre-existing
+          error_codes:
+            - TS2740
+          notes: "Pre-existing test type error in adapter-registry.test.ts (1 error)."
+
+        - path: packages/core/src/config/deck-config.ts
+          error_count: 2
+          classification: pre-existing
+          error_codes:
+            - TS2307
+          notes: "Pre-existing type errors in deck-config.ts (2 errors)."
+
+        - path: packages/core/src/skills/sdd/index.ts
+          error_count: 2
+          classification: pre-existing
+          error_codes:
+            - TS2307
+          notes: "Pre-existing type errors in sdd/index.ts (2 errors)."
+
+        - path: packages/core/src/teams/developer/instruction-bundles/serena-composition.test.ts
+          error_count: 1
+          classification: pre-existing
+          error_codes:
+            - TS2307
+          notes: "Pre-existing test type error in serena-composition.test.ts (1 error)."
       notes: |
-        Pre-existing type errors across 17 files, 108 total errors.
+        Pre-existing type errors across 23 files, 108 total errors.
         All classified as pre-existing known failures.
         Verify can classify all 108 errors as known.
 
