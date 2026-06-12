@@ -43,11 +43,34 @@ testing:
       available: true
       tool: bun:test
     integration:
-      available: false
-      tool: ""
+      available: true
+      tool: bun:test
+      description: |
+        Contract tests for runner-install flow using mocked dependencies.
+        Validates install sequencing and gating without real I/O.
     e2e:
-      available: false
-      tool: ""
+      available: true
+      tool: bun:test
+      description: |
+        E2E-ish TUI tests using render-only pattern.
+        Tests preflight → install → artifact verification without real installs or network.
+  strict_tdd_gates:
+    - focused_preflight_tests: "bun test packages/adapter-pi/src/preflight.test.ts packages/adapter-opencode/src/preflight.test.ts"
+    - contract_tests: "bun test apps/cli/src/tui/runner-dashboard/__tests__/runner-install-contract.test.ts"
+    - e2e_ish_tests: "bun test apps/cli/src/tui/__tests__/runner-install-e2e.test.tsx"
+    - baseline_ledger_comparison: "openspec/baseline-health.yaml"
+  baseline_health:
+    ledger: openspec/baseline-health.yaml
+    policy: |
+      - Focused commands must pass for change closure
+      - New failures in repo-wide commands block closure
+      - Known failures require explicit ledger reference
+      - Pass with warnings requires documented known failures
+  security_constraints: |
+    - No real installations performed
+    - No network calls in test gates
+    - No user filesystem writes
+    - Deterministic mocks for all external dependencies
   coverage:
     available: true
     command: "bun test --coverage"

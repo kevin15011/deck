@@ -647,7 +647,7 @@ export function DeckApp() {
         return;
       }
 
-      const preflight = inspectPiEnvironment({ command: detectedPi.command });
+      const preflight = inspectPiEnvironment({ command: detectedPi.command, includeChecks: true });
       const review = reviewPiRequiredTools({ command: detectedPi.command });
 
       if (!cancelled) {
@@ -695,7 +695,7 @@ export function DeckApp() {
         return;
       }
 
-      const preflight = inspectOpenCodeEnvironment({ command: detectedOpenCode.command });
+      const preflight = inspectOpenCodeEnvironment({ command: detectedOpenCode.command, includeChecks: true });
       const review = reviewOpenCodeTools({ packageManifest: preflight.packageManifest });
 
       if (!cancelled) {

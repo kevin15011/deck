@@ -172,3 +172,6 @@ export * from "./skills/bootstrap";
 export * from "./runner-capability-registry";
 export * from "./runner-capability-parity";
 export * from "./shared-binary-usability";
+
+// Runner Install Preflight Types (Batch B - Install quality)
+export * from "./runner-install-preflight";
