@@ -81,10 +81,13 @@ Valid statuses:
 | `spec` | Spec artifact |
 | `design` | Design artifact |
 | `tasks` | Tasks artifact |
+| `preconditions` | Preconditions artifact (optional, for Apply-bound changes) |
 | `apply_progress` | Apply progress artifact |
 | `verify_report` | Verify report artifact |
 | `review_report` | Review report artifact |
 | `archive_report` | Archive report artifact |
+
+> **Note**: `artifacts.preconditions` is optional. The Task Agent SHOULD produce `preconditions.md` for changes advancing to Apply. The Orchestrator evaluates this artifact before launching Apply.
 
 ### Provenance Entry
 

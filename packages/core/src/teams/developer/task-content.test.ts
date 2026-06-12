@@ -20,9 +20,21 @@ const PLACEHOLDER_SIGNALS = [
   "Coming soon",
   "placeholder",
 ];
+// Exclude status names that contain placeholder (they're legitimate identifiers)
+const STATUS_NAMES_WITH_PLACEHOLDER = ["allowed-with-placeholder"];
 
 function assertNotPlaceholder(content: string, label: string) {
   for (const signal of PLACEHOLDER_SIGNALS) {
+    // Skip: if "placeholder" appears ONLY in legitimate status name `allowed-with-placeholder`
+    if (signal === "placeholder") {
+      // Count occurrences that are NOT in status name format
+      const statusNameMatches = (content.match(/`allowed-with-placeholder`/g) || []).length;
+      const allMatches = (content.match(/placeholder/g) || []).length;
+      // Allow if all matches are from the status name
+      if (allMatches > 0 && allMatches === statusNameMatches) {
+        continue;
+      }
+    }
     expect(content).not.toContain(signal);
   }
   expect(content.length, `${label} should be >500 chars`).toBeGreaterThan(500);
@@ -200,5 +212,52 @@ describe("Git Safety Rule presence", () => {
 
   test("SKILL_BODY contains critical Git discard protection rule", () => {
     expect(TASK_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Preconditions output tests (Task 3)
+// ---------------------------------------------------------------------------
+
+describe("Preconditions output (Task 3)", () => {
+  test("SKILL_BODY contains Step 7: Derive Preconditions from Blockers", () => {
+    expect(TASK_SKILL_BODY).toContain("Step 7: Derive Preconditions from Blockers");
+  });
+
+  test("SKILL_BODY contains Step 9: Write Preconditions Artifact", () => {
+    expect(TASK_SKILL_BODY).toContain("Step 9: Write Preconditions Artifact");
+  });
+
+  test("SKILL_BODY contains allowed precondition statuses", () => {
+    expect(TASK_SKILL_BODY).toContain("satisfied");
+    expect(TASK_SKILL_BODY).toContain("blocked");
+    expect(TASK_SKILL_BODY).toContain("allowed-with-placeholder");
+    expect(TASK_SKILL_BODY).toContain("deferred");
+    expect(TASK_SKILL_BODY).toContain("none");
+  });
+
+  test("SKILL_BODY permits None when no preconditions exist", () => {
+    expect(TASK_SKILL_BODY).toMatch(/None.*complete.*valid artifact|valid artifact.*None/i);
+  });
+
+  test("SKILL_BODY contains anti-duplication guidance", () => {
+    expect(TASK_SKILL_BODY).toMatch(/do NOT duplicate|not duplicate/i);
+    expect(TASK_SKILL_BODY).toMatch(/closure state|only closure/i);
+  });
+
+  test("SKILL_BODY contains preconditions table format", () => {
+    expect(TASK_SKILL_BODY).toContain("Preconditions table format");
+  });
+
+  test("SKILL_BODY contains Closure Decision section format", () => {
+    expect(TASK_SKILL_BODY).toContain("Closure Decision section");
+  });
+
+  test("return contract includes Preconditions Artifact Path field", () => {
+    expect(TASK_SKILL_BODY).toContain("Preconditions Artifact Path");
+  });
+
+  test("return contract includes Preconditions Summary field", () => {
+    expect(TASK_SKILL_BODY).toContain("Preconditions Summary");
   });
 });

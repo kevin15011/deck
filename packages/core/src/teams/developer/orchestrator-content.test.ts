@@ -526,6 +526,50 @@ describe("Pre-Delegation Checklist and Automatic Mode (REQ-OA-004, REQ-OA-006)",
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Emit blocked outcome");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("do NOT delegate");
   });
+});
 
+// ---------------------------------------------------------------------------
+// Preconditions gate tests (Task 4, Task 5)
+// ---------------------------------------------------------------------------
 
+describe("Preconditions gate (Task 4, Task 5)", () => {
+  test("system prompt contains SDD flow with precondition gate", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/Tasks.*Apply|Tasks.*Preconditions.*Apply/i);
+  });
+
+  test("system prompt mentions preconditions gate before Apply", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/precondition.*gate|Gate.*precondition/i);
+  });
+
+  test("system prompt contains gate pass/block rules", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/pass.*block|blocked.*Apply/i);
+  });
+
+  test("system prompt mentions preconditions.md artifact", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("preconditions.md");
+  });
+
+  test("system prompt accepts None as passing result", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/None.*pass|pass.*None/i);
+  });
+
+  test("skill body contains preconditions gate evaluation", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/precondition.*gate|gate.*precondition/i);
+  });
+
+  test("skill body contains gate pass/block rules", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/pass.*block|blocked.*Apply/i);
+  });
+
+  test("skill body contains registry event guidance for gate result", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/gate.*event|event.*gate|registry.*event/i);
+  });
+
+  test("skill body contains anti-bureaucracy constraints", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/anti-bureaucracy|fast.*gate|None.*valid/i);
+  });
+
+  test("skill body mentions preconditions.md existence requirement", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("preconditions.md");
+  });
 });

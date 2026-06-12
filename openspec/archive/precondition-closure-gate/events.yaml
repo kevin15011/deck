@@ -1,0 +1,78 @@
+events:
+  - type: explore.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-explorer
+    model: opencode-go/kimi-k2.6
+    artifact: exploration.md
+    note: "Explorer completed: identified precondition expression patterns, concrete rework case, artifact/fase/status recommendations, and registry validator integration as support"
+  - type: proposal.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-proposal
+    model: openai/gpt-5.5
+    artifact: proposal.md
+    note: "Proposal completed: defined minimal preconditions.md artifact, Orchestrator gate rules, anti-bureaucracy constraints, rollback plan, risks, and acceptance direction"
+  - type: spec.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-spec
+    artifact: spec.md
+    registry_write: reconciled-by-orchestrator
+    note: "Spec completed in registry-deferred mode: 29 requirements, 16 scenarios, precondition statuses and gate semantics."
+  - type: design.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-design
+    artifact: design.md
+    registry_write: reconciled-by-orchestrator
+    note: "Design completed in registry-deferred mode: minimal artifact flow, events gate record, state reference, validator existence support."
+  - type: tasks.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-task
+    artifact: tasks.md
+    registry_write: non-deferred
+    note: "Tasks completed: 9 atomic tasks (Shared 3, Backend 6, no Frontend). Gate logic, validator warning, prompt updates."
+  - type: apply.started
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-apply-general
+    artifact: apply-progress.md
+    registry_write: non-deferred
+    note: "Apply started: General Apply batch 1 (Tasks 1-2) completed: preconditions.md template and Task Agent prompt update"
+  - type: apply.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-apply-backend
+    artifact: apply-progress.md
+    registry_write: non-deferred
+    note: "Backend Apply completed: Tasks 3-9 all complete (gate logic, validator, Apply context-only, Verify optional check). Task 6 optional deferred."
+  - type: apply.fix.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-apply-backend
+    artifact: apply-progress.md
+    registry_write: non-deferred
+    note: "Apply fix batch completed: schema.ts rule codes, types.ts file type, TODO placeholder test fix, apply-frontend-content.ts Preconditions Context section added."
+  - type: verify.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-verify
+    artifact: verify-report.md
+    registry_write: non-deferred
+    note: "Verify completed: PASS. 144/144 tests pass, typecheck passes, all 29 requirements satisfied."
+  - type: review.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-review
+    artifact: review-report.md
+    registry_write: non-deferred
+    note: "Review completed: APPROVE. No blockers, no majors. All previous findings resolved."
+  - type: archive.completed
+    changeId: precondition-closure-gate
+    timestamp: "2026-06-12"
+    agent: deck-developer-archive
+    artifact: archive-report.md
+    registry_write: non-deferred
+    note: "Archive completed: Change archived with full traceability. All artifacts moved to openspec/archive/precondition-closure-gate/."

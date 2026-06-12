@@ -116,6 +116,13 @@ The orchestrator will give you:
 - Relevant project context and project AI notes (if available)
 - Stack-specific skill rules (if resolved)
 
+## Preconditions Context (read-only)
+
+If preconditions.md is provided in the context bundle, you MAY read it for context only:
+- Do NOT re-run or re-adjudicate the precondition gate — that is Orchestrator's responsibility.
+- Do NOT reinterpret precondition statuses — use only for understanding blockers that were already evaluated.
+- If implementation reveals a NEW blocker, report it in apply-progress.md as a reactive Apply blocker.
+
 ## Implementation Steps
 
 ### Step 1: Read Context

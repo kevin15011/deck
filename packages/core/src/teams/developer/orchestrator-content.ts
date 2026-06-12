@@ -221,6 +221,30 @@ The Spec Registry is also required for every SDD phase:
 
 If a memory adapter is available, agents MAY optionally save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
 
+## Preconditions Gate (before Apply)
+
+Before launching Apply for any change with intention to advance to Apply:
+
+1. **Confirm preconditions.md exists**: If the change has intent to proceed to Apply, verify preconditions.md exists at openspec/changes/{change-id}/preconditions.md.
+
+2. **Evaluate the gate**:
+   - **Pass** if: preconditions.md contains None, OR all rows have Status satisfied, allowed-with-placeholder, or deferred.
+   - **Block** if: any row has Status blocked AND Blocks Apply is Yes.
+
+3. **Gate evaluation rules**:
+   - Accept None as a complete, valid artifact when no preconditions exist.
+   - The gate must be fast — if it takes longer than resolving the simplest blocking precondition, the gate design is flawed.
+   - Do NOT parse markdown table semantics — only check for blocked + Blocks Apply = Yes as the blocking signal.
+
+4. **If blocked**: Report the blocking preconditions to the user and do NOT launch Apply until resolved.
+
+5. **Record the gate result**: Append a gate evaluation event to events.yaml before launching Apply.
+
+**Anti-bureaucracy constraints:**
+- Gate runs only for changes going to Apply.
+- None is valid and passes without additional questioning.
+- No new lifecycle phase is added.
+
 ## Apply Routing
 
 Before launching Apply, inspect the Tasks artifact's \`Review Workload Forecast\` and \`Open Questions / Blockers\` sections. Classify every task as **unblocked**, **blocked**, or **allowed-with-placeholder**:
@@ -514,6 +538,30 @@ Phase Routing:
 - When running them in parallel, launch both in **registry-deferred mode**: each writes only its artifact (\`spec.md\` or \`design.md\`) and returns registry intent; the Orchestrator serializes the shared \`state.yaml\`/\`events.yaml\` updates after both complete.
 - Design does not depend directly on Spec.
 - If Design discovers missing behavior, it reports an open question — does not silently change scope.
+
+### Preconditions Gate (before Apply)
+
+Before launching Apply for any change with intention to advance to Apply:
+
+1. **Confirm preconditions.md exists**: If the change has intent to proceed to Apply, verify preconditions.md exists at openspec/changes/{change-id}/preconditions.md.
+
+2. **Evaluate the gate**:
+   - **Pass** if: preconditions.md contains None, OR all rows have Status satisfied, allowed-with-placeholder, or deferred.
+   - **Block** if: any row has Status blocked AND Blocks Apply is Yes.
+
+3. **Gate evaluation rules**:
+   - Accept None as a complete, valid artifact when no preconditions exist.
+   - The gate must be fast — if it takes longer than resolving the simplest blocking precondition, the gate design is flawed.
+   - Do NOT parse markdown table semantics — only check for blocked + Blocks Apply = Yes as the blocking signal.
+
+4. **If blocked**: Report the blocking preconditions to the user and do NOT launch Apply until resolved.
+
+5. **Record the gate result**: Append a gate evaluation event to events.yaml before launching Apply.
+
+**Anti-bureaucracy constraints:**
+- Gate runs only for changes going to Apply.
+- None is valid and passes without additional questioning.
+- No new lifecycle phase is added.
 
 ### Apply Routing
 

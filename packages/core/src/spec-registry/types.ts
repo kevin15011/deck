@@ -229,7 +229,7 @@ export type OpenSpecRegistryValidationIssue = {
   message: string;
   path: string;
   changeId?: string;
-  file?: "state.yaml" | "events.yaml" | "artifact";
+  file?: "state.yaml" | "events.yaml" | "artifact" | "preconditions.md";
   field?: string;
   details?: Record<string, unknown>;
 };

@@ -190,6 +190,9 @@ export type ValidationRuleCode =
   // Artifact rules
   | "artifact.missing_for_completed_phase"
   | "artifact.unregistered_present"
+  // Precondition rules
+  | "preconditions.artifact.missing"
+  | "preconditions.artifact.not_referenced"
   // YAML parser rules
   | "yaml.parse_error"
   | "yaml.parse_warning"
@@ -235,6 +238,8 @@ export const VALIDATION_RULE_CODES: readonly ValidationRuleCode[] = [
   "events.state.last_event_mismatch",
   "artifact.missing_for_completed_phase",
   "artifact.unregistered_present",
+  "preconditions.artifact.missing",
+  "preconditions.artifact.not_referenced",
   "yaml.parse_error",
   "yaml.parse_warning",
   "yaml.duplicate_key",

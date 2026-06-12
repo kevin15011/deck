@@ -183,7 +183,43 @@ Also produce a review workload forecast so the Orchestrator can protect review q
 - Say whether scope reduction or sequential work slices are recommended.
 - Say whether a decision is needed before Apply.
 
-### Step 7: Write the Tasks Artifact
+### Step 7: Derive Preconditions from Blockers
+
+Before writing tasks, derive preconditions from identified blockers, open questions, and unresolved dependencies:
+
+1. **Identify preconditions**: Review the Spec, Design, and any blockers/open questions from your analysis.
+2. **Classify each precondition** with one of these statuses:
+   - \`satisfied\`: Already resolved or verified with concrete evidence.
+   - \`blocked\`: Not resolved; blocks Apply only when \`Blocks Apply\` is \`Yes\`.
+   - \`allowed-with-placeholder\`: Apply may proceed with a preapproved approach.
+   - \`deferred\`: Acknowledged and moved to another change or follow-up task.
+   - \`none\`: No relevant preconditions exist.
+3. **Write evidence**: Each row requires brief evidence (path, test name, change-id, or user decision).
+4. **Anti-bureaucracy**: Do NOT duplicate task descriptions or implementation plans. Only closure state.
+
+**Preconditions table format:**
+
+\`\`\`markdown
+| ID | Precondition | Source | Status | Evidence | Blocks Apply |
+|---|---|---|---|---|---|
+| PCG-001 | Description | Spec REQ-ID | satisfied | Test passes | No |
+\`\`\`
+
+**Closure Decision section:**
+
+\`\`\`markdown
+## Closure Decision
+- Ready for Apply: Yes | No | Yes with conditions
+- Notes: {optional, max two bullets or "None"}
+\`\`\`
+
+If there are no preconditions, write the literal word \`None\` as the entire content:
+
+\`\`\`markdown
+None
+\`\`\`
+
+### Step 8: Write the Tasks Artifact
 
 Compile everything into the output template below.
 
@@ -344,16 +380,36 @@ If a memory adapter is available, you MAY optionally save a concise summary to m
 
 If a tasks artifact already exists for this change, READ it first and UPDATE it rather than overwriting.
 
-### Step 9: Self-Verify Artifact
+### Step 9: Write Preconditions Artifact
+
+Write the preconditions as \`preconditions.md\` inside the OpenSpec change directory (\`openspec/changes/{change-name}/\`).
+
+The preconditions artifact:
+- Contains a preconditions table derived from blockers/open questions.
+- Contains a Closure Decision section with "Ready for Apply" field.
+- May be the literal word \`None\` if no preconditions exist.
+- Must NOT duplicate task descriptions or implementation plans from \`tasks.md\`.
+
+**Anti-bureaucracy rules:**
+- Only closure state, not implementation steps.
+- Evidence must be one short phrase, path, test name, change-id, or user decision.
+- Notes field is max two bullets or \`None\`.
+- \`None\` is a complete, valid artifact when no preconditions exist.
+
+After writing, update the Spec Registry:
+- Add \`artifacts.preconditions: preconditions.md\` to state.yaml if the artifact exists.
+- Append a \`preconditions.created\` event to events.yaml.
+
+### Step 10: Self-Verify Artifact
 
 Before returning completion:
-1. Verify the required artifact file exists at the expected path.
-2. Verify the artifact has content (byte count > 0).
+1. Verify the required artifact files exist at the expected paths.
+2. Verify the artifacts have content (byte count > 0).
 3. Verify registry state/event persistence (or return registry intent if in deferred mode).
 4. Include completion evidence in the return contract: artifact path, \`exists=true\`, byte count, phase status, registry status, any blocker.
 5. If verification fails, do NOT claim completion. Report the failure as a blocker.
 
-### Step 10: Return Summary
+### Step 11: Return Summary
 
 Return EXACTLY this format to the orchestrator:
 
@@ -376,6 +432,10 @@ Return EXACTLY this format to the orchestrator:
 - **Open Questions**: {N}
 - **Artifact Verified**: {exists=true, byte count, registry status}
 - **Mermaid Source**: {fenced Mermaid diagram summarizing this phase, or "N/A — no structural relationships to diagram"}
+
+### Preconditions
+- **Preconditions Artifact Path**: \`openspec/changes/{change-name}/preconditions.md\`
+- **Preconditions Summary**: None | {N} total, {N} blocking
 
 ### Routing Recommendations
 - **General Apply**: {task numbers}

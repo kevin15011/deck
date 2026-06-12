@@ -452,6 +452,44 @@ async function validateChange(
             }
           }
         }
+
+        // Task 7: Check for preconditions.md existence at Apply+ phase (WARNING only, first iteration)
+        // Scope: active changes at or beyond apply phase, not exploration-only
+        const APPLY_PHASES = ["apply", "verify", "review", "archive"];
+        if (currentPhase && APPLY_PHASES.includes(currentPhase) && isCanonical) {
+          const preconditionsPath = path.join(changePath, "preconditions.md");
+          try {
+            await fs.access(preconditionsPath);
+            // preconditions.md exists - check if state.yaml references it
+            if (!artifacts.preconditions) {
+              issues.push({
+                severity: "warning",
+                rule: "preconditions.artifact.not_referenced",
+                message: "preconditions.md exists but not referenced in state.yaml artifacts",
+                path: preconditionsPath,
+                changeId,
+                file: "preconditions.md",
+                field: "artifacts.preconditions",
+              });
+              warningIssues++;
+            }
+          } catch {
+            // preconditions.md does not exist - WARNING only (first iteration)
+            if (artifacts.preconditions) {
+              // Referenced but missing - this is already caught above as artifact.missing_for_completed_phase
+            } else {
+              issues.push({
+                severity: "warning",
+                rule: "preconditions.artifact.missing",
+                message: "preconditions.md not found for change at Apply+ phase",
+                path: preconditionsPath,
+                changeId,
+                file: "preconditions.md",
+              });
+              warningIssues++;
+            }
+          }
+        }
       }
 
       // provenance

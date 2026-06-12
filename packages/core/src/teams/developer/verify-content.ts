@@ -103,6 +103,14 @@ Parse the artifacts to understand:
 - **Tasks**: What was supposed to be done (from Tasks).
 - **Apply Progress**: What was actually done (from Apply Progress).
 
+### Optional: Preconditions Gate Evidence Check
+
+If preconditions.md exists for the change, you MAY optionally check for gate evidence:
+- Check if events.yaml contains a preconditions gate evaluation event (preconditions.gate_passed or preconditions.gate_blocked).
+- Do NOT fail verification solely for missing preconditions.md — this is an optional check.
+- Do NOT fail historical changes or non-Apply-bound changes for missing preconditions artifact.
+- Report findings as SUGGESTION, not CRITICAL or WARNING.
+
 ### Step 2: Check Task Completion
 
 Verify that all tasks are marked complete:

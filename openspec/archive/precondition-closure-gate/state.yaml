@@ -1,0 +1,72 @@
+schema: spec-registry-v1
+changeId: precondition-closure-gate
+name: Precondition closure gate
+phase: archive
+status: archived
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+  archive_report: archive-report.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Investigated how blockers/preconditions/open questions are expressed today; recommended formal artifact and Orchestrator gate before Apply"
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.5
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    artifact: proposal.md
+    note: "Formalized a lightweight anti-bureaucracy precondition closure gate before Apply"
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: deferred-reconciled
+    artifact: spec.md
+    note: "Specified preconditions.md contract, gate statuses, Orchestrator enforcement, and anti-bureaucracy constraints"
+  - phase: design
+    agent: deck-developer-design
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: deferred-reconciled
+    artifact: design.md
+    note: "Designed Tasks -> preconditions.md -> Orchestrator gate -> Apply flow"
+  - phase: tasks
+    agent: deck-developer-task
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    artifact: tasks.md
+    note: "Created 9 atomic tasks: Shared (3), Backend (6), no Frontend. Gate logic, validator warning, prompt updates."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    artifact: apply-progress.md
+    note: "General Apply completed Tasks 1-2: preconditions.md template and Task Agent prompt update"
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    artifact: apply-progress.md
+    note: "Backend Apply completed Tasks 3-9: Task tests, Orchestrator gate logic, validator existence check, Apply context-only, Verify optional check"
+  - phase: archive
+    agent: deck-developer-archive
+    model: opencode-go/kimi-k2.6
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    artifact: archive-report.md
+    note: "Change archived with full traceability. All 9 tasks completed (8 required + 1 optional deferred). Verify PASS, Review APPROVE."

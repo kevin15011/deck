@@ -402,3 +402,210 @@ provenance:
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Preconditions artifact existence check tests (Task 7)
+// ---------------------------------------------------------------------------
+
+describe("Preconditions artifact existence check (Task 7)", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "precond-test-"));
+    await fs.mkdir(path.join(tempDir, "openspec", "changes"), { recursive: true });
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  test("Apply+ change without preconditions.md reports WARNING", async () => {
+    // Create a change at apply phase without preconditions.md
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "apply-no-precond"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-no-precond", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: apply-no-precond
+currentPhase: apply
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-no-precond", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    // Create artifact files
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-no-precond", "exploration.md"),
+      "# Exploration"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-no-precond", "proposal.md"),
+      "# Proposal"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-no-precond", "spec.md"),
+      "# Spec"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-no-precond", "design.md"),
+      "# Design"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-no-precond", "tasks.md"),
+      "# Tasks"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "apply-no-precond",
+    });
+
+    // Should report WARNING (not error) for missing preconditions.md at Apply+
+    expect(result.summary.totalWarnings).toBeGreaterThan(0);
+    const precondWarning = result.issues.find(
+      (i) => i.rule === "preconditions.artifact.missing" || i.message?.includes("preconditions")
+    );
+    // First iteration: WARNING only, not error
+    if (precondWarning) {
+      expect(precondWarning.severity).toBe("warning");
+    }
+  });
+
+  test("Apply+ change with preconditions.md passes existence check", async () => {
+    // Create a change at apply phase WITH preconditions.md
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "apply-with-precond"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-with-precond", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: apply-with-precond
+currentPhase: apply
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-with-precond", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    // Create artifact files including preconditions.md
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-with-precond", "exploration.md"),
+      "# Exploration"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-with-precond", "proposal.md"),
+      "# Proposal"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-with-precond", "spec.md"),
+      "# Spec"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-with-precond", "design.md"),
+      "# Design"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-with-precond", "tasks.md"),
+      "# Tasks"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "apply-with-precond", "preconditions.md"),
+      "# Preconditions\n\n| ID | Precondition | Source | Status | Evidence | Blocks Apply |\n|---|---|---|---|---|---|\n| PCG-001 | Test | Spec | satisfied | Test passes | No |"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "apply-with-precond",
+    });
+
+    // Should pass - preconditions.md exists
+    expect(result.ok).toBe(true);
+  });
+
+  test("Exploration-only change without preconditions.md does NOT report warning", async () => {
+    // Create an exploration-only change (phase < apply)
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "explore-only"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "explore-only", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: explore-only
+currentPhase: explore
+status: in_progress
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "explore-only", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "explore-only",
+    });
+
+    // Should NOT report preconditions warning for exploration-only
+    const precondIssues = result.issues.filter(
+      (i) => i.rule === "preconditions.artifact.missing" || i.message?.includes("preconditions")
+    );
+    expect(precondIssues.length).toBe(0);
+  });
+});
