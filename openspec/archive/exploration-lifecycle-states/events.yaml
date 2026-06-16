@@ -1,0 +1,137 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-explorer
+    registry_write: non-deferred
+    notes:
+      - "Explorer completed: evaluated historical exploration-only cases, current registry/event formats, Orchestrator/Explorer prompts, anti-bureaucracy constraints, and recommended lifecycle semantics."
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-proposal
+    registry_write: non-deferred
+    notes:
+      - "Proposal completed: formalized optional exploration lifecycle states, Orchestrator post-Explorer rules, registry minimums, warning-level schema interaction, risks, rollback, and success criteria."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-spec
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Spec completed in registry-deferred mode: 22 requirements, lifecycle states, Orchestrator behavior, registry/event contracts, scenarios, and verification matrix."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-design
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Design completed in registry-deferred mode: optional Explorer lifecycle flow, minimal registry shape, prompt/content updates, docs, validator warning support, and tests."
+  - phase: spec
+    status: completed
+    event: spec.repaired
+    artifact: spec.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-spec
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Spec repaired to distinguish SDD Explorer from delegated Explorer diagnostics and add exploration_context: sdd | delegated."
+  - phase: design
+    status: completed
+    event: design.repaired
+    artifact: design.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-design
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Design repaired with delegated Explorer diagnostic flow and minimal lifecycle registry shape."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    notes:
+      - "Tasks completed: 10 routed tasks across shared contracts, backend content/validator support, frontend no-op verification, TDD order, execution groups, anti-bureaucracy tests, and review workload forecast."
+  - phase: tasks
+    status: completed
+    event: preconditions.created
+    artifact: preconditions.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    notes:
+      - "Preconditions created: one non-blocking naming-alignment condition; Ready for Apply with conditions."
+  - phase: apply
+    status: in_progress
+    event: apply.general.started
+    artifact: apply-progress.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "General Apply started: implementing registry lifecycle constants, warning rule types, warning-level validation, and schema docs."
+  - phase: apply
+    status: completed
+    event: apply.general.completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "General Apply completed: Tasks 1-4 (registry lifecycle constants, warning rules, validation, docs) all pass. Ready for Backend Apply."
+  - phase: apply
+    status: in_progress
+    event: apply.backend.started
+    artifact: apply-progress.md
+    timestamp: "2026-06-15"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "Backend Apply started: implementing Explorer diagnostic outcome and Orchestrator lifecycle branches. Tasks 5-9."
+  - phase: apply
+    status: completed
+    event: apply.backend.completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-15"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "Backend Apply completed: Tasks 5-9 (Explorer content, Orchestrator content, invariant tests) all pass. 166 tests total. Ready for Frontend Apply Task 10."
+  - phase: apply
+    status: completed
+    event: apply.general.fix_completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-15"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Fix completed: removed 3 dead rule codes (lifecycle.non_actionable, lifecycle.missing_decision_required, lifecycle.event_metadata_incomplete) from schema and docs. Validator tests pass."
+  - phase: apply
+    status: completed
+    event: apply.backend.fix_completed
+    artifact: apply-progress.md
+    timestamp: "2026-06-16"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "Pre-archive fix completed: event-name mismatch validation now accepts repaired/preconditions/apply-owner patterns; --change lookup now finds archived changes after active changes. Focused validator/CLI tests and smoke validate pass."
+  - phase: archive
+    status: completed
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: "2026-06-16"
+    actor: deck-developer-archive
+    registry_write: non-deferred
+    notes:
+      - "Archive completed: moved to openspec/archive/exploration-lifecycle-states/. All 29 requirements satisfied. Verify: PASS. Review: APPROVE."

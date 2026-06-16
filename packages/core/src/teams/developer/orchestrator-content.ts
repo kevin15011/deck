@@ -245,6 +245,44 @@ Before launching Apply for any change with intention to advance to Apply:
 - None is valid and passes without additional questioning.
 - No new lifecycle phase is added.
 
+## Exploration Lifecycle (Optional)
+
+The Orchestrator may record optional lifecycle when an Explorer investigation produces an actionable diagnosis. This is auxiliary, not a new SDD phase.
+
+### When lifecycle applies
+
+- Formal SDD Explorer: completed with actionable diagnosis and flow stops before Proposal
+- Delegated Explorer: returned actionable diagnosis and was not immediately converted to SDD or Proposal
+
+### When lifecycle does NOT apply
+
+- Explorer returned blocked or unclear diagnosis
+- Explorer completed and immediately continues to Proposal
+- Delegated Explorer returned non-actionable findings
+- User immediately starts SDD or Proposal from delegated findings
+
+### Lifecycle fields (optional)
+
+When lifecycle applies, record in state.yaml:
+- exploration_context: sdd for formal SDD, delegated for Orchestrator delegation
+- lifecycle_status: diagnosed (pending decision), deferred, closed-no-action, converted-to-change, converted-to-sdd, or keep-as-reference
+- next_action: required when diagnosed
+
+### Interactive mode options
+
+When lifecycle applies in Interactive mode, present minimum options:
+- Continue or Create Proposal or SDD
+- Defer for later
+- Close with no action
+- Leave as diagnosed pending decision
+- Keep as reference when applicable
+
+### Anti-bureaucracy rule
+
+Never request lifecycle for exploratory questions, code reading, or investigation without actionable finding.
+Never request lifecycle for direct Explorer to Proposal continuation.
+Never request lifecycle for immediate delegated to SDD or Proposal conversion.
+
 ## Apply Routing
 
 Before launching Apply, inspect the Tasks artifact's \`Review Workload Forecast\` and \`Open Questions / Blockers\` sections. Classify every task as **unblocked**, **blocked**, or **allowed-with-placeholder**:
@@ -562,6 +600,44 @@ Before launching Apply for any change with intention to advance to Apply:
 - Gate runs only for changes going to Apply.
 - None is valid and passes without additional questioning.
 - No new lifecycle phase is added.
+
+## Exploration Lifecycle (Optional)
+
+The Orchestrator may record optional lifecycle when an Explorer investigation produces an actionable diagnosis. This is auxiliary, not a new SDD phase.
+
+### When lifecycle applies
+
+- Formal SDD Explorer: completed with actionable diagnosis and flow stops before Proposal
+- Delegated Explorer: returned actionable diagnosis and was not immediately converted to SDD or Proposal
+
+### When lifecycle does NOT apply
+
+- Explorer returned blocked or unclear diagnosis
+- Explorer completed and immediately continues to Proposal
+- Delegated Explorer returned non-actionable findings
+- User immediately starts SDD or Proposal from delegated findings
+
+### Lifecycle fields (optional)
+
+When lifecycle applies, record in state.yaml:
+- exploration_context: sdd for formal SDD, delegated for Orchestrator delegation
+- lifecycle_status: diagnosed (pending decision), deferred, closed-no-action, converted-to-change, converted-to-sdd, or keep-as-reference
+- next_action: required when diagnosed
+
+### Interactive mode options
+
+When lifecycle applies in Interactive mode, present minimum options:
+- Continue or Create Proposal or SDD
+- Defer for later
+- Close with no action
+- Leave as diagnosed pending decision
+- Keep as reference when applicable
+
+### Anti-bureaucracy rule
+
+Never request lifecycle for exploratory questions, code reading, or investigation without actionable finding.
+Never request lifecycle for direct Explorer to Proposal continuation.
+Never request lifecycle for immediate delegated to SDD or Proposal conversion.
 
 ### Apply Routing
 

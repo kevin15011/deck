@@ -157,7 +157,18 @@ If the registry update fails, report it as a blocker and do not silently continu
 
 If a memory adapter is available, you MAY optionally save a concise summary to memory. Memory is auxiliary and never replaces the OpenSpec artifact.
 
-### Step 5: Return Structured Findings
+### Step 5: Assess Actionable Diagnosis
+
+When your investigation identifies a clear root cause, bug, or improvement opportunity that warrants a decision:
+
+- Actionable Diagnosis: yes — when you have found a specific issue, pattern, or recommendation that the team should act on
+- Actionable Diagnosis: no — when the exploration was informational, answered a question, or did not find a clear path forward
+
+If actionable, briefly state what the issue or opportunity is and what the suggested next action would be.
+
+You report the evidence and recommendation. The Orchestrator decides whether to record lifecycle. Do not assume lifecycle applies.
+
+### Step 6: Return Structured Findings
 
 Return EXACTLY this format to the orchestrator:
 
@@ -195,6 +206,12 @@ Return EXACTLY this format to the orchestrator:
 
 ### Recommendation
 {Your recommended approach and why. Be direct.}
+
+### Actionable Diagnosis
+{yes/no — whether the exploration identified an actionable root cause that warrants a decision}
+
+### Suggested Lifecycle Outcome
+{propose | defer | close | reference | none — the recommended next action if an actionable diagnosis exists}
 
 ### Open Questions
 - {Question 1}

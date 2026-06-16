@@ -228,3 +228,25 @@ describe("Documentation and ADRs canonical line", () => {
     expect(EXPLORER_SKILL_BODY).toContain("## Rules");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lifecycle support: Explorer diagnostic outcome (Tasks 5-6)
+// ---------------------------------------------------------------------------
+
+describe("Explorer diagnostic outcome for lifecycle support", () => {
+  test("SKILL_BODY includes actionable diagnosis guidance", () => {
+    expect(EXPLORER_SKILL_BODY).toMatch(/actionable.*diagnosis|diagnosis.*actionable/i);
+  });
+
+  test("SKILL_BODY includes diagnostic outcome or next action in return format", () => {
+    expect(EXPLORER_SKILL_BODY).toMatch(/diagnostic.*outcome|next.*action|recommended.*approach/i);
+  });
+
+  test("SKILL_BODY does not decide lifecycle itself — leaves decision to Orchestrator", () => {
+    expect(EXPLORER_SKILL_BODY).toMatch(/orchestrator|orchestrator.*decide/i);
+  });
+
+  test("SKILL_BODY return format includes diagnostic outcome lines", () => {
+    expect(EXPLORER_SKILL_BODY).toMatch(/actionable|diagnosis|root.*cause/i);
+  });
+});

@@ -68,6 +68,40 @@ export const PHASE_TO_INDEX: ReadonlyMap<ValidatorPhase, number> = new Map(
 );
 
 // ---------------------------------------------------------------------------
+// Exploration lifecycle constants (Task 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Exploration context values (optional, warning-level).
+ */
+export type ExplorationContext = "sdd" | "delegated";
+
+export const VALID_EXPLORATION_CONTEXTS: readonly ExplorationContext[] = [
+  "sdd",
+  "delegated",
+] as const;
+
+/**
+ * Lifecycle status values (optional, warning-level).
+ */
+export type LifecycleStatus =
+  | "diagnosed"
+  | "deferred"
+  | "closed-no-action"
+  | "converted-to-change"
+  | "converted-to-sdd"
+  | "keep-as-reference";
+
+export const VALID_LIFECYCLE_STATUSES: readonly LifecycleStatus[] = [
+  "diagnosed",
+  "deferred",
+  "closed-no-action",
+  "converted-to-change",
+  "converted-to-sdd",
+  "keep-as-reference",
+] as const;
+
+// ---------------------------------------------------------------------------
 // Status enum (canonical)
 // ---------------------------------------------------------------------------
 
@@ -201,7 +235,17 @@ export type ValidationRuleCode =
   | "change.not_found"
   | "change.abandoned_or_incomplete_active"
   | "runtime.error"
-  | "legacy.drift";
+  | "legacy.drift"
+  // Exploration lifecycle rules (warning-level)
+  | "lifecycle.unknown_context"
+  | "lifecycle.missing_context"
+  | "lifecycle.unknown_value"
+  | "lifecycle.missing_next_action"
+  | "lifecycle.incomplete_deferred"
+  | "lifecycle.incomplete_closed_no_action"
+  | "lifecycle.missing_conversion_reference"
+  | "lifecycle.missing_sdd_reference"
+  | "lifecycle.missing_reference_rationale";
 
 /**
  * All validation rule codes.
@@ -247,4 +291,14 @@ export const VALIDATION_RULE_CODES: readonly ValidationRuleCode[] = [
   "change.abandoned_or_incomplete_active",
   "runtime.error",
   "legacy.drift",
+  // Exploration lifecycle rules (warning-level)
+  "lifecycle.unknown_context",
+  "lifecycle.missing_context",
+  "lifecycle.unknown_value",
+  "lifecycle.missing_next_action",
+  "lifecycle.incomplete_deferred",
+  "lifecycle.incomplete_closed_no_action",
+  "lifecycle.missing_conversion_reference",
+  "lifecycle.missing_sdd_reference",
+  "lifecycle.missing_reference_rationale",
 ] as const;

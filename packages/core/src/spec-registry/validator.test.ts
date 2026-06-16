@@ -340,6 +340,73 @@ provenance:
     );
   });
 
+  test("single-change lookup finds archived change by default", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "archive", "archived-lookup"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "archive", "archived-lookup", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: archived-lookup
+currentPhase: archive
+status: archived
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+  archive_report: archive-report.md
+provenance:
+  - phase: archive
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "archive", "archived-lookup", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: archive
+    status: completed
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    for (const file of [
+      "exploration.md",
+      "proposal.md",
+      "spec.md",
+      "design.md",
+      "tasks.md",
+      "apply-progress.md",
+      "verify-report.md",
+      "review-report.md",
+      "archive-report.md",
+    ]) {
+      await fs.writeFile(path.join(tempDir, "openspec", "archive", "archived-lookup", file), `# ${file}`);
+    }
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "archived-lookup",
+    });
+
+    expect(result.summary.totalArchivedChanges).toBe(1);
+    expect(result.changes).toContainEqual(
+      expect.objectContaining({
+        changeId: "archived-lookup",
+        location: "archive",
+      })
+    );
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "change.not_found" })
+    );
+  });
+
   test("closed phase requires abandoned or incomplete status", async () => {
     await fs.mkdir(path.join(tempDir, "openspec", "changes", "closed-change"));
     await fs.writeFile(
@@ -400,6 +467,387 @@ provenance:
         severity: "error",
       })
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Exploration lifecycle tests (Task 1: TDD for optional lifecycle fields)
+// ---------------------------------------------------------------------------
+
+describe("Exploration lifecycle optional fields (Task 1)", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "lifecycle-test-"));
+    await fs.mkdir(path.join(tempDir, "openspec", "changes"), { recursive: true });
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  test("valid exploration_context: sdd does not fail validation", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "lifecycle-sdd"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "lifecycle-sdd", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: lifecycle-sdd
+currentPhase: explore
+status: in_progress
+exploration_context: sdd
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "lifecycle-sdd", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "lifecycle-sdd",
+    });
+
+    // Valid lifecycle context should not produce errors
+    expect(result.ok).toBe(true);
+    // Should not have any lifecycle-related errors
+    const lifecycleErrors = result.issues.filter(
+      (i) => i.rule?.includes("lifecycle") || i.message?.includes("lifecycle")
+    );
+    expect(lifecycleErrors.length).toBe(0);
+  });
+
+  test("valid exploration_context: delegated does not fail validation", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "lifecycle-delegated"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "lifecycle-delegated", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: lifecycle-delegated
+currentPhase: explore
+status: in_progress
+exploration_context: delegated
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "lifecycle-delegated", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "lifecycle-delegated",
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  test("valid lifecycle_status: diagnosed with next_action does not fail", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "diagnosed"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "diagnosed", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: diagnosed
+currentPhase: explore
+status: in_progress
+exploration_context: sdd
+lifecycle_status: diagnosed
+next_action: "Review diagnosis and decide whether to propose"
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "diagnosed", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "diagnosed",
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  test("valid lifecycle_status values: deferred, closed-no-action, converted-to-change, converted-to-sdd, keep-as-reference", async () => {
+    const statuses = ["deferred", "closed-no-action", "converted-to-change", "converted-to-sdd", "keep-as-reference"];
+    const changeId = "lifecycle-statuses";
+
+    for (const status of statuses) {
+      await fs.mkdir(path.join(tempDir, "openspec", "changes", `${changeId}-${status}`));
+      await fs.writeFile(
+        path.join(tempDir, "openspec", "changes", `${changeId}-${status}`, "state.yaml"),
+        `schema: spec-registry-v1
+changeId: ${changeId}-${status}
+currentPhase: explore
+status: in_progress
+exploration_context: sdd
+lifecycle_status: ${status}
+next_action: "test action"
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+      );
+      await fs.writeFile(
+        path.join(tempDir, "openspec", "changes", `${changeId}-${status}`, "exploration.md"),
+        "# Exploration"
+      );
+
+      const result = await validateOpenSpecRegistry({
+        rootDir: tempDir,
+        changeId: `${changeId}-${status}`,
+      });
+
+      expect(result.ok).toBe(true);
+    }
+  });
+
+  test("unknown exploration_context emits WARNING (not error)", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "unknown-context"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "unknown-context", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: unknown-context
+currentPhase: explore
+status: in_progress
+exploration_context: unknown_context
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "unknown-context", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "unknown-context",
+    });
+
+    // Unknown context should NOT fail validation
+    expect(result.ok).toBe(true);
+    // But should have a warning
+    const contextWarnings = result.issues.filter(
+      (i) => i.rule === "lifecycle.unknown_context" || i.message?.includes("exploration context")
+    );
+    expect(contextWarnings.length).toBeGreaterThan(0);
+    expect(contextWarnings[0]?.severity).toBe("warning");
+  });
+
+  test("unknown lifecycle_status emits WARNING (not error)", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "unknown-status"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "unknown-status", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: unknown-status
+currentPhase: explore
+status: in_progress
+exploration_context: sdd
+lifecycle_status: invalid_status
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "unknown-status", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "unknown-status",
+    });
+
+    // Unknown status should NOT fail validation
+    expect(result.ok).toBe(true);
+    // But should have a warning
+    const statusWarnings = result.issues.filter(
+      (i) => i.rule === "lifecycle.unknown_value" || i.message?.includes("lifecycle")
+    );
+    expect(statusWarnings.length).toBeGreaterThan(0);
+    expect(statusWarnings[0]?.severity).toBe("warning");
+  });
+
+  test("lifecycle present but missing exploration_context emits WARNING", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "missing-context"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "missing-context", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: missing-context
+currentPhase: explore
+status: in_progress
+lifecycle_status: diagnosed
+next_action: "test"
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "missing-context", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "missing-context",
+    });
+
+    // Should NOT fail validation
+    expect(result.ok).toBe(true);
+    // But should have a warning about missing context
+    const contextWarnings = result.issues.filter(
+      (i) => i.rule === "lifecycle.missing_context"
+    );
+    expect(contextWarnings.length).toBeGreaterThan(0);
+    expect(contextWarnings[0]?.severity).toBe("warning");
+  });
+
+  test("diagnosed without next_action emits WARNING", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "diagnosed-no-action"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "diagnosed-no-action", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: diagnosed-no-action
+currentPhase: explore
+status: in_progress
+exploration_context: sdd
+lifecycle_status: diagnosed
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "diagnosed-no-action", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "diagnosed-no-action",
+    });
+
+    // Should NOT fail validation
+    expect(result.ok).toBe(true);
+    // But should have a warning about missing next_action
+    const actionWarnings = result.issues.filter(
+      (i) => i.rule === "lifecycle.missing_next_action"
+    );
+    expect(actionWarnings.length).toBeGreaterThan(0);
+    expect(actionWarnings[0]?.severity).toBe("warning");
+  });
+
+  test("canonical phase/status errors remain strict errors", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "invalid-phase"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "invalid-phase", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: invalid-phase
+currentPhase: invalid_phase
+status: in_progress
+exploration_context: sdd
+lifecycle_status: diagnosed
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "invalid-phase", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "invalid-phase",
+    });
+
+    // Canonical phase error should FAIL validation (error, not warning)
+    expect(result.ok).toBe(false);
+    const phaseErrors = result.issues.filter(
+      (i) => i.rule === "state.currentPhase.invalid"
+    );
+    expect(phaseErrors.length).toBeGreaterThan(0);
+    expect(phaseErrors[0]?.severity).toBe("error");
+  });
+
+  test("canonical status errors remain strict errors", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "invalid-status"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "invalid-status", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: invalid-status
+currentPhase: explore
+status: invalid_status
+exploration_context: sdd
+lifecycle_status: diagnosed
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "invalid-status", "exploration.md"),
+      "# Exploration"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "invalid-status",
+    });
+
+    // Canonical status error should FAIL validation
+    expect(result.ok).toBe(false);
+    const statusErrors = result.issues.filter(
+      (i) => i.rule === "state.status.invalid"
+    );
+    expect(statusErrors.length).toBeGreaterThan(0);
+    expect(statusErrors[0]?.severity).toBe("error");
   });
 });
 
@@ -607,5 +1055,145 @@ provenance:
       (i) => i.rule === "preconditions.artifact.missing" || i.message?.includes("preconditions")
     );
     expect(precondIssues.length).toBe(0);
+  });
+
+  test("valid registry event names do not report name_mismatch warnings", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "valid-events"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "valid-events", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: valid-events
+currentPhase: apply
+status: completed
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+provenance:
+  - phase: apply
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "valid-events", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+  - phase: spec
+    status: completed
+    event: spec.repaired
+    artifact: spec.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+  - phase: design
+    status: completed
+    event: design.repaired
+    artifact: design.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+  - phase: tasks
+    status: completed
+    event: preconditions.created
+    artifact: preconditions.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+  - phase: apply
+    status: in_progress
+    event: apply.general.started
+    artifact: apply-progress.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+  - phase: apply
+    status: completed
+    event: apply.general.completed
+    artifact: apply-progress.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+  - phase: apply
+    status: completed
+    event: apply.general.fix_completed
+    artifact: apply-progress.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    for (const file of [
+      "exploration.md",
+      "proposal.md",
+      "spec.md",
+      "design.md",
+      "tasks.md",
+      "preconditions.md",
+      "apply-progress.md",
+    ]) {
+      await fs.writeFile(path.join(tempDir, "openspec", "changes", "valid-events", file), `# ${file}`);
+    }
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "valid-events",
+    });
+
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "events.event.name_mismatch" })
+    );
+  });
+
+  test("unknown registry event names still report name_mismatch warnings", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "unknown-event"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "unknown-event", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: unknown-event
+currentPhase: proposal
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "unknown-event", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: proposal
+    status: completed
+    event: unknown.completed
+    artifact: proposal.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "unknown-event", "exploration.md"),
+      "# Exploration"
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "unknown-event", "proposal.md"),
+      "# Proposal"
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "unknown-event",
+    });
+
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ rule: "events.event.name_mismatch", severity: "warning" })
+    );
   });
 });

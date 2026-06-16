@@ -33,6 +33,11 @@ The registry is the operational authority for Deck's SDD workflow. All agents an
 | `baseline_health` | string | Health status at baseline |
 | `closure_reason` | string | Reason for closure (required if status is `abandoned` or `incomplete`) |
 | `closed_at` | string | ISO timestamp when closed |
+| `exploration_context` | string | Exploration context: `sdd` (formal SDD Explorer stopped before Proposal) or `delegated` (Orchestrator-delegated Explorer with actionable diagnosis) — optional, warning-level |
+| `lifecycle_status` | string | Exploration lifecycle state: `diagnosed`, `deferred`, `closed-no-action`, `converted-to-change`, `converted-to-sdd`, or `keep-as-reference` — optional, warning-level |
+| `next_action` | string | Explicit next action when lifecycle_status is `diagnosed` or recommended for `deferred` — optional, warning-level |
+| `lifecycle_reason` | string | Brief reason for `deferred`, `closed-no-action`, or `keep-as-reference` — optional, warning-level |
+| `lifecycle_ref` | string | Reference to proposal/change for `converted-to-change` or resulting SDD for `converted-to-sdd` — optional, warning-level |
 
 ### Phase Values
 
@@ -240,3 +245,14 @@ The validator reports these as warnings, not errors, to preserve backward compat
 | `events.state.last_event_mismatch` | warning | Last event doesn't match currentPhase |
 | `artifact.missing_for_completed_phase` | error | Artifact file not found |
 | `legacy.drift` | warning | Legacy format detected |
+| `preconditions.artifact.missing` | warning | preconditions.md missing at Apply+ phase |
+| `preconditions.artifact.not_referenced` | warning | preconditions.md exists but not referenced |
+| `lifecycle.unknown_context` | warning | Unknown exploration_context value |
+| `lifecycle.missing_context` | warning | lifecycle_status present but exploration_context missing |
+| `lifecycle.unknown_value` | warning | Unknown lifecycle_status value |
+| `lifecycle.missing_next_action` | warning | diagnosed without next_action |
+| `lifecycle.incomplete_deferred` | warning | deferred without reason or reactivation |
+| `lifecycle.incomplete_closed_no_action` | warning | closed-no-action without reason |
+| `lifecycle.missing_conversion_reference` | warning | converted-to-change without reference |
+| `lifecycle.missing_sdd_reference` | warning | converted-to-sdd without reference |
+| `lifecycle.missing_reference_rationale` | warning | keep-as-reference without rationale |

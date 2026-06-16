@@ -210,4 +210,73 @@ provenance:
     const json = result.json as Record<string, unknown>;
     expect((json.summary as Record<string, number>).totalChanges).toBe(1);
   });
+
+  test("--change finds archived change", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "archive", "archived-cli"), { recursive: true });
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "archive", "archived-cli", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: archived-cli
+currentPhase: archive
+status: archived
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+  archive_report: archive-report.md
+provenance:
+  - phase: archive
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "archive", "archived-cli", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: archive
+    status: completed
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    for (const file of [
+      "exploration.md",
+      "proposal.md",
+      "spec.md",
+      "design.md",
+      "tasks.md",
+      "apply-progress.md",
+      "verify-report.md",
+      "review-report.md",
+      "archive-report.md",
+    ]) {
+      await fs.writeFile(path.join(tempDir, "openspec", "archive", "archived-cli", file), `# ${file}`);
+    }
+
+    const result = await runOpenspecValidate({
+      command: "openspec-validate",
+      flags: { json: true, changeId: "archived-cli", root: tempDir },
+    });
+
+    expect(result.exitCode).toBe(0);
+    const json = result.json as Record<string, unknown>;
+    expect((json.summary as Record<string, number>).totalArchivedChanges).toBe(1);
+    expect(json.changes).toContainEqual(
+      expect.objectContaining({
+        changeId: "archived-cli",
+        location: "archive",
+      })
+    );
+    expect(json.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "change.not_found" })
+    );
+  });
 });

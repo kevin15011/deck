@@ -205,7 +205,7 @@ export type ValidateOpenSpecRegistryOptions = {
   rootDir: string;
   /** Validate one change id; searches changes/ first, archive/ second. */
   changeId?: string;
-  /** Defaults to true when changeId is absent. */
+  /** Defaults to true; single-change lookup searches active changes first, then archive. */
   includeArchive?: boolean;
   /** Defaults to true. */
   includeChanges?: boolean;

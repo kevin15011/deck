@@ -1,0 +1,74 @@
+schema: spec-registry-v1
+changeId: exploration-lifecycle-states
+name: Exploration lifecycle states
+currentPhase: archive
+status: archived
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: openai/gpt-5.5
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Investigated exploration-only changes with clear diagnosis; recommended optional lifecycle states for diagnosed explorations that do not immediately advance to Proposal."
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.5
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Created proposal formalizing optional warning-level exploration lifecycle states and anti-bureaucracy Orchestrator rules."
+  - phase: spec
+    agent: deck-developer-spec
+    model: openai/gpt-5.5
+    timestamp: "2026-06-12"
+    registryWrite: deferred-reconciled
+    note: "Specified optional lifecycle states, Orchestrator behavior, registry/event contracts, warning-level validator behavior, and anti-bureaucracy constraints."
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.5
+    timestamp: "2026-06-12"
+    registryWrite: deferred-reconciled
+    note: "Designed optional post-Explorer lifecycle flow, minimal state/events shape, prompt/content changes, docs, validator warning support, and tests."
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.5
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Created atomic routed implementation tasks, execution groups, TDD order, verification commands, and preconditions for optional exploration lifecycle states."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.5
+    timestamp: "2026-06-12"
+    registryWrite: non-deferred
+    note: "Implemented registry lifecycle constants, warning rule types, warning-level validation, and schema docs. Tasks 1-4 complete."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: openai/gpt-5.5
+    timestamp: "2026-06-15"
+    registryWrite: non-deferred
+    note: "Implemented Explorer diagnostic outcome guidance and Orchestrator lifecycle branches. Tasks 5-9 complete. All 166 tests pass."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: minimax-coding-plan/MiniMax-M2.5
+    timestamp: "2026-06-15"
+    registryWrite: non-deferred
+    note: "Fixed dead rule codes: removed lifecycle.non_actionable, lifecycle.missing_decision_required, lifecycle.event_metadata_incomplete from schema/docs. All validator tests pass."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: openai/gpt-5.5
+    timestamp: "2026-06-16"
+    registryWrite: non-deferred
+    note: "Pre-archive fix: accepted real registry event-name patterns and made --change lookup find archived changes after active changes. Focused validator and CLI tests pass; smoke validate succeeds."
+  - phase: archive
+    agent: deck-developer-archive
+    model: minimax-coding-plan/MiniMax-M2.5
+    timestamp: "2026-06-16"
+    registryWrite: non-deferred
+    note: "Archived to openspec/archive/exploration-lifecycle-states/. All 29 requirements satisfied. Verify: PASS. Review: APPROVE."

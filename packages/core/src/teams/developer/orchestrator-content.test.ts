@@ -573,3 +573,93 @@ describe("Preconditions gate (Task 4, Task 5)", () => {
     expect(ORCHESTRATOR_SKILL_BODY).toContain("preconditions.md");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lifecycle support: Orchestrator lifecycle branches (Tasks 7-9)
+// ---------------------------------------------------------------------------
+
+describe("Orchestrator lifecycle branches for exploration", () => {
+  test("system prompt distinguishes formal SDD Explorer from delegated Explorer", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/SDD.*Explorer|delegated.*Explorer/i);
+  });
+
+  test("system prompt handles SDD Explorer stopped before Proposal", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/stopped.*before.*Proposal|exploration.*context/i);
+  });
+
+  test("system prompt does NOT request lifecycle for blocked Explorer", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/blocked|unclear/i);
+  });
+
+  test("system prompt does NOT request lifecycle for immediate Proposal", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/immediate.*Proposal|continues.*Proposal/i);
+  });
+
+  test("system prompt handles delegated Explorer actionable diagnosis", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/delegated|actionable.*diagnosis/i);
+  });
+
+  test("system prompt does NOT request lifecycle for non-actionable delegated exploration", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/non-actionable|exploratory|consultation/i);
+  });
+
+  test("system prompt includes exploration_context field guidance", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/exploration_context|sdd.*delegated/i);
+  });
+
+  test("system prompt includes lifecycle_status field guidance", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/lifecycle_status|diagnosed|deferred/i);
+  });
+
+  test("skill body contains lifecycle branch logic", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/exploration.*lifecycle|lifecycle.*eligible/i);
+  });
+
+  test("skill body contains anti-bureaucracy constraint for lifecycle", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/no.*lifecycle|lifecycle.*anti-bureaucracy/i);
+  });
+
+  test("skill body distinguishes Run SDD from delegated Explorer", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/Run SDD|delegated.*Explorer/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Anti-bureaucracy invariants (Task 9)
+// ---------------------------------------------------------------------------
+
+describe("Anti-bureaucracy invariants for lifecycle", () => {
+  test("system prompt does NOT add new SDD phase for lifecycle", () => {
+    // Lifecycle is auxiliary, not replacing existing phases
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toMatch(/replace.*phase|new.*canonical.*phase/i);
+  });
+
+  test("system prompt does NOT add Apply gate for lifecycle", () => {
+    // No lifecycle requirement before Apply
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toMatch(/Apply.*gate.*lifecycle|lifecycle.*Apply.*gate/i);
+  });
+
+  test("system prompt does NOT require historical migration", () => {
+    // Historical records not migrated
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toMatch(/historical.*migration|migrate.*historical/i);
+  });
+
+  test("system prompt does NOT make lifecycle mandatory", () => {
+    // Lifecycle is optional
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toMatch(/optional.*lifecycle|lifecycle.*optional/i);
+  });
+
+  test("skill body does NOT add new canonical phase for lifecycle", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).not.toMatch(/phase.*lifecycle/i);
+  });
+
+  test("skill body preserves existing Explorer to Proposal flow without lifecycle", () => {
+    // Direct Explorer -> Proposal has no lifecycle friction
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/Explorer.*Proposal|Proposal.*Explorer/i);
+  });
+
+  test("skill body preserves delegated to SDD flow without lifecycle ceremony", () => {
+    // Immediate conversion has no pending lifecycle
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/immediate|continues.*SDD|continues.*Proposal/i);
+  });
+});

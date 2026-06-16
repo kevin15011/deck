@@ -20,9 +20,13 @@ import {
   PHASE_TO_INDEX,
   VALIDATOR_PHASES,
   VALIDATOR_STATUSES,
+  VALID_EXPLORATION_CONTEXTS,
+  VALID_LIFECYCLE_STATUSES,
   type ValidatorPhase,
   type ValidatorStatus,
   type ValidationRuleCode,
+  type ExplorationContext,
+  type LifecycleStatus,
 } from "./schema";
 import type {
   ValidateOpenSpecRegistryOptions,
@@ -31,6 +35,34 @@ import type {
   OpenSpecRegistryChangeValidation,
   ValidationSeverity,
 } from "./types";
+
+const PHASE_EVENT_STATUSES = new Set([
+  "completed",
+  "started",
+  "repaired",
+  "failed",
+  "passed",
+  "approved",
+]);
+const APPLY_OWNER_EVENT_NAME_PATTERN = /^apply\.[a-z][a-z0-9-]*\.(started|completed|fix_completed)$/;
+const KNOWN_EVENT_NAMES = new Set([
+  "preconditions.created",
+  "precondition_gate.passed",
+  "precondition_gate.blocked",
+  "exploration.lifecycle_decided",
+]);
+
+function isKnownRegistryEventName(eventName: string): boolean {
+  const [phase, status, extra] = eventName.split(".");
+
+  return (
+    (extra === undefined &&
+      VALIDATOR_PHASES.includes(phase as ValidatorPhase) &&
+      PHASE_EVENT_STATUSES.has(status)) ||
+    APPLY_OWNER_EVENT_NAME_PATTERN.test(eventName) ||
+    KNOWN_EVENT_NAMES.has(eventName)
+  );
+}
 
 /**
  * Validate the OpenSpec registry.
@@ -46,7 +78,7 @@ export async function validateOpenSpecRegistry(
   const {
     rootDir,
     changeId,
-    includeArchive = changeId ? false : true,
+    includeArchive = true,
     includeChanges = true,
   } = options;
 
@@ -397,6 +429,140 @@ async function validateChange(
         changeIssues++;
       }
 
+      // Exploration lifecycle validation (Task 3: warning-level only)
+      // These fields are optional - validate only when present
+      const explorationContext = state.exploration_context as string | undefined;
+      const lifecycleStatus = state.lifecycle_status as string | undefined;
+      const nextAction = state.next_action as string | undefined;
+      const lifecycleReason = state.lifecycle_reason as string | undefined;
+      const lifecycleRef = state.lifecycle_ref as string | undefined;
+
+      // Validate exploration_context when present
+      if (explorationContext && !VALID_EXPLORATION_CONTEXTS.includes(explorationContext as ExplorationContext)) {
+        issues.push({
+          severity: "warning",
+          rule: "lifecycle.unknown_context",
+          message: `Unknown exploration_context: ${explorationContext}; expected sdd or delegated`,
+          path: statePath,
+          changeId,
+          file: "state.yaml",
+          field: "exploration_context",
+        });
+        warningIssues++;
+      }
+
+      // Validate lifecycle_status when present
+      if (lifecycleStatus && !VALID_LIFECYCLE_STATUSES.includes(lifecycleStatus as LifecycleStatus)) {
+        issues.push({
+          severity: "warning",
+          rule: "lifecycle.unknown_value",
+          message: `Unknown lifecycle_status: ${lifecycleStatus}; expected diagnosed, deferred, closed-no-action, converted-to-change, converted-to-sdd, or keep-as-reference`,
+          path: statePath,
+          changeId,
+          file: "state.yaml",
+          field: "lifecycle_status",
+        });
+        warningIssues++;
+      }
+
+      // Warn if lifecycle_status present but exploration_context missing
+      if (lifecycleStatus && !explorationContext) {
+        issues.push({
+          severity: "warning",
+          rule: "lifecycle.missing_context",
+          message: "lifecycle_status present but exploration_context is missing; expected sdd or delegated",
+          path: statePath,
+          changeId,
+          file: "state.yaml",
+          field: "exploration_context",
+        });
+        warningIssues++;
+      }
+
+      // Warn if diagnosed without next_action
+      if (lifecycleStatus === "diagnosed" && !nextAction) {
+        issues.push({
+          severity: "warning",
+          rule: "lifecycle.missing_next_action",
+          message: "lifecycle_status is diagnosed but next_action is missing",
+          path: statePath,
+          changeId,
+          file: "state.yaml",
+          field: "next_action",
+        });
+        warningIssues++;
+      }
+
+      // Warn if deferred without reason or reactivation condition
+      if (lifecycleStatus === "deferred" && !lifecycleReason && !nextAction) {
+        issues.push({
+          severity: "warning",
+          rule: "lifecycle.incomplete_deferred",
+          message: "lifecycle_status is deferred but reason or reactivation condition is missing",
+          path: statePath,
+          changeId,
+          file: "state.yaml",
+          field: "lifecycle_reason",
+        });
+        warningIssues++;
+      }
+
+      // Warn if closed-no-action without reason
+      if (lifecycleStatus === "closed-no-action" && !lifecycleReason) {
+        issues.push({
+          severity: "warning",
+          rule: "lifecycle.incomplete_closed_no_action",
+          message: "lifecycle_status is closed-no-action but reason is missing",
+          path: statePath,
+          changeId,
+          file: "state.yaml",
+          field: "lifecycle_reason",
+        });
+        warningIssues++;
+      }
+
+      // Warn if converted-to-change without reference
+      if (lifecycleStatus === "converted-to-change" && !lifecycleRef) {
+        issues.push({
+          severity: "warning",
+          rule: "lifecycle.missing_conversion_reference",
+          message: "lifecycle_status is converted-to-change but reference is missing",
+          path: statePath,
+          changeId,
+          file: "state.yaml",
+          field: "lifecycle_ref",
+        });
+        warningIssues++;
+      }
+
+      // Warn if converted-to-sdd without reference
+      if (lifecycleStatus === "converted-to-sdd" && !lifecycleRef) {
+        issues.push({
+          severity: "warning",
+          rule: "lifecycle.missing_sdd_reference",
+          message: "lifecycle_status is converted-to-sdd but SDD reference is missing",
+          path: statePath,
+          changeId,
+          file: "state.yaml",
+          field: "lifecycle_ref",
+        });
+        warningIssues++;
+      }
+
+      // Warn if keep-as-reference without rationale
+      if (lifecycleStatus === "keep-as-reference" && !lifecycleReason && !nextAction) {
+        issues.push({
+          severity: "warning",
+          rule: "lifecycle.missing_reference_rationale",
+          message: "lifecycle_status is keep-as-reference but rationale is missing",
+          path: statePath,
+          changeId,
+          file: "state.yaml",
+          field: "lifecycle_reason",
+        });
+        warningIssues++;
+      }
+
       // artifacts
       if (!state.artifacts || typeof state.artifacts !== "object") {
         issues.push({
@@ -637,17 +803,17 @@ async function validateChange(
                 }
               }
 
-              // Event name should match phase.status pattern
+              // Event name should match one of the known registry event naming patterns.
               const eventName = event.event as string | undefined;
               const phase = event.phase as string | undefined;
               const status = event.status as string | undefined;
               if (eventName && phase && status) {
                 const expected = `${phase}.${status}`;
-                if (eventName !== expected) {
+                if (!isKnownRegistryEventName(eventName)) {
                   issues.push({
                     severity: "warning",
                     rule: "events.event.name_mismatch",
-                    message: `Event name does not match phase.status pattern: ${eventName} (expected ${expected})`,
+                    message: `Event name does not match a known registry event pattern: ${eventName} (legacy expected ${expected})`,
                     path: eventsPath,
                     changeId,
                     file: "events.yaml",
