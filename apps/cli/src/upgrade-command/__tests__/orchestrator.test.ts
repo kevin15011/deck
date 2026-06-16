@@ -251,6 +251,7 @@ function makeConfig(overrides: {
     rtk: false,
     "adaptive-memory": false,
     serena: false,
+    "code-economy": false,
     ...(overrides.opencode ?? {}),
   };
   return base;

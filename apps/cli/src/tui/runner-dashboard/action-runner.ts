@@ -461,6 +461,7 @@ function writeDeckConfigAction(
       rtk: piInstructions.rtk ?? false,
       "adaptive-memory": piInstructions["adaptive-memory"] ?? false,
       serena: piInstructions.serena ?? false,
+      "code-economy": true, // Always true - baseline, not a user toggle
     },
     opencode: {
       "codebase-memory": opencodeInstructions["codebase-memory"] ?? false,
@@ -468,6 +469,7 @@ function writeDeckConfigAction(
       rtk: opencodeInstructions.rtk ?? false,
       "adaptive-memory": opencodeInstructions["adaptive-memory"] ?? false,
       serena: opencodeInstructions.serena ?? false,
+      "code-economy": true, // Always true - baseline, not a user toggle
     },
   };
 

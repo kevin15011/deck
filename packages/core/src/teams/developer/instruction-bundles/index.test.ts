@@ -24,6 +24,7 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
     packageInstructions: {
       pi: {
         "codebase-memory": overrides.pi?.["codebase-memory"] ?? false,
+        "code-economy": overrides.pi?.["code-economy"] ?? false,
         "context-mode": overrides.pi?.["context-mode"] ?? false,
         rtk: overrides.pi?.rtk ?? false,
         "adaptive-memory": overrides.pi?.["adaptive-memory"] ?? false,
@@ -31,6 +32,7 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
       },
       opencode: {
         "codebase-memory": overrides.opencode?.["codebase-memory"] ?? false,
+        "code-economy": overrides.opencode?.["code-economy"] ?? false,
         "context-mode": overrides.opencode?.["context-mode"] ?? false,
         rtk: overrides.opencode?.rtk ?? false,
         "adaptive-memory": overrides.opencode?.["adaptive-memory"] ?? false,
@@ -98,11 +100,22 @@ describe("buildCapabilityInstructionBundle", () => {
     expect(cmFragments).toHaveLength(2); // agent + skill, not 4
   });
 
+  test("code-economy produces fragments with correct packageId and surfaces", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    expect(bundle.instructions.length).toBeGreaterThan(0);
+    for (const fragment of bundle.instructions) {
+      expect(fragment.packageId).toBe("code-economy");
+      expect(fragment.surface).toBeOneOf(["agent", "skill"]);
+      expect(fragment.markdown.length).toBeGreaterThan(10);
+    }
+  });
+
   test("each fragment has surface, packageId, and non-empty markdown", () => {
-    const bundle = buildCapabilityInstructionBundle(["codebase-memory", "context-mode", "rtk"]);
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory", "code-economy", "context-mode", "rtk"]);
 
     for (const fragment of bundle.instructions) {
-      expect(fragment.packageId).toBeOneOf(["codebase-memory", "context-mode", "rtk"]);
+      expect(fragment.packageId).toBeOneOf(["codebase-memory", "code-economy", "context-mode", "rtk"]);
       expect(fragment.surface).toBeOneOf(["agent", "skill"]);
       expect(typeof fragment.markdown).toBe("string");
       expect(fragment.markdown.length).toBeGreaterThan(10);
@@ -131,20 +144,20 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("returns only enabled packages for pi runner", () => {
     const config = makeConfig({
-      pi: { "codebase-memory": true, "context-mode": false, rtk: true, "adaptive-memory": false, serena: false },
+      pi: { "codebase-memory": true, "code-economy": true, "context-mode": false, rtk: true, "adaptive-memory": false, serena: false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "pi");
-    expect(ids).toEqual(["codebase-memory", "rtk"]);
+    expect(ids).toEqual(["codebase-memory", "code-economy", "rtk"]);
   });
 
   test("returns only enabled packages for opencode runner", () => {
     const config = makeConfig({
-      opencode: { "codebase-memory": false, "context-mode": true, rtk: false, "adaptive-memory": false, serena: false },
+      opencode: { "codebase-memory": false, "code-economy": true, "context-mode": true, rtk: false, "adaptive-memory": false, serena: false },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "opencode");
-    expect(ids).toEqual(["context-mode"]);
+    expect(ids).toEqual(["code-economy", "context-mode"]);
   });
 
   test("returns empty for unknown runner", () => {
@@ -155,12 +168,12 @@ describe("getEnabledPackageInstructionIds", () => {
 
   test("preserves canonical order even when enabled in different order", () => {
     const config = makeConfig({
-      pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": false, serena: false },
+      pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": false, serena: false, "code-economy": true },
     });
 
     const ids = getEnabledPackageInstructionIds(config, "pi");
-    // Order should be canonical: codebase-memory, context-mode, rtk, adaptive-memory
-    expect(ids).toEqual(["codebase-memory", "context-mode", "rtk"]);
+    // Order should be canonical: codebase-memory, code-economy, context-mode, rtk
+    expect(ids).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk"]);
   });
 });
 

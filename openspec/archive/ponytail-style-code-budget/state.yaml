@@ -1,0 +1,158 @@
+# State: ponytail-style-code-budget
+
+change: ponytail-style-code-budget
+created: 2026-06-16
+
+phase: verify
+status: completed
+artifact: verify-report.md
+provenance: orchestrator
+
+previous_phases:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    provenance: explorer
+    note: Initial exploratory entry before formal SDD Explorer refresh
+
+current_phase: verify
+current_status: completed
+current_artifact: verify-report.md
+current_provenance: orchestrator
+
+artifacts:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    provenance: explorer
+    note: Initial exploratory entry (2026-06-16)
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    provenance: explorer
+    note: Formal SDD Explorer refresh with critical-judgment framing and anti-sub-implementation guardrails
+  - phase: proposal
+    status: completed
+    artifact: proposal.md
+    provenance: proposal
+    note: Formal Proposal phase completed; MVP scoped to code-economy bundle, advisory code budget/justification, and Economy/Critical Judgment review dimension with no hard LOC gates
+  - phase: spec
+    status: completed
+    artifact: spec.md
+    provenance: spec
+    note: Registry-deferred Spec phase reconciled by Orchestrator; requirements preserve quality-first code economy and reject hard LOC caps
+  - phase: design
+    status: completed
+    artifact: design.md
+    provenance: design
+    note: Registry-deferred Design phase reconciled by Orchestrator; design scopes MVP to instruction bundle, advisory artifacts, and review dimension without runtime diff gate
+  - phase: tasks
+    status: completed
+    artifact: tasks.md
+    provenance: task
+    note: Task phase completed; 12 atomic tasks routed to General Apply, all shared/contracts work, no hard LOC gates, advisory economy signals preserved
+  - phase: preconditions
+    status: evaluated
+    artifact: preconditions.md
+    provenance: task
+    note: No blocking preconditions; ready for Apply
+  - phase: apply
+    status: completed
+    artifact: apply-progress.md
+    provenance: general
+    note: Apply phase completed; all 12 tasks implemented, tests pass, build passes, no hard LOC/diff gates added
+  - phase: verify
+    status: blocked
+    artifact: verify-report.md
+    provenance: verify
+    note: Registry-deferred Verify reconciled by Orchestrator; typecheck and required test coverage gaps block Archive
+  - phase: review
+    status: approved_with_changes
+    artifact: review-report.md
+    provenance: review
+    note: Registry-deferred Review reconciled by Orchestrator; implementation direction approved but MAJOR test/report accuracy fixes required before Archive
+  - phase: apply
+    status: completed
+    artifact: apply-progress.md
+    provenance: general
+    note: Apply fix completed; typecheck fixed, explicit tests added for code-economy bundle/injection/negative-cases, apply-progress.md accuracy corrected
+  - phase: verify
+    status: blocked
+    artifact: verify-report.md
+    provenance: verify
+    note: Re-Verify blocked on global typecheck; focused tests and build pass, but residual TS2741 fixture errors remain in scope/downstream
+  - phase: review
+    status: completed
+    artifact: review-report.md
+    provenance: review
+    note: Re-Review approved implementation and confirmed prior MAJOR findings fixed; typecheck issues remain for Verify follow-up
+  - phase: apply
+    status: completed
+    artifact: apply-progress.md
+    provenance: general
+    note: Apply Fix #2 completed; residual TS2741 errors fixed in instruction-bundles test, action-runner.ts, orchestrator.test.ts, runner-sync.test.ts; code-economy typecheck passes
+  - phase: verify
+    status: completed
+    artifact: verify-report.md
+    provenance: verify
+    note: Final Verify passed with warnings; focused tests and build pass, remaining global typecheck failures classified as unrelated baseline warnings
+  - phase: review
+    status: approved
+    artifact: review-report.md
+    provenance: review
+    note: Final focused Review approved Apply Fix #2; no blockers or major/minor findings remain
+  - phase: proposal
+    status: repaired
+    artifact: proposal.md
+    provenance: task
+    note: Requirement change repair (2026-06-16); code-economy is now always active in every Developer Team installation, not opt-in
+  - phase: spec
+    status: repaired
+    artifact: spec.md
+    provenance: task
+    note: Requirement change repair (2026-06-16); REQ-CF-001/CF-001a/CF-002 updated to mandate always-active baseline; no user-facing off switch
+  - phase: design
+    status: repaired
+    artifact: design.md
+    provenance: task
+    note: Requirement change repair (2026-06-16); defaults normalized to true; packageInstructions field kept for compatibility/visibility only; no TUI toggle
+  - phase: tasks
+    status: repaired
+    artifact: tasks.md
+    provenance: task
+    note: Requirement change repair (2026-06-16); Tasks 3, 10, 12 updated; Tasks 13-16 added for always-active config, tests, install validation, and opt-in cleanup
+  - phase: preconditions
+    status: evaluated
+    artifact: preconditions.md
+    provenance: task
+    note: Preconditions re-evaluated after requirement change; no blocking preconditions; install validation discovery is allowed-with-placeholder
+  - phase: apply
+    status: completed
+    artifact: apply-progress.md
+    provenance: general
+    note: Apply Fix #3 completed; code-economy now always active (baseline) in getDefaultDeckConfig() and normalizePackageInstructionConfig() for pi/opencode runners; tests updated
+  - phase: verify
+    status: blocked
+    artifact: verify-report.md
+    provenance: verify
+    note: Always-on Verify blocked; invalid code-economy config values do not normalize to true and relevant TUI/typecheck tests fail
+  - phase: review
+    status: approved
+    artifact: review-report.md
+    provenance: review
+    note: Always-on Review approved design/implementation direction; Verify blockers still require Apply fix
+  - phase: apply
+    status: completed
+    artifact: apply-progress.md
+    provenance: general
+    note: Apply Fix #4 completed; code-economy normalizes invalid values to true; action-runner hardcoded to true; TUI tests pre-existing failures unrelated
+  - phase: verify
+    status: completed
+    artifact: verify-report.md
+    provenance: verify
+    note: Verify passed with warnings; code-economy always-on behavior confirmed, TUI/typecheck failures classified as unrelated baseline warnings
+  - phase: review
+    status: approved
+    artifact: review-report.md
+    provenance: review
+    note: Review approved Fix #4; no blockers, one non-blocking test coverage maintainability finding remains

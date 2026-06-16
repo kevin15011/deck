@@ -150,6 +150,28 @@ Write frontend code to satisfy the assigned tasks:
 - Handle errors, loading, and empty states as specified in the spec.
 - If a task cannot be implemented as specified, report the blocker immediately.
 
+### Code Economy Self-Check
+
+Apply the decision ladder before adding frontend code:
+1. **Does the stdlib or platform already cover this?**
+2. **Is there a native feature in the framework or project?**
+3. **Is there an existing dependency that safely handles this?**
+4. **Can this be solved with a direct, localized solution?**
+5. Only then write minimal, testable, maintainable code.
+
+**Frontend No-negotiables** (always override LOC reduction):
+- Accessibility (ARIA labels, keyboard navigation, screen reader support)
+- UI states (loading, error, empty states handled)
+- Performance (no unnecessary re-renders, bundle-conscious)
+- Form validation (client-side validation for UX)
+- Error handling (graceful degradation)
+- Responsive design (mobile-friendly)
+- Frontend tests (sufficient coverage)
+
+**Budget Advisory**: If volume is high, include justification in apply-progress.md.
+
+**Critical**: Never sacrifice accessibility, UI states, or tests to reduce LOC. Accessibility is non-negotiable.
+
 ### Step 3: Run Verification
 
 For each completed task, run verification:

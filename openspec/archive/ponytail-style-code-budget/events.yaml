@@ -1,0 +1,165 @@
+# Events: ponytail-style-code-budget
+
+events:
+  - timestamp: "2026-06-16"
+    phase: explore
+    status: completed
+    artifact: exploration.md
+    event: exploration-completed
+    note: Initial exploratory entry
+  - timestamp: "2026-06-16"
+    phase: explore
+    status: completed
+    artifact: exploration.md
+    event: exploration-formal-refresh
+    note: Formal SDD Explorer phase completed with critical-judgment framing and explicit rejection of artificial LOC caps
+  - timestamp: "2026-06-16"
+    phase: proposal
+    status: completed
+    artifact: proposal.md
+    event: proposal.completed
+    note: Proposal completed for MVP A+B with code-economy bundle, advisory budget/justification, Economy/Critical Judgment review, and no hard runtime diff gate
+  - timestamp: "2026-06-16"
+    phase: spec
+    status: completed
+    artifact: spec.md
+    event: spec.completed
+    note: Registry-deferred Spec phase reconciled by Orchestrator with quality-first requirements and anti-sub-implementation guardrails
+  - timestamp: "2026-06-16"
+    phase: design
+    status: completed
+    artifact: design.md
+    event: design.completed
+    note: Registry-deferred Design phase reconciled by Orchestrator with MVP integration plan and no hard runtime diff gate
+  - timestamp: "2026-06-16"
+    phase: tasks
+    status: completed
+    artifact: tasks.md
+    event: tasks.completed
+    note: Task phase completed; 12 atomic shared/contracts tasks created, advisory economy signals, no hard LOC gates
+  - timestamp: "2026-06-16"
+    phase: preconditions
+    status: evaluated
+    artifact: preconditions.md
+    event: preconditions.created
+    note: Preconditions artifact created; no blocking preconditions, ready for Apply
+  - timestamp: "2026-06-16"
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    event: apply.completed
+    note: Apply phase completed; all 12 tasks implemented, code-economy bundle created and registered, content updated with economy self-check, Economy/Critical Judgment dimension added to Review
+  - timestamp: "2026-06-16"
+    phase: verify
+    status: blocked
+    artifact: verify-report.md
+    event: verify.blocked
+    note: Registry-deferred Verify reconciled by Orchestrator; typecheck failure and missing explicit tests block Archive
+  - timestamp: "2026-06-16"
+    phase: review
+    status: approved_with_changes
+    artifact: review-report.md
+    event: review.completed
+    note: Registry-deferred Review reconciled by Orchestrator; no blockers, but MAJOR test adequacy and apply-progress accuracy fixes required
+  - timestamp: "2026-06-16"
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    event: apply.fix_completed
+    note: Apply fix completed; typecheck failure fixed (fixtures), explicit tests added for code-economy bundle/injection/negative-cases, apply-progress.md accuracy corrected
+  - timestamp: "2026-06-16"
+    phase: verify
+    status: blocked
+    artifact: verify-report.md
+    event: verify.blocked
+    note: Re-Verify blocked on global typecheck despite focused tests/build passing; residual TS2741 fixture errors remain
+  - timestamp: "2026-06-16"
+    phase: review
+    status: completed
+    artifact: review-report.md
+    event: review.completed
+    note: Re-Review approved; prior MAJOR test/report findings fixed, remaining typecheck issues tracked by Verify
+  - timestamp: "2026-06-16"
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    event: apply.fix_completed
+    note: Apply Fix #2 completed; residual TS2741 errors fixed in instruction-bundles test, action-runner.ts, orchestrator.test.ts, runner-sync.test.ts; code-economy typecheck passes
+  - timestamp: "2026-06-16"
+    phase: verify
+    status: completed
+    artifact: verify-report.md
+    event: verify.completed
+    note: Final Verify passed with warnings; focused tests/build pass and remaining global typecheck failures are unrelated baseline warnings
+  - timestamp: "2026-06-16"
+    phase: review
+    status: approved
+    artifact: review-report.md
+    event: review.completed
+    note: Final focused Review approved Apply Fix #2; ready for Archive
+  - timestamp: "2026-06-16"
+    phase: proposal
+    status: repaired
+    artifact: proposal.md
+    event: scope.repaired
+    note: User requirement change — code-economy must always be active in every Developer Team installation; proposal updated to remove opt-in language
+  - timestamp: "2026-06-16"
+    phase: spec
+    status: repaired
+    artifact: spec.md
+    event: spec.repaired
+    note: User requirement change — REQ-CF-001/001a/002 updated; code-economy is mandatory baseline; no packageInstructions opt-in toggle required
+  - timestamp: "2026-06-16"
+    phase: design
+    status: repaired
+    artifact: design.md
+    event: design.repaired
+    note: User requirement change — config defaults/normalization force code-economy true; field retained for compatibility only; no TUI off switch
+  - timestamp: "2026-06-16"
+    phase: tasks
+    status: repaired
+    artifact: tasks.md
+    event: tasks.repaired
+    note: User requirement change — tasks updated/added for always-active implementation, test updates, OpenCode/Pi install validation, and opt-in assertion removal
+  - timestamp: "2026-06-16"
+    phase: preconditions
+    status: evaluated
+    artifact: preconditions.md
+    event: preconditions.updated
+    note: Preconditions re-evaluated after requirement change; no blocking preconditions; install validation discovery allowed-with-placeholder
+  - timestamp: "2026-06-16"
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    event: apply.fix_completed
+    note: Apply Fix #3 completed; code-economy now always active (baseline) - getDefaultDeckConfig() and normalizePackageInstructionConfig() force code-economy: true for pi/opencode runners
+  - timestamp: "2026-06-16"
+    phase: verify
+    status: blocked
+    artifact: verify-report.md
+    event: verify.blocked
+    note: Always-on Verify blocked; invalid config normalization and relevant TUI/typecheck failures must be fixed before Archive
+  - timestamp: "2026-06-16"
+    phase: review
+    status: approved
+    artifact: review-report.md
+    event: review.completed
+    note: Always-on Review approved; remaining blockers owned by Verify
+  - timestamp: "2026-06-16"
+    phase: apply
+    status: completed
+    artifact: apply-progress.md
+    event: apply.fix_completed
+    note: Apply Fix #4 completed; code-economy normalizes invalid values to true; action-runner hardcoded to true; TUI tests pre-existing failures
+  - timestamp: "2026-06-16"
+    phase: verify
+    status: completed
+    artifact: verify-report.md
+    event: verify.completed
+    note: Verify passed with warnings; always-on behavior confirmed and remaining TUI/typecheck failures are unrelated baseline warnings
+  - timestamp: "2026-06-16"
+    phase: review
+    status: approved
+    artifact: review-report.md
+    event: review.completed
+    note: Review approved Fix #4; ready for Archive

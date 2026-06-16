@@ -62,7 +62,7 @@ export const DEFAULT_ORCHESTRATOR_PERSONALITY: OrchestratorPersonality = "pragma
 /** Dynamic runner ID for package instructions — validated at runtime against AdapterRegistry. */
 export type PackageInstructionRunnerId = string & {};
 
-export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk", "adaptive-memory", "serena"] as const;
+export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"] as const;
 export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number];
 
 /**
@@ -205,8 +205,8 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
       activeProvider: "none",
     },
     packageInstructions: {
-      pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
-      opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+      pi: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+      opencode: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
     },
     orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
     profiles: [],
@@ -533,11 +533,11 @@ function normalizePackageInstructionConfig(
   configPath?: string,
   options?: { registry?: AdapterRegistry },
 ): NormalizedDeckConfig["packageInstructions"] {
-  // Default: all runners have all packages disabled
+  // Default: code-economy is ALWAYS true for supported runners (pi, opencode)
   // getDefaultDeckConfig() provides defaults for pi + opencode for backward compat
   const defaultResult: NormalizedDeckConfig["packageInstructions"] = {
-    pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
-    opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+    pi: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+    opencode: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
   };
 
   if (value === undefined || value === null) {
@@ -566,9 +566,11 @@ function normalizePackageInstructionConfig(
 
     assertPlainObject(runnerValue, `packageInstructions.${runner}`, configPath);
 
-    // Initialize runner entry with default false for all packages
+    // Initialize runner entry: code-economy is ALWAYS true for supported runners (pi, opencode)
+    // Other packages default to false
     result[runner as PackageInstructionRunnerId] = {
       "codebase-memory": false,
+      "code-economy": true,
       "context-mode": false,
       rtk: false,
       "adaptive-memory": false,
@@ -587,19 +589,28 @@ function normalizePackageInstructionConfig(
     }
 
     // Normalize package booleans
+    // IMPORTANT: code-economy is ALWAYS true for supported runners - cannot be disabled
+    // Invalid values (non-boolean) are normalized to true for code-economy only
     for (const pkg of PACKAGE_INSTRUCTION_PACKAGE_IDS) {
       const pkgValue = (runnerValue as Record<string, unknown>)[pkg];
       if (pkgValue !== undefined) {
-        if (typeof pkgValue !== "boolean") {
-          throw new DeckConfigError(
-            "DECK_CONFIG_INVALID_SHAPE",
-            `packageInstructions.${runner}.${pkg} must be a boolean.`,
-            { configPath, fieldPath: `packageInstructions.${runner}.${pkg}` },
-          );
+        // code-economy: force to true for ANY value (including invalid non-boolean)
+        // This is a baseline, not a user toggle - invalid values are normalized, not rejected
+        if (pkg === "code-economy") {
+          result[runner as PackageInstructionRunnerId][pkg] = true;
+        } else {
+          // Other packages: reject non-boolean values
+          if (typeof pkgValue !== "boolean") {
+            throw new DeckConfigError(
+              "DECK_CONFIG_INVALID_SHAPE",
+              `packageInstructions.${runner}.${pkg} must be a boolean.`,
+              { configPath, fieldPath: `packageInstructions.${runner}.${pkg}` },
+            );
+          }
+          result[runner as PackageInstructionRunnerId][pkg] = pkgValue;
         }
-        result[runner as PackageInstructionRunnerId][pkg] = pkgValue;
       }
-      // If undefined, keep default (false)
+      // If undefined, keep default (code-economy: true, others: false)
     }
   }
 

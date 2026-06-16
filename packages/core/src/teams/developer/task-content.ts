@@ -183,6 +183,19 @@ Also produce a review workload forecast so the Orchestrator can protect review q
 - Say whether scope reduction or sequential work slices are recommended.
 - Say whether a decision is needed before Apply.
 
+### Code Economy Note
+
+**Budget Advisory**: Budgets (LOC/files) are advisory signals — they inform Review but never block implementation.
+
+When the forecast shows high volume (400-800 or 800+ lines), 4+ files, new dependencies, new abstractions, or security/data/API boundary changes, include a brief note in the tasks artifact.
+
+Example format for the note:
+- Advisory budget signal: Low / Medium / High
+- Justification needed: Yes / No — {brief reason if Yes}
+- Economy guidance: {e.g. "reuse existing bundle pattern; avoid new runtime gate"}
+
+**Critical**: Requirements, security, tests, accessibility, and completeness override any budget pressure. If the Spec/Design requires volume, the task is justified — do not reduce scope to lower the budget signal.
+
 ### Step 7: Derive Preconditions from Blockers
 
 Before writing tasks, derive preconditions from identified blockers, open questions, and unresolved dependencies:

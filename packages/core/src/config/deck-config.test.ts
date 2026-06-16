@@ -54,13 +54,14 @@ function expectDeckConfigError(fn: () => unknown, code: DeckConfigError["code"])
 // PACKAGE_INSTRUCTION_RUNNERS removed — runner keys are now dynamic
 
 describe("PACKAGE_INSTRUCTION_PACKAGE_IDS", () => {
-  test("contains codebase-memory, context-mode, rtk, adaptive-memory, serena", () => {
+  test("contains codebase-memory, code-economy, context-mode, rtk, adaptive-memory, serena", () => {
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("codebase-memory");
+    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("code-economy");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("context-mode");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("rtk");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("adaptive-memory");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("serena");
-    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toHaveLength(5);
+    expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toHaveLength(6);
   });
 });
 
@@ -78,8 +79,8 @@ describe("readDeckConfig", () => {
       version: 1,
       adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
-        pi: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
-        opencode: { "codebase-memory": false, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+        pi: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+        opencode: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
       },
       orchestratorPersonality: "pragmatica",
       profiles: [],
@@ -99,13 +100,15 @@ describe("readDeckConfig", () => {
 // ---------------------------------------------------------------------------
 
 describe("validateDeckConfig — packageInstructions", () => {
-  test("defaults all package instruction toggles to false when field is absent", () => {
+  test("defaults code-economy to true (always-active baseline) and others to false when field is absent", () => {
     const config = validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "none" } });
 
     expect(config.packageInstructions.pi["codebase-memory"]).toBe(false);
+    expect(config.packageInstructions.pi["code-economy"]).toBe(true); // Always active baseline
     expect(config.packageInstructions.pi["context-mode"]).toBe(false);
     expect(config.packageInstructions.pi.rtk).toBe(false);
     expect(config.packageInstructions.opencode["codebase-memory"]).toBe(false);
+    expect(config.packageInstructions.opencode["code-economy"]).toBe(true); // Always active baseline
     expect(config.packageInstructions.opencode["context-mode"]).toBe(false);
     expect(config.packageInstructions.opencode.rtk).toBe(false);
   });
@@ -270,8 +273,8 @@ describe("validateDeckConfig — packageInstructions", () => {
       version: 1,
       adaptiveMemory: { activeProvider: "none" },
       packageInstructions: {
-        pi: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": true, serena: true },
-        opencode: { "codebase-memory": true, "context-mode": true, rtk: true, "adaptive-memory": true, serena: true },
+        pi: { "codebase-memory": true, "code-economy": true, "context-mode": true, rtk: true, "adaptive-memory": true, serena: true },
+        opencode: { "codebase-memory": true, "code-economy": true, "context-mode": true, rtk: true, "adaptive-memory": true, serena: true },
       },
     });
 

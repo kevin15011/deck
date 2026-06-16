@@ -144,6 +144,37 @@ Write code to satisfy the assigned tasks:
 - Write clean, readable code with appropriate comments for non-obvious decisions.
 - If a task cannot be implemented as specified, report the blocker immediately.
 
+### Code Economy Self-Check
+
+Before adding any code, apply this decision ladder:
+
+1. **Does the stdlib or platform already cover this?**
+2. **Is there a native feature in the framework or project?**
+3. **Is there an existing dependency that safely handles this?**
+4. **Can this be solved with a direct, localized solution?**
+5. Only then write minimal, testable, maintainable code.
+
+**No-negotiables** (always override LOC reduction):
+- Requirements from Spec/Design
+- Security (input validation, auth, secrets, injection, trust boundaries)
+- Data security (sensitive data handling, encryption)
+- Error handling (graceful degradation, informative errors)
+- Accessibility (ARIA, keyboard, screen readers)
+- Completeness (full implementation of specified behavior)
+- Tests (sufficient coverage)
+- Maintainability (clear, understandable code)
+- User-requested behavior (explicit feature requests)
+
+**Budget Advisory**: If volume is high (400+ lines, 4+ files, new dependencies, new abstractions), include a brief justification in apply-progress.md.
+
+Example format:
+- Simpler existing path considered: Yes / No / N/A — {brief evidence}
+- New dependency/abstraction added: Yes / No — {justification if Yes}
+- Advisory budget exceeded: Yes / No — {justification if Yes}
+- Quality override used: Yes / No — {security/tests/accessibility/etc. rationale}
+
+**Critical**: Never sacrifice requirements, security, tests, accessibility, or completeness to reduce LOC. If a concise solution would omit these, choose the complete solution and note "Quality override used".
+
 ### Step 3: Run Verification
 
 For each completed task, run verification:

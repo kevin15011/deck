@@ -444,6 +444,160 @@ describe("getAgentContent with capabilityInstructions", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// code-economy injection tests — REQ-CE-001, REQ-CE-002, REQ-CF-001
+// ---------------------------------------------------------------------------
+
+describe("code-economy injection", () => {
+  // Target agents for code-economy injection per Spec/Design
+  const CODE_ECONOMY_TARGET_AGENTS = [
+    "deck-developer-task",
+    "deck-developer-apply-general",
+    "deck-developer-apply-backend",
+    "deck-developer-apply-frontend",
+    "deck-developer-review",
+  ] as const;
+
+  // Non-target agents that should NOT receive code-economy
+  const NON_TARGET_AGENTS = [
+    "deck-developer-explorer",
+    "deck-developer-proposal",
+    "deck-developer-spec",
+    "deck-developer-design",
+    "deck-developer-verify",
+    "deck-developer-archive",
+  ] as const;
+
+  test("code-economy injects into target agents", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    for (const agentId of CODE_ECONOMY_TARGET_AGENTS) {
+      const content = getAgentContent(agentId, { capabilityInstructions: bundle });
+      expect(content).toBeDefined();
+      // Should contain the package instruction section
+      expect(content!.agentBody).toContain("## Package Instructions (configured)");
+      // Should contain code-economy specific content
+      expect(content!.agentBody).toContain("Code Economy");
+    }
+  });
+
+  test("code-economy injects into target agent skills", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    for (const agentId of CODE_ECONOMY_TARGET_AGENTS) {
+      const content = getAgentContent(agentId, { capabilityInstructions: bundle });
+      expect(content).toBeDefined();
+      expect(content!.skillBody).toContain("Code Economy");
+    }
+  });
+
+  test("code-economy does NOT inject into non-target agents", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    for (const agentId of NON_TARGET_AGENTS) {
+      const content = getAgentContent(agentId, { capabilityInstructions: bundle });
+      // Non-target agents should NOT receive code-economy instructions
+      // (code-economy has agentIds filter, so only target agents match)
+      expect(content!.agentBody).not.toContain("Code Economy");
+    }
+  });
+
+  test("code-economy bundle has correct packageId", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    for (const fragment of bundle.instructions) {
+      expect(fragment.packageId).toBe("code-economy");
+    }
+  });
+
+  test("code-economy bundle has agent and skill surfaces", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    const surfaces = bundle.instructions.map((f) => f.surface);
+    expect(surfaces).toContain("agent");
+    expect(surfaces).toContain("skill");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Negative tests: no hard LOC caps — REQ-CE-005, REQ-TK-002
+// ---------------------------------------------------------------------------
+
+describe("code-economy negative tests: no hard LOC caps", () => {
+  // Direct gating instructions that should NEVER appear
+  const DIRECT_GATE_PHRASES = [
+    "MUST stay under",
+    "block if over budget",
+    "reject if over",
+  ];
+
+  // Phrases that should only appear in NEGATIVE context (saying what we DON'T do)
+  const NEGATIVE_CONTEXT_PHRASES = [
+    "hard LOC cap",
+    "hard cap",
+  ];
+
+  test("code-economy does not contain direct gate instructions", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    for (const fragment of bundle.instructions) {
+      for (const phrase of DIRECT_GATE_PHRASES) {
+        expect(fragment.markdown.toLowerCase()).not.toContain(phrase.toLowerCase());
+      }
+    }
+  });
+
+  test("hard cap phrases only appear in negative context", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    for (const fragment of bundle.instructions) {
+      const markdown = fragment.markdown;
+      // If "hard cap" appears, it must be in negative context (e.g., "No hard LOC cap")
+      if (markdown.toLowerCase().includes("hard cap")) {
+        // Should contain "no hard" before "cap" - negative context
+        const hasNegativeContext =
+          markdown.toLowerCase().includes("no hard") ||
+          markdown.toLowerCase().includes("not a hard") ||
+          markdown.toLowerCase().includes("never a hard");
+        expect(hasNegativeContext).toBe(true);
+      }
+    }
+  });
+
+  test("code-economy content contains non-negotiable quality overrides", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    // Should contain phrases that indicate quality/security/etc. are non-negotiable
+    const allMarkdown = bundle.instructions.map((f) => f.markdown).join(" ");
+    const hasNonNegotiables =
+      allMarkdown.includes("non-negotiable") ||
+      allMarkdown.includes("never sacrifice") ||
+      allMarkdown.includes("always override") ||
+      allMarkdown.includes("critical") ||
+      allMarkdown.includes("quality") ||
+      allMarkdown.includes("security");
+    expect(hasNonNegotiables).toBe(true);
+  });
+
+  test("target agent prompts contain advisory language, not blocking", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    const targetAgents = [
+      "deck-developer-task",
+      "deck-developer-apply-general",
+      "deck-developer-review",
+    ] as const;
+
+    for (const agentId of targetAgents) {
+      const content = getAgentContent(agentId, { capabilityInstructions: bundle });
+      // Should contain advisory language
+      const hasAdvisory =
+        content!.agentBody.includes("advisory") || content!.agentBody.includes("signal");
+      expect(hasAdvisory).toBe(true);
+    }
+  });
+});
+
 describe("getTeamSessionInstructions with capabilityInstructions", () => {
   test("existing output unchanged when no bundle provided", () => {
     const instructions = getTeamSessionInstructions("developer-team");

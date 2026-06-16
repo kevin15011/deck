@@ -204,6 +204,26 @@ Compile everything into the output template below.
 | Backend | ✅ Strong / ⚠️ Adequate / ❌ Weak / N/A | |
 | Frontend | ✅ Strong / ⚠️ Adequate / ❌ Weak / N/A | |
 | Integration | ✅ Strong / ⚠️ Adequate / ❌ Weak / N/A | |
+| Economy / Critical Judgment | ✅ Strong / ⚠️ Adequate / ❌ Weak | |
+
+### Economy / Critical Judgment
+
+Evaluate **after** verifying completeness, security, quality, accessibility, maintainability, and tests.
+
+**Rating criteria**:
+
+- **✅ Strong**: Code is necessary, localized, no avoidable dependencies/abstractions; any volume is justified by Spec/Design/quality.
+- **⚠️ Adequate**: Some boilerplate or volume exists but does not affect maintainability or introduce material risk.
+- **❌ Weak**: Over-implementation, premature abstractions, avoidable dependencies, "just-in-case" boilerplate, or artificial fragmentation to reduce metrics.
+
+**Anti-gaming rules**:
+- Do NOT penalize legitimate large diffs (migrations, complex features, comprehensive tests).
+- Do NOT penalize volume justified by security, accessibility, or completeness requirements.
+- Mark as **Weak** only when code is genuinely unnecessary.
+
+**Severity rules**:
+- If economy causes **sub-implementation** (missing tests, validation, accessibility), classify under the critical category (Security, Code Quality, Frontend, etc.) as **BLOCKER**/MAJOR — not as a simple economy finding.
+- If the problem is only unnecessary code without functional risk, use **Economy / Critical Judgment** category as **MINOR**/MAJOR based on maintainability impact.
 
 ## Findings
 

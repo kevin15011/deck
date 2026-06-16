@@ -146,6 +146,29 @@ Write backend code to satisfy the assigned tasks:
 - Handle errors, validation, and edge cases as specified in the spec.
 - If a task cannot be implemented as specified, report the blocker immediately.
 
+### Code Economy Self-Check
+
+Apply the decision ladder before adding backend code:
+1. **Does the stdlib or platform already cover this?**
+2. **Is there a native feature in the framework or project?**
+3. **Is there an existing dependency that safely handles this?**
+4. **Can this be solved with a direct, localized solution?**
+5. Only then write minimal, testable, maintainable code.
+
+**Backend No-negotiables** (always override LOC reduction):
+- Input validation (all inputs validated, types checked)
+- Authentication and authorization (proper auth flow, role-based access)
+- Secrets handling (no hardcoded secrets, secure storage)
+- Injection prevention (SQL, command, XSS prevention)
+- Trust boundary validation (API contracts, data validation at boundaries)
+- Data security (encryption at rest/transit, access control)
+- Error handling (graceful degradation, informative errors, no internal exposure)
+- Backend tests (sufficient coverage)
+
+**Budget Advisory**: If volume is high, include justification in apply-progress.md.
+
+**Critical**: Never sacrifice validation, security, auth, data safety, or tests to reduce LOC. Backend code quality is non-negotiable.
+
 ### Step 3: Run Verification
 
 For each completed task, run verification:

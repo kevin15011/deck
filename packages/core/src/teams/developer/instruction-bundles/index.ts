@@ -12,6 +12,7 @@
 
 import { buildAdaptiveMemoryInstructionBundle } from "./adaptive-memory";
 import { buildCodebaseMemoryInstructionBundle } from "./codebase-memory";
+import { buildCodeEconomyInstructionBundle } from "./code-economy";
 import { buildContextModeInstructionBundle } from "./context-mode";
 import { buildRtkInstructionBundle } from "./rtk";
 import { buildSerenaInstructionBundle, getSerenaToolPolicy } from "./serena";
@@ -24,7 +25,7 @@ import type { PackageInstructionRunnerId, PackageInstructionPackageId } from "..
 
 export type CapabilityInstructionSurface = "session" | "agent" | "skill";
 
-export type CapabilityInstructionPackageId = "adaptive-memory" | "codebase-memory" | "context-mode" | "rtk" | "serena";
+export type CapabilityInstructionPackageId = "adaptive-memory" | "codebase-memory" | "code-economy" | "context-mode" | "rtk" | "serena";
 
 export type CapabilityInstructionFragment = {
   packageId: CapabilityInstructionPackageId;
@@ -119,6 +120,7 @@ export type CapabilityToolPolicyBundle = {
 
 const PACKAGE_BUILDERS: Record<CapabilityInstructionPackageId, () => CapabilityInstructionBundle> = {
   "codebase-memory": buildCodebaseMemoryInstructionBundle,
+  "code-economy": buildCodeEconomyInstructionBundle,
   "context-mode": buildContextModeInstructionBundle,
   rtk: buildRtkInstructionBundle,
   "adaptive-memory": buildAdaptiveMemoryInstructionBundle,
@@ -128,6 +130,7 @@ const PACKAGE_BUILDERS: Record<CapabilityInstructionPackageId, () => CapabilityI
 // Canonical package order — used for deterministic bundle ordering
 const PACKAGE_ORDER: CapabilityInstructionPackageId[] = [
   "codebase-memory",
+  "code-economy",
   "context-mode",
   "rtk",
   "adaptive-memory",
