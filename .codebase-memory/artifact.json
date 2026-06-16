@@ -1,11 +1,11 @@
 {
     "schema_version": 1,
-    "commit": "ede862f10522eccf6c9cba61e1aaa2001dc5851a",
-    "indexed_at": "2026-05-29T15:16:22Z",
+    "commit": "1040bdd2fb11672ebf0d0a40df7d8bd8125da7e6",
+    "indexed_at": "2026-06-12T20:52:00Z",
     "project": "home-kevinlb-deck",
-    "nodes": 8495,
-    "edges": 10022,
-    "original_size": 11468800,
-    "compressed_size": 1346703,
+    "nodes": 16338,
+    "edges": 19307,
+    "original_size": 22478848,
+    "compressed_size": 3579929,
     "compression_level": 3
 }
