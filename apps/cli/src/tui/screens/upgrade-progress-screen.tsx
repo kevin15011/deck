@@ -23,6 +23,7 @@ export const UPGRADE_PHASES: readonly string[] = [
 export type UpgradeProgressStatus =
   | { kind: "running"; phase: string; completedCount: number }
   | { kind: "rolled_back"; backupId?: string; reason: string }
+  | { kind: "partial_failure"; failedRunners: string[]; succeededRunners: string[]; backupId?: string; reason: string }
   | { kind: "completed"; version: string; backupId?: string }
   | { kind: "failed"; reason: string };
 
@@ -47,6 +48,7 @@ export function UpgradeProgressScreen({ status, targetVersion }: UpgradeProgress
       <Box marginTop={1} flexDirection="column">
         {status.kind === "running" ? <RunningBody status={status} /> : null}
         {status.kind === "rolled_back" ? <RolledBackBody status={status} /> : null}
+        {status.kind === "partial_failure" ? <PartialFailureBody status={status} /> : null}
         {status.kind === "completed" ? <CompletedBody status={status} /> : null}
         {status.kind === "failed" ? <FailedBody status={status} /> : null}
       </Box>
@@ -81,6 +83,36 @@ function RolledBackBody({ status }: { status: Extract<UpgradeProgressStatus, { k
   return (
     <>
       <Text color="yellow" bold>Rolled back to the previous version</Text>
+      <Text dimColor>Reason: {status.reason}</Text>
+      {status.backupId ? <Text dimColor>Backup used: {status.backupId}</Text> : null}
+      <Box marginTop={1}>
+        <Text dimColor>Press Enter to return to Home.</Text>
+      </Box>
+    </>
+  );
+}
+
+function PartialFailureBody({ status }: { status: Extract<UpgradeProgressStatus, { kind: "partial_failure" }> }) {
+  return (
+    <>
+      <Text color="yellow" bold>Update partially completed</Text>
+      <Text>Some runners failed to sync.</Text>
+      {status.succeededRunners.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>✓ Succeeded:</Text>
+          {status.succeededRunners.map((runnerId) => (
+            <Text key={runnerId} color="green">  • {runnerId}</Text>
+          ))}
+        </Box>
+      )}
+      {status.failedRunners.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>✗ Failed:</Text>
+          {status.failedRunners.map((runnerId) => (
+            <Text key={runnerId} color="red">  • {runnerId}</Text>
+          ))}
+        </Box>
+      )}
       <Text dimColor>Reason: {status.reason}</Text>
       {status.backupId ? <Text dimColor>Backup used: {status.backupId}</Text> : null}
       <Box marginTop={1}>

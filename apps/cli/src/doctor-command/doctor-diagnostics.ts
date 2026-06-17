@@ -23,7 +23,10 @@ import { inspectPiEnvironment, redact, redactDiagnostic, reviewPiRequiredTools, 
 import { inspectOpenCodeEnvironment, reviewOpenCodeTools } from "@deck/adapter-opencode";
 
 import { detectSelectedRuntimes, type EnvironmentId } from "../runtime-detection";
+import { getBuildInfo } from "../runtime/build-info.js";
+import { getDeckXdgPaths } from "../runtime/paths.js";
 import { runDeckChecks } from "./doctor-checks";
+import { decideReleaseAvailability, fetchReleaseDescriptor } from "../upgrade-command/github-release.js";
 import type {
   DoctorCategoryResult,
   DoctorCheckItem,
@@ -31,6 +34,7 @@ import type {
   DoctorRuntimeResult,
   DoctorStatus,
   DoctorSummary,
+  DoctorBinaryResult,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -402,6 +406,75 @@ function checkOpenCodeMcp(): DoctorCategoryResult {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: Build binary upgrade availability check
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the binary upgrade availability check result.
+ * Uses decideReleaseAvailability for commit-aware comparison.
+ */
+async function buildBinaryUpgradeCheck(): Promise<DoctorBinaryResult> {
+  const buildInfo = getBuildInfo();
+  const xdg = getDeckXdgPaths();
+
+  let upgradeAvailable = false;
+  let latestVersion: string | undefined;
+  let latestCommit: string | undefined;
+  let reason: string | undefined;
+
+  try {
+    // Fetch latest release descriptor
+    const descriptor = await fetchReleaseDescriptor();
+    if (descriptor && descriptor.kind === "descriptor") {
+      // Extract version and commit from descriptor
+      latestVersion = descriptor.descriptor.version;
+      latestCommit = descriptor.commit ?? undefined;
+
+      // Use decideReleaseAvailability for commit-aware comparison
+      const decision = decideReleaseAvailability(
+        buildInfo.version,
+        buildInfo.commit,
+        latestVersion,
+        latestCommit,
+      );
+
+      upgradeAvailable = decision.kind === "available";
+      // Only include reason for non-network-error variants
+      reason = decision.kind === "network-error" ? "Network error checking for updates" : decision.reason;
+    } else if (descriptor && descriptor.kind === "legacy") {
+      reason = descriptor.reason === "missing"
+        ? "Release descriptor not found"
+        : descriptor.reason === "invalid"
+          ? "Invalid release descriptor"
+          : descriptor.error ?? "Unknown error";
+    } else {
+      reason = "Could not fetch release information";
+    }
+  } catch (err) {
+    reason = `Error checking releases: ${(err as Error).message}`;
+  }
+
+  return {
+    buildInfo: {
+      version: buildInfo.version,
+      commit: buildInfo.commit,
+      date: buildInfo.date,
+      target: buildInfo.target,
+      channel: buildInfo.channel,
+    },
+    executablePath: process.execPath ?? null,
+    globalConfigDir: xdg.configDir,
+    globalConfigExists: false, // Will be filled by doctor-checks
+    bundledSkillCount: 0, // Will be filled by doctor-checks
+    upgradeAvailable,
+    // Extended fields for upgrade reporting
+    latestVersion,
+    latestCommit,
+    reason,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Helper: Calculate summary from all category results
 // ---------------------------------------------------------------------------
 
@@ -551,7 +624,23 @@ export async function runDoctorDiagnostics(): Promise<DoctorDiagnosticsResult> {
     ];
   }
 
-  // 6. Calculate summary
+  // 6. Binary upgrade availability check (commit-aware)
+  let binaryResult: DoctorBinaryResult;
+  try {
+    binaryResult = await buildBinaryUpgradeCheck();
+  } catch (err) {
+    binaryResult = {
+      buildInfo: null,
+      executablePath: null,
+      globalConfigDir: "",
+      globalConfigExists: false,
+      bundledSkillCount: 0,
+      upgradeAvailable: false,
+      reason: `Error checking upgrade availability: ${redact(String(err))}`,
+    };
+  }
+
+  // 7. Calculate summary
   const summary = calculateSummary(
     deckResults,
     binaryResults,
@@ -583,5 +672,7 @@ export async function runDoctorDiagnostics(): Promise<DoctorDiagnosticsResult> {
     binaryCheck: binaryResults,
     runnerConfig: runnerConfigResults,
     summary,
+    // Binary upgrade availability
+    binary: binaryResult,
   };
 }

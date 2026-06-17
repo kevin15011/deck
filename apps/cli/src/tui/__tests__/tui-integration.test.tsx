@@ -186,6 +186,29 @@ describe("TUI self-update integration (T3.6)", () => {
     expect(output).toContain("bk-1");
   });
 
+  test("progress screen renders partial_failure with failed and succeeded runners", () => {
+    const output = renderToString(
+      <UpgradeProgressScreen
+        status={{
+          kind: "partial_failure",
+          failedRunners: ["opencode", "pi"],
+          succeededRunners: ["serena"],
+          reason: "Failed to sync: opencode, pi.",
+          backupId: "bk-2",
+        }}
+        targetVersion="1.2.0"
+      />,
+    );
+    expect(output).toContain("Update partially completed");
+    expect(output).toContain("Some runners failed to sync");
+    expect(output).toContain("✓ Succeeded:");
+    expect(output).toContain("serena");
+    expect(output).toContain("✗ Failed:");
+    expect(output).toContain("opencode");
+    expect(output).toContain("pi");
+    expect(output).toContain("bk-2");
+  });
+
   test("getHomeMenuOptions returns Update Deck with the base label when no release check is in scope", () => {
     const options = getHomeMenuOptions();
     const update = options.find((o) => o.value === "update-deck");

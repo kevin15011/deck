@@ -61,6 +61,12 @@ export interface DoctorBinaryResult {
   bundledSkillCount: number;
   /** Whether upgrade check is available */
   upgradeAvailable: boolean;
+  /** Latest available version (optional, for upgrade reporting) */
+  latestVersion?: string;
+  /** Latest release commit (optional, for upgrade reporting) */
+  latestCommit?: string;
+  /** Reason for upgrade availability decision (optional) */
+  reason?: string;
 }
 
 /**

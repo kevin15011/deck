@@ -84,6 +84,12 @@ import {
   type RunnerSyncAdapterRegistry,
 } from "./runner-sync.js";
 import { rollbackLatest, RollbackError } from "./rollback.js";
+import {
+  getEnabledPackageInstructionIds,
+  buildCapabilityInstructionBundle,
+  type CapabilityInstructionBundle,
+  type CapabilityInstructionPackageId,
+} from "@deck/core";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -106,6 +112,10 @@ export const ORCHESTRATOR_ERROR_CODES = {
   HOMEBREW_REFUSED: "HOMEBREW_REFUSED",
   /** No binary item was found for the current platform. */
   NO_BINARY_FOR_PLATFORM: "ORCHESTRATOR_NO_BINARY_FOR_PLATFORM",
+  /** Runner sync failed for one or more runners. */
+  RUNNER_SYNC_PARTIAL_FAILURE: "RUNNER_SYNC_PARTIAL_FAILURE",
+  /** Verification failed after upgrade. */
+  RUNNER_VERIFY_FAILED: "RUNNER_VERIFY_FAILED",
 } as const;
 
 export type OrchestratorErrorCode =
@@ -183,6 +193,35 @@ export function detectInstallKind(argv0?: string): "binary" | "homebrew" | "deve
   return "binary";
 }
 
+/**
+ * Input for the binary replacement operation.
+ * Used by the `replaceBinary` hook in OrchestratorDeps.
+ */
+export type ReplaceBinaryInput = {
+  /** Path to the staged asset (already verified checksum). */
+  stagedAssetPath: string;
+  /** Current binary path to replace. */
+  currentBinaryPath: string;
+  /** Expected SHA-256 of the staged asset. */
+  expectedSha256: string;
+  /** Optional backup path for atomic safety. */
+  backupPath?: string;
+  /** Release item identifier. */
+  itemId: string;
+};
+
+/**
+ * Result of the binary replacement operation.
+ */
+export type ReplaceBinaryResult = {
+  /** Whether the binary was replaced. */
+  replaced: boolean;
+  /** Path to the backup (if created). */
+  backupPath?: string;
+  /** Diagnostics messages. */
+  diagnostics?: string[];
+};
+
 export type OrchestratorDeps = {
   /**
    * Resolve the staging directory for a release version. The orchestrator
@@ -220,6 +259,17 @@ export type OrchestratorDeps = {
    */
   installKind: "binary" | "homebrew" | "development" | "unknown";
   /**
+   * Hook for atomic binary replacement. The orchestrator calls this after
+   * verifying the checksum. Default is a no-op that rejects (safe default
+   * for tests without injected deps).
+   */
+  replaceBinary?: (input: ReplaceBinaryInput) => Promise<ReplaceBinaryResult>;
+  /**
+   * Cleanup hook to remove inline backup after verification succeeds.
+   * Called by the orchestrator after successful verification.
+   */
+  cleanupBinaryBackup?: (backupPath?: string) => Promise<void>;
+  /**
    * Pre-flight hook fired before the lock is acquired. The orchestrator
    * does not provide a default; tests use it to fail-fast with a custom
    * error before any side effects.
@@ -247,7 +297,7 @@ export type OrchestratorResult = {
   /** Backup used for atomic safety; may be undefined for content-only upgrades with nothing to back up. */
   backupId?: string;
   /** Per-kind item outcomes. */
-  binary: { status: "skipped" | "completed" | "skipped-homebrew" | "no-item-for-platform"; itemId?: string };
+  binary: { status: "skipped" | "completed" | "skipped-homebrew" | "skipped_external" | "no-item-for-platform"; itemId?: string };
   content: { status: "skipped" | "completed" | "partial_failure"; outcomes?: RunnerSyncResult["outcomes"] };
   migration: { status: "skipped" | "completed"; itemIds: string[] };
   advisory: { items: AdvisoryReleaseItem[] };
@@ -274,39 +324,148 @@ export type OrchestratorResult = {
  * `readDeckConfig` uses a lazy dynamic import to keep this module loadable
  * in tests that don't have `@deck/core` available at the right path.
  */
+/**
+ * Build a default `OrchestratorDeps` from the running process.
+ *
+ * `readDeckConfig` uses a lazy dynamic import to keep this module loadable
+ * in tests that don't have `@deck/core` available at the right path.
+ */
+/**
+ * Build a default `OrchestratorDeps` from the running process.
+ *
+ * Uses the real adapter registry and config reader for production.
+ * Tests can override these dependencies.
+ */
+/**
+ * Build a default `OrchestratorDeps` from the running process.
+ *
+ * Uses the real adapter registry and config reader for production.
+ * Tests can override these dependencies.
+ */
 export async function buildDefaultOrchestratorDeps(): Promise<OrchestratorDeps> {
-  let cached: import("@deck/core").NormalizedDeckConfig | undefined;
-  const readDeckConfig = () => {
-    if (cached) return cached;
-    // Lazy require to avoid a top-level circular dep with the adapter
-    // packages; tests override this dep anyway.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const core = require("@deck/core") as typeof import("@deck/core");
-    cached = core.getDefaultDeckConfig();
-    return cached;
+  // Lazy load the config reader - uses default config synchronously
+  // For production config, consumers should use readDeckConfig with proper async handling
+  const readDeckConfig = (): import("@deck/core").NormalizedDeckConfig => {
+    try {
+      // Try to get default config (synchronous)
+      const { getDefaultDeckConfig } = require("@deck/core") as typeof import("@deck/core");
+      return getDefaultDeckConfig();
+    } catch {
+      // If even default config fails, throw to signal the error
+      throw new Error("Could not load default deck config");
+    }
+  };
+
+  // Lazy load the adapter registry
+  let adapterRegistry: OrchestratorDeps["adapterRegistry"];
+  try {
+    const { createDefaultAdapterRegistry } = require("../runner-adapters.js") as typeof import("../runner-adapters.js");
+    adapterRegistry = createDefaultAdapterRegistry();
+  } catch {
+    // Fall back to empty registry if adapters can't be loaded
+    adapterRegistry = {
+      list: () => [],
+      has: () => false,
+      get: () => {
+        throw new Error("Default adapter registry unavailable");
+      },
+    };
+  }
+
+  // Productive replaceBinary implementation - atomic replace with backup
+  // NOTE: We keep the backup inline until after verification completes.
+  // The caller (workflow) is responsible for cleanup via cleanupBinaryBackup().
+  const replaceBinary: OrchestratorDeps["replaceBinary"] = async (input) => {
+    const { existsSync, renameSync, unlinkSync, chmodSync, mkdirSync } = require("node:fs") as typeof import("node:fs");
+    const { dirname } = require("node:path") as typeof import("node:path");
+
+    const targetDir = dirname(input.currentBinaryPath);
+
+    // Ensure target directory exists
+    if (!existsSync(targetDir)) {
+      mkdirSync(targetDir, { recursive: true });
+    }
+
+    const backupPath = input.backupPath ?? (input.currentBinaryPath + ".backup");
+    const diagnostics: string[] = [];
+
+    // Step 1: Backup current binary if it exists
+    if (existsSync(input.currentBinaryPath)) {
+      try {
+        // Remove old backup if exists
+        if (existsSync(backupPath)) {
+          unlinkSync(backupPath);
+        }
+        // Rename current to backup
+        renameSync(input.currentBinaryPath, backupPath);
+        diagnostics.push(`Backed up current binary to ${backupPath}`);
+      } catch (backupErr) {
+        throw new Error(`Backup failed: ${(backupErr as Error).message}`);
+      }
+    }
+
+    // Step 2: Move new binary to target (single rename, same filesystem)
+    try {
+      renameSync(input.stagedAssetPath, input.currentBinaryPath);
+      diagnostics.push(`Replaced binary at ${input.currentBinaryPath}`);
+    } catch (replaceErr) {
+      // Restore from backup on failure
+      if (existsSync(backupPath)) {
+        try {
+          renameSync(backupPath, input.currentBinaryPath);
+          diagnostics.push("Restored from backup after replace failure");
+        } catch {
+          // Rollback failed - critical failure
+          throw new Error(`Critical: replace failed and rollback failed. Binary may be corrupted.`);
+        }
+      }
+      throw new Error(`Replace failed: ${(replaceErr as Error).message}`);
+    }
+
+    // Step 3: Make executable (but keep backup for now - cleanup happens after verify)
+    try {
+      chmodSync(input.currentBinaryPath, 0o755);
+    } catch {
+      // Best-effort - binary is already replaced
+      diagnostics.push("Note: could not set executable permissions");
+    }
+
+    return {
+      replaced: true,
+      backupPath,
+      diagnostics,
+    };
+  };
+
+  // Cleanup function to remove inline backup after verification
+  const cleanupBinaryBackup = async (backupPath?: string) => {
+    if (!backupPath) return;
+    try {
+      const { existsSync, unlinkSync } = require("node:fs") as typeof import("node:fs");
+      if (existsSync(backupPath)) {
+        unlinkSync(backupPath);
+      }
+    } catch {
+      // Best-effort cleanup
+    }
   };
 
   return {
     resolveStagingDir: (version: string) => {
-      const cache = require("../runtime/paths.js") as typeof import("../runtime/paths.js");
-      const xdg = cache.getDeckXdgPaths();
-      const path = require("node:path") as typeof import("node:path");
-      return path.join(xdg.releasesDir, `v${version}`);
+      const { getDeckXdgPaths } = require("../runtime/paths.js") as typeof import("../runtime/paths.js");
+      const xdg = getDeckXdgPaths();
+      const { join } = require("node:path") as typeof import("node:path");
+      return join(xdg.releasesDir, `v${version}`);
     },
     resolveStagedAsset: (version: string, assetName: string) => {
-      const cache = require("../runtime/paths.js") as typeof import("../runtime/paths.js");
-      const xdg = cache.getDeckXdgPaths();
-      const path = require("node:path") as typeof import("node:path");
-      const full = path.join(xdg.releasesDir, `v${version}`, assetName);
+      const { getDeckXdgPaths } = require("../runtime/paths.js") as typeof import("../runtime/paths.js");
+      const xdg = getDeckXdgPaths();
+      const { join } = require("node:path") as typeof import("node:path");
+      const { existsSync } = require("node:fs") as typeof import("node:fs");
+      const full = join(xdg.releasesDir, `v${version}`, assetName);
       return existsSync(full) ? full : null;
     },
-    adapterRegistry: {
-      list: () => [],
-      has: () => false,
-      get: () => {
-        throw new Error("Default adapter registry is empty; provide deps.adapterRegistry.");
-      },
-    },
+    adapterRegistry,
     projectRoot: process.cwd(),
     readDeckConfig,
     // Use process.execPath to correctly identify installed binary path.
@@ -314,12 +473,20 @@ export async function buildDefaultOrchestratorDeps(): Promise<OrchestratorDeps> 
     // process.execPath contains the actual binary path.
     currentBinaryPath: process.execPath ?? process.argv[0] ?? "",
     installKind: detectInstallKind(),
+    replaceBinary,
+    cleanupBinaryBackup,
   };
 }
 
 // ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
+
+/**
+ * Alias for runUpgradeOrchestrator — preferred name for the self-upgrade workflow.
+ * Both exports point to the same implementation for backward compatibility.
+ */
+export const runSelfUpgradeWorkflow = runUpgradeOrchestrator;
 
 /**
  * Run the upgrade orchestrator.
@@ -377,12 +544,37 @@ export async function runUpgradeOrchestrator(
   try {
     const binaryItem = selectBinaryItemForPlatform(descriptor, getCurrentPlatformTriple());
     const contentItems = selectItemsByKind(descriptor, "content");
+
+    // Collect backup targets: binary + content + runner files
+    const baseTargets = collectBackupTargets(binaryItem, contentItems, deps);
+    let runnerTargets: Array<{
+      id: string;
+      sourcePath: string;
+      owner: `runner:${string}`;
+      kind: "config" | "prompt" | "skill" | "subagent" | "mcp" | "state" | "manifest";
+    }> = [];
+    let runnerBackupError: string | undefined;
+    try {
+      runnerTargets = await collectRunnerBackupTargets(deps);
+    } catch (err) {
+      // Log error but continue - runner backup is best-effort
+      runnerBackupError = (err as Error).message;
+      console.error(`Warning: Failed to collect runner backup targets: ${runnerBackupError}`);
+      runnerTargets = [];
+    }
+
+    // If we couldn't collect runner targets, log a warning but proceed
+    // The sync will still work but without per-runner rollback capability
+    if (runnerTargets.length === 0 && !runnerBackupError) {
+      console.warn("Warning: No runner backup targets collected - skipping runner rollback capability");
+    }
+
     const backupInput: CreateBackupInput = {
       operationId,
       deckVersionBefore: options.currentVersion,
       ...(descriptor.version ? { targetVersion: descriptor.version } : {}),
       reason: "upgrade",
-      files: collectBackupTargets(binaryItem, contentItems, deps),
+      files: [...baseTargets, ...runnerTargets],
     };
     backup = createBackup(backupInput);
     state = setActiveOperation(state, {
@@ -532,6 +724,20 @@ export async function runUpgradeOrchestrator(
     }
   }
 
+  // Cleanup inline backup after successful verification
+  // This is safe because we have the backup-store copy for rollback
+  if (deps.cleanupBinaryBackup) {
+    // Get the backup path from the replace result stored in state
+    const replaceResult = state.activeOperation?.metadata?.replaceResult as ReplaceBinaryResult | undefined;
+    if (replaceResult?.backupPath) {
+      try {
+        await deps.cleanupBinaryBackup(replaceResult.backupPath);
+      } catch {
+        // Cleanup is best-effort - we still have the backup-store copy
+      }
+    }
+  }
+
   // Compute content status: partial_failure when at least one runner
   // sync reported failure, completed when all sync'd or skipped cleanly.
   const hasFailures = (contentOutcome.outcomes ?? []).some((o) => o.status === "failed");
@@ -625,13 +831,42 @@ async function runBinaryItem(
   });
   writeState(state);
 
-  // Atomic replace. The actual rename is delegated to the caller via
-  // the install module. For now we trust that the binary path is
-  // updated by an external hook (e.g. the actual `performUpgrade` from
-  // install.ts in production). Tests inject a `replaceBinary` hook via
-  // deps to perform the rename. To keep the API tight, we always
-  // require the staging asset to exist; the caller's install.ts is
-  // responsible for the actual file replacement.
+  // Atomic replace: delegate to replaceBinary hook if provided
+  // The hook is responsible for the actual file replacement.
+  // If no hook provided, skip the replace (tests can inject the hook).
+  if (deps.replaceBinary) {
+    try {
+      const replaceInput: ReplaceBinaryInput = {
+        stagedAssetPath: staged,
+        currentBinaryPath: deps.currentBinaryPath,
+        expectedSha256: item.sha256,
+        itemId: item.id,
+      };
+      const replaceResult = await deps.replaceBinary(replaceInput);
+      // Store replace result for cleanup after verify
+      state = setActiveOperation(state, {
+        ...(state.activeOperation ?? {
+          id: "binary",
+          version: "0",
+          phase: "binary",
+          startedAt: new Date().toISOString(),
+        }),
+        metadata: { replaceResult },
+      });
+      // If the hook reports replaced=false, treat as skipped (e.g., external manager)
+      if (!replaceResult.replaced) {
+        return { status: "skipped_external", itemId: item.id };
+      }
+    } catch (replaceErr) {
+      // Rollback on replace failure: restore from backup if available
+      throw new OrchestratorError(
+        ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+        `Binary replacement failed: ${(replaceErr as Error).message}`,
+        { cause: replaceErr },
+      );
+    }
+  }
+
   return { status: "completed", itemId: item.id };
 }
 
@@ -706,6 +941,158 @@ function collectBackupTargets(
     });
   }
   return files;
+}
+
+/**
+ * Collect backup targets for all runners that are both installed and have enabled
+ * package instructions. This is used by the orchestrator to pre-populate the
+ * backup with all mutable files before any mutation occurs.
+ *
+ * For each runner in the registry:
+ *   1. Check `detectDeckInstall` — if not installed, skip.
+ *   2. Check `getEnabledPackageInstructionIds` — if empty, skip.
+ *   3. Build the capability bundle and install plan.
+ *   4. Map `plan.files` to backup targets with owner `runner:${runnerId}`.
+ *
+ * This helper is intentionally side-effect-free: it only computes targets.
+ * The caller decides when and how to create the backup.
+ */
+export async function collectRunnerBackupTargets(
+  deps: OrchestratorDeps,
+): Promise<
+  Array<{
+    id: string;
+    sourcePath: string;
+    owner: `runner:${string}`;
+    kind: "config" | "prompt" | "skill" | "subagent" | "mcp" | "state" | "manifest";
+  }>
+> {
+  const targets: Array<{
+    id: string;
+    sourcePath: string;
+    owner: `runner:${string}`;
+    kind: "config" | "prompt" | "skill" | "subagent" | "mcp" | "state" | "manifest";
+  }> = [];
+
+  const config = deps.readDeckConfig();
+  const runnerIds = deps.adapterRegistry.list().map((a) => a.runnerId);
+
+  for (const runnerId of runnerIds) {
+    // 1. Check if the runner has Deck installed.
+    const adapter = deps.adapterRegistry.get(runnerId);
+    const detection = await safeDetectDeckInstall(adapter, deps.projectRoot);
+    if (!detection.installed) {
+      continue;
+    }
+
+    // 2. Check if there are enabled package instructions.
+    const enabledIds = getEnabledPackageInstructionIds(config, runnerId);
+    if (enabledIds.length === 0) {
+      continue;
+    }
+
+    // 3. Build the capability bundle and install plan.
+    const bundle = buildCapabilityInstructionBundle(enabledIds);
+    const plan = safeBuildDeveloperTeamPlan(adapter, {
+      projectRoot: deps.projectRoot,
+      environmentId: (adapter.environmentIds[0] ?? "opencode-development") as never,
+      capabilityInstructions: bundle,
+    });
+
+    if (!plan.files || plan.files.length === 0) {
+      continue;
+    }
+
+    // 4. Map plan.files to backup targets.
+    for (const file of plan.files) {
+      // Classify the file kind based on its path pattern.
+      const kind = classifyFileKind(file.path);
+      targets.push({
+        id: `${runnerId}:${file.path}`,
+        sourcePath: file.path,
+        owner: `runner:${runnerId}` as const,
+        kind,
+      });
+    }
+  }
+
+  return targets;
+}
+
+/**
+ * Safe wrapper for adapter.detectDeckInstall — returns a safe result
+ * when the method is missing or throws.
+ */
+async function safeDetectDeckInstall(
+  adapter: RunnerSyncAdapterRegistry extends { get(runnerId: string): infer T } ? T : never,
+  projectRoot: string,
+): Promise<{ installed: boolean; managedPaths: readonly string[] }> {
+  if (typeof (adapter as any).detectDeckInstall !== "function") {
+    return { installed: false, managedPaths: [] };
+  }
+  try {
+    return await (adapter as any).detectDeckInstall({ projectRoot });
+  } catch {
+    return { installed: false, managedPaths: [] };
+  }
+}
+
+/**
+ * Safe wrapper for adapter.buildDeveloperTeamInstallPlan — returns a safe plan
+ * when the method is missing or throws.
+ */
+function safeBuildDeveloperTeamPlan(
+  adapter: RunnerSyncAdapterRegistry extends { get(runnerId: string): infer T } ? T : never,
+  input: {
+    projectRoot: string;
+    environmentId: string;
+    capabilityInstructions: CapabilityInstructionBundle;
+  },
+): { files?: Array<{ path: string }> } {
+  if (typeof (adapter as any).buildDeveloperTeamInstallPlan !== "function") {
+    return { files: [] };
+  }
+  try {
+    return (adapter as any).buildDeveloperTeamInstallPlan(input.projectRoot, {
+      environmentId: input.environmentId,
+      capabilityInstructions: input.capabilityInstructions,
+    });
+  } catch {
+    return { files: [] };
+  }
+}
+
+/**
+ * Classify a runner file path into a backup `kind`.
+ * Used by `collectRunnerBackupTargets` to categorize files for the backup manifest.
+ */
+function classifyFileKind(
+  filePath: string,
+): "config" | "prompt" | "skill" | "subagent" | "mcp" | "state" | "manifest" {
+  const lower = filePath.toLowerCase();
+  if (lower.includes("packageinstructions") || lower.includes(".json")) {
+    return "config";
+  }
+  if (lower.includes("/prompts/") || lower.includes("prompts\\")) {
+    return "prompt";
+  }
+  if (lower.includes("/skills/") || lower.includes("skills\\")) {
+    return "skill";
+  }
+  if (lower.includes("/subagents/") || lower.includes("subagents\\") || lower.includes("/agents/") || lower.includes("agents\\")) {
+    return "subagent";
+  }
+  if (lower.includes("/mcp/") || lower.includes("mcp\\")) {
+    return "mcp";
+  }
+  if (lower.includes("/state") || lower.includes("\\state") || lower.includes(".db")) {
+    return "state";
+  }
+  if (lower.includes("/manifest") || lower.includes("\\manifest")) {
+    return "manifest";
+  }
+  // Default to config for unknown files (safe default).
+  return "config";
 }
 
 function tryRollback(

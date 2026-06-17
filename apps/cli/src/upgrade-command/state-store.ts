@@ -76,6 +76,7 @@ export const ActiveOperationSchema = z.object({
   backupId: z.string().optional(),
   releaseCachePath: z.string().optional(),
   startedAt: z.string().datetime(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 export type ActiveOperation = z.infer<typeof ActiveOperationSchema>;
 

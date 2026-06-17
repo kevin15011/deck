@@ -1,0 +1,121 @@
+- phase: explore
+  status: completed
+  event: exploration-complete
+  artifact: exploration.md
+  date: "2026-06-16"
+  summary: "Investigación del flujo update/upgrade: wiring incompleto en TUI (registry/config vacíos), orchestrator sin reemplazo real de binario, backup sin archivos de runner y DoctorBinaryResult no poblado. Se recomienda corregir wiring, implementar replaceBinary, extender backup y poblar upgradeAvailable."
+- phase: proposal
+  status: completed
+  event: proposal-complete
+  artifact: proposal.md
+  date: "2026-06-16"
+  summary: "Propuesta para ejecutar update/upgrade mediante self-upgrade workflow con registry/config reales, reemplazo atómico de binario, sync por runner instalado, respeto de packageInstructions, backups previos de configs y DoctorBinaryResult.upgradeAvailable."
+
+- phase: spec
+  status: completed
+  event: spec-complete
+  artifact: spec.md
+  date: "2026-06-16"
+  summary: "Spec registry-deferred reconciliado: requisitos para detección de upgrades, reemplazo atómico de binario, sync por runner instalado, packageInstructions reales, backups y rollback."
+
+- phase: design
+  status: completed
+  event: design-complete
+  artifact: design.md
+  date: "2026-06-16"
+  summary: "Design registry-deferred reconciliado: self-upgrade workflow compartido TUI/CLI con replaceBinary, backup global+runner, sync filtrado por capacidades y Doctor upgradeAvailable."
+
+- phase: tasks
+  status: completed
+  event: tasks-complete
+  artifact: tasks.md
+  date: "2026-06-16"
+  summary: "Tasks registry-active: 17 tareas atómicas en 4 grupos (Shared/Backend/Frontend/Tests). T1-T3 contratos compartidos, T4-T8 backend core (replaceBinary, backup+runners, rollback, CLI delegation, Doctor), T9-T10 doctor commit-aware, T11-T12 TUI con registry/config reales y progreso, T13-T17 cobertura Bun. Review forecast 400-800 lineas (Medium), slices secuenciales Backend→Frontend. 6 Open Questions clasificadas: 4 deferred, 2 allowed-with-placeholder; 0 implementation-blocking. Preconditions artifact creado con 14 entradas (satisfied/allowed-with-placeholder/deferred); Ready for Apply yes with conditions."
+- phase: preconditions
+  status: completed
+  event: preconditions-created
+  artifact: preconditions.md
+  date: "2026-06-16"
+  summary: "Preconditions registry-active: 14 precondiciones (PCG-001..PCG-014). 5 satisfied, 7 allowed-with-placeholder, 2 deferred. Closure Decision: Ready for Apply yes with conditions; ninguna precondición bloquea Apply."
+
+- phase: apply
+  status: gate-pass
+  event: preconditions-gate-pass
+  artifact: preconditions.md
+  date: "2026-06-16"
+  summary: "Preconditions gate evaluated before Apply: pass; no blocked rows with Blocks Apply=Yes."
+  - phase: apply
+  status: in_progress
+  event: general-apply-slice1-complete
+  artifact: apply-progress.md
+  date: "2026-06-16"
+  summary: "General Apply Slice 1: T1 (replaceBinary contract), T2 (runSelfUpgradeWorkflow alias), T3 (collectRunnerBackupTargets helper) completados. Tipos y funciones exportados en orchestrator.ts. Tests existentes pasan."
+
+- phase: apply
+  status: completed
+  event: backend-apply-slice2-3-complete
+  artifact: apply-progress.md
+  date: "2026-06-16"
+  summary: "Backend Apply Slice 2-3: T4 (replaceBinary productivo), T5 (collectBackupTargets con runners), T6 (buildDefaultOrchestratorDeps reales), T7 (rollback explícito), T8 (CLI delega workflow), T9 (Doctor binary upgradeAvailable), T10 (TUI release-check commit-aware) completados. Tests: 19 orchestrator.test.ts, 9 index.test.ts, 13 doctor-diagnostics.test.ts verde. 40 fallos baseline preexistentes no relacionados."
+
+- phase: apply
+  status: completed
+  event: frontend-apply-slice4-complete
+  artifact: apply-progress.md
+  date: "2026-06-16"
+  summary: "Frontend Apply Slice 4: T11 (TUI usa registry/config reales), T12 (TUI muestra progreso/errores detallados), T17 (tests existentes cubren REQ-TUI-001/002) completados. Registry real: createDefaultAdapterRegistry(). Config real: readDeckConfig/readGlobalDeckConfig. Tests: 23 tui-integration.test.tsx, 19 orchestrator.test.ts verde."
+
+- phase: apply
+  status: completed
+  event: backend-apply-final-tests-complete
+  artifact: apply-progress.md
+  date: "2026-06-16"
+  summary: "Backend Apply Final (T13-T16): Tests de cobertura completados. orchestrator.test.ts (19 tests), runner-sync.test.ts (10 tests), index.test.ts (9 tests), doctor-diagnostics.test.ts (13 tests), github-release.test.tscubren REQ-BIN-001/002/003, REQ-BCU-001/002/003, REQ-ROL-001/002/003, REQ-SRS-001/002/003/004/005, REQ-CLI-001/002, REQ-UAR-001/002. Todos los tests pasan (sin red real, sin writes reales)."
+
+- phase: verify
+  status: failed
+  event: verify-complete
+  artifact: verify-report.md
+  date: "2026-06-16"
+  summary: "Registry-deferred Verify reconciled: FAIL due to typecheck failures and MUST blockers in Doctor/orchestrator/CLI rollback."
+
+- phase: review
+  status: changes_requested
+  event: review-complete
+  artifact: review-report.md
+  date: "2026-06-16"
+  summary: "Registry-deferred Review reconciled: REQUEST CHANGES for Homebrew content sync blocker and five major fixes."
+
+- phase: apply_fix
+  status: completed
+  event: backend-fix-batch1-complete
+  artifact: apply-progress.md
+  date: "2026-06-16"
+  summary: "Backend Fix Batch 1: 7 fixes applied - typecheck (doctor-diagnostics, orchestrator), skipped_external status, Homebrew content sync, runner backup logging, backup inline defer, CLI error logging. Tests: 50/51 pass (1 preexistente). Typecheck: archivos modificados limpios."
+
+- phase: apply_fix
+  status: completed
+  event: final-verify-fix-complete
+  artifact: apply-progress.md
+  date: "2026-06-16"
+  summary: "Final Verify Fix: runUpgrade signature contract repair. Soporta doble llamada: CLI (array) y programática (3 params). --version flag retorna 0 sin workflow. Typecheck: archivos tocados limpios. Test clave: handles --version flag pasa."
+
+- phase: verify
+  status: completed
+  event: verify-complete
+  artifact: verify-report.md
+  date: "2026-06-17"
+  summary: "Final Verify reconciled: PASS WITH WARNINGS; 111/111 focused tests pass; introduced_by_change=0; remaining TypeScript failures baseline_structural."
+
+- phase: review
+  status: completed
+  event: review-complete
+  artifact: review-report.md
+  date: "2026-06-17"
+  summary: "Final Review reconciled: APPROVE; no blockers or required fixes; minor advisory follow-ups only."
+- phase: archive
+  status: completed
+  event: archive-complete
+  artifact: archive-report.md
+  date: "2026-06-17"
+  summary: "Archive complete: traceability matrix built, follow-ups recorded, registry updated. Change fully closed."

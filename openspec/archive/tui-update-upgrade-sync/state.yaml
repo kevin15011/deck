@@ -1,0 +1,88 @@
+changeId: tui-update-upgrade-sync
+currentPhase: archive
+status: archived
+artifacts:
+  - path: exploration.md
+    description: "Exploración del flujo update/upgrade TUI+CLI: detección de versiones, instalación de binario, sync por runner, selección de capacidades, backup de config y doctor upgradeAvailable"
+  - path: proposal.md
+    description: "Propuesta para unificar update/upgrade TUI+CLI con self-upgrade workflow, reemplazo real de binario, sync por runner, backups de configuración y reporting de upgrade disponible"
+  - path: spec.md
+    description: "Especificación de requisitos para update/upgrade TUI+CLI, binario, sync por runner, capacidades opcionales, backups y rollback"
+  - path: design.md
+    description: "Diseño técnico del self-upgrade workflow compartido, replaceBinary, backups por runner, sync filtrado y Doctor upgradeAvailable"
+  - path: tasks.md
+    description: "Tasks registry-active: 17 tareas atómicas agrupadas en Shared/Backend/Frontend/Tests con dependencias, owner, complejidad, execution groups, review forecast y open questions clasificadas"
+  - path: preconditions.md
+    description: "Preconditions registry-active: 14 precondiciones clasificadas (satisfied/allowed-with-placeholder/deferred); Ready for Apply yes with conditions"
+  - path: verify-report.md
+    description: "Final Verify: PASS WITH WARNINGS; focused tests pass; typecheck failures classified baseline_structural"
+  - path: review-report.md
+    description: "Final Review: APPROVE; no blocking required fixes"
+provenance:
+  spec: deck-developer-spec
+  design: deck-developer-design
+  tasks: deck-developer-task
+  initiated_by: user
+  explorer: deck-developer-explorer
+  proposal: deck-developer-proposal
+  model: opencode-go/kimi-k2.7-code
+  proposalModel: openai/gpt-5.5
+  timestamp: "2026-06-16"
+  opencodeVersion: deck 0.1.4
+
+phases:
+  explore:
+    status: completed
+    artifact: exploration.md
+  proposal:
+    status: completed
+    artifact: proposal.md
+    registryMode: deferred
+  spec:
+    status: completed
+    artifact: spec.md
+    registryMode: deferred
+  design:
+    status: completed
+    artifact: design.md
+    registryMode: deferred
+  tasks:
+    status: completed
+    artifact: tasks.md
+    preconditions: preconditions.md
+    registryMode: active
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    agent: backend
+    completed_tasks: "T4-T10"
+    registryMode: active
+  frontend_apply:
+    status: completed
+    artifact: apply-progress.md
+    agent: frontend
+    completed_tasks: "T11,T12,T17"
+    registryMode: active
+  backend_apply_final:
+    status: completed
+    artifact: apply-progress.md
+    agent: backend
+    completed_tasks: "T13,T14,T15,T16"
+    registryMode: active
+  apply_fix_batch_1:
+    status: completed
+    artifact: apply-progress.md
+    agent: backend
+    completed_fixes: "typecheck-Doctor,typecheck-orchestrator,skipped_external,Homebrew-sync,runner-backup-logging,backup-inline-defer,CLI-logging"
+    registryMode: active
+  apply_final_verify_fix:
+    status: completed
+    artifact: apply-progress.md
+    agent: backend
+    completed_fixes: "runUpgrade-signature-contract,--version-flag-early-exit"
+    registryMode: active
+  archive:
+    status: completed
+    artifact: archive-report.md
+    date: "2026-06-17"
+    archiveLocation: openspec/archive/tui-update-upgrade-sync/

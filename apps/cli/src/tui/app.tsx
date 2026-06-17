@@ -118,7 +118,7 @@ import { reduceRunnerDashboard } from "./runner-dashboard/reducer";
 import { getToggleableCapabilityIds } from "./runner-dashboard/selectors";
 import { createDefaultRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type RunnerDashboardState } from "./runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
-import { getAdapter } from "../runner-adapters";
+import { getAdapter, createDefaultAdapterRegistry } from "../runner-adapters";
 import { HomeScreen } from "./screens/home-screen";
 import { DoctorScreen } from "./screens/doctor-screen";
 import { UpgradeConfirmScreen } from "./screens/upgrade-screen";
@@ -530,7 +530,7 @@ export function DeckApp() {
         const plan = adapter.buildReviewPlan(
           {
             runnerId: state.runnerScope as any,
-            selectedCapabilities: state.selectedCapabilities,
+            selectedCapabilities: state.selectedCapabilities as Record<string, boolean>,
             adaptiveMemory: state.adaptiveMemory as any,
             teams: state.teams as any,
             runtime: { toolsReview: state.runtime.toolsReview as any },
@@ -827,12 +827,13 @@ export function DeckApp() {
               kind: action.kind,
               title: action.title,
               capabilityId: action.capabilityId,
+              status: "ready" as const,
             };
             const actionResult = await adapter.runAction(piAction as any, { runnerCommand: "pi" } as any);
             return {
               ok: actionResult.status === "executed",
               path: `${process.env.HOME ?? "/home/kevinlb"}/.pi/agent/mcp.json`,
-              diagnostics: actionResult.diagnostics,
+              diagnostics: [...(actionResult.diagnostics ?? [])],
             };
           }
           // Fall back to default behavior for OpenCode or supermemory
@@ -852,6 +853,7 @@ export function DeckApp() {
                 capabilityId: pkg.id,
                 toolId: pkg.id,
                 source: pkg.source,
+                status: "ready" as const,
               };
               
               try {
@@ -1066,6 +1068,20 @@ export function DeckApp() {
     const run = async () => {
       try {
         const currentVersion = getBuildInfo().version;
+        // T11: Use real registry and config (not placeholders)
+        const realRegistry = createDefaultAdapterRegistry();
+        // Resolve config synchronously before passing to orchestrator
+        // (readDeckConfig is sync, readGlobalDeckConfig is async)
+        let resolvedConfig: NormalizedDeckConfig;
+        try {
+          if (localResolvedProjectRoot) {
+            resolvedConfig = readDeckConfig(localResolvedProjectRoot);
+          } else {
+            resolvedConfig = await readGlobalDeckConfig();
+          }
+        } catch {
+          resolvedConfig = getDefaultDeckConfig();
+        }
         const result = await runUpgradeOrchestrator({
           descriptor: upgradeDescriptor,
           targetVersion: upgradeDescriptor.version,
@@ -1077,31 +1093,53 @@ export function DeckApp() {
             // process.execPath contains the actual binary path.
             currentBinaryPath: process.execPath ?? process.argv[0] ?? "",
             projectRoot: localResolvedProjectRoot ?? process.cwd(),
-            // The real registry is used here; tests inject a fake.
-            adapterRegistry: {
-              list: () => [],
-              has: () => false,
-              get: () => {
-                throw new Error("No adapter available in the TUI upgrade path; use `deck upgrade` for the real path.");
-              },
-            },
-            readDeckConfig: () => getDefaultDeckConfig(),
+            // T11: Real registry with real adapters (pi, opencode)
+            adapterRegistry: realRegistry,
+            // T11: Real config (not default placeholder)
+            readDeckConfig: () => resolvedConfig,
           },
         });
         if (cancelled) return;
+        // T12: Map detailed outcomes to UI status
         if (result.status === "rolled_back") {
+          // Build reason from binary/content outcomes
+          let reason = "Upgrade failed; rolled back to the previous version.";
+          if (result.binary.status !== "skipped" && result.binary.status !== "completed") {
+            reason = `Binary ${result.binary.status}: rolled back.`;
+          } else if (result.content.status === "partial_failure") {
+            reason = "Content sync partial failure; rolled back.";
+          }
           setUpgradeProgress({
             kind: "rolled_back",
             ...(result.backupId ? { backupId: result.backupId } : {}),
-            reason: "Upgrade failed; rolled back to the previous version.",
+            reason,
           });
           return;
         }
         if (result.status === "partial_failure") {
+          // T12: Show detailed failure info - binary was updated, some runners failed
+          let reason = "One or more runners failed to sync.";
+          const failedRunners: string[] = [];
+          const succeededRunners: string[] = [];
+          if (result.content.status === "partial_failure" && result.content.outcomes) {
+            for (const outcome of result.content.outcomes) {
+              const status = outcome.status;
+              if (status === "failed" || status === "error") {
+                failedRunners.push(outcome.runnerId);
+              } else if (status === "completed" || status === "skipped" || status === "synced") {
+                succeededRunners.push(outcome.runnerId);
+              }
+            }
+            if (failedRunners.length > 0) {
+              reason = `Failed to sync: ${failedRunners.join(", ")}.`;
+            }
+          }
           setUpgradeProgress({
-            kind: "rolled_back",
+            kind: "partial_failure",
+            failedRunners,
+            succeededRunners,
             ...(result.backupId ? { backupId: result.backupId } : {}),
-            reason: "One or more steps failed; rolled back.",
+            reason,
           });
           return;
         }
@@ -1134,7 +1172,7 @@ export function DeckApp() {
 
     async function runInstall() {
       // Use require: true for backward compatibility - file ops always need a path
-      const projectRoot = resolveProjectRoot({ require: true });
+      const projectRoot = resolveProjectRoot({ require: true }) ?? process.cwd();
 
       // Determine environmentId based on selected environments
       const openCodeExclusive = selectedEnvironments.includes("opencode-development") && !selectedEnvironments.includes("pi-development");
@@ -1467,7 +1505,7 @@ export function DeckApp() {
       setSelectedPersonality(selected.id);
       try {
         // Use require: true for backward compatibility - writes need a path
-        const projectRoot = resolveProjectRoot({ require: true });
+        const projectRoot = resolveProjectRoot({ require: true }) ?? process.cwd();
         const existingConfig = readDeckConfig(projectRoot);
         writeDeckConfig(projectRoot, {
           ...existingConfig,
@@ -1535,7 +1573,7 @@ export function DeckApp() {
 
       if (selected.id === "apply" && configurePackagesRunner) {
         // Use require: true for backward compatibility - writes need a path
-        const projectRoot = resolveProjectRoot({ require: true });
+        const projectRoot = resolveProjectRoot({ require: true }) ?? process.cwd();
         const existingConfig = readDeckConfig(projectRoot);
         const newPackageInstructions = {
           ...existingConfig.packageInstructions,
