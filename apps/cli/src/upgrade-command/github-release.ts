@@ -36,8 +36,8 @@ import {
 import { ReleaseDescriptorError } from "./release-descriptor.js";
 
 // GitHub repository for deck
-const GITHUB_OWNER = "gentleman-programming";
-const GITHUB_REPO = "deck";
+export const GITHUB_OWNER = "kevin15011";
+export const GITHUB_REPO = "deck";
 
 /**
  * Map Node.js platform to asset OS name.
@@ -171,18 +171,34 @@ export function getDefaultReleaseCachePath(): string {
  * Read the GitHub release JSON via the public releases API.
  *
  * Centralized so tests can inject a custom transport.
+ * Returns non-zero exitCode when HTTP status is non-2xx (404, 403, rate limit, etc.)
+ * to prevent 404 responses from being parsed as "no upgrade available".
  */
 export function curlReleasesApi(extraArgs: readonly string[] = []): { exitCode: number; stdout: string; stderr: string } {
   const result = spawnSync("curl", [
     "-s",
     "-L",
+    "-w",
+    "%{http_code}",
     ...extraArgs,
     `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
   ]);
+  const output = (result.stdout ?? "") as string;
+  
+  // Extract HTTP status code from the last line (curl -w outputs it after the body)
+  const lines = output.split("\n");
+  const httpCodeStr = lines.pop()?.trim() ?? "";
+  const httpCode = parseInt(httpCodeStr, 10);
+  const body = lines.join("\n");
+  
+  // Non-2xx HTTP status indicates an error (404 not found, 403 forbidden, rate limit, etc.)
+  // Return exitCode 1 to trigger network-error handling in fetchReleaseDescriptor
+  const isHttpError = !httpCodeStr || httpCode < 200 || httpCode >= 300;
+  
   return {
-    exitCode: result.exitCode ?? 1,
-    stdout: (result.stdout ?? "") as string,
-    stderr: (result.stderr ?? "") as string,
+    exitCode: isHttpError ? 1 : (result.exitCode ?? 0),
+    stdout: body,
+    stderr: isHttpError ? `HTTP ${httpCode || "error"}` : (result.stderr ?? "") as string,
   };
 }
 

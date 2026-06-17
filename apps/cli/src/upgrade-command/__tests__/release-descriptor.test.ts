@@ -52,7 +52,7 @@ function makeSpecBinaryItem(overrides: Record<string, unknown> = {}): Record<str
     required: true,
     platform: "linux-x64",
     asset_name: "deck_v1.0.0_linux-x64.tar.gz",
-    url: "https://github.com/gentleman-programming/deck/releases/download/v1.0.0/deck_v1.0.0_linux-x64.tar.gz",
+    url: "https://github.com/kevin15011/deck/releases/download/v1.0.0/deck_v1.0.0_linux-x64.tar.gz",
     sha256: "0".repeat(64),
     notes: "test binary",
     ...overrides,
