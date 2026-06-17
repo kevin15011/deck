@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "version": "0.0.1",
+  "tag_name": "v0.0.1",
+  "channel": "stable",
+  "published_at": "2020-01-01T00:00:00.000Z",
+  "release_notes_url": "https://github.com/gentleman-programming/deck/releases/v0.0.1",
+  "items": [
+    {
+      "id": "deck-v0.0.1-linux-x64",
+      "kind": "binary",
+      "required": true,
+      "platform": "linux-x64",
+      "asset_name": "deck_v0.0.1_linux-x64.tar.gz",
+      "url": "file:///tmp/deck-fake-binary",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "notes": "Test fixture - no upgrade"
+    }
+  ]
+}

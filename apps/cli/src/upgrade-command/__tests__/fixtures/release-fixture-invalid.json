@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "version": "invalid",
+  "tag_name": "vinvalid",
+  "channel": "stable",
+  "published_at": "not-a-date",
+  "items": []
+}

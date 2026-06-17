@@ -190,6 +190,90 @@ describe("normalizeCommit", () => {
   });
 });
 
+describe("DECK_RELEASE_CHECK_FIXTURE", () => {
+  const path = require("node:path");
+  const { fetchReleaseDescriptor } = require("../github-release.js");
+
+  const fixturesDir = path.join(__dirname, "fixtures");
+
+  it("returns descriptor when fixture file exists with higher version", async () => {
+    const fixturePath = path.join(fixturesDir, "release-fixture-upgrade.json");
+    // Set the env var
+    process.env.DECK_RELEASE_CHECK_FIXTURE = fixturePath;
+
+    try {
+      const result = fetchReleaseDescriptor();
+      expect(result.kind).toBe("descriptor");
+      expect(result.descriptor.version).toBe("99.99.99");
+      expect(result.descriptor.tag_name).toBe("v99.99.99");
+      expect(result.commit).toBe("deadbeef");
+
+      // Verify binary item exists for current platform
+      const triple = `${process.platform}-${process.arch === "x64" ? "x64" : "arm64"}`;
+      const binary = result.descriptor.items.find(
+        (i: any) => i.kind === "binary" && i.platform === triple,
+      );
+      expect(binary).toBeDefined();
+    } finally {
+      delete process.env.DECK_RELEASE_CHECK_FIXTURE;
+    }
+  });
+
+  it("returns descriptor when fixture has lower version", async () => {
+    const fixturePath = path.join(fixturesDir, "release-fixture-no-upgrade.json");
+    process.env.DECK_RELEASE_CHECK_FIXTURE = fixturePath;
+
+    try {
+      const result = fetchReleaseDescriptor();
+      expect(result.kind).toBe("descriptor");
+      expect(result.descriptor.version).toBe("0.0.1");
+    } finally {
+      delete process.env.DECK_RELEASE_CHECK_FIXTURE;
+    }
+  });
+
+  it("returns legacy with error when fixture file does not exist", async () => {
+    process.env.DECK_RELEASE_CHECK_FIXTURE = "/nonexistent/path/fixture.json";
+
+    try {
+      const result = fetchReleaseDescriptor();
+      expect(result.kind).toBe("legacy");
+      expect(result.reason).toBe("invalid");
+      expect(result.error).toContain("Failed to read fixture file");
+    } finally {
+      delete process.env.DECK_RELEASE_CHECK_FIXTURE;
+    }
+  });
+
+  it("returns legacy with error when fixture is invalid JSON", async () => {
+    const fixturePath = path.join(fixturesDir, "release-fixture-invalid.json");
+    process.env.DECK_RELEASE_CHECK_FIXTURE = fixturePath;
+
+    try {
+      const result = fetchReleaseDescriptor();
+      expect(result.kind).toBe("legacy");
+      expect(result.reason).toBe("invalid");
+      expect(result.error).toContain("Fixture validation failed");
+    } finally {
+      delete process.env.DECK_RELEASE_CHECK_FIXTURE;
+    }
+  });
+
+  it("skips network calls when fixture is active", async () => {
+    const fixturePath = path.join(fixturesDir, "release-fixture-upgrade.json");
+    process.env.DECK_RELEASE_CHECK_FIXTURE = fixturePath;
+
+    try {
+      const result = fetchReleaseDescriptor();
+      // Should return descriptor without network errors
+      expect(result.kind).toBe("descriptor");
+      expect(result.error).toBeUndefined();
+    } finally {
+      delete process.env.DECK_RELEASE_CHECK_FIXTURE;
+    }
+  });
+});
+
 describe("decideReleaseAvailability", () => {
   const { decideReleaseAvailability } = require("../github-release.js");
 

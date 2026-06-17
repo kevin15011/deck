@@ -215,11 +215,170 @@ export function curlReleaseJsonAsset(
  * On malformed payload: returns `{ kind: "legacy", reason: "invalid", error }`.
  * On network failure: returns `{ kind: "network-error", error }`.
  */
+/**
+ * Load a release descriptor from a local fixture file.
+ *
+ * This enables testing the TUI/doctor upgrade signals without
+ * publishing a real GitHub release. When the fixture contains
+ * a version higher than the current version, the upgrade available
+ * signal will trigger.
+ *
+ * Expected fixture format (release.json):
+ * ```json
+ * {
+ *   "schemaVersion": 1,
+ *   "version": "99.99.99",
+ *   "tag_name": "v99.99.99",
+ *   "channel": "stable",
+ *   "published_at": "2026-01-01T00:00:00.000Z",
+ *   "release_notes_url": "https://github.com/...",
+ *   "items": [
+ *     {
+ *       "id": "deck-v99.99.99-linux-x64",
+ *       "kind": "binary",
+ *       "required": true,
+ *       "platform": "linux-x64",
+ *       "asset_name": "deck_v99.99.99_linux-x64.tar.gz",
+ *       "url": "file:///tmp/deck-fake-binary",
+ *       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+ *       "notes": "Test fixture"
+ *     }
+ *   ]
+ * }
+ * ```
+ *
+ * Also accepts legacy aliases for convenience:
+ * - `tagName` → `tag_name`
+ * - `downloadUrl` / `browser_download_url` (first binary item)
+ * - `sha256` (first binary item)
+ *
+ * @param fixturePath - Absolute path to the fixture JSON file
+ * @returns ReleaseFetchResult with kind "descriptor" or "legacy"
+ */
+function loadFixtureDescriptor(fixturePath: string): ReleaseFetchResult {
+  let raw: unknown;
+
+  // Read and parse the fixture file
+  try {
+    const content = readFileSync(fixturePath, "utf-8");
+    try {
+      raw = JSON.parse(content);
+    } catch (err) {
+      return {
+        kind: "legacy",
+        reason: "invalid",
+        info: {
+          tagName: "v0.0.0",
+          version: "0.0.0",
+          downloadUrl: "",
+          sha256: "",
+          publishedAt: "",
+          body: "",
+          commit: null,
+        },
+        error: `Fixture is not valid JSON: ${(err as Error).message}`,
+      };
+    }
+  } catch (err) {
+    return {
+      kind: "legacy",
+      reason: "invalid",
+      info: {
+        tagName: "v0.0.0",
+        version: "0.0.0",
+        downloadUrl: "",
+        sha256: "",
+        publishedAt: "",
+        body: "",
+        commit: null,
+      },
+      error: `Failed to read fixture file: ${(err as Error).message}`,
+    };
+  }
+
+  // Normalize legacy aliases for convenience
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    // tagName → tag_name
+    if (obj.tagName && !obj.tag_name) {
+      obj.tag_name = obj.tagName;
+    }
+    // If items array missing but has legacy fields, construct minimal binary item
+    if (!obj.items && (obj.downloadUrl || obj.browser_download_url || obj.sha256)) {
+      const platform = getPlatformTriple();
+      obj.items = [
+        {
+          id: `deck-fixture-${obj.version || "0.0.0"}-${platform}`,
+          kind: "binary",
+          required: true,
+          platform,
+          asset_name: `deck_v${obj.version || "0.0.0"}_${platform}.tar.gz`,
+          url: obj.downloadUrl || obj.browser_download_url || "file:///tmp/fake",
+          sha256: obj.sha256 || "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          notes: "Fixture",
+        },
+      ];
+    }
+  }
+
+  // Validate against the schema
+  try {
+    const descriptor = parseReleaseDescriptor(raw);
+    return {
+      kind: "descriptor",
+      descriptor,
+      cachePath: fixturePath,
+      commit: normalizeCommit((descriptor as { commit?: string }).commit ?? null),
+    };
+  } catch (err) {
+    if (err instanceof ReleaseDescriptorError) {
+      return {
+        kind: "legacy",
+        reason: "invalid",
+        info: {
+          tagName: "v0.0.0",
+          version: "0.0.0",
+          downloadUrl: "",
+          sha256: "",
+          publishedAt: "",
+          body: "",
+          commit: null,
+        },
+        error: `Fixture validation failed: ${err.message}`,
+      };
+    }
+    return {
+      kind: "legacy",
+      reason: "invalid",
+      info: {
+        tagName: "v0.0.0",
+        version: "0.0.0",
+        downloadUrl: "",
+        sha256: "",
+        publishedAt: "",
+        body: "",
+        commit: null,
+      },
+      error: `Fixture validation failed: ${(err as Error).message}`,
+    };
+  }
+}
+
 export function fetchReleaseDescriptor(
   options: FetchDescriptorOptions = {},
 ): ReleaseFetchResult {
   const cachePath = options.cachePath ?? getDefaultReleaseCachePath();
 
+  // ===== FIXTURE MODE: Read from local file instead of GitHub =====
+  // When DECK_RELEASE_CHECK_FIXTURE is set, read release.json from that path
+  // and skip all network calls. This enables testing the TUI/doctor
+  // upgrade signals without publishing a real release.
+  const fixturePath = process.env.DECK_RELEASE_CHECK_FIXTURE;
+  if (fixturePath) {
+    return loadFixtureDescriptor(fixturePath);
+  }
+
+  // ===== NORMAL MODE: Fetch from GitHub =====
   // Step 1: ask the API for the latest release so we know its tag.
   const apiResult = curlReleasesApi(
     options.etag ? ["-H", `If-None-Match: ${options.etag}`] : [],

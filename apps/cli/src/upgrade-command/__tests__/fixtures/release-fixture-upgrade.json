@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "version": "99.99.99",
+  "tag_name": "v99.99.99",
+  "channel": "stable",
+  "published_at": "2026-01-01T00:00:00.000Z",
+  "release_notes_url": "https://github.com/gentleman-programming/deck/releases/v99.99.99",
+  "commit": "deadbeef",
+  "items": [
+    {
+      "id": "deck-v99.99.99-linux-x64",
+      "kind": "binary",
+      "required": true,
+      "platform": "linux-x64",
+      "asset_name": "deck_v99.99.99_linux-x64.tar.gz",
+      "url": "file:///tmp/deck-fake-binary",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "notes": "Test fixture - fake upgrade"
+    },
+    {
+      "id": "deck-v99.99.99-darwin-arm64",
+      "kind": "binary",
+      "required": true,
+      "platform": "darwin-arm64",
+      "asset_name": "deck_v99.99.99_darwin-arm64.tar.gz",
+      "url": "file:///tmp/deck-fake-binary",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "notes": "Test fixture - fake upgrade"
+    }
+  ]
+}
