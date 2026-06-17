@@ -8,9 +8,9 @@
 import type { BuildInfo } from "./build-info.js";
 
 export const BUILD_INFO: BuildInfo = {
-  version: "0.1.6",
-  commit: "7bc4b36",
-  date: "2026-06-16",
+  version: "0.1.7",
+  commit: "3bb3f2d",
+  date: "2026-06-17",
   target: "linux-x64",
   channel: "stable",
 } as const;
