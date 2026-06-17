@@ -342,6 +342,52 @@ describe("ORCHESTRATOR_SKILL_BODY", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Language Policy reinforcement — REQ-ORCH-001, REQ-ORCH-002, REQ-ORCH-003,
+// REQ-ORCH-004, REQ-LANG-001, REQ-LANG-002
+// ---------------------------------------------------------------------------
+
+describe("Orchestrator Language Policy reinforcement", () => {
+  const SURFACES: { name: string; content: string }[] = [
+    { name: "prompt", content: ORCHESTRATOR_SYSTEM_PROMPT },
+    { name: "skillBody", content: ORCHESTRATOR_SKILL_BODY },
+  ];
+
+  for (const surface of SURFACES) {
+    test(`${surface.name} contains a Language Policy heading`, () => {
+      expect(surface.content).toContain("## Language Policy");
+    });
+
+    test(`${surface.name} requires English-only delegation prompts to sub-agents`, () => {
+      expect(surface.content).toContain("Delegation prompts");
+      expect(surface.content).toMatch(/MUST be in English|MUST be English/i);
+    });
+
+    test(`${surface.name} requires English-only sub-agent responses and generated artifacts`, () => {
+      expect(surface.content).toContain("Sub-agent responses");
+      expect(surface.content).toContain("generated OpenSpec artifacts");
+      expect(surface.content).toContain("MUST be English only");
+    });
+
+    test(`${surface.name} requires repair for non-English outputs except allowed literals`, () => {
+      expect(surface.content).toMatch(/reject.*request repair|request repair.*reject/i);
+      expect(surface.content).toContain("allowed literal exception");
+    });
+
+    test(`${surface.name} requires direct user-facing responses to use the user's language`, () => {
+      expect(surface.content).toContain("Direct user-facing responses");
+      expect(surface.content).toContain("user's language");
+    });
+
+    test(`${surface.name} lists allowed literal exceptions`, () => {
+      expect(surface.content).toContain("Allowed literal exceptions");
+      expect(surface.content).toContain("quoted user input");
+      expect(surface.content).toContain("file paths");
+      expect(surface.content).toContain("identifiers");
+    });
+  }
+});
+
 describe("ORCHESTRATOR_PROMPT_GUIDA", () => {
   // INV-004 strengthened wording — guida variant matches strengthened system prompt
   test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {

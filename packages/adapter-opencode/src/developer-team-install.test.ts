@@ -10,7 +10,7 @@ import {
   rollbackDeveloperTeamFiles,
   verifyOpenCodeDeveloperTeamInstall,
 } from "./developer-team-install";
-import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import type {
@@ -1194,6 +1194,33 @@ describe("dynamic tool resolution", () => {
       expect(orchestratorEntry.tools.delegation_list).toBe(true);
     } finally {
       cleanup(projectRoot);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Developer Team language policy propagation to OpenCode install-plan skills
+// (REQ-ADAPT-001, REQ-LEAK-001, REQ-LEAK-002, REQ-TEST-001, REQ-TEST-003)
+// ---------------------------------------------------------------------------
+
+describe("Developer Team language policy propagation to OpenCode install-plan skills", () => {
+  test("every planned skill contains the language policy", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    for (const skill of plan.skills) {
+      expect(
+        skill.content,
+        `${skill.agent.id} skill missing Developer Team language policy`,
+      ).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+    }
+  });
+
+  test("no planned skill contains the known Spanish leak", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    for (const skill of plan.skills) {
+      expect(
+        skill.content,
+        `${skill.agent.id} skill contains known leak`,
+      ).not.toContain("herramienta");
     }
   });
 });

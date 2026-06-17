@@ -1,0 +1,97 @@
+phase: archive
+status: archived
+artifacts:
+  - path: exploration.md
+    description: "Exploration of English-only Developer Team prompt and artifact enforcement"
+  - path: proposal.md
+    description: "Proposal to enforce English-only sub-agent communication and generated artifacts in Deck-owned generated content"
+  - path: spec.md
+    description: "Requirements and acceptance scenarios for English-only sub-agent communication and generated artifacts"
+  - path: design.md
+    description: "Technical design for central Developer Team language policy composition and adapter propagation"
+  - path: tasks.md
+    description: "Atomic implementation tasks for central Developer Team language policy composition, orchestrator reinforcement, leak removal, and adapter regression coverage"
+  - path: preconditions.md
+    description: "Preconditions table and closure decision for the tasks phase of enforce-english-agent-artifacts"
+  - path: apply-progress.md
+    description: "Apply progress for Tasks 1-13: central language policy composition, orchestrator reinforcement, known leak removal, core regression tests, and adapter regression tests"
+  - path: verify-report.md
+    description: "Verification report for focused tests, build, typecheck warning, and requirement/task compliance"
+  - path: review-report.md
+    description: "Review report approving with changes and identifying minor language-policy test coverage fix"
+  - path: archive-report.md
+    description: "Archive report for completed lifecycle closure"
+provenance:
+  agent: deck-developer-explorer
+  model: opencode-go/kimi-k2.7-code
+  date: "2026-06-17"
+  proposal_completed_by: deck-developer-proposal
+  proposal_model: openai/gpt-5.5
+  proposal_completed: "2026-06-17"
+  spec_completed_by: deck-developer-spec
+  spec_registry_write: deferred-serialized-by-orchestrator
+  spec_completed: "2026-06-17"
+  design_completed_by: deck-developer-design
+  design_registry_write: deferred-serialized-by-orchestrator
+  design_completed: "2026-06-17"
+  proposal_repaired_by: deck-developer-proposal
+  proposal_repair_model: openai/gpt-5.5
+  proposal_repaired: "2026-06-17"
+  proposal_repair_reason: "Corrected user-facing orchestrator language requirement from optional/allowed phrasing to MUST use the user's language; preserved English-only sub-agent communication, sub-agent returns, and generated artifacts."
+  exploration_repaired_by: deck-developer-orchestrator
+  exploration_repair_reason: "Mechanically aligned exploration wording with corrected MUST-level user-facing language requirement."
+  spec_repaired_by: deck-developer-spec
+  spec_repair_registry_write: deferred-serialized-by-orchestrator
+  spec_repaired: "2026-06-17"
+  design_repaired_by: deck-developer-design
+  design_repair_registry_write: deferred-serialized-by-orchestrator
+  design_repaired: "2026-06-17"
+  tasks_completed_by: deck-developer-task
+  tasks_model: opencode-go/kimi-k2.7-code
+  tasks_completed: "2026-06-17"
+  tasks_summary: "Created 13 atomic tasks (7 shared/core content, 2 shared tests, 4 backend adapter tests) grouped into execution groups with dependency graph, parallelization plan, complexity summary, review workload forecast, and responsibility contracts. Preserved user correction: orchestrator-to-user uses user language; orchestrator-to-sub-agent, sub-agent returns, and generated OpenSpec artifacts remain English only."
+  preconditions_completed_by: deck-developer-task
+  preconditions_artifact: preconditions.md
+  preconditions_completed: "2026-06-17"
+  preconditions_summary: "Closure decision: Ready for Apply with conditions. 8 preconditions recorded: 7 satisfied (PCG-001 through PCG-007) and 1 allowed-with-placeholder (PCG-008 deny-list scope may extend to new confirmed leak terms discovered during Apply). No blocking preconditions."
+  apply_general_completed_by: deck-developer-apply-general
+  apply_general_status: completed
+  apply_general_artifact: apply-progress.md
+  apply_general_completed: "2026-06-17"
+  apply_general_summary: "Completed Tasks 1-9: central language policy constant/helper preserved, policy composed into agent/skill/fallback/session surfaces, orchestrator prompt/skill reinforcement preserved, herramienta replaced with [tool] in Serena and apply-agent content, content-registry and orchestrator-content regression tests added and passing. Tasks 10-13 remain for Backend Apply."
+  apply_backend_completed_by: deck-developer-apply-backend
+  apply_backend_status: completed
+  apply_backend_artifact: apply-progress.md
+  apply_backend_completed: "2026-06-17"
+  apply_backend_summary: "Completed Tasks 10-13: adapter-opencode prompt-generation and install-plan language-policy regression tests, adapter-pi install-plan and profile language-policy regression tests. Focused adapter test suite passed (194 tests, 0 failures)."
+  verify_completed_by: deck-developer-verify
+  verify_status: passed_with_warnings
+  verify_registry_write: deferred-serialized-by-orchestrator
+  verify_completed: "2026-06-17"
+  review_completed_by: deck-developer-review
+  review_status: approved
+  review_registry_write: deferred-serialized-by-orchestrator
+  review_completed: "2026-06-17"
+  review_required_fix: "Resolved: deck-init and deck-onboard added to the content-registry language-policy test iteration."
+  apply_review_fix_completed_by: deck-developer-apply-general
+  apply_review_fix_status: completed
+  apply_review_fix_completed: "2026-06-17"
+  verify_rerun_completed_by: deck-developer-verify
+  verify_rerun_status: passed_with_warnings
+  verify_rerun_registry_write: deferred-serialized-by-orchestrator
+  verify_rerun_completed: "2026-06-17"
+  review_rerun_completed_by: deck-developer-review
+  review_rerun_status: approved
+  review_rerun_registry_write: deferred-serialized-by-orchestrator
+  review_rerun_completed: "2026-06-17"
+  apply_review_fix_completed_by: deck-developer-apply-general
+  apply_review_fix_status: completed
+  apply_review_fix_artifact: apply-progress.md
+  apply_review_fix_completed: "2026-06-17"
+  apply_review_fix_summary: "Added LANGUAGE_POLICY_TEST_AGENT_IDS covering all 14 REAL_CONTENT keys (12 deck-developer-* + deck-init + deck-onboard) to language policy test iteration. Tests pass (84 tests, 704 expect calls). Did not expand deny-list to Spanish plural."
+  archive_phase: archive
+  archive_status: completed
+  archive_completed_by: deck-developer-archive
+  archive_completed: "2026-06-17"
+  archive_artifact: archive-report.md
+  archive_target: openspec/archive/enforce-english-agent-artifacts

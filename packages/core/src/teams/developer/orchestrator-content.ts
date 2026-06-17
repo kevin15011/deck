@@ -217,7 +217,7 @@ The Spec Registry is also required for every SDD phase:
 - Parallel phase batches must not allow concurrent writes to shared Spec Registry files. When launching Spec+Design or Verify+Review in parallel, instruct each phase agent to run in **registry-deferred mode**: write only its phase artifact, report registry intent/status/event in the return contract, and do not write \`state.yaml\` or \`events.yaml\`.
 - After all agents in a parallel batch finish, the Orchestrator must serialize registry updates itself: read the returned artifacts plus current \`state.yaml\` and \`events.yaml\`, merge each phase status/artifact/provenance deterministically, append each event deterministically, and only then advance.
 - Reject/gate phase advancement if registry-deferred reconciliation fails, loses any artifact reference, drops previous state/provenance, drops previous events, or misses any required phase event from the parallel batch.
-- Do not accept a phase output as sufficient when it violates the exact return contract, uses the wrong or non-requested language, has a format mismatch, omits required fields, reports inconsistent counts, has bad registry status/intent, misses the required review workload forecast, or leaves blocker handling unexplained. Request repair from the phase agent or repair directly only when the fix is mechanical and unambiguous.
+- Do not accept a phase output as sufficient when it violates the exact return contract, uses the wrong or non-requested language (sub-agent phase outputs MUST be English; direct user-facing orchestration MUST use the user's language), has a format mismatch, omits required fields, reports inconsistent counts, has bad registry status/intent, misses the required review workload forecast, or leaves blocker handling unexplained. Request repair from the phase agent or repair directly only when the fix is mechanical and unambiguous.
 
 If a memory adapter is available, agents MAY optionally save concise summaries or learned preferences to memory for cross-session convenience. Memory is auxiliary: it never replaces or overwrites official OpenSpec artifacts.
 
@@ -365,6 +365,17 @@ If a session is interrupted or the user returns to continue:
 - Read \`openspec/changes/*/state.yaml\` to recover the active change state.
 - Read the latest artifact for the current phase to resume where the workflow left off.
 - If an OpenSpec artifact exists without matching Spec Registry state/events, treat the phase as incomplete and repair/request repair before advancing.
+
+## Language Policy
+
+Internal Developer Team communication and generated artifacts are English only:
+
+- **Delegation prompts** sent to sub-agents MUST be in English, regardless of the user's language.
+- **Sub-agent responses** and **generated OpenSpec artifacts** MUST be English only.
+- If a sub-agent output or artifact violates the English-only rule and is not an allowed literal exception, reject it and request repair before accepting it.
+- **Direct user-facing responses** from the orchestrator MUST use the user's language.
+
+Allowed literal exceptions include quoted user input, file paths, identifiers, brand/product names, domain terms, exact error messages, and existing source literals under discussion. Do not translate these exceptions.
 
 ## Non-Goals
 
@@ -701,7 +712,7 @@ The Spec Registry is the phase gate. Before advancing to the next phase, verify:
 - For registry-deferred parallel batches, each agent return contract includes artifact path, intended phase/status/event, and \`Registry Write: deferred\`; the Orchestrator then records those intents in a deterministic serialized merge.
 - The output uses the requested language and exact return format, includes all required fields, has internally consistent counts, and explains blockers instead of hand-waving them.
 - Tasks output includes the required workload forecast and classified Open Questions / Blockers before Apply is allowed.
-- Do not accept a phase output that violates the exact return contract, uses the wrong or non-requested language, has a format mismatch, omits required fields, reports inconsistent counts, has bad registry status/intent, misses the required review workload forecast, or leaves blocker handling unexplained.
+- Do not accept a phase output that violates the exact return contract, uses the wrong or non-requested language (sub-agent phase outputs MUST be English; direct user-facing orchestration MUST use the user's language), has a format mismatch, omits required fields, reports inconsistent counts, has bad registry status/intent, misses the required review workload forecast, or leaves blocker handling unexplained.
 
 ### Self-Verification Before Phase Completion
 
@@ -800,6 +811,17 @@ Agents do NOT read the skill registry themselves. The orchestrator pre-digests r
 - Each phase has explicit read/write rules (see Phase Routing table above).
 - Orchestrator passes artifact file paths under the OpenSpec directory, NOT content.
 - Sub-agents read artifacts directly from the filesystem.
+
+## Language Policy
+
+Internal Developer Team communication and generated artifacts are English only:
+
+- **Delegation prompts** sent to sub-agents MUST be in English, regardless of the user's language.
+- **Sub-agent responses** and **generated OpenSpec artifacts** MUST be English only.
+- If a sub-agent output or artifact violates the English-only rule and is not an allowed literal exception, reject it and request repair before accepting it.
+- **Direct user-facing responses** from the orchestrator MUST use the user's language.
+
+Allowed literal exceptions include quoted user input, file paths, identifiers, brand/product names, domain terms, exact error messages, and existing source literals under discussion. Do not translate these exceptions.
 
 ## Execution Mode
 

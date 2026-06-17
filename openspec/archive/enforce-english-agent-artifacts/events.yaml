@@ -1,0 +1,125 @@
+events:
+  - phase: explore
+    status: completed
+    agent: deck-developer-explorer
+    artifact: exploration.md
+    timestamp: "2026-06-17T00:00:00Z"
+    summary: "Identified Spanish 'herramienta' leak in generated Developer Team prompts (serena.ts + apply-*-content.ts). Mapped minimal Deck-owned change points: content-registry composition layer, orchestrator-content language policy, adapter install verification, and regression tests."
+  - phase: proposal
+    status: completed
+    agent: deck-developer-proposal
+    artifact: proposal.md
+    timestamp: "2026-06-17T00:00:00Z"
+    summary: "Created proposal for Deck-owned English-only Developer Team sub-agent communication and generated artifacts, scoped to central content-registry policy, orchestrator reinforcement, known leak removal, and core/adapter regression tests."
+  - phase: spec
+    status: completed
+    agent: deck-developer-spec
+    artifact: spec.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Specified requirements and acceptance scenarios for English-only orchestrator-to-sub-agent communication, English-only generated artifacts, user-language exception, adapter propagation, known leak absence, and regression testing."
+  - phase: design
+    status: completed
+    agent: deck-developer-design
+    artifact: design.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Designed central Developer Team language policy composition in content-registry, orchestrator reinforcement, Serena/apply leak removal, OpenCode/Pi adapter propagation, and test sequencing."
+  - phase: proposal-repair
+    status: completed
+    agent: deck-developer-proposal
+    artifact: proposal.md
+    timestamp: "2026-06-17T00:00:00Z"
+    summary: "Repaired proposal wording so orchestrator-to-user communication is a MUST-level requirement to use the user's language, while orchestrator-to-sub-agent communication, sub-agent returns, and generated artifacts remain English-only. Preserved Deck-owned generated/installed behavior scope."
+  - phase: exploration-repair
+    status: completed
+    agent: deck-developer-orchestrator
+    artifact: exploration.md
+    timestamp: "2026-06-17T00:00:00Z"
+    summary: "Mechanically aligned exploration wording with corrected MUST-level requirement that user-facing orchestrator responses use the user's language."
+  - phase: spec-repair
+    status: completed
+    agent: deck-developer-spec
+    artifact: spec.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Repaired spec wording so orchestrator-to-user communication MUST use the user's language, while preserving English-only sub-agent communication, returns, and generated artifacts."
+  - phase: design-repair
+    status: completed
+    agent: deck-developer-design
+    artifact: design.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Repaired design wording so orchestrator-to-user communication MUST use the user's language, while preserving English-only sub-agent communication, returns, and generated artifacts."
+  - phase: tasks
+    status: completed
+    agent: deck-developer-task
+    artifact: tasks.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Created 13 atomic tasks across Shared/Contracts (7 content + 2 tests) and Backend (4 adapter tests) groups, with dependency graph, parallelization plan, complexity summary, review workload forecast (100-400 lines, Low risk), and ownership routing. Preserved user correction across all tasks."
+  - phase: preconditions.created
+    status: completed
+    agent: deck-developer-task
+    artifact: preconditions.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Preconditions recorded: 7 satisfied (user correction preserved, spec completed, design completed, Deck-owned scope, leak confirmed, API backward compatibility, agent catalog available) and 1 allowed-with-placeholder (deny-list may extend to additional confirmed leak terms). Closure decision: Ready for Apply with conditions."
+  - phase: apply-gate
+    status: passed
+    agent: deck-developer-orchestrator
+    artifact: preconditions.md
+    timestamp: "2026-06-17T00:00:00Z"
+    summary: "Preconditions gate passed before Apply: preconditions.md exists; no row has Status blocked with Blocks Apply Yes; 7 satisfied and 1 allowed-with-placeholder."
+  - phase: apply
+    status: in_progress
+    agent: deck-developer-apply-general
+    artifact: apply-progress.md
+    timestamp: "2026-06-17T00:00:00Z"
+    summary: "General Apply completed Tasks 1-9: central language policy composition, orchestrator reinforcement, known leak removal (herramienta -> [tool]), and core regression tests. Tasks 10-13 remain for Backend Apply."
+  - phase: apply
+    status: completed
+    agent: deck-developer-apply-backend
+    artifact: apply-progress.md
+    timestamp: "2026-06-17T00:00:00Z"
+    summary: "Backend Apply completed Tasks 10-13: OpenCode prompt-generation and install-plan language-policy regression tests, Pi install-plan and profile language-policy regression tests. Focused adapter test suite passed (194 tests, 0 failures). All 13 tasks are now complete; change is ready for Verify/Review."
+  - phase: verify
+    status: passed_with_warnings
+    agent: deck-developer-verify
+    artifact: verify-report.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Verify passed with warnings: 396 focused tests passed, build passed, full-project typecheck still fails with pre-existing unrelated errors. No blockers."
+  - phase: review
+    status: approved_with_changes
+    agent: deck-developer-review
+    artifact: review-report.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Review approved with changes: no blockers or major findings; minor required fix is to include deck-init and deck-onboard in content-registry language-policy test iteration."
+  - phase: verify
+    status: passed_with_warnings
+    agent: deck-developer-verify
+    artifact: verify-report.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Re-verify passed with warnings after review fix: 396 focused tests passed, build dry-run passed, full-project typecheck still fails with pre-existing unrelated errors."
+  - phase: review
+    status: approved
+    agent: deck-developer-review
+    artifact: review-report.md
+    timestamp: "2026-06-17T00:00:00Z"
+    registry_write: deferred-serialized-by-orchestrator
+    summary: "Re-review approved: prior deck-init/deck-onboard test coverage gap resolved; no blockers or major findings remain."
+  - phase: apply-review-fix
+    status: completed
+    agent: deck-developer-apply-general
+    artifact: apply-progress.md
+    timestamp: "2026-06-17T00:00:00Z"
+    summary: "Applied Review fix: Added LANGUAGE_POLICY_TEST_AGENT_IDS covering all 14 REAL_CONTENT keys (12 deck-developer-* + deck-init + deck-onboard) to language policy test iteration. Tests pass (84 tests, 704 expect calls). Did not expand deny-list to Spanish plural."
+  - phase: archive
+    status: completed
+    agent: deck-developer-archive
+    artifact: archive-report.md
+    timestamp: "2026-06-17T00:00:00Z"
+    summary: "Archived change to `openspec/archive/enforce-english-agent-artifacts` with completed proposal, spec, design, tasks, apply-progress, verify-report, and review-report artifacts, and generated a full archive report."

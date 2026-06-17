@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { DEVELOPER_TEAM_LANGUAGE_POLICY } from "@deck/core/teams/developer/content-registry";
 import {
   buildTeamSystemPrompt,
   materializeTeamProfile,
@@ -323,6 +324,34 @@ describe("materializeTeamProfile", () => {
       expect(content).toContain("## Adaptive Memory (provider-injected)");
       expect(content).toContain("Use Engram for persistent session context.");
       expect(content).toContain("Memory is auxiliary");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Developer Team language policy propagation to Pi team profile
+// (REQ-ADAPT-002, REQ-LEAK-001, REQ-LEAK-002, REQ-TEST-001, REQ-TEST-003)
+// ---------------------------------------------------------------------------
+
+describe("Developer Team language policy propagation to Pi team profile", () => {
+  test("buildTeamSystemPrompt includes the language policy and excludes the known leak", () => {
+    const { content } = buildTeamSystemPrompt("developer-team");
+    expect(content).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+    expect(content).not.toContain("herramienta");
+  });
+
+  test("materialized profile system-prompt.md includes the language policy and excludes the known leak", () => {
+    const projectRoot = createTempDir();
+    try {
+      materializeTeamProfile({ teamId: "developer-team", projectRoot });
+      const content = readFileSync(
+        join(projectRoot, ".deck", "pi", "profiles", "developer-team", "system-prompt.md"),
+        "utf-8",
+      );
+      expect(content).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+      expect(content).not.toContain("herramienta");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }

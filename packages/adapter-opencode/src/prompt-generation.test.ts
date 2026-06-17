@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
-import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { buildCapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 import type { MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
 
@@ -589,5 +589,38 @@ describe("authorization card injection (REQ-OA-005)", () => {
     const applyGeneral = plan.find((p) => p.agent.id === "deck-developer-apply-general")!;
     expect(applyGeneral.content).toContain("test-change");
     expect(applyGeneral.content).toContain("tasks.md");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Developer Team language policy propagation to OpenCode prompts (REQ-ADAPT-001,
+// REQ-LEAK-001, REQ-LEAK-002, REQ-TEST-001, REQ-TEST-003)
+// ---------------------------------------------------------------------------
+
+describe("Developer Team language policy propagation to OpenCode prompts", () => {
+  test("every planned prompt contains the language policy", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+    });
+    for (const planned of plan) {
+      expect(
+        planned.content,
+        `${planned.agent.id} prompt missing Developer Team language policy`,
+      ).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+    }
+  });
+
+  test("no planned prompt contains the known Spanish leak", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+    });
+    for (const planned of plan) {
+      expect(
+        planned.content,
+        `${planned.agent.id} prompt contains known leak`,
+      ).not.toContain("herramienta");
+    }
   });
 });

@@ -14,7 +14,7 @@ import {
   verifyDeveloperTeamInstall,
   cleanupLegacySddAgentFiles,
 } from "./developer-team-install";
-import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "./model-config";
 
 // ---------------------------------------------------------------------------
@@ -1468,6 +1468,55 @@ describe("verifyDeveloperTeamInstall with orchestrator invariants", () => {
       expect(orchAgentResult).toBeDefined();
     } finally {
       cleanup(projectRoot);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Developer Team language policy propagation to Pi install-plan files
+// (REQ-ADAPT-002, REQ-LEAK-001, REQ-LEAK-002, REQ-TEST-001, REQ-TEST-003)
+// ---------------------------------------------------------------------------
+
+describe("Developer Team language policy propagation to Pi install-plan files", () => {
+  test("every non-orchestrator agent file and skill file contains the language policy", () => {
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project");
+
+    const nonOrchestratorAgents = plan.agents.filter(
+      (a) => a.agent.id !== "deck-developer-orchestrator",
+    );
+    for (const agent of nonOrchestratorAgents) {
+      expect(
+        agent.content,
+        `${agent.agent.id} agent file missing Developer Team language policy`,
+      ).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+    }
+
+    for (const skill of plan.skills) {
+      expect(
+        skill.content,
+        `${skill.agent.id} skill file missing Developer Team language policy`,
+      ).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+    }
+  });
+
+  test("no non-orchestrator agent file or skill file contains the known Spanish leak", () => {
+    const plan = buildDeveloperTeamInstallPlan("/tmp/project");
+
+    const nonOrchestratorAgents = plan.agents.filter(
+      (a) => a.agent.id !== "deck-developer-orchestrator",
+    );
+    for (const agent of nonOrchestratorAgents) {
+      expect(
+        agent.content,
+        `${agent.agent.id} agent file contains known leak`,
+      ).not.toContain("herramienta");
+    }
+
+    for (const skill of plan.skills) {
+      expect(
+        skill.content,
+        `${skill.agent.id} skill file contains known leak`,
+      ).not.toContain("herramienta");
     }
   });
 });

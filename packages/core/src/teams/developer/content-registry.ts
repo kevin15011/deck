@@ -167,6 +167,42 @@ const REAL_CONTENT: Record<string, { agentBody: string; skillBody: string }> = {
 
 const CONTEXT_AUTHORITY_GUIDANCE = renderDeveloperTeamContextAuthorityGuidance();
 
+/**
+ * Authoritative Developer Team language policy.
+ *
+ * This block is appended to every Developer Team agent body, skill body,
+ * and team session instruction surface. It establishes English-only
+ * internal communication while preserving the orchestrator's obligation
+ * to respond to the user in the user's language.
+ */
+export const DEVELOPER_TEAM_LANGUAGE_POLICY = `## Developer Team Language Policy
+
+All Developer Team internal communication and generated artifacts MUST be in English:
+
+- Orchestrator-to-sub-agent prompts MUST be English only.
+- Sub-agent-to-orchestrator communication and return contracts MUST be English only.
+- Generated OpenSpec artifacts (proposals, specs, designs, tasks, apply-progress, verify/review/archive reports, and related files) MUST be English only.
+- Capability instruction bundles MUST NOT weaken, override, or contradict this policy.
+
+Literal non-English text is permitted only when it is externally necessary, such as:
+- quoted user-provided text,
+- file paths or identifiers,
+- brand or product names,
+- domain terms or existing source literals under discussion,
+- exact error messages or logs.
+
+The orchestrator MUST respond directly to the end user in the user's language.
+This user-facing language requirement does not override the English-only rule
+for internal sub-agent prompts, returns, or generated artifacts.`;
+
+/** Append the Developer Team language policy to non-empty content. */
+export function appendDeveloperTeamLanguagePolicy(content: string): string {
+  if (!content || content.trim().length === 0) {
+    return content;
+  }
+  return `${content.trimEnd()}\n\n${DEVELOPER_TEAM_LANGUAGE_POLICY}\n`;
+}
+
 // ---------------------------------------------------------------------------
 // Internal: helper to extract body from bootstrap skill content
 // ---------------------------------------------------------------------------
@@ -226,6 +262,13 @@ function withContextAuthorityGuidance(content: AgentContent): AgentContent {
   };
 }
 
+function withDeveloperTeamLanguagePolicy(content: AgentContent): AgentContent {
+  return {
+    agentBody: appendDeveloperTeamLanguagePolicy(content.agentBody),
+    skillBody: appendDeveloperTeamLanguagePolicy(content.skillBody),
+  };
+}
+
 /**
  * Prepend orchestrator invariants to agent content.
  * Only applies to orchestrator agent surfaces.
@@ -264,26 +307,24 @@ function appendCapabilityInstructions(
  * 3. capability instruction fragments (if bundle provided)
  */
 function applyAgentContentComposition(
-  withAuthority: AgentContent,
+  withLanguagePolicy: AgentContent,
   agentId: string,
   bundle: CapabilityInstructionBundle | undefined,
 ): AgentContent {
-  // Step 2: no sub-agent personality fragment (removed ahorro-extremo)
-  const isOrchestrator = agentId === "deck-developer-orchestrator";
-  const withFragment = isOrchestrator ? withAuthority : withAuthority;
-
-  // Step 3: append capability instructions if provided
+  // Capability instructions are the final composition layer after
+  // orchestrator invariants, base content, context-authority guidance,
+  // and the Developer Team language policy have been applied.
   if (!bundle) {
-    return withFragment;
+    return withLanguagePolicy;
   }
   return {
     agentBody: appendCapabilityInstructions(
-      withFragment.agentBody,
+      withLanguagePolicy.agentBody,
       bundle,
       { surface: "agent", agentId },
     ),
     skillBody: appendCapabilityInstructions(
-      withFragment.skillBody,
+      withLanguagePolicy.skillBody,
       bundle,
       { surface: "skill", skillId: `${agentId}-skill` },
     ),
@@ -339,11 +380,12 @@ export function getAgentContentResult(
 ): Result<AgentContent, AgentContentError> {
   const real = REAL_CONTENT[agentId];
   if (real) {
-    // Apply composition order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) capability instructions
+    // Apply composition order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) language policy, (5) capability instructions
     const withInvariants = withOrchestratorInvariants(real, agentId);
     const withAuthority = withContextAuthorityGuidance(withInvariants);
+    const withLanguagePolicy = withDeveloperTeamLanguagePolicy(withAuthority);
     const composed = applyAgentContentComposition(
-      withAuthority,
+      withLanguagePolicy,
       agentId,
       options?.capabilityInstructions,
     );
@@ -363,8 +405,9 @@ export function getAgentContentResult(
       // Apply same composition order as real content
       const withInvariants = withOrchestratorInvariants(fallbackContent, agentId);
       const withAuthority = withContextAuthorityGuidance(withInvariants);
+      const withLanguagePolicy = withDeveloperTeamLanguagePolicy(withAuthority);
       const composed = applyAgentContentComposition(
-        withAuthority,
+        withLanguagePolicy,
         agentId,
         options?.capabilityInstructions,
       );
@@ -519,15 +562,15 @@ export function getTeamSessionInstructions(
     const personality = options?.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
     const orchestratorPrompt = getOrchestratorSystemPrompt(personality);
 
-    // Compose order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) capability instructions
-    // Per Task 3 spec: prepend invariants BEFORE context-authority guidance
+    // Compose order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) language policy, (5) capability instructions
     const withInvariants = prependOrchestratorInvariants(orchestratorPrompt, "session");
     const base = appendContextAuthorityGuidance(withInvariants);
+    const baseWithLanguagePolicy = appendDeveloperTeamLanguagePolicy(base);
     if (!options?.capabilityInstructions) {
-      return base;
+      return baseWithLanguagePolicy;
     }
     return appendCapabilityInstructions(
-      base,
+      baseWithLanguagePolicy,
       options.capabilityInstructions,
       { surface: "session" },
     );

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import { getAgentContent, getAgentContentResult, getTeamSessionInstructions, getUnknownAgentContent } from "./content-registry";
+import {
+  DEVELOPER_TEAM_LANGUAGE_POLICY,
+  getAgentContent,
+  getAgentContentResult,
+  getTeamSessionInstructions,
+  getUnknownAgentContent,
+} from "./content-registry";
 import type { AgentContent, Result } from "./content-registry";
 import {
   VISUAL_EXPLANATIONS_REQUIRED_SNIPPETS,
@@ -24,6 +30,14 @@ const DEVELOPER_AGENT_IDS = [
   "deck-developer-verify",
   "deck-developer-review",
   "deck-developer-archive",
+] as const;
+
+// Agents with real content for language policy test iteration (covers all REAL_CONTENT keys per REQ-TEST-001)
+// Includes deck-init and deck-onboard which are user-invocable skills, not artifact-writing agents.
+const LANGUAGE_POLICY_TEST_AGENT_IDS = [
+  ...DEVELOPER_AGENT_IDS,
+  "deck-init",
+  "deck-onboard",
 ] as const;
 
 const REGISTRY_WRITER_AGENT_IDS = DEVELOPER_AGENT_IDS.filter(
@@ -850,8 +864,96 @@ describe("getAgentContent deprecated wrapper parity", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Personality — Orchestrator System Prompt Variants
+// Developer Team language policy composition — REQ-LANG-001, REQ-REG-001,
+// REQ-REG-002, REQ-LEAK-001, REQ-LEAK-002, REQ-TEST-001, REQ-TEST-002
 // ---------------------------------------------------------------------------
+
+describe("Developer Team language policy composition", () => {
+  test("every catalog agent body and skill body contains the language policy", () => {
+    // LANGUAGE_POLICY_TEST_AGENT_IDS covers all REAL_CONTENT keys per REQ-TEST-001
+    // Includes deck-init and deck-onboard which are user-invocable skills
+    for (const id of LANGUAGE_POLICY_TEST_AGENT_IDS) {
+      const content = getAgentContent(id)!;
+      expect(content.agentBody, `${id} agentBody missing language policy`).toContain(
+        DEVELOPER_TEAM_LANGUAGE_POLICY,
+      );
+      expect(content.skillBody, `${id} skillBody missing language policy`).toContain(
+        DEVELOPER_TEAM_LANGUAGE_POLICY,
+      );
+    }
+  });
+
+  test("no catalog agent body or skill body contains the known Spanish leak", () => {
+    // LANGUAGE_POLICY_TEST_AGENT_IDS covers all REAL_CONTENT keys per REQ-TEST-001
+    // Includes deck-init and deck-onboard which are user-invocable skills
+    for (const id of LANGUAGE_POLICY_TEST_AGENT_IDS) {
+      const content = getAgentContent(id)!;
+      expect(content.agentBody, `${id} agentBody contains leak`).not.toContain("herramienta");
+      expect(content.skillBody, `${id} skillBody contains leak`).not.toContain("herramienta");
+    }
+  });
+
+  test("team session instructions contain the language policy and no leak", () => {
+    const instructions = getTeamSessionInstructions("developer-team")!;
+    expect(instructions).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+    expect(instructions).not.toContain("herramienta");
+  });
+
+  test("language policy is composed after context-authority guidance and before capability instructions", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+    const content = getAgentContent("deck-developer-explorer", { capabilityInstructions: bundle })!;
+
+    const authorityIdx = content.agentBody.indexOf("## Context Authority");
+    const policyIdx = content.agentBody.indexOf("## Developer Team Language Policy");
+    const packageIdx = content.agentBody.indexOf("## Package Instructions (configured)");
+
+    expect(authorityIdx, "context authority missing").toBeGreaterThan(-1);
+    expect(policyIdx, "language policy missing").toBeGreaterThan(-1);
+    expect(packageIdx, "package instructions missing").toBeGreaterThan(-1);
+    expect(authorityIdx).toBeLessThan(policyIdx);
+    expect(policyIdx).toBeLessThan(packageIdx);
+  });
+
+  test("session instructions compose language policy before capability instructions", () => {
+    const bundle: CapabilityInstructionBundle = {
+      instructions: [
+        {
+          packageId: "codebase-memory",
+          surface: "session",
+          markdown: "## Session-level capability\n\nThis should appear after the language policy.",
+        },
+      ],
+    };
+
+    const instructions = getTeamSessionInstructions("developer-team", { capabilityInstructions: bundle })!;
+    const policyIdx = instructions.indexOf("## Developer Team Language Policy");
+    const packageIdx = instructions.indexOf("## Package Instructions (configured)");
+
+    expect(policyIdx, "language policy missing in session").toBeGreaterThan(-1);
+    expect(packageIdx, "package instructions missing in session").toBeGreaterThan(-1);
+    expect(policyIdx).toBeLessThan(packageIdx);
+  });
+
+  test("capability bundle (Serena) preserves language policy and does not reintroduce leak", () => {
+    const bundle = buildCapabilityInstructionBundle(["serena"]);
+    const content = getAgentContent("deck-developer-apply-general", { capabilityInstructions: bundle })!;
+
+    expect(content.agentBody).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+    expect(content.skillBody).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+    expect(content.agentBody).not.toContain("herramienta");
+    expect(content.skillBody).not.toContain("herramienta");
+  });
+
+  test("fallback content receives the language policy when fallback is available", () => {
+    // Use a known catalog agent with real content; fallback: true still exercises the composition path.
+    const result = getAgentContentResult("deck-developer-archive", { fallback: true });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.agentBody).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+      expect(result.value.skillBody).toContain(DEVELOPER_TEAM_LANGUAGE_POLICY);
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Orchestrator Invariants Integration — REQ-IBC-001, REQ-IBC-002, REQ-IBC-003, REQ-IBC-004

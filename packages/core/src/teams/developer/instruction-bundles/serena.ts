@@ -140,7 +140,7 @@ Use each tool for its designed purpose:
 **Fallback and Reporting**
 
 When Serena tools are unavailable (no LSP, MCP server down):
-1. Report: "Serena tools unavailable. Using fallback: [herramienta]."
+1. Report: "Serena tools unavailable. Using fallback: [tool]."
 2. Continue with authorized fallback: codebase-memory tools or generic read/edit/grep.
 3. Do NOT treat fallback as error — report and continue.
 
