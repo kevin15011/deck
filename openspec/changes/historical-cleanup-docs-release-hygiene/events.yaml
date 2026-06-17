@@ -1,0 +1,14 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-06-16T20:30:00Z"
+    actor: deck-developer-explorer
+    notes:
+      - Investigated three floating historical changes (fix-provider-engram-leak, fix-adaptive-memory-heading-duplication, fix-supermemory-userid-validation).
+      - Confirmed fixes were mostly absorbed by redesign-supermemory-mcp-memory; dead SUPERMEMORY_USER_ID_REQUIRED code remains.
+      - Identified docs/release drift (README 0.0.4 vs package.json 0.1.6, CHANGELOG gaps, wrong repo link).
+      - Confirmed deck openspec validate requires explicit --root when run inside a workspace and is not yet integrated into deck doctor.
+      - Recommended splitting into two SDDs: openspec-historical-cleanup and docs-release-hygiene.

@@ -1,0 +1,14 @@
+schema: spec-registry-v1
+changeId: historical-cleanup-docs-release-hygiene
+name: Historical OpenSpec cleanup and docs/release hygiene
+currentPhase: explore
+status: completed
+artifacts:
+  exploration: exploration.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: opencode-go/kimi-k2.7-code
+    timestamp: "2026-06-16"
+    registryWrite: non-deferred
+    note: Explored scope and recommended splitting into two SDDs.
