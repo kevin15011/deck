@@ -1,0 +1,76 @@
+change: fix-opencode-effort-levels-hardcoded
+phase: apply
+status: completed
+artifacts:
+  - path: openspec/changes/fix-opencode-effort-levels-hardcoded/exploration.md
+    phase: explorer
+    type: exploration
+    timestamp: "2026-06-21T00:00:00Z"
+  - path: openspec/changes/fix-opencode-effort-levels-hardcoded/apply-progress.md
+    phase: apply
+    agent: backend
+    type: apply-progress
+    timestamp: "2026-06-21T12:00:00Z"
+  - path: openspec/changes/fix-opencode-effort-levels-hardcoded/apply-progress.md
+    phase: apply
+    agent: frontend
+    type: apply-progress
+    timestamp: "2026-06-21T15:00:00Z"
+provenance:
+  user_request: |
+    "El nivel de razonamiento no es el que disponibilizan los modelos, es como si estuvieran
+    quemados los 3 niveles que se muestran siempre, pero, se que varios modelos tienen diferentes
+    niveles de razonamiento o esfuerzo y no se están listando lo que realmente tienen los modelos."
+  mode: diagnostic
+  language: es
+  related_changes:
+    - model-reasoning-effort-capability (archived — addressed capability/visibility, NOT per-model levels)
+    - opencode-configured-providers-filter (in_progress — adapter inventory + configured-provider filter)
+findings:
+  actionable_diagnosis: true
+  root_cause: |
+    Three independent layers ignore per-model effort levels and fall back to the hardcoded
+    constant OPENCODE_THINKING_LEVELS = ["off","low","medium","high"]:
+    1. model-inventory.ts reads data.variants but the real OpenCode cache uses
+       data.reasoning_options[].values (0/5288 models have a variants field).
+    2. runner-adapter.ts getThinkingLevels(_modelId) ignores modelId and returns the constant.
+    3. developer-team-screens.tsx (line 257) and app.tsx (lines 1455,1879,1894,2361) use the
+       constant directly instead of adapter.getThinkingLevels(modelId).
+  evidence:
+    real_cache: "~/.cache/opencode/models.json — 5288 models, 144 providers, 0 with variants field, 656 with reasoning_options type=effort+values, 137 with type=budget_tokens"
+    user_model: "alibaba-token-plan/glm-5.2 has reasoning_options [{type:effort, values:[high,max]}] but TUI shows [off,low,medium,high]"
+    variant_cache_absent: "~/.cache/deck/opencode/model-variants.json does not exist; model-variants plugin not installed in opencode.json"
+  recommended_option: "A — read reasoning_options directly in model-inventory.ts; thread through adapter and TUI"
+apply:
+  backend:
+    agent: backend
+    status: completed
+    scope: |
+      Backend portion of the focused OpenCode model-specific effort-level fix.
+      (1) model-inventory.ts extracts effort variants from reasoning_options
+      (type=effort + string values), falling back to the legacy variants field;
+      budget_tokens and absent options leave variants empty. (2) runner-adapter.ts
+      getThinkingLevels(modelId) looks up the model in inventory and returns its
+      per-model variants, failing closed (empty) for unsupported/no-variant models
+      and when the inventory is unavailable; no-modelId still returns canonical
+      levels. TUI rewiring was out of scope (Frontend Apply).
+    outcome: success
+  frontend:
+    agent: frontend
+    status: completed
+    scope: |
+      Frontend TUI rewiring (Layer 3 of the diagnosis). (1) AgentModelAssignmentScreen
+      in developer-team-screens.tsx now accepts an optional thinkingLevels prop
+      sourced from adapter.getThinkingLevels(selectedModel.id); when provided, the
+      screen renders exactly those model-specific levels instead of the hardcoded
+      OPENCODE_THINKING_LEVELS constant. Empty array hides the picker (fail-closed).
+      Pi omits the prop and falls back to PI_THINKING_LEVELS unchanged. (2) app.tsx
+      adds getActiveThinkingLevels(modelId?) helper and rewires all four hardcoded
+      OPENCODE_THINKING_LEVELS sites (getCursorLimit, model-selection handler,
+      agent-model-assignment handler, getThinkingLevelByCursor) plus the render site
+      to use model-specific levels for OpenCode. Native variant ?? reasoningEffort
+      fallback preserved.
+    outcome: success
+  remaining_followups: []
+  contract_change: "none (RunnerThinkingLevel return type unchanged; per-model tokens cast at runtime — documented). Widening ReasoningLevel to include 'max'/'none' would be a separate core-type change."
+last_updated: "2026-06-21T15:00:00Z"

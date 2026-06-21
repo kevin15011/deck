@@ -241,6 +241,22 @@ type AgentModelAssignmentScreenProps = {
   defaultThinking: PiThinkingLevel | OpenCodeThinkingLevel;
   supportsThinking?: boolean;
   runtime?: "pi" | "opencode";
+  /**
+   * Model-specific thinking/effort levels to render. When provided, takes
+   * precedence over the runtime-default constant (e.g. OPENCODE_THINKING_LEVELS).
+   *
+   * For OpenCode, app.tsx passes `adapter.getThinkingLevels(selectedModel.id)`
+   * so the rendered options reflect the model's real reasoning_options variants
+   * (e.g. ["high","max"] or ["none","low","medium","high","xhigh"]) rather than
+   * a hardcoded 4-level set.
+   *
+   * When provided and empty, the picker is hidden (treated as unsupported),
+   * matching the fail-closed contract of RunnerAdapter.getThinkingLevels.
+   *
+   * When omitted, the screen falls back to the runtime-default constant —
+   * this preserves Pi's fixed PI_THINKING_LEVELS path.
+   */
+  thinkingLevels?: readonly string[];
 };
 
 export function AgentModelAssignmentScreen({
@@ -251,10 +267,17 @@ export function AgentModelAssignmentScreen({
   defaultThinking,
   supportsThinking = true,
   runtime = "pi",
+  thinkingLevels,
 }: AgentModelAssignmentScreenProps) {
   const agent = DEVELOPER_TEAM_AGENTS[agentIndex];
   const progress = `${agentIndex + 1}/${totalAgents}`;
-  const thinkingLevels = runtime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
+  const fallbackLevels = runtime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
+  // Model-specific levels (when provided) override the runtime-default constant.
+  // An empty model-specific array means the model has no discrete effort variants
+  // in the cache; we treat that as "not supported" to fail closed.
+  const hasModelSpecificLevels = thinkingLevels !== undefined;
+  const effectiveLevels = hasModelSpecificLevels ? thinkingLevels : fallbackLevels;
+  const effectiveSupportsThinking = hasModelSpecificLevels ? effectiveLevels.length > 0 : supportsThinking;
   const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
 
   return (
@@ -263,13 +286,13 @@ export function AgentModelAssignmentScreen({
         Select reasoning for {agent.displayName} <Text dimColor>({progress})</Text>
       </Text>
       <Text>Selected model: <Text color="cyan">{modelId}</Text></Text>
-      {supportsThinking ? (
+      {effectiveSupportsThinking ? (
         <>
           <Text dimColor>Choose {runtimeLabel} thinking/effort level for this agent.</Text>
           <Box marginTop={1}>
             <MenuList
               cursor={cursor}
-              items={thinkingLevels.map((level) => ({
+              items={effectiveLevels.map((level) => ({
                 id: level,
                 label: `thinking ${level}`,
                 hint: level === defaultThinking ? "recommended/default" : "",

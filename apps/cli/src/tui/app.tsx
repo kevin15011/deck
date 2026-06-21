@@ -66,7 +66,6 @@ import {
   mergeSettingsPackages,
 } from "@deck/adapter-pi";
 import {
-  OPENCODE_THINKING_LEVELS,
   inspectOpenCodeEnvironment,
   reviewOpenCodeTools,
   buildOpenCodeRunnerCapabilityInventory,
@@ -81,6 +80,7 @@ import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import { readDeckConfig, writeDeckConfig, readGlobalDeckConfig, writeGlobalDeckConfig, getDefaultDeckConfig, type AdaptiveMemoryActiveProvider, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import { buildCapabilityInstructionBundle, getEnabledPackageInstructionIds } from "@deck/core";
+import type { RunnerModelInventory, RunnerThinkingLevel } from "@deck/core";
 
 import {
   getNextScreenAfterDeveloperTeamInstall,
@@ -331,6 +331,153 @@ if (typeof process !== "undefined") {
     globalAddLog?.(msg);
     console.error(msg);
   });
+}
+
+// ---------------------------------------------------------------------------
+// TUI model-inventory helpers (module scope)
+//
+// The OpenCode TUI model inventory should be sourced from the adapter's
+// `getModelInventory()` (which reads the configured-provider cache), not the
+// curated subset returned by `opencode models` CLI. The CLI output is kept
+// only as a fallback when the adapter does not (yet) expose an inventory or
+// returns an empty one.
+//
+// These helpers are pure and have no React state dependencies so they can be
+// exercised directly from tests without rendering the TUI.
+// ---------------------------------------------------------------------------
+
+type TuiDetectedProvider = {
+  id: string;
+  displayName: string;
+  envVars: readonly string[];
+};
+
+type TuiDetectedModel = {
+  id: string;
+  displayName: string;
+  providerId: string;
+  thinking?: boolean;
+};
+
+export type TuiModelInventory = {
+  providers: TuiDetectedProvider[];
+  modelsByProvider: Record<string, TuiDetectedModel[]>;
+};
+
+/**
+ * Map a runner-agnostic `RunnerModelInventory` (from `adapter.getModelInventory()`)
+ * into the TUI's provider/model shape. Returns an empty inventory when the
+ * input is null/undefined or has no providers.
+ */
+export function buildTuiInventoryFromAdapterInventory(
+  raw: RunnerModelInventory | null | undefined,
+): TuiModelInventory {
+  if (!raw || !Array.isArray(raw.providers) || raw.providers.length === 0) {
+    return { providers: [], modelsByProvider: {} };
+  }
+  const providers: TuiDetectedProvider[] = raw.providers.map((p) => ({
+    id: p.id,
+    displayName: p.displayName,
+    envVars: p.envVars ?? [],
+  }));
+  const modelsByProvider: Record<string, TuiDetectedModel[]> = {};
+  for (const provider of providers) modelsByProvider[provider.id] = [];
+  const sourceMap = raw.modelsByProvider ?? {};
+  for (const [providerId, models] of Object.entries(sourceMap)) {
+    if (!Array.isArray(models)) continue;
+    const list = modelsByProvider[providerId] ?? (modelsByProvider[providerId] = []);
+    for (const m of models) {
+      list.push({
+        id: m.id,
+        displayName: m.displayName,
+        providerId: m.providerId,
+        thinking: typeof m.supportsReasoning === "boolean" ? m.supportsReasoning : undefined,
+      });
+    }
+  }
+  return { providers, modelsByProvider };
+}
+
+/**
+ * Parse `opencode models` CLI stdout into the TUI's provider/model shape.
+ *
+ * Each non-empty line containing a `/` is treated as `<providerId>/<modelId>`.
+ * Empty/non-matching lines are ignored. Used only as a fallback when the
+ * adapter does not provide an inventory.
+ */
+export function buildTuiInventoryFromOpenCodeCliOutput(
+  output: string,
+): TuiModelInventory {
+  const lines = output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && line.includes("/"));
+  if (lines.length === 0) return { providers: [], modelsByProvider: {} };
+  const providerIds = [
+    ...new Set(lines.map((line) => line.split("/", 2)[0] ?? "unknown")),
+  ];
+  const providers: TuiDetectedProvider[] = providerIds.map((id) => ({
+    id,
+    displayName: humanizeProviderName(id),
+    envVars: [],
+  }));
+  const modelsByProvider: Record<string, TuiDetectedModel[]> = {};
+  for (const provider of providers) modelsByProvider[provider.id] = [];
+  for (const line of lines) {
+    const [providerId, modelName] = line.split("/", 2);
+    const pid = providerId ?? "unknown";
+    const list = modelsByProvider[pid] ?? (modelsByProvider[pid] = []);
+    list.push({
+      id: line,
+      displayName: humanizeModelName(modelName ?? line),
+      providerId: pid,
+    });
+  }
+  return { providers, modelsByProvider };
+}
+
+/**
+ * Safely resolve a `RunnerModelInventory` from an adapter, handling both
+ * synchronous and Promise returns. Returns `null` when the adapter does not
+ * expose `getModelInventory`, when the method throws, or when the returned
+ * Promise rejects. Never throws.
+ */
+export async function resolveAdapterModelInventory(
+  adapter: unknown,
+): Promise<RunnerModelInventory | null> {
+  if (!adapter || typeof adapter !== "object") return null;
+  const fn = (adapter as { getModelInventory?: () => unknown }).getModelInventory;
+  if (typeof fn !== "function") return null;
+  try {
+    const result = fn.call(adapter);
+    if (result && typeof (result as { then?: unknown }).then === "function") {
+      const awaited = await (result as Promise<RunnerModelInventory>);
+      return awaited ?? null;
+    }
+    return (result as RunnerModelInventory | null | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function humanizeProviderName(providerId: string): string {
+  return providerId
+    .split(/[-_]/)
+    .map((part) => (part.length === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ");
+}
+
+function humanizeModelName(modelName: string): string {
+  return modelName
+    .split(/[-_]/)
+    .map((part) =>
+      part.length === 0
+        ? part
+        : part.toUpperCase() === part
+          ? part
+          : part.charAt(0).toUpperCase() + part.slice(1),
+    )
+    .join(" ");
 }
 
 export function DeckApp() {
@@ -1304,10 +1451,14 @@ export function DeckApp() {
     if (screen === "model-provider-selection") return Math.max(0, detectedProviders.length - 1);
     if (screen === "model-selection") return Math.max(0, providerModels.length - 1);
     if (screen === "agent-model-assignment") {
-      const thinkingLevels = modelConfigRuntime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
+      // Use model-specific thinking levels for OpenCode (from the adapter's
+      // model inventory) rather than the hardcoded OPENCODE_THINKING_LEVELS
+      // constant. Pi keeps its fixed PI_THINKING_LEVELS set.
       const adapter = getAdapter(modelConfigRuntime);
       const supportsThinking = selectedModel ? adapter.supportsThinking(selectedModel.id) : false;
-      return selectedModel && supportsThinking ? thinkingLevels.length - 1 : 0;
+      if (!selectedModel || !supportsThinking) return 0;
+      const thinkingLevels = getActiveThinkingLevels(selectedModel.id);
+      return Math.max(0, thinkingLevels.length - 1);
     }
     if (screen === "no-providers") return 0;
     if (screen === "personality-selection") return 1; // 2 options: guia, pragmatica
@@ -1460,7 +1611,7 @@ export function DeckApp() {
         hydrateDeveloperTeamModelConfig(runtime);
 
         if (isO) {
-          const inventory = detectOpenCodeModelInventoryForTui();
+          const inventory = await detectOpenCodeModelInventoryForTui();
           setDetectedProviders(inventory.providers);
           setModelsByProvider(inventory.modelsByProvider);
           if (inventory.providers.length === 0) {
@@ -1648,7 +1799,7 @@ export function DeckApp() {
         const runtime: "pi" | "opencode" = selectedEnvironments.includes("opencode-development") && !selectedEnvironments.includes("pi-development") ? "opencode" : "pi";
         setModelConfigRuntime(runtime);
         hydrateDeveloperTeamModelConfig(runtime);
-        const inventory = runtime === "opencode" ? detectOpenCodeModelInventoryForTui() : detectPiModelInventoryForTui();
+        const inventory = runtime === "opencode" ? await detectOpenCodeModelInventoryForTui() : detectPiModelInventoryForTui();
         setDetectedProviders(inventory.providers);
         setModelsByProvider(inventory.modelsByProvider);
         setModelConfigSource("install");
@@ -1728,7 +1879,11 @@ export function DeckApp() {
       const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
       const existingThinking = agent ? thinkingAssignments[agent.id] : undefined;
 
-      const thinkingLevels = modelConfigRuntime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
+      // Model-specific thinking levels for OpenCode (from the adapter's model
+      // inventory). Pi keeps its fixed PI_THINKING_LEVELS set. This drives the
+      // cursor position for the effort picker so the preselected level matches
+      // the model's real variants.
+      const thinkingLevels = getActiveThinkingLevels(model.id);
 
       const resolveThinking = getAdapter(modelConfigRuntime).resolveThinking(model.id, existingThinking as any);
 
@@ -1743,7 +1898,10 @@ export function DeckApp() {
       const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
       if (!agent) return;
 
-      const thinkingLevels = modelConfigRuntime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
+      // Model-specific thinking levels for OpenCode (from the adapter's model
+      // inventory). Pi keeps its fixed PI_THINKING_LEVELS set. The cursor
+      // indexes into the model's real variants rather than a hardcoded set.
+      const thinkingLevels = getActiveThinkingLevels(selectedModel.id);
       const rawThinking = thinkingLevels[cursor] ?? "low";
 
       const thinking = getAdapter(modelConfigRuntime).resolveThinking(selectedModel.id, rawThinking as any);
@@ -1878,7 +2036,7 @@ export function DeckApp() {
     }
   }
 
-  function handleDashboardInput(input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) {
+  async function handleDashboardInput(input: string, key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean }) {
     debug(`handleDashboardInput ENTER: input="${input}" key=${JSON.stringify(key)} screen=${dashboardState.screen}`);
     if (input === "q") {
       log("handleDashboardInput: q pressed → exit");
@@ -1920,7 +2078,7 @@ export function DeckApp() {
     }
     if (key.return) {
       log(`handleDashboardInput: Enter pressed. dashboardScreen=${dashboardState.screen} cursor=${dashboardState.cursor}`);
-      continueDashboardCurrent();
+      await continueDashboardCurrent();
     }
   }
 
@@ -1929,18 +2087,18 @@ export function DeckApp() {
     if (action) setDashboardState((current) => reduceRunnerDashboard(current, action, dashboardPlanBuilder));
   }
 
-  function continueDashboardCurrent() {
+  async function continueDashboardCurrent() {
     log(`continueDashboardCurrent: screen=${dashboardState.screen} cursor=${dashboardState.cursor}`);
     const effect = getDashboardContinueEffect(dashboardState, {
       inventory: dashboardInventory,
       canRunPlan: canRunDashboardPlan(dashboardState),
     }, dashboardCapabilityResolver);
     log(`continueDashboardCurrent: effect.type=${effect.type} action=${(effect as any).action?.type ?? "n/a"}`);
-    applyDashboardContinueEffect(effect);
+    await applyDashboardContinueEffect(effect);
     log(`continueDashboardCurrent: done`);
   }
 
-  function applyDashboardContinueEffect(effect: RunnerDashboardContinueEffect) {
+  async function applyDashboardContinueEffect(effect: RunnerDashboardContinueEffect) {
     // Helper to safely dispatch reducer actions that use dashboardPlanBuilder
     const safeDispatch = (action: RunnerDashboardAction) => {
       try {
@@ -1982,7 +2140,7 @@ export function DeckApp() {
         }
         let inventory;
         try {
-          inventory = runtime === "opencode" ? detectOpenCodeModelInventoryForTui() : detectPiModelInventoryForTui();
+          inventory = runtime === "opencode" ? await detectOpenCodeModelInventoryForTui() : detectPiModelInventoryForTui();
           debug(`open-developer-team-model-config: after detect inventory=${JSON.stringify({ providers: inventory.providers.length, modelsByProvider: Object.keys(inventory.modelsByProvider).length })}`);
         } catch (e) {
           debug(`open-developer-team-model-config: detect ERROR: ${e}`);
@@ -2208,9 +2366,36 @@ export function DeckApp() {
     setThinkingAssignments(cleanedThinking);
   }
 
+  /**
+   * Resolve the thinking levels to render for the agent-model-assignment screen.
+   *
+   * - Pi: always returns the fixed PI_THINKING_LEVELS constant (Pi has a single
+   *   fixed 6-level set across all supported models).
+   * - OpenCode: returns adapter.getThinkingLevels(modelId) so the rendered
+   *   options reflect the model's real reasoning_options variants
+   *   (e.g. ["high","max"] or ["none","low","medium","high","xhigh"]).
+   *   Fails closed (returns []) when the model is unknown/unsupported or the
+   *   inventory cannot be loaded, which drives the "Thinking not supported" UX.
+   *
+   * `modelId` overrides `selectedModel.id` when the caller already has the
+   * target model in hand (e.g. the model-selection handler, which hasn't
+   * committed the selection to state yet).
+   */
+  function getActiveThinkingLevels(modelId?: string): readonly RunnerThinkingLevel[] {
+    const adapter = getAdapter(modelConfigRuntime);
+    const targetModelId = modelId ?? (selectedModel ? selectedModel.id : undefined);
+    if (modelConfigRuntime === "opencode") {
+      return adapter.getThinkingLevels(targetModelId);
+    }
+    return PI_THINKING_LEVELS;
+  }
+
   function getThinkingLevelByCursor(index: number) {
     if (modelConfigRuntime === "opencode") {
-      return OPENCODE_THINKING_LEVELS[index] ?? "low";
+      // Use model-specific levels from the adapter's inventory rather than the
+      // hardcoded OPENCODE_THINKING_LEVELS constant.
+      const levels = getActiveThinkingLevels();
+      return levels[index] ?? "low";
     }
     return PI_THINKING_LEVELS[index] ?? "low";
   }
@@ -2319,8 +2504,15 @@ export function DeckApp() {
     };
   }
 
-  function detectOpenCodeModelInventoryForTui() {
-    // Step 1: Read existing agent models from opencode.json
+  async function detectOpenCodeModelInventoryForTui(): Promise<{
+    providers: Array<{ id: string; displayName: string; envVars: readonly string[] }>;
+    modelsByProvider: Record<string, Array<{ id: string; displayName: string; providerId: string; thinking?: boolean }>>;
+  }> {
+    // Step 1: Read existing agent models from opencode.json so user selections
+    // are pre-populated. Preserves the native `variant ?? reasoningEffort`
+    // fallback: the resolved thinking level later flows through
+    // adapter.resolveThinking(modelId, existingAssignment), which uses the
+    // native variant when available and falls back to `reasoningEffort`.
     const opencodeConfigPath = join(homedir(), ".config", "opencode", "opencode.json");
     if (existsSync(opencodeConfigPath)) {
       try {
@@ -2344,55 +2536,37 @@ export function DeckApp() {
       }
     }
 
-    // Step 2: Get available models from `opencode models`
+    // Step 2: Prefer adapter inventory (`adapter.getModelInventory()`) over
+    // the curated `opencode models` CLI subset. The adapter reads the full
+    // configured-provider cache, so models such as `openai/gpt-5.3-codex`
+    // (present in `~/.cache/opencode/models.json` but not in the CLI subset)
+    // surface in the TUI. Handles both sync and Promise returns.
+    try {
+      const adapter = getAdapter("opencode");
+      const adapterRaw = await resolveAdapterModelInventory(adapter);
+      const adapterMapped = buildTuiInventoryFromAdapterInventory(adapterRaw);
+      if (adapterMapped.providers.length > 0) {
+        log(`detectOpenCodeModelInventoryForTui: using adapter inventory (${adapterMapped.providers.length} providers, ${Object.keys(adapterMapped.modelsByProvider).length} with models)`);
+        return adapterMapped;
+      }
+    } catch (error) {
+      log(`detectOpenCodeModelInventoryForTui: adapter inventory failed, falling back to CLI: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    // Step 3: Fallback to `opencode models` CLI subset only when the adapter
+    // did not provide an inventory (or returned an empty one).
     const listModelsResult = runOpenCodeCommand("opencode", ["models"]);
     log(`detectOpenCodeModelInventoryForTui: opencode models exitCode=${listModelsResult.exitCode} stdoutLen=${listModelsResult.stdout?.length ?? 0} stderrLen=${listModelsResult.stderr?.length ?? 0}`);
     const output = listModelsResult.stdout || listModelsResult.stderr || "";
     if (listModelsResult.exitCode === 0 && output.trim().length > 0) {
-      const models = parseOpenCodeModelsOutput(output);
-      const providers = [...new Set(models.map((m) => m.providerId))].map((id) => ({ id, displayName: humanizeProviderName(id), envVars: [] }));
-      const modelsByProvider: Record<string, Array<{ id: string; displayName: string; providerId: string }>> = {};
-      for (const model of models) {
-        if (!modelsByProvider[model.providerId]) modelsByProvider[model.providerId] = [];
-        modelsByProvider[model.providerId].push(model);
-      }
-      return { providers, modelsByProvider };
+      return buildTuiInventoryFromOpenCodeCliOutput(output);
     }
-    return { providers: [] as Array<{ id: string; displayName: string; envVars: string[] }>, modelsByProvider: {} };
-  }
-
-  function parseOpenCodeModelsOutput(output: string): Array<{ id: string; displayName: string; providerId: string }> {
-    return output
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0 && line.includes("/"))
-      .map((line) => {
-        const [providerId, modelName] = line.split("/", 2);
-        return {
-          id: line,
-          displayName: humanizeModelName(modelName ?? line),
-          providerId: providerId ?? "unknown",
-        };
-      });
+    return { providers: [], modelsByProvider: {} };
   }
 
   function runOpenCodeCommand(command: string, args: string[]) {
     const result = spawnSync(command, args);
     return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
-  }
-
-  function humanizeProviderName(providerId: string): string {
-    return providerId
-      .split(/[-_]/)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
-  }
-
-  function humanizeModelName(modelName: string): string {
-    return modelName
-      .split(/[-_]/)
-      .map((part) => part.toUpperCase() === part ? part : part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
   }
 
   function runPiCommand(command: string, args: string[]) {
@@ -2576,6 +2750,15 @@ export function DeckApp() {
           defaultThinking={getAdapter(modelConfigRuntime).getDefaultThinking(selectedModel.id)}
           supportsThinking={getAdapter(modelConfigRuntime).supportsThinking(selectedModel.id)}
           runtime={modelConfigRuntime}
+          // Pass model-specific thinking levels for OpenCode so the rendered
+          // options match the model's real reasoning_options variants
+          // (e.g. ["high","max"]) rather than the hardcoded 4-level constant.
+          // Pi omits this prop and falls back to PI_THINKING_LEVELS.
+          thinkingLevels={
+            modelConfigRuntime === "opencode"
+              ? getActiveThinkingLevels(selectedModel.id)
+              : undefined
+          }
         />
       ) : null}
       {screen === "no-providers" ? <NoProvidersScreen dashboardContext={dashboardDeveloperTeamContext()} runtime={modelConfigRuntime} /> : null}

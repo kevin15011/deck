@@ -1,0 +1,28 @@
+- event: exploration-completed
+  phase: explore
+  status: completed
+  artifact: exploration.md
+  timestamp: 2026-06-19T00:00:00Z
+  agent: explorer
+  summary: Diagnosed two root causes — backend returns all 145 cached providers without filtering by configured status (auth.json), and MenuList has no windowing causing invisible selectable rows.
+- event: apply-frontend-in-progress
+  phase: apply
+  status: in_progress
+  artifact: apply-progress.md
+  timestamp: 2026-06-21T00:00:00Z
+  agent: deck-developer-apply-frontend
+  model: alibaba-token-plan/glm-5.2
+  summary: >-
+    Fixed MenuList windowing visual/navigation bug for long model/provider lists.
+    Root cause: placeholder rows used a regular space (" ") which Ink's
+    Output.get() trims to an empty string via per-line trimEnd(), producing a
+    trailing "\n" in the joined output. Ink's log-update then over-erases by one
+    line on the next render, shifting the list and making the cursor/items
+    visually disappear near the top or bottom of a long list. Fix: replace space
+    placeholders with U+200B (zero-width space) which survives trimEnd() while
+    rendering invisibly. Added defensive cursor clamping so the selector is
+    always rendered on a valid item even with a stale cursor prop. 32/32
+    menu-list tests pass (29 existing + 3 new regression tests); 37/37 effort
+    tests pass. Zero typecheck/diagnostics in touched files. Backend filtering
+    (auth.json reader + configured-provider filter) remains for Backend/General
+    Apply.

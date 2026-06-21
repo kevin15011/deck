@@ -4,9 +4,10 @@
  * Hybrid resolver for determining if a model supports reasoning/thinking effort.
  *
  * Precedence:
- * 1. Runner signal (explicit true/false) - always wins
- * 2. Catalog (explicit supportsReasoning or derived from capabilities)
- * 3. Unknown/no confirmation - default to false (safe default)
+ * 1. Runner variants (non-empty array) — confirms reasoning support with source "runner"
+ * 2. Runner explicit signal (true/false) — always wins
+ * 3. Catalog (explicit supportsReasoning or derived from capabilities)
+ * 4. Unknown/no confirmation — default to false (safe default)
  *
  * REQ-MRE-001 through REQ-MRE-006
  */
@@ -21,6 +22,9 @@ export type ReasoningSupportSource = "runner" | "catalog" | "unknown";
 
 export type ResolveReasoningSupportInput = {
   modelId?: string;
+  /** Per-model effort variants confirmed by the runner (e.g. from cache reasoning_options). */
+  runnerVariants?: readonly string[];
+  /** Explicit runner signal for the model as a whole (true/false). */
   runnerSupportsReasoning?: boolean | null;
   catalog?: ModelCatalog;
 };
@@ -66,11 +70,12 @@ export function catalogSupportsReasoning(model?: ModelEntry): boolean | undefine
  * Resolves reasoning effort support with hybrid precedence.
  *
  * Precedence order:
- * 1. Runner signal (if explicitly true or false) - always wins
- * 2. Catalog fallback:
+ * 1. Runner variants (non-empty array) — EG-1 T2: confirms support with source "runner"
+ * 2. Runner explicit signal (true/false) — always wins over catalog
+ * 3. Catalog fallback:
  *    - Explicit supportsReasoning takes priority
  *    - If undefined, derive from capabilities.includes("reasoning")
- * 3. Unknown/no confirmation: returns false with source "unknown"
+ * 4. Unknown/no confirmation: returns false with source "unknown"
  *
  * @param input - Resolution input containing modelId, optional runner signal, and optional catalog
  * @returns Result with supportsReasoning flag and source of determination
@@ -78,10 +83,20 @@ export function catalogSupportsReasoning(model?: ModelEntry): boolean | undefine
 export function resolveReasoningEffortSupport(
   input: ResolveReasoningSupportInput
 ): ResolveReasoningSupportResult {
-  const { modelId, runnerSupportsReasoning, catalog } = input;
+  const { modelId, runnerVariants, runnerSupportsReasoning, catalog } = input;
 
-  // 1. Runner signal takes precedence (REQ-MRE-002, REQ-MRE-003)
-  // Only true|false count as explicit signal; null/undefined fall through to catalog
+  // 1. Runner variants take precedence over everything (EG-1 T2).
+  // Non-empty array = runner confirms this model supports reasoning effort.
+  // Empty/undefined variants fall through to the runnerSupportsReasoning check.
+  if (runnerVariants && runnerVariants.length > 0) {
+    return {
+      supportsReasoning: true,
+      source: "runner",
+    };
+  }
+
+  // 2. Runner explicit signal takes precedence (REQ-MRE-002, REQ-MRE-003).
+  // Only true|false count as explicit signal; null/undefined fall through to catalog.
   if (runnerSupportsReasoning === true) {
     return {
       supportsReasoning: true,
@@ -96,7 +111,7 @@ export function resolveReasoningEffortSupport(
     };
   }
 
-  // 2. Catalog fallback (REQ-MRE-004)
+  // 3. Catalog fallback (REQ-MRE-004)
   if (catalog && modelId) {
     // Use the provided catalog's models, or fall back to global if not provided
     const models = catalog.models ?? [];
@@ -127,7 +142,7 @@ export function resolveReasoningEffortSupport(
     };
   }
 
-  // 3. Unknown/no confirmation - safe default (REQ-MRE-005, REQ-MRE-006)
+  // 4. Unknown/no confirmation - safe default (REQ-MRE-005, REQ-MRE-006)
   return {
     supportsReasoning: false,
     source: "unknown",

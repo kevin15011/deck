@@ -89,6 +89,8 @@ import {
 import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
 import { getUserFacingOpenCodeCapability, OPENCODE_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
 import type { CapabilityCatalogEntry } from "@deck/core";
+import { loadModelInventory } from "./model-inventory";
+import type { RunnerModelInventory, RunnerModelEntry } from "@deck/core";
 
 // ---------------------------------------------------------------------------
 // Adapter factory
@@ -96,8 +98,21 @@ import type { CapabilityCatalogEntry } from "@deck/core";
 
 const OPENCODE_ENVIRONMENT_IDS = ["opencode-development"] as const;
 
-function createOpenCodeRunnerAdapter(): RunnerAdapter {
-  return new OpenCodeRunnerAdapterImpl();
+/**
+ * Options for constructing an OpenCode runner adapter.
+ *
+ * `inventoryLoader` is primarily a testing seam: production code leaves it
+ * undefined so the adapter reads the real OpenCode cache via
+ * `loadModelInventory()`. Tests inject a fixed inventory to assert
+ * model-specific effort-level behavior without touching the filesystem.
+ */
+export type OpenCodeRunnerAdapterOptions = {
+  /** Override the model inventory source (defaults to loadModelInventory()). */
+  inventoryLoader?: () => RunnerModelInventory;
+};
+
+function createOpenCodeRunnerAdapter(options?: OpenCodeRunnerAdapterOptions): RunnerAdapter {
+  return new OpenCodeRunnerAdapterImpl(options);
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +127,17 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
   // Store last native plan for backup/restore operations
   // buildDeveloperTeamInstallPlan stores it here, backupDeveloperTeamFiles uses it
   #lastNativePlan: OpenCodeDeveloperTeamInstallPlan | null = null;
+
+  // Optional inventory loader (testing seam). When undefined, getModelInventory()
+  // falls back to loadModelInventory(), which reads the real OpenCode cache.
+  #inventoryLoader: (() => RunnerModelInventory) | null;
+
+  // Cached model inventory (populated lazily by getModelInventory()).
+  #cachedInventory: RunnerModelInventory | null = null;
+
+  constructor(options?: OpenCodeRunnerAdapterOptions) {
+    this.#inventoryLoader = options?.inventoryLoader ?? null;
+  }
 
   // -------------------------------------------------------------------------
   // Runtime detection
@@ -534,19 +560,83 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
     return config.thinkingAssignments as DeveloperTeamThinkingAssignments;
   }
 
-  getThinkingLevels(_modelId?: string): readonly RunnerThinkingLevel[] {
-    // Map OpenCode thinking levels to canonical RunnerThinkingLevel (ReasoningLevel)
-    const mapping: Record<OpenCodeThinkingLevel, import("@deck/core").ReasoningLevel> = {
-      "off": "off",
-      "low": "low",
-      "medium": "medium",
-      "high": "high",
-    };
-    return OPENCODE_THINKING_LEVELS.map((l) => mapping[l]);
+  getThinkingLevels(modelId?: string): readonly RunnerThinkingLevel[] {
+    // No modelId requested: return the canonical OpenCode thinking levels.
+    // This preserves the existing contract (used by callers that want the
+    // full level set without targeting a specific model) and keeps the
+    // "no modelId" path independent of cache availability.
+    if (!modelId) {
+      return OPENCODE_THINKING_LEVELS as readonly RunnerThinkingLevel[];
+    }
+
+    // A specific model was requested. Look it up in the inventory and return
+    // its model-specific effort variants (e.g. ["high","max"] or
+    // ["none","low","medium","high","xhigh"]) populated from the cache's
+    // reasoning_options. Fail closed (return empty) when:
+    //   - the inventory cannot be loaded, OR
+    //   - the model is absent from the inventory, OR
+    //   - the model has no discrete effort variants (e.g. budget_tokens-only
+    //     models, or models whose reasoning_options omitted an effort entry).
+    // Returning empty — rather than the generic 4-level constant — prevents
+    // offering effort levels the model does not actually support.
+    try {
+      const inventory = this.getModelInventory();
+      const model = findModelInInventory(inventory, modelId);
+      if (model && model.variants && model.variants.length > 0) {
+        // Variants come straight from the cache (already validated/deduped).
+        // Cast because RunnerThinkingLevel is a closed union of canonical
+        // levels, but real per-model effort values include provider-specific
+        // tokens ("max", "none", "xhigh", ...). Runtime treats them as
+        // strings; the closed type is a known pre-existing limitation.
+        return model.variants as readonly RunnerThinkingLevel[];
+      }
+      return [];
+    } catch {
+      // Inventory unavailable: fail closed rather than guessing levels.
+      return [];
+    }
   }
 
   supportsThinking(modelId: string): boolean {
+    // Check cache-derived variants first: if getThinkingLevels returns non-empty
+    // variants, the cache confirms this model supports reasoning effort.
+    const variants = this.getThinkingLevels(modelId);
+    if (variants.length > 0) {
+      return true;
+    }
+
+    // Variants are empty. Determine whether the model is in the cache:
+    // - In cache but empty variants → fail closed (cache says no effort levels)
+    // - Not in cache → fall back to catalog via supportsThinkingForOpenCodeModel
+    const inventory = this.getModelInventory();
+    let inCache = false;
+    for (const models of Object.values(inventory.modelsByProvider)) {
+      if (models.some((m) => m.id === modelId)) {
+        inCache = true;
+        break;
+      }
+    }
+
+    if (inCache) {
+      // Model is in the runner cache but has no discrete effort variants.
+      // Fail closed rather than using catalog confirmation.
+      return false;
+    }
+
+    // Model not in cache — fall back to catalog (acceptable for non-cache models).
     return supportsThinkingForOpenCodeModel(modelId);
+  }
+
+  // -------------------------------------------------------------------------
+  // Model inventory (configured providers only)
+  // -------------------------------------------------------------------------
+
+  getModelInventory(): RunnerModelInventory {
+    if (this.#cachedInventory) {
+      return this.#cachedInventory;
+    }
+    this.#cachedInventory = this.#inventoryLoader ? this.#inventoryLoader() : loadModelInventory();
+    return this.#cachedInventory;
   }
 
   // -------------------------------------------------------------------------
@@ -839,6 +929,59 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
       diagnostics,
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Model-inventory lookup helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Find a model entry in the inventory by ID, tolerating the
+ * `provider/model` vs raw `model` ID mismatch.
+ *
+ * Lookup order:
+ *  1. Exact match on `model.id` across all providers (handles canonical
+ *     `provider/model` IDs like "openai/gpt-5.5" or "alibaba-token-plan/glm-5.2").
+ *  2. If `modelId` has no provider prefix (no "/"), match by suffix — i.e.
+ *     find any inventory entry whose id is `<provider>/<modelId>`. This lets
+ *     callers pass a raw model id ("glm-5.2") and still resolve the entry
+ *     ("alibaba-token-plan/glm-5.2").
+ *
+ * Returns the first match, or undefined when the model is not in the inventory.
+ */
+function findModelInInventory(
+  inventory: RunnerModelInventory,
+  modelId: string,
+): RunnerModelEntry | undefined {
+  const providerIds = Object.keys(inventory.modelsByProvider);
+
+  // 1. Exact id match.
+  for (const providerId of providerIds) {
+    const models = inventory.modelsByProvider[providerId];
+    if (!models) continue;
+    for (const model of models) {
+      if (model.id === modelId) {
+        return model;
+      }
+    }
+  }
+
+  // 2. Suffix match for raw (unprefixed) model IDs.
+  if (!modelId.includes("/")) {
+    for (const providerId of providerIds) {
+      const models = inventory.modelsByProvider[providerId];
+      if (!models) continue;
+      for (const model of models) {
+        const slashIdx = model.id.lastIndexOf("/");
+        const suffix = slashIdx >= 0 ? model.id.slice(slashIdx + 1) : model.id;
+        if (suffix === modelId) {
+          return model;
+        }
+      }
+    }
+  }
+
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

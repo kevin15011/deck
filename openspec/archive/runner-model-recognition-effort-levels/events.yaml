@@ -1,0 +1,117 @@
+events:
+  - phase: explore
+    status: completed
+    timestamp: "2026-06-17T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/exploration.md
+    event: exploration-completed
+    summary: "Initial exploration diagnosed narrow OpenCode model recognition and globally hardcoded effort levels."
+  - phase: explore
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/exploration.md
+    event: exploration-updated
+    summary: "External read-only gentle-ai investigation added reference design: OpenCode cache inventory plus per-model variants."
+  - phase: proposal
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/proposal.md
+    event: proposal-completed
+    summary: "Proposal completed for adapter-driven, model-aware runner model and variant discovery."
+  - phase: spec
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/spec.md
+    event: spec-completed
+    summary: "Spec completed in registry-deferred mode; no gentle-ai dependency and runner-owned source constraints recorded."
+  - phase: design
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/design.md
+    event: design-completed
+    summary: "Design completed in registry-deferred mode; OpenCode inventory/cache/plugin architecture defined."
+  - phase: tasks
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/tasks.md
+    event: tasks-completed
+    summary: "Tasks completed: 15 tasks across shared contracts, OpenCode backend, Pi compatibility, TUI, and tests."
+  - phase: tasks
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/preconditions.md
+    event: preconditions-created
+    summary: "Preconditions created: 7 total, 0 blocked; Apply allowed with recorded placeholders."
+  - phase: apply
+    status: gate-passed
+    timestamp: "2026-06-18T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/preconditions.md
+    event: apply-preconditions-gate-passed
+    summary: "Apply preconditions gate passed; no blocked row with Blocks Apply = Yes."
+  - phase: apply
+    status: completed
+    timestamp: "2026-06-18T15:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/apply-progress.md
+    event: apply-execution-groups-completed
+    summary: "Initial Apply execution groups EG-1 through EG-4 completed, later requiring repairs."
+  - phase: verify
+    status: failed
+    timestamp: "2026-06-18T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/verify-report.md
+    event: verify-failed
+    summary: "Initial Verify failed; returned to Apply for multiple repair rounds."
+  - phase: review
+    status: changes_requested
+    timestamp: "2026-06-18T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/review-report.md
+    event: review-changes-requested
+    summary: "Initial Review requested changes; returned to Apply for blocker repairs."
+  - phase: apply
+    status: completed
+    timestamp: "2026-06-18T23:59:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/apply-progress.md
+    event: incident-repair-completed
+    summary: "Tracked-file integration incident repaired after Verify/Review found claimed changes missing from tracked files."
+  - phase: apply
+    status: completed
+    timestamp: "2026-06-19T00:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/apply-progress.md
+    event: bounded-backend-salvage-completed
+    summary: "Bounded backend salvage completed: catalog fallback removed, backend require() calls replaced, cross-cutting variant tests strengthened."
+  - phase: apply
+    status: completed
+    timestamp: "2026-06-19T01:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/apply-progress.md
+    event: bounded-frontend-salvage-triage-completed
+    summary: "Bounded frontend salvage fixed app.tsx change-surface diagnostics and preserved adapter-first inventory behavior."
+  - phase: apply
+    status: completed
+    timestamp: "2026-06-19T02:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/apply-progress.md
+    event: pi-detector-restored
+    summary: "Restored detectPiModelInventoryForTui and added regression coverage for Pi detector branch."
+  - phase: apply
+    status: completed
+    timestamp: "2026-06-19T03:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/apply-progress.md
+    event: opencode-variant-persistence-fixed
+    summary: "Fixed OpenCode variant persistence: inventory-confirmed or cache-confirmed variants are written as native variant; unconfirmed variants are omitted; legacy reasoningEffort is not written."
+  - phase: verify
+    status: passed_with_warnings
+    timestamp: "2026-06-19T03:30:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/verify-report.md
+    event: verify-passed-with-warnings
+    summary: "Final Verify passed with warnings. Focused OpenCode/core/Pi/no-gentle-ai/TUI tests and build passed; remaining full TUI/typecheck warnings are pre-existing or unrelated."
+  - phase: review
+    status: approved_with_warnings
+    timestamp: "2026-06-19T03:30:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/review-report.md
+    event: review-approved-with-warnings
+    summary: "Final Review approved with warnings. Prior blockers resolved; residual findings are non-blocking follow-ups."
+
+  - phase: archive
+    status: completed
+    timestamp: "2026-06-19T04:00:00Z"
+    artifact: openspec/changes/runner-model-recognition-effort-levels/archive-report.md
+    archive_target: openspec/archive/runner-model-recognition-effort-levels/
+    event: change-archived
+    summary: "Change closed and archived to openspec/archive/runner-model-recognition-effort-levels/."

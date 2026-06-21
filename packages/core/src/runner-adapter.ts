@@ -120,6 +120,47 @@ export type CapabilityCatalogEntry = {
 };
 
 // ---------------------------------------------------------------------------
+// Model inventory (getModelInventory)
+// ---------------------------------------------------------------------------
+
+/**
+ * Source of model inventory data.
+ */
+export type RunnerModelSource = "runner-cache" | "runner-config";
+
+/**
+ * Provider in the model inventory.
+ */
+export type RunnerModelProvider = {
+  id: string;
+  displayName: string;
+  envVars?: readonly string[];
+  source: RunnerModelSource;
+};
+
+/**
+ * Model entry in the inventory.
+ */
+export type RunnerModelEntry = {
+  id: string;
+  providerId: string;
+  displayName: string;
+  supportsTools?: boolean;
+  supportsReasoning?: boolean | null;
+  variants?: readonly string[];
+  source: RunnerModelSource;
+};
+
+/**
+ * Model inventory for TUI consumption.
+ */
+export type RunnerModelInventory = {
+  providers: readonly RunnerModelProvider[];
+  modelsByProvider: Readonly<Record<string, readonly RunnerModelEntry[]>>;
+  diagnostics?: readonly string[];
+};
+
+// ---------------------------------------------------------------------------
 // Dashboard state (passed to buildReviewPlan / buildInstallationPlan)
 // Minimal core-facing DTO — adapter transforms this into runner-specific plans.
 // ---------------------------------------------------------------------------

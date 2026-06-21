@@ -1,0 +1,15 @@
+phase: apply
+status: in_progress
+artifact: apply-progress.md
+provenance:
+  agent: deck-developer-apply-frontend
+  model: alibaba-token-plan/glm-5.2
+  timestamp: 2026-06-21T00:00:00Z
+previous_artifacts:
+  - phase: explore
+    status: completed
+    artifact: exploration.md
+    provenance:
+      agent: explorer
+      model: qwen3.7-plus
+      timestamp: 2026-06-19T00:00:00Z

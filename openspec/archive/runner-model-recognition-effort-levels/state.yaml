@@ -1,0 +1,88 @@
+phase: archive
+status: archived
+change: runner-model-recognition-effort-levels
+agent: archive
+artifacts:
+  - path: openspec/changes/runner-model-recognition-effort-levels/exploration.md
+    phase: explore
+    type: exploration
+    status: completed
+    timestamp: "2026-06-17T00:00:00Z"
+  - path: openspec/changes/runner-model-recognition-effort-levels/exploration.md
+    phase: explore
+    type: exploration-update
+    section: "External Reference: gentle-ai"
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+  - path: openspec/changes/runner-model-recognition-effort-levels/proposal.md
+    phase: proposal
+    type: proposal
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+  - path: openspec/changes/runner-model-recognition-effort-levels/spec.md
+    phase: spec
+    type: spec
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+  - path: openspec/changes/runner-model-recognition-effort-levels/design.md
+    phase: design
+    type: design
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+  - path: openspec/changes/runner-model-recognition-effort-levels/tasks.md
+    phase: tasks
+    type: tasks
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+  - path: openspec/changes/runner-model-recognition-effort-levels/preconditions.md
+    phase: tasks
+    type: preconditions
+    status: completed
+    timestamp: "2026-06-18T00:00:00Z"
+  - path: openspec/changes/runner-model-recognition-effort-levels/apply-progress.md
+    phase: apply
+    type: apply-progress
+    status: completed
+    timestamp: "2026-06-19T03:00:00Z"
+    agents:
+      - general
+      - backend
+      - frontend
+    summary: "Apply completed after incident repair, bounded backend salvage, bounded frontend salvage, Pi detector restoration, and inventory/cache-confirmed OpenCode variant persistence fix."
+  - path: openspec/changes/runner-model-recognition-effort-levels/verify-report.md
+    phase: verify
+    type: verify-report
+    status: passed_with_warnings
+    timestamp: "2026-06-19T03:30:00Z"
+  - path: openspec/changes/runner-model-recognition-effort-levels/review-report.md
+    phase: review
+    type: review-report
+    status: approved_with_warnings
+    timestamp: "2026-06-19T03:30:00Z"
+  - path: openspec/changes/runner-model-recognition-effort-levels/archive-report.md
+    phase: archive
+    type: archive-report
+    status: completed
+    timestamp: "2026-06-19T04:00:00Z"
+provenance:
+  user_request: |
+    "Hay algo que quiero corregir y es el reconocimiento de los modelos de los proveedores de los runner, especificamente opencode no está reconociendo todos los modelos de los proveedores como por ejemplo OpenAI y tampoco los niveles de esfuerzos de dichos modelos, es como si tuviera quemados los mismo 3 niveles de esfuerzo"
+  follow_up_request: |
+    "Quiero que primero explores un repositorio que está justo fuera de este llamado gentle-ai, este de cierta forma obtiene los modelos de los runner o adapters, veamos como lo hace antes de avanzar al proposal"
+  proposal_approval_constraint: |
+    "Procede, teneindo en cuenta que deck no puede depender de nadie mas que del runner"
+  mode: interactive
+  external_reference: /home/kevinlb/gentle-ai (read-only)
+  explorer_artifact: openspec/changes/runner-model-recognition-effort-levels/exploration.md
+  proposal_artifact: openspec/changes/runner-model-recognition-effort-levels/proposal.md
+  spec_artifact: openspec/changes/runner-model-recognition-effort-levels/spec.md
+  design_artifact: openspec/changes/runner-model-recognition-effort-levels/design.md
+  tasks_artifact: openspec/changes/runner-model-recognition-effort-levels/tasks.md
+  preconditions_artifact: openspec/changes/runner-model-recognition-effort-levels/preconditions.md
+  apply_progress_artifact: openspec/changes/runner-model-recognition-effort-levels/apply-progress.md
+  verify_artifact: openspec/changes/runner-model-recognition-effort-levels/verify-report.md
+  review_artifact: openspec/changes/runner-model-recognition-effort-levels/review-report.md
+  preconditions_summary: "7 preconditions: 4 satisfied, 3 allowed-with-placeholder, 0 blocked, 0 deferred."
+  latest_verify_summary: "PASS WITH WARNINGS: focused OpenCode/core/Pi/no-gentle-ai/TUI tests and build pass; workspace typecheck and full TUI warnings are pre-existing/unrelated."
+  latest_review_summary: "APPROVED WITH WARNINGS: prior blockers resolved; residual warnings are non-blocking follow-ups."
+last_updated: "2026-06-19T04:00:00Z"

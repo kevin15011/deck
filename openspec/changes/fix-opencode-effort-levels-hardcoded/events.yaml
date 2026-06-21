@@ -1,0 +1,103 @@
+events:
+  - phase: explorer
+    status: completed
+    timestamp: "2026-06-21T00:00:00Z"
+    artifact: openspec/changes/fix-opencode-effort-levels-hardcoded/exploration.md
+    event: exploration-completed
+    summary: |
+      Diagnostic exploration completed. Three independent root causes confirmed by reading
+      real source code and the real OpenCode cache (~/.cache/opencode/models.json, 2.3MB,
+      5288 models). The TUI shows hardcoded effort levels ["off","low","medium","high"] for
+      every OpenCode model because:
+      (1) model-inventory.ts reads data.variants but the real cache uses
+      data.reasoning_options[].values — 0/5288 models have a variants field;
+      (2) runner-adapter.ts getThinkingLevels(_modelId) ignores the modelId parameter and
+      returns the hardcoded OPENCODE_THINKING_LEVELS constant;
+      (3) developer-team-screens.tsx (line 257) and app.tsx (4 sites) use the constant
+      directly instead of calling adapter.getThinkingLevels(modelId).
+      The user's configured model alibaba-token-plan/glm-5.2 exposes ["high","max"] via
+      reasoning_options but the TUI shows ["off","low","medium","high"] (levels the model
+      does not even support). 656 models have effort-type reasoning_options; 137 have
+      budget_tokens type. Recommended fix: Option A — read reasoning_options directly in
+      model-inventory.ts, populate RunnerModelEntry.variants, rewire adapter and TUI.
+    findings:
+      - "Real cache uses reasoning_options[{type:effort,values:[...]}] not variants; 0/5288 models have variants field"
+      - "getThinkingLevels(_modelId) in runner-adapter.ts:539 ignores modelId; returns hardcoded constant"
+      - "developer-team-screens.tsx:257 and app.tsx:1455,1879,1894,2361 use OPENCODE_THINKING_LEVELS directly, never call adapter.getThinkingLevels"
+      - "User model alibaba-token-plan/glm-5.2 exposes [high,max] but TUI shows [off,low,medium,high]"
+      - "model-variants.ts variantsFor() and the Deck variant cache plugin are dead code in the effort-level flow; plugin not installed, cache file absent"
+      - "Existing effort tests use mock adapters; no wiring test proves the real screen calls adapter.getThinkingLevels"
+    recommendation: |
+      Option A — read reasoning_options[].values in model-inventory.ts parseModelEntry(),
+      populate RunnerModelEntry.variants, make getThinkingLevels(modelId) return per-model
+      variants with hardcoded fallback, rewire AgentModelAssignmentScreen and app.tsx to
+      call adapter.getThinkingLevels(selectedModel.id). Handle budget_tokens models by
+      hiding the picker. Medium effort, 4 files.
+  - phase: apply
+    agent: backend
+    status: completed
+    timestamp: "2026-06-21T12:00:00Z"
+    artifact: openspec/changes/fix-opencode-effort-levels-hardcoded/apply-progress.md
+    event: backend-apply-completed
+    summary: |
+      Backend apply completed (Layers 1 & 2 of the diagnosis). model-inventory.ts
+      now extracts discrete effort variants from reasoning_options entries where
+      type === "effort" and values is a string array, falling back to the legacy
+      variants field for compatibility; budget_tokens-only and absent-options
+      models yield empty variants. runner-adapter.ts getThinkingLevels(modelId)
+      now looks up the model in the inventory and returns its per-model variants
+      (e.g. ["high","max"] for alibaba-token-plan/glm-5.2, ["none","low","medium",
+      "high","xhigh"] for gpt-5.3-codex-spark), failing closed (empty) for
+      unsupported/no-variant/inventory-unavailable cases. The no-modelId path
+      still returns canonical OPENCODE_THINKING_LEVELS. A new
+      OpenCodeRunnerAdapterOptions.inventoryLoader testing seam lets tests inject
+      an inventory without touching the filesystem. findModelInInventory tolerates
+      the provider/model vs raw model-id mismatch via suffix matching. Layer 3
+      (TUI rewiring in developer-team-screens.tsx and app.tsx) remains for
+      Frontend Apply. No contract change to RunnerThinkingLevel; provider-specific
+      tokens ("max","none") are cast at runtime with inline documentation.
+    verification:
+      backend_tests: "359 pass / 0 fail across packages/adapter-opencode/src (39 targeted in model-inventory.test.ts + runner-adapter.inventory.test.ts)"
+      typecheck: "0 errors in touched files (model-inventory.ts, runner-adapter.ts, model-inventory.test.ts, runner-adapter.inventory.test.ts); 118 pre-existing errors in untouched files"
+      dep_guard: "no-gentle-ai-dependency.test.ts 3/3 pass"
+      committed: false
+    files_changed:
+      - packages/adapter-opencode/src/model-inventory.ts (modify — reasoning_options parsing)
+      - packages/adapter-opencode/src/runner-adapter.ts (modify — model-specific getThinkingLevels + inventoryLoader seam)
+      - packages/adapter-opencode/src/model-inventory.test.ts (modify — 8 new reasoning_options cases)
+      - packages/adapter-opencode/src/runner-adapter.inventory.test.ts (modify — rewritten with 14 model-specific cases)
+  - phase: apply
+    agent: frontend
+    status: completed
+    timestamp: "2026-06-21T15:00:00Z"
+    artifact: openspec/changes/fix-opencode-effort-levels-hardcoded/apply-progress.md
+    event: frontend-apply-completed
+    summary: |
+      Frontend apply completed (Layer 3 of the diagnosis — TUI rewiring).
+      AgentModelAssignmentScreen in developer-team-screens.tsx now accepts an
+      optional thinkingLevels prop; when provided, the screen renders exactly
+      those model-specific levels (sourced from
+      adapter.getThinkingLevels(selectedModel.id) by app.tsx) instead of the
+      hardcoded OPENCODE_THINKING_LEVELS constant. An empty array hides the
+      picker and shows "Thinking not supported" — matching the fail-closed
+      contract for unsupported/no-variant/budget_tokens-only models. Pi omits
+      the prop and falls back to PI_THINKING_LEVELS unchanged.
+      app.tsx adds a getActiveThinkingLevels(modelId?) helper and rewires all
+      four hardcoded OPENCODE_THINKING_LEVELS sites: getCursorLimit
+      (agent-model-assignment branch), model-selection handler (preselected
+      thinking index), agent-model-assignment handler (selected level by cursor),
+      and getThinkingLevelByCursor (cursor-to-level mapping). The render site
+      passes thinkingLevels={getActiveThinkingLevels(selectedModel.id)} for
+      OpenCode. The unused OPENCODE_THINKING_LEVELS import was removed from
+      app.tsx. Native variant ?? reasoningEffort fallback in
+      detectOpenCodeModelInventoryForTui is preserved unchanged.
+    verification:
+      frontend_tests: "44 pass / 0 fail in developer-team-screens-effort.test.tsx (7 new model-specific rendering cases); 40 pass / 0 fail in menu-list.test.tsx; 3 pass / 0 fail in no-gentle-ai-dependency.test.ts"
+      typecheck: "0 errors in modified line ranges of app.tsx and 0 in developer-team-screens.tsx; pre-existing baseline errors remain in unrelated dashboard/supermemory/optional-tools areas (verified by stash comparison)"
+      pre_existing_failures: "2 tests in developer-team-flow.test.tsx (TeamSelectionScreen 'archive', PersonalitySelectionScreen 'Ahorro extremo') confirmed as baseline before frontend changes — reference text absent from app.tsx"
+      dep_guard: "no-gentle-ai-dependency.test.ts 3/3 pass"
+      committed: false
+    files_changed:
+      - apps/cli/src/tui/screens/developer-team-screens.tsx (modify — thinkingLevels prop + fail-closed empty handling)
+      - apps/cli/src/tui/app.tsx (modify — getActiveThinkingLevels helper, 4 site rewiring, render site, import cleanup)
+      - apps/cli/src/tui/__tests__/developer-team-screens-effort.test.tsx (modify — 7 new model-specific rendering tests)

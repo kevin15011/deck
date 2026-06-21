@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "runner": "opencode",
+  "generatedAt": "2026-06-18T00:00:00.000Z",
+  "providers": {
+    "openai": {
+      "openai/gpt-5.5": ["minimal", "low", "medium", "high", "xhigh"]
+    },
+    "anthropic": {
+      "anthropic/claude-sonnet-4": ["low", "medium", "high"]
+    }
+  }
+}
