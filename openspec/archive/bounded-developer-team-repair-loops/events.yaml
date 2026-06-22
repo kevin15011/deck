@@ -1,0 +1,369 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: 2026-06-22
+    actor: deck-developer-explorer
+    summary: >
+      Completed exploration for bounded Developer Team repair loops, identifying
+      evidence from the previous release-gate repair loop and recommending a
+      runner-agnostic scope covering budgets, structured manifests, staged
+      verification, repair incidents, generated-artifact policy, and Apply/Verify
+      handoff quality.
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: 2026-06-22
+    actor: deck-developer-proposal
+    registry_write: non-deferred
+    notes:
+      - >
+        Created proposal for a runner-agnostic bounded repair-loop protocol with
+        budgets, structured failure manifests, staged verification, repair incident
+        lifecycle telemetry, generated-artifact policy, and Apply/Verify handoff
+        improvements.
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: 2026-06-22
+    actor: deck-developer-spec
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled deferred Spec registry intent after parallel Spec and Design
+        completion. Spec defines 36 requirements and 28 acceptance scenarios for
+        bounded repair loops, failure manifests, staged verification, repair
+        incident telemetry, generated-artifact policy, and handoff behavior.
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: 2026-06-22
+    actor: deck-developer-design
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled deferred Design registry intent after parallel Spec and Design
+        completion. Design selects an artifact-first, runner-agnostic repair-loop
+        architecture with optional repair incidents, staged verification, runtime
+        helper concepts, registry-compatible telemetry, and adapter guidance only.
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: 2026-06-22
+    actor: deck-developer-task
+    registry_write: non-deferred
+    notes:
+      - >
+        Produced 11 atomic implementation tasks across 3 execution groups
+        (Shared/Contracts, Core Developer Team Content, Adapter and Cross-Cutting
+        Tests) routed to General Apply, with dependency graph, complexity summary,
+        review workload forecast, and classified open questions. All Spec/Design
+        open questions resolved as satisfied, allowed-with-placeholder, or
+        deferred; no blockers block Apply.
+      - >
+        Created preconditions artifact (preconditions.md) capturing user approval
+        (satisfied), default-budget placeholder (allowed-with-placeholder using
+        existing budget-watchdog/loop-breaker defaults), Review integration
+        follow-up (deferred), validator warning-first rollout (satisfied), and
+        Spec/Design reconciliation (satisfied). Apply is ready.
+  - phase: apply
+    status: gate-passed
+    event: preconditions.evaluated
+    artifact: preconditions.md
+    timestamp: 2026-06-22
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - >
+        Preconditions gate evaluated before Apply. preconditions.md contains five
+        rows with statuses satisfied, allowed-with-placeholder, or deferred, and
+        no row has Status blocked with Blocks Apply Yes. Apply is authorized by
+        the user in interactive mode.
+  - phase: apply
+    status: in_progress
+    event: apply.partial_recorded
+    artifact: apply-progress.md
+    timestamp: 2026-06-22
+    actor: deck-developer-orchestrator
+    registry_write: repaired-by-orchestrator
+    notes:
+      - >
+        Recorded partial Apply progress after the first General Apply attempt
+        completed Tasks 1-2 only and did not create the required apply-progress.md
+        artifact or registry entries. Remaining Tasks 3-11 are pending and should
+        continue in smaller Apply slices before Verify/Review.
+
+  - phase: apply
+    status: in_progress
+    event: apply.slice_a2_completed
+    artifact: apply-progress.md
+    timestamp: 2026-06-22
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - >
+        Completed Tasks 3-5 only: added optional repair_incident registry artifact
+        support, known auxiliary repair lifecycle events, warning-first validator and
+        public type support, targeted tests, and documentation updates. Apply remains
+        in progress for Tasks 6-11.
+
+  - phase: apply
+    status: in_progress
+    event: apply.slice_b_completed
+    artifact: apply-progress.md
+    timestamp: 2026-06-22
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - >
+        Completed Tasks 6-9 only: updated Orchestrator, Verify, Apply General,
+        Apply Backend, Apply Frontend, and Task content plus targeted content tests
+        for bounded repair-loop launch/checkpoint/hard-stop behavior, staged
+        verification, structured failure manifests, repair incident consumption,
+        generated-artifact evidence, redaction, accessibility preservation, and
+        repair replan guidance. Apply remains in progress for Tasks 10-11.
+
+  - phase: apply
+    status: completed
+    event: apply.slice_c_completed
+    artifact: apply-progress.md
+    timestamp: 2026-06-22
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - >
+        Completed Tasks 10-11 only: updated OpenCode command generation to surface
+        optional repair-incident handoff context for apply, verify, and continue
+        commands, added valid/invalid repair incident fixtures, and added targeted
+        cross-module tests for parser, governance, and registry validator behavior.
+
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-06-22
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - >
+        Apply completed for all Tasks 1-11 after Slice C. Targeted and scoped
+        aggregate tests for adapter command generation, runtime repair incident
+        contracts/governance, and spec registry validation passed.
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: 2026-06-22
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled deferred Verify result. Verdict FAIL: targeted/scoped tests and
+        build dry-run passed, but bunx tsc --noEmit failed at
+        packages/core/src/spec-registry/validator.ts(59,27) with TS2345. Broad full
+        test was inconclusive due MCP request timeout.
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: 2026-06-22
+    actor: deck-developer-review
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled deferred Review result. Verdict REQUEST CHANGES with 2 blockers,
+        3 majors, 2 minors, and 1 nit. Required fixes must return to Apply before
+        Verify/Archive.
+  - phase: apply
+    status: completed
+    event: apply.review_fixes_completed
+    artifact: apply-progress.md
+    timestamp: 2026-06-22
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - >
+        Completed focused repair pass for Verify/Review findings only. Targeted
+        runtime governance/parser, registry validator/schema, adapter command
+        generation, Developer Team Apply content tests, and bunx tsc --noEmit pass.
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: 2026-06-22
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled deferred Verify rerun. Verdict PASS WITH WARNINGS: 11/11 tasks
+        and 8/8 required fixes verified; targeted/scoped/broad tests, bunx tsc
+        --noEmit, and build dry-run passed. Remaining warning is unrelated worktree
+        hygiene for Archive/commit isolation.
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: 2026-06-22
+    actor: deck-developer-review
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled deferred Review rerun. Verdict REQUEST CHANGES with 1 blocker
+        and 1 minor: fix hard-stop precedence in evaluateRepairIncident and resolve
+        the loopBreakerConfig public API mismatch before Archive.
+  - phase: apply
+    status: completed
+    event: apply.final_review_fixes_completed
+    artifact: apply-progress.md
+    timestamp: 2026-06-22
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - >
+        Completed final focused Apply repair pass for remaining Review rerun
+        findings only. Added hard-attempt versus soft-checkpoint precedence
+        regression coverage, verified explicit hard-stop override behavior,
+        strengthened loopBreakerConfig override coverage so custom thresholds
+        change decisions, and preserved prior registry history.
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: 2026-06-22
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled final Verify rerun. Verdict PASS WITH WARNINGS: Tasks 11/11 and
+        final fixes 2/2 verified; targeted governance tests, runtime/orchestrator
+        aggregate, bunx tsc --noEmit, build dry-run, and full tests passed. Warning
+        remains for unrelated worktree hygiene before Archive/commit.
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: 2026-06-22
+    actor: deck-developer-review
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled final Review rerun. Verdict PASS WITH WARNINGS: prior findings
+        2/2 resolved; no blockers or majors remain. Remaining warnings are cleanup
+        follow-ups and unrelated worktree isolation before Archive/commit.
+  - phase: tasks
+    status: repaired
+    event: tasks.boundary_repaired
+    artifact: tasks.md
+    timestamp: 2026-06-22
+    actor: deck-developer-task
+    registry_write: non-deferred
+    notes:
+      - >
+        Repaired OpenSpec artifacts before Apply to enforce the user clarification
+        boundary: Deck does NOT own, install, generate, or manage OpenCode
+        commands named sdd-* (including sdd-apply, sdd-verify, sdd-continue);
+        Deck retains Developer Team subagents/skills (deck-developer-*); existing
+        installed sdd-* user files are not deleted by Deck; cleanup of legacy
+        installed files is user/manual or a separately authorized change.
+      - >
+        Updated design.md by adding a Boundary Clarification section near the top
+        and replacing each adapter-side repair-incident surface prescription with
+        a boundary assertion (Stage 4 row, Component/Module Boundaries
+        command-generation.ts row, API/Contract Implications OpenCode commands
+        row, File Impact Estimate command-generation.ts row, Testing Strategy
+        adapter command-generation tests bullet, Rollout step 3, and Mermaid
+        diagram). Updated Current Architecture Context line about
+        command-generation.ts to reflect that Deck does not generate sdd-*
+        commands going forward.
+      - >
+        Updated tasks.md by replacing Task 10 (formerly "Update OpenCode adapter
+        command generation to surface repair-incident context") with a boundary
+        correction task ("Enforce Developer Team install boundary — no sdd-*
+        command generation"); updated Task 11 to drop the adapter sdd-*
+        integration dependency; updated dependency graph, parallelization plan,
+        responsibility contracts, complexity summary, review workload forecast,
+        Open Questions Q5, and Mermaid diagram to reflect the boundary.
+      - >
+        Updated apply-progress.md by adding a Boundary Clarification section
+        near the top summarizing the user clarification and the artifact
+        repairs performed before Apply.
+      - >
+        Updated state.yaml by setting currentPhase tasks and status repaired,
+        and by appending a boundary-repair provenance entry while preserving
+        all prior provenance. Appended this event to events.yaml while
+        preserving all prior events. No product code, tests, package files,
+        installed OpenCode files, or git state modified; no installed files
+        deleted.
+  - phase: apply
+    status: gate-passed
+    event: preconditions.evaluated
+    artifact: preconditions.md
+    timestamp: 2026-06-22
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - >
+        Preconditions gate re-evaluated after boundary artifact repair. No row has
+        Status blocked with Blocks Apply Yes. User authorized removing sdd-* command
+        generation from Deck's OpenCode install surface while leaving existing
+        installed user files untouched.
+  - phase: apply
+    status: completed
+    event: apply.boundary_fix_completed
+    artifact: apply-progress.md
+    timestamp: 2026-06-22
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - >
+        Completed the OpenCode install boundary fix. Deck-owned Developer Team
+        installs now produce an empty commandGenerationPlan, applyCommandGeneration
+        is a no-op, and adapter install tests assert no commands/sdd-*.md files are
+        produced or written while pre-existing user-owned sdd-* command files are
+        preserved. Installed OpenCode command files were not deleted or touched.
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: 2026-06-22
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled boundary Verify rerun. Verdict PASS WITH WARNINGS: active
+        Developer Team install no longer generates commands/sdd-*.md, command
+        generation is no-op, no OpenCode SDD skills are installed as Deck artifacts,
+        Developer Team content still installs, user-owned installed sdd-* commands
+        remain untouched, and adapter/content/typecheck/build/full tests pass.
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: 2026-06-22
+    actor: deck-developer-review
+    registry_write: deferred-reconciled-by-orchestrator
+    notes:
+      - >
+        Reconciled boundary Review rerun. Verdict PASS WITH WARNINGS: no blockers
+        or majors remain; boundary behavior is acceptable for the active install
+        path. Follow-ups are hardening against synthetic/stale non-empty command
+        plans and unrelated worktree isolation before Archive/commit.
+  - phase: archive
+    status: archived
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: 2026-06-22
+    actor: deck-developer-archive
+    registry_write: direct
+    notes:
+      - >
+        Change archived under `openspec/archive/bounded-developer-team-repair-loops/`
+        with full artifact preservation: state/events/proposal/spec/design/tasks/
+        preconditions/apply-progress/verify-review, and archive-report.
+        No additional code artifacts were moved by Archive.

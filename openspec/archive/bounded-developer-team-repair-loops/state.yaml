@@ -1,0 +1,264 @@
+schema: spec-registry-v1
+changeId: bounded-developer-team-repair-loops
+currentPhase: archive
+status: archived
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply-progress: apply-progress.md
+  verify: verify-report.md
+  review: review-report.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Explored runner-agnostic Developer Team repair-loop improvements using prior
+      release-gate repair artifacts and current SDD orchestration/runtime surfaces.
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Created proposal for bounded Developer Team repair loops covering budgets,
+      structured failure manifests, staged verification, repair incident telemetry,
+      generated-artifact policy, and Apply/Verify handoff quality.
+  - phase: spec
+    agent: deck-developer-spec
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Created formal requirements and acceptance scenarios for bounded repair-loop
+      budgets, failure manifests, staged verification, repair incidents,
+      generated-artifact policy, and Apply/Verify handoff quality.
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Created artifact-first design for runner-agnostic repair-loop governance using
+      optional repair incidents, staged verification, runtime helper concepts,
+      registry-compatible telemetry, and adapter guidance only.
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Produced 11 atomic tasks across 3 execution groups (Shared / Contracts,
+      Core Developer Team Content, Adapter and Cross-Cutting Tests) with explicit
+      dependency graph, owner routing, complexity summary, review workload
+      forecast, and classified open questions. Preconditions artifact records
+      satisfied/allowed-with-placeholder/deferred status for Spec/Design open
+      questions; no blockers block Apply.
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: repaired-by-orchestrator
+    note: >
+      First General Apply attempt completed Tasks 1-2 only and returned a partial
+      free-form summary without the required Apply artifact or registry update.
+      Orchestrator created apply-progress.md and marked Apply in progress so the
+      remaining Tasks 3-11 can continue in smaller slices.
+
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Completed Slice A2 (Tasks 3-5): registry repair telemetry schema constants,
+      warning-first validator/type support, targeted tests, and registry/methodology
+      documentation. Apply remains in progress because Tasks 6-11 are pending.
+
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Completed Slice B (Tasks 6-9): core Developer Team Orchestrator, Verify,
+      Apply, and Task content now includes bounded repair-loop governance, staged
+      verification, repair manifest consumption, generated-artifact evidence,
+      redaction, accessibility preservation, and repair replan guidance. Apply
+      remains in progress because Tasks 10-11 are pending.
+
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Completed Slice C (Tasks 10-11): OpenCode command generation now surfaces
+      optional repair-incident handoff context for apply, verify, and continue
+      commands without defining core repair semantics; fixture-driven runtime,
+      governance, and registry tests cover valid/invalid repair incidents and
+      repair telemetry. Apply is complete for Tasks 1-11.
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Verify failed after targeted and scoped tests passed because bunx tsc --noEmit
+      failed in packages/core/src/spec-registry/validator.ts. Verify also recorded
+      a warning about ambiguous hard-stop override behavior and an inconclusive
+      broad full test due MCP timeout.
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Review completed with verdict REQUEST CHANGES. Required fixes include
+      per-fingerprint attempt-limit enforcement, full nested repair incident schema
+      validation, effective OpenCode command repair-incident context, independent
+      missing repair_incident artifact validation, and isolation of unrelated
+      worktree changes before Archive/commit.
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Completed focused Apply repair pass for Verify FAIL and Review REQUEST
+      CHANGES findings only. Fixed registry validator event-name type narrowing,
+      per-fingerprint repair attempt limit decisions, full nested repair incident
+      schema validation, generic OpenCode repair-incident handoff guidance,
+      independent repair_incident artifact existence validation, generated-artifact
+      wording, and unused helper hygiene. Apply is ready for Verify/Review rerun.
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Verify rerun completed with PASS WITH WARNINGS. Tasks 1-11 and required fixes
+      8/8 were verified; targeted tests, scoped aggregates, broad full tests,
+      typecheck, and build dry-run passed. Worktree hygiene remains a non-blocking
+      Archive/commit warning.
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Review rerun completed with verdict REQUEST CHANGES. One blocker remains:
+      hard fingerprint attempt exhaustion can be downgraded to a soft checkpoint
+      when soft incident/runtime conditions are also present. One minor remains:
+      loopBreakerConfig is still accepted but does not drive loop decisions.
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Completed final focused Apply repair pass for remaining Review rerun findings
+      only. Confirmed hard per-fingerprint attempt exhaustion has precedence over
+      soft incident checkpoints, added regression coverage for hard-stop override
+      behavior, strengthened loopBreakerConfig override coverage, and repaired an
+      interrupted duplicate/corrupted test block. Apply is ready for Verify/Review
+      rerun.
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Final Verify rerun completed with PASS WITH WARNINGS. Tasks 11/11 and final
+      fixes 2/2 were verified; targeted governance tests, runtime/orchestrator
+      aggregate, typecheck, build dry-run, and full tests passed. Remaining warning
+      is unrelated worktree hygiene before Archive/commit.
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Final Review rerun completed with PASS WITH WARNINGS. Prior findings 2/2 were
+      resolved; no blockers or majors remain. Residual follow-ups are cleanup-level
+      test/comment hygiene and unrelated worktree isolation before Archive/commit.
+  - phase: archive
+    agent: deck-developer-archive
+    model: openai/gpt-5.3-codex-spark
+    timestamp: 2026-06-22
+    registryWrite: direct
+    note: >
+      Change artifacts moved to `openspec/archive/bounded-developer-team-repair-loops/`
+      with all required OpenSpec artifacts preserved, including `archive-report.md`.
+      No spec/doc merge was required because this change did not introduce a
+      delta-spec artifact.
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Boundary repair before Apply. Per user clarification, Deck must NOT own,
+      install, generate, or manage OpenCode commands named sdd-* (including
+      sdd-apply, sdd-verify, sdd-continue); Deck retains Developer Team
+      subagents/skills (deck-developer-*); existing installed sdd-* user files
+      are not deleted by Deck. Repaired design.md (replaced adapter-side
+      repair-incident surface with Boundary Clarification section and boundary
+      rows), tasks.md (replaced Task 10 with a Developer Team install boundary
+      correction; updated Task 11, dependency graph, parallelization plan,
+      responsibility contracts, complexity summary, review workload forecast,
+      Open Questions, and Mermaid), apply-progress.md (added Boundary
+      Clarification section), state.yaml (currentPhase tasks, status repaired,
+      preserved prior provenance), and events.yaml (appended
+      tasks.boundary_repaired while preserving prior events). No product code,
+      tests, package files, installed OpenCode files, or git state modified;
+      no installed files deleted.
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: non-deferred
+    note: >
+      Completed boundary Apply fix after user clarification. OpenCode Developer
+      Team install no longer generates, writes, or manages Deck-owned sdd-* command
+      files; command generation is an explicit no-op; install tests now prove no
+      commands/sdd-*.md entries are produced or written and pre-existing user-owned
+      sdd-* command files are left untouched. Developer Team agents, prompts,
+      skills, standalone skills, and opencode.json config behavior remain intact.
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Boundary Verify rerun completed with PASS WITH WARNINGS. Verified that active
+      Developer Team install no longer generates commands/sdd-*.md, command
+      generation is an explicit no-op, no OpenCode SDD skills are installed as Deck
+      artifacts, Developer Team agents/prompts/skills still install, existing
+      user-owned sdd-* command files remain untouched, and tests/typecheck/build/full
+      tests pass. Warnings remain for unrelated worktree hygiene and legacy preflight
+      advisory wording.
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.5
+    timestamp: 2026-06-22
+    registryWrite: deferred-reconciled-by-orchestrator
+    note: >
+      Boundary Review rerun completed with PASS WITH WARNINGS. No blockers or majors
+      remain. Boundary behavior is acceptable for the active install path; follow-up
+      recommended to harden applyOpenCodeDeveloperTeamInstall against synthetic or
+      stale non-empty command plans and to isolate unrelated worktree noise before
+      Archive/commit.
+
+archive:
+  phase: archive
+  status: archived
+  artifact: archive-report.md
+  recorded: 2026-06-22
+  location: openspec/archive/bounded-developer-team-repair-loops/
