@@ -1,0 +1,8 @@
+phase: explore
+status: completed
+artifacts:
+  - path: exploration.md
+    description: "Diagnosis of Deck TUI failing to detect the 0.1.8 update"
+provenance:
+  initiated_by: user
+  date: "2026-06-17"
