@@ -697,7 +697,9 @@ export function applyOpenCodeDeveloperTeamInstall(
     }
   }
 
-  // 5. Write command files with idempotency
+  // 5. Command generation is intentionally empty for Deck-owned installs.
+  // Deck must not generate, write, or manage OpenCode `sdd-*` command files;
+  // pre-existing user command files are left untouched.
   for (const planned of plan.commandGenerationPlan) {
     const dir = dirname(planned.absolutePath);
     mkdir(dir, { recursive: true });

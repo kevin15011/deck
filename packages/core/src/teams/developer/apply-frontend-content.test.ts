@@ -376,3 +376,20 @@ describe("Authorization Card and Self-Rejection Instruction", () => {
     expect(APPLY_FRONTEND_AGENT_BODY).toContain("defense-in-depth measure");
   });
 });
+
+
+describe("repair incident apply behavior", () => {
+  test("requires incident consumption, scoped retry accounting, generated-artifact evidence, redaction, and next stage updates", () => {
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("repair-incident.md");
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("preserve prior Verify evidence");
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("update retry accounting");
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("Do not start a repair when required manifest fields are missing");
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("clarification, replan, or blocked");
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("not_generated, checked_in_deterministic, checked_in_environment_sensitive, untracked_build_output, or unknown");
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("untracked_build_output requires evidence that it remains untracked/ignored or was removed");
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("Redact runner session IDs, absolute user paths, tokens, credentials, and secrets");
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("targeted, affected_area, or broad_gate");
+  });
+});
+
+describe("frontend repair accessibility content", () => { test("preserves accessibility obligations", () => { expect(APPLY_FRONTEND_SKILL_BODY).toContain("preserve accessibility obligations"); expect(APPLY_FRONTEND_SKILL_BODY).toContain("keyboard interaction"); expect(APPLY_FRONTEND_SKILL_BODY).toContain("ARIA semantics"); }); });

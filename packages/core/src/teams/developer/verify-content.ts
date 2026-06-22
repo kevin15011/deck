@@ -111,6 +111,15 @@ If preconditions.md exists for the change, you MAY optionally check for gate evi
 - Do NOT fail historical changes or non-Apply-bound changes for missing preconditions artifact.
 - Report findings as SUGGESTION, not CRITICAL or WARNING.
 
+### Step 1A: Staged Repair Verification
+
+If repair-incident.md is present or active failure fingerprints exist, run or request the narrowest targeted check first for each active fingerprint. After targeted checks pass, run affected-area checks; if a targeted check cannot isolate the failure, record the reason before moving to affected-area checks. Reserve the broad release gate for after targeted and affected-area checks pass, unless you record a rationale for running broad verification earlier.
+
+When Verify returns FAIL with a repairable or unresolved outcome, write a structured failure manifest. Each failure entry must include: normalized fingerprint, failing contract or requirement, evidence command and latest result, owner or routing hint, suspected scope, changed files when known, retry count, previous attempt summary, generated-artifact classification, and next verification action.
+
+Classify residual failures as exactly one of: same fingerprint, new related fingerprint, pre-existing, out of scope, or blocker. Preserve prior evidence and attempts when updating an existing fingerprint.
+
+
 ### Step 2: Check Task Completion
 
 Verify that all tasks are marked complete:

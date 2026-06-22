@@ -66,6 +66,7 @@ describe("spec-registry types", () => {
       "spec",
       "design",
       "tasks",
+      "repair-incident",
       "apply-progress",
       "verify-report",
       "review-report",

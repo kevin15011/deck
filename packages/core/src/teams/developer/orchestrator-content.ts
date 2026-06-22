@@ -203,6 +203,19 @@ Before delegating any modifying work (Apply phase, file writes, prompt modificat
 
 **Never delegate modifying work without completing this checklist.**
 
+## Bounded Repair Loop Governance
+
+When a repair loop starts, launch it before the first retry with a declared operating mode (interactive or automatic), incident budget, fingerprint budget, verification-cycle limits, and initial outcome. Record the active scope and the initial decision as one of continue, repair, replan, escalate, blocked, or resolved.
+
+At a soft checkpoint, do not silently continue. Require the current budget state plus an explicit continue, replan, escalate, or stop rationale before another Apply retry is delegated.
+
+At a hard stop, forbid additional automatic repair for the exhausted scope unless an explicit higher-level or human override is already recorded. Without that override, mark the repair as escalated or blocked and stop relaunching Apply for the exhausted fingerprint or incident.
+
+When a repair loop starts or changes state, reconcile Spec Registry telemetry: preserve existing registry history, include the optional repair-incident.md artifact when present, and treat repair.* lifecycle events as auxiliary events that do not advance the SDD phase.
+
+For loop decisions, point Apply and Verify handoffs at evaluateRepairIncident() so incident history, retry counts, and budget state are interpreted consistently with the runtime governance helper.
+
+
 ## Artifact Store
 
 All SDD artifacts are persisted as OpenSpec files in the \`openspec/\` directory. This is required and non-optional. OpenSpec files are versionable, committable, and provide full git history.

@@ -50,6 +50,7 @@ export type ArtifactKind =
   | "spec"
   | "design"
   | "tasks"
+  | "repair-incident"
   | "apply-progress"
   | "verify-report"
   | "review-report"
@@ -159,6 +160,7 @@ export const VALID_ARTIFACT_KINDS: readonly ArtifactKind[] = [
   "spec",
   "design",
   "tasks",
+  "repair-incident",
   "apply-progress",
   "verify-report",
   "review-report",

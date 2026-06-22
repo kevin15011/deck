@@ -1196,4 +1196,257 @@ events:
       expect.objectContaining({ rule: "events.event.name_mismatch", severity: "warning" })
     );
   });
+
+  test("repair lifecycle events are accepted as known auxiliary events", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "repair-events"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-events", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: repair-events
+currentPhase: apply
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  repair_incident: repair-incident.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-events", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: repair
+    status: started
+    event: repair.started
+    artifact: repair-incident.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+  - phase: repair
+    status: resolved
+    event: repair.resolved
+    artifact: repair-incident.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    for (const file of ["exploration.md", "proposal.md", "spec.md", "design.md", "tasks.md", "repair-incident.md"]) {
+      await fs.writeFile(path.join(tempDir, "openspec", "changes", "repair-events", file), `# ${file}`);
+    }
+
+    const result = await validateOpenSpecRegistry({ rootDir: tempDir, changeId: "repair-events" });
+
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "events.event.name_mismatch" })
+    );
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "repair_incident.artifact.missing" })
+    );
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "events.state.last_event_mismatch" })
+    );
+  });
+
+  test("missing repair_incident reference is warning-first when repair events exist", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "repair-missing-reference"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-missing-reference", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: repair-missing-reference
+currentPhase: apply
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-missing-reference", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: repair
+    status: started
+    event: repair.started
+    artifact: repair-incident.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    for (const file of ["exploration.md", "proposal.md", "spec.md", "design.md", "tasks.md"]) {
+      await fs.writeFile(path.join(tempDir, "openspec", "changes", "repair-missing-reference", file), `# ${file}`);
+    }
+
+    const result = await validateOpenSpecRegistry({ rootDir: tempDir, changeId: "repair-missing-reference" });
+
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ rule: "repair_incident.artifact.missing", severity: "warning" })
+    );
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "repair_incident.artifact.missing", severity: "error" })
+    );
+  });
+
+  test("referenced repair_incident missing on apply reports an artifact error", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "repair-missing-file"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-missing-file", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: repair-missing-file
+currentPhase: apply
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  repair_incident: repair-incident.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-missing-file", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: repair
+    status: started
+    event: repair.started
+    artifact: repair-incident.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    for (const file of ["exploration.md", "proposal.md", "spec.md", "design.md", "tasks.md"]) {
+      await fs.writeFile(path.join(tempDir, "openspec", "changes", "repair-missing-file", file), `# ${file}`);
+    }
+
+    const result = await validateOpenSpecRegistry({ rootDir: tempDir, changeId: "repair-missing-file" });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        rule: "artifact.missing_for_completed_phase",
+        severity: "error",
+        field: "artifacts.repair_incident",
+      })
+    );
+  });
+
+  test("referenced repair_incident missing reports artifact error without repair events", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "repair-missing-file-no-events"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-missing-file-no-events", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: repair-missing-file-no-events
+currentPhase: apply
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  repair_incident: repair-incident.md
+provenance:
+  - phase: explore
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-missing-file-no-events", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    for (const file of ["exploration.md", "proposal.md", "spec.md", "design.md", "tasks.md"]) {
+      await fs.writeFile(path.join(tempDir, "openspec", "changes", "repair-missing-file-no-events", file), `# ${file}`);
+    }
+
+    const result = await validateOpenSpecRegistry({ rootDir: tempDir, changeId: "repair-missing-file-no-events" });
+
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ rule: "artifact.missing_for_completed_phase", severity: "error", field: "artifacts.repair_incident" })
+    );
+  });
+
+  test("canonical repair_incident reference with repair.resolved event validates without warnings", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "repair-resolved"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-resolved", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: repair-resolved
+currentPhase: apply
+status: completed
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply-progress: apply-progress.md
+  repair_incident: repair-incident.md
+provenance:
+  - phase: apply
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`
+    );
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "repair-resolved", "events.yaml"),
+      `schema: spec-registry-events-v1
+events:
+  - phase: repair
+    status: resolved
+    event: repair.resolved
+    artifact: repair-incident.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+`
+    );
+    for (const file of [
+      "exploration.md",
+      "proposal.md",
+      "spec.md",
+      "design.md",
+      "tasks.md",
+      "preconditions.md",
+      "apply-progress.md",
+      "repair-incident.md",
+    ]) {
+      await fs.writeFile(path.join(tempDir, "openspec", "changes", "repair-resolved", file), `# ${file}`);
+    }
+
+    const result = await validateOpenSpecRegistry({ rootDir: tempDir, changeId: "repair-resolved" });
+
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "events.event.name_mismatch" })
+    );
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "repair_incident.artifact.missing" })
+    );
+  });
 });

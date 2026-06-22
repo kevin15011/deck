@@ -10,6 +10,7 @@ export * from "./contracts/self-audit";
 export * from "./contracts/risk";
 export * from "./contracts/outcome";
 export * from "./contracts/state-update";
+export * from "./contracts/repair-incident";
 
 // Orchestrator
 export * from "./orchestrator/risk-scorer";

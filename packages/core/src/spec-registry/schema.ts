@@ -153,10 +153,13 @@ export type ValidatorArtifactKind =
   | "spec"
   | "design"
   | "tasks"
+  | "repair_incident"
   | "apply_progress"
   | "verify_report"
   | "review_report"
   | "archive_report";
+
+export const REPAIR_INCIDENT_ARTIFACT_KIND = "repair_incident" as const satisfies ValidatorArtifactKind;
 
 export const VALIDATOR_ARTIFACT_KINDS: readonly ValidatorArtifactKind[] = [
   "exploration",
@@ -164,6 +167,7 @@ export const VALIDATOR_ARTIFACT_KINDS: readonly ValidatorArtifactKind[] = [
   "spec",
   "design",
   "tasks",
+  REPAIR_INCIDENT_ARTIFACT_KIND,
   "apply_progress",
   "verify_report",
   "review_report",
@@ -179,11 +183,30 @@ export const ARTIFACT_KEY_TO_PUBLIC: ReadonlyMap<ValidatorArtifactKind, string> 
   ["spec", "spec"],
   ["design", "design"],
   ["tasks", "tasks"],
+  [REPAIR_INCIDENT_ARTIFACT_KIND, "repair-incident"],
   ["apply_progress", "apply-progress"],
   ["verify_report", "verify-report"],
   ["review_report", "review-report"],
   ["archive_report", "archive-report"],
 ]);
+
+export const REPAIR_LIFECYCLE_EVENTS = new Set([
+  "repair.started",
+  "repair.retry_recorded",
+  "repair.checkpoint_reached",
+  "repair.replanned",
+  "repair.escalated",
+  "repair.blocked",
+  "repair.resolved",
+] as const);
+
+export const KNOWN_EVENT_NAMES = new Set([
+  "preconditions.created",
+  "precondition_gate.passed",
+  "precondition_gate.blocked",
+  "exploration.lifecycle_decided",
+  ...REPAIR_LIFECYCLE_EVENTS,
+] as const);
 
 // ---------------------------------------------------------------------------
 // Validation rule codes
@@ -224,6 +247,7 @@ export type ValidationRuleCode =
   // Artifact rules
   | "artifact.missing_for_completed_phase"
   | "artifact.unregistered_present"
+  | "repair_incident.artifact.missing"
   // Precondition rules
   | "preconditions.artifact.missing"
   | "preconditions.artifact.not_referenced"
@@ -282,6 +306,7 @@ export const VALIDATION_RULE_CODES: readonly ValidationRuleCode[] = [
   "events.state.last_event_mismatch",
   "artifact.missing_for_completed_phase",
   "artifact.unregistered_present",
+  "repair_incident.artifact.missing",
   "preconditions.artifact.missing",
   "preconditions.artifact.not_referenced",
   "yaml.parse_error",

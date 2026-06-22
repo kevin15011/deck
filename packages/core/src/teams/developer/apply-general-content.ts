@@ -175,6 +175,17 @@ Example format:
 
 **Critical**: Never sacrifice requirements, security, tests, accessibility, or completeness to reduce LOC. If a concise solution would omit these, choose the complete solution and note "Quality override used".
 
+### Step 2A: Repair Incident Consumption
+
+If repair-incident.md is present, consume it before editing. Select only the assigned fingerprints, preserve prior Verify evidence, update retry accounting for each attempted fingerprint, and set the next verification stage to targeted, affected_area, or broad_gate in the failure entry.
+
+Do not start a repair when required manifest fields are missing. Instead record clarification, replan, or blocked with the missing fields and route the issue back through the Orchestrator.
+
+For each generated file touched or suspected, classify it as not_generated, checked_in_deterministic, checked_in_environment_sensitive, untracked_build_output, or unknown. checked_in_environment_sensitive requires regeneration or portability evidence; untracked_build_output requires evidence that it remains untracked/ignored or was removed before the repair can be considered ready for broad verification.
+
+Redact runner session IDs, absolute user paths, tokens, credentials, and secrets from evidence excerpts. OpenSpec artifacts remain authoritative; runner logs and adaptive memory are supporting evidence only.
+
+
 ### Step 3: Run Verification
 
 For each completed task, run verification:

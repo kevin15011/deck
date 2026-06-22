@@ -173,3 +173,21 @@ describe("Git Safety Rule presence", () => {
     expect(VERIFY_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
   });
 });
+
+
+describe("staged repair verification content", () => {
+  test("requires staged sequencing, failure manifest fields, and residual classification", () => {
+    expect(VERIFY_SKILL_BODY).toContain("repair-incident.md");
+    expect(VERIFY_SKILL_BODY).toContain("narrowest targeted check first");
+    expect(VERIFY_SKILL_BODY).toContain("affected-area checks");
+    expect(VERIFY_SKILL_BODY).toContain("broad release gate");
+    expect(VERIFY_SKILL_BODY).toContain("structured failure manifest");
+    expect(VERIFY_SKILL_BODY).toContain("normalized fingerprint");
+    expect(VERIFY_SKILL_BODY).toContain("evidence command and latest result");
+    expect(VERIFY_SKILL_BODY).toContain("owner or routing hint");
+    expect(VERIFY_SKILL_BODY).toContain("retry count");
+    expect(VERIFY_SKILL_BODY).toContain("generated-artifact classification");
+    expect(VERIFY_SKILL_BODY).toContain("next verification action");
+    expect(VERIFY_SKILL_BODY).toContain("same fingerprint, new related fingerprint, pre-existing, out of scope, or blocker");
+  });
+});

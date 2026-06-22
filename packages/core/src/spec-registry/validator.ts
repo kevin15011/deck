@@ -22,6 +22,8 @@ import {
   VALIDATOR_STATUSES,
   VALID_EXPLORATION_CONTEXTS,
   VALID_LIFECYCLE_STATUSES,
+  KNOWN_EVENT_NAMES,
+  REPAIR_LIFECYCLE_EVENTS,
   type ValidatorPhase,
   type ValidatorStatus,
   type ValidationRuleCode,
@@ -45,12 +47,8 @@ const PHASE_EVENT_STATUSES = new Set([
   "approved",
 ]);
 const APPLY_OWNER_EVENT_NAME_PATTERN = /^apply\.[a-z][a-z0-9-]*\.(started|completed|fix_completed)$/;
-const KNOWN_EVENT_NAMES = new Set([
-  "preconditions.created",
-  "precondition_gate.passed",
-  "precondition_gate.blocked",
-  "exploration.lifecycle_decided",
-]);
+const KNOWN_EVENT_NAME_SET: ReadonlySet<string> = KNOWN_EVENT_NAMES;
+const REPAIR_LIFECYCLE_EVENT_SET: ReadonlySet<string> = REPAIR_LIFECYCLE_EVENTS;
 
 function isKnownRegistryEventName(eventName: string): boolean {
   const [phase, status, extra] = eventName.split(".");
@@ -60,7 +58,7 @@ function isKnownRegistryEventName(eventName: string): boolean {
       VALIDATOR_PHASES.includes(phase as ValidatorPhase) &&
       PHASE_EVENT_STATUSES.has(status)) ||
     APPLY_OWNER_EVENT_NAME_PATTERN.test(eventName) ||
-    KNOWN_EVENT_NAMES.has(eventName)
+    KNOWN_EVENT_NAME_SET.has(eventName)
   );
 }
 
@@ -221,6 +219,8 @@ async function validateChange(
   let changeIssues = 0;
   let warningIssues = 0;
   let isCanonical = false;
+  let stateArtifacts: Record<string, string> | undefined;
+  let sawRepairLifecycleEvent = false;
 
   // Check if state.yaml exists
   let stateData: unknown;
@@ -578,6 +578,7 @@ async function validateChange(
       } else {
         // Check exploration artifact exists
         const artifacts = state.artifacts as Record<string, string>;
+        stateArtifacts = artifacts;
         if (!artifacts.exploration) {
           issues.push({
             severity: "error",
@@ -654,6 +655,27 @@ async function validateChange(
               });
               warningIssues++;
             }
+          }
+        }
+
+        // Validate an explicitly referenced repair incident independently of
+        // lifecycle telemetry. Missing references remain warning-first only
+        // when repair.* events exist without this artifact key.
+        if (artifacts.repair_incident) {
+          const fullPath = path.join(changePath, artifacts.repair_incident);
+          try {
+            await fs.access(fullPath);
+          } catch {
+            issues.push({
+              severity: "error",
+              rule: "artifact.missing_for_completed_phase",
+              message: `Repair incident artifact file not found: ${artifacts.repair_incident}`,
+              path: fullPath,
+              changeId,
+              file: "artifact",
+              field: "artifacts.repair_incident",
+            });
+            changeIssues++;
           }
         }
       }
@@ -808,6 +830,9 @@ async function validateChange(
               const phase = event.phase as string | undefined;
               const status = event.status as string | undefined;
               if (eventName && phase && status) {
+                if (REPAIR_LIFECYCLE_EVENT_SET.has(eventName)) {
+                  sawRepairLifecycleEvent = true;
+                }
                 const expected = `${phase}.${status}`;
                 if (!isKnownRegistryEventName(eventName)) {
                   issues.push({
@@ -823,8 +848,30 @@ async function validateChange(
               }
             }
 
-            // Last event should match currentPhase
-            const lastEvent = eventsArray[eventsArray.length - 1] as
+            if (sawRepairLifecycleEvent) {
+              const repairIncidentPath = stateArtifacts?.repair_incident;
+              if (!repairIncidentPath) {
+                issues.push({
+                  severity: "warning",
+                  rule: "repair_incident.artifact.missing",
+                  message: "repair.* lifecycle events are present but artifacts.repair_incident is not referenced",
+                  path: statePath,
+                  changeId,
+                  file: "state.yaml",
+                  field: "artifacts.repair_incident",
+                });
+                warningIssues++;
+              }
+            }
+
+            // Last phase-advancing event should match currentPhase. Repair lifecycle
+            // events are auxiliary telemetry and must not advance currentPhase.
+            const phaseEvents = eventsArray.filter((candidate) => {
+              const candidateEvent = candidate as Record<string, unknown> | undefined;
+              const candidateName = candidateEvent?.event;
+              return typeof candidateName !== "string" || !REPAIR_LIFECYCLE_EVENT_SET.has(candidateName);
+            });
+            const lastEvent = phaseEvents[phaseEvents.length - 1] as
               | Record<string, unknown>
               | undefined;
             if (lastEvent && currentPhase) {

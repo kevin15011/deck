@@ -87,12 +87,15 @@ Valid statuses:
 | `design` | Design artifact |
 | `tasks` | Tasks artifact |
 | `preconditions` | Preconditions artifact (optional, for Apply-bound changes) |
+| `repair_incident` | Repair incident telemetry artifact (optional, `repair-incident.md`) |
 | `apply_progress` | Apply progress artifact |
 | `verify_report` | Verify report artifact |
 | `review_report` | Review report artifact |
 | `archive_report` | Archive report artifact |
 
 > **Note**: `artifacts.preconditions` is optional. The Task Agent SHOULD produce `preconditions.md` for changes advancing to Apply. The Orchestrator evaluates this artifact before launching Apply.
+
+> **Repair telemetry note**: `artifacts.repair_incident` is optional and should point to `repair-incident.md` when a bounded repair loop starts. Legacy and non-repair changes do not need to add it. If `repair.*` lifecycle events exist without this artifact reference, validators warn first rather than fail the change. If an Apply/Verify change references `artifacts.repair_incident`, the referenced file must exist.
 
 ### Provenance Entry
 
@@ -131,6 +134,20 @@ Optional:
 - `notes` (array): Array of strings with event notes
 - `registry_write` (string): `"non-deferred"` or `"reconciled-by-orchestrator"`
 
+### Auxiliary Repair Lifecycle Events
+
+Repair lifecycle events are known auxiliary events. They record bounded repair-loop telemetry and do not advance `currentPhase` by themselves:
+
+- `repair.started`
+- `repair.retry_recorded`
+- `repair.checkpoint_reached`
+- `repair.replanned`
+- `repair.escalated`
+- `repair.blocked`
+- `repair.resolved`
+
+When any of these events is recorded, the event `artifact` should be `repair-incident.md` and `state.yaml` should reference `artifacts.repair_incident: repair-incident.md`. Missing repair-incident references are warning-first to preserve compatibility with existing changes.
+
 ---
 
 ## Severity Rules
@@ -151,6 +168,7 @@ Optional:
 - Legacy provenance format (object vs array)
 - Events/state phase mismatch
 - Non-canonical artifact shapes
+- `repair.*` lifecycle events without `artifacts.repair_incident`
 
 ---
 
@@ -244,6 +262,7 @@ The validator reports these as warnings, not errors, to preserve backward compat
 | `events.event.name_mismatch` | error | Event name doesn't match phase.status |
 | `events.state.last_event_mismatch` | warning | Last event doesn't match currentPhase |
 | `artifact.missing_for_completed_phase` | error | Artifact file not found |
+| `repair_incident.artifact.missing` | warning | repair lifecycle event exists but `artifacts.repair_incident` is not referenced |
 | `legacy.drift` | warning | Legacy format detected |
 | `preconditions.artifact.missing` | warning | preconditions.md missing at Apply+ phase |
 | `preconditions.artifact.not_referenced` | warning | preconditions.md exists but not referenced |

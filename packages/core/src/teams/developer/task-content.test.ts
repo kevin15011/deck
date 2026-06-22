@@ -261,3 +261,15 @@ describe("Preconditions output (Task 3)", () => {
     expect(TASK_SKILL_BODY).toContain("Preconditions Summary");
   });
 });
+
+
+describe("repair replan guidance", () => {
+  test("routes replan or soft checkpoint to clarification rather than blind Apply retry", () => {
+    expect(TASK_SKILL_BODY).toContain("loop decision replan");
+    expect(TASK_SKILL_BODY).toContain("soft checkpoint asks for replan");
+    expect(TASK_SKILL_BODY).toContain("stop routing another blind Apply retry");
+    expect(TASK_SKILL_BODY).toContain("Spec, Design, or this Task breakdown");
+    expect(TASK_SKILL_BODY).toContain("record a brief rationale");
+    expect(TASK_SKILL_BODY).toContain("existing tasks artifact unless the spec or design contract changes");
+  });
+});

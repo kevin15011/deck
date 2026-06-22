@@ -709,3 +709,20 @@ describe("Anti-bureaucracy invariants for lifecycle", () => {
     expect(ORCHESTRATOR_SKILL_BODY).toMatch(/immediate|continues.*SDD|continues.*Proposal/i);
   });
 });
+
+
+describe("bounded repair loop governance content", () => {
+  test("requires declared mode, budget launch, checkpoint, hard stop, registry reconciliation, and evaluator guidance", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("declared operating mode");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("incident budget");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("fingerprint budget");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("verification-cycle limits");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("soft checkpoint");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("continue, replan, escalate, or stop rationale");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("hard stop");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("human override");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("repair.* lifecycle events");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("repair-incident.md");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("evaluateRepairIncident()");
+  });
+});

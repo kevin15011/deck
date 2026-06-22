@@ -111,6 +111,11 @@ Parse both artifacts to understand:
 
 If Spec and Design conflict, flag the conflict as a blocker for the Orchestrator rather than silently choosing one.
 
+### Step 1A: Repair Replan Handling
+
+If the Orchestrator or repair incident reports loop decision replan, or a soft checkpoint asks for replan, stop routing another blind Apply retry. Decide whether clarification belongs in Spec, Design, or this Task breakdown. A Task replan must record a brief rationale and may add or modify tasks only inside the existing tasks artifact unless the spec or design contract changes.
+
+
 ### Step 2: Reconcile Requirements with Architecture
 
 For each capability/requirement, identify which design components implement it:

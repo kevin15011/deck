@@ -244,9 +244,10 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     expect(plan.promptGenerationPlan).toHaveLength(14);
   });
 
-test("generates command generation plan with 14 commands", () => {
+  test("does not generate OpenCode sdd-* command files", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    expect(plan.commandGenerationPlan).toHaveLength(14);
+    expect(plan.commandGenerationPlan).toEqual([]);
+    expect(plan.commandGenerationPlan.some((p) => p.commandId.startsWith("sdd-"))).toBe(false);
   });
 
   test("generates skill files for all 14 agents", () => {
@@ -263,6 +264,12 @@ test("generates command generation plan with 14 commands", () => {
         expect(skill.content).toContain("delegate_only: true");
       }
     }
+  });
+
+  test("does not install OpenCode SDD skills as Deck artifacts", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    expect(plan.skills.some((skill) => skill.agent.skillId.startsWith("sdd-"))).toBe(false);
+    expect(plan.standaloneSkills.some((skill) => skill.skillId.startsWith("sdd-"))).toBe(false);
   });
 
   test("skill content comes from core registry", () => {
@@ -308,7 +315,7 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
     }
   });
 
-  test("writes command files to configDir/commands/", () => {
+  test("does not write or manage OpenCode sdd-* command files", () => {
     const projectRoot = createTempProject();
     try {
       const configDir = join(projectRoot, ".config", "opencode");
@@ -316,12 +323,29 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
       applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
-      for (const planned of plan.commandGenerationPlan) {
-        expect(existsSync(planned.absolutePath)).toBe(true);
-        const content = readFileSync(planned.absolutePath, "utf-8");
-        expect(content).toContain("agent: deck-developer-orchestrator");
-        expect(content).toContain("subtask: true");
-      }
+      expect(plan.commandGenerationPlan).toEqual([]);
+      expect(existsSync(join(configDir, "commands", "sdd-apply.md"))).toBe(false);
+      expect(existsSync(join(configDir, "commands", "sdd-verify.md"))).toBe(false);
+      expect(existsSync(join(configDir, "commands", "sdd-continue.md"))).toBe(false);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("leaves pre-existing user sdd-* command files untouched", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = join(projectRoot, ".config", "opencode");
+      const commandsDir = join(configDir, "commands");
+      mkdirSync(commandsDir, { recursive: true });
+      const existingCommandPath = join(commandsDir, "sdd-apply.md");
+      const existingContent = "# user-owned legacy command\n";
+      writeFileSync(existingCommandPath, existingContent, "utf-8");
+
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      expect(readFileSync(existingCommandPath, "utf-8")).toBe(existingContent);
     } finally {
       cleanup(projectRoot);
     }
@@ -560,12 +584,9 @@ describe("verifyRunnerIsolation", () => {
     }
   });
 
-  test("generated command files contain no @deck/core or @deck/sdd-runtime imports", () => {
+  test("no command files are generated for runner isolation", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/fake-project-for-isolation-test");
-    for (const planned of plan.commandGenerationPlan) {
-      const found = findForbiddenImports(planned.content, planned.absolutePath);
-      expect(found).toHaveLength(0);
-    }
+    expect(plan.commandGenerationPlan).toEqual([]);
   });
 
   test("plain-text mentions of @deck/core in markdown do NOT trigger violations", () => {

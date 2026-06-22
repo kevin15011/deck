@@ -14,6 +14,7 @@ This document provides a single human-readable inventory of all prompt/methodolo
 | Delegation Rules | Rule Set | `orchestrator-content.ts` | session, agent, skill |
 | Artifact Store & Spec Registry | Storage | `orchestrator-content.ts` | session, agent, skill |
 | Registry-Deferred Mode | Parallelism | `orchestrator-content.ts` | session, agent, skill |
+| Bounded Repair Loop | Repair Protocol | Repair incident contract, registry schema, Developer Team phase content | session, agent, skill |
 | Apply Routing & Blocker Classification | Routing | `orchestrator-content.ts` | session, agent, skill |
 | Self-Verification Pattern | Pattern | Phase content (`*-content.ts`) | skill |
 | Return Contracts | Contract | Phase content (`*-content.ts`) | skill |
@@ -194,7 +195,45 @@ Safe parallelism for Spec+Design and Verify+Review batches by deferring registry
 
 ---
 
-## 7. Apply Routing & Blocker Classification
+## 7. Bounded Repair Loop
+
+### What it governs
+
+Controls retry behavior after Verify or Apply failures so repairs stay bounded, evidence-preserving, and registry-visible instead of becoming untracked repeated attempts.
+
+### Source file(s)
+
+- `packages/sdd-runtime/src/contracts/repair-incident.ts`
+- `packages/sdd-runtime/src/orchestrator/repair-loop-governance.ts`
+- `packages/core/src/spec-registry/schema.ts`
+- Developer Team phase content modules that consume or produce repair incidents
+
+### Key rules
+
+- **Budget declaration**: a repair loop records operating mode, incident budget, fingerprint budget, verification-cycle limits, retry counts, and the initial outcome before retrying.
+- **Repair manifest**: repair handoff uses `repair-incident.md` with schema `repair-incident-v1`, failed contract evidence, normalized fingerprint, generated-artifact classification, and the next verification stage.
+- **Staged verification**: run targeted checks first, then affected-area checks, then broad gate only after narrower checks pass or with recorded rationale.
+- **Generated-artifact policy**: classify touched or suspected generated files as `not_generated`, `checked_in_deterministic`, `checked_in_environment_sensitive`, `untracked_build_output`, or `unknown`; preserve regeneration evidence when required.
+- **Apply/Verify handoff quality**: Apply preserves prior Verify evidence, updates retry accounting and next verification stage, and refuses underspecified repair manifests with a recorded blocked/replan/clarification result.
+- **Registry telemetry**: when a repair loop starts, state may reference `artifacts.repair_incident: repair-incident.md`; events use auxiliary `repair.*` names and must not advance `currentPhase` by themselves.
+- **Warning-first rollout**: existing changes without repair telemetry remain valid. Missing `artifacts.repair_incident` with repair events is a validator warning unless the artifact is explicitly referenced and absent during Apply/Verify.
+
+### Related modules
+
+- Artifact Store & Spec Registry — records `repair-incident.md` and auxiliary repair lifecycle events.
+- Registry-Deferred Mode — Orchestrator reconciles repair telemetry when parallel agents cannot safely write registry files directly.
+- Apply Routing & Blocker Classification — repair failures may route to owner-specific Apply agents or back to Task/Design when replan is required.
+- Self-Verification Pattern — repair attempts must report targeted evidence before returning to Verify.
+
+### Surfaces
+
+- session: ✓
+- agent: ✓
+- skill: ✓
+
+---
+
+## 8. Apply Routing & Blocker Classification
 
 ### What it governs
 
