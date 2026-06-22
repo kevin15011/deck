@@ -224,14 +224,12 @@ async function resolveLaunchMemoryProvider(options: RunPiLaunchOptions): Promise
 
   if (activeProvider === "supermemory") {
     const supermemory = resolved.supermemory;
-    if (!supermemory?.configured) {
-      const message = "Supermemory configuration is incomplete; token is required. Launched without adaptive-memory injection.";
-      return { diagnostics: [{ code: "memory_provider_unavailable", providerId: "supermemory", message }], memoryUnavailableReason: message };
-    }
+    // Token-only config: configured check removed since DeckSupermemoryConfig no longer
+    // carries a configured flag — runtime validation below handles availability.
 
     const validator = options.supermemoryRuntimeValidator ?? validateSupermemoryPiMcpRuntime;
     const runtimeValidation = await validator({
-      serverName: supermemory.mcpServerName,
+      serverName: supermemory?.mcpServerName ?? "supermemory",
       configPath: options.piMcpConfigPath,
       homeDir: options.piMcpHomeDir,
       timeoutMs: options.supermemoryValidationTimeoutMs ?? 3000,
@@ -321,7 +319,9 @@ function hasConfigResolutionInput(options: ResolvePiAdaptiveMemoryProviderOption
  * It has no import-time side effects and never persists Supermemory tokens to
  * `.deck/config.json`; callers must hand off credentials through Pi MCP config.
  */
-export function resolvePiAdaptiveMemoryProvider(options: ResolvePiAdaptiveMemoryProviderOptions): ResolvedPiAdaptiveMemoryProvider {
+export async function resolvePiAdaptiveMemoryProvider(
+  options: ResolvePiAdaptiveMemoryProviderOptions,
+): Promise<ResolvedPiAdaptiveMemoryProvider> {
   const diagnostics: MemoryProviderDiagnostic[] = [];
   const context = options.unavailableContext ?? "launch";
 
@@ -367,12 +367,11 @@ export function resolvePiAdaptiveMemoryProvider(options: ResolvePiAdaptiveMemory
 
   if (activeProvider === "supermemory") {
     const supermemory = resolved.supermemory;
-    if (!supermemory?.configured) {
-      return unavailable("supermemory", `Supermemory configuration is incomplete; token is required. ${capitalizedContext(context)} without adaptive-memory injection.`);
-    }
+    // Token-only config: configured check removed since DeckSupermemoryConfig no longer
+    // carries a configured flag — MCP config validation below handles availability.
 
     const mcpValidation = validateSupermemoryPiMcpConfig({
-      serverName: supermemory.mcpServerName,
+      serverName: supermemory?.mcpServerName ?? "supermemory",
       configPath: options.piMcpConfigPath,
       homeDir: options.piMcpHomeDir,
     });
@@ -390,10 +389,11 @@ export function resolvePiAdaptiveMemoryProvider(options: ResolvePiAdaptiveMemory
         mcpServerName: mcpValidation.serverName,
         authenticatedRuntimeValidated: true,
       });
-
       return { provider, diagnostics };
-    } catch {
-      return providerConstructionUnavailable("supermemory", context);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Container tag")) return providerConstructionUnavailable("supermemory", context);
+      const message = redactLaunchDiagnosticText(`Supermemory provider could not be constructed; ${context === "install" ? "installed" : "launched"} without adaptive-memory injection. ${error instanceof Error ? error.message : String(error)}`);
+      return unavailable("supermemory", message);
     }
   }
 

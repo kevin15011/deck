@@ -1,5 +1,5 @@
 import type { InstallableOpenCodeTool } from "./installation-plan";
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, appendFileSync, accessSync, constants } from "node:fs";
 import { join } from "node:path";
 
@@ -121,17 +121,19 @@ export async function installOpenCodeTools(
         // Pipe stdout to shell
         debugLog(`[install-tools] ${tool.name}: Executing shell script...`);
         const shell = getShellCommand();
-        const shellProcess = nodeSpawn(shell, ["-s"], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+        // Cast to ChildProcess to resolve the intersection-type narrowing to `never`.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const shellProcess = nodeSpawn(shell, ["-s"], { stdio: ["pipe", "pipe", "pipe"] }) as any;
         shellProcess.stdin?.write(stdout);
         shellProcess.stdin?.end();
 
         let shellStdout = "";
         let shellStderr = "";
-        shellProcess.stdout?.on("data", (chunk) => { shellStdout += chunk.toString(); });
-        shellProcess.stderr?.on("data", (chunk) => { shellStderr += chunk.toString(); });
+        shellProcess.stdout?.on("data", (chunk: string | Buffer) => { shellStdout += chunk.toString(); });
+        shellProcess.stderr?.on("data", (chunk: string | Buffer) => { shellStderr += chunk.toString(); });
 
         const shellExitCode = await new Promise<number>((resolve) => {
-          shellProcess.on("close", (code) => resolve(code ?? 1));
+          shellProcess.on("close", (code: number | null) => resolve(code ?? 1));
         });
 
         debugLog(`[install-tools] ${tool.name}: shell exitCode=${shellExitCode}`);
@@ -562,7 +564,7 @@ function installOpenCodePlugin(options: {
 
 async function runDefaultInstallCommand(command: string, args: string[]): Promise<InstallCommandResult> {
   return new Promise((resolve) => {
-    const process = nodeSpawn(command, args, { stdout: "pipe", stderr: "pipe" });
+    const process = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
 

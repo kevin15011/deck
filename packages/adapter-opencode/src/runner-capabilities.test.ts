@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createOpenCodeRunnerCapabilities } from "./runner-capabilities";
 import { buildOpenCodeDeveloperTeamInstallPlan } from "./developer-team-install";
-import type { CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles/index";
+import type { CapabilityInstructionBundle } from "../../core/src/teams/developer/instruction-bundles/index";
 
 // Test helper: create a minimal non-default capabilityInstructions bundle
 function createTestCapabilityInstructions(): CapabilityInstructionBundle {
@@ -122,6 +122,7 @@ describe("buildDeveloperTeamManifest — memoryBundle flow", () => {
   test("manifest agents have memoryBundle: undefined when no provider configured", () => {
     const manifest = capabilities.teams.buildDeveloperTeamManifest({
       projectRoot: "/tmp/test-project",
+      environmentId: "opencode-development",
       capabilityInstructions: undefined,
       modelAssignments: [],
     });
@@ -144,6 +145,7 @@ describe("buildDeveloperTeamManifest — memoryBundle flow", () => {
     // So when plan.memoryBundle is non-null, manifest agents/skill entries have the same non-null bundle.
     const manifest = capabilities.teams.buildDeveloperTeamManifest({
       projectRoot: "/tmp/test-project",
+      environmentId: "opencode-development",
       capabilityInstructions: undefined,
       modelAssignments: [],
     });
@@ -173,6 +175,7 @@ describe("buildDeveloperTeamManifest — memoryBundle flow", () => {
     // Here we verify the manifest structure is correct and agents have memoryBundle.
     const manifest = capabilities.teams.buildDeveloperTeamManifest({
       projectRoot: "/tmp/test-project",
+      environmentId: "opencode-development",
       capabilityInstructions: undefined,
       modelAssignments: [],
     });

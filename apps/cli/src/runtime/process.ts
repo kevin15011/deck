@@ -7,7 +7,7 @@
  * @module
  */
 
-import { spawn as nodeSpawn, spawnSync as nodeSpawnSync, SpawnOptions as NodeSpawnOptions, ChildProcess } from "node:child_process";
+import { spawn as nodeSpawn, spawnSync as nodeSpawnSync, SpawnOptions as NodeSpawnOptions, ChildProcess, type SpawnSyncReturns } from "node:child_process";
 
 // ============================================================================
 // Types
@@ -151,7 +151,7 @@ export function spawnSync(
   };
 
   try {
-    const result = nodeSpawnSync(command, args, options);
+    const result = nodeSpawnSync(command, args, options) as SpawnSyncReturns<Buffer>;
 
     // Handle case where command wasn't found - check result.error for ENOENT
     if (result.error) {
@@ -162,9 +162,9 @@ export function spawnSync(
       };
     }
 
-    // Node's spawnSync uses .status for exit code, not .exitCode
-    // status is the raw exit code passed to process.exit(), or undefined if killed by signal
-    const exitCode = result.status ?? (result.exitCode ?? (result.signal ? 1 : 0));
+    // Node's spawnSync uses .status for exit code (number, the process exit code),
+    // or undefined when killed by signal (in which case .signal is set).
+    const exitCode = result.status ?? (result.signal ? 1 : 0);
 
     return {
       exitCode,

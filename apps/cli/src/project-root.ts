@@ -14,7 +14,9 @@ export function resolveProjectRoot(startDirOrOptions?: string | { fallback?: str
   const root = startDir ? resolveProjectRootInternal(startDir) : resolveProjectRootInternal();
   if (root) return root;
   if (options?.require) return options.fallback ?? process.cwd();
-  return options?.fallback ?? null;
+  // When called with a string argument (no options), fall back to the start directory
+  // rather than null, so callers that pass a path always get a usable directory.
+  return startDir ?? options?.fallback ?? null;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { PathLike } from "node:fs";
 
 import { DEFAULT_OPENCODE_MODELS, resolveModelConfig, supportsThinkingForOpenCodeModel, resolveThinkingForOpenCodeModel, getDefaultThinkingForOpenCodeModel, readOpenCodeDeveloperTeamModelConfigAssignments } from "./model-config";
 import { resolveReasoningEffortSupport, getModelCatalog } from "@deck/core";
@@ -273,7 +274,7 @@ describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinking
   test("returns effectiveThinkingAssignments as undefined when model is unsupported", () => {
     // Create a mock config with an unsupported model (gpt-4o)
     const mockConfig = {
-      exists: (_path: string) => true,
+      exists: (_path: PathLike) => true,
       readFile: (_path: string, _encoding: string) => JSON.stringify({
         agent: {
           "deck-developer-orchestrator": {
@@ -295,7 +296,7 @@ describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinking
 
   test("returns effectiveThinkingAssignments when model is supported", () => {
     const mockConfig = {
-      exists: (_path: string) => true,
+      exists: (_path: PathLike) => true,
       readFile: (_path: string, _encoding: string) => JSON.stringify({
         agent: {
           "deck-developer-orchestrator": {

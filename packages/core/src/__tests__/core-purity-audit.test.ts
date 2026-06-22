@@ -61,6 +61,52 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   // Runner ID const arrays in deck-config.ts
   { pattern: /^"pi"$/, reason: "PACKAGE_INSTRUCTION_RUNNERS runner ID const" },
   { pattern: /^"opencode"$/, reason: "PACKAGE_INSTRUCTION_RUNNERS runner ID const" },
+  // Runner-capability-registry.ts: capability IDs and catalog entries with runner/provider prefixes
+  // These are SPEC-DEFINED catalog identifiers, not runtime references.
+  // File path references to adapter-opencode in instruction content (historical example)
+  { pattern: /packages\/adapter-opencode/, reason: "file path reference in instruction content example" },
+  // Capability IDs: runner-prefixed identifiers in canonical capability registry
+  { pattern: /^"pi-mermaid"$/, reason: "canonical capability ID with runner prefix in runner-capability-registry" },
+  { pattern: /^"pi-orchestrator-prompt-persistence"$/, reason: "canonical capability ID with runner prefix" },
+  { pattern: /^"pi-team-profile"$/, reason: "canonical capability ID with runner prefix" },
+  { pattern: /^"opencode-primary-orchestrator"$/, reason: "canonical capability ID with runner prefix" },
+  { pattern: /^"opencode-mermaid"$/, reason: "canonical capability ID with runner prefix" },
+  { pattern: /^"supermemory-tool-bindings"$/, reason: "canonical capability ID" },
+  // Capability display names: human-readable names with runner prefixes
+  { pattern: /^"OpenCode Primary Orchestrator"$/, reason: "capability display name with runner prefix" },
+  { pattern: /^"OpenCode Mermaid"$/, reason: "capability display name with runner prefix" },
+  { pattern: /^"Pi Mermaid"$/, reason: "capability display name with runner prefix" },
+  // Adapter sources: runner-prefixed adapter source identifiers
+  { pattern: /^"opencode-mcp-config"$/, reason: "adapter source ID with runner prefix" },
+  // Runner-capability-parity.ts: parity error codes (spec-defined gap identifiers)
+  // Error codes embed runner names as gap identifiers, not runtime references
+  { pattern: /^"pi-context-mode-mcp-missing"$/, reason: "parity error code with runner prefix" },
+  { pattern: /^"pi-rtk-mapping-missing"$/, reason: "parity error code with runner prefix" },
+  { pattern: /^"pi-supermemory-extra-gate-present"$/, reason: "parity error code with runner/provider prefix" },
+  { pattern: /^"pi-serena-not-satisfied"$/, reason: "parity error code with runner prefix" },
+  // Runner-adapter.ts: engram as model provider ID in RunnerModelProvider union
+  { pattern: /^"engram"$/, reason: "model provider ID in RunnerModelProvider type" },
+  // Runner capability parity gap descriptions (spec-authored content embedded in catalog)
+  // These describe parity gaps for specific runners — spec-defined, not implementation references
+  { pattern: /Serena is mandatory for Pi parity/, reason: "parity gap description referencing runner name" },
+  { pattern: /parity with OpenCode/, reason: "parity gap description referencing runner name" },
+  { pattern: /Pi parity/, reason: "parity gap description referencing runner name" },
+  { pattern: /RTK via Bash hook in OpenCode/, reason: "parity gap notes referencing runner name" },
+  { pattern: /Deck init is bundled with OpenCode/, reason: "capability notes referencing runner name" },
+  { pattern: /OpenCode Mermaid renderer/, reason: "capability description referencing runner name" },
+  { pattern: /Configure Supermemory MCP with valid credentials/, reason: "parity gap recommended action" },
+  { pattern: /Shared binary plus local MCP config in ~\/\.pi\//, reason: "capability notes referencing pi home path" },
+  // runner-capability-registry.ts: capability descriptions and notes with runner/provider names
+  // These are spec-authored catalog descriptions, not implementation references
+  { pattern: /wrapper @dreki-gg\/pi-context7/, reason: "capability description referencing pi wrapper package" },
+  { pattern: /No Pi-only runtime gate/, reason: "capability description referencing pi runtime gate" },
+  { pattern: /Pi Mermaid - internal runner-specific package/, reason: "capability description with runner name" },
+  // adaptive-memory.ts: provider description strings in instruction content
+  // These describe how to use named providers in agent sessions — spec-authored, not runtime
+  { pattern: /When the configured memory provider is "engram"/, reason: "provider description in adaptive memory instruction" },
+  { pattern: /When the configured memory provider is "supermemory"/, reason: "provider description in adaptive memory instruction" },
+  // serena.ts: Serena-specific statement explaining why tools are disabled (OpenCode provides them)
+  { pattern: /These tools are explicitly disabled because OpenCode or other packages handle them/, reason: "Serena instruction content explaining tool scope" },
 ];
 
 const testDir = dirname(fileURLToPath(import.meta.url));

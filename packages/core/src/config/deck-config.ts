@@ -5,12 +5,12 @@ import type { AdapterRegistry } from "../adapter-registry";
 
 // Import global config path resolver from T5
 // Lazy import to avoid circular dependencies
-let globalPaths: typeof import("../../apps/cli/src/runtime/paths.js") | null = null;
+let globalPaths: typeof import("../../../../apps/cli/src/runtime/paths.js") | null = null;
 
 async function getGlobalPaths() {
   if (!globalPaths) {
     try {
-      globalPaths = await import("../../apps/cli/src/runtime/paths.js");
+      globalPaths = await import("../../../../apps/cli/src/runtime/paths.js");
     } catch {
       // Global paths module not available (e.g., in tests or before paths.ts is built)
       globalPaths = null;

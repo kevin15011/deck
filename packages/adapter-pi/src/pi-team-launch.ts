@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { getDeveloperTeamCatalog } from "./developer-team-catalog";
 import { readDeveloperTeamModelConfigAssignments } from "./developer-team-install";
-import { resolveThinkingForModel, supportsDeveloperTeamModel } from "./model-config";
+import { resolveThinkingForModel, supportsDeveloperTeamModel, type PiThinkingLevel } from "./model-config";
 import type { TeamId } from "./team-catalog";
 import { getTeamsForEnvironment } from "./team-catalog";
 
@@ -131,7 +131,7 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
   if (orchestratorModel && supportsDeveloperTeamModel(orchestratorModel)) {
     args.push("--model", orchestratorModel);
     const hasThinkingAssignment = Object.prototype.hasOwnProperty.call(assignments.thinkingAssignments, DEVELOPER_ORCHESTRATOR_AGENT_ID);
-    const thinking = hasThinkingAssignment ? resolveThinkingForModel(orchestratorModel, assignments.thinkingAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID]) : undefined;
+    const thinking = hasThinkingAssignment ? resolveThinkingForModel(orchestratorModel, assignments.thinkingAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID] as PiThinkingLevel | undefined) : undefined;
     if (thinking) args.push("--thinking", thinking);
   }
 

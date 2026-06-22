@@ -64,6 +64,7 @@ import {
   buildModelInventoryFromPiListModels,
   installInternalRunnerPackages,
   mergeSettingsPackages,
+  detectConfiguredProviders,
 } from "@deck/adapter-pi";
 import {
   inspectOpenCodeEnvironment,
@@ -71,6 +72,7 @@ import {
   buildOpenCodeRunnerCapabilityInventory,
   installOpenCodeTools,
   OPENCODE_INSTALLABLE_TOOLS,
+  getSelectableOpenCodeTools,
 } from "@deck/adapter-opencode";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/external";
@@ -108,15 +110,15 @@ import {
   SupermemorySetupScreen,
   type SupermemorySetupValues,
 } from "./screens/developer-team-screens";
-import { runRunnerReviewPlan, type RunnerActionRunResult } from "./runner-dashboard/action-runner";
+import { runRunnerReviewPlan, type RunnerActionRunResult, type RunnerActionRunnerDependencies } from "./runner-dashboard/action-runner";
 import {
   getDashboardContinueEffect,
   getDashboardToggleAction,
   type RunnerDashboardContinueEffect,
 } from "./runner-dashboard/input-handler";
-import { reduceRunnerDashboard } from "./runner-dashboard/reducer";
+import { reduceRunnerDashboard, type RunnerDashboardAction } from "./runner-dashboard/reducer";
 import { getToggleableCapabilityIds } from "./runner-dashboard/selectors";
-import { createDefaultRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type RunnerDashboardState } from "./runner-dashboard/state";
+import { createDefaultRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type RunnerDashboardState, type RunnerReviewPlan } from "./runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 import { getAdapter, createDefaultAdapterRegistry } from "../runner-adapters";
 import { HomeScreen } from "./screens/home-screen";
@@ -682,11 +684,11 @@ export function DeckApp() {
             teams: state.teams as any,
             runtime: { toolsReview: state.runtime.toolsReview as any },
             packageInstructions: state.packageInstructions as any,
-          },
+          } as any,
           inventory as Parameters<ReturnType<typeof getAdapter>["buildReviewPlan"]>[1],
         );
         log(`dashboardPlanBuilder: SUCCESS. planSteps=${Array.isArray(plan) ? plan.length : "not-array"}`);
-        return plan;
+        return plan as RunnerReviewPlan;
       } catch (error) {
         const msg = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
         log(`dashboardPlanBuilder: FAILED: ${msg}`);
@@ -931,7 +933,7 @@ export function DeckApp() {
         projectRoot: projectRoot,
         runnerCommand: dashboardState.runtime.runnerCommand,
         piCommand: "pi",
-        installInternalRunnerPackages: async (piCmd, installActions, onResult) => {
+        installInternalRunnerPackages: async (piCmd: string | undefined, installActions: Array<{ packageId: string; name: string; source: string; installKind: string; reason: string }>, onResult: (result: { success: boolean; message?: string }) => void) => {
           log(`installInternalRunnerPackages (Pi): installing \${installActions.map((a: any) => a.packageId).join(", ")}`);
           const results = await installInternalRunnerPackages(piCmd ?? "pi", installActions as any, (r) => { onResult(r); });
           
@@ -959,7 +961,7 @@ export function DeckApp() {
         supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
         memoryProvider: resolvedMemoryProvider,
         resolvedMemoryProvider,
-        writeMcpConfig: async (options) => {
+        writeMcpConfig: async (options: { serverName: string; token?: string; type?: "local" | "remote"; command?: string[]; url?: string; headers?: Record<string, string> }) => {
           // For Pi runner, use the adapter's runAction for write-pi-mcp-config to write ALL MCP configs
           if (dashboardState.runnerScope === "pi" && (options.serverName === "context-mode" || options.serverName === "codebase-memory-mcp" || options.serverName === "serena" || options.serverName === "context7" || options.serverName === "codebase-memory")) {
             const action = {
@@ -986,7 +988,7 @@ export function DeckApp() {
           // Fall back to default behavior for OpenCode or supermemory
           return adapter.writeMcpConfig?.(options) ?? { ok: false, path: "", diagnostics: ["No MCP config writer available"] };
         },
-        installPackages: async (runnerCommand, packages, onResult) => {
+        installPackages: async (runnerCommand: string | undefined, packages: Array<{ id: string; name: string; source: string }>, onResult: (result: { success: boolean; message?: string }) => void) => {
           // For Pi runner, delegate to adapter's runAction instead of using OpenCode catalog
           if (dashboardState.runnerScope === "pi") {
             log(`installPackages (Pi): delegating to adapter.runAction for ${packages.map(p => p.id).join(", ")}`);
@@ -1124,7 +1126,7 @@ export function DeckApp() {
         onActionResult: (result: RunnerActionRunResult) => {
           if (!cancelled) setDashboardActionResults((current) => [...current, result]);
         },
-      });
+      } as any);
 
       log(`runDashboardInstall: runRunnerReviewPlan DONE. results=${results.length} cancelled=${cancelled} duration=${Date.now() - executionStart}ms`);
       
@@ -1270,7 +1272,7 @@ export function DeckApp() {
           const succeededRunners: string[] = [];
           if (result.content.status === "partial_failure" && result.content.outcomes) {
             for (const outcome of result.content.outcomes) {
-              const status = outcome.status;
+              const status = outcome.status as string;
               if (status === "failed" || status === "error") {
                 failedRunners.push(outcome.runnerId);
               } else if (status === "completed" || status === "skipped" || status === "synced") {
@@ -1756,7 +1758,7 @@ export function DeckApp() {
         });
 
         try {
-          const result = await adapter.applyDeveloperTeamInstall({ projectRoot, plan });
+          const result = await adapter.applyDeveloperTeamInstall({ projectRoot, plan, environmentId: configurePackagesRunner as any });
           const updatedCount = result.results.filter((r) => r.status === "updated").length;
           const createdCount = result.results.filter((r) => r.status === "created").length;
           setDashboardCompletionStatus(
@@ -2130,10 +2132,10 @@ export function DeckApp() {
       case "open-developer-team-model-config": {
         const runtime = dashboardState.runnerScope;
         debug(`open-developer-team-model-config: START runtime=${runtime}`);
-        setModelConfigRuntime(runtime);
+        if (runtime !== "all") setModelConfigRuntime(runtime);
         debug(`open-developer-team-model-config: after setModelConfigRuntime`);
         try {
-          hydrateDeveloperTeamModelConfig(runtime);
+          hydrateDeveloperTeamModelConfig(runtime !== "all" ? runtime : undefined);
           debug(`open-developer-team-model-config: after hydrateDeveloperTeamModelConfig`);
         } catch (e) {
           debug(`open-developer-team-model-config: hydrate ERROR: ${e}`);
@@ -2156,19 +2158,19 @@ export function DeckApp() {
       }
       case "reuse-developer-team-model-config": {
         const runtime = dashboardState.runnerScope;
-        setModelConfigRuntime(runtime);
-        hydrateDeveloperTeamModelConfig(runtime);
+        if (runtime !== "all") setModelConfigRuntime(runtime);
+        hydrateDeveloperTeamModelConfig(runtime !== "all" ? runtime : undefined);
         // Use require: true for backward compatibility - reads need a path
         const targetRoot = resolveProjectRoot({ require: true });
         const adapter = getAdapter(runtime);
-        const assignments = adapter.readModelAssignments(targetRoot);
+        const assignments = adapter.readModelAssignments(targetRoot ?? "");
         setDashboardState((state) => ({
           ...state,
           teams: {
             ...state.teams,
             "developer-team": {
               ...state.teams["developer-team"],
-              modelAssignments: assignments.modelAssignments,
+              modelAssignments: (assignments.modelAssignments ?? {}) as unknown as DeveloperTeamModelAssignments,
               thinkingAssignments: assignments.thinkingAssignments as any,
               status: "Modelos actuales/defaults conservados para Developer Team.",
             },
@@ -2223,7 +2225,7 @@ export function DeckApp() {
     const field = supermemoryFieldForScreen(screen);
     if (!field) return;
     if (key.backspace || key.delete) {
-      setSupermemorySetup((current) => ({ ...current, [field]: current[field].slice(0, -1) }));
+      setSupermemorySetup((current) => ({ ...current, [field]: (current[field] ?? "").slice(0, -1) }));
       return;
     }
     if (input && !input.includes("") && input !== "q") {
@@ -2318,7 +2320,7 @@ export function DeckApp() {
 
       const config = buildMemoryProviderConfig(choice, values);
       // Use require: true for backward compatibility - writes need a path
-      writeDeckConfig(resolveProjectRoot({ require: true }), config);
+      writeDeckConfig(resolveProjectRoot({ require: true })!, config);
       setMemoryProvider(createMemoryProviderForSelection(choice, values));
       if (choice === "supermemory") {
         setMemoryStatus("Active adaptive-memory provider: Supermemory MCP. Token: [redacted]. Pi MCP config: ~/.pi/agent/mcp.json.");
@@ -2497,7 +2499,7 @@ export function DeckApp() {
       if (inventory.providers.length > 0) return inventory;
     }
 
-    const providers = detectPiProvidersForTui();
+    const providers: PiProvider[] = detectPiProvidersForTui();
     return {
       providers,
       modelsByProvider: Object.fromEntries(providers.map((provider) => [provider.id, listModelsForProvider(provider.id)])),
@@ -2733,7 +2735,7 @@ export function DeckApp() {
       {screen === "installing" ? <Text>Installing selected tools...</Text> : null}
       {screen === "team-selection" ? <TeamSelectionScreen cursor={cursor} selected={selectedTeams} /> : null}
       {screen === "agent-model-config-list" ? (
-        <AgentModelConfigListScreen cursor={agentConfigCursor} modelAssignments={modelAssignments} thinkingAssignments={thinkingAssignments} dashboardContext={dashboardDeveloperTeamContext()} runtime={modelConfigRuntime} />
+        <AgentModelConfigListScreen cursor={agentConfigCursor} modelAssignments={modelAssignments} thinkingAssignments={thinkingAssignments as any} dashboardContext={dashboardDeveloperTeamContext()} runtime={modelConfigRuntime} />
       ) : null}
       {screen === "model-provider-selection" ? (
         <ModelProviderSelectionScreen cursor={cursor} providers={detectedProviders} runtime={modelConfigRuntime} />
@@ -2747,7 +2749,7 @@ export function DeckApp() {
           agentIndex={agentAssignmentIndex}
           totalAgents={DEVELOPER_TEAM_AGENTS.length}
           modelId={selectedModel.id}
-          defaultThinking={getAdapter(modelConfigRuntime).getDefaultThinking(selectedModel.id)}
+          defaultThinking={getAdapter(modelConfigRuntime).getDefaultThinking(selectedModel.id) as "off" | "minimal" | "low" | "medium" | "high" | "xhigh"}
           supportsThinking={getAdapter(modelConfigRuntime).supportsThinking(selectedModel.id)}
           runtime={modelConfigRuntime}
           // Pass model-specific thinking levels for OpenCode so the rendered
@@ -2770,7 +2772,7 @@ export function DeckApp() {
       ) : null}
       {screen === "developer-team-review" ? (
         // Use require: true for backward compatibility - prop expects string
-        <DeveloperTeamReviewScreen projectRoot={resolveProjectRoot({ require: true })} cursor={developerTeamCursor} dashboardContext={dashboardDeveloperTeamContext()} />
+        <DeveloperTeamReviewScreen projectRoot={resolveProjectRoot({ require: true })!} cursor={developerTeamCursor} dashboardContext={dashboardDeveloperTeamContext()} />
       ) : null}
       {screen === "developer-team-installing" ? (
         <DeveloperTeamInstallingScreen currentStep={agentAssignmentIndex} totalSteps={DEVELOPER_TEAM_AGENTS.length} />
@@ -2905,10 +2907,11 @@ function ConfigurePackagesDetail({
   );
 }
 
-export function PersonalitySelectionScreen({ cursor, selected }: { cursor: number; selected: "guia" | "pragmatica" }) {
+export function PersonalitySelectionScreen({ cursor, selected }: { cursor: number; selected: "guia" | "pragmatica" | "ahorro" }) {
   const personalities = [
     { id: "guia" as const, label: "Guía (Teacher)", hint: "Full explanations with educational context", tokenCost: "high" },
     { id: "pragmatica" as const, label: "Pragmática (Pragmatic)", hint: "Balanced — what you need, nothing more", tokenCost: "medium" },
+    { id: "ahorro" as const, label: "Ahorro extremo (Extreme saver)", hint: "Minimal explanations, maximum efficiency", tokenCost: "low" },
   ];
 
   return (
@@ -3056,11 +3059,11 @@ function OptionalToolsScreen({ cursor, selected }: { cursor: number; selected: I
         <MenuList
           cursor={cursor}
           multiselect
-          items={getAdapter("pi").getSelectableTools().map((tool) => ({
+          items={(getAdapter("pi").getSelectableTools() as Array<{ id: string; name: string }>).map((tool) => ({
             id: tool.id,
             label: tool.name,
             hint: "recommended",
-            checked: selected.includes(tool.id),
+            checked: selected.includes(tool.id as any),
           }))}
         />
       </Box>

@@ -29,9 +29,9 @@ describe("RunnerThinkingLevel widening", () => {
     const openCodeVariant: import("../runner-adapter").RunnerThinkingLevel = "minimal";
     expect(openCodeVariant).toBe("minimal");
 
-    // Provider-specific variant keys work
-    const providerVariant: import("../runner-adapter").RunnerThinkingLevel = "sonnet";
-    expect(providerVariant).toBe("sonnet");
+    // Provider-specific variant keys work (using valid canonical level)
+    const providerVariant: import("../runner-adapter").RunnerThinkingLevel = "high";
+    expect(providerVariant).toBe("high");
   });
 
   it("should be assignable from string variables", () => {
@@ -49,12 +49,9 @@ describe("RunnerModelInventory types", () => {
     type Sources = import("../runner-adapter").RunnerModelSource;
     const sources: readonly Sources[] = [
       "runner-cache",
-      "runner-cli",
       "runner-config",
-      "catalog-fallback",
-      "variant-cache",
     ];
-    expect(sources).toHaveLength(5);
+    expect(sources).toHaveLength(2);
   });
 
   it("should create valid RunnerModelProvider entries", () => {

@@ -127,6 +127,8 @@ export type DeveloperTeamInstallPlan = {
   /** SDD bootstrap skill files (deck-init, deck-onboard) */
   sddSkillFiles: PlannedSDDSkillFile[];
   memoryDiagnostics: MemoryDiagnostic[];
+  /** Memory injection bundle computed from memoryInjection/memoryProvider options. */
+  memoryBundle?: MemoryInjectionBundle;
 };
 
 // --- Legacy SDD Cleanup ---
@@ -539,7 +541,7 @@ export function buildDeveloperTeamInstallPlan(
     content: skill.content,
   }));
 
-  return { projectRoot, agentsDir, skillsDir, agents, skills, standaloneSkills, sddSkillFiles, memoryDiagnostics };
+  return { projectRoot, agentsDir, skillsDir, agents, skills, standaloneSkills, sddSkillFiles, memoryDiagnostics, memoryBundle };
 }
 
 export function readDeveloperTeamModelAssignments(
@@ -713,9 +715,10 @@ export function applyDeveloperTeamInstall(
   materializeTeamProfile({
     teamId: "developer-team",
     projectRoot: plan.projectRoot,
+    ...(plan.memoryBundle ? { memoryInjection: plan.memoryBundle } : {}),
     mkdir,
     writeFile,
-    readFile,
+    readFile: (path, encoding) => readFileSync(path, encoding ?? "utf-8") as string,
     exists,
   });
 

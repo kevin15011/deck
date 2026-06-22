@@ -61,14 +61,44 @@ function createMockAdapter(
     supportsThinking() {
       return false;
     },
-    buildDeveloperTeamInstallPlan() {
+    buildDeveloperTeamInstallPlan(_input: unknown) {
       return { files: [] };
     },
-    async applyDeveloperTeamInstall() {
+    async applyDeveloperTeamInstall(_input: unknown) {
       return { results: [], changedCount: 0, unchangedCount: 0 };
     },
     getNextScreen() {
       return "complete";
+    },
+    async inspectEnvironment() {
+      return {};
+    },
+    async reviewTools() {
+      return {};
+    },
+    backupDeveloperTeamFiles(_plan: unknown) {
+      return {};
+    },
+    rollbackDeveloperTeamFiles(_backup: unknown) {
+      // noop
+    },
+    verifyDeveloperTeamInstall(_plan: unknown) {
+      return { valid: true, diagnostics: [] as readonly string[] };
+    },
+    resolveThinking(_modelId: string) {
+      return undefined;
+    },
+    getDefaultThinking(_modelId: string) {
+      return "off";
+    },
+    getCapability(_capabilityId: string) {
+      return undefined;
+    },
+    getCapabilityIds() {
+      return [] as readonly string[];
+    },
+    getSelectableTools() {
+      return [];
     },
   };
 }

@@ -11,7 +11,8 @@ import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@dec
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "@deck/core";
-import { CODEBASE_MEMORY_MCP_SERVER_NAME } from "@deck/adapter-pi";
+// Canonical server name for codebase-memory MCP — defined locally to avoid adapter dependency in the runner
+const CODEBASE_MEMORY_MCP_SERVER_NAME = "codebase-memory";
 
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
@@ -94,8 +95,8 @@ export type RunnerActionRunnerDependencies = {
   piCommand?: string;
   writeSupermemoryPiMcpConfig?: McpConfigWriterFn;
   validateSupermemoryPiMcpConfig?: McpConfigValidatorFn;
-  buildDeveloperTeamInstallPlan?: (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => import("@deck/adapter-pi").DeveloperTeamInstallPlan;
-  applyDeveloperTeamInstall?: (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => import("@deck/adapter-pi").DeveloperTeamApplyResult;
+  buildDeveloperTeamInstallPlan?: (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => { agents: unknown[]; skills: unknown[]; standaloneSkills: unknown[]; sddSkillFiles: unknown[]; };
+  applyDeveloperTeamInstall?: (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider }) => Promise<{ results: Array<{ agentId: string; kind: string; status: string }> }>;
   installInternalRunnerPackages?: (command: string | undefined, actions: Array<{ packageId: string; name: string; source: string; installKind: string; reason: string }>, onResult: (result: { success: boolean; message?: string }) => void) => Promise<Array<{ success: boolean; message?: string }>>;
   resolveAdaptiveMemoryProvider?: (options: { provider: string; supermemoryToken?: string; projectRoot?: string }) => AdaptiveMemoryProvider | undefined;
 };
@@ -378,10 +379,17 @@ async function runInternalPackageInstall(
       };
     }
 
+    // Use action.title for human-readable messages (e.g. "Install visual explanation support")
+    const title = action.title;
+    // Strip "Install " prefix for display (e.g. "visual explanation support")
+    const displayName = title.replace(/^install\s+/i, "");
+    // Capitalize first letter for display (e.g. "Visual explanation support")
+    const displayNameCapitalized = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+
     return {
       actionId: action.id,
       status: result.success ? "executed" : "failed",
-      message: result.success ? `Installed ${packageName}.` : `Failed to install ${packageName}.`,
+      message: result.success ? `Installed ${displayName}.` : `${displayNameCapitalized} install failed.`,
       diagnostics: result.message ? redactDiagnostics([result.message]) : [],
       raw: redactRaw(result),
     };
@@ -397,10 +405,12 @@ async function runInternalPackageInstall(
     dependencies.runnerCommand,
     [{ id: packageId, name: packageName, source: action.source ?? "" }],
     (result) => {
+      const displayName = action.title.replace(/^install\s+/i, "");
+      const displayNameCapitalized = displayName.charAt(0).toUpperCase() + displayName.slice(1);
       dependencies.onActionResult?.({
         actionId: action.id,
         status: result.success ? "executed" : "failed",
-        message: result.success ? `Installed ${packageName}.` : `Failed to install ${packageName}.`,
+        message: result.success ? `Installed ${displayName}.` : `${displayNameCapitalized} install failed.`,
         diagnostics: result.message ? redactDiagnostics([result.message]) : [],
         raw: redactRaw(result),
       });
@@ -420,7 +430,7 @@ async function runInternalPackageInstall(
   return {
     actionId: action.id,
     status: result.success ? "executed" : "failed",
-    message: result.success ? `Installed ${packageName}.` : `Failed to install ${packageName}.`,
+    message: result.success ? `Installed ${action.title.replace(/^install\s+/i, "")}.` : `${action.title.replace(/^install\s+/i, "").charAt(0).toUpperCase() + action.title.replace(/^install\s+/i, "").slice(1)} install failed.`,
     diagnostics: result.message ? redactDiagnostics([result.message]) : [],
     raw: redactRaw(result),
   };
@@ -436,8 +446,11 @@ function writeDeckConfigAction(
   }
 
   const state = dependencies.dashboardState;
-  const provider = state?.adaptiveMemory.provider ?? "none";
-  const supermemory = state?.adaptiveMemory.supermemory;
+  if (!state) {
+    return skippedResult(action, "Dashboard state is required to write .deck/config.json.");
+  }
+  const provider = state.adaptiveMemory.provider ?? "none";
+  const supermemory = state.adaptiveMemory.supermemory;
 
   // Read existing config to preserve OTHER runner's packageInstructions
   const existingConfig = readDeckConfig(projectRoot);
@@ -497,6 +510,7 @@ function writeDeckConfigAction(
     status: "executed",
     message: `Wrote .deck/config.json with adaptive memory provider: ${provider}.`,
     diagnostics: redactDiagnostics(action.diagnostics ?? []),
+    raw: redactRaw(config),
   };
 }
 
@@ -652,6 +666,7 @@ async function writeMcpConfigAction(
       status: "failed",
       message: `MCP config write failed at ${result.path ?? "unknown path"}.`,
       diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+      raw: redactRaw(result),
     };
   }
 
@@ -660,6 +675,7 @@ async function writeMcpConfigAction(
     status: "executed",
     message: `Supermemory MCP config written successfully at ${result.path}.`,
     diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+    raw: redactRaw(result),
   };
 }
 
@@ -712,28 +728,35 @@ function validateAction(
   dependencies: RunnerActionRunnerDependencies,
 ): RunnerActionRunResult {
   if (action.id === "adaptive-memory.supermemory.validate") {
-    const validator = dependencies.validateMcpConfig;
+    let validator = dependencies.validateMcpConfig;
+    if (!validator && dependencies.validateSupermemoryPiMcpConfig) {
+      // Backward-compatible Pi-specific validator alias
+      validator = dependencies.validateSupermemoryPiMcpConfig;
+    }
     if (!validator) {
       return skippedResult(action, "MCP config validator not provided.");
     }
 
     const token = dependencies.supermemoryToken;
     if (!token?.trim()) {
+      const redactedDiagnostics = redactDiagnostics(action.diagnostics ?? []);
       return {
         actionId: action.id,
         status: "failed",
         message: "Supermemory token is required for validation.",
-        diagnostics: redactDiagnostics(action.diagnostics ?? []),
+        diagnostics: redactedDiagnostics,
       };
     }
 
     const result = validator({ token: token.trim(), serverName: "supermemory" });
+    const redactedRaw = redactRaw(result);
     if (!result.ok) {
       return {
         actionId: action.id,
         status: "failed",
         message: "Supermemory MCP config validation failed.",
-        diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+        diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...((redactedRaw as { diagnostics?: Array<string | { message?: string; code?: string; severity?: string }> })?.diagnostics ?? [])]),
+        raw: redactedRaw,
       };
     }
 
@@ -742,6 +765,7 @@ function validateAction(
       status: "executed",
       message: "Supermemory MCP config validated successfully.",
       diagnostics: redactDiagnostics(action.diagnostics ?? []),
+      raw: redactedRaw,
     };
   }
 
@@ -814,18 +838,33 @@ function skippedResult(action: RunnerAction, message: string): RunnerActionRunRe
 
 function isBlockingSetupDiagnostic(diagnostic: string): boolean {
   const lower = diagnostic.toLowerCase();
-  return lower.includes("required") || lower.includes("blocked") || lower.includes("failed");
+  if (lower.includes("required") || lower.includes("blocked") || lower.includes("failed")) return true;
+  // Security: any diagnostic mentioning a token sentinel (raw or redacted) is blocking.
+  // Token sentinel patterns: sk-{20+ alphanum/- } and [REDACTED]/[redacted].
+  if (/\bsk-[a-zA-Z0-9-]{20,}\b/.test(diagnostic)) return true;
+  if (/\[REDACTED\]/i.test(diagnostic)) return true;
+  return false;
 }
 
-function redactDiagnostics(diagnostics: string[]): string[] {
-  return diagnostics.map(redact);
+function redactDiagnostics(diagnostics: Array<string | { message?: string; code?: string; severity?: string }>): string[] {
+  return diagnostics.map((d) => {
+    if (typeof d === "string") return redact(d);
+    // Handle diagnostic objects with message/code/severity fields
+    if (d && typeof d === "object") {
+      const obj = d as Record<string, unknown>;
+      const message = obj["message"];
+      const redactedMessage = typeof message === "string" ? redact(message) : "[REDACTED]";
+      return JSON.stringify({ ...obj, message: redactedMessage });
+    }
+    return redact(String(d));
+  });
 }
 
 function redact(value: unknown): string {
   const str = typeof value === "string" ? value : String(value);
   return str
-    .replace(/sk-[a-zA-Z0-9]{20,}/g, "[redacted]")
-    .replace(/eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g, "[redacted]");
+    .replace(/sk-[a-zA-Z0-9-]{20,}/g, "[REDACTED]")
+    .replace(/eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g, "[REDACTED]");
 }
 
 function redactRaw(value: unknown): unknown {

@@ -109,7 +109,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         expect(existsSync(join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"))).toBe(true);
         const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"), "utf-8");
         expect(orchestrator).toContain("Supermemory MCP Adaptive Memory");
-        expect(orchestrator).toContain("supermemory.execute");
+        expect(orchestrator).toContain("supermemory.memory");
         expect(orchestrator).not.toContain(SENTINEL_TOKEN);
         expect(orchestrator).not.toContain("x-supermemory-api-key");
       }
@@ -135,7 +135,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
       expect(first.status).toBe("ready");
-      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"), "utf-8")).toContain("supermemory.execute");
+      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"), "utf-8")).toContain("supermemory.memory");
 
       const second = await runPiLaunch({
         teamId: "developer-team",
@@ -385,12 +385,17 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         "utf-8",
       );
 
+      // Use piMcpHomeDir to point to a fake home so the Pi MCP config doesn't exist,
+      // isolating the test to the incomplete Supermemory config in .deck/config.json.
+      const fakeHome = join(projectRoot, ".fake-pi-home");
+
       const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        piMcpHomeDir: fakeHome,
       });
 
       expect(result.status).toBe("ready");

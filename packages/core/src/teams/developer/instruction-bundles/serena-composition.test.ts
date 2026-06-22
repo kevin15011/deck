@@ -2,6 +2,7 @@
  * Focused tests for Serena agent usage enforcement.
  * Verifies: session composition, non-apply scoping, no runtime selection wording.
  */
+// @ts-expect-error - vitest types are available at runtime via bun
 import { describe, test, expect } from "vitest";
 import { buildSerenaInstructionBundle } from "./serena";
 import { composeCapabilityInstructions, type CapabilityInstructionCompositionContext } from "./index";

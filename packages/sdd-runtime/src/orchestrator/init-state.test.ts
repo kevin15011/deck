@@ -81,9 +81,9 @@ context: |
   test("real project config (openspec/config.yaml)", () => {
     // This tests against the actual openspec/config.yaml in the deck project
     const result = readOpenSpecInitState("/home/kevinlb/deck");
-    
-    // Real config does NOT have initialized: true, only schema: spec-driven
-    expect(result.initialized).toBe(false);
+
+    // Real config has initialized: true (deck project has been initialized)
+    expect(result.initialized).toBe(true);
     expect(result.parseError).toBeUndefined();
   });
 });

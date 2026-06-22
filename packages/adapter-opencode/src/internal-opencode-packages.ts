@@ -14,9 +14,9 @@ import type { OpenCodeConfig } from "./types";
 // Package identifiers
 // ---------------------------------------------------------------------------
 
-export type InternalOpenCodePackageId = "opencode-mermaid-renderer";
+export type InternalOpenCodePackageId = "opencode-mermaid-renderer" | "deck-model-variants";
 
-export const INTERNAL_OPENCODE_PACKAGE_IDS = ["opencode-mermaid-renderer"] as const satisfies readonly InternalOpenCodePackageId[];
+export const INTERNAL_OPENCODE_PACKAGE_IDS = ["opencode-mermaid-renderer", "deck-model-variants"] as const satisfies readonly InternalOpenCodePackageId[];
 
 // ---------------------------------------------------------------------------
 // Package metadata
@@ -34,6 +34,12 @@ export const INTERNAL_OPENCODE_PACKAGES: Record<InternalOpenCodePackageId, Inter
     id: "opencode-mermaid-renderer",
     name: "Visual explanation support",
     detectorName: "opencode-mermaid-renderer",
+    required: true,
+  },
+  "deck-model-variants": {
+    id: "deck-model-variants",
+    name: "Deck model variants",
+    detectorName: "deck-model-variants",
     required: true,
   },
 } as const satisfies Record<InternalOpenCodePackageId, InternalOpenCodePackage>;

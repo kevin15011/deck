@@ -9,7 +9,7 @@ import { createDefaultPiRunnerDashboardState } from "./state";
 
 const inventory: PiRunnerCapabilityInventory = {
   "context-mode": { capabilityId: "context-mode", status: "missing", runnerScope: "pi", installed: false, toolId: "context-mode", source: "npm:context-mode", diagnostics: [] },
-  "codebase-memory": { capabilityId: "codebase-memory", status: "manual", runnerScope: "pi", installed: false, toolId: "codebase-memory", source: "DeusData/codebase-memory-mcp", diagnostics: [] },
+  "codebase-memory-mcp": { capabilityId: "codebase-memory-mcp", status: "manual", runnerScope: "pi", installed: false, toolId: "codebase-memory-mcp", source: "DeusData/codebase-memory-mcp", diagnostics: [] },
   rtk: { capabilityId: "rtk", status: "manual", runnerScope: "pi", installed: false, toolId: "rtk", source: "rtk-ai/rtk", diagnostics: [] },
   serena: { capabilityId: "serena", status: "manual", runnerScope: "pi", installed: false, toolId: "serena", source: "oraios/serena", diagnostics: [] },
   "pi-hud": { capabilityId: "pi-hud", status: "pending-source", runnerScope: "pi", installed: false, source: "TBD", diagnostics: [] },

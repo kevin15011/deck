@@ -13,52 +13,65 @@ describe("upgrade-command/index", () => {
   });
 
   describe("runUpgrade", () => {
-    beforeEach(() => {
+    beforeEach(async () => {
       vi.clearAllMocks();
+      // Prevent real network calls — mock getLatestReleaseInfo to return null
+      // so the upgrade path short-circuits without hitting the workflow.
+      const githubRelease = await import("../github-release.js");
+      vi.spyOn(githubRelease, "getLatestReleaseInfo").mockResolvedValue(null);
     });
 
     it("runs without breaking when no release available", async () => {
       const { runUpgrade } = require("../index.js");
-      
-      // getLatestReleaseInfo will try to contact network - that's ok
-      const result = await runUpgrade(["--version"]);
+
+      // getLatestReleaseInfo returns null → "No release available" → returns 0
+      const result = await runUpgrade([]);
       expect(typeof result).toBe("number");
+      expect(result).toBe(0);
     });
 
     it("handles --version flag", async () => {
       const { runUpgrade } = require("../index.js");
-      
+
       const result = await runUpgrade(["--version"]);
       expect(result).toBe(0);
     });
   });
 
   describe("--yes flag behavior", () => {
-    beforeEach(() => {
+    beforeEach(async () => {
       vi.clearAllMocks();
+      const githubRelease = await import("../github-release.js");
+      vi.spyOn(githubRelease, "getLatestReleaseInfo").mockResolvedValue(null);
     });
 
     it("accepts --yes flag", async () => {
       const { runUpgrade } = require("../index.js");
-      
-      // --yes should not cause errors (skips confirmation)
+
+      // --yes should not cause errors (skips confirmation); no release → returns 0
       const result = await runUpgrade(["--yes"]);
       expect(typeof result).toBe("number");
     });
 
     it("accepts -y flag", async () => {
       const { runUpgrade } = require("../index.js");
-      
+
       const result = await runUpgrade(["-y"]);
       expect(typeof result).toBe("number");
     });
   });
 
   describe("error handling", () => {
+    beforeEach(async () => {
+      vi.clearAllMocks();
+      const githubRelease = await import("../github-release.js");
+      vi.spyOn(githubRelease, "getLatestReleaseInfo").mockResolvedValue(null);
+    });
+
     it("handles missing binary path", async () => {
       const { runUpgrade } = require("../index.js");
-      
-      // When there's no release available, should handle gracefully
+
+      // getLatestReleaseInfo mocked → no release available → returns 0
       const result = await runUpgrade([]);
       expect(typeof result).toBe("number");
     });
@@ -76,9 +89,14 @@ describe("REQ-bsu-001: Upgrade detects newer version", () => {
 });
 
 describe("REQ-bsu-003: --yes flag skips confirmation", () => {
-  const { runUpgrade } = require("../index.js");
-  
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const githubRelease = await import("../github-release.js");
+    vi.spyOn(githubRelease, "getLatestReleaseInfo").mockResolvedValue(null);
+  });
+
   it("accepts --yes flag", async () => {
+    const { runUpgrade } = require("../index.js");
     const result = await runUpgrade(["--yes"]);
     expect(typeof result).toBe("number");
   });

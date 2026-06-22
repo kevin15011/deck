@@ -32,7 +32,7 @@ export function ScreenFrame({ title, help, children, width, height, logs }: Scre
       {logs && logs.length > 0 ? (
         <Box marginTop={1} flexDirection="column">
           {logs.slice(-5).map((log, i) => (
-            <Text key={i} dimColor fontSize={9}>{log}</Text>
+            <Text key={i} dimColor>{log}</Text>
           ))}
         </Box>
       ) : null}

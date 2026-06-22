@@ -17,12 +17,12 @@ const inventory: PiRunnerCapabilityInventory = {
     source: "npm:context-mode",
     diagnostics: [],
   },
-  "codebase-memory": {
-    capabilityId: "codebase-memory",
+  "codebase-memory-mcp": {
+    capabilityId: "codebase-memory-mcp",
     status: "manual",
     runnerScope: "pi",
     installed: false,
-    toolId: "codebase-memory",
+    toolId: "codebase-memory-mcp",
     source: "DeusData/codebase-memory-mcp",
     diagnostics: [],
   },

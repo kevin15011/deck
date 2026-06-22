@@ -1,9 +1,18 @@
 import type { AdaptiveMemoryProvider, MemoryInjectionBundle, MemoryInstructionFragment, MemoryToolBinding } from "@deck/core/memory/adaptive-memory";
-import { createAdaptiveMemoryDiagnostic, type AdaptiveMemoryAdapter, type AdaptiveMemoryCommitRequest, type AdaptiveMemoryCommitResult, type AdaptiveMemoryConfigureRequest, type AdaptiveMemoryContextResult, type AdaptiveMemoryHealthResult, type AdaptiveMemorySearchRequest, type AdaptiveMemorySearchResult, type AdaptiveMemorySource } from "@deck/core/memory/adaptive-memory-contract";
+import { createAdaptiveMemoryDiagnostic, type AdaptiveMemoryAdapter, type AdaptiveMemoryCommitRequest, type AdaptiveMemoryCommitResult, type AdaptiveMemoryConfigureRequest, type AdaptiveMemoryContextRequest, type AdaptiveMemoryContextResult, type AdaptiveMemoryHealthResult, type AdaptiveMemorySearchRequest, type AdaptiveMemorySearchResult, type AdaptiveMemorySource } from "@deck/core/memory/adaptive-memory-contract";
 import { validateAdaptiveMemoryCommitRequest, validateAdaptiveMemorySearchFilters, validateAdaptiveMemoryScope } from "@deck/core/memory/adaptive-memory-governance";
 
 export const SUPERMEMORY_MCP_SERVER_URL = "https://mcp.supermemory.ai/mcp";
 export const SUPERMEMORY_MCP_TOOLS = ["memory", "recall", "whoAmI"] as const;
+
+/** Specific metadata shape used by Supermemory tool bindings. */
+export type SupermemoryToolBindingMetadata = {
+  endpoint: string;
+  requiresAuthenticatedExecuteProbe: boolean;
+  authenticatedRuntimeValidated: boolean;
+  serverQualifiedToolNamesRequired: boolean;
+  serverQualifiedToolNames: readonly string[];
+};
 
 /**
  * Supermemory MCP-only Memory Provider Configuration.
@@ -74,7 +83,7 @@ function createAdapter(
 ): AdaptiveMemoryAdapter {
   return {
     identity: { id: "supermemory", displayName: "Supermemory MCP" },
-    async loadContext(_request: { scopes?: Array<{ scope: string }>; filters?: Record<string, unknown> }): Promise<AdaptiveMemoryContextResult> {
+    async loadContext(_request: AdaptiveMemoryContextRequest): Promise<AdaptiveMemoryContextResult> {
       return {
         providerId: "supermemory",
         items: [],
@@ -164,22 +173,23 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
     adapter,
     health: () => adapter.health(),
     buildInjection(): MemoryInjectionBundle {
+      const metadata: SupermemoryToolBindingMetadata = {
+        endpoint: SUPERMEMORY_MCP_SERVER_URL,
+        requiresAuthenticatedExecuteProbe: true,
+        authenticatedRuntimeValidated: _authenticatedRuntimeValidated.current,
+        serverQualifiedToolNamesRequired: false,
+        serverQualifiedToolNames: [
+          normalized.mcpServerName + ".memory",
+          normalized.mcpServerName + ".recall",
+          normalized.mcpServerName + ".whoAmI",
+        ],
+      };
       const bindings: readonly MemoryToolBinding[] = [
         {
           capability: "memory.write",
           serverName: normalized.mcpServerName,
           toolNames: SUPERMEMORY_MCP_TOOLS,
-          metadata: {
-            endpoint: SUPERMEMORY_MCP_SERVER_URL,
-            requiresAuthenticatedExecuteProbe: true,
-            authenticatedRuntimeValidated: _authenticatedRuntimeValidated.current,
-            serverQualifiedToolNamesRequired: false,
-            serverQualifiedToolNames: [
-              normalized.mcpServerName + ".memory",
-              normalized.mcpServerName + ".recall",
-              normalized.mcpServerName + ".whoAmI",
-            ],
-          },
+          metadata: metadata as unknown as Readonly<Record<string, unknown>>,
         },
       ];
       return { instructions: createFragments(normalized), toolBindings: bindings };

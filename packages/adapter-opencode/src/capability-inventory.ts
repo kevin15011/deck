@@ -51,6 +51,7 @@ export type BuildOpenCodeRunnerCapabilityInventoryConfig = {
 
 const INTERNAL_PACKAGE_TO_CAPABILITY: Record<InternalOpenCodePackageId, "opencode-mermaid"> = {
   "opencode-mermaid-renderer": "opencode-mermaid",
+  "deck-model-variants": "opencode-mermaid",
 };
 
 export function buildOpenCodeRunnerCapabilityInventory(

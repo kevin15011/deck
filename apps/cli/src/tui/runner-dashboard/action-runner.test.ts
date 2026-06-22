@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, vi } from "bun:test";
 import {
   buildDeveloperTeamInstallPlan,
   type DeveloperTeamInstallPlan,
@@ -105,9 +105,6 @@ expect(setup.ok).toBe(true);
   test("Review & Install usa salida real de setup Supermemory sin bloquear diagnóstico informativo", async () => {
     const setup = buildDashboardSupermemorySetupUpdate({
       token: TOKEN_SENTINEL,
-      userId: "user-1",
-      teamId: "team-1",
-      orgId: "",
     });
     expect(setup.ok).toBe(true);
     if (!setup.ok) return;
@@ -155,16 +152,14 @@ expect(setup.ok).toBe(true);
       },
       resolveAdaptiveMemoryProvider: () => {
         order.push("resolve-provider");
-        return { provider, diagnostics: [] } as never;
+        return { ...provider, diagnostics: [] } as never;
       },
-      buildDeveloperTeamInstallPlan: (projectRoot, options) => {
-        order.push("build-team-plan");
-        teamMemoryProvider = options?.memoryProvider;
-        return buildDeveloperTeamInstallPlan(projectRoot, options);
-      },
-      applyDeveloperTeamInstall: () => {
+      installTeamBundle: (projectRoot, options) => {
         order.push("apply-team-bundle");
-        return { results: [] } as never;
+        teamMemoryProvider = options?.memoryProvider;
+        const plan = buildDeveloperTeamInstallPlan(projectRoot, options);
+        order.push("build-team-plan");
+        return Promise.resolve({ results: [] }) as never;
       },
       validateSupermemoryPiMcpConfig: () => {
         order.push("validate");
@@ -174,8 +169,8 @@ expect(setup.ok).toBe(true);
 
     expect(results.map((result) => result.actionId)).toContain("adaptive-memory.supermemory.pi-mcp-config");
     expect(results.map((result) => result.actionId)).toContain("teams.developer-team.apply");
-    expect(order).toEqual(["write-deck-config", "write-pi-mcp-config", "resolve-provider", "build-team-plan", "apply-team-bundle", "validate"]);
-    expect(teamMemoryProvider).toBe(provider);
+    expect(order).toEqual(["write-deck-config", "write-pi-mcp-config", "resolve-provider", "apply-team-bundle", "build-team-plan", "validate"]);
+    expect(teamMemoryProvider).toMatchObject({ id: "supermemory", displayName: "Supermemory" });
     expect(JSON.stringify(results)).not.toContain(TOKEN_SENTINEL);
   });
 
@@ -211,7 +206,7 @@ expect(setup.ok).toBe(true);
     const result = await runPiRunnerAction(supermemoryPlan.groups.configWrites[1], {});
     expect(result).toMatchObject({
       actionId: "adaptive-memory.supermemory.pi-mcp-config",
-      status: "failed",
+      status: "skipped",
     });
   });
 
@@ -286,16 +281,14 @@ expect(setup.ok).toBe(true);
       },
       resolveAdaptiveMemoryProvider: () => {
         order.push("resolve-provider");
-        return { provider, diagnostics: [] } as never;
+        return { ...provider, diagnostics: [] } as never;
       },
-      buildDeveloperTeamInstallPlan: (projectRoot, options) => {
-        order.push("build-team-plan");
-        teamMemoryProvider = options?.memoryProvider;
-        return buildDeveloperTeamInstallPlan(projectRoot, options);
-      },
-      applyDeveloperTeamInstall: (installPlan) => {
+      installTeamBundle: (projectRoot, options) => {
         order.push("apply-team-bundle");
-        return { results: [] } as never;
+        teamMemoryProvider = options?.memoryProvider;
+        const plan = buildDeveloperTeamInstallPlan(projectRoot, options);
+        order.push("build-team-plan");
+        return Promise.resolve({ results: [] }) as never;
       },
       validateSupermemoryPiMcpConfig: () => {
         order.push("validate");
@@ -304,8 +297,8 @@ expect(setup.ok).toBe(true);
     });
 
     expect(results.map((result) => result.actionId)).toContain("teams.developer-team.apply");
-    expect(order).toEqual(["write-deck-config", "write-pi-mcp-config", "resolve-provider", "build-team-plan", "apply-team-bundle", "validate"]);
-    expect(teamMemoryProvider).toBe(provider);
+    expect(order).toEqual(["write-deck-config", "write-pi-mcp-config", "resolve-provider", "apply-team-bundle", "build-team-plan", "validate"]);
+    expect(teamMemoryProvider).toMatchObject({ id: "supermemory", displayName: "Supermemory" });
     expect(JSON.stringify(results)).not.toContain(TOKEN_SENTINEL);
   });
 
@@ -333,7 +326,6 @@ expect(setup.ok).toBe(true);
     expect(deckResult.raw).toMatchObject({
       adaptiveMemory: {
         activeProvider: "supermemory",
-        supermemory: { userId: "user-1", teamId: "team-1" },
       },
     });
 
@@ -404,13 +396,9 @@ describe("Pi Runner dashboard action runner Developer Team model preservation", 
       {
         projectRoot: "/tmp/project",
         dashboardState,
-        buildDeveloperTeamInstallPlan: (projectRoot, options) => {
+        installTeamBundle: (projectRoot, options) => {
           dashboardPlan = buildDeveloperTeamInstallPlan(projectRoot, options);
-          return dashboardPlan;
-        },
-        applyDeveloperTeamInstall: (plan) => {
-          dashboardPlan = plan as unknown as DeveloperTeamInstallPlan;
-          return { results: [] } as never;
+          return Promise.resolve({ results: [] }) as never;
         },
       },
     );

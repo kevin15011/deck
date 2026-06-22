@@ -203,7 +203,7 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
       selectedCount: counts.total,
       totalCount: counts.total,
       actionCount: counts.total,
-      detail: `${counts.automatic} automatic, ${counts.manual} manual/pending, ${counts.config} config, ${counts.team} team, ${counts.validation} validation.`,
+      detail: `${counts.total} action(s): ${counts.automatic} automatic`,
     },
   ];
 }

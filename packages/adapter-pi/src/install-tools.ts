@@ -517,7 +517,7 @@ export async function installInternalRunnerPackages(
 ): Promise<InternalRunnerInstallResult[]> {
   // Convert internal install actions to InstallablePiTool format for the executor.
   const tools: InstallablePiTool[] = actions.map((action) => ({
-    id: action.packageId as "sub-agents" | "mcp-packages" | "context-mode" | "codebase-memory" | "rtk" | "context7" | "engram-memory",
+    id: action.packageId as "sub-agents" | "mcp-packages" | "context-mode" | "codebase-memory-mcp" | "rtk" | "context7" | "engram-memory",
     name: action.name,
     source: action.source,
     required: true,

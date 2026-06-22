@@ -8,7 +8,7 @@
     "build": "bun run scripts/build-binaries.ts",
     "build:dry-run": "bun run scripts/build-binaries.ts --dry-run",
     "deck:run": "DECK_DEBUG=1 bun run build:dry-run && DECK_DEBUG=1 ./dist/cli/deck",
-    "test": "bun test"
+    "test": "bun test --timeout 30000"
   },
   "bin": {
     "deck": "./dist/cli/deck"

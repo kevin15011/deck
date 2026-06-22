@@ -53,7 +53,7 @@ describe("quality-router", () => {
 
     test("override can downgrade routing but never disables state validation", () => {
       const decision = routeQuality(
-        { score: 85, tier: "critical", signals: [{ name: "destructive_operation", weight: 0.9, evidence: "drops table" }], thresholds: { standard: 30, boundary: 60, critical: 80 }, overrides: [{ name: "user-override", scope: "quality-only", expiresAt: "2026-05-21" }], recommendedChecks: [], confidence: 0.5 },
+        { score: 85, tier: "critical", signals: [{ name: "destructive_operation", weight: 0.9, evidence: "drops table" }], thresholds: { standard: 30, boundary: 60, critical: 80 }, overrides: [{ name: "user-override", scope: "quality-only", expiresAt: "2026-12-31" }], recommendedChecks: [], confidence: 0.5 },
         DEFAULT_ROUTER_CONFIG,
       );
 

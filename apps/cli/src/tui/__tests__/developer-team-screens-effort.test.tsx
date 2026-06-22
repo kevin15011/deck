@@ -201,7 +201,7 @@ describe("T14: Model-aware effort picker screen logic (REQ-EFFORT-001, REQ-TUI-0
         agentIndex={0}
         totalAgents={3}
         modelId="unknown/model"
-        defaultThinking={undefined}
+        defaultThinking="off"
         supportsThinking={false}
         runtime="opencode"
       />,
@@ -219,7 +219,7 @@ describe("T14: Model-aware effort picker screen logic (REQ-EFFORT-001, REQ-TUI-0
         agentIndex={0}
         totalAgents={3}
         modelId="some-model"
-        defaultThinking={undefined}
+        defaultThinking="off"
         supportsThinking={false}
         runtime="opencode"
       />,
@@ -333,7 +333,7 @@ describe("T14: Unsupported model hides effort picker (REQ-EFFORT-004)", () => {
         agentIndex={0}
         totalAgents={3}
         modelId="unknown/model"
-        defaultThinking={undefined}
+        defaultThinking="off"
         supportsThinking={false}
         runtime="opencode"
       />,
@@ -401,7 +401,7 @@ describe("T14: Native variant preselection with legacy reasoningEffort fallback 
         agentIndex={0}
         totalAgents={3}
         modelId="claude-sonnet-4"
-        defaultThinking={undefined}
+        defaultThinking="off"
         supportsThinking={true}
         runtime="pi"
       />,
@@ -884,7 +884,7 @@ describe("T14: Unsupported/no-variant model hides effort picker via thinkingLeve
         agentIndex={0}
         totalAgents={3}
         modelId="unknown/model"
-        defaultThinking={undefined}
+        defaultThinking="off"
         supportsThinking={true}
         runtime="opencode"
         thinkingLevels={[]}
@@ -906,7 +906,7 @@ describe("T14: Unsupported/no-variant model hides effort picker via thinkingLeve
         agentIndex={0}
         totalAgents={3}
         modelId="openai/special"
-        defaultThinking="only"
+        defaultThinking="off"
         supportsThinking={true}
         runtime="opencode"
         thinkingLevels={["only"]}

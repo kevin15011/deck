@@ -10,9 +10,10 @@ describe("INTERNAL_OPENCODE_PACKAGES", () => {
     expect(INTERNAL_OPENCODE_PACKAGES["opencode-mermaid-renderer"].required).toBe(true);
   });
 
-  test("INTERNAL_OPENCODE_PACKAGE_IDS has one entry", () => {
-    expect(INTERNAL_OPENCODE_PACKAGE_IDS).toHaveLength(1);
+  test("INTERNAL_OPENCODE_PACKAGE_IDS has two entries", () => {
+    expect(INTERNAL_OPENCODE_PACKAGE_IDS).toHaveLength(2);
     expect(INTERNAL_OPENCODE_PACKAGE_IDS[0]).toBe("opencode-mermaid-renderer");
+    expect(INTERNAL_OPENCODE_PACKAGE_IDS[1]).toBe("deck-model-variants");
   });
 });
 

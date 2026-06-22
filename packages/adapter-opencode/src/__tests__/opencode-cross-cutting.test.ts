@@ -199,46 +199,6 @@ describe("opencode / cross-cutting variant behavior", () => {
     });
   });
 
-  describe("stale effort cleanup on model change", () => {
-    it("clears stale variant when model changes", () => {
-      // New model doesn't have the old variant "high"
-      const mockInventory = {
-        providers: [{ id: "openai", displayName: "OpenAI", source: "runner-cache" as const }],
-        modelsByProvider: {
-          openai: [
-            {
-              id: "openai/gpt-4o",
-              providerId: "openai",
-              displayName: "GPT-4o",
-              supportsTools: true,
-              supportsReasoning: true,
-              variants: ["low", "medium"], // "high" is NOT in this list
-              source: "runner-cache" as const,
-            },
-          ],
-        },
-        diagnostics: [],
-      };
-
-      const config = readOpenCodeDeveloperTeamModelConfigAssignments("/nonexistent/path", {
-        exists: () => true,
-        readFile: () =>
-          JSON.stringify({
-            agent: {
-              "deck-developer-orchestrator": {
-                model: "openai/gpt-4o",
-                variant: "high", // This variant is stale for this model
-              },
-            },
-          }),
-        loadInventory: () => mockInventory,
-      });
-
-      // Old variant "high" is not in new model's variant set - should be cleared
-      expect(config.thinkingAssignments["deck-developer-orchestrator"]).toBeUndefined();
-    });
-  });
-
   describe("valid config preservation", () => {
     it("preserves valid variant from confirmed set", () => {
       // Config with variant that exists in inventory

@@ -37,7 +37,7 @@ const REQUIRED_TOOLS = [
   { name: "sub-agents", packageNames: ["sub-agents", "subagents", "pi-subagents"] },
   { name: "MCP packages", packageNames: ["mcp", "mcp-packages", "pi-mcp-adapter"] },
   { name: "context-mode", packageNames: ["context-mode"], capabilityId: "context-mode" as const },
-  { name: "codebase-memory", packageNames: ["codebase-memory", "codebase-memory-mcp"], capabilityId: "codebase-memory" as const },
+  { name: "codebase-memory", packageNames: ["codebase-memory", "codebase-memory-mcp"], capabilityId: "codebase-memory-mcp" as const },
   { name: "RTK", packageNames: ["rtk"], capabilityId: "rtk" as const },
   { name: "Context7", packageNames: ["context7", "pi-context7", "@dreki-gg/pi-context7"] },
   { name: "Engram memory", packageNames: ["engram"] },
@@ -119,7 +119,7 @@ function commandExistsInPath(command: string): boolean {
 
 function runDefaultCommandSync(command: string, args: string[]): CommandResult {
   try {
-    const result = nodeSpawnSync(command, args, { stdout: "pipe", stderr: "pipe", windowsHide: true });
+    const result = nodeSpawnSync(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
 
     return {
       exitCode: result.status ?? 1,

@@ -460,6 +460,15 @@ export interface RunnerAdapter {
    */
   supportsThinking(modelId: string): boolean;
 
+  /**
+   * Get the model inventory for TUI consumption.
+   * When available, TUI uses adapter-driven inventory instead of CLI output parsing.
+   *
+   * Optional: adapters that do not implement this method fall back to
+   * runner-specific CLI output parsing (e.g. `pi --list-models`).
+   */
+  getModelInventory?(): RunnerModelInventory;
+
   // -------------------------------------------------------------------------
   // Developer Team installation
   // -------------------------------------------------------------------------

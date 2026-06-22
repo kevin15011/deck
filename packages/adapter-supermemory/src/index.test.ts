@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { createSupermemoryMemoryProvider, SUPERMEMORY_MCP_TOOLS, SUPERMEMORY_MCP_SERVER_URL } from "./index";
+import { createSupermemoryMemoryProvider, SUPERMEMORY_MCP_TOOLS, SUPERMEMORY_MCP_SERVER_URL, SupermemoryToolBindingMetadata } from "./index";
 
 describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-29)", () => {
   test("NO userId required - token-only input", () => {
@@ -12,7 +12,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
   test("buildInjection produces bindings with memory/recall/whoAmI tools", () => {
     const bundle = createSupermemoryMemoryProvider().buildInjection({ teamId: "developer-team" });
     expect(bundle.toolBindings).toHaveLength(1);
-    expect(bundle.toolBindings[0].toolNames).toEqual(SUPERMEMORY_MCP_TOOLS);
+    expect(bundle.toolBindings[0]!.toolNames).toEqual(SUPERMEMORY_MCP_TOOLS);
     const tools = bundle.toolBindings.flatMap((binding) => [...binding.toolNames]);
     expect(tools).toContain("memory");
     expect(tools).toContain("recall");
@@ -48,7 +48,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     const bundle = provider.buildInjection({ teamId: "developer-team" });
     expect(bundle.instructions).toHaveLength(3);
     expect(bundle.toolBindings).toHaveLength(1);
-    expect(bundle.toolBindings[0].metadata.authenticatedRuntimeValidated).toBe(false);
+    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ authenticatedRuntimeValidated: false });
   });
 
   test("health returns available after authenticatedRuntimeValidated is true", async () => {
@@ -60,27 +60,19 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
 
   test("tool binding metadata includes serverQualifiedToolNames with new tools", () => {
     const bundle = createSupermemoryMemoryProvider().buildInjection({});
-    expect(bundle.toolBindings[0].metadata.serverQualifiedToolNames).toEqual([
-      "supermemory.memory",
-      "supermemory.recall",
-      "supermemory.whoAmI",
-    ]);
+    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ serverQualifiedToolNames: ["supermemory.memory", "supermemory.recall", "supermemory.whoAmI"] });
   });
 
   test("buildInjection with custom server name", () => {
     const bundle = createSupermemoryMemoryProvider({ mcpServerName: "custom" }).buildInjection({});
-    expect(bundle.toolBindings[0].serverName).toBe("custom");
-    expect(bundle.toolBindings[0].metadata.serverQualifiedToolNames).toEqual([
-      "custom.memory",
-      "custom.recall",
-      "custom.whoAmI",
-    ]);
+    expect(bundle.toolBindings[0]!.serverName).toBe("custom");
+    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ serverQualifiedToolNames: ["custom.memory", "custom.recall", "custom.whoAmI"] });
   });
 
   test("default URL is MCP v4 endpoint", () => {
     const provider = createSupermemoryMemoryProvider();
     const bundle = provider.buildInjection({});
-    expect(bundle.toolBindings[0].metadata.endpoint).toBe(SUPERMEMORY_MCP_SERVER_URL);
+    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ endpoint: SUPERMEMORY_MCP_SERVER_URL });
     expect(SUPERMEMORY_MCP_SERVER_URL).toBe("https://mcp.supermemory.ai/mcp");
   });
 
@@ -105,6 +97,7 @@ describe("MCP-only behavior: commit operations deferred to runtime", () => {
         content: "Test memory",
         highSignal: true,
         scope: { scope: "personal" },
+        containerTag: "test",
         metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
       }],
     });
@@ -146,7 +139,7 @@ describe("no REST/fetch path in adapter", () => {
     globalThis.fetch = (() => {
       fetchCalled = true;
       throw new Error("fetch should NOT be called in MCP-only mode");
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
   });
 
   afterEach(() => {
@@ -160,6 +153,7 @@ describe("no REST/fetch path in adapter", () => {
         content: "Should not trigger fetch",
         highSignal: true,
         scope: { scope: "personal" },
+        containerTag: "test",
         metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
       }],
     });

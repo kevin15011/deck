@@ -156,7 +156,7 @@ describe("installPiTools with installKind dispatch", () => {
 
 const plan: InstallablePiTool[] = [
   { id: "context-mode", name: "context-mode", source: "npm:context-mode", required: false, installKind: "pi-package" },
-  { id: "codebase-memory", name: "codebase-memory", source: "npm:codebase-memory", required: false, installKind: "pi-package" },
+  { id: "codebase-memory-mcp", name: "codebase-memory", source: "npm:codebase-memory", required: false, installKind: "pi-package" },
 ];
 
 describe("installPiTools", () => {
