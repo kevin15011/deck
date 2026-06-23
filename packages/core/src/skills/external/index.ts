@@ -67,6 +67,15 @@ export const STANDALONE_SKILLS: readonly StandaloneSkillDefinition[] = [
   { skillId: "shipping-and-launch", sourcePath: "shipping-and-launch/SKILL.md" },
   { skillId: "test-driven-development", sourcePath: "test-driven-development/SKILL.md" },
   { skillId: "using-agent-skills", sourcePath: "using-agent-skills/SKILL.md" },
+  { skillId: "ui-skills-root", sourcePath: "ui-skills-root/SKILL.md" },
+  { skillId: "frontend-design", sourcePath: "frontend-design/SKILL.md" },
+  { skillId: "baseline-ui", sourcePath: "baseline-ui/SKILL.md" },
+  { skillId: "fixing-accessibility", sourcePath: "fixing-accessibility/SKILL.md" },
+  { skillId: "fixing-motion-performance", sourcePath: "fixing-motion-performance/SKILL.md" },
+  { skillId: "fixing-metadata", sourcePath: "fixing-metadata/SKILL.md" },
+  { skillId: "web-quality-audit", sourcePath: "web-quality-audit/SKILL.md" },
+  { skillId: "playwright-cli", sourcePath: "playwright-cli/SKILL.md" },
+  { skillId: "design-lab", sourcePath: "design-lab/SKILL.md" },
 ];
 
 // ---------------------------------------------------------------------------

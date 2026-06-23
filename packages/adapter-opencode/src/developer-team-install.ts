@@ -92,6 +92,7 @@ export type OpenCodePlannedSkillFile = {
 
 export type OpenCodePlannedStandaloneSkillFile = {
   skillId: string;
+  packagePath: string;
   relativePath: string;
   absolutePath: string;
   content: string;
@@ -172,8 +173,46 @@ export type MemoryInjectionOptions = {
    * When provided, these skills are written as-is (verbatim) to .opencode/skills/{skillId}/SKILL.md
    * without generating agent-bound frontmatter.
    */
-  standaloneSkills?: readonly { skillId: string; body: string }[];
+  standaloneSkills?: readonly { skillId: string; body: string; files?: Record<string, string> }[];
 };
+
+function validateStandaloneSkillId(skillId: string): void {
+  if (!/^[a-z0-9_-]+$/i.test(skillId)) {
+    throw new Error(`Invalid skillId "${skillId}": must contain only alphanumeric characters, underscores, and hyphens`);
+  }
+}
+
+function validateStandalonePackagePath(filePath: string): void {
+  if (!filePath || filePath.startsWith("/") || filePath.includes("\\")) {
+    throw new Error(`Invalid standalone skill package path "${filePath}": must be a relative POSIX path`);
+  }
+  const segments = filePath.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    throw new Error(`Invalid standalone skill package path "${filePath}": must not contain empty, current, or parent segments`);
+  }
+}
+
+function buildStandaloneSkillFiles(
+  skillsDir: string,
+  standaloneSkills: readonly { skillId: string; body: string; files?: Record<string, string> }[],
+): OpenCodePlannedStandaloneSkillFile[] {
+  const planned: OpenCodePlannedStandaloneSkillFile[] = [];
+  for (const skill of standaloneSkills) {
+    validateStandaloneSkillId(skill.skillId);
+    const packageFiles: Record<string, string> = { "SKILL.md": skill.body, ...(skill.files ?? {}) };
+    for (const [packagePath, content] of Object.entries(packageFiles)) {
+      validateStandalonePackagePath(packagePath);
+      planned.push({
+        skillId: skill.skillId,
+        packagePath,
+        relativePath: `skills/${skill.skillId}/${packagePath}`,
+        absolutePath: join(skillsDir, skill.skillId, ...packagePath.split("/")),
+        content,
+      });
+    }
+  }
+  return planned;
+}
 
 // ---------------------------------------------------------------------------
 // Memory injection resolution (delegated to core)
@@ -545,16 +584,8 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     return { agent, relativePath, absolutePath, content };
   });
 
-  // Build standalone skill files (verbatim, no generated frontmatter)
-  // Validate skillId to prevent path traversal attacks
-  const standaloneSkills: OpenCodePlannedStandaloneSkillFile[] = (options?.standaloneSkills ?? []).map((skill) => {
-    if (!/^[a-z0-9_-]+$/i.test(skill.skillId)) {
-      throw new Error(`Invalid skillId "${skill.skillId}": must contain only alphanumeric characters, underscores, and hyphens`);
-    }
-    const relativePath = `skills/${skill.skillId}/SKILL.md`;
-    const absolutePath = join(skillsDir, skill.skillId, "SKILL.md");
-    return { skillId: skill.skillId, relativePath, absolutePath: join(skillsDir, skill.skillId, "SKILL.md"), content: skill.body };
-  });
+  // Build standalone skill package files (verbatim, no generated frontmatter).
+  const standaloneSkills = buildStandaloneSkillFiles(skillsDir, options?.standaloneSkills ?? []);
 
   // Prompt generation plan - pass memoryBundle for provider-specific adaptive memory injection
   // This ensures provider isolation and OpenSpec authority are maintained
@@ -663,7 +694,7 @@ export function applyOpenCodeDeveloperTeamInstall(
 
   // 3. Write standalone skills (verbatim, no generated frontmatter)
   for (const planned of plan.standaloneSkills) {
-    const skillDir = join(planned.absolutePath, "..");
+    const skillDir = dirname(planned.absolutePath);
     if (!exists(skillDir)) {
       mkdir(skillDir, { recursive: true });
     }
@@ -809,10 +840,23 @@ export function verifyOpenCodeDeveloperTeamInstall(
     return { agentId: planned.agent.id, valid: issues.length === 0, issues };
   });
 
+  const standaloneResults: OpenCodeBundleVerifyResult[] = plan.standaloneSkills.map((planned) => {
+    const issues: string[] = [];
+    if (!exists(planned.absolutePath)) {
+      return { agentId: planned.skillId, valid: false, issues: [`File does not exist: ${planned.packagePath}.`] };
+    }
+    const content = readFile(planned.absolutePath, "utf-8");
+    if (content !== planned.content) {
+      issues.push(`Content mismatch for standalone skill ${planned.skillId}/${planned.packagePath}; installed file differs from planned content.`);
+      logMismatchDiagnostic(`${planned.skillId}/${planned.packagePath}`, planned.absolutePath, content, planned.content);
+    }
+    return { agentId: planned.skillId, valid: issues.length === 0, issues };
+  });
+
   return {
-    valid: skillResults.every((r) => r.valid),
+    valid: skillResults.every((r) => r.valid) && standaloneResults.every((r) => r.valid),
     agentResults: [],
-    skillResults,
+    skillResults: [...skillResults, ...standaloneResults],
   };
 }
 
@@ -924,6 +968,12 @@ export function backupDeveloperTeamFiles(
 
   const entries: FileBackupEntry[] = [
     ...plan.skills.map((planned) => {
+      if (exists(planned.absolutePath)) {
+        return { absolutePath: planned.absolutePath, previousContent: readFile(planned.absolutePath, "utf-8") };
+      }
+      return { absolutePath: planned.absolutePath, previousContent: null };
+    }),
+    ...plan.standaloneSkills.map((planned) => {
       if (exists(planned.absolutePath)) {
         return { absolutePath: planned.absolutePath, previousContent: readFile(planned.absolutePath, "utf-8") };
       }

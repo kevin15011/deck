@@ -22,3 +22,4 @@ apps/cli/install
 
 # Auto-generated TypeScript files (build-time injection — do not edit manually)
 *.generated.ts
+!packages/core/src/skills/external/content.generated.ts

@@ -49,6 +49,7 @@ import type {
 } from "@deck/core";
 
 import { getModelCatalog } from "@deck/core";
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 
 // ---------------------------------------------------------------------------
 // OpenCode-specific imports
@@ -647,13 +648,18 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
     const modelAssignments = input.modelAssignments ?? {};
     const thinkingAssignments = input.thinkingAssignments ?? {};
 
+    const standaloneSkills = input.standaloneSkills ?? getStandaloneSkills().map(({ skillId }) => {
+      const bundle = getStandaloneSkill(skillId);
+      return { skillId, body: bundle.SKILL, files: bundle.files };
+    });
+
     const nativePlan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
       configModelOverrides: modelAssignments,
       reasoningEffortOverrides: thinkingAssignments,
       memoryProvider: input.memoryProvider as any,
       supportedMemoryProviderIds: ["engram", "supermemory"],
       capabilityInstructions: input.capabilityInstructions,
-      standaloneSkills: input.standaloneSkills,
+      standaloneSkills,
     });
 
     // Store native plan for backup/restore operations
@@ -661,9 +667,9 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
 
     // Map to generic RunnerDeveloperTeamInstallPlan
     // deck-init and deck-onboard are now proper agents in the skills array
-    const files: Array<{ path: string; content: string }> = [
-      ...nativePlan.skills.map((s) => ({ path: s.relativePath, content: s.content })),
-      ...nativePlan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content })),
+    const files: Array<{ path: string; content: string; kind: "skill" | "standalone-skill"; skillId: string; packagePath: string }> = [
+      ...nativePlan.skills.map((s) => ({ path: s.relativePath, content: s.content, kind: "skill" as const, skillId: s.agent.skillId, packagePath: "SKILL.md" })),
+      ...nativePlan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content, kind: "standalone-skill" as const, skillId: s.skillId, packagePath: s.packagePath })),
     ];
 
     return { files };

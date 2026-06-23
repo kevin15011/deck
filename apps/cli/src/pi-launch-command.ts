@@ -22,6 +22,7 @@ import {
   type DeckSupermemoryConfig,
 } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider, MemoryDiagnostic, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 
 // --- Types ---
 
@@ -153,6 +154,10 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
 
   if (resolvedMemory.provider || resolvedMemory.memoryInjection || resolvedMemory.memoryUnavailableReason) {
     const { modelAssignments, thinkingAssignments } = readDeveloperTeamModelConfigAssignments(projectRoot);
+    const standaloneSkills = getStandaloneSkills().map((skill) => {
+      const bundle = getStandaloneSkill(skill.skillId);
+      return { skillId: skill.skillId, body: bundle.SKILL, files: bundle.files };
+    });
     const installPlan = buildDeveloperTeamInstallPlan(projectRoot, {
       ...(resolvedMemory.memoryInjection ? { memoryInjection: resolvedMemory.memoryInjection } : {}),
       ...(resolvedMemory.provider ? { memoryProvider: resolvedMemory.provider } : {}),
@@ -160,6 +165,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
       modelAssignments,
       thinkingAssignments,
       preserveMissingThinkingAssignments: true,
+      standaloneSkills,
       piMcpConfigPath: options.piMcpConfigPath,
       piMcpHomeDir: options.piMcpHomeDir,
     });

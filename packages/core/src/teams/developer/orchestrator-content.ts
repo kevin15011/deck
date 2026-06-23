@@ -65,6 +65,12 @@ You route only within the Developer Team. Each team has its own orchestrator.
 | Init Agent | \`deck-init\` | Initializes SDD context, indexes codebase, bootstraps OpenSpec |
 | Onboard Agent | \`deck-onboard\` | Guides users through the SDD cycle with interactive walkthrough |
 
+## Frontend External Skill Routing
+
+- For UI-scoped work, mention ui-skills-root as the router for UI skill selection; do not load every downstream UI skill automatically.
+- Keep heavy or audit UI skills conditional: design-lab is for major redesign exploration, and web-quality-audit is for audit/predeploy or broad quality review.
+- External frontend skill guidance affects consideration during sessions only; it does not change silent external skill installation or SDD delegation gates.
+
 ## Your Identity: Pure Delegator
 
 You are not a worker — you are a **coordinator and synthesizer**. Your role:
@@ -536,6 +542,11 @@ export const ORCHESTRATOR_AGENT_BODY = `# Orchestrator Agent
 4. **Incident rule**: stop and audit after environment issues or repo mutations.
 5. **Long-session rule**: ~20 tool calls without delegation → pause and delegate.
 
+## Frontend External Skill Routing
+
+- For UI-scoped work, mention ui-skills-root as the router for UI skill selection; do not load every downstream UI skill automatically.
+- Keep design-lab for major redesign exploration and web-quality-audit for audit/predeploy or broad quality review.
+
 ## Non-Goals
 
 - Does not implement complex changes directly.
@@ -573,6 +584,12 @@ Before asking for execution mode, launching SDD phases, or taking/delegating any
 - **Run SDD**: explicit SDD request, accepted SDD recommendation, or implementation/planning that clearly needs the full phase pipeline.
 
 Do not infer full SDD from "OpenSpec", "PRD", "requirements", or prompt length alone. If triage says **Recommend SDD**, ask one question and wait.
+
+### Frontend External Skill Routing
+
+- For UI-scoped work, mention ui-skills-root as the router for UI skill selection; do not load every downstream UI skill automatically.
+- Keep heavy or audit UI skills conditional: design-lab is for major redesign exploration, and web-quality-audit is for audit/predeploy or broad quality review.
+- This guidance affects session consideration only and must not weaken SDD gates, delegation authorization, or silent external skill installation.
 
 ### Dependency Graph
 

@@ -1,0 +1,184 @@
+events:
+  - name: explorer-complete
+    phase: explore
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-explorer
+    artifact: exploration.md
+    summary: "Completed exploration for registering and routing 9 frontend-focused external skills."
+  - name: proposal-complete
+    phase: proposal
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-proposal
+    artifact: proposal.md
+    summary: "Completed proposal for registering, routing, and adapter-installing 9 frontend-focused external skills."
+  - name: spec-complete
+    phase: spec
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-spec
+    artifact: spec.md
+    summary: "Completed requirements for silent frontend external skill integration, runner adapter installation parity, and role-aware routing."
+  - name: design-complete
+    phase: design
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-design
+    artifact: design.md
+    summary: "Completed technical design for core skill bundling, silent adapter-mediated installation, and conditional Developer Team role guidance."
+  - name: tasks-complete
+    phase: tasks
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-task
+    artifact: tasks.md
+    summary: "Broke the change into 18 routed implementation tasks across Shared, Adapter (OpenCode + Pi), and Developer Team role guidance groups; produced Review Workload Forecast and Open Questions / Blockers; preconditions gate: pass."
+  - name: preconditions-created
+    phase: tasks
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-task
+    artifact: preconditions.md
+    summary: "Preconditions closure: None. Spec and Design consistent; all proposal open questions resolved by Design."
+  - name: preconditions-gate-pass
+    phase: apply-preconditions
+    status: passed
+    at: 2026-06-22
+    actor: deck-developer-orchestrator
+    artifact: preconditions.md
+    summary: "Preconditions gate passed: no blocking preconditions; Apply authorized by user."
+  - name: apply-general-slice-complete
+    phase: apply
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-apply-general
+    artifact: apply-progress.md
+    summary: "Completed Apply slice for Tasks 1-9: core standalone skill registry, generator, generated package bundle, core tests, manifest files payload, runner-neutral contracts, and direct launch package forwarding."
+
+  - name: apply-backend-adapter-slice-complete
+    phase: apply
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-apply-backend
+    artifact: apply-progress.md
+    summary: "Completed Apply slice for Tasks 10-15: OpenCode and Pi adapters silently install all 29 standalone skill packages, preserve support files, validate safe package paths, and cover native/capability paths with targeted tests."
+  - name: apply-general-final-slice-complete
+    phase: apply
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-apply-general
+    artifact: apply-progress.md
+    summary: "Completed Apply slice for Tasks 16-18: added conditional Developer Team frontend skill routing guidance, prompt tests, targeted verification, generator idempotence, typecheck, and full Bun suite run with only non-attributable prepare-release staleness failures."
+  - name: verify-complete
+    phase: verify
+    status: passed
+    at: 2026-06-22
+    actor: deck-developer-verify
+    artifact: verify-report.md
+    summary: "Verify passed: targeted tests, typecheck, build dry-run, prepare-release tests, and full Bun suite passed."
+  - name: review-complete
+    phase: review
+    status: changes_requested
+    at: 2026-06-22
+    actor: deck-developer-review
+    artifact: review-report.md
+    summary: "Review requested changes: unrelated working tree changes are outside this OpenSpec scope and Pi capability verify/backup must cover standalone support files."
+  - name: repair-loop-start
+    phase: repair
+    status: active
+    at: 2026-06-22
+    actor: deck-developer-orchestrator
+    artifact: review-report.md
+    summary: "Started bounded repair loop in interactive mode; incident budget 2, fingerprint budget 2, verify-cycle limit 2; initial decision repair."
+  - name: repair-pi-capability-parity-complete
+    phase: apply
+    status: completed
+    at: 2026-06-22
+    actor: deck-developer-apply-backend
+    artifact: apply-progress.md
+    summary: "Repair retry 1 completed the authorized Pi capability verify/backup parity blocker: verify and backup now use ~/.pi/agent standalone skill support-file paths; focused Pi tests and typecheck passed."
+  - name: repair-working-tree-scope-resolved
+    phase: repair
+    status: completed
+    at: 2026-06-23
+    actor: deck-developer-orchestrator
+    artifact: review-report.md
+    summary: "User requested committing unrelated runner skill config changes; commit d043e97 removed .opencode/.agents/skills-lock changes from the current working tree scope."
+  - name: verify-complete
+    phase: verify
+    status: passed
+    at: 2026-06-23
+    actor: deck-developer-verify
+    artifact: verify-report.md
+    summary: "Verify retry passed after repair: Pi focused tests, adapter targeted tests, full Bun suite, typecheck, build, and bundle generator idempotence passed."
+  - name: review-complete
+    phase: review
+    status: approved_with_changes
+    at: 2026-06-23
+    actor: deck-developer-review
+    artifact: review-report.md
+    summary: "Review retry approved with warnings; prior blockers resolved, with follow-up warnings for legacy Pi verification surface and guarded OpenCode command-generation plumbing."
+  - name: repair-loop-resolved
+    phase: repair
+    status: resolved
+    at: 2026-06-23
+    actor: deck-developer-orchestrator
+    artifact: review-report.md
+    summary: "Bounded repair loop resolved after one Apply retry plus user-requested commit of unrelated runner config changes; no remaining blockers."
+  - name: opencode-install-validation-failed
+    phase: install-validation
+    status: blocked
+    at: 2026-06-23
+    actor: deck-developer-verify
+    artifact: opencode-install-validation.md
+    summary: "Pre-Archive OpenCode installation validation failed: installed Developer Team guidance is present, but all 9 frontend external skill folders are missing from /home/kevinlb/.config/opencode/skills/."
+  - name: install-repair-start
+    phase: repair
+    status: active
+    at: 2026-06-23
+    actor: deck-developer-orchestrator
+    artifact: opencode-install-validation.md
+    summary: "Started bounded install repair loop after user authorization; investigate and fix why OpenCode installs updated Developer Team guidance but omits the 9 new standalone frontend skill folders."
+  - name: install-repair-complete
+    phase: repair
+    status: completed
+    at: 2026-06-23
+    actor: deck-developer-apply-backend
+    artifact: apply-progress.md
+    summary: "Fixed OpenCode RunnerAdapter default standalone skill installation: omitted input.standaloneSkills now derives from the complete standalone registry; local OpenCode install now contains all 9 frontend skills."
+  - name: opencode-install-validation-passed
+    phase: install-validation
+    status: passed
+    at: 2026-06-23
+    actor: deck-developer-verify
+    artifact: opencode-install-validation.md
+    summary: "Post-repair OpenCode installation validation passed: all 9 frontend external skills and representative support files are installed under /home/kevinlb/.config/opencode/skills/."
+  - name: verify-complete
+    phase: verify
+    status: passed_with_warnings
+    at: 2026-06-23
+    actor: deck-developer-verify
+    artifact: verify-report.md
+    summary: "Verify retry after OpenCode install repair passed with warnings: targeted OpenCode tests, external skill tests, typecheck, and build passed; broad full-suite retry timed out at MCP layer."
+  - name: review-complete
+    phase: review
+    status: approved_with_changes
+    at: 2026-06-23
+    actor: deck-developer-review
+    artifact: review-report.md
+    summary: "Review retry approved the OpenCode install repair with warnings; root cause and fix are correct, silent install is preserved, and no blockers remain."
+  - name: install-repair-opencode-standalone-skills-complete
+    phase: apply
+    status: completed
+    at: 2026-06-23
+    actor: deck-developer-apply-backend
+    artifact: apply-progress.md
+    summary: "Install repair completed: OpenCode RunnerAdapter now derives standalone external skills from the complete registry by default; local OpenCode install now has all 9 frontend external skills and support files."
+  - name: archive-complete
+    phase: archive
+    status: archived
+    at: 2026-06-23
+    actor: deck-developer-archive
+    artifact: archive-report.md
+    summary: "Change archived: all 9 frontend external skills verified installed under OpenCode, all 18 tasks completed, verify passed with warnings, review approved with changes, registry state and events updated, change moved to openspec/archive/frontend-external-skills-integration/."

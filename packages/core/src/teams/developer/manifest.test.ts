@@ -74,6 +74,27 @@ describe("DeveloperTeamManifest", () => {
       }
     });
 
+    test("creates a manifest with complete standalone skill packages", () => {
+      const result = buildDeveloperTeamManifest({
+        team: { id: "developer-team", displayName: "Developer Team" },
+      });
+
+      expect(result.manifest.standaloneSkills).toBeDefined();
+      expect(result.manifest.standaloneSkills).toHaveLength(29);
+
+      const frontendDesign = result.manifest.standaloneSkills!.find((skill) => skill.skillId === "frontend-design");
+      expect(frontendDesign?.body.length).toBeGreaterThan(0);
+      expect(frontendDesign?.files).toBeDefined();
+      expect(frontendDesign?.files?.["LICENSE.txt"]?.length).toBeGreaterThan(0);
+
+      const baselineUi = result.manifest.standaloneSkills!.find((skill) => skill.skillId === "baseline-ui");
+      expect(baselineUi?.files).toEqual({});
+
+      for (const skill of result.manifest.standaloneSkills!) {
+        expect(Object.keys(skill).sort()).toEqual(["body", "files", "skillId"]);
+      }
+    });
+
     test("manifest with no model overrides has no model assignments", () => {
       // REQ-MC-005: No hardcoded defaults
       const result = buildDeveloperTeamManifest({

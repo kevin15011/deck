@@ -472,6 +472,12 @@ Ready for Apply agents (\`deck-developer-apply-general\`, \`deck-developer-apply
 
 ${GIT_DISCARD_PROTECTION_RULE}
 
+## Frontend External Skill Routing
+
+- When UI-scoped tasks are routed, include ui-skills-root as the router for UI work without assigning every downstream UI skill by default.
+- Add conditional task notes for focused skills only when scope warrants them: visual direction, baseline polish, accessibility, motion performance, metadata, browser QA, or predeploy audit.
+- Keep design-lab for major redesign exploration tasks and web-quality-audit for audit/predeploy or broad quality review tasks.
+
 ## Rules
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.

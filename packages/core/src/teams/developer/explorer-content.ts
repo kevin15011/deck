@@ -230,6 +230,12 @@ Return EXACTLY this format to the orchestrator:
 
 ${GIT_DISCARD_PROTECTION_RULE}
 
+## Frontend External Skill Routing
+
+- When exploration has UI scope, use ui-skills-root as the router before choosing narrower UI skills.
+- Use frontend-design for new visual surfaces or visual identity questions.
+- Reserve design-lab for substantial redesigns that need variants or structured exploration.
+
 ## Rules
 
 - Do not modify, create, or edit product code or configuration; writing required OpenSpec artifacts and Spec Registry files is allowed.

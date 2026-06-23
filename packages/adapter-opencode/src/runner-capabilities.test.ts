@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createOpenCodeRunnerCapabilities } from "./runner-capabilities";
 import { buildOpenCodeDeveloperTeamInstallPlan } from "./developer-team-install";
+import { buildDeveloperTeamManifest } from "../../core/src/teams/developer/manifest";
 import type { CapabilityInstructionBundle } from "../../core/src/teams/developer/instruction-bundles/index";
 
 // Test helper: create a minimal non-default capabilityInstructions bundle
@@ -218,6 +219,31 @@ describe("verify reuse of built plan", () => {
     expect(result).toBeDefined();
     expect(result?.files).toBeDefined();
     expect(result?.files.length).toBeGreaterThan(0);
+  });
+
+  test("buildInstallPlan preserves all standalone package files with metadata", () => {
+    const manifest = buildDeveloperTeamManifest({
+      team: { id: "developer-team", displayName: "Developer Team" },
+    }).manifest;
+    const result = capabilities.teams.buildDeveloperTeamInstallPlan({
+      projectRoot: "/tmp/test-standalone-packages",
+      environmentId: "opencode-development",
+      manifest,
+    });
+
+    expect(result).toBeDefined();
+    const standaloneFiles = result!.files.filter((file) => file.kind === "standalone-skill");
+    const standaloneSkillIds = new Set(standaloneFiles.map((file) => file.skillId));
+    expect(standaloneSkillIds.size).toBe(29);
+    expect(standaloneSkillIds.has("frontend-design")).toBe(true);
+    expect(standaloneSkillIds.has("web-quality-audit")).toBe(true);
+    expect(standaloneFiles).toContainEqual(expect.objectContaining({
+      path: "skills/web-quality-audit/scripts/analyze.sh",
+      kind: "standalone-skill",
+      skillId: "web-quality-audit",
+      packagePath: "scripts/analyze.sh",
+    }));
+    expect(result!.files.some((file) => file.path.includes("/commands/sdd-") || file.path.startsWith("commands/sdd-"))).toBe(false);
   });
 
   test("buildInstallPlan with non-default personality produces files", async () => {

@@ -323,6 +323,12 @@ Return EXACTLY this format to the orchestrator:
 
 ${GIT_DISCARD_PROTECTION_RULE}
 
+## Frontend External Skill Routing
+
+- For UI review scope, use baseline-ui, fixing-accessibility, fixing-motion-performance, and fixing-metadata when those quality dimensions are relevant.
+- Use playwright-cli when real-browser evidence, screenshots, navigation checks, or UI regression proof are needed.
+- Use web-quality-audit only for audit, predeploy, or broad quality review contexts; it is not routine implementation guidance.
+
 ## Rules
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.

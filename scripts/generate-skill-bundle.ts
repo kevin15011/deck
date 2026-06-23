@@ -11,36 +11,15 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { STANDALONE_SKILLS } from "../packages/core/src/skills/external/index";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const EXTERNAL_SKILLS_DIR = join(ROOT, "packages/core/src/skills/external");
 const OUTPUT_FILE = join(EXTERNAL_SKILLS_DIR, "content.generated.ts");
 
-// Skill IDs (directories) to bundle - discovered from filesystem
-// Canonical 20 skills per REQ-ESI-002 + user-added using-agent-skills
-const CANONICAL_SKILLS = [
-  "api-and-interface-design",
-  "ci-cd-and-automation",
-  "code-review-and-quality",
-  "code-simplification",
-  "cognitive-doc-design",
-  "comment-writer",
-  "debugging-and-error-recovery",
-  "deprecation-and-migration",
-  "documentation-and-adrs",
-  "doubt-driven-development",
-  "frontend-ui-engineering",
-  "git-workflow-and-versioning",
-  "idea-refine",
-  "interview-me",
-  "judgment-day",
-  "performance-optimization",
-  "security-and-hardening",
-  "shipping-and-launch",
-  "test-driven-development",
-  "using-agent-skills",
-];
+// Skill IDs come from the canonical runtime registry to prevent generator drift.
+const CANONICAL_SKILLS = STANDALONE_SKILLS.map((skill) => skill.skillId);
 
 function escapeStringForTs(str: string): string {
   // Escape backticks, ${, and backslashes for template literal

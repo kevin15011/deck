@@ -268,6 +268,12 @@ Ready for Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) 
 
 ${GIT_DISCARD_PROTECTION_RULE}
 
+## Frontend External Skill Routing
+
+- When UI scope appears in a proposal, mention ui-skills-root as the router for later UI skill selection.
+- Use planning-only wording for frontend-design, fixing-accessibility, and fixing-metadata when visual direction, interactive UI, or new page metadata may affect scope.
+- Reserve design-lab only for major redesign intake; do not turn it into implementation guidance.
+
 ## Rules
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.

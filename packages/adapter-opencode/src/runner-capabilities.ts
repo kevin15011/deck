@@ -28,9 +28,11 @@ import type {
   RunnerDeveloperTeamApplyResult,
   RunnerDeveloperTeamVerifyResult,
   DeveloperTeamManifest,
+  DeveloperTeamInstallFile,
   TeamEntry,
 } from "@deck/core";
 import { DEVELOPER_TEAM_AGENTS, getModelCatalog } from "@deck/core";
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { join } from "node:path";
 
 
@@ -73,6 +75,29 @@ function getBuiltPlan(projectRoot: string): OpenCodeDeveloperTeamInstallPlan | u
 const OPENCODE_ENVIRONMENTS: readonly RunnerEnvironment[] = [
   { id: "opencode-development", displayName: "OpenCode Development" },
 ];
+
+const DEVELOPER_TEAM_SKILL_IDS = new Set(DEVELOPER_TEAM_AGENTS.map((agent) => agent.skillId));
+
+function splitSkillInstallFile(file: DeveloperTeamInstallFile): { skillId: string; packagePath: string } | undefined {
+  if (file.skillId && file.packagePath) {
+    return { skillId: file.skillId, packagePath: file.packagePath };
+  }
+  const match = file.path.match(/^skills\/([^/]+)\/(.+)$/);
+  if (!match) return undefined;
+  return { skillId: match[1], packagePath: match[2] };
+}
+
+function isStandaloneSkillFile(file: DeveloperTeamInstallFile): boolean {
+  if (file.kind === "standalone-skill") return true;
+  const parsed = splitSkillInstallFile(file);
+  return !!parsed && !DEVELOPER_TEAM_SKILL_IDS.has(parsed.skillId);
+}
+
+function isAgentSkillFile(file: DeveloperTeamInstallFile): boolean {
+  if (file.kind === "skill") return true;
+  const parsed = splitSkillInstallFile(file);
+  return !!parsed && parsed.packagePath === "SKILL.md" && DEVELOPER_TEAM_SKILL_IDS.has(parsed.skillId);
+}
 
 // ---------------------------------------------------------------------------
 // Environment inspection
@@ -269,10 +294,10 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
     memoryBundle: plan.memoryBundle,
   }));
 
-  const standaloneSkills = plan.standaloneSkills.map((s) => ({
-    skillId: s.skillId,
-    body: s.content,
-  }));
+  const standaloneSkills = getStandaloneSkills().map(({ skillId }) => {
+    const bundle = getStandaloneSkill(skillId);
+    return { skillId, body: bundle.SKILL, files: bundle.files };
+  });
 
   return {
     team: OPENCODE_DEVELOPMENT_TEAMS[0],
@@ -308,9 +333,9 @@ function buildTeamInstallPlan(input: import("@deck/core").DeveloperTeamInstallPl
   captureBuiltPlan(plan, input.projectRoot);
 
   // OpenCode writes skill files, prompt files, and command files
-  const files: import("@deck/core").DeveloperTeamInstallFile[] = [
-    ...plan.skills.map((s) => ({ path: s.relativePath, content: s.content })),
-    ...plan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content })),
+  const files: DeveloperTeamInstallFile[] = [
+    ...plan.skills.map((s) => ({ path: s.relativePath, content: s.content, kind: "skill" as const, skillId: s.agent.skillId, packagePath: "SKILL.md" })),
+    ...plan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content, kind: "standalone-skill" as const, skillId: s.skillId, packagePath: s.packagePath })),
     // Prompt and command files would be added from promptGenerationPlan and commandGenerationPlan
   ];
 
@@ -323,34 +348,31 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
   const skillsDir = join(configDir, "skills");
 
   // Separate agent-bound skills from standalone skills via the path pattern
-  const agentSkillFiles = input.plan.files.filter((f: { path: string }) => f.path.includes("/skills/") && !f.path.includes("judgment-day") && !f.path.includes("cognitive-doc-design") && !f.path.includes("comment-writer"));
-  const standaloneSkillFiles = input.plan.files.filter((f: { path: string }) =>
-    f.path.includes("judgment-day") ||
-    f.path.includes("cognitive-doc-design") ||
-    f.path.includes("comment-writer")
-  );
+  const agentSkillFiles = input.plan.files.filter(isAgentSkillFile);
+  const standaloneSkillFiles = input.plan.files.filter(isStandaloneSkillFile);
 
   const plan: OpenCodeDeveloperTeamInstallPlan = {
     projectRoot: input.projectRoot,
     agentsDir: join(configDir, "agents"),
     skillsDir: join(configDir, "skills"),
     agents: [],
-    skills: agentSkillFiles.map((f: { path: string; content: string }) => ({
-      agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
+    skills: agentSkillFiles.map((f) => ({
+      agent: { id: splitSkillInstallFile(f)?.skillId ?? "", name: "", description: "", skillId: splitSkillInstallFile(f)?.skillId ?? "" } as any,
       relativePath: f.path,
-      absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
+      absolutePath: join(skillsDir, splitSkillInstallFile(f)?.skillId ?? "", "SKILL.md"),
       content: f.content,
     })),
-    standaloneSkills: standaloneSkillFiles.map((f: { path: string; content: string }) => ({
-      skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
+    standaloneSkills: standaloneSkillFiles.map((f) => ({
+      skillId: splitSkillInstallFile(f)?.skillId ?? "",
+      packagePath: splitSkillInstallFile(f)?.packagePath ?? "SKILL.md",
       relativePath: f.path,
-      absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
+      absolutePath: join(skillsDir, splitSkillInstallFile(f)?.skillId ?? "", ...(splitSkillInstallFile(f)?.packagePath ?? "SKILL.md").split("/")),
       content: f.content,
     })),
     memoryDiagnostics: [],
     agentEntries: {},
-    promptGenerationPlan: {} as ReturnType<typeof import("./prompt-generation").buildPromptGenerationPlan>,
-    commandGenerationPlan: {} as ReturnType<typeof import("./command-generation").buildCommandGenerationPlan>,
+    promptGenerationPlan: [] as ReturnType<typeof import("./prompt-generation").buildPromptGenerationPlan>,
+    commandGenerationPlan: [] as ReturnType<typeof import("./command-generation").buildCommandGenerationPlan>,
     mermaidPluginStatus: "missing",
   };
 
@@ -501,14 +523,18 @@ function buildTeamInstallPlanFromInput(input: import("@deck/core").DeveloperTeam
     configModelOverrides: modelAssignments,
     reasoningEffortOverrides: reasoningAssignments,
     capabilityInstructions: input.capabilityInstructions,
+    standaloneSkills: getStandaloneSkills().map(({ skillId }) => {
+      const bundle = getStandaloneSkill(skillId);
+      return { skillId, body: bundle.SKILL, files: bundle.files };
+    }),
   });
 
   // Capture the built plan for verify fallback
   captureBuiltPlan(plan, input.projectRoot);
 
   const files: import("@deck/core").DeveloperTeamInstallFile[] = [
-    ...plan.skills.map((s) => ({ path: s.relativePath, content: s.content })),
-    ...plan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content })),
+    ...plan.skills.map((s) => ({ path: s.relativePath, content: s.content, kind: "skill" as const, skillId: s.agent.skillId, packagePath: "SKILL.md" })),
+    ...plan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content, kind: "standalone-skill" as const, skillId: s.skillId, packagePath: s.packagePath })),
   ];
 
   return { files };
@@ -519,33 +545,32 @@ function applyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamApply
   const configDir = join(process.env.HOME ?? "/home/user", ".config", "opencode");
   const skillsDir = join(configDir, "skills");
 
-  // Separate standalone skills from agent-bound skills
-  const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
+  const agentSkillFiles = input.plan.files.filter(isAgentSkillFile);
+  const standaloneSkillFiles = input.plan.files.filter(isStandaloneSkillFile);
   const plan: OpenCodeDeveloperTeamInstallPlan = {
     projectRoot: input.projectRoot,
     agentsDir: join(configDir, "agents"),
     skillsDir: join(configDir, "skills"),
     agents: [],
-    skills: input.plan.files
-      .filter((f) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
+    skills: agentSkillFiles
       .map((f) => ({
-        agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
+        agent: { id: splitSkillInstallFile(f)?.skillId ?? "", name: "", description: "", skillId: splitSkillInstallFile(f)?.skillId ?? "" } as any,
         relativePath: f.path,
-        absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
+        absolutePath: join(skillsDir, splitSkillInstallFile(f)?.skillId ?? "", "SKILL.md"),
         content: f.content,
       })),
-    standaloneSkills: input.plan.files
-      .filter((f) => standaloneSkillIds.some((id) => f.path.includes(id)))
+    standaloneSkills: standaloneSkillFiles
       .map((f) => ({
-        skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
+        skillId: splitSkillInstallFile(f)?.skillId ?? "",
+        packagePath: splitSkillInstallFile(f)?.packagePath ?? "SKILL.md",
         relativePath: f.path,
-        absolutePath: join(skillsDir, f.path.split("/").pop()!.replace("/SKILL.md", ""), "SKILL.md"),
+        absolutePath: join(skillsDir, splitSkillInstallFile(f)?.skillId ?? "", ...(splitSkillInstallFile(f)?.packagePath ?? "SKILL.md").split("/")),
         content: f.content,
       })),
     memoryDiagnostics: [],
     agentEntries: {},
-    promptGenerationPlan: {} as ReturnType<typeof import("./prompt-generation").buildPromptGenerationPlan>,
-    commandGenerationPlan: {} as ReturnType<typeof import("./command-generation").buildCommandGenerationPlan>,
+    promptGenerationPlan: [] as ReturnType<typeof import("./prompt-generation").buildPromptGenerationPlan>,
+    commandGenerationPlan: [] as ReturnType<typeof import("./command-generation").buildCommandGenerationPlan>,
     mermaidPluginStatus: "missing",
   };
 
@@ -583,24 +608,24 @@ function verifyTeamInstallFromPlan(input: import("@deck/core").DeveloperTeamVeri
 }
 
 function backupTeamFiles(plan: import("@deck/core").RunnerDeveloperTeamInstallPlan): import("@deck/core").BackupManifest {
-  const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
+  const agentSkillFiles = plan.files.filter(isAgentSkillFile);
+  const standaloneSkillFiles = plan.files.filter(isStandaloneSkillFile);
   const nativePlan: OpenCodeDeveloperTeamInstallPlan = {
     projectRoot: "",
     agentsDir: "",
     skillsDir: "",
     agents: [],
-    skills: plan.files
-      .filter((f) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
+    skills: agentSkillFiles
       .map((f) => ({
-        agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "", skillId: "" } as any,
+        agent: { id: splitSkillInstallFile(f)?.skillId ?? "", name: "", description: "", skillId: splitSkillInstallFile(f)?.skillId ?? "" } as any,
         relativePath: f.path,
         absolutePath: f.path,
         content: f.content,
       })),
-    standaloneSkills: plan.files
-      .filter((f) => standaloneSkillIds.some((id) => f.path.includes(id)))
+    standaloneSkills: standaloneSkillFiles
       .map((f) => ({
-        skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
+        skillId: splitSkillInstallFile(f)?.skillId ?? "",
+        packagePath: splitSkillInstallFile(f)?.packagePath ?? "SKILL.md",
         relativePath: f.path,
         absolutePath: f.path,
         content: f.content,

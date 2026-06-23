@@ -254,7 +254,7 @@ export type DeveloperTeamAdapterInstallInput = {
   thinkingAssignments?: DeveloperTeamThinkingAssignments;
   memoryProvider?: AdaptiveMemoryProvider;
   capabilityInstructions?: CapabilityInstructionBundle;
-  standaloneSkills?: readonly { skillId: string; body: string }[];
+  standaloneSkills?: readonly { skillId: string; body: string; files?: Record<string, string> }[];
 };
 
 // ---------------------------------------------------------------------------

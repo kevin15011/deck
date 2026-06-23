@@ -4,7 +4,9 @@
  * Tests the bundled skill lookup and fallback behavior.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import {
   STANDALONE_SKILLS,
   getStandaloneSkillBody,
@@ -14,11 +16,38 @@ import {
   SkillLookupError,
 } from "../index.js";
 
+const FRONTEND_EXTERNAL_SKILLS = [
+  "ui-skills-root",
+  "frontend-design",
+  "baseline-ui",
+  "fixing-accessibility",
+  "fixing-motion-performance",
+  "fixing-metadata",
+  "web-quality-audit",
+  "playwright-cli",
+  "design-lab",
+] as const;
+
+const REPRESENTATIVE_SUPPORT_FILES: Record<string, readonly string[]> = {
+  "frontend-design": ["LICENSE.txt"],
+  "web-quality-audit": ["scripts/analyze.sh"],
+  "design-lab": ["DESIGN_PRINCIPLES.md"],
+  "playwright-cli": [
+    "references/playwright-tests.md",
+    "references/session-management.md",
+    "references/tracing.md",
+  ],
+};
+
 describe("external/skills content", () => {
   describe("STANDALONE_SKILLS", () => {
-    it("contains exactly 20 skills (REQ-TEST-001)", () => {
+    it("contains exactly 29 skills (REQ-TEST-001)", () => {
       const skills = getStandaloneSkills();
-      expect(skills.length).toBe(20);
+      expect(skills.length).toBe(29);
+      const skillIds = skills.map((skill) => skill.skillId);
+      for (const skillId of FRONTEND_EXTERNAL_SKILLS) {
+        expect(skillIds).toContain(skillId);
+      }
     });
 
     it("each skill has valid sourcePath", () => {
@@ -126,12 +155,48 @@ describe("external/skills content", () => {
       expect(fileKeys).toHaveLength(4);
     });
 
-    it("all 20 skills have non-empty SKILL body (REQ-TEST-006)", () => {
+    it("all 29 skills have non-empty SKILL body (REQ-TEST-006)", () => {
       const skills = getStandaloneSkills();
       for (const skill of skills) {
         const bundle = getStandaloneSkill(skill.skillId);
         expect(bundle.SKILL.length).toBeGreaterThan(0);
       }
+    });
+
+    it("preserves representative support files for multi-file frontend skills", () => {
+      for (const [skillId, expectedFiles] of Object.entries(REPRESENTATIVE_SUPPORT_FILES)) {
+        const bundle = getStandaloneSkill(skillId);
+        for (const filePath of expectedFiles) {
+          expect(bundle.files[filePath], `${skillId}/${filePath}`).toBeDefined();
+          expect(bundle.files[filePath].length).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it("single-file frontend skills expose an empty files map", () => {
+      for (const skillId of [
+        "ui-skills-root",
+        "baseline-ui",
+        "fixing-accessibility",
+        "fixing-motion-performance",
+        "fixing-metadata",
+      ]) {
+        expect(Object.keys(getStandaloneSkill(skillId).files)).toHaveLength(0);
+      }
+    });
+
+    it("generated bundle is idempotent", () => {
+      const generatedPath = "packages/core/src/skills/external/content.generated.ts";
+      const before = readFileSync(generatedPath, "utf-8");
+      const first = spawnSync("bun", ["scripts/generate-skill-bundle.ts"], { encoding: "utf-8" });
+      expect(first.status, first.stderr).toBe(0);
+      const afterFirst = readFileSync(generatedPath, "utf-8");
+      const second = spawnSync("bun", ["scripts/generate-skill-bundle.ts"], { encoding: "utf-8" });
+      expect(second.status, second.stderr).toBe(0);
+      const afterSecond = readFileSync(generatedPath, "utf-8");
+
+      expect(afterFirst).toBe(before);
+      expect(afterSecond).toBe(afterFirst);
     });
 
     it("no system artifacts in bundle files (REQ-TEST-007)", () => {

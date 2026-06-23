@@ -29,7 +29,7 @@ import type {
   DeveloperTeamManifestStandaloneSkill,
 } from "../../runner-capability";
 import type { CapabilityInstructionBundle } from "./instruction-bundles/index";
-import { getStandaloneSkills, getStandaloneSkillBody } from "../../skills/external";
+import { getStandaloneSkill, getStandaloneSkills } from "../../skills/external";
 
 // Re-export model catalog types for convenience
 export type { ModelCatalog, DeveloperTeamDefaultModelAssignment, ReasoningLevel };
@@ -152,13 +152,12 @@ export function buildDeveloperTeamManifest(options: BuildManifestOptions): Manif
   // Build standalone skill manifests (not bound to agents)
   const standaloneSkills: DeveloperTeamManifestStandaloneSkill[] = [];
   for (const skillDef of getStandaloneSkills()) {
-    const body = getStandaloneSkillBody(skillDef.skillId);
-    if (body !== undefined) {
-      standaloneSkills.push({
-        skillId: skillDef.skillId,
-        body,
-      });
-    }
+    const bundle = getStandaloneSkill(skillDef.skillId);
+    standaloneSkills.push({
+      skillId: skillDef.skillId,
+      body: bundle.SKILL,
+      files: bundle.files,
+    });
   }
 
   // Strict mode: validate model assignments reference existing agents

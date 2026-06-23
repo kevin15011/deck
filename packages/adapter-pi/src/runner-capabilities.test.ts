@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { createPiRunnerCapabilities } from "./runner-capabilities";
+import { buildDeveloperTeamManifest } from "../../core/src/teams/developer/manifest";
 
 describe("Pi RunnerCapabilities factory", () => {
   const capabilities = createPiRunnerCapabilities();
@@ -102,5 +106,100 @@ describe("Pi RunnerCapabilities factory", () => {
   test("no imports from @deck/adapter-engram (providers injected at composition time)", () => {
     const source = require("fs").readFileSync(__filename.replace(".test.ts", ".ts"), "utf-8");
     expect(source).not.toContain("@deck/adapter-engram");
+  });
+
+  test("buildInstallPlan preserves all standalone package files with metadata", () => {
+    const manifest = buildDeveloperTeamManifest({
+      team: { id: "developer-team", displayName: "Developer Team" },
+    }).manifest;
+    const result = capabilities.teams.buildDeveloperTeamInstallPlan({
+      projectRoot: "/tmp/test-standalone-packages",
+      environmentId: "pi-development",
+      manifest,
+    });
+
+    expect(result).toBeDefined();
+    const standaloneFiles = result!.files.filter((file) => file.kind === "standalone-skill");
+    const standaloneSkillIds = new Set(standaloneFiles.map((file) => file.skillId));
+    expect(standaloneSkillIds.size).toBe(29);
+    expect(standaloneSkillIds.has("frontend-design")).toBe(true);
+    expect(standaloneSkillIds.has("web-quality-audit")).toBe(true);
+    expect(standaloneFiles).toContainEqual(expect.objectContaining({
+      path: ".pi/skills/web-quality-audit/scripts/analyze.sh",
+      kind: "standalone-skill",
+      skillId: "web-quality-audit",
+      packagePath: "scripts/analyze.sh",
+    }));
+    expect(result!.files.some((file) => file.path.includes("/commands/sdd-") || file.path.startsWith("commands/sdd-"))).toBe(false);
+  });
+
+  test("capability verify checks standalone support files under ~/.pi/agent", async () => {
+    const home = mkdtempSync(join(tmpdir(), "deck-pi-capability-home-"));
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-pi-capability-project-"));
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+
+    try {
+      const plan = capabilities.developerTeam!.buildInstallPlan({ projectRoot });
+      await capabilities.developerTeam!.applyInstall({
+        projectRoot,
+        environmentId: "pi-development",
+        plan,
+      });
+
+      const supportFile = join(home, ".pi", "agent", "skills", "web-quality-audit", "scripts", "analyze.sh");
+      expect(existsSync(supportFile)).toBe(true);
+      writeFileSync(supportFile, "stale support file", "utf-8");
+
+      const result = await capabilities.developerTeam!.verifyInstall({
+        projectRoot,
+        environmentId: "pi-development",
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.skillResults).toContainEqual({ agentId: "web-quality-audit", valid: false });
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      rmSync(home, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("capability backup reads standalone support files from ~/.pi/agent", async () => {
+    const home = mkdtempSync(join(tmpdir(), "deck-pi-capability-home-"));
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-pi-capability-project-"));
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+
+    try {
+      const plan = capabilities.developerTeam!.buildInstallPlan({ projectRoot });
+      await capabilities.developerTeam!.applyInstall({
+        projectRoot,
+        environmentId: "pi-development",
+        plan,
+      });
+
+      const supportFile = join(home, ".pi", "agent", "skills", "web-quality-audit", "scripts", "analyze.sh");
+      writeFileSync(supportFile, "existing support file", "utf-8");
+
+      const backup = capabilities.developerTeam!.backupFiles(plan);
+      expect(backup.files).toContainEqual(expect.objectContaining({
+        path: supportFile,
+        originalContent: "existing support file",
+      }));
+      expect(readFileSync(supportFile, "utf-8")).toBe("existing support file");
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      rmSync(home, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });

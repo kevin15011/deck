@@ -11,6 +11,7 @@ import {
   verifyOpenCodeDeveloperTeamInstall,
 } from "./developer-team-install";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { getStandaloneSkill, STANDALONE_SKILLS } from "@deck/core/skills/external";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import type {
@@ -109,6 +110,11 @@ function createTempConfigDir(projectRoot: string): string {
 function cleanup(dir: string) {
   rmSync(dir, { recursive: true, force: true });
 }
+
+const completeStandaloneSkills = STANDALONE_SKILLS.map(({ skillId }) => {
+  const bundle = getStandaloneSkill(skillId);
+  return { skillId, body: bundle.SKILL, files: bundle.files };
+});
 
 describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
   test("generates 14 agent entries for opencode.json", () => {
@@ -272,6 +278,43 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     expect(plan.standaloneSkills.some((skill) => skill.skillId.startsWith("sdd-"))).toBe(false);
   });
 
+  test("expands all standalone skill packages including support files", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      standaloneSkills: completeStandaloneSkills,
+    });
+
+    const plannedSkillIds = new Set(plan.standaloneSkills.map((skill) => skill.skillId));
+    expect(plannedSkillIds.size).toBe(29);
+    for (const { skillId } of STANDALONE_SKILLS) {
+      expect(plannedSkillIds.has(skillId)).toBe(true);
+      expect(plan.standaloneSkills).toContainEqual(expect.objectContaining({
+        skillId,
+        packagePath: "SKILL.md",
+        relativePath: `skills/${skillId}/SKILL.md`,
+      }));
+    }
+    expect(plan.standaloneSkills).toContainEqual(expect.objectContaining({
+      skillId: "web-quality-audit",
+      packagePath: "scripts/analyze.sh",
+      relativePath: "skills/web-quality-audit/scripts/analyze.sh",
+    }));
+    expect(plan.standaloneSkills).toContainEqual(expect.objectContaining({
+      skillId: "design-lab",
+      packagePath: "DESIGN_PRINCIPLES.md",
+      relativePath: "skills/design-lab/DESIGN_PRINCIPLES.md",
+    }));
+    expect(plan.commandGenerationPlan).toEqual([]);
+  });
+
+  test("rejects unsafe standalone skill package paths", () => {
+    expect(() => buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      standaloneSkills: [{ skillId: "safe-skill", body: "# Safe", files: { "../escape.md": "nope" } }],
+    })).toThrow(/Invalid standalone skill package path/);
+    expect(() => buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      standaloneSkills: [{ skillId: "../unsafe", body: "# Unsafe" }],
+    })).toThrow(/Invalid skillId/);
+  });
+
   test("skill content comes from core registry", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
     const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
@@ -310,6 +353,27 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
       for (const planned of plan.promptGenerationPlan) {
         expect(existsSync(planned.absolutePath)).toBe(true);
       }
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("silently writes standalone support files and nested directories", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+        configDir,
+        standaloneSkills: completeStandaloneSkills,
+      });
+
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+
+      const supportFile = plan.standaloneSkills.find((file) => file.skillId === "web-quality-audit" && file.packagePath === "scripts/analyze.sh")!;
+      expect(existsSync(supportFile.absolutePath)).toBe(true);
+      expect(readFileSync(supportFile.absolutePath, "utf-8")).toBe(supportFile.content);
+      expect(supportFile.absolutePath).toContain(`${configDir}/skills/web-quality-audit/scripts/analyze.sh`);
+      expect(plan.commandGenerationPlan).toEqual([]);
     } finally {
       cleanup(projectRoot);
     }
@@ -533,6 +597,26 @@ describe("verifyOpenCodeDeveloperTeamInstall", () => {
       cleanup(projectRoot);
     }
   });
+
+  test("fails when a standalone support file is missing or stale", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+        configDir,
+        standaloneSkills: completeStandaloneSkills,
+      });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      const supportFile = plan.standaloneSkills.find((file) => file.skillId === "web-quality-audit" && file.packagePath === "scripts/analyze.sh")!;
+      writeFileSync(supportFile.absolutePath, "stale", "utf-8");
+
+      const staleResult = verifyOpenCodeDeveloperTeamInstall(plan);
+      expect(staleResult.valid).toBe(false);
+      expect(staleResult.skillResults.some((result) => result.issues.some((issue) => issue.includes("web-quality-audit/scripts/analyze.sh")))).toBe(true);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
 });
 
 describe("backupDeveloperTeamFiles", () => {
@@ -544,6 +628,26 @@ describe("backupDeveloperTeamFiles", () => {
       applyOpenCodeDeveloperTeamInstall(plan, { configDir });
       const backup = backupDeveloperTeamFiles(plan);
       expect(backup.entries.every((e) => e.previousContent !== null)).toBe(true);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("captures standalone package support files", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+        configDir,
+        standaloneSkills: completeStandaloneSkills,
+      });
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      const backup = backupDeveloperTeamFiles(plan);
+      const supportFile = plan.standaloneSkills.find((file) => file.skillId === "web-quality-audit" && file.packagePath === "scripts/analyze.sh")!;
+      expect(backup.entries).toContainEqual(expect.objectContaining({
+        absolutePath: supportFile.absolutePath,
+        previousContent: supportFile.content,
+      }));
     } finally {
       cleanup(projectRoot);
     }

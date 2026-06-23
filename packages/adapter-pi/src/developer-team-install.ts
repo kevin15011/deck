@@ -104,6 +104,7 @@ export type PlannedSkillFile = {
 
 export type PlannedStandaloneSkillFile = {
   skillId: string;
+  packagePath: string;
   relativePath: string;
   absolutePath: string;
   content: string;
@@ -130,6 +131,45 @@ export type DeveloperTeamInstallPlan = {
   /** Memory injection bundle computed from memoryInjection/memoryProvider options. */
   memoryBundle?: MemoryInjectionBundle;
 };
+
+function validateStandaloneSkillId(skillId: string): void {
+  if (!/^[a-z0-9_-]+$/i.test(skillId)) {
+    throw new Error(`Invalid skillId "${skillId}": must contain only alphanumeric characters, underscores, and hyphens`);
+  }
+}
+
+function validateStandalonePackagePath(filePath: string): void {
+  if (!filePath || filePath.startsWith("/") || filePath.includes("\\")) {
+    throw new Error(`Invalid standalone skill package path "${filePath}": must be a relative POSIX path`);
+  }
+  const segments = filePath.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    throw new Error(`Invalid standalone skill package path "${filePath}": must not contain empty, current, or parent segments`);
+  }
+}
+
+function buildStandaloneSkillFiles(
+  projectRoot: string,
+  standaloneSkills: readonly { skillId: string; body: string; files?: Record<string, string> }[],
+): PlannedStandaloneSkillFile[] {
+  const planned: PlannedStandaloneSkillFile[] = [];
+  for (const skill of standaloneSkills) {
+    validateStandaloneSkillId(skill.skillId);
+    const packageFiles: Record<string, string> = { "SKILL.md": skill.body, ...(skill.files ?? {}) };
+    for (const [packagePath, content] of Object.entries(packageFiles)) {
+      validateStandalonePackagePath(packagePath);
+      const relativePath = `.pi/skills/${skill.skillId}/${packagePath}`;
+      planned.push({
+        skillId: skill.skillId,
+        packagePath,
+        relativePath,
+        absolutePath: join(projectRoot, ".pi", "skills", skill.skillId, ...packagePath.split("/")),
+        content,
+      });
+    }
+  }
+  return planned;
+}
 
 // --- Legacy SDD Cleanup ---
 
@@ -351,7 +391,7 @@ export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
    * When provided, these skills are written as-is (verbatim) to .pi/skills/{skillId}/SKILL.md
    * without generating agent-bound frontmatter.
    */
-  standaloneSkills?: readonly { skillId: string; body: string }[];
+  standaloneSkills?: readonly { skillId: string; body: string; files?: Record<string, string> }[];
   /**
    * Optional orchestrator personality override. When provided, this value is
    * passed to the content registry to select the appropriate prompt variant.
@@ -521,16 +561,8 @@ export function buildDeveloperTeamInstallPlan(
     return { agent, relativePath, absolutePath, content };
   });
 
-  // Build standalone skill files (verbatim, no generated frontmatter)
-  // Validate skillId to prevent path traversal attacks
-  const standaloneSkills: PlannedStandaloneSkillFile[] = (options?.standaloneSkills ?? []).map((skill) => {
-    if (!/^[a-z0-9_-]+$/i.test(skill.skillId)) {
-      throw new Error(`Invalid skillId "${skill.skillId}": must contain only alphanumeric characters, underscores, and hyphens`);
-    }
-    const relativePath = `.pi/skills/${skill.skillId}/SKILL.md`;
-    const absolutePath = join(projectRoot, relativePath);
-    return { skillId: skill.skillId, relativePath, absolutePath, content: skill.body };
-  });
+  // Build standalone skill package files (verbatim, no generated frontmatter).
+  const standaloneSkills = buildStandaloneSkillFiles(projectRoot, options?.standaloneSkills ?? []);
 
 // Build SDD bootstrap skill files (deck-init, deck-onboard)
   // Map: "deck-init/SKILL.md" -> ".pi/skills/deck-init/SKILL.md"
@@ -663,6 +695,11 @@ export function applyDeveloperTeamInstall(
 
   // Write standalone skills (verbatim, no generated frontmatter)
   const standaloneSkillResults: BundleApplyResult[] = plan.standaloneSkills.map((planned) => {
+    const skillDir = join(planned.absolutePath, "..");
+    if (!exists(skillDir)) {
+      mkdir(skillDir, { recursive: true });
+    }
+
     if (exists(planned.absolutePath)) {
       const existing = readFile(planned.absolutePath, "utf-8");
       if (existing === planned.content) {
@@ -818,6 +855,18 @@ export function verifyDeveloperTeamInstall(
     return { agentId: planned.agent.id, valid: issues.length === 0, issues };
   });
 
+  const standaloneSkillResults: BundleVerifyResult[] = plan.standaloneSkills.map((planned) => {
+    const issues: string[] = [];
+    if (!exists(planned.absolutePath)) {
+      return { agentId: planned.skillId, valid: false, issues: [`File does not exist: ${planned.packagePath}.`] };
+    }
+    const content = readFile(planned.absolutePath, "utf-8");
+    if (content !== planned.content) {
+      issues.push(`Content mismatch for standalone skill ${planned.skillId}/${planned.packagePath}; installed file differs from planned content.`);
+    }
+    return { agentId: planned.skillId, valid: issues.length === 0, issues };
+  });
+
   // Verify SDD bootstrap skill files
   const sddSkillResults: BundleVerifyResult[] = plan.sddSkillFiles.map((planned) => {
     const issues: string[] = [];
@@ -837,9 +886,9 @@ export function verifyDeveloperTeamInstall(
   });
 
   return {
-    valid: agentResults.every((r) => r.valid) && skillResults.every((r) => r.valid) && sddSkillResults.every((r) => r.valid),
+    valid: agentResults.every((r) => r.valid) && skillResults.every((r) => r.valid) && standaloneSkillResults.every((r) => r.valid) && sddSkillResults.every((r) => r.valid),
     agentResults,
-    skillResults,
+    skillResults: [...skillResults, ...standaloneSkillResults],
   };
 }
 
@@ -862,7 +911,7 @@ export function backupDeveloperTeamFiles(
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;
 
-  const allFiles = [...plan.agents, ...plan.skills, ...plan.sddSkillFiles];
+  const allFiles = [...plan.agents, ...plan.skills, ...plan.standaloneSkills, ...plan.sddSkillFiles];
 
   const entries: FileBackupEntry[] = allFiles.map((planned) => {
     if (exists(planned.absolutePath)) {

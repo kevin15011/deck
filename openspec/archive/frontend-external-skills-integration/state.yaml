@@ -1,0 +1,175 @@
+change_id: frontend-external-skills-integration
+phase: archive
+status: archived
+updated_at: 2026-06-23
+archived_at: 2026-06-23
+archive_location: openspec/archive/frontend-external-skills-integration/
+  artifacts:
+    exploration: exploration.md
+    proposal: proposal.md
+    spec: spec.md
+    design: design.md
+    tasks: tasks.md
+    preconditions: preconditions.md
+    apply: apply-progress.md
+    verify: verify-report.md
+    review: review-report.md
+    opencode_install_validation: opencode-install-validation.md
+    archive: archive-report.md
+phases:
+  explore:
+    status: completed
+    artifact: exploration.md
+    completed_at: 2026-06-22
+    actor: deck-developer-explorer
+  proposal:
+    status: completed
+    artifact: proposal.md
+    completed_at: 2026-06-22
+    actor: deck-developer-proposal
+  spec:
+    status: completed
+    artifact: spec.md
+    completed_at: 2026-06-22
+    actor: deck-developer-spec
+  design:
+    status: completed
+    artifact: design.md
+    completed_at: 2026-06-22
+    actor: deck-developer-design
+  tasks:
+    status: completed
+    artifact: tasks.md
+    preconditions_artifact: preconditions.md
+    completed_at: 2026-06-22
+    actor: deck-developer-task
+    task_count: 18
+    owner_counts:
+      general_apply: 12
+      backend_apply: 6
+      frontend_apply: 0
+    groups:
+      shared_core_registry_and_tests: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+      adapter_opencode: [10, 11, 12]
+      adapter_pi: [13, 14, 15]
+      developer_team_role_guidance: [16, 17]
+      verification: [18]
+    review_workload_forecast:
+      estimated_lines: 400-800
+      budget_risk: medium
+      sequential_slices_recommended: true
+      decision_needed_before_apply: false
+    open_questions: 0
+    blockers: none
+    preconditions_gate: pass
+  apply:
+    status: completed
+    artifact: apply-progress.md
+    updated_at: 2026-06-22
+    completed_at: 2026-06-22
+    actor: deck-developer-apply-general
+    actors: [deck-developer-apply-general, deck-developer-apply-backend]
+    completed_task_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+    completed_groups:
+      - shared_core_registry_and_generator_source_of_truth
+      - shared_core_external_skill_tests
+      - shared_core_manifest_and_runner_neutral_contracts
+      - adapter_opencode
+      - adapter_pi
+      - developer_team_role_guidance
+      - final_verification
+    remaining_task_ids: []
+    verification:
+      targeted_tests: passed
+      typecheck: passed
+      generator_idempotence: passed
+      adapter_targeted_tests: passed
+      adapter_typecheck: passed
+      role_prompt_tests: passed
+      full_bun_suite: passed_after_verify_retry
+      full_bun_suite_note: "Initial Apply full-suite run saw non-attributable prepare-release staleness; Verify retry passed the full Bun suite."
+    blockers: none
+  verify:
+    status: passed_with_warnings
+    artifact: verify-report.md
+    completed_at: 2026-06-23
+    actor: deck-developer-verify
+    verdict: pass-with-warnings
+    warnings:
+      - "Full Bun suite retry after OpenCode install repair timed out at the MCP layer; targeted affected-area tests, typecheck, and build passed. A previous full-suite retry in this change passed."
+  review:
+    status: approved_with_changes
+    artifact: review-report.md
+    completed_at: 2026-06-23
+    actor: deck-developer-review
+    verdict: pass-with-warnings
+    blockers: none
+    warnings:
+      - "Legacy Pi teams.verifyDeveloperTeamInstall surface remains less package-aware than repaired developerTeam.verifyInstall; follow-up consolidation recommended."
+      - "OpenCode command-generation plumbing remains no-op but should stay guarded."
+  archive:
+    status: archived
+    artifact: archive-report.md
+    completed_at: 2026-06-23
+    actor: deck-developer-archive
+    archive_location: openspec/archive/frontend-external-skills-integration/
+  repair:
+    status: resolved
+    mode: interactive
+    incident_budget: 2
+    fingerprint_budget: 2
+    verify_cycle_limit: 2
+    current_retry: 1
+    active_scope: "Review blocker: Pi runner-capability verify/backup support-file parity for ~/.pi/agent standalone skill support files."
+    initial_decision: repair
+    completed_scopes:
+      - "Pi runner-capability verify and backup now cover standalone skill support files under ~/.pi/agent/skills/<skillId>/..."
+    latest_attempt:
+      actor: deck-developer-apply-backend
+      status: completed
+      artifact: apply-progress.md
+      completed_at: 2026-06-22
+      verification:
+        focused_pi_runner_capabilities: passed
+        affected_pi_adapter_tests: passed
+        broader_pi_adapter_suite: passed
+        typecheck: passed
+    remaining_blockers: []
+    resolution:
+      pi_capability_parity: completed
+      unrelated_working_tree_scope: resolved_by_user_requested_commit
+      commit: d043e97
+  install_validation:
+    status: passed
+    artifact: opencode-install-validation.md
+    completed_at: 2026-06-23
+    actor: deck-developer-verify
+    target_runner: opencode
+    target_path: /home/kevinlb/.config/opencode/skills/
+    installed_frontend_skills: [ui-skills-root, frontend-design, baseline-ui, fixing-accessibility, fixing-motion-performance, fixing-metadata, web-quality-audit, playwright-cli, design-lab]
+    support_files: passed
+    blockers: []
+  install_repair:
+    status: completed
+    mode: interactive
+    incident_budget: 2
+    fingerprint_budget: 2
+    verify_cycle_limit: 2
+    current_retry: 1
+    active_scope: "Diagnose and repair why OpenCode installation includes Developer Team guidance but omits the 9 new standalone frontend external skill folders."
+    initial_decision: repair
+    completed_at: 2026-06-23
+    actor: deck-developer-apply-backend
+    artifact: apply-progress.md
+    root_cause: "OpenCode RunnerAdapter install plan defaulted omitted standaloneSkills to an empty standalone package list, while the dashboard caller did not pass standaloneSkills."
+    fix: "RunnerAdapter now derives the complete standalone external skill registry by default and focused tests cover the 9 frontend skills plus support files."
+    verification:
+      focused_opencode_adapter_tests: passed
+      typecheck: passed
+      local_opencode_filesystem_validation: passed
+      install_validation_retry: passed_with_warnings
+    installed_frontend_skills: [ui-skills-root, frontend-design, baseline-ui, fixing-accessibility, fixing-motion-performance, fixing-metadata, web-quality-audit, playwright-cli, design-lab]
+    remaining_blockers: []
+provenance:
+  requested_by: deck-developer-orchestrator
+  source_summary: "Explore integration of 9 frontend-focused external skills into Deck external skill bundling and Developer Team role guidance."

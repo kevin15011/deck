@@ -362,6 +362,12 @@ Ready for Design (\`deck-developer-design\`) and Task (\`deck-developer-task\`) 
 
 ${GIT_DISCARD_PROTECTION_RULE}
 
+## Frontend External Skill Routing
+
+- When UI-scoped requirements are present, mention ui-skills-root as the router for later UI skill selection.
+- Use planning-only wording for fixing-accessibility on interactive UI requirements and fixing-metadata for new page/route metadata requirements.
+- Do not use audit-heavy or implementation-heavy frontend skill wording in specs.
+
 ## Rules
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.

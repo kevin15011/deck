@@ -158,8 +158,10 @@ export type DeveloperTeamManifestSkill = {
 
 export type DeveloperTeamManifestStandaloneSkill = {
   skillId: string;
-  /** Contenido verbatim del SKILL.md incluyendo frontmatter */
+  /** Verbatim SKILL.md content including frontmatter. */
   body: string;
+  /** Support files keyed by relative POSIX path. Core emits {} when none exist. */
+  files?: Record<string, string>;
 };
 
 export type MemoryDiagnostic = {
@@ -203,6 +205,9 @@ export type RunnerDeveloperTeamInstallPlan = {
 export type DeveloperTeamInstallFile = {
   path: string;
   content: string;
+  kind?: "agent" | "skill" | "standalone-skill" | "command" | "prompt" | "other";
+  skillId?: string;
+  packagePath?: string;
 };
 
 export type DeveloperTeamApplyInput = {

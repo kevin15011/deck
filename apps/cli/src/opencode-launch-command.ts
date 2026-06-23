@@ -15,7 +15,7 @@ import {
   type AdaptiveMemoryActiveProvider,
 } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
-import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/external";
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import {
   getEnabledPackageInstructionIds,
   buildCapabilityInstructionBundle,
@@ -223,7 +223,10 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   }
 
   // 4. Build install plan
-  const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
+  const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => {
+    const bundle = getStandaloneSkill(s.skillId);
+    return { skillId: s.skillId, body: bundle.SKILL, files: bundle.files };
+  });
   const installPlan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
     configDir,
     memoryInjection: resolvedMemory.memoryInjection,

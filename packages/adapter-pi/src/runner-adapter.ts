@@ -465,52 +465,34 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     this.#lastNativePlan = nativePlan;
 
     const files: import("@deck/core").DeveloperTeamInstallFile[] = [
-      ...nativePlan.agents.map((a: { relativePath: string; content: string }) => ({ path: a.relativePath, content: a.content })),
-      ...nativePlan.skills.map((s: { relativePath: string; content: string }) => ({ path: s.relativePath, content: s.content })),
-      ...nativePlan.standaloneSkills.map((s: { relativePath: string; content: string }) => ({ path: s.relativePath, content: s.content })),
+      ...nativePlan.agents.map((a: { relativePath: string; content: string }) => ({ path: a.relativePath, content: a.content, kind: "agent" as const })),
+      ...nativePlan.skills.map((s) => ({ path: s.relativePath, content: s.content, kind: "skill" as const, skillId: s.agent.skillId, packagePath: "SKILL.md" })),
+      ...nativePlan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content, kind: "standalone-skill" as const, skillId: s.skillId, packagePath: s.packagePath })),
     ];
 
     return { files };
   }
 
   async applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
-    // Build the native plan structure expected by applyPiDeveloperTeamInstall
+    // Use the native plan captured by buildDeveloperTeamInstallPlan so package
+    // metadata and support-file paths survive the generic runner boundary.
+    if (!this.#lastNativePlan) {
+      throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
+    }
     const homeDir = process.env.HOME ?? "/home/user";
     const piConfigDir = `${homeDir}/.pi/agent`;
     const piAgentsDir = `${piConfigDir}/agents`;
     const piSkillsDir = `${piConfigDir}/skills`;
 
-    const standaloneSkillIds = ["judgment-day", "cognitive-doc-design", "comment-writer"];
     const plan: PiDeveloperTeamInstallPlan = {
+      ...this.#lastNativePlan,
       projectRoot: input.projectRoot,
       agentsDir: piAgentsDir,
       skillsDir: piSkillsDir,
-      agents: input.plan.files
-        .filter((f: { path: string }) => f.path.includes("/agents/"))
-        .map((f: { path: string; content: string }) => ({
-          agent: { id: f.path.split("/").pop()!.replace(".md", ""), name: "", description: "" } as any,
-          relativePath: f.path,
-          absolutePath: `${piAgentsDir}/${f.path.split("/").pop()}`,
-          content: f.content,
-        })),
-      skills: input.plan.files
-        .filter((f: { path: string }) => f.path.includes("/skills/") && !standaloneSkillIds.some((id) => f.path.includes(id)))
-        .map((f: { path: string; content: string }) => ({
-          agent: { id: f.path.split("/").pop()!.replace("/SKILL.md", ""), name: "", description: "" } as any,
-          relativePath: f.path,
-          absolutePath: `${piSkillsDir}/${f.path.split("/").pop()!.replace("/SKILL.md", "")}/SKILL.md`,
-          content: f.content,
-        })),
-      standaloneSkills: input.plan.files
-        .filter((f: { path: string }) => standaloneSkillIds.some((id) => f.path.includes(id)))
-        .map((f: { path: string; content: string }) => ({
-          skillId: f.path.split("/").pop()!.replace("/SKILL.md", ""),
-          relativePath: f.path,
-          absolutePath: `${piSkillsDir}/${f.path.split("/").pop()!.replace("/SKILL.md", "")}/SKILL.md`,
-          content: f.content,
-        })),
-      sddSkillFiles: [],
-      memoryDiagnostics: [],
+      agents: this.#lastNativePlan.agents.map((file) => ({ ...file, absolutePath: `${piAgentsDir}/${file.relativePath.split("/").pop()}` })),
+      skills: this.#lastNativePlan.skills.map((file) => ({ ...file, absolutePath: `${piSkillsDir}/${file.agent.skillId}/SKILL.md` })),
+      standaloneSkills: this.#lastNativePlan.standaloneSkills.map((file) => ({ ...file, absolutePath: `${piSkillsDir}/${file.skillId}/${file.packagePath}` })),
+      sddSkillFiles: this.#lastNativePlan.sddSkillFiles.map((file) => ({ ...file, absolutePath: `${piSkillsDir}/${file.skillId}/SKILL.md` })),
     };
 
     const result = applyPiDeveloperTeamInstall(plan);

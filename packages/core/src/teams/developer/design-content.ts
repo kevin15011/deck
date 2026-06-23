@@ -323,6 +323,12 @@ Ready for Task (\`deck-developer-task\`) to combine with Spec and break into imp
 
 ${GIT_DISCARD_PROTECTION_RULE}
 
+## Frontend External Skill Routing
+
+- When design work has UI scope, use ui-skills-root as the router before choosing narrower UI skills.
+- Use frontend-design for distinctive visual direction, pages, components, or visual identity.
+- Reserve design-lab for substantial redesigns that need variants or structured exploration.
+
 ## Rules
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.

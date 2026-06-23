@@ -283,6 +283,16 @@ Return EXACTLY this format to the orchestrator:
 
 ${GIT_DISCARD_PROTECTION_RULE}
 
+## Frontend External Skill Routing
+
+- For UI-scoped work, use ui-skills-root as the router before choosing narrower UI skills; do not load every downstream UI skill automatically.
+- Use frontend-design for distinctive visual direction or new visual surfaces.
+- Use baseline-ui for spacing, hierarchy, typography, states, and small polish.
+- Use fixing-accessibility for forms, buttons, dialogs, focus, ARIA, and keyboard behavior.
+- Use fixing-motion-performance only when motion, transitions, scrolling, or animation performance are in scope.
+- Use fixing-metadata for new pages/routes that need title/meta, canonical, Open Graph, Twitter cards, JSON-LD, or robots directives.
+- Use playwright-cli for real-browser checks, screenshots, forms, navigation, local state, and UI regression evidence.
+
 ## Rules
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
