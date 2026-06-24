@@ -305,17 +305,17 @@ detect_shell() {
 # ============================================================================
 
 add_to_path() {
-    if [ -z "$SHELL_RC" ] || [ ! -f "$SHELL_RC" ]; then
+    if [ -z "${SHELL_RC:-}" ] || [ ! -f "${SHELL_RC:-}" ]; then
         return
     fi
 
-    if grep -qF -- "$install_dir" "$SHELL_RC" 2>/dev/null; then
+    if grep -qF -- "${INSTALL_DIR:-}" "$SHELL_RC" 2>/dev/null; then
         return
     fi
 
     echo "" >> "$SHELL_RC"
     echo "# Deck installer" >> "$SHELL_RC"
-    echo 'export PATH="$PATH:'"${install_dir}"'"' >> "$SHELL_RC"
+    echo 'export PATH="$PATH:'"${INSTALL_DIR:-}"'"' >> "$SHELL_RC"
 }
 
 # ============================================================================
