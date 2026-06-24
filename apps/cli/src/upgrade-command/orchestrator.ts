@@ -27,7 +27,10 @@
  * REQ-ATM-012, REQ-SYNC-001..007, REQ-RD-010, REQ-RD-011.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, normalize, sep } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import {
   parseReleaseDescriptor,
@@ -83,7 +86,8 @@ import {
   type RunnerSyncResult,
   type RunnerSyncAdapterRegistry,
 } from "./runner-sync.js";
-import { rollbackLatest, RollbackError } from "./rollback.js";
+import { rollbackBackup, RollbackError } from "./rollback.js";
+import { spawnAsync } from "../runtime/process.js";
 import {
   getEnabledPackageInstructionIds,
   buildCapabilityInstructionBundle,
@@ -198,12 +202,19 @@ export function detectInstallKind(argv0?: string): "binary" | "homebrew" | "deve
  * Used by the `replaceBinary` hook in OrchestratorDeps.
  */
 export type ReplaceBinaryInput = {
-  /** Path to the staged asset (already verified checksum). */
+  /**
+   * Path to the binary to install. For archive releases, this is the extracted
+   * executable, not the downloaded archive whose checksum was verified.
+   */
   stagedAssetPath: string;
   /** Current binary path to replace. */
   currentBinaryPath: string;
-  /** Expected SHA-256 of the staged asset. */
-  expectedSha256: string;
+  /** Expected SHA-256 of `stagedAssetPath` for raw binary assets. */
+  expectedSha256?: string;
+  /** Verified source archive path when `stagedAssetPath` was extracted. */
+  verifiedArchivePath?: string;
+  /** Descriptor SHA-256 that was verified against `verifiedArchivePath`. */
+  verifiedArchiveSha256?: string;
   /** Optional backup path for atomic safety. */
   backupPath?: string;
   /** Release item identifier. */
@@ -260,8 +271,9 @@ export type OrchestratorDeps = {
   installKind: "binary" | "homebrew" | "development" | "unknown";
   /**
    * Hook for atomic binary replacement. The orchestrator calls this after
-   * verifying the checksum. Default is a no-op that rejects (safe default
-   * for tests without injected deps).
+   * verifying the descriptor checksum against the staged asset. For archive
+   * releases, the hook receives the extracted binary plus archive verification
+   * metadata, not a binary checksum.
    */
   replaceBinary?: (input: ReplaceBinaryInput) => Promise<ReplaceBinaryResult>;
   /**
@@ -312,30 +324,6 @@ export type OrchestratorResult = {
 // Default deps factory
 // ---------------------------------------------------------------------------
 
-/**
- * Build a default `OrchestratorDeps` from the running process.
- *
- * `readDeckConfig` uses a lazy dynamic import to keep this module loadable
- * in tests that don't have `@deck/core` available at the right path.
- */
-/**
- * Build a default `OrchestratorDeps` from the running process.
- *
- * `readDeckConfig` uses a lazy dynamic import to keep this module loadable
- * in tests that don't have `@deck/core` available at the right path.
- */
-/**
- * Build a default `OrchestratorDeps` from the running process.
- *
- * `readDeckConfig` uses a lazy dynamic import to keep this module loadable
- * in tests that don't have `@deck/core` available at the right path.
- */
-/**
- * Build a default `OrchestratorDeps` from the running process.
- *
- * Uses the real adapter registry and config reader for production.
- * Tests can override these dependencies.
- */
 /**
  * Build a default `OrchestratorDeps` from the running process.
  *
@@ -495,6 +483,80 @@ export const runSelfUpgradeWorkflow = runUpgradeOrchestrator;
  * failure of any step past the backup phase, the orchestrator
  * auto-rollbacks from the backup and returns `status: "rolled_back"`.
  */
+export type StageReleaseAssetsDeps = {
+  resolveStagingDir?: (version: string) => string;
+  downloadAsset?: (url: string, destinationPath: string) => Promise<void>;
+};
+
+export type StageReleaseAssetsResult = {
+  staged: number;
+  skipped: number;
+  files: string[];
+};
+
+/**
+ * Download release assets into the versioned staging directory expected by
+ * the orchestrator (`releases/v<version>/<asset_name>`).
+ */
+export async function stageReleaseAssets(
+  descriptorInput: unknown,
+  deps: StageReleaseAssetsDeps = {},
+): Promise<StageReleaseAssetsResult> {
+  const descriptor = parseReleaseDescriptor(descriptorInput);
+  const baseDeps = deps.resolveStagingDir ? undefined : await buildDefaultOrchestratorDeps();
+  const resolveStagingDir = deps.resolveStagingDir ?? baseDeps?.resolveStagingDir;
+  if (!resolveStagingDir) {
+    throw new OrchestratorError(
+      ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+      "Could not resolve release staging directory.",
+    );
+  }
+
+  const stagingDir = resolveStagingDir(descriptor.version);
+  mkdirSync(stagingDir, { recursive: true });
+
+  const downloadAsset = deps.downloadAsset ?? downloadAssetToFile;
+  const files: string[] = [];
+  let staged = 0;
+  let skipped = 0;
+
+  const binaryItem = selectBinaryItemForPlatform(descriptor, getCurrentPlatformTriple());
+  if (!binaryItem?.url) {
+    return { staged, skipped, files };
+  }
+
+  const destination = join(stagingDir, binaryItem.asset_name);
+  if (existsSync(destination) && computeFileSha256(destination) === binaryItem.sha256) {
+    files.push(destination);
+    skipped += 1;
+    return { staged, skipped, files };
+  }
+
+  await downloadAsset(binaryItem.url, destination);
+  const actual = computeFileSha256(destination);
+  if (actual !== binaryItem.sha256) {
+    throw new OrchestratorError(
+      ORCHESTRATOR_ERROR_CODES.CHECKSUM_MISMATCH,
+      `Checksum mismatch for ${binaryItem.asset_name}: expected ${binaryItem.sha256}, got ${actual}`,
+      { path: destination },
+    );
+  }
+  files.push(destination);
+  staged += 1;
+
+  return { staged, skipped, files };
+}
+
+async function downloadAssetToFile(url: string, destinationPath: string): Promise<void> {
+  mkdirSync(dirname(destinationPath), { recursive: true });
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to download ${url}: HTTP ${response.status}`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  writeFileSync(destinationPath, bytes);
+}
+
 export async function runUpgradeOrchestrator(
   options: OrchestratorOptions,
 ): Promise<OrchestratorResult> {
@@ -546,7 +608,7 @@ export async function runUpgradeOrchestrator(
     const contentItems = selectItemsByKind(descriptor, "content");
 
     // Collect backup targets: binary + content + runner files
-    const baseTargets = collectBackupTargets(binaryItem, contentItems, deps);
+    const baseTargets = collectBackupTargets(binaryItem, contentItems, deps, descriptor.version);
     let runnerTargets: Array<{
       id: string;
       sourcePath: string;
@@ -607,6 +669,7 @@ export async function runUpgradeOrchestrator(
   };
   let contentOutcome: ContentOutcome = { status: "skipped" };
   let manifest: ManifestJsonV2 = readOrDefaultManifest(options.currentVersion);
+  let replaceResultForCleanup: ReplaceBinaryResult | undefined;
 
   try {
     const ordered = orderReleaseItems(descriptor);
@@ -640,7 +703,8 @@ export async function runUpgradeOrchestrator(
         if (item.platform !== getCurrentPlatformTriple()) {
           continue;
         }
-        binaryOutcome = await runBinaryItem(item, state, deps, options.force === true);
+        binaryOutcome = await runBinaryItem(item, state, deps, options.force === true, descriptor.version);
+        replaceResultForCleanup = readState("placeholder").activeOperation?.metadata?.replaceResult as ReplaceBinaryResult | undefined;
         if (binaryOutcome.status === "completed" && binaryOutcome.itemId) {
           manifest = upsertManifestFile(manifest, {
             path: deps.currentBinaryPath,
@@ -727,11 +791,9 @@ export async function runUpgradeOrchestrator(
   // Cleanup inline backup after successful verification
   // This is safe because we have the backup-store copy for rollback
   if (deps.cleanupBinaryBackup) {
-    // Get the backup path from the replace result stored in state
-    const replaceResult = state.activeOperation?.metadata?.replaceResult as ReplaceBinaryResult | undefined;
-    if (replaceResult?.backupPath) {
+    if (replaceResultForCleanup?.backupPath) {
       try {
-        await deps.cleanupBinaryBackup(replaceResult.backupPath);
+        await deps.cleanupBinaryBackup(replaceResultForCleanup.backupPath);
       } catch {
         // Cleanup is best-effort - we still have the backup-store copy
       }
@@ -776,11 +838,143 @@ export async function runUpgradeOrchestrator(
 // Step helpers
 // ---------------------------------------------------------------------------
 
+type ExtractedBinaryArchive = {
+  binaryPath: string;
+  cleanupDir?: string;
+};
+
+function validateTarArchiveContents(archivePath: string): void {
+  const listing = spawnSync("tar", ["-tzf", archivePath], { encoding: "utf-8" });
+  if (listing.status !== 0) {
+    throw new OrchestratorError(
+      ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+      `Failed to inspect binary archive ${archivePath}: ${listing.stderr}`,
+      { path: archivePath },
+    );
+  }
+
+  for (const rawEntry of listing.stdout.split(/\r?\n/)) {
+    const entry = rawEntry.trim();
+    if (entry.length === 0) {
+      continue;
+    }
+    const normalized = normalize(entry);
+    if (isAbsolute(entry) || normalized === ".." || normalized.startsWith(`..${sep}`)) {
+      throw new OrchestratorError(
+        ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+        `Binary archive contains unsafe path entry: ${entry}`,
+        { path: archivePath },
+      );
+    }
+  }
+
+  const verbose = spawnSync("tar", ["-tvzf", archivePath], { encoding: "utf-8" });
+  if (verbose.status !== 0) {
+    throw new OrchestratorError(
+      ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+      `Failed to inspect binary archive entry types ${archivePath}: ${verbose.stderr}`,
+      { path: archivePath },
+    );
+  }
+
+  for (const rawLine of verbose.stdout.split(/\r?\n/)) {
+    const line = rawLine.trimStart();
+    if (line.length === 0) {
+      continue;
+    }
+    const entryType = line[0];
+    if (entryType !== "-" && entryType !== "d") {
+      throw new OrchestratorError(
+        ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+        `Binary archive contains unsupported entry type: ${line}`,
+        { path: archivePath },
+      );
+    }
+  }
+}
+
+function findDeckExecutable(rootDir: string): string | null {
+  const candidates: string[] = [];
+  const visit = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      const entryPath = join(dir, entry);
+      const stats = lstatSync(entryPath);
+      if (stats.isSymbolicLink()) {
+        throw new OrchestratorError(
+          ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+          `Binary archive contains unsupported symlink entry: ${entryPath}`,
+          { path: entryPath },
+        );
+      }
+      if (stats.isDirectory()) {
+        visit(entryPath);
+        continue;
+      }
+      if (!stats.isFile()) {
+        throw new OrchestratorError(
+          ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+          `Binary archive contains unsupported special entry: ${entryPath}`,
+          { path: entryPath },
+        );
+      }
+      if (entry === "deck") {
+        candidates.push(entryPath);
+      }
+    }
+  };
+
+  visit(rootDir);
+  if (candidates.length > 1) {
+    throw new OrchestratorError(
+      ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+      "Binary archive contains multiple deck executables.",
+      { path: rootDir },
+    );
+  }
+  return candidates[0] ?? null;
+}
+
+async function extractStagedBinaryArchive(archivePath: string): Promise<ExtractedBinaryArchive> {
+  if (!archivePath.endsWith(".tar.gz")) {
+    return { binaryPath: archivePath };
+  }
+
+  validateTarArchiveContents(archivePath);
+
+  const extractDir = mkdtempSync(join(tmpdir(), "deck-upgrade-binary-"));
+  try {
+    const result = await spawnAsync("tar", ["-xzf", archivePath, "-C", extractDir]);
+    if (result.exitCode !== 0) {
+      throw new OrchestratorError(
+        ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+        `Failed to extract binary archive ${archivePath}: ${result.stderr}`,
+        { path: archivePath },
+      );
+    }
+
+    const extractedBinary = findDeckExecutable(extractDir);
+    if (extractedBinary === null) {
+      throw new OrchestratorError(
+        ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+        `Binary archive ${archivePath} does not contain a deck executable.`,
+        { path: archivePath },
+      );
+    }
+
+    chmodSync(extractedBinary, 0o755);
+    return { binaryPath: extractedBinary, cleanupDir: extractDir };
+  } catch (err) {
+    rmSync(extractDir, { recursive: true, force: true });
+    throw err;
+  }
+}
+
 async function runBinaryItem(
   item: BinaryReleaseItem,
   state: DeckUpdateState,
   deps: OrchestratorDeps,
   force: boolean,
+  targetVersion: string,
 ): Promise<OrchestratorResult["binary"]> {
   if (deps.installKind === "development") {
     throw new OrchestratorError(
@@ -795,7 +989,7 @@ async function runBinaryItem(
     return { status: "skipped-homebrew", itemId: item.id };
   }
 
-  const staged = deps.resolveStagedAsset(item.asset_name, item.asset_name);
+  const staged = deps.resolveStagedAsset(targetVersion, item.asset_name);
   if (staged === null) {
     // Allow tests to inject a staged asset; for production callers, the
     // upstream download step is responsible for staging.
@@ -804,12 +998,14 @@ async function runBinaryItem(
     }
     throw new OrchestratorError(
       ORCHESTRATOR_ERROR_CODES.NO_BINARY_FOR_PLATFORM,
-      `Staged asset for ${item.asset_name} not found. Did the download step run?`,
+      `Staged asset for ${item.asset_name} not found under release ${targetVersion}. Did the download step run?`,
       { path: item.asset_name },
     );
   }
 
-  // Verify checksum (spec REQ-RD-010).
+  // Verify the staged release asset checksum before any archive extraction.
+  // Binary descriptors point at .tar.gz archives, so the descriptor checksum
+  // belongs to the archive, not the extracted deck executable.
   const actual = computeFileSha256(staged);
   if (actual !== item.sha256) {
     throw new OrchestratorError(
@@ -818,56 +1014,69 @@ async function runBinaryItem(
       { path: staged },
     );
   }
+  const extracted = await extractStagedBinaryArchive(staged);
 
-  // Mark phase=before atomic replace so an interrupted run can detect it.
-  state = setActiveOperation(state, {
-    ...(state.activeOperation ?? {
-      id: "binary",
-      version: "0",
+  try {
+    // Mark phase=before atomic replace so an interrupted run can detect it.
+    state = setActiveOperation(state, {
+      ...(state.activeOperation ?? {
+        id: "binary",
+        version: "0",
+        phase: "binary",
+        startedAt: new Date().toISOString(),
+      }),
       phase: "binary",
-      startedAt: new Date().toISOString(),
-    }),
-    phase: "binary",
-  });
-  writeState(state);
+    });
+    writeState(state);
 
-  // Atomic replace: delegate to replaceBinary hook if provided
-  // The hook is responsible for the actual file replacement.
-  // If no hook provided, skip the replace (tests can inject the hook).
-  if (deps.replaceBinary) {
-    try {
-      const replaceInput: ReplaceBinaryInput = {
-        stagedAssetPath: staged,
-        currentBinaryPath: deps.currentBinaryPath,
-        expectedSha256: item.sha256,
-        itemId: item.id,
-      };
-      const replaceResult = await deps.replaceBinary(replaceInput);
-      // Store replace result for cleanup after verify
-      state = setActiveOperation(state, {
-        ...(state.activeOperation ?? {
-          id: "binary",
-          version: "0",
-          phase: "binary",
-          startedAt: new Date().toISOString(),
-        }),
-        metadata: { replaceResult },
-      });
-      // If the hook reports replaced=false, treat as skipped (e.g., external manager)
-      if (!replaceResult.replaced) {
-        return { status: "skipped_external", itemId: item.id };
+    // Atomic replace: delegate to replaceBinary hook if provided
+    // The hook is responsible for the actual file replacement.
+    // If no hook provided, skip the replace (tests can inject the hook).
+    if (deps.replaceBinary) {
+      try {
+        const replaceInput: ReplaceBinaryInput = {
+          stagedAssetPath: extracted.binaryPath,
+          currentBinaryPath: deps.currentBinaryPath,
+          itemId: item.id,
+        };
+        if (extracted.binaryPath === staged) {
+          replaceInput.expectedSha256 = item.sha256;
+        } else {
+          replaceInput.verifiedArchivePath = staged;
+          replaceInput.verifiedArchiveSha256 = item.sha256;
+        }
+        const replaceResult = await deps.replaceBinary(replaceInput);
+        // Store replace result for cleanup after verify
+        state = setActiveOperation(state, {
+          ...(state.activeOperation ?? {
+            id: "binary",
+            version: "0",
+            phase: "binary",
+            startedAt: new Date().toISOString(),
+          }),
+          metadata: { replaceResult },
+        });
+        writeState(state);
+        // If the hook reports replaced=false, treat as skipped (e.g., external manager)
+        if (!replaceResult.replaced) {
+          return { status: "skipped_external", itemId: item.id };
+        }
+      } catch (replaceErr) {
+        // Rollback on replace failure: restore from backup if available
+        throw new OrchestratorError(
+          ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
+          `Binary replacement failed: ${(replaceErr as Error).message}`,
+          { cause: replaceErr },
+        );
       }
-    } catch (replaceErr) {
-      // Rollback on replace failure: restore from backup if available
-      throw new OrchestratorError(
-        ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED,
-        `Binary replacement failed: ${(replaceErr as Error).message}`,
-        { cause: replaceErr },
-      );
+    }
+
+    return { status: "completed", itemId: item.id };
+  } finally {
+    if (extracted.cleanupDir) {
+      rmSync(extracted.cleanupDir, { recursive: true, force: true });
     }
   }
-
-  return { status: "completed", itemId: item.id };
 }
 
 async function runContentItem(
@@ -913,6 +1122,7 @@ function collectBackupTargets(
   binaryItem: BinaryReleaseItem | undefined,
   contentItems: readonly ContentReleaseItem[],
   deps: OrchestratorDeps,
+  targetVersion: string,
 ): CreateBackupInput["files"] {
   const files: Array<{
     id: string;
@@ -935,7 +1145,7 @@ function collectBackupTargets(
     // tarballs.
     files.push({
       id: `content-${item.id}`,
-      sourcePath: deps.resolveStagedAsset(item.asset_name, item.asset_name) ?? "(none)",
+      sourcePath: deps.resolveStagedAsset(targetVersion, item.asset_name) ?? "(none)",
       owner: "deck",
       kind: "content",
     });
@@ -1104,7 +1314,8 @@ function tryRollback(
     return { success: false, nextState: state, reason: "no backup id recorded" };
   }
   try {
-    const result = rollbackLatest(currentVersion, { force: true });
+    const manifest = readBackupManifest(backupId);
+    const result = rollbackBackup(manifest, currentVersion, { force: true });
     return { success: true, nextState: readOrDefaultState(result.rolledBackTo, "binary"), reason: "ok" };
   } catch (err) {
     return { success: false, nextState: state, reason: (err as Error).message };

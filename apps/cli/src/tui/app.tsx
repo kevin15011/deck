@@ -133,7 +133,7 @@ import {
   type ReleaseCheckState,
 } from "./release-check";
 import type { ReleaseJson } from "../upgrade-command/release-descriptor";
-import { detectInstallKind, runUpgradeOrchestrator } from "../upgrade-command/orchestrator";
+import { detectInstallKind, runUpgradeOrchestrator, stageReleaseAssets } from "../upgrade-command/orchestrator";
 import { getBuildInfo } from "../runtime/build-info";
 import { resolveLatestBackupForCli, rollbackLatest, RollbackError } from "../upgrade-command/rollback";
 import type { BackupManifest } from "../upgrade-command/backup-store";
@@ -1231,6 +1231,7 @@ export function DeckApp() {
         } catch {
           resolvedConfig = getDefaultDeckConfig();
         }
+        await stageReleaseAssets(upgradeDescriptor);
         const result = await runUpgradeOrchestrator({
           descriptor: upgradeDescriptor,
           targetVersion: upgradeDescriptor.version,

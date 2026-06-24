@@ -14,15 +14,18 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { _resetDeckPathCache } from "../../runtime/paths.js";
 import type {
@@ -42,8 +45,10 @@ import {
   OrchestratorError,
   ORCHESTRATOR_ERROR_CODES,
   runUpgradeOrchestrator,
+  stageReleaseAssets,
   type OrchestratorDeps,
 } from "../orchestrator.js";
+import { createBackup } from "../backup-store.js";
 import {
   parseReleaseDescriptor,
   type ReleaseJson,
@@ -167,6 +172,28 @@ function contentOnlyDescriptor(version: string): ReleaseJson {
   };
 }
 
+function binaryOnlyDescriptor(version: string, assetName: string, sha: string): ReleaseJson {
+  return {
+    schemaVersion: 1,
+    version,
+    tag_name: `v${version}`,
+    channel: "stable",
+    published_at: new Date().toISOString(),
+    items: [
+      {
+        id: `binary-linux-x64-v${version}`,
+        kind: "binary",
+        required: true,
+        platform: "linux-x64",
+        asset_name: assetName,
+        url: `https://example.com/${assetName}`,
+        sha256: sha,
+        notes: "",
+      },
+    ],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -257,6 +284,93 @@ function makeConfig(overrides: {
   return base;
 }
 
+function sha256(payload: string | Buffer): string {
+  return require("node:crypto")
+    .createHash("sha256")
+    .update(payload)
+    .digest("hex");
+}
+
+async function withPlatform<T>(platform: NodeJS.Platform, arch: NodeJS.Architecture, fn: () => Promise<T> | T): Promise<T> {
+  const originalPlatform = process.platform;
+  const originalArch = process.arch;
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  Object.defineProperty(process, "arch", { value: arch, configurable: true });
+  try {
+    return await fn();
+  } finally {
+    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
+  }
+}
+
+function createDeckArchive(archivePath: string, payload: string): void {
+  const archiveDir = mkdtempSync(join(tmpdir(), "deck-archive-src-"));
+  try {
+    const deckPath = join(archiveDir, "deck");
+    writeFileSync(deckPath, payload);
+    chmodSync(deckPath, 0o755);
+    const result = spawnSync("tar", ["-czf", archivePath, "-C", archiveDir, "deck"], {
+      encoding: "utf-8",
+    });
+    if (result.status !== 0) {
+      throw new Error(`failed to create test tarball: ${result.stderr}`);
+    }
+  } finally {
+    rmSync(archiveDir, { recursive: true, force: true });
+  }
+}
+
+function createSymlinkDeckArchive(archivePath: string): void {
+  const archiveDir = mkdtempSync(join(tmpdir(), "deck-archive-src-"));
+  try {
+    writeFileSync(join(archiveDir, "target"), "not a deck binary");
+    symlinkSync("target", join(archiveDir, "deck"));
+    const result = spawnSync("tar", ["-czf", archivePath, "-C", archiveDir, "deck"], {
+      encoding: "utf-8",
+    });
+    if (result.status !== 0) {
+      throw new Error(`failed to create symlink test tarball: ${result.stderr}`);
+    }
+  } finally {
+    rmSync(archiveDir, { recursive: true, force: true });
+  }
+}
+
+function createPathTraversalDeckArchive(archivePath: string): void {
+  const archiveDir = mkdtempSync(join(tmpdir(), "deck-archive-src-"));
+  try {
+    writeFileSync(join(archiveDir, "deck"), "traversal");
+    const result = spawnSync(
+      "tar",
+      ["-czf", archivePath, "--transform=s#deck#../deck#", "-C", archiveDir, "deck"],
+      { encoding: "utf-8" },
+    );
+    if (result.status !== 0) {
+      throw new Error(`failed to create traversal test tarball: ${result.stderr}`);
+    }
+  } finally {
+    rmSync(archiveDir, { recursive: true, force: true });
+  }
+}
+
+function createMultipleDeckCandidatesArchive(archivePath: string): void {
+  const archiveDir = mkdtempSync(join(tmpdir(), "deck-archive-src-"));
+  try {
+    writeFileSync(join(archiveDir, "deck"), "first");
+    mkdirSync(join(archiveDir, "nested"), { recursive: true });
+    writeFileSync(join(archiveDir, "nested", "deck"), "second");
+    const result = spawnSync("tar", ["-czf", archivePath, "-C", archiveDir, "deck", "nested/deck"], {
+      encoding: "utf-8",
+    });
+    if (result.status !== 0) {
+      throw new Error(`failed to create multiple-candidate test tarball: ${result.stderr}`);
+    }
+  } finally {
+    rmSync(archiveDir, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Suite
 // ---------------------------------------------------------------------------
@@ -324,21 +438,304 @@ describe("orchestrator", () => {
     };
   }
 
+  // --- Staging --------------------------------------------------------
+
+  describe("stageReleaseAssets", () => {
+    it("downloads assets into the descriptor version staging directory", async () => {
+      const assetName = "deck_v2.0.0_linux-x64.tar.gz";
+      const payload = "v2 payload";
+      const assetSha = sha256(payload);
+
+      const result = await withPlatform("linux", "x64", () => stageReleaseAssets(
+        {
+          schemaVersion: 1,
+          version: "2.0.0",
+          tag_name: "v2.0.0",
+          channel: "stable",
+          published_at: new Date().toISOString(),
+          items: [
+            {
+              id: "binary-linux-x64-v2.0.0",
+              kind: "binary",
+              required: true,
+              platform: "linux-x64",
+              asset_name: assetName,
+              url: `https://example.com/${assetName}`,
+              sha256: assetSha,
+              notes: "",
+            },
+          ],
+        },
+        {
+          resolveStagingDir: (version) => join(stagingDir, `v${version}`),
+          downloadAsset: async (_url, destination) => {
+            writeFileSync(destination, payload);
+          },
+        },
+      ));
+
+      const stagedPath = join(stagingDir, "v2.0.0", assetName);
+      expect(result.staged).toBe(1);
+      expect(result.files).toEqual([stagedPath]);
+      expect(readFileSync(stagedPath, "utf-8")).toBe(payload);
+    });
+
+    it("does not download binary assets for unrelated platforms", async () => {
+      const linuxAsset = "deck_v2.1.0_linux-x64.tar.gz";
+      const darwinAsset = "deck_v2.1.0_darwin-arm64.tar.gz";
+      const linuxPayload = "linux payload";
+      const downloadedUrls: string[] = [];
+
+      const result = await withPlatform("linux", "x64", () => stageReleaseAssets(
+        {
+          schemaVersion: 1,
+          version: "2.1.0",
+          tag_name: "v2.1.0",
+          channel: "stable",
+          published_at: new Date().toISOString(),
+          items: [
+            {
+              id: "binary-linux-x64-v2.1.0",
+              kind: "binary",
+              required: true,
+              platform: "linux-x64",
+              asset_name: linuxAsset,
+              url: `https://example.com/${linuxAsset}`,
+              sha256: sha256(linuxPayload),
+              notes: "",
+            },
+            {
+              id: "binary-darwin-arm64-v2.1.0",
+              kind: "binary",
+              required: true,
+              platform: "darwin-arm64",
+              asset_name: darwinAsset,
+              url: `https://bad.example.com/${darwinAsset}`,
+              sha256: "0".repeat(64),
+              notes: "",
+            },
+          ],
+        },
+        {
+          resolveStagingDir: (version) => join(stagingDir, `v${version}`),
+          downloadAsset: async (url, destination) => {
+            downloadedUrls.push(url);
+            if (url.includes(darwinAsset)) {
+              throw new Error("unrelated platform should not be downloaded");
+            }
+            writeFileSync(destination, linuxPayload);
+          },
+        },
+      ));
+
+      expect(result.staged).toBe(1);
+      expect(downloadedUrls).toEqual([`https://example.com/${linuxAsset}`]);
+      expect(existsSync(join(stagingDir, "v2.1.0", darwinAsset))).toBe(false);
+    });
+
+    it("does not block on optional or non-executed asset URLs", async () => {
+      const binaryAsset = "deck_v2.2.0_linux-x64.tar.gz";
+      const payload = "linux payload";
+      const downloadedUrls: string[] = [];
+
+      const result = await withPlatform("linux", "x64", () => stageReleaseAssets(
+        {
+          schemaVersion: 1,
+          version: "2.2.0",
+          tag_name: "v2.2.0",
+          channel: "stable",
+          published_at: new Date().toISOString(),
+          items: [
+            {
+              id: "binary-linux-x64-v2.2.0",
+              kind: "binary",
+              required: true,
+              platform: "linux-x64",
+              asset_name: binaryAsset,
+              url: `https://example.com/${binaryAsset}`,
+              sha256: sha256(payload),
+              notes: "",
+            },
+            {
+              id: "optional-content-v2.2.0",
+              kind: "content",
+              required: false,
+              asset_name: "deck_v2.2.0_content.tar.gz",
+              url: "https://bad.example.com/content.tar.gz",
+              sha256: "1".repeat(64),
+              notes: "",
+              content_kinds: ["prompts"],
+            },
+            {
+              id: "future-migration-v2.2.0",
+              kind: "migration",
+              required: true,
+              asset_name: "deck_v2.2.0_migration.tar.gz",
+              url: "https://bad.example.com/migration.tar.gz",
+              sha256: "2".repeat(64),
+              notes: "",
+              from_schema_version: 1,
+              to_schema_version: 2,
+            },
+          ],
+        },
+        {
+          resolveStagingDir: (version) => join(stagingDir, `v${version}`),
+          downloadAsset: async (url, destination) => {
+            downloadedUrls.push(url);
+            if (url.includes("bad.example.com")) {
+              throw new Error("non-executed assets should not be downloaded");
+            }
+            writeFileSync(destination, payload);
+          },
+        },
+      ));
+
+      expect(result.staged).toBe(1);
+      expect(downloadedUrls).toEqual([`https://example.com/${binaryAsset}`]);
+    });
+  });
+
   // --- Happy paths ---------------------------------------------------
 
   describe("happy path", () => {
+    it("extracts a staged .tar.gz binary archive before replacement", async () => {
+      const assetName = "deck_v1.2.1_linux-x64.tar.gz";
+      const archivePath = join(stagingDir, assetName);
+      createDeckArchive(archivePath, "v2-extracted-binary");
+      const archiveSha = sha256(readFileSync(archivePath));
+      let replacementPath = "";
+
+      const descriptor = {
+        schemaVersion: 1,
+        version: "1.2.1",
+        tag_name: "v1.2.1",
+        channel: "stable",
+        published_at: new Date().toISOString(),
+        items: [
+          {
+            id: "binary-linux-x64-v1.2.1",
+            kind: "binary",
+            required: true,
+            platform: "linux-x64",
+            asset_name: assetName,
+            url: `https://example.com/${assetName}`,
+            sha256: archiveSha,
+            notes: "",
+          },
+        ],
+      };
+
+      const result = await withPlatform("linux", "x64", () => runUpgradeOrchestrator({
+        descriptor,
+        targetVersion: "1.2.1",
+        currentVersion: "1.0.0",
+        deps: makeDeps({
+          replaceBinary: async (input) => {
+            replacementPath = input.stagedAssetPath;
+            expect(input.stagedAssetPath).not.toBe(archivePath);
+            expect(input.stagedAssetPath.endsWith("deck")).toBe(true);
+            expect(input.expectedSha256).toBeUndefined();
+            expect(input.verifiedArchivePath).toBe(archivePath);
+            expect(input.verifiedArchiveSha256).toBe(archiveSha);
+            expect(readFileSync(input.stagedAssetPath, "utf-8")).toBe("v2-extracted-binary");
+            return { replaced: true };
+          },
+        }),
+      }));
+
+      expect(result.binary.status).toBe("completed");
+      expect(replacementPath).toBeTruthy();
+      expect(existsSync(dirname(replacementPath))).toBe(false);
+      expect(readFileSync(archivePath)).toBeDefined();
+    });
+
+    it("rejects a binary archive containing a symlink deck entry", async () => {
+      const assetName = "deck_v1.2.2_linux-x64.tar.gz";
+      const archivePath = join(stagingDir, assetName);
+      createSymlinkDeckArchive(archivePath);
+      const archiveSha = sha256(readFileSync(archivePath));
+
+      await expect(withPlatform("linux", "x64", () => runUpgradeOrchestrator({
+        descriptor: binaryOnlyDescriptor("1.2.2", assetName, archiveSha),
+        targetVersion: "1.2.2",
+        currentVersion: "1.0.0",
+        deps: makeDeps({
+          replaceBinary: async () => {
+            throw new Error("replaceBinary should not run for unsafe archives");
+          },
+        }),
+      }))).rejects.toThrow(/unsupported entry type|symlink/i);
+    });
+
+    it("rejects a binary archive containing path traversal entries", async () => {
+      const assetName = "deck_v1.2.3_linux-x64.tar.gz";
+      const archivePath = join(stagingDir, assetName);
+      createPathTraversalDeckArchive(archivePath);
+      const archiveSha = sha256(readFileSync(archivePath));
+
+      await expect(withPlatform("linux", "x64", () => runUpgradeOrchestrator({
+        descriptor: binaryOnlyDescriptor("1.2.3", assetName, archiveSha),
+        targetVersion: "1.2.3",
+        currentVersion: "1.0.0",
+        deps: makeDeps({
+          replaceBinary: async () => {
+            throw new Error("replaceBinary should not run for unsafe archives");
+          },
+        }),
+      }))).rejects.toThrow(/unsafe path entry/i);
+    });
+
+    it("rejects a binary archive with multiple deck candidates", async () => {
+      const assetName = "deck_v1.2.4_linux-x64.tar.gz";
+      const archivePath = join(stagingDir, assetName);
+      createMultipleDeckCandidatesArchive(archivePath);
+      const archiveSha = sha256(readFileSync(archivePath));
+
+      await expect(withPlatform("linux", "x64", () => runUpgradeOrchestrator({
+        descriptor: binaryOnlyDescriptor("1.2.4", assetName, archiveSha),
+        targetVersion: "1.2.4",
+        currentVersion: "1.0.0",
+        deps: makeDeps({
+          replaceBinary: async () => {
+            throw new Error("replaceBinary should not run for ambiguous archives");
+          },
+        }),
+      }))).rejects.toThrow(/multiple deck executables/i);
+    });
+
+    it("cleans the inline binary backup after successful verification", async () => {
+      const assetName = "deck_v1.2.5_linux-x64.tar.gz";
+      const archivePath = join(stagingDir, assetName);
+      const inlineBackupPath = join(workDir, "deck.backup");
+      createDeckArchive(archivePath, "v2-extracted-binary");
+      const archiveSha = sha256(readFileSync(archivePath));
+      let cleanedPath = "";
+
+      const result = await withPlatform("linux", "x64", () => runUpgradeOrchestrator({
+        descriptor: binaryOnlyDescriptor("1.2.5", assetName, archiveSha),
+        targetVersion: "1.2.5",
+        currentVersion: "1.0.0",
+        deps: makeDeps({
+          replaceBinary: async () => ({ replaced: true, backupPath: inlineBackupPath }),
+          cleanupBinaryBackup: async (backupPath) => {
+            cleanedPath = backupPath ?? "";
+          },
+        }),
+      }));
+
+      expect(result.binary.status).toBe("completed");
+      expect(cleanedPath).toBe(inlineBackupPath);
+    });
+
     it("completes a binary+content upgrade", async () => {
-      // Compute the SHA-256 of the binary content we'll pre-stage.
       const binaryContent = "v2-binary-payload";
-      const binarySha = require("node:crypto")
-        .createHash("sha256")
-        .update(binaryContent)
-        .digest("hex");
 
       const assetName = "deck_v1.2.0_linux-x64.tar.gz";
-      // Pre-stage the binary at the resolved staging dir with a known checksum.
+      // Pre-stage the binary archive at the resolved staging dir with a known checksum.
       const linuxPath = join(stagingDir, assetName);
-      writeFileSync(linuxPath, binaryContent);
+      createDeckArchive(linuxPath, binaryContent);
+      const binarySha = sha256(readFileSync(linuxPath));
 
       // Build a minimal descriptor that matches the staging.
       const descriptor = {
@@ -384,6 +781,10 @@ describe("orchestrator", () => {
           currentVersion: "1.0.0",
           deps: makeDeps({
             installKind: "binary",
+            resolveStagedAsset: (version: string, name: string) => {
+              const p = join(stagingDir, name);
+              return version === "1.2.0" && existsSync(p) ? p : null;
+            },
             adapterRegistry: makeRegistry([
               makeAdapter({
                 detectDeckInstall: async () => ({ installed: false, managedPaths: [] }),
@@ -398,6 +799,70 @@ describe("orchestrator", () => {
         expect(after.currentVersion).toBe("1.2.0");
         expect(after.lock).toBeUndefined();
         expect(after.activeOperation).toBeUndefined();
+      } finally {
+        Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+      }
+    });
+  });
+
+
+  // --- Rollback targeting ---------------------------------------------
+
+  describe("auto-rollback", () => {
+    it("rolls back from the failed operation backup, not an unrelated newer backup", async () => {
+      const binaryContent = "v2-binary-payload";
+      const assetName = "deck_v1.2.0_linux-x64.tar.gz";
+      const archivePath = join(stagingDir, assetName);
+      createDeckArchive(archivePath, binaryContent);
+      const binarySha = sha256(readFileSync(archivePath));
+
+      const descriptor = {
+        schemaVersion: 1,
+        version: "1.2.0",
+        tag_name: "v1.2.0",
+        channel: "stable",
+        published_at: new Date().toISOString(),
+        items: [
+          {
+            id: "binary-linux-x64-v1.2.0",
+            kind: "binary",
+            required: true,
+            platform: "linux-x64",
+            asset_name: assetName,
+            url: `https://example.com/${assetName}`,
+            sha256: binarySha,
+            notes: "",
+          },
+        ],
+      };
+
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+      Object.defineProperty(process, "arch", { value: "x64", configurable: true });
+
+      try {
+        await runUpgradeOrchestrator({
+          descriptor,
+          targetVersion: "1.2.0",
+          currentVersion: "1.0.0",
+          deps: makeDeps({
+            replaceBinary: async () => {
+              writeFileSync(binaryPath, "BROKEN");
+              createBackup({
+                operationId: "unrelated-newer-op",
+                deckVersionBefore: "9.0.0",
+                reason: "upgrade",
+                files: [{ id: "binary", sourcePath: binaryPath, owner: "deck", kind: "binary" }],
+              });
+              throw new Error("simulated replace failure");
+            },
+          }),
+        });
+        throw new Error("expected orchestrator failure");
+      } catch (err) {
+        expect(err).toBeInstanceOf(OrchestratorError);
+        expect((err as OrchestratorError).code).toBe(ORCHESTRATOR_ERROR_CODES.REPLACE_FAILED);
+        expect(readFileSync(binaryPath, "utf-8")).toBe("v1-binary");
       } finally {
         Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
       }

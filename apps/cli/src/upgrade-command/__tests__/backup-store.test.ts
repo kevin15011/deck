@@ -155,6 +155,48 @@ describe("backup-store", () => {
         expect((err as BackupStoreError).code).toBe(BACKUP_ERROR_CODES.NOT_FOUND);
       }
     });
+
+
+    it("includes failed entry diagnostics when restore partially fails", () => {
+      const source = join(workDir, "binary");
+      writeFileSync(source, "ORIGINAL");
+      const { backupId } = createBackup({
+        operationId: "op-1",
+        deckVersionBefore: "1.0.0",
+        reason: "upgrade",
+        files: [{ id: "binary", sourcePath: source, owner: "deck", kind: "binary" }],
+      });
+
+      const manifest = readBackupManifest(backupId);
+      const badBackupPath = join(workDir, "not-a-file");
+      mkdirSync(badBackupPath, { recursive: true });
+      writeFileSync(
+        join(getBackupDir(backupId), "backup-manifest.json"),
+        JSON.stringify(
+          {
+            ...manifest,
+            entries: manifest.entries.map((entry) =>
+              entry.id === "binary" ? { ...entry, backupPath: badBackupPath } : entry,
+            ),
+          },
+          null,
+          2,
+        ),
+      );
+
+      try {
+        restoreBackup(backupId);
+        throw new Error("expected restore failure");
+      } catch (err) {
+        expect(err).toBeInstanceOf(BackupStoreError);
+        const backupError = err as BackupStoreError;
+        expect(backupError.code).toBe(BACKUP_ERROR_CODES.RESTORE_FAILED);
+        expect(backupError.message).toContain("binary");
+        expect(backupError.message).toContain(source);
+        expect(backupError.failedEntries?.[0]?.entryId).toBe("binary");
+        expect(backupError.failedEntries?.[0]?.sourcePath).toBe(source);
+      }
+    });
   });
 
   // --- Retention -------------------------------------------------------

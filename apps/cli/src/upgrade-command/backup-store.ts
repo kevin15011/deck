@@ -97,12 +97,18 @@ export type BackupErrorCode = (typeof BACKUP_ERROR_CODES)[keyof typeof BACKUP_ER
 export class BackupStoreError extends Error {
   readonly code: BackupErrorCode;
   readonly backupId?: string;
+  readonly failedEntries?: { entryId: string; sourcePath: string; reason: string }[];
 
-  constructor(code: BackupErrorCode, message: string, options?: { backupId?: string; cause?: unknown }) {
+  constructor(
+    code: BackupErrorCode,
+    message: string,
+    options?: { backupId?: string; cause?: unknown; failedEntries?: { entryId: string; sourcePath: string; reason: string }[] },
+  ) {
     super(message);
     this.name = "BackupStoreError";
     this.code = code;
     this.backupId = options?.backupId;
+    this.failedEntries = options?.failedEntries;
     if (options?.cause !== undefined) {
       this.cause = options.cause;
     }
@@ -301,13 +307,13 @@ export function computeFileSha256(filePath: string): string {
 export function restoreBackup(backupId: string): {
   restored: number;
   deleted: number;
-  failed: { entryId: string; reason: string }[];
+  failed: { entryId: string; sourcePath: string; reason: string }[];
 } {
   const manifest = readBackupManifest(backupId);
 
   let restored = 0;
   let deleted = 0;
-  const failed: { entryId: string; reason: string }[] = [];
+  const failed: { entryId: string; sourcePath: string; reason: string }[] = [];
 
   // Reverse so newer changes get unwound first.
   const reversed = [...manifest.entries].reverse();
@@ -328,17 +334,23 @@ export function restoreBackup(backupId: string): {
     } catch (err) {
       failed.push({
         entryId: entry.id,
+        sourcePath: entry.sourcePath,
         reason: (err as Error).message,
       });
     }
   }
 
   if (failed.length > 0) {
+    const details = failed
+      .slice(0, 5)
+      .map((entry) => `${entry.entryId} (${entry.sourcePath}): ${entry.reason}`)
+      .join("; ");
+    const suffix = failed.length > 5 ? `; plus ${failed.length - 5} more` : "";
     throw new BackupStoreError(
       BACKUP_ERROR_CODES.RESTORE_FAILED,
       `Restore partially failed: ${failed.length} of ${reversed.length} entries. ` +
-        `See the backup at ${manifest.backupId}.`,
-      { backupId },
+        `Failures: ${details}${suffix}. See the backup at ${manifest.backupId}.`,
+      { backupId, failedEntries: failed },
     );
   }
 

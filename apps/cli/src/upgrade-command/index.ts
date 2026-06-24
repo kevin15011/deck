@@ -7,19 +7,15 @@
  * Delegates to the shared self-upgrade workflow when a release is available.
  */
 
-import { existsSync } from "node:fs";
-import { argv } from "node:process";
-
 import { getBuildInfo } from "../runtime/build-info.js";
 import {
-  checkUpgradeAvailable,
-  compareVersions,
-  getLatestReleaseInfo,
-  UPGRADE_ERROR_CODES,
+  fetchReleaseDescriptor,
+  type ReleaseFetchResult,
   type ReleaseInfo,
 } from "./github-release.js";
-import { performUpgrade, InstallError } from "./install.js";
-import { runSelfUpgradeWorkflow, detectInstallKind } from "./orchestrator.js";
+import { performUpgrade } from "./install.js";
+import { runSelfUpgradeWorkflow, stageReleaseAssets, type OrchestratorResult } from "./orchestrator.js";
+import type { ReleaseJson } from "./release-descriptor.js";
 
 /**
  * CLI flags for upgrade command.
@@ -29,6 +25,28 @@ export type UpgradeFlags = {
   yes: boolean;
   /** Show version without upgrading */
   version: boolean;
+};
+
+type UpgradeRelease =
+  | { kind: "descriptor"; descriptor: ReleaseJson }
+  | { kind: "legacy"; info: ReleaseInfo };
+
+export type UpgradeCommandDeps = {
+  fetchReleaseDescriptor: () => ReleaseFetchResult;
+  getBuildInfo: typeof getBuildInfo;
+  getBinaryPath: () => string;
+  stageReleaseAssets: typeof stageReleaseAssets;
+  runSelfUpgradeWorkflow: typeof runSelfUpgradeWorkflow;
+  performUpgrade: typeof performUpgrade;
+};
+
+const defaultDeps: UpgradeCommandDeps = {
+  fetchReleaseDescriptor,
+  getBuildInfo,
+  getBinaryPath: () => process.execPath || process.argv[0] || "",
+  stageReleaseAssets,
+  runSelfUpgradeWorkflow,
+  performUpgrade,
 };
 
 /**
@@ -89,48 +107,99 @@ async function confirm(message: string, skip: boolean): Promise<boolean> {
   });
 }
 
+function resolveCliRelease(result: ReleaseFetchResult): UpgradeRelease | null {
+  if (result.kind === "descriptor") {
+    return { kind: "descriptor", descriptor: result.descriptor };
+  }
+
+  if (result.kind === "legacy") {
+    // Only a release with no descriptor metadata is allowed to use the legacy
+    // installer. Invalid or failed descriptor reads are security failures and
+    // must not bypass the hardened workflow.
+    if (result.reason === "missing" && !result.error) {
+      return { kind: "legacy", info: result.info };
+    }
+    throw new Error(result.error ?? `release descriptor ${result.reason}`);
+  }
+
+  return null;
+}
+
+function resolveProgrammaticRelease(value: ReleaseInfo | ReleaseJson | string | undefined): UpgradeRelease | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  if (Array.isArray((value as ReleaseJson).items) && typeof (value as ReleaseJson).tag_name === "string") {
+    return { kind: "descriptor", descriptor: value as ReleaseJson };
+  }
+
+  return { kind: "legacy", info: value as ReleaseInfo };
+}
+
+function releaseVersion(release: UpgradeRelease): string {
+  return release.kind === "descriptor" ? release.descriptor.version : release.info.version;
+}
+
+function handleWorkflowResult(result: OrchestratorResult, version: string): number {
+  if (result.status === "completed") {
+    console.log(`Upgrade to ${version} completed.`);
+    if (result.content.status === "completed") {
+      console.log("Runner content synchronized.");
+    } else if (result.content.status === "partial_failure") {
+      console.log("Runner content partially synced - some runners may have issues.");
+    }
+    return 0;
+  }
+
+  if (result.status === "rolled_back") {
+    console.error("Upgrade failed and was rolled back.");
+    return 1;
+  }
+
+  console.log("Upgrade completed with some runner sync failures.");
+  if (result.content.outcomes) {
+    for (const [runnerId, outcome] of Object.entries(result.content.outcomes)) {
+      if (outcome.status === "failed") {
+        console.error(`  - ${runnerId}: ${outcome.diagnostics.join(", ")}`);
+      }
+    }
+  }
+  return 0;
+}
+
 /**
  * Run the upgrade process.
  */
 export async function runUpgrade(
   argsOrCurrentVersion: string[] | string,
-  latestReleaseOrCurrentVersion?: string,
+  latestReleaseOrCurrentVersion?: ReleaseInfo | ReleaseJson | string,
   currentBinaryPath?: string,
+  deps: UpgradeCommandDeps = defaultDeps,
 ): Promise<number> {
   // Support both call signatures:
   // 1. runUpgrade(["--version", "--yes"]) — CLI/test style with args array
   // 2. runUpgrade(currentVersion, latestRelease, currentBinaryPath) — programmatic style
   let args: string[] = [];
   let currentVersion: string;
-  let latestRelease: ReleaseInfo | undefined;
+  let latestRelease: UpgradeRelease | undefined;
   let binaryPath: string;
 
   if (Array.isArray(argsOrCurrentVersion)) {
-    // CLI/test style: runUpgrade(["--version"])
     args = argsOrCurrentVersion;
-    // For CLI mode, we need to fetch release info
-    currentVersion = "0.0.0"; // Will be fetched from build-info
-    binaryPath = ""; // Will be determined
-    latestRelease = undefined;
+    currentVersion = "0.0.0";
+    binaryPath = "";
   } else {
-    // Programmatic style: runUpgrade(currentVersion, latestRelease, currentBinaryPath)
     currentVersion = argsOrCurrentVersion;
-    // Accept ReleaseInfo or string (for backward compatibility)
-    latestRelease = typeof latestReleaseOrCurrentVersion === "object"
-      ? latestReleaseOrCurrentVersion as ReleaseInfo
-      : undefined;
+    latestRelease = resolveProgrammaticRelease(latestReleaseOrCurrentVersion);
     binaryPath = currentBinaryPath || "";
   }
 
-  // Parse flags early to handle --version
   const flags = parseArgs(args);
 
   if (flags.version) {
-    // Just show version and exit successfully
-    // Try to get version from build-info, fallback to unknown
     try {
-      const { getBuildInfo } = await import("../runtime/build-info.js");
-      const buildInfo = getBuildInfo();
+      const buildInfo = deps.getBuildInfo();
       console.log(`deck version ${buildInfo.version}`);
     } catch {
       console.log("deck version unknown");
@@ -138,25 +207,21 @@ export async function runUpgrade(
     return 0;
   }
 
-  // For CLI mode, fetch release info now
   if (Array.isArray(argsOrCurrentVersion)) {
     try {
-      const { getBuildInfo } = await import("../runtime/build-info.js");
-      const buildInfo = getBuildInfo();
+      const buildInfo = deps.getBuildInfo();
       currentVersion = buildInfo.version;
-
-      // Use process.execPath as binary path (same as orchestrator does)
-      binaryPath = process.execPath || process.argv[0] || "";
+      binaryPath = deps.getBinaryPath();
     } catch {
       currentVersion = "unknown";
       binaryPath = "";
     }
 
     try {
-      const release = await getLatestReleaseInfo();
-      latestRelease = release ?? undefined;
-    } catch {
-      latestRelease = undefined;
+      latestRelease = resolveCliRelease(deps.fetchReleaseDescriptor()) ?? undefined;
+    } catch (err) {
+      console.error(`Release descriptor is invalid or unavailable: ${(err as Error).message}`);
+      return 1;
     }
   }
 
@@ -170,64 +235,38 @@ export async function runUpgrade(
     return 0;
   }
 
-  // If no valid download URL, there's nothing to upgrade
-  if (!latestRelease.downloadUrl) {
-    console.log("No upgrade package available for this platform.");
+  if (latestRelease.kind === "legacy") {
+    if (!latestRelease.info.downloadUrl) {
+      console.log("No upgrade package available for this platform.");
+      return 0;
+    }
+
+    await deps.performUpgrade(
+      {
+        downloadUrl: latestRelease.info.downloadUrl,
+        sha256: latestRelease.info.sha256,
+      },
+      binaryPath,
+    );
+
+    console.log("Restart deck to use the new version.");
     return 0;
   }
 
-  // Detect install kind to decide which path to use
-  const installKind = detectInstallKind(binaryPath);
-
-  // Try to use the shared workflow for all install kinds
-  // The workflow handles skipped-homebrew internally (skips binary replace, allows content sync)
+  const descriptor = latestRelease.descriptor;
   try {
-    const result = await runSelfUpgradeWorkflow({
-      descriptor: latestRelease,
-      targetVersion: latestRelease.version,
-      currentVersion: currentVersion,
+    await deps.stageReleaseAssets(descriptor);
+    const result = await deps.runSelfUpgradeWorkflow({
+      descriptor,
+      targetVersion: descriptor.version,
+      currentVersion,
     });
 
-    if (result.status === "completed") {
-      console.log(`Upgrade to ${latestRelease.version} completed.`);
-      if (result.content.status === "completed") {
-        console.log("Runner content synchronized.");
-      } else if (result.content.status === "partial_failure") {
-        console.log("Runner content partially synced - some runners may have issues.");
-      }
-      return 0;
-    } else if (result.status === "rolled_back") {
-      console.error("Upgrade failed and was rolled back.");
-      return 1;
-    } else if (result.status === "partial_failure") {
-      // Partial failure means binary was replaced but some runners failed
-      console.log("Upgrade completed with some runner sync failures.");
-      if (result.content.outcomes) {
-        for (const [runnerId, outcome] of Object.entries(result.content.outcomes)) {
-          if (outcome.status === "failed") {
-            console.error(`  - ${runnerId}: ${outcome.diagnostics.join(", ")}`);
-          }
-        }
-      }
-      return 0; // Not a complete failure
-    }
+    return handleWorkflowResult(result, releaseVersion(latestRelease));
   } catch (workflowErr) {
-    // Log the error for diagnostics before falling back
-    console.warn(`Workflow failed: ${(workflowErr as Error).message}`);
-    console.log("Falling back to legacy upgrade path...");
+    console.error(`Upgrade workflow failed: ${(workflowErr as Error).message}`);
+    return 1;
   }
-
-  // Legacy path: binary only (fallback for when workflow is unavailable)
-  await performUpgrade(
-    {
-      downloadUrl: latestRelease.downloadUrl,
-      sha256: latestRelease.sha256,
-    },
-    binaryPath
-  );
-
-  console.log("Restart deck to use the new version.");
-  return 0;
 }
 
 /**
