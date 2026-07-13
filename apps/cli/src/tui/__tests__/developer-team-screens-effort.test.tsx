@@ -16,13 +16,18 @@
 import React from "react";
 import { describe, expect, test, beforeEach, mock } from "bun:test";
 import { renderToString } from "ink";
+import { getAdapter } from "../../runner-adapters";
 
-import { AgentModelAssignmentScreen } from "../screens/developer-team-screens";
-import type { RunnerAdapter, RunnerThinkingLevel, RunnerModelInventory } from "@deck/core";
+import {
+  AgentModelAssignmentScreen,
+  AgentModelConfigListScreen,
+  OpenCodeModelDiscoveryScreen,
+} from "../screens/developer-team-screens";
+import type { RunnerAdapter, RunnerThinkingLevel, RunnerModelInventory, RunnerModelInventoryResult } from "@deck/core";
 import {
   buildTuiInventoryFromAdapterInventory,
-  buildTuiInventoryFromOpenCodeCliOutput,
-  resolveAdapterModelInventory,
+  buildTuiInventoryFromDiscoveryResult,
+  resolveOpenCodeModelDiscovery,
 } from "../app";
 
 // ============================================================================
@@ -57,12 +62,12 @@ function createMockOpenCodeAdapter(): RunnerAdapter {
     getModelInventory: (): RunnerModelInventory => {
       return {
         providers: [
-          { id: "openai", displayName: "OpenAI", source: "runner-cache" as const },
+          { id: "openai", displayName: "OpenAI", source: "runner-resolved" as const },
         ],
         modelsByProvider: {
           openai: [
-            { id: "openai/gpt-4.5", providerId: "openai", displayName: "GPT-4.5", supportsReasoning: true, source: "runner-cache" as const },
-            { id: "openai/gpt-5.5", providerId: "openai", displayName: "GPT-5.5", supportsReasoning: true, source: "runner-cache" as const },
+            { id: "openai/gpt-4.5", providerId: "openai", displayName: "GPT-4.5", supportsReasoning: true, source: "runner-resolved" as const },
+            { id: "openai/gpt-5.5", providerId: "openai", displayName: "GPT-5.5", supportsReasoning: true, source: "runner-resolved" as const },
           ],
         },
       };
@@ -116,11 +121,11 @@ function createMockModelChangeAdapter(): RunnerAdapter {
       return modelId === "openai/gpt-4.5" || modelId === "openai/gpt-5.5";
     },
     getModelInventory: (): RunnerModelInventory => ({
-      providers: [{ id: "openai", displayName: "OpenAI", source: "runner-cache" as const }],
+      providers: [{ id: "openai", displayName: "OpenAI", source: "runner-resolved" as const }],
       modelsByProvider: {
         openai: [
-          { id: "openai/gpt-4.5", providerId: "openai", displayName: "GPT-4.5", supportsReasoning: true, source: "runner-cache" as const },
-          { id: "openai/gpt-5.5", providerId: "openai", displayName: "GPT-5.5", supportsReasoning: true, source: "runner-cache" as const },
+          { id: "openai/gpt-4.5", providerId: "openai", displayName: "GPT-4.5", supportsReasoning: true, source: "runner-resolved" as const },
+          { id: "openai/gpt-5.5", providerId: "openai", displayName: "GPT-5.5", supportsReasoning: true, source: "runner-resolved" as const },
         ],
       },
     }),
@@ -154,20 +159,22 @@ describe("T13: Adapter-driven inventory contract (REQ-INV-001, REQ-TUI-001)", ()
 
   test("getModelInventory returns provider model data - deterministic proof", () => {
     const adapter = createMockOpenCodeAdapter();
-    const inventory = adapter.getModelInventory!() as RunnerModelInventory;
+    const inventory = (adapter as unknown as { getModelInventory(): RunnerModelInventory })
+      .getModelInventory();
 
     expect(inventory.providers).toHaveLength(1);
     expect(inventory.providers[0].id).toBe("openai");
-    expect(inventory.providers[0].source).toBe("runner-cache");
+    expect(inventory.providers[0].source).toBe("runner-resolved");
     expect(inventory.modelsByProvider.openai).toHaveLength(2);
   });
 
   test("adapter inventory provides models with source metadata (REQ-INV-002)", () => {
     const adapter = createMockOpenCodeAdapter();
-    const inventory = adapter.getModelInventory!() as RunnerModelInventory;
+    const inventory = (adapter as unknown as { getModelInventory(): RunnerModelInventory })
+      .getModelInventory();
 
     // REQ-INV-002: Adapter-driven inventory source is runner-owned
-    expect(inventory.providers[0].source).toBe("runner-cache");
+    expect(inventory.providers[0].source).toBe("runner-resolved");
   });
 });
 
@@ -452,7 +459,6 @@ describe("Pi compatibility (REQ-COMPAT-001)", () => {
 
   test("Pi adapter has distinct thinking levels from OpenCode", () => {
     // Import real Pi adapter for comparison
-    const { getAdapter } = require("../../runner-adapters");
     const piAdapter = getAdapter("pi") as RunnerAdapter;
     const opencodeAdapter = getAdapter("opencode") as RunnerAdapter;
 
@@ -460,7 +466,7 @@ describe("Pi compatibility (REQ-COMPAT-001)", () => {
     const piLevels = piAdapter.getThinkingLevels("claude-sonnet-4");
     expect(piLevels.length).toBe(6);
 
-    // OpenCode returns from cache (empty in test env)
+    // OpenCode levels are runner-resolved (empty in this test environment).
     const ocLevels = opencodeAdapter.getThinkingLevels("openai/gpt-4.5");
     expect(Array.isArray(ocLevels)).toBe(true);
   });
@@ -473,7 +479,8 @@ describe("Pi compatibility (REQ-COMPAT-001)", () => {
 describe("T13: Adapter-driven inventory is preferred when available (REQ-INV-002)", () => {
   test("adapter inventory provides models with variants", () => {
     const adapter = createMockOpenCodeAdapter();
-    const inventory = adapter.getModelInventory!() as RunnerModelInventory;
+    const inventory = (adapter as unknown as { getModelInventory(): RunnerModelInventory })
+      .getModelInventory();
 
     expect(inventory.providers).toHaveLength(1);
     expect(inventory.modelsByProvider.openai).toHaveLength(2);
@@ -481,10 +488,11 @@ describe("T13: Adapter-driven inventory is preferred when available (REQ-INV-002
 
   test("inventory source is marked as runner-owned", () => {
     const adapter = createMockOpenCodeAdapter();
-    const inventory = adapter.getModelInventory!() as RunnerModelInventory;
+    const inventory = (adapter as unknown as { getModelInventory(): RunnerModelInventory })
+      .getModelInventory();
 
     // REQ-INV-002: Runner-owned source
-    expect(inventory.providers[0].source).toBe("runner-cache");
+    expect(inventory.providers[0].source).toBe("runner-resolved");
   });
 });
 
@@ -507,7 +515,6 @@ describe("No forbidden dependency (REQ-INV-005, REQ-TEST-003)", () => {
 
 describe("Pi model inventory detector regression (REQ-COMPAT-001)", () => {
   test("Pi adapter getThinkingLevels returns fixed levels for known models", () => {
-    const { getAdapter } = require("../../runner-adapters");
     const piAdapter = getAdapter("pi") as RunnerAdapter;
     
     // Pi adapter should return fixed six levels for known models
@@ -518,7 +525,6 @@ describe("Pi model inventory detector regression (REQ-COMPAT-001)", () => {
   });
 
   test("Pi adapter supportsThinking returns true for known models", () => {
-    const { getAdapter } = require("../../runner-adapters");
     const piAdapter = getAdapter("pi") as RunnerAdapter;
     
     // Pi adapter should support thinking for known models
@@ -528,38 +534,137 @@ describe("Pi model inventory detector regression (REQ-COMPAT-001)", () => {
 });
 
 // ============================================================================
-// Test Suite - OpenCode TUI Inventory Prefers Adapter Cache Over CLI Subset
-//
-// User-reported bug: TUI was sourcing models from `opencode models` CLI output
-// (a curated subset) instead of the adapter's `getModelInventory()` (which
-// reads the full configured-provider cache, including models like
-// `openai/gpt-5.3-codex` that are absent from the CLI subset).
-//
-// Covers: REQ-INV-OPENCODE-CACHE, REQ-INV-CLI-FALLBACK
-//
-// These tests directly exercise the module-scope helpers from app.tsx so the
-// adapter-vs-CLI preference contract is provable without spinning up the
-// full DeckApp component.
+// Test Suite - OpenCode TUI Uses Runner-Resolved Inventory\n//\n// Availability and variants come only from the adapter's runner-resolved\n// `opencode models --verbose` inventory. Cache/config metadata may enrich\n// presentation, but never add models or variants.\n//\n// Covers: REQ-INV-001, REQ-TEST-002\n//\n// These tests directly exercise the module-scope helpers from app.tsx so the\n// runner-result mapping contract is provable without spinning up DeckApp.
 // ============================================================================
 
-describe("OpenCode TUI inventory: adapter cache preferred over CLI subset", () => {
+describe("OpenCode TUI discovery states (Group 3)", () => {
+  const runnerInventory: RunnerModelInventory = {
+    providers: [{ id: "plugin", displayName: "Plugin", source: "runner-resolved" }],
+    modelsByProvider: {
+      plugin: [{
+        id: "plugin/model",
+        providerId: "plugin",
+        modelId: "model",
+        displayName: "Plugin Model",
+        variants: ["custom-fast", "custom-deep"],
+        metadataSource: "runner",
+        source: "runner-resolved",
+      }],
+    },
+  };
+
+  test("renders text-based loading, empty, stale, and blocked states with keyboard-reachable Retry and Back", () => {
+    expect(renderToString(<OpenCodeModelDiscoveryScreen cursor={0} state={{ kind: "loading" }} />))
+      .toContain("Reading models from OpenCode");
+
+    const empty = renderToString(<OpenCodeModelDiscoveryScreen cursor={0} state={{ kind: "empty" }} />);
+    expect(empty).toContain("OpenCode reported no available models.");
+    expect(empty).toContain("Retry discovery");
+    expect(empty).toContain("Back");
+    expect(empty.lastIndexOf("❯", empty.indexOf("Retry discovery"))).toBeGreaterThan(-1);
+
+    const stale = renderToString(<OpenCodeModelDiscoveryScreen cursor={0} state={{
+      kind: "stale",
+      discoveredAt: 0,
+      errorMessage: "OpenCode timed out. Retry discovery.",
+    }} />);
+    expect(stale).toContain("Last known OpenCode models (discovered");
+    expect(stale).toContain("changes cannot be applied");
+
+    const blocked = renderToString(<OpenCodeModelDiscoveryScreen cursor={0} state={{
+      kind: "blocked",
+      errorMessage: "OpenCode discovery timed out. Retry discovery.",
+    }} />);
+    expect(blocked).toContain("OpenCode discovery timed out. Retry discovery.");
+    expect(blocked).toContain("opencode models --verbose");
+  });
+
+  test("maps only runner inventory IDs and preserves exact variant order", () => {
+    const ready: RunnerModelInventoryResult = {
+      state: "ready",
+      inventory: runnerInventory,
+      source: "live",
+      discoveredAt: 1,
+      fingerprint: "fresh",
+    };
+    const mapped = buildTuiInventoryFromDiscoveryResult(ready);
+
+    expect(mapped.kind).toBe("ready");
+    if (mapped.kind !== "ready") throw new Error("expected ready discovery state");
+    expect(mapped.inventory.modelsByProvider.plugin?.map((model) => model.id)).toEqual(["plugin/model"]);
+    expect(mapped.inventory.modelsByProvider.plugin?.[0]?.variants).toEqual(["custom-fast", "custom-deep"]);
+  });
+
+  test("uses only a local rescan request and preserves unavailable persisted model and variant labels", async () => {
+    const requests: unknown[] = [];
+    const adapter = {
+      getModelInventory: async (request: unknown) => {
+        requests.push(request);
+        return {
+          state: "ready",
+          inventory: runnerInventory,
+          source: "live",
+          discoveredAt: 1,
+          fingerprint: "fresh",
+        } as RunnerModelInventoryResult;
+      },
+    };
+    await resolveOpenCodeModelDiscovery(adapter, { projectRoot: "/fixture", mode: "rescan" });
+    expect(requests).toEqual([{ projectRoot: "/fixture", mode: "rescan" }]);
+
+    const output = renderToString(
+      <AgentModelConfigListScreen
+        cursor={0}
+        runtime="opencode"
+        modelAssignments={{
+          "deck-developer-orchestrator": "retired/model",
+          "deck-developer-proposal": "plugin/model",
+        }}
+        thinkingAssignments={{ "deck-developer-proposal": "old-variant" }}
+        assignmentStates={{
+          "deck-developer-orchestrator": "model-unavailable",
+          "deck-developer-proposal": "variant-unavailable",
+        }}
+      />,
+    );
+    expect(output).toContain("retired/model · Unavailable model");
+    expect(output).toContain("Variant unavailable: old-variant");
+    expect(output).toContain("plugin/model");
+  });
+
+  test("zero-variant models state that no reasoning choice applies", () => {
+    const output = renderToString(
+      <AgentModelAssignmentScreen
+        cursor={0}
+        agentIndex={0}
+        totalAgents={3}
+        modelId="plugin/no-variants"
+        defaultThinking=""
+        runtime="opencode"
+        thinkingLevels={[]}
+      />,
+    );
+    expect(output).toContain("No reasoning choice applies to this model.");
+  });
+
+
   test("adapter inventory is mapped into the TUI provider/model shape", () => {
-    // Fixture mirrors the configured-provider cache shape read by adapter.getModelInventory():
-    // - openai has gpt-5.3-codex (model present in cache but typically absent from CLI subset)
-    // - anthropic has claude-sonnet-4 (well-known CLI-listed model)
+    // Fixture mirrors a runner-resolved inventory returned by adapter.getModelInventory().
+    // OpenCode may report built-in and custom models with exact runner keys.
+    // The mapping preserves those records without treating cache/auth data as authority.
     const raw: RunnerModelInventory = {
       providers: [
         {
           id: "openai",
           displayName: "OpenAI",
           envVars: ["OPENAI_API_KEY"],
-          source: "runner-cache",
+          source: "runner-resolved",
         },
         {
           id: "anthropic",
           displayName: "Anthropic",
           envVars: ["ANTHROPIC_API_KEY"],
-          source: "runner-cache",
+          source: "runner-resolved",
         },
       ],
       modelsByProvider: {
@@ -569,14 +674,14 @@ describe("OpenCode TUI inventory: adapter cache preferred over CLI subset", () =
             providerId: "openai",
             displayName: "Gpt 5.3 Codex",
             supportsReasoning: true,
-            source: "runner-cache",
+            source: "runner-resolved",
           },
           {
             id: "openai/gpt-5.5",
             providerId: "openai",
             displayName: "Gpt 5.5",
             supportsReasoning: true,
-            source: "runner-cache",
+            source: "runner-resolved",
           },
         ],
         anthropic: [
@@ -585,7 +690,7 @@ describe("OpenCode TUI inventory: adapter cache preferred over CLI subset", () =
             providerId: "anthropic",
             displayName: "Claude Sonnet 4",
             supportsReasoning: true,
-            source: "runner-cache",
+            source: "runner-resolved",
           },
         ],
       },
@@ -598,8 +703,7 @@ describe("OpenCode TUI inventory: adapter cache preferred over CLI subset", () =
     expect(openai.displayName).toBe("OpenAI");
     expect(openai.envVars).toEqual(["OPENAI_API_KEY"]);
 
-    // Critical: openai/gpt-5.3-codex must surface even though it is absent
-    // from the curated CLI subset.
+    // The exact runner-resolved model key must surface unchanged in the TUI.
     const openaiModels = mapped.modelsByProvider["openai"] ?? [];
     expect(openaiModels.map((m) => m.id)).toContain("openai/gpt-5.3-codex");
     expect(openaiModels.find((m) => m.id === "openai/gpt-5.3-codex")?.thinking).toBe(true);
@@ -608,161 +712,6 @@ describe("OpenCode TUI inventory: adapter cache preferred over CLI subset", () =
     expect(anthropicModels.map((m) => m.id)).toContain("anthropic/claude-sonnet-4");
   });
 
-  test("CLI subset keeps models absent from CLI excluded (negative fixture)", () => {
-    // The `opencode models` CLI is a curated subset that omits models like
-    // gpt-5.3-codex. This negative fixture proves the helper preserves that
-    // CLI-side gap (so the adapter-first choice matters).
-    const cliOutput = [
-      "openai/gpt-5.5",
-      "anthropic/claude-sonnet-4",
-    ].join("\n");
-
-    const mapped = buildTuiInventoryFromOpenCodeCliOutput(cliOutput);
-
-    const allIds = Object.values(mapped.modelsByProvider).flat().map((m) => m.id);
-    expect(allIds).toContain("openai/gpt-5.5");
-    expect(allIds).toContain("anthropic/claude-sonnet-4");
-    // gpt-5.3-codex is the bug-report example of a model that is in the cache
-    // but absent from the CLI subset.
-    expect(allIds).not.toContain("openai/gpt-5.3-codex");
-  });
-
-  test("resolveAdapterModelInventory handles synchronous return", async () => {
-    const adapter = {
-      getModelInventory: (): RunnerModelInventory => ({
-        providers: [
-          { id: "openai", displayName: "OpenAI", source: "runner-cache" },
-        ],
-        modelsByProvider: {
-          openai: [
-            {
-              id: "openai/gpt-5.3-codex",
-              providerId: "openai",
-              displayName: "Gpt 5.3 Codex",
-              source: "runner-cache",
-            },
-          ],
-        },
-      }),
-    };
-
-    const result = await resolveAdapterModelInventory(adapter);
-    expect(result).not.toBeNull();
-    expect(result!.providers.map((p) => p.id)).toEqual(["openai"]);
-    expect(result!.modelsByProvider["openai"]?.[0]?.id).toBe("openai/gpt-5.3-codex");
-  });
-
-  test("resolveAdapterModelInventory handles async (Promise) return", async () => {
-    const adapter = {
-      getModelInventory: async (): Promise<RunnerModelInventory> => ({
-        providers: [
-          { id: "openai", displayName: "OpenAI", source: "runner-cache" },
-        ],
-        modelsByProvider: {
-          openai: [
-            {
-              id: "openai/gpt-5.3-codex",
-              providerId: "openai",
-              displayName: "Gpt 5.3 Codex",
-              source: "runner-cache",
-            },
-          ],
-        },
-      }),
-    };
-
-    const result = await resolveAdapterModelInventory(adapter);
-    expect(result).not.toBeNull();
-    expect(result!.modelsByProvider["openai"]?.[0]?.id).toBe("openai/gpt-5.3-codex");
-  });
-
-  test("resolveAdapterModelInventory returns null when adapter has no inventory method (CLI fallback path)", async () => {
-    // Pi adapter does not (currently) expose getModelInventory; the TUI must
-    // gracefully fall back to CLI subset in that case.
-    const adapterWithoutInventory = {
-      runnerId: "pi",
-    };
-
-    const result = await resolveAdapterModelInventory(adapterWithoutInventory);
-    expect(result).toBeNull();
-  });
-
-  test("resolveAdapterModelInventory returns null on adapter throw (CLI fallback path)", async () => {
-    const adapter = {
-      getModelInventory: () => {
-        throw new Error("boom");
-      },
-    };
-
-    const result = await resolveAdapterModelInventory(adapter);
-    expect(result).toBeNull();
-  });
-
-  test("resolveAdapterModelInventory returns null on rejected Promise (CLI fallback path)", async () => {
-    const adapter = {
-      getModelInventory: async () => {
-        throw new Error("boom");
-      },
-    };
-
-    const result = await resolveAdapterModelInventory(adapter);
-    expect(result).toBeNull();
-  });
-
-  test("resolveAdapterModelInventory returns null for null/undefined adapter", async () => {
-    expect(await resolveAdapterModelInventory(null)).toBeNull();
-    expect(await resolveAdapterModelInventory(undefined)).toBeNull();
-    expect(await resolveAdapterModelInventory({})).toBeNull();
-  });
-
-  test("empty adapter inventory triggers CLI fallback shape", () => {
-    // When adapter inventory is empty (no configured providers), the mapped
-    // result has no providers — which is exactly the signal that should
-    // drive the detect function to fall back to `opencode models` CLI.
-    const empty = buildTuiInventoryFromAdapterInventory({
-      providers: [],
-      modelsByProvider: {},
-    });
-    expect(empty.providers).toHaveLength(0);
-    expect(empty.modelsByProvider).toEqual({});
-
-    const missing = buildTuiInventoryFromAdapterInventory(undefined);
-    expect(missing.providers).toHaveLength(0);
-
-    const nullish = buildTuiInventoryFromAdapterInventory(null);
-    expect(nullish.providers).toHaveLength(0);
-  });
-
-  test("buildTuiInventoryFromOpenCodeCliOutput parses `opencode models` stdout shape", () => {
-    const cliOutput = [
-      "openai/gpt-5.5",
-      "openai/gpt-5.5-codex",
-      "anthropic/claude-sonnet-4",
-      "",
-      "  ",
-      "garbage line",
-    ].join("\n");
-
-    const mapped = buildTuiInventoryFromOpenCodeCliOutput(cliOutput);
-
-    expect(mapped.providers.map((p) => p.id).sort()).toEqual(["anthropic", "openai"]);
-    expect(mapped.modelsByProvider["openai"]?.map((m) => m.id).sort()).toEqual([
-      "openai/gpt-5.5",
-      "openai/gpt-5.5-codex",
-    ]);
-    expect(mapped.modelsByProvider["anthropic"]?.[0]?.id).toBe("anthropic/claude-sonnet-4");
-  });
-
-  test("buildTuiInventoryFromOpenCodeCliOutput returns empty for blank/invalid input", () => {
-    expect(buildTuiInventoryFromOpenCodeCliOutput("")).toEqual({
-      providers: [],
-      modelsByProvider: {},
-    });
-    expect(buildTuiInventoryFromOpenCodeCliOutput("\n\n  \n")).toEqual({
-      providers: [],
-      modelsByProvider: {},
-    });
-  });
 });
 
 // ============================================================================
@@ -891,7 +840,7 @@ describe("T14: Unsupported/no-variant model hides effort picker via thinkingLeve
       />,
     );
 
-    expect(output).toContain("Thinking not supported");
+    expect(output).toContain("No reasoning choice applies to this model.");
     // No effort options should be rendered.
     expect(output).not.toContain("thinking high");
     expect(output).not.toContain("thinking low");

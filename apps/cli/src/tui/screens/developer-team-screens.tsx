@@ -174,7 +174,7 @@ export function ModelProviderSelectionScreen({ cursor, providers, runtime = "pi"
   return (
     <Box flexDirection="column">
       <Text bold>Select a {runtimeLabel} provider</Text>
-      <Text dimColor>Providers come from {runtimeLabel} settings and detected credentials.</Text>
+      <Text dimColor>{runtime === "opencode" ? "Providers come from the active OpenCode runner." : `Providers come from ${runtimeLabel} settings and detected credentials.`}</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
@@ -201,7 +201,7 @@ export function ModelSelectionScreen({ cursor, provider, models, runtime = "pi" 
   return (
     <Box flexDirection="column">
       <Text bold>Select a model for {provider.displayName}</Text>
-      <Text dimColor>Models are loaded from {runtimeLabel} when available; defaults are fallback only.</Text>
+      <Text dimColor>{runtime === "opencode" ? "Models and reasoning variants come from the active OpenCode runner." : `Models are loaded from ${runtimeLabel} when available; defaults are fallback only.`}</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
@@ -238,7 +238,7 @@ type AgentModelAssignmentScreenProps = {
   agentIndex: number;
   totalAgents: number;
   modelId: string;
-  defaultThinking: PiThinkingLevel | OpenCodeThinkingLevel;
+  defaultThinking: string;
   supportsThinking?: boolean;
   runtime?: "pi" | "opencode";
   /**
@@ -272,9 +272,6 @@ export function AgentModelAssignmentScreen({
   const agent = DEVELOPER_TEAM_AGENTS[agentIndex];
   const progress = `${agentIndex + 1}/${totalAgents}`;
   const fallbackLevels = runtime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
-  // Model-specific levels (when provided) override the runtime-default constant.
-  // An empty model-specific array means the model has no discrete effort variants
-  // in the cache; we treat that as "not supported" to fail closed.
   const hasModelSpecificLevels = thinkingLevels !== undefined;
   const effectiveLevels = hasModelSpecificLevels ? thinkingLevels : fallbackLevels;
   const effectiveSupportsThinking = hasModelSpecificLevels ? effectiveLevels.length > 0 : supportsThinking;
@@ -300,6 +297,8 @@ export function AgentModelAssignmentScreen({
             />
           </Box>
         </>
+      ) : runtime === "opencode" && hasModelSpecificLevels ? (
+        <Text color="yellow">No reasoning choice applies to this model.</Text>
       ) : (
         <Text color="yellow">Thinking not supported by this provider/model; using off.</Text>
       )}
@@ -310,36 +309,44 @@ export function AgentModelAssignmentScreen({
 type AgentModelConfigListScreenProps = {
   cursor: number;
   modelAssignments: Record<string, string>;
-  thinkingAssignments: Record<string, PiThinkingLevel>;
+  thinkingAssignments: Record<string, string>;
+  assignmentStates?: Readonly<Record<string, "available" | "model-unavailable" | "variant-unavailable" | "unverified">>;
+  discoveryState?: "stale";
   dashboardContext?: DeveloperTeamDashboardContext;
   runtime?: "pi" | "opencode";
 };
 
-export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingAssignments, dashboardContext, runtime = "pi" }: AgentModelConfigListScreenProps) {
-  // T8: Only show thinking hint when model supports reasoning
+export function AgentModelConfigListScreen({
+  cursor,
+  modelAssignments,
+  thinkingAssignments,
+  assignmentStates = {},
+  discoveryState,
+  dashboardContext,
+  runtime = "pi",
+}: AgentModelConfigListScreenProps) {
   const agentItems = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const assigned = modelAssignments[agent.id];
     const thinking = thinkingAssignments[agent.id];
+    const assignmentState = assignmentStates[agent.id];
 
     let hint: string;
     if (!assigned) {
       hint = "not configured";
+    } else if (assignmentState === "model-unavailable") {
+      hint = `${assigned} · Unavailable model`;
+    } else if (assignmentState === "variant-unavailable") {
+      hint = `Variant unavailable: ${thinking ?? "unset"} · ${assigned}`;
+    } else if (assignmentState === "unverified") {
+      hint = `${assigned}${thinking ? ` · thinking ${thinking}` : ""} · Availability unverified`;
     } else {
-      // Check if model supports thinking - only show thinking hint if supported
       const supportsThinking = runtime === "opencode"
         ? supportsThinkingForOpenCodeModel(assigned)
         : supportsThinkingForModel(assigned as any);
-
-      hint = supportsThinking && thinking
-        ? `${assigned} · thinking ${thinking}`
-        : assigned;
+      hint = supportsThinking && thinking ? `${assigned} · thinking ${thinking}` : assigned;
     }
 
-    return {
-      id: agent.id,
-      label: agent.displayName,
-      hint,
-    };
+    return { id: agent.id, label: agent.displayName, hint };
   });
 
   const items = [...agentItems, { id: "finish", label: "Finish configuration", hint: dashboardContext?.returnLabel ?? "" }];
@@ -348,9 +355,61 @@ export function AgentModelConfigListScreen({ cursor, modelAssignments, thinkingA
     <Box flexDirection="column">
       <Text bold>Select an agent to configure</Text>
       <Text dimColor>Current assignments are shown. Choose an agent to change its model and reasoning level.</Text>
+      {discoveryState === "stale" ? <Text color="yellow">Last known OpenCode models are shown; changes are disabled until Retry discovery succeeds.</Text> : null}
       {dashboardContext?.source === "dashboard" ? <DashboardContextSummary context={dashboardContext} /> : null}
       <Box marginTop={1}>
         <MenuList cursor={cursor} items={items} />
+      </Box>
+    </Box>
+  );
+}
+
+
+type OpenCodeModelDiscoveryScreenProps = {
+  cursor: number;
+  state:
+    | { kind: "loading" }
+    | { kind: "ready" }
+    | { kind: "empty"; discoveredAt?: number }
+    | { kind: "stale"; discoveredAt: number; errorMessage: string }
+    | { kind: "blocked"; errorMessage: string };
+};
+
+/** Terminal-readable async discovery status with keyboard-native Retry and Back items. */
+export function OpenCodeModelDiscoveryScreen({ cursor, state }: OpenCodeModelDiscoveryScreenProps) {
+  if (state.kind === "loading") {
+    return (
+      <Box flexDirection="column">
+        <Text bold>Reading models from OpenCode…</Text>
+        <Text dimColor>Existing assignments are preserved while discovery runs.</Text>
+      </Box>
+    );
+  }
+
+  if (state.kind === "ready") {
+    return <Text>OpenCode models are ready.</Text>;
+  }
+
+  const isEmpty = state.kind === "empty";
+  const isStale = state.kind === "stale";
+  const title = isEmpty
+    ? "OpenCode reported no available models."
+    : isStale
+      ? `Last known OpenCode models (discovered ${new Date(state.discoveredAt).toLocaleString()})`
+      : "OpenCode model discovery is unavailable.";
+
+  return (
+    <Box flexDirection="column">
+      <Text color={isEmpty || isStale ? "yellow" : "red"} bold>{title}</Text>
+      {isStale ? <Text color="yellow">{state.errorMessage}</Text> : null}
+      {isStale ? <Text>Assignments can be inspected, but changes cannot be applied until a rescan succeeds.</Text> : null}
+      {state.kind === "blocked" ? <Text color="red">{state.errorMessage}</Text> : null}
+      {state.kind === "blocked" ? <Text>Check `opencode models --verbose`, then retry discovery.</Text> : null}
+      <Box marginTop={1}>
+        <MenuList cursor={cursor} items={[
+          { id: "retry", label: "Retry discovery", hint: "local rescan" },
+          { id: "back", label: "Back" },
+        ]} />
       </Box>
     </Box>
   );

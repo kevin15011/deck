@@ -1,0 +1,6 @@
+opencode/openai/gpt-5.3-codex
+{
+  "providerID": "different-provider",
+  "name": "Malformed provider mismatch",
+  "variants": []
+}

@@ -13,6 +13,7 @@ import {
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { getStandaloneSkill, STANDALONE_SKILLS } from "@deck/core/skills/external";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
+import { createOpenCodeRunnerAdapter } from "./runner-adapter";
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import type {
   AdaptiveMemoryProvider,
@@ -184,6 +185,7 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     };
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configModelOverrides: configOverrides,
+      changedAgentIds: ["deck-developer-orchestrator"],
     });
 
     expect(plan.agentEntries["deck-developer-orchestrator"].model).toBe("anthropic/claude-sonnet-4-20250514");
@@ -191,17 +193,19 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     expect(plan.agentEntries["deck-developer-explorer"].model).toBeUndefined();
   });
 
-  test("explicit reasoningEffort override flows to agent entries with model", () => {
+  test("changed OpenCode model and variant overrides use the native variant field", () => {
     // REQ-MC-005: Explicit reasoning override works when model is also set
     const configOverrides = { "deck-developer-orchestrator": "anthropic/claude-sonnet-4" };
     const reasoningOverrides = { "deck-developer-orchestrator": "high" as const };
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configModelOverrides: configOverrides,
       reasoningEffortOverrides: reasoningOverrides,
+      changedAgentIds: ["deck-developer-orchestrator"],
     });
 
     expect(plan.agentEntries["deck-developer-orchestrator"].model).toBe("anthropic/claude-sonnet-4");
-    expect(plan.agentEntries["deck-developer-orchestrator"].reasoningEffort).toBe("high");
+    expect(plan.agentEntries["deck-developer-orchestrator"].variant).toBe("high");
+    expect(plan.agentEntries["deck-developer-orchestrator"].reasoningEffort).toBeUndefined();
     // Other agents should not have reasoningEffort
     expect(plan.agentEntries["deck-developer-explorer"].reasoningEffort).toBeUndefined();
   });
@@ -213,6 +217,7 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     };
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configModelOverrides: configOverrides,
+      changedAgentIds: ["deck-developer-orchestrator", "deck-developer-apply-backend"],
     });
 
     expect(plan.agentEntries["deck-developer-orchestrator"].model).toBe("anthropic/claude-sonnet-4-20250514");
@@ -230,11 +235,53 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configModelOverrides: configOverrides,
       reasoningEffortOverrides: reasoningOverrides,
+      changedAgentIds: ["deck-developer-orchestrator"],
     });
 
     const orchestrator = plan.agentEntries["deck-developer-orchestrator"];
     expect(orchestrator.model).toBe("anthropic/claude-sonnet-4");
-    expect(orchestrator.reasoningEffort).toBe("high");
+    expect(orchestrator.variant).toBe("high");
+    expect(orchestrator.reasoningEffort).toBeUndefined();
+  });
+
+
+  test("writes a changed OpenCode assignment with native variant only", () => {
+    const agentId = "deck-developer-orchestrator";
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      configModelOverrides: { [agentId]: "anthropic/claude-sonnet-4" },
+      reasoningEffortOverrides: { [agentId]: "custom-fast" },
+      changedAgentIds: [agentId],
+    });
+
+    expect(plan.agentEntries[agentId]).toMatchObject({
+      model: "anthropic/claude-sonnet-4",
+      variant: "custom-fast",
+    });
+    expect(plan.agentEntries[agentId]?.reasoningEffort).toBeUndefined();
+  });
+
+  test("persists a runner-only non-canonical variant as the exact native key", () => {
+    const projectRoot = createTempProject();
+    const agentId = "deck-developer-orchestrator";
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+        configDir,
+        configModelOverrides: { [agentId]: "runner-plugin/runner-only-model" },
+        reasoningEffortOverrides: { [agentId]: "exact/runner-key" },
+        changedAgentIds: [agentId],
+      });
+
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      const config = JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8"));
+      expect(config.agent[agentId]).toMatchObject({
+        model: "runner-plugin/runner-only-model",
+        variant: "exact/runner-key",
+      });
+      expect(config.agent[agentId].reasoningEffort).toBeUndefined();
+    } finally {
+      cleanup(projectRoot);
+    }
   });
 
   test("prompt references use {file:/absolute/path} format", () => {
@@ -1347,5 +1394,24 @@ describe("Developer Team language policy propagation to OpenCode install-plan sk
         `${skill.agent.id} skill contains known leak`,
       ).not.toContain("herramienta");
     }
+  });
+});
+
+describe("adapter plan binding isolation", () => {
+  test("applies two independently built plans in reverse order without crossing assignments", async () => {
+    const root = createTempProject();
+    const configDir = createTempConfigDir(root);
+    try {
+      const inventory = { state: "ready" as const, source: "live" as const, discoveredAt: 1, fingerprint: "fixture", inventory: { providers: [{ id: "openai", displayName: "openai", source: "runner-resolved" as const }], modelsByProvider: { openai: [{ id: "openai/exact", providerId: "openai", modelId: "exact", displayName: "exact", variants: [], metadataSource: "runner" as const, source: "runner-resolved" as const }, { id: "openai/zero", providerId: "openai", modelId: "zero", displayName: "zero", variants: [], metadataSource: "runner" as const, source: "runner-resolved" as const }] } } };
+      const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir, inventoryDiscovery: async () => inventory }) as any;
+      await adapter.getModelInventory({ projectRoot: root });
+      const changedAgentIds = ["deck-developer-orchestrator"];
+      const planA = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, modelAssignments: { "deck-developer-orchestrator": "openai/exact" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
+      const planB = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, modelAssignments: { "deck-developer-orchestrator": "openai/zero" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
+      await adapter.applyDeveloperTeamInstall({ projectRoot: root, plan: planB });
+      expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-developer-orchestrator"].model).toBe("openai/zero");
+      await adapter.applyDeveloperTeamInstall({ projectRoot: root, plan: planA });
+      expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-developer-orchestrator"].model).toBe("openai/exact");
+    } finally { cleanup(root); }
   });
 });

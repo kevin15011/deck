@@ -23,7 +23,7 @@ export type AgentEntry = {
   description: string;
   mode: "primary" | "subagent";
   model?: string;
-  reasoningEffort?: "low" | "medium" | "high";
+  reasoningEffort?: string;
   /** Prompt reference in OpenCode's {file:/absolute/path} format */
   prompt: string;
   tools?: Record<string, boolean>;

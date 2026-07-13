@@ -423,7 +423,7 @@ function readAssignments(input: import("@deck/core").RunnerModelAssignmentReadIn
   const result = DEVELOPER_TEAM_AGENTS.map((agent) => ({
     agentId: agent.id,
     modelId: config.modelAssignments[agent.id] ?? "",
-    reasoning: config.thinkingAssignments[agent.id],
+    reasoning: config.thinkingAssignments[agent.id] as import("@deck/core").ReasoningLevel | undefined,
   }));
 
   return { assignments: result };
@@ -438,7 +438,7 @@ function resolveAssignment(input: import("@deck/core").RunnerModelResolveInput):
   return {
     agentId: input.agentId,
     modelId: input.modelId ?? configuredModel ?? "",
-    reasoning: input.reasoning ?? configuredReasoning,
+    reasoning: input.reasoning ?? configuredReasoning as import("@deck/core").ReasoningLevel | undefined,
   };
 }
 
@@ -682,7 +682,7 @@ function resolveAgentModel(agentId: string, overrides?: import("@deck/core").Mod
   return {
     agentId,
     modelId: overrides?.modelId ?? configuredModel ?? "",
-    reasoning: overrides?.reasoning ?? configuredReasoning,
+    reasoning: overrides?.reasoning ?? configuredReasoning as import("@deck/core").ReasoningLevel | undefined,
   };
 }
 

@@ -8,7 +8,7 @@
  */
 
 import { homedir } from "node:os";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync, existsSync, promises as fs } from "node:fs";
 
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
@@ -46,6 +46,10 @@ import type {
   NextScreen,
   RunnerDeckInstallInput,
   RunnerDeckInstallStatus,
+  RunnerModelDiscoveryRequest,
+  RunnerModelInventoryResult,
+  RunnerModelAssignmentValidationInput,
+  RunnerModelAssignmentValidationResult,
 } from "@deck/core";
 
 import { getModelCatalog } from "@deck/core";
@@ -72,11 +76,6 @@ import { buildOpenCodeInstallationPlan, OPENCODE_INSTALLABLE_TOOLS, type Install
 import { getTeamsForEnvironment } from "./team-catalog";
 import {
   readOpenCodeDeveloperTeamModelConfigAssignments,
-  OPENCODE_THINKING_LEVELS,
-  supportsThinkingForOpenCodeModel,
-  getDefaultThinkingForOpenCodeModel,
-  resolveThinkingForOpenCodeModel,
-  type OpenCodeThinkingLevel,
 } from "./model-config";
 import {
   buildOpenCodeDeveloperTeamInstallPlan,
@@ -90,7 +89,10 @@ import {
 import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
 import { getUserFacingOpenCodeCapability, OPENCODE_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
 import type { CapabilityCatalogEntry } from "@deck/core";
-import { loadModelInventory } from "./model-inventory";
+import { discoverModelInventory } from "./model-inventory";
+import { LastKnownGoodStore, ModelInventoryCache, buildDiscoveryFingerprint, buildLastKnownGoodScopeKey } from "./model-inventory-cache";
+import { nodeOpenCodeCommandRunner, OPENCODE_DISCOVERY_TIMEOUT_MS, type ModelDiscoveryFileSystem, type OpenCodeCommandRunner } from "./opencode-models-cli";
+import { collectOpenCodeDiscoveryContext } from "./model-discovery-context";
 import type { RunnerModelInventory, RunnerModelEntry } from "@deck/core";
 
 // ---------------------------------------------------------------------------
@@ -102,42 +104,125 @@ const OPENCODE_ENVIRONMENT_IDS = ["opencode-development"] as const;
 /**
  * Options for constructing an OpenCode runner adapter.
  *
- * `inventoryLoader` is primarily a testing seam: production code leaves it
- * undefined so the adapter reads the real OpenCode cache via
- * `loadModelInventory()`. Tests inject a fixed inventory to assert
+ * `inventoryDiscovery` is primarily a testing seam: production code leaves it
+ * undefined so the adapter uses runner-resolved discovery. Tests inject a fixed inventory to assert
  * model-specific effort-level behavior without touching the filesystem.
  */
 export type OpenCodeRunnerAdapterOptions = {
-  /** Override the model inventory source (defaults to loadModelInventory()). */
-  inventoryLoader?: () => RunnerModelInventory;
+  /** Injected runner-only discovery for deterministic tests. */
+  inventoryDiscovery?: (request: RunnerModelDiscoveryRequest) => Promise<RunnerModelInventoryResult>;
+  /** Partial node-boundary replacement used only to hermetically prove default production composition. */
+  productionDiscoveryDependencies?: Partial<OpenCodeProductionDiscoveryDependencies>;
+  /** Isolated install root for adapter integration tests; production retains OpenCode's config directory. */
+  developerTeamConfigDir?: string;
 };
 
-function createOpenCodeRunnerAdapter(options?: OpenCodeRunnerAdapterOptions): RunnerAdapter {
-  return new OpenCodeRunnerAdapterImpl(options);
+export type DiscoveryTimers = { setTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout>; clearTimeout(timer: ReturnType<typeof setTimeout>): void };
+export type OpenCodeProductionDiscoveryDependencies = {
+  commandRunner: OpenCodeCommandRunner;
+  fs: ModelDiscoveryFileSystem;
+  now: () => number;
+  timers: DiscoveryTimers;
+  env: Readonly<Record<string, string | undefined>>;
+  homeDir: string;
+  xdgConfigHome: string;
+  xdgDataHome: string;
+  xdgCacheHome: string;
+  resolveExecutable: (command: string, env: Readonly<Record<string, string | undefined>>) => Promise<string>;
+  resolveWorkspaceRoot: (projectRoot: string) => Promise<string>;
+  resolvePluginEntry: (reference: string, fromDirectory: string) => Promise<string | null>;
+};
+
+function nodeProductionDiscoveryDependencies(): OpenCodeProductionDiscoveryDependencies {
+  const fileSystem: ModelDiscoveryFileSystem = {
+    readFile: (path) => fs.readFile(path, "utf8"),
+    stat: async (path) => { const value = await fs.stat(path); return { size: value.size, mtimeMs: value.mtimeMs, ctimeMs: value.ctimeMs, mode: value.mode, dev: value.dev, ino: value.ino, isFile: () => value.isFile(), isDirectory: () => value.isDirectory() }; },
+    realpath: (path) => fs.realpath(path),
+    readdir: (path) => fs.readdir(path),
+    mkdir: async (path, mode) => { await fs.mkdir(path, { recursive: true, mode }); },
+    writeFile: (path, body, mode) => fs.writeFile(path, body, { mode }),
+    rename: (from, to) => fs.rename(from, to),
+    chmod: (path, mode) => fs.chmod(path, mode),
+    lstat: async (path) => { const value = await fs.lstat(path); return { mode: value.mode, isSymbolicLink: () => value.isSymbolicLink() }; },
+    unlink: (path) => fs.unlink(path),
+  };
+  return {
+    commandRunner: nodeOpenCodeCommandRunner, fs: fileSystem, now: Date.now,
+    timers: { setTimeout: (callback, delay) => setTimeout(callback, delay), clearTimeout: (timer) => clearTimeout(timer) },
+    env: process.env, homeDir: homedir(), xdgConfigHome: process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), xdgDataHome: process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), xdgCacheHome: process.env.XDG_CACHE_HOME || join(homedir(), ".cache"),
+    resolveExecutable: async (_command, env) => {
+      const found = (env.PATH?.split(":") ?? []).map((directory) => join(directory, "opencode")).find((candidate) => existsSync(candidate));
+      if (!found) throw new Error("opencode not found");
+      return fileSystem.realpath(found);
+    },
+    resolveWorkspaceRoot: async (projectRoot) => projectRoot,
+    resolvePluginEntry: async (reference, fromDirectory) => reference.startsWith("file:") ? join(fromDirectory, reference.slice(5)) : reference.startsWith(".") ? join(fromDirectory, reference) : null,
+  };
+}
+
+/** The only production composition point; tests inject every external boundary without changing behavior. */
+export function createDefaultOpenCodeInventoryDiscovery(overrides: Partial<OpenCodeProductionDiscoveryDependencies> = {}): (request: RunnerModelDiscoveryRequest) => Promise<RunnerModelInventoryResult> {
+  const dependencies = { ...nodeProductionDiscoveryDependencies(), ...overrides } as OpenCodeProductionDiscoveryDependencies;
+  const cache = new ModelInventoryCache({ now: dependencies.now });
+  const lkgByScope = new Map<string, LastKnownGoodStore>();
+  return async (request) => {
+    const startedAt = dependencies.now();
+    const deadlineAt = startedAt + OPENCODE_DISCOVERY_TIMEOUT_MS;
+    const controller = new AbortController();
+    let candidate: { fingerprint: string; snapshot: { inventory: RunnerModelInventory; discoveredAt: number } } | undefined;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<RunnerModelInventoryResult>((resolve) => {
+      deadlineTimer = dependencies.timers.setTimeout(() => {
+        controller.abort();
+        const error = { code: "timeout" as const, message: "OpenCode model discovery timed out. Try again.", retryable: true };
+        resolve(candidate ? { state: "stale", inventory: candidate.snapshot.inventory, source: "last-known-good", discoveredAt: candidate.snapshot.discoveredAt, fingerprint: candidate.fingerprint, error } : { state: "blocked", inventory: null, source: "none", error });
+      }, OPENCODE_DISCOVERY_TIMEOUT_MS);
+    });
+    const work = (async (): Promise<RunnerModelInventoryResult> => {
+      const executable = await dependencies.resolveExecutable("opencode", dependencies.env);
+      const versionResult = await dependencies.commandRunner.run({ file: executable, args: ["--version"], cwd: request.projectRoot, timeoutMs: Math.min(2_000, Math.max(0, deadlineAt - dependencies.now())), maxStdoutBytes: 4_096, maxStderrBytes: 4_096, signal: controller.signal });
+      const version = versionResult.exitCode === 0 && !versionResult.terminationReason ? versionResult.stdout.trim().slice(0, 1_024) : null;
+      const context = await collectOpenCodeDiscoveryContext({ projectRoot: request.projectRoot, executable, version, env: dependencies.env, homeDir: dependencies.homeDir, xdgConfigHome: dependencies.xdgConfigHome, xdgDataHome: dependencies.xdgDataHome, fs: dependencies.fs, resolveWorkspaceRoot: dependencies.resolveWorkspaceRoot, resolvePluginEntry: dependencies.resolvePluginEntry });
+      const fingerprint = await buildDiscoveryFingerprint(context);
+      const scopeKey = buildLastKnownGoodScopeKey({ runnerRealPath: context.runner.realPath, projectRoot: context.scope.projectRoot, workspaceRoot: context.scope.workspaceRoot });
+      let lkg = lkgByScope.get(scopeKey);
+      if (!lkg) { lkg = new LastKnownGoodStore({ fs: dependencies.fs, now: dependencies.now }, join(dependencies.xdgCacheHome, "deck", "opencode-model-inventory"), scopeKey); lkgByScope.set(scopeKey, lkg); }
+      const snapshot = await lkg.read(fingerprint);
+      if (snapshot) candidate = { fingerprint, snapshot };
+      return discoverModelInventory({ projectRoot: request.projectRoot, mode: request.mode, cache, fingerprint, context, deadlineAt, signal: controller.signal, preloadedLastKnownGood: snapshot, readLastKnownGood: (key) => lkg!.read(key), writeLastKnownGood: (value) => lkg!.write(value.fingerprint, value.inventory, value.discoveredAt), dependencies: { commandRunner: dependencies.commandRunner, resolveExecutable: dependencies.resolveExecutable, env: dependencies.env, now: dependencies.now } });
+    })();
+    // Observe late work after the public race so it cannot become an unhandled rejection or a late commit.
+    void work.catch(() => undefined);
+    try { return await Promise.race([work, timeout]); }
+    catch { return { state: "blocked", inventory: null, source: "none", error: { code: "command-failed", message: "OpenCode model discovery failed. Run opencode models --verbose to check the runner.", retryable: true } }; }
+    finally { if (deadlineTimer) dependencies.timers.clearTimeout(deadlineTimer); }
+  };
+}
+
+export function createOpenCodeRunnerAdapter(options?: OpenCodeRunnerAdapterOptions): RunnerAdapter {
+  // Group 0 defines the core async port. Group 2 owns implementing it against
+  // OpenCode discovery; retain this legacy facade until that adapter work lands.
+  return new OpenCodeRunnerAdapterImpl(options) as unknown as RunnerAdapter;
 }
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
-class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
+class OpenCodeRunnerAdapterImpl {
   readonly runnerId: RunnerId = "opencode";
   readonly displayName: string = "OpenCode";
   readonly environmentIds: readonly RunnerEnvironmentId[] = [...OPENCODE_ENVIRONMENT_IDS];
 
-  // Store last native plan for backup/restore operations
-  // buildDeveloperTeamInstallPlan stores it here, backupDeveloperTeamFiles uses it
-  #lastNativePlan: OpenCodeDeveloperTeamInstallPlan | null = null;
-
-  // Optional inventory loader (testing seam). When undefined, getModelInventory()
-  // falls back to loadModelInventory(), which reads the real OpenCode cache.
-  #inventoryLoader: (() => RunnerModelInventory) | null;
-
-  // Cached model inventory (populated lazily by getModelInventory()).
-  #cachedInventory: RunnerModelInventory | null = null;
+  #inventoryDiscovery: (request: RunnerModelDiscoveryRequest) => Promise<RunnerModelInventoryResult>;
+  #latestReady: Extract<RunnerModelInventoryResult, { state: "ready" }> | null = null;
+  #planBindings = new WeakMap<RunnerDeveloperTeamInstallPlan, { nativePlan: OpenCodeDeveloperTeamInstallPlan; validation: { changedAgentIds: readonly string[]; fingerprint?: string; modelAssignments: DeveloperTeamModelAssignments; thinkingAssignments: DeveloperTeamThinkingAssignments } }>();
+  #developerTeamConfigDir?: string;
 
   constructor(options?: OpenCodeRunnerAdapterOptions) {
-    this.#inventoryLoader = options?.inventoryLoader ?? null;
+    this.#developerTeamConfigDir = options?.developerTeamConfigDir;
+    this.#inventoryDiscovery = options?.inventoryDiscovery
+      ?? createDefaultOpenCodeInventoryDiscovery(options?.productionDiscoveryDependencies);
   }
 
   // -------------------------------------------------------------------------
@@ -561,83 +646,40 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
     return config.thinkingAssignments as DeveloperTeamThinkingAssignments;
   }
 
-  getThinkingLevels(modelId?: string): readonly RunnerThinkingLevel[] {
-    // No modelId requested: return the canonical OpenCode thinking levels.
-    // This preserves the existing contract (used by callers that want the
-    // full level set without targeting a specific model) and keeps the
-    // "no modelId" path independent of cache availability.
-    if (!modelId) {
-      return OPENCODE_THINKING_LEVELS as readonly RunnerThinkingLevel[];
-    }
-
-    // A specific model was requested. Look it up in the inventory and return
-    // its model-specific effort variants (e.g. ["high","max"] or
-    // ["none","low","medium","high","xhigh"]) populated from the cache's
-    // reasoning_options. Fail closed (return empty) when:
-    //   - the inventory cannot be loaded, OR
-    //   - the model is absent from the inventory, OR
-    //   - the model has no discrete effort variants (e.g. budget_tokens-only
-    //     models, or models whose reasoning_options omitted an effort entry).
-    // Returning empty — rather than the generic 4-level constant — prevents
-    // offering effort levels the model does not actually support.
-    try {
-      const inventory = this.getModelInventory();
-      const model = findModelInInventory(inventory, modelId);
-      if (model && model.variants && model.variants.length > 0) {
-        // Variants come straight from the cache (already validated/deduped).
-        // Cast because RunnerThinkingLevel is a closed union of canonical
-        // levels, but real per-model effort values include provider-specific
-        // tokens ("max", "none", "xhigh", ...). Runtime treats them as
-        // strings; the closed type is a known pre-existing limitation.
-        return model.variants as readonly RunnerThinkingLevel[];
-      }
-      return [];
-    } catch {
-      // Inventory unavailable: fail closed rather than guessing levels.
-      return [];
-    }
+  getThinkingLevels(modelId?: string): readonly string[] {
+    if (!modelId || !this.#latestReady) return [];
+    return findModelInInventory(this.#latestReady.inventory, modelId)?.variants ?? [];
   }
 
   supportsThinking(modelId: string): boolean {
-    // Check cache-derived variants first: if getThinkingLevels returns non-empty
-    // variants, the cache confirms this model supports reasoning effort.
-    const variants = this.getThinkingLevels(modelId);
-    if (variants.length > 0) {
-      return true;
-    }
-
-    // Variants are empty. Determine whether the model is in the cache:
-    // - In cache but empty variants → fail closed (cache says no effort levels)
-    // - Not in cache → fall back to catalog via supportsThinkingForOpenCodeModel
-    const inventory = this.getModelInventory();
-    let inCache = false;
-    for (const models of Object.values(inventory.modelsByProvider)) {
-      if (models.some((m) => m.id === modelId)) {
-        inCache = true;
-        break;
-      }
-    }
-
-    if (inCache) {
-      // Model is in the runner cache but has no discrete effort variants.
-      // Fail closed rather than using catalog confirmation.
-      return false;
-    }
-
-    // Model not in cache — fall back to catalog (acceptable for non-cache models).
-    return supportsThinkingForOpenCodeModel(modelId);
+    return this.getThinkingLevels(modelId).length > 0;
   }
 
   // -------------------------------------------------------------------------
   // Model inventory (configured providers only)
   // -------------------------------------------------------------------------
 
-  getModelInventory(): RunnerModelInventory {
-    if (this.#cachedInventory) {
-      return this.#cachedInventory;
+  async getModelInventory(request: RunnerModelDiscoveryRequest): Promise<RunnerModelInventoryResult> {
+    const result = await this.#inventoryDiscovery(request);
+    if (result.state === "ready") this.#latestReady = result;
+    return result;
+  }
+
+
+  async validateModelAssignments(input: RunnerModelAssignmentValidationInput): Promise<RunnerModelAssignmentValidationResult> {
+    const result = await this.getModelInventory({ projectRoot: input.projectRoot, mode: "prefer-cache" });
+    if (result.state !== "ready" || (input.expectedFingerprint && input.expectedFingerprint !== result.fingerprint)) {
+      return { valid: false, issues: input.changedAgentIds.map((agentId) => ({ agentId, code: "inventory-not-ready", message: "OpenCode availability must be refreshed before changing this assignment." })) };
     }
-    this.#cachedInventory = this.#inventoryLoader ? this.#inventoryLoader() : loadModelInventory();
-    return this.#cachedInventory;
+    const issues: import("@deck/core").RunnerModelAssignmentIssue[] = [];
+    for (const agentId of input.changedAgentIds) {
+      const modelId = input.modelAssignments[agentId];
+      const variant = input.thinkingAssignments[agentId];
+      const model = modelId ? findModelInInventory(result.inventory, modelId) : undefined;
+      if (!model) issues.push({ agentId, code: "model-unavailable", message: "The selected model is unavailable in the active OpenCode runner." });
+      else if (variant && !model.variants?.includes(variant)) issues.push({ agentId, code: "variant-unavailable", message: "The selected reasoning variant is unavailable for the model." });
+    }
+    return issues.length ? { valid: false, issues } : { valid: true, fingerprint: result.fingerprint };
   }
 
   // -------------------------------------------------------------------------
@@ -647,54 +689,56 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
     const modelAssignments = input.modelAssignments ?? {};
     const thinkingAssignments = input.thinkingAssignments ?? {};
-
     const standaloneSkills = input.standaloneSkills ?? getStandaloneSkills().map(({ skillId }) => {
       const bundle = getStandaloneSkill(skillId);
       return { skillId, body: bundle.SKILL, files: bundle.files };
     });
-
     const nativePlan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
       configModelOverrides: modelAssignments,
       reasoningEffortOverrides: thinkingAssignments,
+      changedAgentIds: input.changedAgentIds,
       memoryProvider: input.memoryProvider as any,
       supportedMemoryProviderIds: ["engram", "supermemory"],
       capabilityInstructions: input.capabilityInstructions,
       standaloneSkills,
     });
-
-    // Store native plan for backup/restore operations
-    this.#lastNativePlan = nativePlan;
-
-    // Map to generic RunnerDeveloperTeamInstallPlan
-    // deck-init and deck-onboard are now proper agents in the skills array
     const files: Array<{ path: string; content: string; kind: "skill" | "standalone-skill"; skillId: string; packagePath: string }> = [
-      ...nativePlan.skills.map((s) => ({ path: s.relativePath, content: s.content, kind: "skill" as const, skillId: s.agent.skillId, packagePath: "SKILL.md" })),
-      ...nativePlan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content, kind: "standalone-skill" as const, skillId: s.skillId, packagePath: s.packagePath })),
+      ...nativePlan.skills.map((skill) => ({ path: skill.relativePath, content: skill.content, kind: "skill" as const, skillId: skill.agent.skillId, packagePath: "SKILL.md" })),
+      ...nativePlan.standaloneSkills.map((skill) => ({ path: skill.relativePath, content: skill.content, kind: "standalone-skill" as const, skillId: skill.skillId, packagePath: skill.packagePath })),
     ];
-
-    return { files };
+    const plan: RunnerDeveloperTeamInstallPlan = { files };
+    this.#planBindings.set(plan, {
+      nativePlan,
+      validation: {
+        changedAgentIds: [...(input.changedAgentIds ?? [])],
+        fingerprint: input.validatedInventoryFingerprint,
+        modelAssignments: { ...modelAssignments },
+        thinkingAssignments: { ...thinkingAssignments },
+      },
+    });
+    return plan;
   }
 
   async applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
-    // Use the native plan directly from buildDeveloperTeamInstallPlan instead of reconstructing.
-    // This ensures verifyDeveloperTeamInstall sees the exact same content that was applied.
-    if (!this.#lastNativePlan) {
-      throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
+    const binding = this.#planBindings.get(input.plan);
+    if (!binding) {
+      throw new Error("The supplied developer-team plan was not built by this adapter instance.");
     }
-
-    const configDir = join(homedir(), ".config", "opencode");
-
-    // Use stored native plan - it has the complete content (frontmatter, skillBody, etc.)
-    // that was generated by buildOpenCodeDeveloperTeamInstallPlan
-    const nativePlan: OpenCodeDeveloperTeamInstallPlan = {
-      ...this.#lastNativePlan,
-      projectRoot: input.projectRoot,
-    };
-
+    if (binding.validation.changedAgentIds.length) {
+      const validation = await this.validateModelAssignments({
+        projectRoot: input.projectRoot,
+        modelAssignments: binding.validation.modelAssignments,
+        thinkingAssignments: binding.validation.thinkingAssignments,
+        changedAgentIds: binding.validation.changedAgentIds,
+        expectedFingerprint: binding.validation.fingerprint,
+      });
+      if (!validation.valid) throw new Error(validation.issues.map((issue) => issue.message).join(" "));
+    }
+    const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
+    const nativePlan: OpenCodeDeveloperTeamInstallPlan = { ...binding.nativePlan, projectRoot: input.projectRoot };
     const result: OpenCodeDeveloperTeamApplyResult = applyOpenCodeDeveloperTeamInstall(nativePlan, { configDir });
-
     return {
-      results: result.results.map((r) => ({ agentId: r.agentId, kind: r.kind, status: r.status })),
+      results: result.results.map((item) => ({ agentId: item.agentId, kind: item.kind, status: item.status })),
       changedCount: result.changedCount,
       unchangedCount: result.unchangedCount,
     };
@@ -805,10 +849,9 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   backupDeveloperTeamFiles(plan: unknown): unknown {
-    if (!this.#lastNativePlan) {
-      throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
-    }
-    return backupDeveloperTeamFiles(this.#lastNativePlan);
+    const binding = this.#planBindings.get(plan as RunnerDeveloperTeamInstallPlan);
+    if (!binding) throw new Error("The supplied developer-team plan was not built by this adapter instance.");
+    return backupDeveloperTeamFiles(binding.nativePlan);
   }
 
   rollbackDeveloperTeamFiles(backup: unknown): void {
@@ -820,14 +863,12 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   verifyDeveloperTeamInstall(plan: unknown): { valid: boolean; diagnostics: readonly string[] } {
-    if (!this.#lastNativePlan) {
-      throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
-    }
-    const result = verifyOpenCodeDeveloperTeamInstall(this.#lastNativePlan);
-    // Flatten issues from agentResults and skillResults into diagnostics
+    const binding = this.#planBindings.get(plan as RunnerDeveloperTeamInstallPlan);
+    if (!binding) throw new Error("The supplied developer-team plan was not built by this adapter instance.");
+    const result = verifyOpenCodeDeveloperTeamInstall(binding.nativePlan);
     const diagnostics = [
-      ...result.agentResults.flatMap((r) => r.issues),
-      ...result.skillResults.flatMap((r) => r.issues),
+      ...result.agentResults.flatMap((entry) => entry.issues),
+      ...result.skillResults.flatMap((entry) => entry.issues),
     ];
     return { valid: result.valid, diagnostics };
   }
@@ -837,11 +878,12 @@ class OpenCodeRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   resolveThinking(modelId: string, existingAssignment?: string): string | undefined {
-    return resolveThinkingForOpenCodeModel(modelId, existingAssignment as any);
+    const variants = this.getThinkingLevels(modelId);
+    return existingAssignment && variants.includes(existingAssignment) ? existingAssignment : undefined;
   }
 
-  getDefaultThinking(modelId: string): string {
-    return getDefaultThinkingForOpenCodeModel(modelId);
+  getDefaultThinking(modelId: string): string | undefined {
+    return this.getThinkingLevels(modelId)[0];
   }
 
   // -------------------------------------------------------------------------
@@ -959,34 +1001,10 @@ function findModelInInventory(
   inventory: RunnerModelInventory,
   modelId: string,
 ): RunnerModelEntry | undefined {
-  const providerIds = Object.keys(inventory.modelsByProvider);
-
-  // 1. Exact id match.
-  for (const providerId of providerIds) {
-    const models = inventory.modelsByProvider[providerId];
-    if (!models) continue;
-    for (const model of models) {
-      if (model.id === modelId) {
-        return model;
-      }
-    }
+  for (const models of Object.values(inventory.modelsByProvider)) {
+    const exact = models.find((model) => model.id === modelId);
+    if (exact) return exact;
   }
-
-  // 2. Suffix match for raw (unprefixed) model IDs.
-  if (!modelId.includes("/")) {
-    for (const providerId of providerIds) {
-      const models = inventory.modelsByProvider[providerId];
-      if (!models) continue;
-      for (const model of models) {
-        const slashIdx = model.id.lastIndexOf("/");
-        const suffix = slashIdx >= 0 ? model.id.slice(slashIdx + 1) : model.id;
-        if (suffix === modelId) {
-          return model;
-        }
-      }
-    }
-  }
-
   return undefined;
 }
 
@@ -999,5 +1017,3 @@ export const openCodeRunnerAdapter: RunnerAdapter = createOpenCodeRunnerAdapter(
 // ---------------------------------------------------------------------------
 // Factory export (for AdapterRegistry registration)
 // ---------------------------------------------------------------------------
-
-export { createOpenCodeRunnerAdapter };

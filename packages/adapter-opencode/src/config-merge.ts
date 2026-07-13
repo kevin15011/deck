@@ -123,7 +123,15 @@ export function mergeConfig(
 
   // Inject agent entries under deck-developer-* keys only (replace-by-key)
   for (const [key, entry] of Object.entries(agentEntries)) {
-    merged.agent[key] = entry;
+    const previous = merged.agent[key] ?? ({} as AgentEntry);
+    const next: AgentEntry = { ...previous, ...entry };
+    // A native variant is a changed OpenCode assignment. Migrate just that
+    // agent away from legacy reasoningEffort; untouched agents retain fields.
+    if (Object.prototype.hasOwnProperty.call(entry, "variant")) {
+      delete next.reasoningEffort;
+      if (entry.variant === "") delete next.variant;
+    }
+    merged.agent[key] = next;
   }
 
   // Ensure plugin array exists

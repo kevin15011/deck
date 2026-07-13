@@ -1,281 +1,185 @@
-/**
- * Unit tests for the OpenCode runner adapter's model inventory and thinking levels surface.
- * Tests getModelInventory() and getThinkingLevels() per Task 15 and REQ-INV-002.
- *
- * Covers the model-specific effort-level fix: getThinkingLevels(modelId) looks
- * up the model in the inventory and returns its per-model effort variants
- * (populated from the cache's reasoning_options), failing closed (empty)
- * for unsupported models rather than returning a generic constant.
- */
+import { describe, expect, test } from "bun:test";
+import { createDefaultOpenCodeInventoryDiscovery, createOpenCodeRunnerAdapter } from "./runner-adapter";
+import type { RunnerModelInventoryResult } from "@deck/core";
 
-import { describe, expect, it } from "bun:test";
-import { createOpenCodeRunnerAdapter } from "./runner-adapter";
-import type {
-  RunnerAdapter,
-  RunnerModelInventory,
-  RunnerModelEntry,
-  RunnerModelSource,
-} from "@deck/core";
-
-/**
- * `RunnerAdapter` does not declare `getModelInventory` (it is an extra method
- * on `OpenCodeRunnerAdapterImpl`). This type re-adds it so tests can call it
- * without per-site non-null assertions. The runtime object always provides it.
- */
-type AdapterWithInventory = RunnerAdapter & {
-  getModelInventory(): RunnerModelInventory;
+const ready: Extract<RunnerModelInventoryResult, { state: "ready" }> = {
+  state: "ready", source: "live", discoveredAt: 1, fingerprint: "fresh", inventory: {
+    providers: [{ id: "openai", displayName: "openai", source: "runner-resolved" }],
+    modelsByProvider: { openai: [{ id: "openai/exact", providerId: "openai", modelId: "exact", displayName: "exact", variants: ["CaseSensitive"], metadataSource: "runner", source: "runner-resolved" }, { id: "openai/zero", providerId: "openai", modelId: "zero", displayName: "zero", variants: [], metadataSource: "runner", source: "runner-resolved" }] },
+  },
 };
 
-/** Build an adapter, optionally injecting an inventory for testing. */
-function makeAdapter(inventory?: RunnerModelInventory): AdapterWithInventory {
-  return createOpenCodeRunnerAdapter(
-    inventory ? { inventoryLoader: () => inventory } : undefined,
-  ) as AdapterWithInventory;
-}
-
-/**
- * Build a minimal RunnerModelInventory with the given models grouped by provider.
- */
-function inventoryWith(
-  ...models: Array<{
-    id: string;
-    providerId: string;
-    displayName?: string;
-    variants?: readonly string[];
-  }>
-): RunnerModelInventory {
-  const modelsByProvider: Record<string, RunnerModelEntry[]> = {};
-  for (const m of models) {
-    if (!modelsByProvider[m.providerId]) {
-      modelsByProvider[m.providerId] = [];
-    }
-    const entry: RunnerModelEntry = {
-      id: m.id,
-      providerId: m.providerId,
-      displayName: m.displayName ?? m.id,
-      variants: m.variants,
-      source: "runner-cache" as RunnerModelSource,
-    };
-    modelsByProvider[m.providerId].push(entry);
-  }
-  return {
-    providers: Object.keys(modelsByProvider).map((id) => ({
-      id,
-      displayName: id,
-      source: "runner-cache" as RunnerModelSource,
-    })),
-    modelsByProvider,
+function productionFakes() {
+  let runner = "/fixture/bin/opencode";
+  let workspace = "/fixture";
+  let configMtime = 1;
+  let authMtime = 1;
+  let pluginMtime = 1;
+  const env: Record<string, string | undefined> = { OPENAI_API_KEY: "one", PATH: "/fixture/bin" };
+  let config = '{"providers":{"openai":{"env":"OPENAI_API_KEY","model":"gpt-4.1"}},"plugins":["./plugin.ts"]}';
+  const writes: string[] = [];
+  let verboseCalls = 0;
+  const fs = {
+    realpath: async (path: string) => path,
+    stat: async (path: string) => ({ size: 1, mtimeMs: path.endsWith("auth.json") ? authMtime : path.endsWith("plugin.ts") ? pluginMtime : path.endsWith("opencode.json") ? configMtime : 1, ctimeMs: 1, mode: path.includes("opencode-model-inventory") ? 0o700 : 0o600, isFile: () => !path.endsWith("inventory"), isDirectory: () => path.endsWith("inventory") }),
+    readFile: async (path: string) => path.endsWith("opencode.json") ? config : path.endsWith("plugin.ts") ? "export const plugin = 'private';" : (() => { throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: "ENOENT" }); })(),
+    readdir: async () => [], mkdir: async () => {}, writeFile: async (path: string) => { writes.push(path); }, rename: async () => {}, chmod: async () => {}, lstat: async () => ({ mode: 0o600, isSymbolicLink: () => false }), unlink: async () => {},
   };
+  const commandRunner = { run: async (request: { args: readonly string[] }) => {
+    if (request.args[0] === "--version") return { exitCode: 0, signal: null, stdout: "1.17.18", stderr: "" };
+    verboseCalls++;
+    return { exitCode: 0, signal: null, stdout: 'openai/exact\n{"providerID":"openai","variants":{"Exact":{}}}', stderr: "" };
+  } };
+  return { fakes: { commandRunner, fs, now: () => 1_000, env, homeDir: "/fixture/home", xdgConfigHome: "/fixture/config", xdgDataHome: "/fixture/data", xdgCacheHome: "/fixture/cache", resolveExecutable: async () => runner, resolveWorkspaceRoot: async () => workspace, resolvePluginEntry: async (reference: string, from: string) => reference.startsWith(".") ? `${from}/${reference.slice(2)}` : null }, writes, calls: () => verboseCalls, mutate: { runner: (value: string) => { runner = value; }, workspace: (value: string) => { workspace = value; }, config: () => { configMtime++; }, configContent: (value: string) => { config = value; }, auth: () => { authMtime++; }, plugin: () => { pluginMtime++; }, env: (value: Record<string, string | undefined>) => { for (const key of Object.keys(env)) delete env[key]; Object.assign(env, value); } } };
 }
 
-describe("opencode / getModelInventory()", () => {
-  it("returns a RunnerModelInventory object", () => {
-    const adapter = makeAdapter();
-    const inventory = adapter.getModelInventory();
-    expect(inventory).toBeDefined();
-    expect(typeof inventory).toBe("object");
-    expect(Array.isArray(inventory.providers) || inventory.providers === undefined).toBe(true);
-    expect(typeof inventory.modelsByProvider === "object").toBe(true);
+describe("OpenCode adapter dynamic inventory", () => {
+  test("uses the default production composition for safe invalidation and runner/project LKG scope", async () => {
+    const proof = productionFakes();
+    const adapter = createOpenCodeRunnerAdapter({ productionDiscoveryDependencies: proof.fakes });
+    const get = (projectRoot = "/fixture/project") => adapter.getModelInventory?.({ projectRoot });
+    await get(); expect(proof.calls()).toBe(1);
+    proof.mutate.config(); await get(); expect(proof.calls()).toBe(2);
+    proof.mutate.auth(); await get(); expect(proof.calls()).toBe(3);
+    proof.mutate.plugin(); await get(); expect(proof.calls()).toBe(4);
+    proof.mutate.workspace("/fixture/workspace-b"); await get(); expect(proof.calls()).toBe(5);
+    proof.mutate.runner("/fixture/bin/opencode-b"); await get(); expect(proof.calls()).toBe(6);
+    await get("/fixture/project-b"); expect(proof.calls()).toBe(7);
+    proof.mutate.env({ OPENAI_API_KEY: "two", PATH: "/fixture/bin", UNRELATED: "changed" }); await get("/fixture/project-b");
+    expect(proof.calls()).toBe(7);
+    proof.mutate.configContent('{"providers":{"custom-provider":{"env":"OPENAI_API_KEY","model":"gpt-4.2","options":{"token":"secret"}}},"plugins":["./plugin-b.ts"],"controlPath":"/fixture/alternate"}');
+    await get("/fixture/project-b"); expect(proof.calls()).toBe(8);
+    proof.mutate.env({ PATH: "/fixture/bin", UNRELATED: "changed" }); await get("/fixture/project-b");
+    expect(proof.calls()).toBe(9);
+    proof.mutate.env({ PATH: "/fixture/bin", UNRELATED: "another-change" }); await get("/fixture/project-b");
+    expect(proof.calls()).toBe(9);
+
+    proof.mutate.configContent('{"providers":{"custom-provider":{"options":{"baseURL":"https://one.example","bearer":"secret-one"}}}}');
+    await get("/fixture/project-b"); expect(proof.calls()).toBe(10);
+    proof.mutate.configContent('{"providers":{"custom-provider":{"options":{"baseURL":"https://two.example","bearer":"secret-one"}}}}');
+    await get("/fixture/project-b"); expect(proof.calls()).toBe(11);
+    proof.mutate.configContent('{"providers":{"custom-provider":{"options":{"baseURL":"https://two.example","bearer":"secret-two"}}}}');
+    await get("/fixture/project-b"); expect(proof.calls()).toBe(11);
+
+    proof.mutate.env({ PATH: "/fixture/bin", OPENCODE_CONFIG_CONTENT: '{"providers":{"virtual":{"env":"CUSTOM_PROVIDER_TOKEN"}},"plugins":["./virtual-plugin.ts"]}' });
+    await get("/fixture/project-b"); expect(proof.calls()).toBe(12);
+    proof.mutate.env({ PATH: "/fixture/bin", CUSTOM_PROVIDER_TOKEN: "present", OPENCODE_CONFIG_CONTENT: '{"providers":{"virtual":{"env":"CUSTOM_PROVIDER_TOKEN"}},"plugins":["./virtual-plugin.ts"]}' });
+    await get("/fixture/project-b"); expect(proof.calls()).toBe(13);
+    proof.mutate.env({ PATH: "/fixture/bin", CUSTOM_PROVIDER_TOKEN: "present", UNRELATED: "another-change", OPENCODE_CONFIG_CONTENT: '{"providers":{"virtual":{"env":"CUSTOM_PROVIDER_TOKEN"}},"plugins":["./virtual-plugin.ts"]}' });
+    await get("/fixture/project-b"); expect(proof.calls()).toBe(13);
+    expect(new Set(proof.writes.map((path) => path.replace(/\.[a-f0-9]{32}\.tmp$/, ""))).size).toBeGreaterThan(2);
   });
 
-  it("caches inventory on subsequent calls", () => {
-    const adapter = makeAdapter();
-    const first = adapter.getModelInventory();
-    const second = adapter.getModelInventory();
-    // Should return same cached reference
-    expect(first).toBe(second);
+  test("discovers runner models and variants on a fresh installation without a Deck cache directory", async () => {
+    const proof = productionFakes();
+    const cacheDirectory = "/fixture/cache/deck/opencode-model-inventory";
+    const originalFs = proof.fakes.fs;
+    let cacheDirectoryExists = false;
+    const missing = (path: string) => Object.assign(new Error(`ENOENT: no such file or directory, stat '${path}'`), { code: "ENOENT" });
+    const fs = {
+      ...originalFs,
+      stat: async (path: string) => {
+        if (path.startsWith(cacheDirectory)) {
+          if (!cacheDirectoryExists) throw missing(path);
+          return { size: 0, mtimeMs: 0, ctimeMs: 0, mode: path === cacheDirectory ? 0o700 : 0o600, isFile: () => path !== cacheDirectory, isDirectory: () => path === cacheDirectory };
+        }
+        return originalFs.stat(path);
+      },
+      lstat: async (path: string) => {
+        if (path.startsWith(cacheDirectory)) {
+          if (path === cacheDirectory && cacheDirectoryExists) return { mode: 0o700, isSymbolicLink: () => false };
+          throw missing(path);
+        }
+        return originalFs.lstat();
+      },
+      mkdir: async (path: string, mode: number) => {
+        if (path === cacheDirectory && mode === 0o700) cacheDirectoryExists = true;
+        await originalFs.mkdir();
+      },
+    };
+    const adapter = createOpenCodeRunnerAdapter({ productionDiscoveryDependencies: { ...proof.fakes, fs } });
+
+    const result = await adapter.getModelInventory?.({ projectRoot: "/fixture/project" });
+
+    expect(result).toMatchObject({ state: "ready", source: "live", inventory: { modelsByProvider: { openai: [{ id: "openai/exact", variants: ["Exact"] }] } } });
+    expect(proof.calls()).toBe(1);
   });
 
-  it("uses an injected inventoryLoader when provided", () => {
-    const injected = inventoryWith({
-      id: "openai/gpt-5.5",
-      providerId: "openai",
-      variants: ["low", "medium", "high"],
-    });
-    const adapter = makeAdapter(injected);
-    const inventory = adapter.getModelInventory();
-    expect(inventory).toBe(injected);
-    // Cached: second call returns the same reference.
-    expect(adapter.getModelInventory()).toBe(injected);
-  });
-});
+  test("invalidates default discovery when embedded credentials become present but not when values change", async () => {
+    const proof = productionFakes();
+    proof.mutate.configContent('{"providers":{"custom":{"options":{"token":"Bearer {env:EMBEDDED_DEFAULT_TOKEN}"}}}}');
+    const adapter = createOpenCodeRunnerAdapter({ productionDiscoveryDependencies: proof.fakes });
+    const get = () => adapter.getModelInventory?.({ projectRoot: "/fixture/project" });
 
-describe("opencode / getThinkingLevels(modelId)", () => {
-  it("returns all canonical levels when no modelId provided", () => {
-    const adapter = makeAdapter();
-    const levels = adapter.getThinkingLevels(undefined);
-    // When no modelId is provided, returns all available thinking levels
-    expect(Array.isArray(levels)).toBe(true);
-    expect(levels.length).toBeGreaterThan(0);
+    await get();
+    expect(proof.calls()).toBe(1);
+    proof.mutate.env({ PATH: "/fixture/bin", EMBEDDED_DEFAULT_TOKEN: "first-secret" });
+    await get();
+    expect(proof.calls()).toBe(2);
+    proof.mutate.env({ PATH: "/fixture/bin", EMBEDDED_DEFAULT_TOKEN: "second-secret" });
+    await get();
+    expect(proof.calls()).toBe(2);
   });
 
-  it("returns empty array for unknown model (fail-closed, no generic constant)", () => {
-    const adapter = makeAdapter(
-      inventoryWith({
-        id: "openai/gpt-5.5",
-        providerId: "openai",
-        variants: ["low", "medium", "high"],
-      }),
-    );
-    const levels = adapter.getThinkingLevels("unknown/model");
-    expect(Array.isArray(levels)).toBe(true);
-    // Must be empty — NOT the generic 3/4-level constant.
-    expect(levels).toEqual([]);
+  test("makes full default discovery settle at the absolute 15,000 ms deadline", async () => {
+    let now = 0, id = 0;
+    const timers = new Map<number, { at: number; callback: () => void }>();
+    const advance = (target: number) => { while (true) { const next = [...timers.entries()].filter(([, timer]) => timer.at <= target).sort((a, b) => a[1].at - b[1].at)[0]; if (!next) break; timers.delete(next[0]); now = next[1].at; next[1].callback(); } now = target; };
+    const base = productionFakes().fakes;
+    const fakes = {
+      ...base,
+      now: () => now,
+      timers: { setTimeout: (callback: () => void, delay: number) => { const timer = ++id; timers.set(timer, { at: now + delay, callback }); return timer as unknown as ReturnType<typeof setTimeout>; }, clearTimeout: (timer: ReturnType<typeof setTimeout>) => { timers.delete(timer as unknown as number); } },
+      commandRunner: { run: async (request: { args: readonly string[] }) => request.args[0] === "--version" ? { exitCode: 0, signal: null, stdout: "1", stderr: "" } : await new Promise<never>(() => {}) },
+    };
+    const result = createDefaultOpenCodeInventoryDiscovery(fakes)({ projectRoot: "/fixture/project" });
+    for (let step = 0; step < 8; step++) await Promise.resolve();
+    advance(14_999);
+    let settled = false; void result.then(() => { settled = true; }); await Promise.resolve(); expect(settled).toBe(false);
+    advance(15_000); await expect(result).resolves.toMatchObject({ state: "blocked", error: { code: "timeout" } });
+  });
+  test("propagates ready data and validates exact changed assignments only", async () => {
+    const adapter = createOpenCodeRunnerAdapter({ inventoryDiscovery: async () => ready });
+    expect(await adapter.getModelInventory?.({ projectRoot: "/workspace" })).toBe(ready);
+    expect(adapter.getThinkingLevels("openai/exact")).toEqual(["CaseSensitive"]);
+    expect(adapter.getThinkingLevels("exact")).toEqual([]);
+    expect(await adapter.validateModelAssignments?.({ projectRoot: "/workspace", modelAssignments: { changed: "openai/exact", untouched: "missing/model" }, thinkingAssignments: { changed: "CaseSensitive", untouched: "old" }, changedAgentIds: ["changed"], expectedFingerprint: "fresh" })).toEqual({ valid: true, fingerprint: "fresh" });
+    const invalid = await adapter.validateModelAssignments?.({ projectRoot: "/workspace", modelAssignments: { changed: "openai/exact" }, thinkingAssignments: { changed: "casesensitive" }, changedAgentIds: ["changed"] });
+    expect(invalid).toMatchObject({ valid: false, issues: [{ code: "variant-unavailable" }] });
   });
 
-  it("returns array (possibly empty) for known provider but unknown model", () => {
-    const adapter = makeAdapter(
-      inventoryWith({
-        id: "openai/gpt-4o",
-        providerId: "openai",
-        variants: ["low", "medium"],
-      }),
-    );
-    const levels = adapter.getThinkingLevels("openai/unknown-model-12345");
-    expect(Array.isArray(levels)).toBe(true);
-    expect(levels).toEqual([]);
+  test("blocks writes for stale or blocked inventories", async () => {
+    const adapter = createOpenCodeRunnerAdapter({ inventoryDiscovery: async () => ({ state: "stale", source: "last-known-good", discoveredAt: 1, fingerprint: "old", inventory: ready.inventory, error: { code: "timeout", message: "timed out", retryable: true } }) });
+    expect(await adapter.validateModelAssignments?.({ projectRoot: "/workspace", modelAssignments: { changed: "openai/exact" }, thinkingAssignments: {}, changedAgentIds: ["changed"] })).toMatchObject({ valid: false, issues: [{ code: "inventory-not-ready" }] });
   });
 
-  // The core fix: model-specific effort variants must be returned for the
-  // requested model, drawn from the inventory (which the cache parser now
-  // populates from reasoning_options[].values).
-  it("returns model-specific effort variants (high,max)", () => {
-    const adapter = makeAdapter(
-      inventoryWith(
-        {
-          id: "alibaba-token-plan/glm-5.2",
-          providerId: "alibaba-token-plan",
-          displayName: "GLM 5.2",
-          variants: ["high", "max"],
+  test("keeps a runner-only non-canonical variant exact through live validation", async () => {
+    const adapter = createOpenCodeRunnerAdapter({ inventoryDiscovery: async () => ({
+      ...ready,
+      inventory: {
+        providers: [{ id: "runner-plugin", displayName: "Runner Plugin", source: "runner-resolved" }],
+        modelsByProvider: {
+          "runner-plugin": [{
+            id: "runner-plugin/runner-only-model",
+            providerId: "runner-plugin",
+            modelId: "runner-only-model",
+            displayName: "Runner-only Model",
+            variants: ["exact/runner-key"],
+            metadataSource: "runner",
+            source: "runner-resolved",
+          }],
         },
-        {
-          id: "openai/gpt-5.3-codex-spark",
-          providerId: "openai",
-          displayName: "GPT 5.3 Codex Spark",
-          variants: ["none", "low", "medium", "high", "xhigh"],
-        },
-      ),
-    );
+      },
+    }) });
+    await adapter.getModelInventory?.({ projectRoot: "/workspace", mode: "rescan" });
 
-    // Cast to readonly string[] because per-model effort variants may include
-    // non-canonical tokens ("max", "none") that the closed RunnerThinkingLevel
-    // union does not enumerate (runtime-correct, type-narrowed).
-    const glmLevels = adapter.getThinkingLevels("alibaba-token-plan/glm-5.2") as readonly string[];
-    expect(glmLevels).toEqual(["high", "max"]);
-
-    const sparkLevels = adapter.getThinkingLevels("openai/gpt-5.3-codex-spark") as readonly string[];
-    expect(sparkLevels).toEqual(["none", "low", "medium", "high", "xhigh"]);
-  });
-
-  it("returns different variant sets per model (high,max vs none..xhigh)", () => {
-    const adapter = makeAdapter(
-      inventoryWith(
-        {
-          id: "alibaba-token-plan/glm-5.2",
-          providerId: "alibaba-token-plan",
-          variants: ["high", "max"],
-        },
-        {
-          id: "openai/gpt-5.3-codex-spark",
-          providerId: "openai",
-          variants: ["none", "low", "medium", "high", "xhigh"],
-        },
-      ),
-    );
-
-    const a = adapter.getThinkingLevels("alibaba-token-plan/glm-5.2") as readonly string[];
-    const b = adapter.getThinkingLevels("openai/gpt-5.3-codex-spark") as readonly string[];
-    expect(a).not.toEqual(b);
-    expect(a).toEqual(["high", "max"]);
-    expect(b).toEqual(["none", "low", "medium", "high", "xhigh"]);
-  });
-
-  // Model ID mismatch tolerance: callers may pass a raw model id without the
-  // provider prefix. The lookup must still resolve via suffix match.
-  it("resolves a raw model id (no provider prefix) via suffix match", () => {
-    const adapter = makeAdapter(
-      inventoryWith({
-        id: "alibaba-token-plan/glm-5.2",
-        providerId: "alibaba-token-plan",
-        variants: ["high", "max"],
-      }),
-    );
-
-    // Raw model id, no "provider/" prefix.
-    const levels = adapter.getThinkingLevels("glm-5.2") as readonly string[];
-    expect(levels).toEqual(["high", "max"]);
-  });
-
-  // Models with budget_tokens reasoning options have no discrete effort
-  // variants (empty array in the inventory). getThinkingLevels must return
-  // empty — NOT a generic constant — so the picker hides.
-  it("returns empty for a budget_tokens-only model (no effort variants)", () => {
-    const adapter = makeAdapter(
-      inventoryWith({
-        id: "anthropic/claude-sonnet-4-5",
-        providerId: "anthropic",
-        variants: [],
-      }),
-    );
-
-    const levels = adapter.getThinkingLevels("anthropic/claude-sonnet-4-5");
-    expect(levels).toEqual([]);
-  });
-
-  // A model present in the inventory but with undefined variants is treated
-  // the same as empty: fail closed.
-  it("returns empty when model exists but variants is undefined", () => {
-    const adapter = makeAdapter(
-      inventoryWith({
-        id: "openai/gpt-4o",
-        providerId: "openai",
-        // variants intentionally omitted
-      }),
-    );
-
-    const levels = adapter.getThinkingLevels("openai/gpt-4o");
-    expect(levels).toEqual([]);
-  });
-
-  // When the inventory is unavailable (loader throws), getThinkingLevels
-  // must fail closed (empty) for a specific model rather than guessing the
-  // generic constant. The no-modelId path is covered separately below.
-  it("fails closed (empty) when the inventory loader throws for a specific model", () => {
-    const adapter = makeAdapter(
-      new Proxy({} as RunnerModelInventory, {
-        get() {
-          throw new Error("cache unreadable");
-        },
-      }),
-    );
-
-    const levels = adapter.getThinkingLevels("alibaba-token-plan/glm-5.2");
-    expect(levels).toEqual([]);
-  });
-
-  it("still returns canonical levels when no modelId AND inventory is unavailable", () => {
-    // The no-modelId fallback to canonical levels is the pre-existing contract
-    // (callers that want the full set without targeting a model). This path
-    // does not depend on inventory availability — the constant is returned
-    // before the inventory is ever consulted.
-    const adapter = makeAdapter(
-      new Proxy({} as RunnerModelInventory, {
-        get() {
-          throw new Error("cache unreadable");
-        },
-      }),
-    );
-
-    const levels = adapter.getThinkingLevels(undefined);
-    expect(Array.isArray(levels)).toBe(true);
-    expect(levels.length).toBeGreaterThan(0);
-  });
-});
-
-describe("opencode / supportsThinking(modelId)", () => {
-  it("returns false for unknown model", () => {
-    const adapter = makeAdapter();
-    const supported = adapter.supportsThinking("unknown/model");
-    expect(typeof supported).toBe("boolean");
+    expect(adapter.resolveThinking("runner-plugin/runner-only-model", "exact/runner-key")).toBe("exact/runner-key");
+    expect(await adapter.validateModelAssignments?.({
+      projectRoot: "/workspace",
+      modelAssignments: { changed: "runner-plugin/runner-only-model" },
+      thinkingAssignments: { changed: "exact/runner-key" },
+      changedAgentIds: ["changed"],
+      expectedFingerprint: "fresh",
+    })).toEqual({ valid: true, fingerprint: "fresh" });
   });
 });

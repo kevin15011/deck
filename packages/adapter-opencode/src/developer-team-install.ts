@@ -117,6 +117,7 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   memoryBundle?: MemoryInjectionBundle;
   /** Resolved orchestrator personality used during plan construction */
   personality?: OrchestratorPersonality;
+  changedAgentIds?: readonly string[];
 };
 
 export type OpenCodeBundleApplyResult = {
@@ -407,64 +408,44 @@ function buildAgentEntry(
     configModelOverrides?: Record<string, string>;
     reasoningEffortOverrides?: Record<string, string>;
     capabilityMap?: Record<string, boolean | null>;
+    changedAgentIds?: readonly string[];
   },
 ): AgentEntry {
   const isOrchestrator = agent.id === "deck-developer-orchestrator";
+  const isChanged = options?.changedAgentIds?.includes(agent.id) ?? false;
   const serenaTools = resolveSerenaToolsForAgent(agent.id, toolPolicyBundle);
-  const modelConfig = resolveModelConfig(
+  const modelConfig = isChanged ? resolveModelConfig(
     agent.id,
     options?.cliModelOverride,
     options?.configModelOverrides,
     options?.reasoningEffortOverrides as Record<string, "off" | "low" | "medium" | "high"> | undefined,
-    undefined, // catalog - use default
+    undefined,
     options?.capabilityMap,
-  );
-
-  let tools: Record<string, boolean>;
-
-  if (isOrchestrator) {
-    tools = ORCHESTRATOR_TOOLS;
-  } else if (Object.keys(serenaTools).length > 0) {
-    // Combine base + Serena tools (role-based: read-only for non-apply, read+write for apply)
-    tools = { ...SUBAGENT_BASE_TOOLS, ...serenaTools };
-  } else {
-    // Default: base tools only
-    tools = SUBAGENT_BASE_TOOLS;
-  }
-
+  ) : undefined;
+  const tools = isOrchestrator
+    ? ORCHESTRATOR_TOOLS
+    : Object.keys(serenaTools).length > 0 ? { ...SUBAGENT_BASE_TOOLS, ...serenaTools } : SUBAGENT_BASE_TOOLS;
   const entry: AgentEntry = {
     description: agent.description,
     mode: isOrchestrator ? "primary" : "subagent",
     prompt: promptReference,
     tools,
   };
-
-  // Only set model if explicitly configured (not undefined or empty)
-  if (modelConfig.model) {
-    entry.model = modelConfig.model;
+  // Assignment fields are intentionally emitted only for explicit changes.
+  // Unchanged agents merge only non-assignment metadata and therefore retain their
+  // exact persisted model/variant/reasoningEffort fields.
+  if (isChanged) {
+    const model = options?.configModelOverrides?.[agent.id] ?? modelConfig?.model;
+    if (model) entry.model = model;
+    entry.variant = options?.reasoningEffortOverrides?.[agent.id] ?? "";
   }
-
-  // Only include reasoningEffort when model supports it (filtered by resolveModelConfig)
-  if (modelConfig.reasoningEffort) {
-    entry.reasoningEffort = modelConfig.reasoningEffort;
-  }
-
   if (isOrchestrator) {
-    // Orchestrator: deny-by-default + allowlist all subagents
-    const subagents = DEVELOPER_TEAM_AGENTS.filter((a) => a.id !== "deck-developer-orchestrator");
-    const permissionTask: Record<string, string> = {
-      "*": "deny",
-      ...Object.fromEntries(subagents.map((a) => [a.id, "allow"])),
-    };
-    entry.permission = { task: permissionTask };
+    const subagents = DEVELOPER_TEAM_AGENTS.filter((candidate) => candidate.id !== "deck-developer-orchestrator");
+    entry.permission = { task: { "*": "deny", ...Object.fromEntries(subagents.map((candidate) => [candidate.id, "allow"])) } };
     entry.hidden = false;
-    entry.variant = "";
   } else {
-    // Subagents: hidden
     entry.hidden = true;
-    entry.variant = "";
   }
-
   return entry;
 }
 
@@ -522,6 +503,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     cliModelOverride?: string;
     configModelOverrides?: Record<string, string>;
     reasoningEffortOverrides?: Record<string, string>;
+    changedAgentIds?: readonly string[];
     /** Optional personality override; when absent, reads from .deck/config.json */
     personality?: OrchestratorPersonality;
     /**
@@ -573,6 +555,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
       configModelOverrides: options?.configModelOverrides,
       reasoningEffortOverrides: options?.reasoningEffortOverrides,
       capabilityMap: options?.capabilityMap,
+      changedAgentIds: options?.changedAgentIds,
     });
   }
 
@@ -620,6 +603,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     capabilityInstructions,
     memoryBundle,
     personality: resolvedPersonality,
+    changedAgentIds: options?.changedAgentIds,
   };
 }
 

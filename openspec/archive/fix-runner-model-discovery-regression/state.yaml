@@ -1,0 +1,467 @@
+change: fix-runner-model-discovery-regression
+phase: archive
+status: archived
+artifacts:
+  - path: openspec/archive/fix-runner-model-discovery-regression/exploration.md
+    phase: explorer
+    type: exploration
+    timestamp: "2026-07-12T19:20:00Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/proposal.md
+    phase: proposal
+    type: proposal
+    timestamp: "2026-07-12T19:21:47Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/preconditions.md
+    phase: proposal
+    type: preconditions
+    timestamp: "2026-07-12T19:21:47Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/spec.md
+    phase: spec
+    type: specification
+    timestamp: "2026-07-12T19:30:00Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/design.md
+    phase: design
+    type: design
+    timestamp: "2026-07-12T19:30:00Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/tasks.md
+    phase: tasks
+    type: tasks
+    timestamp: "2026-07-12T19:56:19Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/apply-progress.md
+    phase: apply
+    type: apply-progress
+    timestamp: "2026-07-12T20:25:18Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/verify-report.md
+    phase: verify
+    type: verify-report
+    timestamp: "2026-07-12T21:14:00Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/review-report.md
+    phase: review
+    type: review-report
+    timestamp: "2026-07-12T21:14:00Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/repair-incident.md
+    phase: repair
+    type: repair-incident
+    timestamp: "2026-07-12T21:20:00Z"
+  - path: openspec/archive/fix-runner-model-discovery-regression/archive-report.md
+    phase: archive
+    type: archive-report
+    timestamp: "2026-07-13T01:00:00Z"
+provenance:
+  user_request: |
+    Deck must show only providers and models recognized by the active runner and
+    must derive each model's available reasoning levels from the runner rather
+    than from hardcoded or stale cache metadata.
+  user_runtime_correction: |
+    The user runs npm run deck:run, which rebuilds and executes ./dist/cli/deck.
+    The installed ~/.local/bin/deck binary is not involved.
+  mode: interactive
+  language: en
+  supersedes_diagnosis: stale-installed-binary
+  proposal_completed_by: deck-developer-proposal
+  proposal_completed_at: "2026-07-12T19:21:47Z"
+  proposal_basis: exploration-corrected
+  spec_completed_by: deck-developer-spec
+  spec_completed_at: "2026-07-12T19:30:00Z"
+  design_completed_by: deck-developer-design
+  design_completed_at: "2026-07-12T19:30:00Z"
+  tasks_completed_by: deck-developer-task
+  tasks_completed_at: "2026-07-12T19:56:19Z"
+  verify_completed_by: deck-developer-verify
+  verify_completed_at: "2026-07-12T21:14:00Z"
+  review_completed_by: deck-developer-review
+  review_completed_at: "2026-07-12T21:14:00Z"
+  parallel_registry_reconciled_by: deck-developer-orchestrator
+  adaptive_context: "consulted as advisory only; OpenSpec artifacts and registry remain authoritative"
+  related_changes:
+    - fix-opencode-effort-levels-hardcoded
+    - opencode-configured-providers-filter
+    - runner-model-recognition-effort-levels
+    - tui-model-assignment-bug
+findings:
+  actionable_diagnosis: true
+  root_cause: |
+    Deck treats the configured-provider-filtered OpenCode models.json cache as
+    authoritative for model availability and reasoning levels. The live runner
+    output differs: 148 cache-derived candidates versus 107 models reported by
+    opencode models, with 58 cache-only entries and 17 live models absent from
+    Deck's filtered set. Live verbose variants differ from cached effort values
+    for 33 of 99 comparable models.
+  evidence:
+    runtime_command: "npm run deck:run"
+    opencode_version: "1.17.18"
+    deck_cache_candidate_models: 148
+    runner_reported_models: 107
+    cache_only_candidates: 58
+    runner_only_from_deck_perspective: 17
+    live_models_with_variants: 53
+    comparable_variant_models: 99
+    variant_mismatches: 33
+    runner_variants_cache_empty: 16
+    nonempty_variant_disagreements: 17
+  recommended_option: |
+    Use opencode models --verbose or an equivalent stable runner API as the
+    authoritative resolved inventory and variant source. Treat models.json only
+    as optional metadata enrichment and never as permission to add models or
+    variants absent from the runner result.
+proposal:
+  status: completed
+  artifact: openspec/archive/fix-runner-model-discovery-regression/proposal.md
+  preconditions_artifact: openspec/archive/fix-runner-model-discovery-regression/preconditions.md
+  event: proposal-completed
+  timestamp: "2026-07-12T19:21:47Z"
+  scope_summary: |
+    OpenCode provider/model inventory and per-model reasoning levels must come
+    from the runner's final resolved model set. Cache/catalog data is metadata
+    enrichment only, with bounded discovery caching/failure behavior and
+    compatibility handling for stale persisted assignments.
+  decisions:
+    - "Use opencode models --verbose or an equivalent stable structured runner API as the authoritative OpenCode inventory source."
+    - "Derive providers from runner-returned model IDs, including built-in/custom/plugin providers."
+    - "Expose exactly each model's final runner variants keys as reasoning levels."
+    - "Do not run --refresh automatically on normal TUI open."
+    - "Keep Pi and other adapters on runner-specific contracts with anti-regression coverage."
+spec:
+  status: completed
+  artifact: openspec/changes/fix-runner-model-discovery-regression/spec.md
+  event: spec-completed
+  timestamp: "2026-07-12T19:30:00Z"
+  requirements_count: 33
+  scenarios_count: 36
+  blockers: none
+design:
+  status: completed
+  artifact: openspec/changes/fix-runner-model-discovery-regression/design.md
+  event: design-completed
+  timestamp: "2026-07-12T19:30:00Z"
+  architecture_decision: |
+    Use isolated strict parsing of opencode models --verbose. The adapter owns
+    discovery, validation, caching, and snapshots while core remains runner-neutral.
+  timeout_decision:
+    status: resolved
+    selected_ms: 15000
+    selected_by: user
+    rationale: |
+      The user selected the more tolerant option. A 15-second hard deadline
+      accommodates the measured 7.55s cold and 4.11-4.37s warm OpenCode 1.17.18
+      discovery times while remaining bounded.
+  human_override_replan:
+    status: completed
+    event: repair-design-replan-completed
+    timestamp: "2026-07-12T22:42:00Z"
+    scoped_fingerprints:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - opencode-timeout-not-hard-bounded
+      - required-regression-matrix-incomplete
+    apply_batches_planned: 1
+    atomic_repair_steps: 5
+repair:
+  incident_id: apply-group0-auth-card
+  scope: "Apply Group 0 delegation metadata only"
+  status: completed
+  operating_mode: automatic
+  incident_budget: 2
+  fingerprint_budget: 1
+  verification_cycle_limit: 1
+  attempts_used: 1
+  initial_outcome: blocked
+  decision: repair
+  rationale: |
+    The Apply agent made no modifications because the delegation omitted the
+    literal authorization card required by its role contract. User Apply
+    authorization and the preconditions gate are already recorded.
+tasks:
+  status: completed
+  artifact: openspec/changes/fix-runner-model-discovery-regression/tasks.md
+  event: repair-tasks-replan-completed
+  timestamp: "2026-07-12T22:50:00Z"
+  task_count: 11
+  completed_task_count: 10
+  pending_task_ids: ["R1"]
+  execution_groups: 6
+  blockers: none
+  preconditions_status: pass
+  repair_task:
+    id: R1
+    owner: backend
+    classification: unblocked
+    atomic_substeps: 5
+    incident_id: verify-review-blockers-round-1
+    scoped_fingerprints:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - opencode-timeout-not-hard-bounded
+      - required-regression-matrix-incomplete
+  routing:
+    general_apply: ["0.1", "0.2", "4.1"]
+    backend_apply: ["1.1", "1.2", "1.3", "2.1", "2.2", "2.3"]
+    frontend_apply: ["3.1"]
+apply:
+  status: completed
+  artifact: openspec/changes/fix-runner-model-discovery-regression/apply-progress.md
+  event: apply-completed
+  timestamp: "2026-07-12T20:54:33Z"
+  agent: general
+  execution_groups: [0, 1, 2, 3, 4]
+  completed_tasks: ["0.1", "0.2", "1.1", "1.2", "1.3", "2.1", "2.2", "2.3", "3.1", "4.1"]
+  pending_tasks: []
+  repair_incident: apply-group0-auth-card
+  repair_attempt: 1
+  verification:
+    focused_tests: passed
+    typecheck: passed
+    broader_adapter_tui_tests: passed
+    repository_script: passed
+    repo_wide_tests: passed-with-known-baseline-failure
+    baseline_reference: "repo-bun-test: Binary smoke tests > doctor runs and reports diagnostics"
+  blockers: none
+verify:
+  status: failed
+  artifact: openspec/changes/fix-runner-model-discovery-regression/verify-report.md
+  event: verify-failed
+  timestamp: "2026-07-12T21:14:00Z"
+  requirements_verified: "26/33"
+  scenarios_verified: "26/36"
+  tasks_verified: "6/10"
+  findings:
+    critical: 3
+    warning: 1
+  repair_required: true
+  repair_cycle_1:
+    status: failed
+    event: repair-verify-cycle-1-failed
+    timestamp: "2026-07-12T22:25:00Z"
+    requirements_verified: "32/33"
+    scenarios_verified: "35/36"
+    tasks_verified: "8/10"
+    original_fingerprints_resolved: "9/10"
+    exhausted_recurrences:
+      - opencode-timeout-not-hard-bounded
+  repair_cycle_2:
+    status: failed
+    event: repair-verify-cycle-2-failed
+    timestamp: "2026-07-12T23:25:00Z"
+    requirements_verified: "32/33"
+    scenarios_verified: "35/36"
+    tasks_verified: "10/11"
+    scoped_fingerprints_resolved: "2/3"
+    scoped_recurrences:
+      - required-regression-matrix-incomplete
+  separately_authorized_corrective:
+    status: passed
+    event: corrective-retry-verify-passed
+    timestamp: "2026-07-13T00:30:00Z"
+    requirements_verified: "33/33"
+    scenarios_verified: "36/36"
+    tasks_verified: "11/11"
+    focused_matrix: "151 passed, 0 failed"
+    broader_tests: "607 passed, 0 failed"
+    package_tests: "3285 passed, 0 failed"
+    repo_wide_tests: "3284 passed, 1 known baseline failure"
+    new_failures: none
+    archive_ready: true
+review:
+  status: changes_requested
+  artifact: openspec/changes/fix-runner-model-discovery-regression/review-report.md
+  event: review-changes-requested
+  timestamp: "2026-07-12T21:14:00Z"
+  findings:
+    critical: 0
+    high: 8
+    medium: 2
+    low: 1
+    blocking: 8
+  repair_required: true
+  repair_cycle_1:
+    status: changes_requested
+    event: repair-review-cycle-1-changes-requested
+    timestamp: "2026-07-12T22:25:00Z"
+    original_high_resolved: "5/8"
+    original_medium_resolved: "2/2"
+    original_low_resolved: "0/1"
+    exhausted_recurrences:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - opencode-timeout-not-hard-bounded
+      - required-regression-matrix-incomplete
+  repair_cycle_2:
+    status: blocked
+    event: repair-review-cycle-2-changes-requested
+    timestamp: "2026-07-12T23:25:00Z"
+    original_high_resolved: "6/8"
+    original_medium_resolved: "2/2"
+    original_low_resolved: "0/1"
+    scoped_fingerprints_resolved: "1/3"
+    scoped_recurrences:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - required-regression-matrix-incomplete
+  separately_authorized_corrective:
+    status: passed
+    event: final-mechanical-review-passed
+    timestamp: "2026-07-13T00:30:00Z"
+    findings:
+      critical: 0
+      high: 0
+      medium: 0
+      low: 0
+      blocking: 0
+    archive_ready: true
+active_repair:
+  incident_id: verify-review-blockers-round-1
+  artifact: openspec/changes/fix-runner-model-discovery-regression/repair-incident.md
+  status: resolved
+  operating_mode: interactive
+  initial_outcome: repair
+  decision: resolved
+  apply_batch_budget: 3
+  apply_batches_used: 3
+  fingerprint_budget: 1
+  verification_cycle_limit: 2
+  verification_cycles_used: 2
+  soft_checkpoint: "after first post-repair Verify + Review cycle"
+  hard_stop: "after second failed verification cycle or exhausted fingerprint recurrence without override"
+  next_action: archive
+  exhausted_fingerprint_recurrences:
+    - discovery-runtime-cache-fingerprint-lkg-unwired
+    - opencode-timeout-not-hard-bounded
+    - required-regression-matrix-incomplete
+  automatic_repair_permitted: false
+  final_scoped_recurrences:
+    - discovery-runtime-cache-fingerprint-lkg-unwired
+    - required-regression-matrix-incomplete
+  final_resolved_scoped_fingerprint:
+    - opencode-timeout-not-hard-bounded
+  final_hard_stop_active: false
+  resolution: separately-authorized-corrective
+  resolved_at: "2026-07-13T00:30:00Z"
+  archive_ready: true
+  separately_authorized_corrective:
+    authorized_by: user
+    status: completed
+    backend_fingerprint_fix: passed
+    mounted_deckapp_and_mock_isolation: passed
+    embedded_env_reference_fix: passed
+    final_verify: passed
+    final_review: passed
+    blocking_findings: 0
+  closure_exception:
+    authorized: true
+    authorized_by: user
+    timestamp: "2026-07-12T23:35:00Z"
+    scope:
+      - semantic-production-fingerprint-projection
+      - mounted-deckapp-transition-evidence
+      - remaining-test-comment-cleanup
+    additional_apply_batches: 1
+    additional_verification_cycles: 1
+    status: failed
+    apply_batches_used: "1/1"
+    apply_outcome: partial-verification-timeout
+    no_apply_retries_remaining: true
+    verification_cycles_used: "1/1"
+    closure_scope_verified: "1/3"
+    archive_ready: false
+    blocking_findings: 2
+    new_test_regressions: 6
+    final_recurrences:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - required-regression-matrix-incomplete
+    hard_stop_after_exception: "any blocking finding or failed final closure verification"
+  override_batch:
+    task_id: R1
+    owner: backend
+    status: completed
+    classification: unblocked
+    apply_batches_used: "1/1"
+    attempts_remaining_per_scoped_fingerprint: 0
+    verification_cycles_remaining: 0
+    final_hard_stop: "any scoped recurrence or failed verification cycle 2"
+    event: repair-override-r1-completed
+    timestamp: "2026-07-12T23:10:00Z"
+    attempted_fingerprints:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - opencode-timeout-not-hard-bounded
+      - required-regression-matrix-incomplete
+    resolved_fingerprints:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - opencode-timeout-not-hard-bounded
+      - required-regression-matrix-incomplete
+    unresolved_fingerprints: []
+    verification_stage: broad_gate
+  human_override:
+    authorized: true
+    authorized_by: user
+    timestamp: "2026-07-12T22:35:00Z"
+    scope:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - opencode-timeout-not-hard-bounded
+      - required-regression-matrix-incomplete
+    additional_apply_batches_used: "1/1"
+    additional_attempts_per_scoped_fingerprint_remaining: 0
+    verification_cycles_remaining: 0
+    status: exhausted
+    hard_stop_after_override: "any scoped recurrence or failed verification cycle 2"
+  batch_1:
+    status: completed
+    event: repair-backend-security-completed
+    timestamp: "2026-07-12T21:33:54Z"
+    artifact: openspec/changes/fix-runner-model-discovery-regression/apply-progress.md
+    attempted_fingerprints:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - opencode-timeout-not-hard-bounded
+      - unchanged-assignment-field-mutation
+      - lkg-validation-privacy-integrity
+      - mutable-last-plan-cross-request-risk
+      - chunked-utf8-decoding-corruption
+    resolved_fingerprints:
+      - discovery-runtime-cache-fingerprint-lkg-unwired
+      - opencode-timeout-not-hard-bounded
+      - unchanged-assignment-field-mutation
+      - lkg-validation-privacy-integrity
+      - mutable-last-plan-cross-request-risk
+      - chunked-utf8-decoding-corruption
+    verification_stage: targeted
+  batch_2:
+    status: completed
+    event: repair-tui-compatibility-completed
+    timestamp: "2026-07-12T21:50:57Z"
+    artifact: openspec/changes/fix-runner-model-discovery-regression/apply-progress.md
+    attempted_fingerprints:
+      - runner-variant-static-resolution-leak
+      - async-discovery-stale-response-overwrite
+      - successful-empty-state-routing
+    resolved_fingerprints:
+      - runner-variant-static-resolution-leak
+      - async-discovery-stale-response-overwrite
+      - successful-empty-state-routing
+    unresolved_fingerprints: []
+    verification_stage: targeted
+  batch_3:
+    status: completed
+    agent: general
+    event: repair-regression-matrix-completed
+    timestamp: "2026-07-12T22:06:02Z"
+    artifact: openspec/changes/fix-runner-model-discovery-regression/apply-progress.md
+    attempted_fingerprints:
+      - required-regression-matrix-incomplete
+    resolved_fingerprints:
+      - required-regression-matrix-incomplete
+    unresolved_fingerprints: []
+    verification_stage: broad_gate
+    summary: |
+      Deterministic parser/process/cache/LKG coverage is complete, obsolete
+      cache-authority test prose is reconciled to runner-resolved authority, and
+      focused, typecheck, broader, package, and repo-wide baseline gates ran.
+archive:
+  status: archived
+  phase: archive
+  artifact: openspec/archive/fix-runner-model-discovery-regression/archive-report.md
+  event: change-archived
+  timestamp: "2026-07-13T01:00:00Z"
+  archived_by: deck-developer-archive
+  requirements_verified: "33/33"
+  scenarios_verified: "36/36"
+  tasks_completed: "11/11"
+  final_verification: passed
+  final_review: approve
+  blocking_findings: 0
+  known_baseline_failure: "Binary smoke tests > doctor runs and reports diagnostics (recorded fingerprint)"
+  repair_history_preserved: true
+  corrective_resolution: completed

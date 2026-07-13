@@ -68,6 +68,10 @@ export type DeveloperTeamThinkingAssignments = Record<string, string>;
  */
 export type RunnerThinkingLevel = ReasoningLevel;
 
+
+/** A runner-defined reasoning variant key; dynamic runners are not closed unions. */
+export type RunnerVariantKey = string;
+
 // ---------------------------------------------------------------------------
 // Runtime detection (detectRuntimes)
 // ---------------------------------------------------------------------------
@@ -126,7 +130,12 @@ export type CapabilityCatalogEntry = {
 /**
  * Source of model inventory data.
  */
-export type RunnerModelSource = "runner-cache" | "runner-config";
+export type RunnerModelSource =
+  | "runner-resolved"
+  // Legacy sources remain readable during the staged adapter migration. New
+  // discovery results must use "runner-resolved".
+  | "runner-cache"
+  | "runner-config";
 
 /**
  * Provider in the model inventory.
@@ -142,12 +151,19 @@ export type RunnerModelProvider = {
  * Model entry in the inventory.
  */
 export type RunnerModelEntry = {
+  /** Exact canonical provider/model identifier reported by the runner. */
   id: string;
   providerId: string;
+  /** The portion after the first slash for runner-resolved entries. */
+  modelId?: string;
   displayName: string;
   supportsTools?: boolean;
+  /** Presentation metadata only; it cannot authorize variants. */
   supportsReasoning?: boolean | null;
-  variants?: readonly string[];
+  /** Runner-defined keys; an empty array means no selectable variants. */
+  variants?: readonly RunnerVariantKey[];
+  /** Metadata may enrich a matching runner entry but cannot add authority. */
+  metadataSource?: "runner" | "runner+cache";
   source: RunnerModelSource;
 };
 
@@ -159,6 +175,67 @@ export type RunnerModelInventory = {
   modelsByProvider: Readonly<Record<string, readonly RunnerModelEntry[]>>;
   diagnostics?: readonly string[];
 };
+
+
+export type RunnerModelDiscoveryError = {
+  code:
+    | "runner-not-found"
+    | "timeout"
+    | "command-failed"
+    | "output-too-large"
+    | "malformed-output"
+    | "incompatible-snapshot";
+  /** Sanitized and actionable; never raw subprocess output. */
+  message: string;
+  retryable: boolean;
+};
+
+export type RunnerModelDiscoveryRequest = {
+  projectRoot: string;
+  /** Rescan bypasses Deck caches; it never authorizes a runner network refresh. */
+  mode?: "prefer-cache" | "rescan";
+};
+
+export type RunnerModelInventoryResult =
+  | {
+      state: "ready";
+      inventory: RunnerModelInventory;
+      source: "live" | "memory";
+      discoveredAt: number;
+      fingerprint: string;
+    }
+  | {
+      state: "stale";
+      inventory: RunnerModelInventory;
+      source: "last-known-good";
+      discoveredAt: number;
+      fingerprint: string;
+      error: RunnerModelDiscoveryError;
+    }
+  | {
+      state: "blocked";
+      inventory: null;
+      source: "none";
+      error: RunnerModelDiscoveryError;
+    };
+
+export type RunnerModelAssignmentValidationInput = {
+  projectRoot: string;
+  modelAssignments: DeveloperTeamModelAssignments;
+  thinkingAssignments: DeveloperTeamThinkingAssignments;
+  changedAgentIds: readonly string[];
+  expectedFingerprint?: string;
+};
+
+export type RunnerModelAssignmentIssue = {
+  agentId: string;
+  code: "model-unavailable" | "variant-unavailable" | "inventory-not-ready";
+  message: string;
+};
+
+export type RunnerModelAssignmentValidationResult =
+  | { valid: true; fingerprint: string }
+  | { valid: false; issues: readonly RunnerModelAssignmentIssue[] };
 
 // ---------------------------------------------------------------------------
 // Dashboard state (passed to buildReviewPlan / buildInstallationPlan)
@@ -252,6 +329,10 @@ export type DeveloperTeamAdapterInstallInput = {
   environmentId: RunnerEnvironmentId;
   modelAssignments?: DeveloperTeamModelAssignments;
   thinkingAssignments?: DeveloperTeamThinkingAssignments;
+  /** Agents changed by the user; unchanged persisted assignments stay untouched. */
+  changedAgentIds?: readonly string[];
+  /** Evidence from successful dynamic-inventory validation, if the runner uses it. */
+  validatedInventoryFingerprint?: string;
   memoryProvider?: AdaptiveMemoryProvider;
   capabilityInstructions?: CapabilityInstructionBundle;
   standaloneSkills?: readonly { skillId: string; body: string; files?: Record<string, string> }[];
@@ -453,7 +534,7 @@ export interface RunnerAdapter {
    * Get the available thinking levels for this runner.
    * Optionally filtered by a specific modelId.
    */
-  getThinkingLevels(modelId?: string): readonly RunnerThinkingLevel[];
+  getThinkingLevels(modelId?: string): readonly RunnerVariantKey[];
 
   /**
    * Check whether a given model supports thinking/reasoning.
@@ -461,13 +542,20 @@ export interface RunnerAdapter {
   supportsThinking(modelId: string): boolean;
 
   /**
-   * Get the model inventory for TUI consumption.
-   * When available, TUI uses adapter-driven inventory instead of CLI output parsing.
-   *
-   * Optional: adapters that do not implement this method fall back to
-   * runner-specific CLI output parsing (e.g. `pi --list-models`).
+   * Discover runner-owned model availability. Dynamic adapters always resolve
+   * asynchronously; adapters without dynamic inventory (such as Pi) omit it.
    */
-  getModelInventory?(): RunnerModelInventory;
+  getModelInventory?(
+    request: RunnerModelDiscoveryRequest,
+  ): Promise<RunnerModelInventoryResult>;
+
+  /**
+   * Validate only changed assignments against a ready runner inventory before
+   * a write. Runners without dynamic inventory may omit this port.
+   */
+  validateModelAssignments?(
+    input: RunnerModelAssignmentValidationInput,
+  ): Promise<RunnerModelAssignmentValidationResult>;
 
   // -------------------------------------------------------------------------
   // Developer Team installation

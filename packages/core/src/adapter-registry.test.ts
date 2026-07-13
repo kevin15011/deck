@@ -103,6 +103,85 @@ function createMockAdapter(
   };
 }
 
+
+describe("RunnerAdapter dynamic model discovery contract", () => {
+  test("supports optional async inventory and validation ports without requiring Pi", async () => {
+    type AsyncInventoryPort = NonNullable<RunnerAdapter["getModelInventory"]>;
+    type AssignmentValidationPort = NonNullable<
+      RunnerAdapter["validateModelAssignments"]
+    >;
+
+    const inventoryPort: AsyncInventoryPort = async (request) => {
+      expect(request).toEqual({ projectRoot: "/workspace", mode: "rescan" });
+      return {
+        state: "ready",
+        source: "live",
+        discoveredAt: 123,
+        fingerprint: "fixture-fingerprint",
+        inventory: {
+          providers: [
+            { id: "fixture", displayName: "Fixture", source: "runner-resolved" },
+          ],
+          modelsByProvider: {
+            fixture: [
+              {
+                id: "fixture/model/with/slashes",
+                providerId: "fixture",
+                modelId: "model/with/slashes",
+                displayName: "Fixture model",
+                variants: ["maximum-plus"],
+                metadataSource: "runner",
+                source: "runner-resolved",
+              },
+            ],
+          },
+        },
+      };
+    };
+    const validationPort: AssignmentValidationPort = async (input) => {
+      expect(input.changedAgentIds).toEqual(["general"]);
+      expect(input.expectedFingerprint).toBe("fixture-fingerprint");
+      return { valid: true, fingerprint: "fixture-fingerprint" };
+    };
+    const dynamicAdapter: RunnerAdapter = {
+      ...createMockAdapter("opencode", ["opencode-development"]),
+      getModelInventory: inventoryPort,
+      validateModelAssignments: validationPort,
+      getThinkingLevels: () => ["maximum-plus"],
+    };
+    const installInput: Parameters<RunnerAdapter["buildDeveloperTeamInstallPlan"]>[0] = {
+      projectRoot: "/workspace",
+      environmentId: "opencode-development",
+      changedAgentIds: ["general"],
+      validatedInventoryFingerprint: "fixture-fingerprint",
+    };
+
+    const result = await dynamicAdapter.getModelInventory?.({
+      projectRoot: "/workspace",
+      mode: "rescan",
+    });
+    const validation = await dynamicAdapter.validateModelAssignments?.({
+      projectRoot: "/workspace",
+      modelAssignments: { general: "fixture/model/with/slashes" },
+      thinkingAssignments: { general: "maximum-plus" },
+      changedAgentIds: installInput.changedAgentIds ?? [],
+      expectedFingerprint: installInput.validatedInventoryFingerprint,
+    });
+    const piAdapter = createMockAdapter("pi", ["pi-development"]);
+
+    expect(result).toMatchObject({ state: "ready", fingerprint: "fixture-fingerprint" });
+    expect(result?.state === "ready" && result.inventory.modelsByProvider.fixture[0]?.variants).toEqual([
+      "maximum-plus",
+    ]);
+    expect(validation).toEqual({ valid: true, fingerprint: "fixture-fingerprint" });
+    expect(dynamicAdapter.getThinkingLevels("fixture/model/with/slashes")).toEqual([
+      "maximum-plus",
+    ]);
+    expect(piAdapter.getModelInventory).toBeUndefined();
+    expect(piAdapter.validateModelAssignments).toBeUndefined();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

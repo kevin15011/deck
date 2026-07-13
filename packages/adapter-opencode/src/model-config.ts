@@ -30,6 +30,7 @@ import type { OpenCodeConfig } from "./types";
 export type OpenCodeModelConfig = {
   model?: string; // undefined when not explicitly configured
   reasoningEffort?: "low" | "medium" | "high";
+  variant?: string;
 };
 
 export type OpenCodeThinkingLevel = "off" | "low" | "medium" | "high";
@@ -266,9 +267,9 @@ export function resolveModelConfig(
 
 export type OpenCodeDeveloperTeamModelConfigAssignments = {
   modelAssignments: Record<string, string>;
-  thinkingAssignments: Record<string, OpenCodeThinkingLevel>;
-  /** Effective thinking assignments after filtering by model capability */
-  effectiveThinkingAssignments?: Record<string, OpenCodeThinkingLevel>;
+  /** Raw native variant first, then legacy reasoningEffort for compatibility. */
+  thinkingAssignments: Record<string, string>;
+  effectiveThinkingAssignments?: Record<string, string>;
 };
 
 export function readOpenCodeDeveloperTeamModelConfigAssignments(
@@ -280,8 +281,8 @@ export function readOpenCodeDeveloperTeamModelConfigAssignments(
 
   const configPath = join(configDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
   const modelAssignments: Record<string, string> = {};
-  const thinkingAssignments: Record<string, OpenCodeThinkingLevel> = {};
-  const effectiveThinkingAssignments: Record<string, OpenCodeThinkingLevel> = {};
+  const thinkingAssignments: Record<string, string> = {};
+  const effectiveThinkingAssignments: Record<string, string> = {};
 
   if (!exists(configPath)) {
     return { modelAssignments, thinkingAssignments };
@@ -289,34 +290,22 @@ export function readOpenCodeDeveloperTeamModelConfigAssignments(
 
   try {
     const config = JSON.parse(readFile(configPath, "utf-8")) as {
-      agent?: Record<string, { model?: string; reasoningEffort?: string }>;
+      agent?: Record<string, { model?: string; variant?: string; reasoningEffort?: string }>;
     };
 
     const agentConfig = config.agent ?? {};
     const catalog = getModelCatalog();
-
     for (const agent of DEVELOPER_TEAM_AGENTS) {
       const entry = agentConfig[agent.id];
       if (entry?.model) {
         modelAssignments[agent.id] = entry.model;
 
-        // Parse and validate thinking level
-        const parsed = parseOpenCodeThinkingLevel(entry.reasoningEffort);
-        if (parsed) {
-          thinkingAssignments[agent.id] = parsed;
-
-          // Check if model actually supports reasoning using resolver
-          const resolverInput: ResolveReasoningSupportInput = {
-            modelId: entry.model,
-            catalog,
-          };
-          const result = resolveReasoningEffortSupport(resolverInput);
-
-          // Only include effective thinking if model supports it
-          if (result.supportsReasoning) {
-            effectiveThinkingAssignments[agent.id] = parsed;
+        const rawVariant = entry.variant || entry.reasoningEffort;
+        if (rawVariant) {
+          thinkingAssignments[agent.id] = rawVariant;
+          if (resolveReasoningEffortSupport({ modelId: entry.model, catalog }).supportsReasoning) {
+            effectiveThinkingAssignments[agent.id] = rawVariant;
           }
-          // If not supported, effective is undefined (won't be shown in TUI)
         }
       }
     }

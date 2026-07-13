@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import type { PathLike } from "node:fs";
 
 import { DEFAULT_OPENCODE_MODELS, resolveModelConfig, supportsThinkingForOpenCodeModel, resolveThinkingForOpenCodeModel, getDefaultThinkingForOpenCodeModel, readOpenCodeDeveloperTeamModelConfigAssignments } from "./model-config";
@@ -271,6 +271,15 @@ describe("resolveModelConfig with capabilityMap", () => {
 });
 
 describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinkingAssignments", () => {
+  it("prefers native variant over legacy reasoningEffort without mutating the source", () => {
+    const content = JSON.stringify({ agent: { "deck-developer-orchestrator": { model: "openai/gpt-5.5", variant: "runner-token", reasoningEffort: "high" } } });
+    const result = readOpenCodeDeveloperTeamModelConfigAssignments("/fixture", {
+      exists: () => true,
+      readFile: () => content,
+    });
+    expect(result.thinkingAssignments["deck-developer-orchestrator"]).toBe("runner-token");
+    expect(content).toContain('"reasoningEffort":"high"');
+  });
   test("returns effectiveThinkingAssignments as undefined when model is unsupported", () => {
     // Create a mock config with an unsupported model (gpt-4o)
     const mockConfig = {

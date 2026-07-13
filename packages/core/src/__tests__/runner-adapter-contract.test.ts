@@ -120,7 +120,7 @@ describe("RunnerAdapter interface contracts", () => {
     // This is a compile-time check - if this file compiles,
     // the interface includes getThinkingLevels
     type HasGetThinkingLevels = import("../runner-adapter").RunnerAdapter extends {
-      getThinkingLevels(modelId?: string): readonly import("../runner-adapter").RunnerThinkingLevel[];
+      getThinkingLevels(modelId?: string): readonly import("../runner-adapter").RunnerVariantKey[];
     }
       ? true
       : false;
@@ -139,10 +139,11 @@ describe("RunnerAdapter interface contracts", () => {
   });
 
   it("should allow optional getModelInventory method", () => {
-    // getModelInventory is optional - adapters can implement incrementally
-    // The actual interface allows Promise | sync return, so we check if the method exists optionally
+    // getModelInventory is optional - adapters can implement dynamic discovery incrementally.
     type RunnerAdapter = import("../runner-adapter").RunnerAdapter;
-    type HasInventoryMethod = RunnerAdapter extends { getModelInventory?: (...args: never[]) => unknown }
+    type HasInventoryMethod = RunnerAdapter extends {
+      getModelInventory?: (request: import("../runner-adapter").RunnerModelDiscoveryRequest) => Promise<unknown>;
+    }
       ? true
       : false;
     const _check: HasInventoryMethod = true;
