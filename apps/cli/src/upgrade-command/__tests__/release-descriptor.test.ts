@@ -2,7 +2,7 @@
  * Unit tests for the release descriptor schema and parser.
  *
  * These tests pin the contract described in
- * `openspec/changes/add-self-update-system/spec.md` (REQ-RD-001 .. REQ-RD-011).
+ * `openspec/archive/add-self-update-system/spec.md` (REQ-RD-001 .. REQ-RD-011).
  * The fixture under `__fixtures__/release-fixture.json` is the canonical
  * reference descriptor used by T1.2 (prepare-release.ts) and downstream
  * G2 backend tasks.

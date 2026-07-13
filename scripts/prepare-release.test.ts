@@ -2,7 +2,7 @@
  * Unit tests for scripts/prepare-release.ts.
  *
  * The script emits the OFFICIAL spec-shaped descriptor (snake_case per
- * `openspec/changes/add-self-update-system/spec.md`). Tests pin that
+ * `openspec/archive/add-self-update-system/spec.md`). Tests pin that
  * contract end-to-end.
  *
  * Covers:

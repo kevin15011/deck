@@ -12,9 +12,8 @@
  *   - design-content
  *   - proposal-content
  *
- * The rationale for each no-op skill is documented in
- * `docs/skills-integration-roadmap.md` under "Phase 3F selective no-op
- * decisions". Skills are excluded because they are either:
+ * The local typed `NOOP_SKILLS` catalog and behavior assertions are the
+ * executable evidence for each rationale. Skills are excluded because they are either:
  *   - interactive (require user conversation)
  *   - phase-mismatch (not applicable to autonomous construction/review)
  *   - negligible-overlap (scope does not overlap with agent responsibilities)

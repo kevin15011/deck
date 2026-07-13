@@ -137,21 +137,3 @@ describe("Git Safety Rule — Dynamic Discovery Test", () => {
     expect(missingImport).toEqual([]);
   });
 });
-
-describe("Git Safety Rule — Roadmap Presence Test", () => {
-  test("roadmap contains Git safety rule reference", async () => {
-    const roadmapPath = path.join(process.cwd(), "docs/skills-integration-roadmap.md");
-    const roadmap = (await fs.readFile(roadmapPath, "utf8")).toString();
-    
-    // Sentinel phrases that indicate the rule is documented
-    const sentinelPhrases = [
-      "Critical Git Discard Protection",
-      "Git Discard Protection",
-      "Phase 3Z",
-      "git-safety.ts"
-    ];
-    
-    const found = sentinelPhrases.some(phrase => roadmap.includes(phrase));
-    expect(found).toBe(true);
-  });
-});

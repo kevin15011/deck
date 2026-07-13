@@ -9,7 +9,7 @@
  * `advisory`, `channel_eol`).
  *
  * **The script emits the OFFICIAL spec-shaped descriptor** (snake_case
- * field names per `openspec/changes/add-self-update-system/spec.md`).
+ * field names per `openspec/archive/add-self-update-system/spec.md`).
  * The output round-trips through `parseReleaseDescriptor` from
  * `release-descriptor.ts`.
  *
@@ -220,7 +220,7 @@ Flags:
   -h, --help               Show this help
 
 The output is the OFFICIAL spec-shaped descriptor (snake_case per
-openspec/changes/add-self-update-system/spec.md). Field names:
+openspec/archive/add-self-update-system/spec.md). Field names:
   version, tag_name, published_at, channel, release_notes_url, items
   items[].kind / required / asset_name / sha256 / notes
   items[binary].asset_name must match deck_v{VERSION}_{OS}-{ARCH}.tar.gz

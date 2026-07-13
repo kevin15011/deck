@@ -1,15 +1,10 @@
 # Baseline Health Ledger
-# Minimal fingerprint record for known failures and quality gates
-# Used by Verify to distinguish known failures from new regressions
-# Regenerated: 2026-06-12 via Apply Batch 3 (ledger-only fix)
-# Updated: 2026-06-12 via General Apply (ledger classification fix - 6 new files)
-
+# Minimal fingerprint record for known repository gates.
 schema: baseline-health/v1
-updated: "2026-06-12"
-source: runner-install-preflight-tdd-quality SDD
+updated: "2026-07-12"
+source: streamline-project-documentation Apply repair
 
-# Focused commands owned by this change
-# These MUST pass for change to be closable
+# Focused commands retained from the existing verification ownership contract.
 focused_commands:
   - id: focused-preflight-pi
     command: "bun test packages/adapter-pi/src/preflight.test.ts"
@@ -17,21 +12,18 @@ focused_commands:
       status: pass
       passed: 8
       failed: 0
-
   - id: focused-preflight-opencode
     command: "bun test packages/adapter-opencode/src/preflight.test.ts"
     expected:
       status: pass
       passed: 8
       failed: 0
-
   - id: focused-contract-tests
     command: "bun test apps/cli/src/tui/runner-dashboard/__tests__/runner-install-contract.test.ts"
     expected:
       status: pass
       passed: 6
       failed: 0
-
   - id: focused-e2e-ish-tests
     command: "bun test apps/cli/src/tui/__tests__/runner-install-e2e.test.tsx"
     expected:
@@ -39,415 +31,57 @@ focused_commands:
       passed: 15
       failed: 0
 
-# Repo-wide commands with known failures
-# These are compared against baseline to detect regressions
 repo_wide_commands:
   - id: repo-bun-test
     command: "bun test"
-    captured_at: "2026-06-12T17:00:00Z"
+    captured_at: "2026-07-12"
+    source_commands:
+      - "bun test apps/cli/src/__tests__/binary-smoke.test.tsx --test-name-pattern doctor runs and reports diagnostics"
+      - "bun test"
     expected:
       status: known-failures
-      passed: 2854
-      failed: 40
-      # Complete fingerprints for all 40 pre-existing failures across 20 test suites
+      passed: 3296
+      failed: 1
       fingerprints:
-        - suite: writeDeckConfig
-          test_names:
-            - "persists only normalized non-secret config"
-            - "persists packageInstructions when provided"
-            - "rejects secret fields before writing"
-            - "round-trip: written config can be re-read with same packageInstructions values"
-          test_count: 4
+        - file_path: apps/cli/src/__tests__/binary-smoke.test.tsx
+          suite: "Binary smoke tests"
+          test_name: "doctor runs and reports diagnostics"
+          error_signature: "bun-test-timeout-5000ms; killed 1 dangling process"
           classification: known
-          error_signature: "config serialization/validation"
-
-        - suite: Orchestrator Personality
-          test_names:
-            - "writeDeckConfig — orchestratorPersonality round-trip > round-trip preserves each valid personality value"
-            - "writeDeckConfig — orchestratorPersonality round-trip > writing personality does not erase existing adaptiveMemory field"
-            - "writeDeckConfig — orchestratorPersonality round-trip > write-then-read round-trip preserves personality for each valid value"
-            - "writeDeckConfig — orchestratorPersonality round-trip > write then read preserves adaptiveMemory when included in the write input"
-          test_count: 4
-          classification: known
-          error_signature: "orchestratorPersonality serialization"
-
-        - suite: resolveActiveMemoryProvider
-          test_names:
-            - "falls back to none when no CLI override or config file is present"
-            - "reads project config file for resolver precedence"
-          test_count: 2
-          classification: known
-          error_signature: "supermemory provider resolution"
-
-        - suite: Profile defaults
-          test_names:
-            - "readDeckConfig with no config file returns default profile values"
-          test_count: 1
-          classification: known
-          error_signature: "default profile values"
-
-        - suite: Profile persistence round-trip
-          test_names:
-            - "write then read preserves profiles and activeProfile"
-            - "profile with all SDD phase overrides can be written and read back"
-          test_count: 2
-          classification: known
-          error_signature: "profile serialization"
-
-        - suite: deprecated config fields migration
-          test_names:
-            - "write then read produces clean output without deprecated fields"
-          test_count: 1
-          classification: known
-          error_signature: "deprecated field migration"
-
-        - suite: core purity audit
-          test_names:
-            - "non-test core source files do not contain concrete runner or provider string literals"
-          test_count: 1
-          classification: known
-          error_signature: "core purity check"
-
-        - suite: resolveProjectRoot
-          test_names:
-            - "returns cwd when no workspace markers found in any ancestor"
-            - "stops at filesystem root and returns start dir when nothing matches"
-          test_count: 2
-          classification: known
-          error_signature: "project root resolution"
-
-        - suite: Pi Runner dashboard action runner Supermemory safety
-          test_names:
-            - "bloquea Review & Install cuando Supermemory no tiene configuración completa"
-            - "Review & Install usa salida real de setup Supermemory sin bloquear diagnóstico informativo"
-            - "write-pi-mcp-config sin token falla para handoff Supermemory requerido"
-            - "redacta token Supermemory standalone sk-sm en action-runner"
-            - "Review & Install writes Pi MCP config before resolving provider and applying Developer Team"
-            - "redacta token sentinela en resultados raw/diagnostics y escribe solo config no secreta"
-          test_count: 6
-          classification: known
-          error_signature: "supermemory token redaction/safety"
-
-        - suite: Pi Runner dashboard action runner Developer Team model preservation
-          test_names:
-            - "apply-team-bundle usa assignments del dashboard y preserva frontmatter observable de Configure Models"
-          test_count: 1
-          classification: known
-          error_signature: "team model preservation"
-
-        - suite: Fix #1: internal package install action routing
-          test_names:
-            - "missing pi-mermaid plan action executes pi install npm:pi-mermaid via installInternalRunnerPackages"
-            - "missing pi-mermaid install failure surfaces visual_support_install_failed error code"
-            - "missing pi-mermaid install with no piCommand reports failure gracefully"
-          test_count: 3
-          classification: known
-          error_signature: "internal package install routing"
-
-        - suite: runPiLaunch
-          test_names:
-            - "passes Engram memory provider to materializeTeamProfile"
-            - "--memory=engram materializes agent and skill files with tool bindings (REQ-AMI-002)"
-          test_count: 2
-          classification: known
-          error_signature: "runPiLaunch tool detection"
-
-        - suite: runPiLaunch Supermemory provider resolution
-          test_names:
-            - "uses .deck/config.json when no CLI memory flag is supplied but enables Supermemory after authenticated runtime validation"
-            - "failed Supermemory validation overwrites stale generated agent files without Supermemory tools"
-            - "CLI provider overrides .deck/config.json and does not double-inject providers"
-          test_count: 3
-          classification: known
-          error_signature: "supermemory provider resolution"
-
-        - suite: runPiLaunch direct Supermemory dashboard config
-          test_names:
-            - "fails closed for invalid dashboard container tags without injecting memory"
-          test_count: 1
-          classification: known
-          error_signature: "direct Supermemory config"
-
-        - suite: Developer Team TUI screens
-          test_names:
-            - "PersonalitySelectionScreen > shows cursor on Ahorro extremo when cursor=2"
-          test_count: 1
-          classification: known
-          error_signature: "Developer Team TUI"
-
-        - suite: TUI adapter import boundary audit
-          test_names:
-            - "TUI files other than known runtime glue do not import adapter packages"
-          test_count: 1
-          classification: known
-          error_signature: "TUI adapter boundary"
-
-        - suite: Binary smoke tests
-          test_names:
-            - "--version outputs version/commit/date/platform"
-            - "--doctor runs and reports diagnostics"
-          test_count: 2
-          classification: known
-          error_signature: "binary smoke test"
-
-        - suite: quality-router
-          test_names:
-            - "routeQuality > override can downgrade routing but never disables state validation"
-          test_count: 1
-          classification: known
-          error_signature: "quality router"
-
-        - suite: init-state
-          test_names:
-            - "real project config (openspec/config.yaml)"
-          test_count: 1
-          classification: known
-          error_signature: "init-state config"
-
-        - suite: readDeckConfig
-          test_names:
-            - "returns provider none defaults when .deck/config.json is absent"
-          test_count: 1
-          classification: known
-          error_signature: "readDeckConfig"
-      notes: |
-        40 pre-existing failures from 20 test suites.
-        All failures are known and unrelated to runner-install-preflight-tdd-quality change.
-        Fingerprints captured via `bun test --summary` on 2026-06-12.
-        This ledger enables Verify to classify current failures as known (not regressions).
-
+          reproduction: "Bun test-level timeout after 5000 ms"
+    notes: |
+      Captured on 2026-07-12. The focused reproduction has 0 pass and 1 fail;
+      the repository-wide run has 3296 pass and 1 fail. This is the sole known
+      repository failure and must match its exact file, suite, test name, and timeout signature.
   - id: repo-typecheck
-    command: "tsc --noEmit"
-    captured_at: "2026-06-12T17:00:00Z"
+    command: "bunx tsc --noEmit"
+    captured_at: "2026-07-12"
     expected:
-      status: known-failures
-      error_count: 108
-      error_files: 23
-        - path: apps/cli/src/tui/app.tsx
-          error_count: 44
-          classification: pre-existing
-          error_codes:
-            - TS18046
-            - TS2304
-            - TS2322
-            - TS2345
-            - TS2532
-            - TS2552
-            - TS2741
-            - TS7006
-          notes: "Pre-existing type errors in app.tsx (44 errors)."
+      status: pass
+      error_count: 0
+    notes: "Current typecheck passes; obsolete failure inventories were removed."
 
-        - path: packages/adapter-opencode/src/install-tools.ts
-          error_count: 20
-          classification: pre-existing
-          error_codes:
-            - TS2339
-            - TS2769
-            - TS7006
-          notes: "Pre-existing type errors in install-tools.ts (20 errors)."
-
-        - path: apps/cli/src/tui/developer-team-flow.test.tsx
-          error_count: 6
-          classification: pre-existing
-          error_codes:
-            - TS2322
-          notes: "Pre-existing test type errors (6 errors)."
-
-        - path: packages/adapter-opencode/src/runner-capabilities.test.ts
-          error_count: 4
-          classification: pre-existing
-          error_codes:
-            - TS2307
-            - TS2345
-          notes: "Pre-existing test type errors (4 errors)."
-
-        - path: apps/cli/src/pi-launch-command.direct-supermemory.test.ts
-          error_count: 3
-          classification: pre-existing
-          error_codes:
-            - TS2322
-          notes: "Pre-existing test type errors (3 errors)."
-
-        - path: apps/cli/src/tui/runner-dashboard/action-runner.test.ts
-          error_count: 3
-          classification: pre-existing
-          error_codes:
-            - TS2322
-          notes: "Pre-existing test type errors (3 errors)."
-
-        - path: apps/cli/src/pi-launch-command.ts
-          error_count: 2
-          classification: pre-existing
-          error_codes:
-            - TS2339
-          notes: "Pre-existing type errors in pi-launch-command.ts (2 errors)."
-
-        - path: packages/adapter-opencode/src/model-config.test.ts
-          error_count: 2
-          classification: pre-existing
-          error_codes:
-            - TS2345
-          notes: "Pre-existing test type errors (2 errors)."
-
-        - path: apps/cli/src/runtime/process.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2339
-          notes: "Pre-existing type error in runtime/process.ts (1 error)."
-
-        - path: apps/cli/src/tui/runner-dashboard/input-handler.test.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2353
-          notes: "Pre-existing test type error (1 error)."
-
-        - path: apps/cli/src/tui/runner-dashboard/reducer.test.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2353
-          notes: "Pre-existing test type error (1 error)."
-
-        - path: apps/cli/src/tui/screen-frame.tsx
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2322
-          notes: "Pre-existing type error in screen-frame.tsx (1 error)."
-
-        - path: packages/adapter-pi/src/developer-team-install.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2322
-          notes: "Pre-existing type error in developer-team-install.ts (1 error)."
-
-        - path: packages/adapter-pi/src/install-tools.test.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2820
-          notes: "Pre-existing test type error (1 error)."
-
-        - path: packages/adapter-pi/src/install-tools.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2322
-          notes: "Pre-existing type error in install-tools.ts (1 error)."
-
-        - path: packages/adapter-pi/src/pi-team-launch.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2345
-          notes: "Pre-existing type error in pi-team-launch.ts (1 error)."
-
-        - path: packages/adapter-pi/src/required-tools.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2322
-          notes: "Pre-existing type error in required-tools.ts (1 error)."
-
-        - path: packages/adapter-supermemory/src/index.test.ts
-          error_count: 7
-          classification: pre-existing
-          error_codes:
-            - TS2352
-            - TS2532
-            - TS2741
-          notes: "Pre-existing test type errors in adapter-supermemory/src/index.test.ts (7 errors)."
-
-        - path: packages/adapter-supermemory/src/index.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2322
-          notes: "Pre-existing type error in adapter-supermemory/src/index.ts (1 error)."
-
-        - path: packages/core/src/adapter-registry.test.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2740
-          notes: "Pre-existing test type error in adapter-registry.test.ts (1 error)."
-
-        - path: packages/core/src/config/deck-config.ts
-          error_count: 2
-          classification: pre-existing
-          error_codes:
-            - TS2307
-          notes: "Pre-existing type errors in deck-config.ts (2 errors)."
-
-        - path: packages/core/src/skills/sdd/index.ts
-          error_count: 2
-          classification: pre-existing
-          error_codes:
-            - TS2307
-          notes: "Pre-existing type errors in sdd/index.ts (2 errors)."
-
-        - path: packages/core/src/teams/developer/instruction-bundles/serena-composition.test.ts
-          error_count: 1
-          classification: pre-existing
-          error_codes:
-            - TS2307
-          notes: "Pre-existing test type error in serena-composition.test.ts (1 error)."
-      notes: |
-        Pre-existing type errors across 23 files, 108 total errors.
-        All classified as pre-existing known failures.
-        Verify can classify all 108 errors as known.
-
-# Verification policy
 verify_policy:
-  # Focused commands owned by this change must pass
   focused_commands_must_pass: true
-
-  # New failures in repo-wide commands block closure
   new_failures_block: true
-
-  # Known failures require explicit ledger reference to advance
   known_failures_require_reference: true
-
-  # Pass with warnings only allowed with documented known failures
   pass_with_warnings_requires_ledger_entry: true
 
-# Ledger comparison rules
 comparison:
-  # Fingerprint fields used for matching
   fingerprint_fields:
+    - suite
     - test_name
     - file_path
-    - error_message
-    - error_code
-
-  # Classification logic
+    - error_signature
   classification:
-    known: "Current failure matches ledger fingerprint (test_name + file_path + error_message)"
-    regression: "Current failure does not match any ledger fingerprint"
-    improved: "Ledger fingerprint no longer appears in current execution"
+    known: "Current failure matches the recorded exact fingerprint."
+    regression: "Current failure does not match a recorded fingerprint."
+    improved: "A recorded failure no longer appears in current execution."
 
-# Policy for this change
 policy:
-  known_failures: "All 40 test failures and 108 typecheck errors are classified as known/pre-existing."
+  known_failures: "Only the recorded Binary smoke doctor timeout is known."
   regression_definitions: |
-    - New test failure not in ledger = regression
-    - New type error in changed file = regression
-    - Type error in unchanged file with error_count increase = regression
-  improved_definitions: |
-    - Test failure in ledger no longer appears = improved
-    - Type error in ledger no longer appears = improved
-  action: |
-    This ledger enables Verify to classify all current failures as known.
-    Verify should PASS with REQ-LEDGER-001..004 satisfied.
-
-# Notes
-notes: |
-  - Complete fingerprints captured 2026-06-12 via `bun test --summary` and `tsc --noEmit`
-  - All 40 test failures and 108 typecheck errors are fingerprinted
-  - All failures classified as known/pre-existing
-  - This change adds focused preflight tests that pass; does not introduce new failures
-  - Ledger regenerated via Apply Batch 3 (ledger-only fix)
-  - Ledger is now accurate and complete for Verify closure
+    - Any additional test failure is a regression.
+    - A changed doctor file, suite, test name, or timeout signature is a regression.
+    - Any typecheck error is a regression.
+  action: "Verify may pass with warnings only when the exact known fingerprint is reproduced and documented."

@@ -1,0 +1,157 @@
+schema: spec-registry-v1
+changeId: streamline-project-documentation
+name: Streamline Project Documentation
+currentPhase: archive
+status: archived
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+  archive_report: archive-report.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Inventoried user, contributor, maintainer, AI-agent, OpenSpec, and bundled documentation surfaces and recommended a minimal target information architecture."
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Committed to five maintained documentation entry points, evidence-backed authority boundaries, thin local skills, and dependency-safe consolidation and deletion."
+  - phase: spec
+    agent: deck-developer-spec
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    registryWrite: deferred-reconciled
+    note: "Defined 31 requirements and 29 acceptance scenarios for the curated documentation system, authority boundaries, safe migration, and focused validation."
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    registryWrite: deferred-reconciled
+    note: "Designed seven curated documents, two thin local skill wrappers, behavior-focused invariant migration, safe snapshot deletion, and focused Bun validation."
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Routed 11 dependency-aware General Apply tasks for test-first replacement documentation, authority and identity migration, invariant decoupling, consumer-gated deletion, and baseline-aware verification."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Completed Apply Batch 1 Tasks 1-9 with a passing focused governance contract; Task 9 found no active maintained consumers but blocked deletion because actionable debt lacks approved OpenSpec disposition."
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Replanned the Task 9 deletion gate: this already approved change may preserve each extracted debt topic through an evidence-backed disposition table in apply-progress.md; Task 10 remains blocked until all nine rows and a rerun show zero live consumers."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Completed Task 9R with nine evidence-backed debt dispositions and a zero-maintained-consumer rerun; Task 10 is unblocked, while Task 11 awaits the separately authorized deletion transaction."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Completed Task 10: deleted the five approved snapshots after the zero-consumer gate and added target-tree absence coverage; Task 11 is unblocked but not executed."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Completed Task 11 and Apply: all focused gates, generated-skill freshness, release suites, and typecheck pass; the sole broad-suite binary-smoke doctor failure is an explicitly accounted baseline/environment-sensitive fingerprint."
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    status: failed
+    registryWrite: deferred-reconciled
+    note: "Verified all 31 requirements and 29 scenarios, but failed closure because the current Binary smoke doctor timeout is not an exact baseline-ledger fingerprint match."
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    status: changes_requested
+    registryWrite: deferred-reconciled
+    note: "Requested six major documentation/test fixes and one required changelog-link correction; no security blocker was found."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Completed bounded Apply repair: restored designated durable tool guidance, completed owner documents and governance predicates, corrected the changelog link, and refreshed the exact current doctor baseline fingerprint."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-07-12"
+    registryWrite: non-deferred
+    note: "Completed the single human-authorized override repair: corrected release truth, source-connected inline direct-command governance, and baseline suite identity."
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    status: passed_with_warnings
+    registryWrite: deferred-reconciled
+    note: "Verify rerun passed all 31 requirements, 29 scenarios, 12 task entries, focused gates, and typecheck; the sole full-suite failure exactly matches the refreshed baseline."
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    status: changes_requested
+    registryWrite: deferred-reconciled
+    note: "Review rerun resolved four majors and the changelog minor, but requested three required corrections for release accuracy, inline command validation, and baseline fingerprint consistency."
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    status: passed_with_warnings
+    registryWrite: deferred-reconciled
+    note: "Final human-override Verify cycle passed all requirements, scenarios, tasks, focused gates, and typecheck; the sole full-suite failure exactly matches the maintained baseline."
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-12"
+    status: failed
+    registryWrite: deferred-reconciled
+    note: "Final human-override Review resolved release and baseline findings but found one required command-governance gap; Archive remains blocked."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-07-13"
+    registryWrite: non-deferred
+    note: "Completed the single final narrow Bun command-governance repair: existing repository test-file targets are required and inline invalid mutations are extracted before shared-predicate rejection; all required focused gates and typecheck pass, while the sole full-suite doctor failure exactly matches the maintained baseline."
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-13"
+    status: passed_with_warnings
+    registryWrite: deferred-reconciled
+    note: "Final narrow Verify passed all 31 requirements, 29 scenarios, 12 tasks, command-governance proofs, focused gates, and typecheck; the sole full-suite failure exactly matches baseline."
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-13"
+    status: approved
+    registryWrite: deferred-reconciled
+    note: "Final narrow Review approved with zero blockers, majors, or minors; command-governance authority and protected boundaries are complete."
+  - phase: archive
+    agent: deck-developer-archive
+    model: minimax-coding-plan/MiniMax-M2.5-highspeed
+    timestamp: "2026-07-13"
+    registryWrite: non-deferred
+    note: "Archived complete change with all artifacts preserved. Produced traceability archive-report.md. Registry state/event updated non-deferred. Source directory removed after copy. Registry validation: ok=true, 0 errors, 15 warning-only diagnostics (14 events.event.name_mismatch compatibility + 1 repair_incident.artifact.missing). No further Apply authorized."

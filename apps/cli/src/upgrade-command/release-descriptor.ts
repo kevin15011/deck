@@ -7,7 +7,7 @@
  * reason about typed release items (`binary`, `content`, `migration`,
  * `advisory`, `channel_eol`) instead of unstructured release notes.
  *
- * Official contract: `openspec/changes/add-self-update-system/spec.md`
+ * Official contract: `openspec/archive/add-self-update-system/spec.md`
  * (REQ-RD-001 .. REQ-RD-011). The schema is **spec-shaped** (snake_case
  * field names) so the on-the-wire JSON matches the spec exactly:
  *

@@ -1,0 +1,435 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-explorer
+    registry_write: non-deferred
+    notes:
+      - "Completed broad documentation inventory and code/package validation."
+      - "Recommended a minimal five-entry-point documentation system and dependency-safe archive/delete sequence."
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-proposal
+    registry_write: non-deferred
+    notes:
+      - "Established five maintained documentation entry points with explicit audience and source-of-truth boundaries."
+      - "Resolved canonical repository identity as kevin15011/deck and retained project-local skills as thin supported wrappers."
+      - "Required invariant and consumer migration before snapshot deletion while preserving historical OpenSpec artifacts unchanged."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-spec
+    registry_write: deferred-reconciled
+    notes:
+      - "Defined 31 requirements and 29 Given/When/Then scenarios for audience entry points, authority, maintenance, migration, and validation."
+      - "Prohibited volatile version copies, exhaustive inventories, machine-local paths, and duplicated runtime or registry policy."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-design
+    registry_write: deferred-reconciled
+    notes:
+      - "Designed the target documentation tree, file ownership boundaries, local skill wrappers, and focused governance test."
+      - "Sequenced invariant migration and consumer removal before deleting obsolete snapshot documents while preserving OpenSpec history."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    notes:
+      - "Created 11 ordered General Apply tasks with a test-first contract, isolated identity/skill work, behavior-focused roadmap decoupling, and a consumer-gated deletion transaction."
+      - "Classified deletion as internally blocked until active-consumer and actionable-debt evidence is recorded; no external Apply precondition exists."
+  - phase: tasks
+    status: completed
+    event: preconditions.created
+    artifact: preconditions.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    notes:
+      - "Recorded None because no external, user, or environment precondition exists; Task 9 retains the internal deletion-evidence gate."
+  - phase: apply
+    status: passed
+    event: apply.preconditions_gate_passed
+    artifact: preconditions.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Preconditions artifact contains None; no external, user, or environment precondition blocks Apply."
+      - "Tasks 1-9 may proceed in dependency order; Tasks 10-11 remain gated on Task 9 deletion-safety evidence."
+  - phase: repair
+    status: active
+    event: repair.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Scope: Apply Batch 1 dispatch; no repository files were modified by the blocked attempt."
+      - "Mode: automatic; incident budget: 2 Apply retries; fingerprint budget: 1 missing-authorization-card retry; verification-cycle limit: 2."
+      - "Initial outcome: repair; decision: retry with the explicit modifying-work authorization card already granted by the user."
+      - "Apply and Verify handoffs must evaluate this incident consistently through evaluateRepairIncident()."
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Apply Batch 1 completed Tasks 1-9 under the corrected authorization-card retry."
+      - "Focused documentation, release, and Developer Team invariant tests pass; generated outputs and historical OpenSpec artifacts remain untouched."
+      - "Task 9 found zero active maintained consumers but recorded DOC_REMOVAL_BLOCKED because docs/deuda-tecnica.md has unresolved actionable work without an existing or separately approved OpenSpec disposition; Tasks 10-11 remain blocked."
+  - phase: repair
+    status: resolved
+    event: repair.resolved
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "The missing-authorization-card fingerprint was resolved on its single allowed retry; Tasks 1-9 executed and focused checks passed."
+      - "Incident budget used: 1 of 2 Apply retries; fingerprint budget used: 1 of 1; verification cycles used: 0 of 2."
+  - phase: repair
+    status: active
+    event: repair.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Scope: clarify and satisfy REQ-MIGRATE-001 for unresolved items extracted from docs/deuda-tecnica.md before snapshot deletion."
+      - "Mode: automatic; incident budget: 2 Apply attempts; fingerprint budget: 1 debt-disposition replan; verification-cycle limit: 2."
+      - "Initial outcome: replan; decision: clarify whether this already approved OpenSpec change can record evidence-backed disposition without creating a new maintained backlog."
+      - "Rationale: the user authorized automatic expert judgment, the current change is an existing approved OpenSpec change, and no maintained consumer remains; do not weaken REQ-MIGRATE-001."
+      - "Apply and Verify handoffs must evaluate this incident consistently through evaluateRepairIncident()."
+  - phase: tasks
+    status: completed
+    event: tasks.replanned
+    artifact: tasks.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    notes:
+      - "Clarified that streamline-project-documentation is the existing OpenSpec change permitted by REQ-MIGRATE-001 to preserve evidence-backed dispositions for debt extracted from docs/deuda-tecnica.md."
+      - "Added Task 9R: assess all nine topics, record one permitted disposition per topic in apply-progress.md, rerun the zero-consumer gate, and permit Task 10 only when both conditions pass."
+      - "Current registry phase and status remain apply/in_progress; Tasks 10 and 11 remain blocked solely by the clarified internal dependency chain."
+  - phase: repair
+    status: resolved
+    event: repair.resolved
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Debt-disposition replan fingerprint resolved on its single allowed attempt."
+      - "Incident budget used: 1 of 2 Apply attempts; fingerprint budget used: 1 of 1; verification cycles used: 1 of 2."
+      - "Task 9R recorded nine permitted dispositions and zero maintained consumers, unblocking Task 10 without creating a backlog or separate change."
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Task 9R complete: D-01 through D-09 have evidence-backed permitted dispositions in the existing approved change."
+      - "Zero maintained consumers remain for the five snapshot candidates; Task 10 is unblocked and Task 11 remains pending Task 10."
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Completed Task 10 deletion transaction after the pre-deletion zero-consumer gate passed."
+      - "Deleted exactly five approved snapshots and added focused target-tree absence assertions; focused governance and behavior-invariant tests pass."
+      - "Historical OpenSpec artifacts and generated outputs remain untouched. Task 11 is unblocked but not executed."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Completed Task 11 and all Apply tasks, including 9R, with passing focused governance, invariant, freshness, release, helper, and typecheck gates."
+      - "Repository-wide bun test has one explicitly accounted Binary smoke doctor failure: the ledger names the same suite/test fingerprint, while current exit code 143 is environment-sensitive subprocess termination and unrelated to this documentation change."
+      - "Manual review confirmed maintained documentation and local wrappers are English, role-blocked, progressively disclosed, source-backed, and within generated/history boundaries."
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    notes:
+      - "All 31 requirements and 29 scenarios pass; focused tests and typecheck pass."
+      - "Closure is blocked because Binary smoke tests > doctor runs and reports diagnostics times out after 5000 ms and does not exactly match the stale ledger identity/behavior fingerprint."
+  - phase: review
+    status: changes_requested
+    event: review.changes_requested
+    artifact: review-report.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    notes:
+      - "Requested six major fixes: preserve durable tool guidance; complete contributor, architecture, release, and descriptor owners; strengthen canonical identity and direct-command validation."
+      - "Requested correction of the changelog comparison link; generated, history, security, and Git-safety boundaries remain sound."
+  - phase: repair
+    status: active
+    event: repair.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Scope: repair Review's six major findings and required changelog-link correction, then formally refresh the stale baseline ledger for the exact unchanged Binary smoke doctor timeout fingerprint."
+      - "Mode: automatic; incident budget: 2 Apply retries; fingerprint budget: 2 (review-fix bundle and doctor-baseline mismatch); verification-cycle limit: 2."
+      - "Initial outcome: repair; decision: perform one bounded General Apply pass without changing runtime behavior or restoring obsolete snapshots."
+      - "Rationale: all specified documentation behavior passes, Review found bounded in-scope gaps, and Verify explicitly permits resolving or formally baselining the unchanged current doctor fingerprint."
+      - "Apply and Verify handoffs must evaluate this incident consistently through evaluateRepairIncident()."
+  - phase: repair
+    status: resolved
+    event: repair.resolved
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Review-fix bundle and doctor-baseline mismatch fingerprints resolved on retry 1 through bounded documentation, governance-test, and ledger changes."
+      - "Incident budget used: 1 of 2 Apply retries; fingerprint budget used: 2 of 2; verification cycles used: 1 of 2."
+      - "No runtime behavior, generated output, historical OpenSpec artifact, or deleted snapshot was changed."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Completed the Verify/Review repair and baseline refresh; focused documentation, invariant, freshness, release, helper, and typecheck gates pass."
+      - "Repository-wide bun test has 3295 pass and one exact ledger-recorded Binary smoke doctor timeout fingerprint."
+  - phase: repair
+    status: resolved
+    event: repair.resolved
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Single human-authorized override attempt resolved all three remaining Review findings."
+      - "Override budget used: 1 of 1 Apply attempts; 3 of 3 findings; 1 of 1 fresh Verify/Review cycles reserved."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Focused gates pass; typecheck passes; broad suite is 3296 pass and one exact refreshed doctor baseline fingerprint."
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.passed_with_warnings
+    artifact: verify-report.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    notes:
+      - "Verify rerun cycle 2 of 2 passed all 31 requirements, 29 scenarios, and 12 task entries; every focused gate and typecheck passes."
+      - "Repository-wide bun test has 3295 passes and one exact refreshed-ledger Binary smoke doctor timeout fingerprint, permitted as PASS WITH WARNINGS."
+  - phase: review
+    status: changes_requested
+    event: review.changes_requested
+    artifact: review-report.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    notes:
+      - "Review rerun confirmed the documentation architecture, contributor guidance, tool migration, identity checks, changelog link, deletion safety, and protected boundaries."
+      - "Archive remains blocked by two majors and one required minor: release/descriptor claims conflict with executable behavior, inline direct-command validation is incomplete, and baseline fingerprint_fields omits suite."
+  - phase: repair
+    status: escalated
+    event: repair.hard_stop
+    artifact: review-report.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Automatic repair is exhausted for the active Verify/Review repair scope: verification cycles 2 of 2 and fingerprint budget 2 of 2."
+      - "No further Apply retry may be launched for these findings without an explicit higher-level or human override recorded in a new message."
+      - "Current outcome: escalated; remaining scope is three bounded required corrections identified by the Review rerun."
+  - phase: repair
+    status: authorized
+    event: repair.override_authorized
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: end-user
+    registry_write: non-deferred
+    notes:
+      - "The user explicitly authorized one additional attempt to correct all three remaining findings, rerun verification/review, and archive if every gate passes."
+      - "Override scope is limited to release/descriptor accuracy, inline direct-command governance, baseline suite-field consistency, and their required evidence."
+  - phase: repair
+    status: active
+    event: repair.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Mode: automatic; human-override incident budget: exactly 1 Apply attempt; fingerprint budget: 3 remaining Review findings; verification-cycle limit: exactly 1 fresh Verify/Review cycle."
+      - "Initial outcome: repair; decision: execute one source-validated, TDD-backed correction pass, then require both Verify and Review to accept before Archive."
+      - "No additional automatic repair is permitted after this override attempt; any residual required finding must be reported and stopped."
+      - "Apply and Verify handoffs must evaluate the override and exhausted prior incidents through evaluateRepairIncident()."
+  - phase: repair
+    status: resolved
+    event: repair.resolved
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Single human-authorized override attempt resolved all three remaining Review findings."
+      - "Override budget used: 1 of 1 Apply attempts; 3 of 3 findings; fresh Verify/Review cycle remains available."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Focused gates pass; typecheck passes; broad suite is 3296 pass and one exact refreshed doctor baseline fingerprint."
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.passed_with_warnings
+    artifact: verify-report.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    notes:
+      - "Final human-override Verify cycle 1 of 1 passed all 31 requirements, 29 scenarios, 12 task entries, focused gates, and typecheck."
+      - "Repository-wide bun test has 3296 passes and one exact ledger-recorded Binary smoke doctor timeout, permitted as PASS WITH WARNINGS."
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    notes:
+      - "Final human-override Review accepted release/descriptor accuracy and baseline identity."
+      - "Review failed because Bun-test governance still accepts nonexistent test targets and lacks end-to-end invalid inline extraction coverage."
+  - phase: repair
+    status: escalated
+    event: repair.hard_stop
+    artifact: review-report.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "The human override budget is exhausted: Apply attempts 1 of 1, findings 3 of 3 attempted, and fresh Verify/Review cycle 1 of 1 consumed."
+      - "Final Verify passed with warnings, but final Review found one required command-governance major; no automatic repair or Archive is authorized."
+      - "Current outcome: blocked pending a new explicit human disposition."
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Serialized deferred Verify/Review reconciliation completed with zero canonical registry errors."
+      - "Review remains failed because one required command-governance major remains after the exhausted human-override attempt."
+  - phase: repair
+    status: authorized
+    event: repair.authorized
+    artifact: review-report.md
+    timestamp: "2026-07-12"
+    actor: end-user
+    registry_write: non-deferred
+    notes:
+      - "The user replied Proceed to the requested final repair limited exclusively to Bun command validation, followed by Verify, Review, and Archive only if both approve."
+  - phase: repair
+    status: active
+    event: repair.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-12"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Mode: automatic; final narrow budget: exactly 1 Apply attempt, 1 command-governance fingerprint, and 1 fresh Verify/Review cycle."
+      - "Scope: require Bun-test targets to resolve to existing repository test files and prove invalid inline typecheck/flag/target mutations end-to-end through extraction plus the shared predicate."
+      - "No other documentation, runtime, baseline, deletion, generated, or historical scope is authorized."
+      - "Apply and Verify must evaluate this final narrow override through evaluateRepairIncident(); any residual required finding stops without another automatic retry."
+  - phase: repair
+    status: resolved
+    event: repair.resolved
+    artifact: apply-progress.md
+    timestamp: "2026-07-13"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Resolved the one authorized command-governance fingerprint on the one authorized Apply attempt."
+      - "The predicate now requires a single existing regular .test.ts/.test.tsx target under tests, packages, apps, or scripts; mutation coverage extracts invalid inline typecheck, flag, and nonexistent-target commands before shared-predicate rejection."
+      - "evaluateRepairIncident() outcome: no active repaired fingerprint remains; one fresh Verify/Review cycle remains pending and no automatic retry is permitted."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-13"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Focused governance, Git-safety/no-op invariants, generated freshness, release suites, release helper, and typecheck pass."
+      - "Focused doctor and full-suite evidence match the sole maintained Binary smoke doctor baseline fingerprint: 0 pass/1 fail focused and 3296 pass/1 fail full suite."
+      - "Only the authorized governance test and current-change Apply/registry artifacts changed; no protected boundary changed."
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.passed_with_warnings
+    artifact: verify-report.md
+    timestamp: "2026-07-13"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    notes:
+      - "Final narrow Verify cycle 1 of 1 passed all 31 requirements, 29 scenarios, 12 task entries, command-governance proofs, focused gates, and typecheck."
+      - "Repository-wide bun test has 3296 passes and one exact ledger-recorded Binary smoke doctor timeout, permitted as PASS WITH WARNINGS."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-07-13"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    notes:
+      - "Final narrow Review approved with zero blockers, zero majors, and zero minors; one optional wording nit remains non-blocking."
+      - "The Bun command-governance finding is fully resolved and documentation, deletion, generated/history, identity, Git-safety, and security boundaries remain sound."
+  - phase: archive
+    status: completed
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: "2026-07-13"
+    actor: deck-developer-archive
+    registry_write: non-deferred
+    notes:
+      - "Change archived to openspec/archive/streamline-project-documentation/. All artifacts preserved including all repair/override provenance."
+      - "Registry state and events updated with archive phase. Source directory removed after verified copy."
+      - "Verify: PASS WITH WARNINGS — 31/31 requirements, 29/29 scenarios, 12/12 tasks. Review: APPROVE — 0 blockers, 0 majors, 0 minors."
+      - "Known warning: exact maintained Binary smoke doctor baseline (environment-sensitive, not a change regression)."
+      - "Optional follow-up: remove 'when applicable' from docs/maintainers/releasing.md:29 if verbatim wording desired."
+      - "Registry validation: ok=true, 0 errors, 15 warning-only diagnostics (14 events.event.name_mismatch compatibility + 1 repair_incident.artifact.missing)."
