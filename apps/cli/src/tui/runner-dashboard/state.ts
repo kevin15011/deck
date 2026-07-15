@@ -211,6 +211,7 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   selectedCapabilities: {
     "context-mode": true,
     "codebase-memory-mcp": true,
+    "codebase-memory": true,
     rtk: true,
     serena: true,
     context7: true,
