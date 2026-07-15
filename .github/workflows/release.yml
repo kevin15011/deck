@@ -166,11 +166,11 @@ jobs:
             --commit "$GITHUB_SHA" \
             --target linux-x64 \
             --channel stable
-          ASSET_BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+          ASSET_BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
           bun run scripts/prepare-release.ts \
             --non-interactive \
             --version "${VERSION#v}" \
-            --tag "${VERSION}" \
+            --tag "v${VERSION}" \
             --channel stable \
             --from-assets-dir release-assets \
             --asset-base-url "${ASSET_BASE_URL}" \
@@ -180,7 +180,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.metadata.outputs.version }}
+          tag_name: v${{ needs.metadata.outputs.version }}
           name: Deck v${{ needs.metadata.outputs.version }}
           draft: false
           prerelease: ${{ contains(needs.metadata.outputs.version, '-beta') || contains(needs.metadata.outputs.version, '-alpha') }}

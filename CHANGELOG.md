@@ -13,4 +13,16 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 - Structured `release.json` descriptors support binary, content, migration, advisory, and channel-end-of-life items. See the [release descriptor reference](docs/release-descriptor.md).
 
-[Unreleased]: https://github.com/kevin15011/deck/releases
+## [0.2.3] - 2026-07-15
+
+### Fixed
+
+- Hardened self-update staging, backup, and rollback so failed upgrades preserve or restore the installed Deck binary safely.
+
+### Changed
+
+- OpenCode model selection now uses the model inventory resolved by the active runner.
+- Streamlined project documentation and strengthened contributor, architecture, release, and documentation-governance guidance.
+
+[Unreleased]: https://github.com/kevin15011/deck/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/kevin15011/deck/releases/tag/v0.2.3
