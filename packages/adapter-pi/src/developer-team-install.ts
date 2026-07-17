@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getAgentContent } from "@deck/core/teams/developer/content-registry";
-import { getOrchestratorSystemPrompt, ORCHESTRATOR_AGENT_BODY } from "@deck/core/teams/developer/orchestrator-content";
+import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
+import { ORCHESTRATOR_AGENT_BODY, ORCHESTRATOR_COMPACT_AGENT_BODY } from "@deck/core/teams/developer/orchestrator-content";
 import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
 import {
   buildCapabilityInstructionBundle,
@@ -49,9 +49,15 @@ function verifyInvariantPresence(
     return { pass: false, missing: criticalIds };
   }
 
-  // For skill surface, require actual invariant headers
-  const hasHeader = /^## Orchestrator Invariants$/m.test(content);
-  if (!hasHeader) {
+  const hasCompactReference = /^## Runtime Contract Reference$/m.test(content)
+    && content.includes("Runtime-Enforced Team Contract remains binding");
+  if (hasCompactReference) {
+    return { pass: true, missing: [] };
+  }
+
+  // Legacy skill surfaces retain the full invariant body.
+  const hasLegacyHeader = /^## Orchestrator Invariants$/m.test(content);
+  if (!hasLegacyHeader) {
     return { pass: false, missing: criticalIds };
   }
 
@@ -73,6 +79,7 @@ import {
 } from "@deck/core/memory/adaptive-memory";
 import { readDeckConfig, DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
 import type { CapabilityInstructionBundle } from "@deck/core";
+import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import type { DeveloperTeamAgent } from "./developer-team-catalog";
 import { DEVELOPER_TEAM_AGENTS } from "./developer-team-catalog";
 import {
@@ -130,6 +137,10 @@ export type DeveloperTeamInstallPlan = {
   memoryDiagnostics: MemoryDiagnostic[];
   /** Memory injection bundle computed from memoryInjection/memoryProvider options. */
   memoryBundle?: MemoryInjectionBundle;
+  /** Effective prompt profile. Compact is selected for normal installations. */
+  promptProfile: DeveloperTeamPromptProfileV1;
+  /** Retained for API compatibility with earlier rollout-aware callers. */
+  promptProfileActivation?: PromptProfileActivationV1;
 };
 
 function validateStandaloneSkillId(skillId: string): void {
@@ -400,6 +411,8 @@ export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
    * explicitly after calling `readDeckConfig(projectRoot)`.
    */
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
+  /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
+  promptProfileActivation?: PromptProfileActivationV1;
 };
 
 // --- Legacy local resolveMemoryInjection (delegated to core) ---
@@ -505,6 +518,13 @@ function toPiMemoryToolName(serverName: string | undefined, toolName: string): s
 
 // --- Plan ---
 
+export function getPiExecutionProbeCapabilities() {
+  return Object.freeze({
+    invocationHook: true,
+    freshAgentHook: true,
+  });
+}
+
 export function buildDeveloperTeamInstallPlan(
   projectRoot: string,
   options?: DeveloperTeamInstallOptions,
@@ -533,6 +553,7 @@ export function buildDeveloperTeamInstallPlan(
       return DEFAULT_ORCHESTRATOR_PERSONALITY;
     }
   })();
+  const promptProfile = "compact" as const;
 
   const agents: PlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `.pi/agents/${agent.id}.md`;
@@ -543,7 +564,15 @@ export function buildDeveloperTeamInstallPlan(
     const thinking = model && options?.preserveMissingThinkingAssignments && !hasThinkingAssignment
       ? undefined
       : model ? resolveThinkingForModel(model, thinkingAssignments?.[agent.id] as PiThinkingLevel | undefined) : resolveThinkingForModel(undefined);
-    const content = buildAgentFileContent(agent, model, thinking, memoryBundle, capabilityInstructions, personality);
+    const content = buildAgentFileContent(
+      agent,
+      model,
+      thinking,
+      memoryBundle,
+      capabilityInstructions,
+      personality,
+      promptProfile,
+    );
 
     return { agent, relativePath, absolutePath, content };
   });
@@ -556,7 +585,13 @@ export function buildDeveloperTeamInstallPlan(
   const skills: PlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.filter((agent) => !sddSkillIds.has(agent.skillId)).map((agent) => {
     const relativePath = `.pi/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
-    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions, personality);
+    const content = buildSkillFileContent(
+      agent,
+      memoryBundle,
+      capabilityInstructions,
+      personality,
+      promptProfile,
+    );
 
     return { agent, relativePath, absolutePath, content };
   });
@@ -570,10 +605,29 @@ export function buildDeveloperTeamInstallPlan(
     skillId: skill.skillId,
     relativePath: `.pi/skills/${skill.skillId}/SKILL.md`,
     absolutePath: join(projectRoot, `.pi/skills/${skill.skillId}/SKILL.md`),
-    content: skill.content,
+    content: buildBootstrapSkillFileContent(
+      skill,
+      capabilityInstructions,
+      personality,
+      promptProfile,
+    ),
   }));
 
-  return { projectRoot, agentsDir, skillsDir, agents, skills, standaloneSkills, sddSkillFiles, memoryDiagnostics, memoryBundle };
+  return {
+    projectRoot,
+    agentsDir,
+    skillsDir,
+    agents,
+    skills,
+    standaloneSkills,
+    sddSkillFiles,
+    memoryDiagnostics,
+    memoryBundle,
+    promptProfile,
+    ...(options?.promptProfileActivation === undefined
+      ? {}
+      : { promptProfileActivation: options.promptProfileActivation }),
+  };
 }
 
 export function readDeveloperTeamModelAssignments(
@@ -753,6 +807,9 @@ export function applyDeveloperTeamInstall(
     teamId: "developer-team",
     projectRoot: plan.projectRoot,
     ...(plan.memoryBundle ? { memoryInjection: plan.memoryBundle } : {}),
+    ...(plan.promptProfileActivation === undefined
+      ? {}
+      : { promptProfileActivation: plan.promptProfileActivation }),
     mkdir,
     writeFile,
     readFile: (path, encoding) => readFileSync(path, encoding ?? "utf-8") as string,
@@ -833,7 +890,7 @@ export function verifyDeveloperTeamInstall(
       issues.push(`Description mismatch for skill ${planned.agent.skillId}.`);
     }
 
-    const registryContent = getAgentContent(planned.agent.id);
+    const registryContent = getAgentContent(planned.agent.id, { promptProfile: plan.promptProfile });
     if (registryContent) {
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
       if (headingMatch && !content.includes(headingMatch[0])) {
@@ -877,9 +934,8 @@ export function verifyDeveloperTeamInstall(
 
     const content = readFile(planned.absolutePath, "utf-8");
 
-    // Basic validation: check for expected skill ID content
-    if (!content.includes("deck-init") && !content.includes("deck-onboard")) {
-      issues.push(`Missing expected SDD skill content.`);
+    if (content !== planned.content) {
+      issues.push(`Content mismatch for SDD skill ${planned.skillId}; installed file differs from planned content.`);
     }
 
     return { agentId: planned.skillId, valid: issues.length === 0, issues };
@@ -958,12 +1014,13 @@ function buildSkillFileContent(
   memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
   personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
+  promptProfile: DeveloperTeamPromptProfileV1 = "compact",
 ): string {
   const content = getAgentContent(
     agent.id,
     capabilityInstructions
-      ? { capabilityInstructions, personality }
-      : { personality },
+      ? { capabilityInstructions, personality, promptProfile }
+      : { personality, promptProfile },
   );
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
@@ -987,6 +1044,29 @@ function buildSkillFileContent(
   ].join("\n");
 }
 
+function buildBootstrapSkillFileContent(
+  skill: { skillId: string; content: string },
+  capabilityInstructions: CapabilityInstructionBundle | undefined,
+  personality: import("@deck/core/config/deck-config").OrchestratorPersonality,
+  promptProfile: DeveloperTeamPromptProfileV1,
+): string {
+  const agent = DEVELOPER_TEAM_AGENTS.find((candidate) => candidate.skillId === skill.skillId);
+  const frontmatterEnd = skill.content.indexOf("\n---", 3);
+  if (!agent || frontmatterEnd < 0) {
+    throw new Error(`Invalid bootstrap skill content for ${skill.skillId}.`);
+  }
+  const content = getAgentContent(
+    agent.id,
+    capabilityInstructions
+      ? { capabilityInstructions, personality, promptProfile }
+      : { personality, promptProfile },
+  );
+  if (!content) {
+    throw new Error(`No content found for agent ${agent.id} in core registry.`);
+  }
+  return `${skill.content.slice(0, frontmatterEnd + 4)}\n\n${content.skillBody.trim()}\n`;
+}
+
 const DEVELOPER_ORCHESTRATOR_AGENT_ID = "deck-developer-orchestrator";
 
 function buildAgentFileContent(
@@ -996,14 +1076,15 @@ function buildAgentFileContent(
   memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
   personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
+  promptProfile: DeveloperTeamPromptProfileV1 = "compact",
 ): string {
   const isOrchestrator = agent.id === DEVELOPER_ORCHESTRATOR_AGENT_ID;
 
   const content = getAgentContent(
     agent.id,
     capabilityInstructions
-      ? { capabilityInstructions, personality }
-      : { personality },
+      ? { capabilityInstructions, personality, promptProfile }
+      : { personality, promptProfile },
   );
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
@@ -1011,7 +1092,14 @@ function buildAgentFileContent(
 
   // For orchestrator, generate a stub that includes all required sections for observability
   if (isOrchestrator) {
-    return buildOrchestratorStub(agent, model, thinking, memoryBundle, capabilityInstructions);
+    return buildOrchestratorStub(
+      agent,
+      promptProfile === "compact" ? ORCHESTRATOR_COMPACT_AGENT_BODY : ORCHESTRATOR_AGENT_BODY,
+      model,
+      thinking,
+      memoryBundle,
+      capabilityInstructions,
+    );
   }
 
   const agentResult: AdaptiveMemoryCompositionResult = memoryBundle
@@ -1053,11 +1141,11 @@ function buildAgentFileContent(
  */
 function buildOrchestratorStub(
   agent: DeveloperTeamAgent,
+  agentBodyContent: string,
   model?: string,
   thinking?: PiThinkingLevel,
   memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
-  personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
 ): string {
   // Build tool bindings from memory bundle - filter by surface matching "agent"
   // This follows the same contract as composeAdaptiveMemory
@@ -1146,9 +1234,6 @@ function buildOrchestratorStub(
     "",
   ].join("\n");
 
-  // Append personality-specific content after the base stub
-  // Use ORCHESTRATOR_AGENT_BODY which contains "Delegate real work" etc.
-  const agentBodyContent = ORCHESTRATOR_AGENT_BODY;
   const combinedContent = `${stubBody}\n\n---\n\n${agentBodyContent}`;
 
   return [...frontmatterLines, "", combinedContent, ""].join("\n");

@@ -27,6 +27,18 @@ import type {
   RepairBudgets,
   RuntimeBudget,
 } from "../contracts/repair-incident";
+import type { ExecutionDossierV1 } from "../contracts/execution-dossier";
+
+/**
+ * Batch C compatibility projection. The legacy incident remains the sole
+ * source of terminal budget semantics; a mismatched incident is invalid rather
+ * than being adapted into a weaker cross-batch guard.
+ */
+export function adaptDossierToRepairIncidentV1(dossier: ExecutionDossierV1, incident?: RepairIncident): RepairIncident | undefined {
+  if (!incident) return undefined;
+  if (incident.changeId !== dossier.batch.changeId) throw new Error("invalid-evidence: repair incident change");
+  return incident;
+}
 
 // ── Operating mode ─────────────────────────────────────────────────────────────
 

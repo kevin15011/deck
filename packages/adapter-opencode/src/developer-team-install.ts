@@ -36,8 +36,14 @@ function verifyInvariantPresence(
   ];
   const missing: string[] = [];
 
-  const hasHeader = /^## Orchestrator Invariants$/m.test(content);
-  if (!hasHeader) {
+  const hasCompactReference = /^## Runtime Contract Reference$/m.test(content)
+    && content.includes("Runtime-Enforced Team Contract remains binding");
+  if (hasCompactReference) {
+    return { pass: true, missing: [] };
+  }
+
+  const hasLegacyHeader = /^## Orchestrator Invariants$/m.test(content);
+  if (!hasLegacyHeader) {
     return { pass: false, missing: criticalIds };
   }
 
@@ -59,7 +65,8 @@ import {
   type MemoryToolBinding,
 } from "@deck/core/memory/adaptive-memory";
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
-import { getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
+import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import { readDeckConfig } from "@deck/core/config/deck-config";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
 import type { CapabilityInstructionBundle } from "@deck/core";
@@ -71,6 +78,7 @@ import { resolveModelConfig, DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { detectMermaidPluginStatus, INTERNAL_OPENCODE_PACKAGE_IDS } from "./internal-opencode-packages";
 import { validateSupermemoryOpenCodeMcpConfig } from "./opencode-mcp-config";
 import type { AgentEntry, OpenCodeConfig } from "./types";
+import executionPluginAssetPath from "../assets/opencode/plugins/developer-team-execution.generated.js" with { type: "file" };
 
 // ---------------------------------------------------------------------------
 // Types (re-export)
@@ -98,6 +106,12 @@ export type OpenCodePlannedStandaloneSkillFile = {
   content: string;
 };
 
+export type OpenCodePlannedExecutionPluginFile = {
+  relativePath: string;
+  absolutePath: string;
+  content: string;
+};
+
 export type OpenCodeDeveloperTeamInstallPlan = {
   projectRoot: string;
   agentsDir: string;
@@ -105,6 +119,7 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   agents: OpenCodePlannedAgentFile[];
   skills: OpenCodePlannedSkillFile[];
   standaloneSkills: OpenCodePlannedStandaloneSkillFile[];
+  executionPlugin?: OpenCodePlannedExecutionPluginFile;
   memoryDiagnostics: MemoryDiagnostic[];
   /** Agent entries for opencode.json config merge */
   agentEntries: Record<string, AgentEntry>;
@@ -117,12 +132,14 @@ export type OpenCodeDeveloperTeamInstallPlan = {
   memoryBundle?: MemoryInjectionBundle;
   /** Resolved orchestrator personality used during plan construction */
   personality?: OrchestratorPersonality;
+  /** Effective prompt profile after rollout receipt validation. */
+  promptProfile: DeveloperTeamPromptProfileV1;
   changedAgentIds?: readonly string[];
 };
 
 export type OpenCodeBundleApplyResult = {
   agentId: string;
-  kind: "agent" | "skill" | "prompt" | "command";
+  kind: "agent" | "skill" | "prompt" | "command" | "plugin";
   status: "created" | "unchanged" | "updated";
   absolutePath: string;
 };
@@ -149,6 +166,7 @@ export type OpenCodeDeveloperTeamVerifyResult = {
   valid: boolean;
   agentResults: OpenCodeBundleVerifyResult[];
   skillResults: OpenCodeBundleVerifyResult[];
+  pluginResults?: OpenCodeBundleVerifyResult[];
 };
 
 /** Re-export MemoryDiagnostic from core for backward compatibility. */
@@ -458,8 +476,11 @@ function buildSkillFileContent(
   memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
   personality?: OrchestratorPersonality,
+  promptProfile: DeveloperTeamPromptProfileV1 = "compact",
 ): string {
-  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions, personality } : { personality });
+  const content = getAgentContent(agent.id, capabilityInstructions
+    ? { capabilityInstructions, personality, promptProfile }
+    : { personality, promptProfile });
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
@@ -496,6 +517,13 @@ function buildSkillFileContent(
 // Plan
 // ---------------------------------------------------------------------------
 
+export function getOpenCodeExecutionProbeCapabilities() {
+  return Object.freeze({
+    invocationHook: true,
+    freshAgentHook: true,
+  });
+}
+
 export function buildOpenCodeDeveloperTeamInstallPlan(
   projectRoot: string,
   options?: MemoryInjectionOptions & {
@@ -518,11 +546,18 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
      * This enables the TUI to pass runtime capability detection results.
      */
     capabilityMap?: Record<string, boolean | null>;
+    /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
+    promptProfileActivation?: PromptProfileActivationV1;
   },
 ): OpenCodeDeveloperTeamInstallPlan {
   const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
   const agentsDir = join(configDir, "agents");
   const skillsDir = join(configDir, "skills");
+  const executionPlugin: OpenCodePlannedExecutionPluginFile = {
+    relativePath: "plugins/developer-team-execution.js",
+    absolutePath: join(configDir, "plugins", "developer-team-execution.js"),
+    content: readFileSync(typeof executionPluginAssetPath === "string" ? executionPluginAssetPath : new URL("../assets/opencode/plugins/developer-team-execution.generated.js", import.meta.url), "utf-8"),
+  };
 
   const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options, configDir);
 
@@ -545,6 +580,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
       return DEFAULT_ORCHESTRATOR_PERSONALITY;
     }
   })();
+  const promptProfile = "compact" as const;
 
   // Build agent entries for opencode.json
   const agentEntries: Record<string, AgentEntry> = {};
@@ -563,7 +599,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   const skills: OpenCodePlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
     const relativePath = `skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(skillsDir, agent.skillId, "SKILL.md");
-    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions, resolvedPersonality);
+    const content = buildSkillFileContent(agent, memoryBundle, capabilityInstructions, resolvedPersonality, promptProfile);
     return { agent, relativePath, absolutePath, content };
   });
 
@@ -578,6 +614,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     projectRoot,
     capabilityInstructions,
     personality: resolvedPersonality,
+    promptProfile,
     memoryBundle,
     authorization: options?.authorization,
   });
@@ -595,6 +632,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     agents: [], // Skills are in skills[]
     skills,
     standaloneSkills,
+    executionPlugin,
     memoryDiagnostics,
     agentEntries,
     promptGenerationPlan,
@@ -603,6 +641,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     capabilityInstructions,
     memoryBundle,
     personality: resolvedPersonality,
+    promptProfile,
     changedAgentIds: options?.changedAgentIds,
   };
 }
@@ -694,6 +733,15 @@ export function applyOpenCodeDeveloperTeamInstall(
       writeFile(planned.absolutePath, planned.content, "utf-8");
       results.push({ agentId: planned.skillId, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath });
     }
+  }
+
+  if (plan.executionPlugin) {
+    const dir = dirname(plan.executionPlugin.absolutePath);
+    mkdir(dir, { recursive: true });
+    const existingContent = exists(plan.executionPlugin.absolutePath) ? readFile(plan.executionPlugin.absolutePath, "utf-8") : null;
+    const status = existingContent === null ? "created" as const : existingContent === plan.executionPlugin.content ? "unchanged" as const : "updated" as const;
+    if (status !== "unchanged") writeFile(plan.executionPlugin.absolutePath, plan.executionPlugin.content, "utf-8");
+    results.push({ agentId: "developer-team-execution", kind: "plugin", status, absolutePath: plan.executionPlugin.absolutePath });
   }
 
   // 5. Write prompt files with idempotency
@@ -788,6 +836,7 @@ export function verifyOpenCodeDeveloperTeamInstall(
     const registryContent = getAgentContent(planned.agent.id, {
       capabilityInstructions: plan.capabilityInstructions,
       personality: plan.personality,
+      promptProfile: plan.promptProfile,
     });
     if (registryContent) {
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
@@ -837,10 +886,17 @@ export function verifyOpenCodeDeveloperTeamInstall(
     return { agentId: planned.skillId, valid: issues.length === 0, issues };
   });
 
+  const pluginResults: OpenCodeBundleVerifyResult[] = plan.executionPlugin ? (() => {
+    if (!exists(plan.executionPlugin.absolutePath)) return [{ agentId: "developer-team-execution", valid: false, issues: ["File does not exist."] }];
+    const content = readFile(plan.executionPlugin.absolutePath, "utf-8");
+    return [{ agentId: "developer-team-execution", valid: content === plan.executionPlugin.content, issues: content === plan.executionPlugin.content ? [] : ["Content mismatch for developer-team execution plugin."] }];
+  })() : [];
+
   return {
-    valid: skillResults.every((r) => r.valid) && standaloneResults.every((r) => r.valid),
+    valid: skillResults.every((r) => r.valid) && standaloneResults.every((r) => r.valid) && pluginResults.every((r) => r.valid),
     agentResults: [],
     skillResults: [...skillResults, ...standaloneResults],
+    pluginResults,
   };
 }
 
@@ -963,6 +1019,10 @@ export function backupDeveloperTeamFiles(
       }
       return { absolutePath: planned.absolutePath, previousContent: null };
     }),
+    ...(plan.executionPlugin ? [{
+      absolutePath: plan.executionPlugin.absolutePath,
+      previousContent: exists(plan.executionPlugin.absolutePath) ? readFile(plan.executionPlugin.absolutePath, "utf-8") : null,
+    }] : []),
   ];
 
   return { entries };

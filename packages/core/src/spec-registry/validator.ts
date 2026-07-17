@@ -50,7 +50,7 @@ const APPLY_OWNER_EVENT_NAME_PATTERN = /^apply\.[a-z][a-z0-9-]*\.(started|comple
 const KNOWN_EVENT_NAME_SET: ReadonlySet<string> = KNOWN_EVENT_NAMES;
 const REPAIR_LIFECYCLE_EVENT_SET: ReadonlySet<string> = REPAIR_LIFECYCLE_EVENTS;
 
-function isKnownRegistryEventName(eventName: string): boolean {
+export function isKnownRegistryEventName(eventName: string): boolean {
   const [phase, status, extra] = eventName.split(".");
 
   return (
@@ -822,6 +822,21 @@ async function validateChange(
                     field,
                   });
                   changeIssues++;
+                }
+              }
+
+              for (const field of ["intent_id", "idempotency_key", "transaction_id", "batch_digest"] as const) {
+                if (event[field] !== undefined && (typeof event[field] !== "string" || event[field].length === 0)) {
+                  issues.push({
+                    severity: "warning",
+                    rule: "events.event.metadata.invalid",
+                    message: `Event metadata must be a non-empty string: ${field}`,
+                    path: eventsPath,
+                    changeId,
+                    file: "events.yaml",
+                    field,
+                  });
+                  warningIssues++;
                 }
               }
 

@@ -10,6 +10,7 @@ import {
   validateSupermemoryPiMcpConfig,
   validateSupermemoryPiMcpRuntime,
   type PiTeamLaunchPlan,
+  type PromptProfileActivationV1,
   type SupermemoryRuntimeValidationResult,
 } from "@deck/adapter-pi";
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
@@ -66,6 +67,8 @@ export type RunPiLaunchOptions = {
   commandExists?: (command: string) => boolean;
   /** Override the Pi command path */
   piCommand?: string;
+  /** Retained for API compatibility; compact prompts are active by default. */
+  promptProfileActivation?: PromptProfileActivationV1;
   /** If true, don't spawn Pi — just return the plan */
   dryRun?: boolean;
 };
@@ -148,6 +151,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
     ...(resolvedMemory.memoryInjection ? { memoryInjection: resolvedMemory.memoryInjection } : {}),
     ...(resolvedMemory.provider ? { memoryProvider: resolvedMemory.provider } : {}),
     ...(resolvedMemory.memoryUnavailableReason ? { memoryUnavailableReason: resolvedMemory.memoryUnavailableReason } : {}),
+    promptProfileActivation: options.promptProfileActivation,
   });
 
   allDiagnostics.push(...profileDiagnostics.map(toLaunchMemoryDiagnostic));
@@ -168,6 +172,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
       standaloneSkills,
       piMcpConfigPath: options.piMcpConfigPath,
       piMcpHomeDir: options.piMcpHomeDir,
+      promptProfileActivation: options.promptProfileActivation,
     });
     applyDeveloperTeamInstall(installPlan);
     allDiagnostics.push(...installPlan.memoryDiagnostics.map(toLaunchMemoryDiagnostic));

@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
-import { getAgentContent, getTeamSessionInstructions } from "@deck/core/teams/developer/content-registry";
+import { getAgentContent, getTeamSessionInstructions, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
 import { buildAdaptiveMemoryInstructionBundle } from "../../core/src/teams/developer/instruction-bundles/adaptive-memory";
 import type { CapabilityInstructionBundle } from "@deck/core";
 import { type OrchestratorPersonality } from "@deck/core/config/deck-config";
@@ -41,6 +41,8 @@ export type GeneratePromptFilesOptions = {
   capabilityInstructions?: CapabilityInstructionBundle;
   /** Optional orchestrator personality for session prompt selection. */
   personality?: OrchestratorPersonality;
+  /** Effective profile selected by the rollout gate. Defaults to legacy. */
+  promptProfile?: DeveloperTeamPromptProfileV1;
   /** Optional memory injection bundle for provider-specific instructions (supermemory/engram). */
   memoryBundle?: MemoryInjectionBundle;
   /**
@@ -274,18 +276,21 @@ function buildPromptContent(
   skillPath: string,
   capabilityInstructions: CapabilityInstructionBundle | undefined,
   personality: OrchestratorPersonality | undefined,
+  promptProfile: DeveloperTeamPromptProfileV1,
   memoryBundle?: MemoryInjectionBundle,
   explicitProvider?: "supermemory" | "engram",
   authorization?: ModificationAuthorization,
 ): string {
-  const content = getAgentContent(agent.id, capabilityInstructions ? { capabilityInstructions, personality } : { personality });
+  const content = getAgentContent(agent.id, capabilityInstructions
+    ? { capabilityInstructions, personality, promptProfile }
+    : { personality, promptProfile });
   if (!content) {
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
 
   const isOrchestrator = agent.id === "deck-developer-orchestrator";
   let baseContent = isOrchestrator
-    ? (getTeamSessionInstructions("developer-team", { capabilityInstructions, personality }) ??
+    ? (getTeamSessionInstructions("developer-team", { capabilityInstructions, personality, promptProfile }) ??
       content.agentBody)
     : content.agentBody;
 
@@ -375,6 +380,7 @@ export function buildPromptGenerationPlan(
     projectRoot: string;
     capabilityInstructions?: CapabilityInstructionBundle;
     personality?: OrchestratorPersonality;
+    promptProfile?: DeveloperTeamPromptProfileV1;
     /** Optional memory injection bundle for provider-specific adaptive memory injection. */
     memoryBundle?: MemoryInjectionBundle;
     /**
@@ -391,6 +397,7 @@ export function buildPromptGenerationPlan(
   },
 ): PlannedPromptFile[] {
   const { configDir, projectRoot, capabilityInstructions, personality, memoryBundle, authorization } = options;
+  const promptProfile = options.promptProfile ?? "compact";
 
   // REQ-R25: Auto-detect provider from MCP config if not explicitly provided
   const explicitProvider =
@@ -412,6 +419,7 @@ export function buildPromptGenerationPlan(
       skillPath,
       effectiveCapabilityInstructions,
       personality,
+      promptProfile,
       memoryBundle,
       explicitProvider ?? undefined,
       authorization,

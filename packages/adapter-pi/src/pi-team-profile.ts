@@ -9,9 +9,11 @@ import {
 } from "@deck/core/memory/adaptive-memory";
 import { renderSddContextSections } from "@deck/core/memory/adaptive-context-renderer";
 import { readDeckConfig } from "@deck/core/config/deck-config";
+import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import type { MemoryDiagnostic } from "./developer-team-install";
 import { buildTeamProfileDir } from "./pi-team-launch";
 import { getTeamsForEnvironment } from "./team-catalog";
+import executionExtensionAssetPath from "../assets/pi/extensions/developer-team-execution.generated.js" with { type: "file" };
 
 // --- Types ---
 
@@ -35,6 +37,8 @@ export type MaterializeTeamProfileOptions = {
   exists?: (path: string) => boolean;
   /** Optional orchestrator personality. When absent, falls back to config or default. */
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
+  /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
+  promptProfileActivation?: PromptProfileActivationV1;
 };
 
 // --- System Prompt Builder ---
@@ -67,6 +71,8 @@ export type BuildTeamSystemPromptOptions = {
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
   /** Project root for resolving config. Required when using config-based personality fallback. */
   projectRoot?: string;
+  /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
+  promptProfileActivation?: PromptProfileActivationV1;
 };
 
 /**
@@ -91,7 +97,8 @@ export function buildTeamSystemPrompt(
   // Resolve personality: explicit option > config > default
   const configPath = options?.projectRoot ?? ".";
   const personality = options?.orchestratorPersonality ?? readDeckConfig(configPath).orchestratorPersonality;
-  const instructions = getTeamSessionInstructions(teamId, { personality });
+  const promptProfile = "compact" as const;
+  const instructions = getTeamSessionInstructions(teamId, { personality, promptProfile });
   const base = instructions ?? [
     `# Deck ${teamId} Session`,
     "",
@@ -161,6 +168,8 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
 
   const profileDir = buildTeamProfileDir(projectRoot, teamId);
   const systemPromptPath = join(profileDir, "system-prompt.md");
+  const extensionDir = join(profileDir, "extensions");
+  const extensionPath = join(extensionDir, "developer-team-execution.js");
 
   const { content, memoryDiagnostics } = buildTeamSystemPrompt(teamId, {
     memoryInjection: options.memoryInjection,
@@ -168,6 +177,7 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
     supportedMemoryProviderIds: options.supportedMemoryProviderIds,
     memoryUnavailableReason: options.memoryUnavailableReason,
     orchestratorPersonality: options.orchestratorPersonality,
+    promptProfileActivation: options.promptProfileActivation,
     projectRoot: options.projectRoot,
   });
 
@@ -176,14 +186,9 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
     mkdir(profileDir, { recursive: true });
   }
 
-  // Skip write if content unchanged
-  if (exists(systemPromptPath)) {
-    const existing = readFile(systemPromptPath, "utf-8");
-    if (existing === content) {
-      return memoryDiagnostics;
-    }
-  }
-
-  writeFile(systemPromptPath, content, "utf-8");
+  if (!exists(systemPromptPath) || readFile(systemPromptPath, "utf-8") !== content) writeFile(systemPromptPath, content, "utf-8");
+  if (!exists(extensionDir)) mkdir(extensionDir, { recursive: true });
+  const extensionContent = readFileSync(typeof executionExtensionAssetPath === "string" ? executionExtensionAssetPath : new URL("../assets/pi/extensions/developer-team-execution.generated.js", import.meta.url), "utf-8");
+  if (!exists(extensionPath) || readFile(extensionPath, "utf-8") !== extensionContent) writeFile(extensionPath, extensionContent, "utf-8");
   return memoryDiagnostics;
 }

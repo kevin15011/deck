@@ -61,6 +61,7 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   // Runner ID const arrays in deck-config.ts
   { pattern: /^"pi"$/, reason: "PACKAGE_INSTRUCTION_RUNNERS runner ID const" },
   { pattern: /^"opencode"$/, reason: "PACKAGE_INSTRUCTION_RUNNERS runner ID const" },
+  { pattern: /^"developerTeamExecution\.invocationAuthorization\.(?:opencode|pi)"$/, reason: "adapter-specific invocation authorization config path" },
   // Runner-capability-registry.ts: capability IDs and catalog entries with runner/provider prefixes
   // These are SPEC-DEFINED catalog identifiers, not runtime references.
   // File path references to adapter-opencode in instruction content (historical example)

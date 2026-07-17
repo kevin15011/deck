@@ -124,6 +124,11 @@ export type SpecRegistryEvent = {
   actor: string;
   evidence?: string;
   metadata?: Record<string, unknown>;
+  /** Warning-first centralized registry metadata. */
+  intentId?: string;
+  idempotencyKey?: string;
+  transactionId?: string;
+  batchDigest?: string;
 };
 
 // ---------------------------------------------------------------------------

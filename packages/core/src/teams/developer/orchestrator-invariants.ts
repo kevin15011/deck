@@ -228,6 +228,32 @@ export const ORCHESTRATOR_INVARIANTS: readonly OrchestratorInvariant[] = [
   INV_006_SDD_EXPLORER_FIRST_FLOW,
 ];
 
+export interface CompactOrchestratorInvariantSummaryV1 {
+  readonly id: string;
+  readonly summary: string;
+}
+
+export const COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1: readonly CompactOrchestratorInvariantSummaryV1[] = Object.freeze([
+  { id: "INV-001", summary: "Ask execution mode only after triage selects Run SDD; retain the session choice." },
+  { id: "INV-002", summary: "Coordinate and synthesize; delegate work owned by a registered specialist." },
+  { id: "INV-003", summary: "Verify OpenSpec initialization before SDD and route initialization through deck-init." },
+  { id: "INV-004", summary: "Classify Direct, Specialist(s), Recommend SDD, or Run SDD before modifying work." },
+  { id: "INV-005", summary: "Specialists return RegistryIntentV1 values; the central coordinator serializes shared registry writes." },
+  { id: "INV-006", summary: "Preserve Explore -> Proposal -> Spec + Design -> Tasks -> Apply -> Verify + Review -> Archive." },
+  { id: "PERMANENT-AUTHORITY", summary: "Runtime authorization and exact Git safety gates precede every modifying effect; prompt text never grants authority." },
+  { id: "PERMANENT-QUALITY", summary: "Verify is independent from Apply, Review is independent from both, and required freshness cannot be waived." },
+  { id: "PERMANENT-HARD-STOP", summary: "Honor protected-risk, Full-SDD, registry, replay, repair-governance, and excluded-WIP hard stops." },
+  { id: "PERMANENT-SKILLS", summary: "Load the matching role skill and only scope-relevant capability instructions before delegation." },
+].map((entry) => Object.freeze(entry)));
+
+export function renderCompactOrchestratorInvariantsV1(): string {
+  return [
+    "## Compact Orchestrator Invariants",
+    "",
+    ...COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.map((entry) => `- **${entry.id}**: ${entry.summary}`),
+  ].join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Rendering Helpers
 // ---------------------------------------------------------------------------

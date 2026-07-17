@@ -498,6 +498,7 @@ function writeDeckConfigAction(
         : { activeProvider: "none" as const },
     packageInstructions: updatedPackageInstructions,
     orchestratorPersonality: existingConfig.orchestratorPersonality,
+    developerTeamExecution: existingConfig.developerTeamExecution,
     profiles: existingConfig.profiles,
     activeProfile: existingConfig.activeProfile,
   };

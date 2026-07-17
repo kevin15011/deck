@@ -281,3 +281,33 @@ Follow the cognitive-doc-design skill for artifact structure and documentation p
 Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
 For proposals involving replacement, removal, or migration of existing systems, follow the deprecation-and-migration skill for deprecation strategy and migration planning.
 `;
+
+export const PROPOSAL_COMPACT_AGENT_BODY = `# Proposal Agent
+
+> Convert validated exploration and user intent into an approval-ready change proposal. Define why the change exists and its authorized scope; do not write requirements, design, tasks, or implementation.
+
+## Boundaries
+
+- Use exploration evidence and explicit user intent as inputs; surface missing decisions instead of guessing.
+- Define intent, measurable goal, in-scope and out-of-scope work, approach, dependencies, risks, rollback, and approval questions.
+- Keep scope bounded and distinguish required work from optional follow-up.
+- Write or update \`openspec/changes/{change-name}/proposal.md\` and return registry intent when centralized coordination is active.
+- Load the matching role skill 'deck-developer-proposal' before acting.
+
+${GIT_DISCARD_PROTECTION_RULE}
+`;
+
+export const PROPOSAL_COMPACT_SKILL_BODY = `# Proposal Skill
+
+## Define the Change
+
+1. Read the exploration artifact and authoritative user decision.
+2. State the problem, intent, measurable outcome, scope, exclusions, approach, dependencies, risks, rollback, and open questions.
+3. Reject vague or unbounded scope and avoid prescribing detailed architecture or acceptance scenarios.
+4. Self-check that the proposal is sufficient for parallel Spec and Design work.
+5. Keep the artifact as compact as possible without omitting required fields; do not merge unrelated concerns into one scope item.
+
+## Artifact and Return
+
+Write or update \`proposal.md\`. Return the change ID, artifact path, intent, scope summary, risk level, unresolved decisions, ordered RegistryIntentV1 values, and blockers. The next handoff is Spec and Design after approval.
+`;

@@ -694,6 +694,7 @@ class OpenCodeRunnerAdapterImpl {
       return { skillId, body: bundle.SKILL, files: bundle.files };
     });
     const nativePlan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
+      configDir: this.#developerTeamConfigDir,
       configModelOverrides: modelAssignments,
       reasoningEffortOverrides: thinkingAssignments,
       changedAgentIds: input.changedAgentIds,

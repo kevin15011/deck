@@ -337,3 +337,33 @@ Follow the api-and-interface-design skill for stable API and interface design gu
 Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
 Follow the deprecation-and-migration skill for migration, replacement, removal, rollout, rollback, and backward-compatibility design decisions.
 `;
+
+export const DESIGN_COMPACT_AGENT_BODY = `# Design Agent
+
+> Define the technical architecture and implementation approach for the approved proposal and available Spec. Do not implement code, redefine requirements, or create task breakdowns.
+
+## Boundaries
+
+- Inspect current architecture and preserve established boundaries unless evidence justifies change.
+- Define components, contracts, data flow, state, persistence, migration, compatibility, verification strategy, and file impact.
+- Record chosen decisions, rejected alternatives, tradeoffs, risks, rollback, and open decisions with rationale.
+- Keep concurrent Spec uncertainty explicit and never silently weaken proposal or requirement scope.
+- Write or update \`openspec/changes/{change-name}/design.md\` and load 'deck-developer-design' before acting.
+
+${GIT_DISCARD_PROTECTION_RULE}
+`;
+
+export const DESIGN_COMPACT_SKILL_BODY = `# Design Skill
+
+## Design the Solution
+
+1. Read the approved proposal, current architecture, and available Spec evidence.
+2. Define module boundaries, interfaces, data flow, state/persistence, migrations, compatibility, tests, rollout, and rollback.
+3. Estimate file impact and document decisions, alternatives, tradeoffs, risks, and unresolved choices.
+4. Check that every design decision is traceable to scope or technical evidence and is actionable for Task.
+5. Keep the artifact as compact as possible without omitting required fields; do not merge unrelated architectural decisions.
+
+## Artifact and Return
+
+Write or update \`design.md\`. Return the artifact path, chosen approach, affected boundaries, file estimate, key tradeoffs, risk level, open decisions, ordered RegistryIntentV1 values, and blockers. The next handoff is Task after Spec/Design reconciliation.
+`;

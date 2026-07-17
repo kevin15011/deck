@@ -83,6 +83,17 @@ describe("readDeckConfig", () => {
         opencode: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
       },
       orchestratorPersonality: "pragmatica",
+      developerTeamExecution: {
+        schema: "developer-team-execution-config-v1",
+        executionContracts: "observe",
+        decisionKernel: "shadow",
+        invocationAuthorization: { default: "static-compatible" },
+        registryWriter: "distributed-compatible",
+        routePolicy: "legacy-triage",
+        promptProfile: "compact",
+        telemetry: "off",
+        cohortPercent: 0,
+      },
       profiles: [],
       activeProfile: "default",
     });
@@ -92,6 +103,60 @@ describe("readDeckConfig", () => {
     const config = validateDeckConfig({ version: 1, adaptiveMemory: {} });
 
     expect(config.adaptiveMemory.activeProvider).toBe("none");
+  });
+});
+
+describe("validateDeckConfig - developerTeamExecution", () => {
+  test("normalizes additive execution controls with safe defaults", () => {
+    const config = validateDeckConfig({
+      version: 1,
+      developerTeamExecution: {
+        executionContracts: "enforce",
+        decisionKernel: "active",
+        invocationAuthorization: { default: "static-compatible", opencode: "invocation-required" },
+        registryWriter: "centralized",
+        routePolicy: "shadow-risk-lanes",
+        promptProfile: "compact",
+        telemetry: "local-safe",
+        cohortPercent: 25,
+      },
+    });
+
+    expect(config.developerTeamExecution).toEqual({
+      schema: "developer-team-execution-config-v1",
+      executionContracts: "enforce",
+      decisionKernel: "active",
+      invocationAuthorization: { default: "static-compatible", opencode: "invocation-required" },
+      registryWriter: "centralized",
+      routePolicy: "shadow-risk-lanes",
+      promptProfile: "compact",
+      telemetry: "local-safe",
+      cohortPercent: 25,
+    });
+  });
+
+  test("accepts the authorization control key without weakening secret rejection", () => {
+    expect(validateDeckConfig({ developerTeamExecution: { invocationAuthorization: { pi: "invocation-required" } } })
+      .developerTeamExecution.invocationAuthorization.pi).toBe("invocation-required");
+    expectDeckConfigError(
+      () => validateDeckConfig({ developerTeamExecution: { token: "raw-secret" } }),
+      "SUPERMEMORY_CREDENTIAL_IN_DECK_CONFIG",
+    );
+  });
+
+  test("rejects invalid enums, cohort bounds, and unknown nested fields", () => {
+    expectDeckConfigError(
+      () => validateDeckConfig({ developerTeamExecution: { routePolicy: "unsafe" } }),
+      "DECK_CONFIG_INVALID_SHAPE",
+    );
+    expectDeckConfigError(
+      () => validateDeckConfig({ developerTeamExecution: { cohortPercent: 101 } }),
+      "DECK_CONFIG_INVALID_SHAPE",
+    );
+    expectDeckConfigError(
+      () => validateDeckConfig({ developerTeamExecution: { invocationAuthorization: { unknown: "static-compatible" } } }),
+      "DECK_CONFIG_UNKNOWN_FIELD",
+    );
   });
 });
 

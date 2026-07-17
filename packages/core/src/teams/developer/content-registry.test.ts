@@ -146,9 +146,9 @@ describe("getAgentContent", () => {
     }
   });
 
-  test("artifact-writing agents require merge/append registry updates", () => {
+  test("explicit legacy artifact writers retain merge/append registry instructions", () => {
     for (const id of REGISTRY_WRITER_AGENT_IDS) {
-      const content = getAgentContent(id)!;
+      const content = getAgentContent(id, { promptProfile: "legacy" })!;
       const combined = `${content.agentBody}\n${content.skillBody}`;
       expect(combined, id).toContain("Read existing");
       expect(combined, id).toContain("Merge phase");
@@ -160,8 +160,8 @@ describe("getAgentContent", () => {
     }
   });
 
-  test("orchestrator rejects registry history resets", () => {
-    const content = getAgentContent("deck-developer-orchestrator")!;
+  test("explicit legacy orchestrator rejects registry history resets", () => {
+    const content = getAgentContent("deck-developer-orchestrator", { promptProfile: "legacy" })!;
     const combined = `${content.agentBody}\n${content.skillBody}`;
     expect(combined).toContain("merge new state without dropping prior artifacts/provenance");
     expect(combined).toContain("append new events without dropping prior events");
@@ -169,8 +169,8 @@ describe("getAgentContent", () => {
     expect(combined).toContain("reset/dropped prior registry history");
   });
 
-  test("orchestrator serializes registry reconciliation for parallel phases", () => {
-    const content = getAgentContent("deck-developer-orchestrator")!;
+  test("explicit legacy orchestrator serializes registry reconciliation for parallel phases", () => {
+    const content = getAgentContent("deck-developer-orchestrator", { promptProfile: "legacy" })!;
     const combined = `${content.agentBody}\n${content.skillBody}`;
     expect(combined).toContain("Spec+Design");
     expect(combined).toContain("Verify+Review");
@@ -212,8 +212,8 @@ describe("getAgentContent", () => {
     expect(combined).toContain("explicit current-state/context provided by the Orchestrator");
   });
 
-  test("orchestrator repairs contract violations and gates Apply blockers", () => {
-    const content = getAgentContent("deck-developer-orchestrator")!;
+  test("explicit legacy orchestrator repairs contract violations and gates Apply blockers", () => {
+    const content = getAgentContent("deck-developer-orchestrator", { promptProfile: "legacy" })!;
     const combined = `${content.agentBody}\n${content.skillBody}`;
     expect(combined).toContain("violates the exact return contract");
     expect(combined).toContain("wrong or non-requested language");
@@ -227,7 +227,7 @@ describe("getAgentContent", () => {
     expect(combined).toContain("Do not launch Apply for blocked tasks");
   });
 
-  test("parallel phase agents support registry-deferred mode", () => {
+  test("explicit legacy parallel phase agents support registry-deferred mode", () => {
     const parallelPhaseAgentIds = [
       "deck-developer-spec",
       "deck-developer-design",
@@ -236,7 +236,7 @@ describe("getAgentContent", () => {
     ] as const;
 
     for (const id of parallelPhaseAgentIds) {
-      const content = getAgentContent(id)!;
+      const content = getAgentContent(id, { promptProfile: "legacy" })!;
       const combined = `${content.agentBody}\n${content.skillBody}`;
       expect(combined, id).toContain("registry-deferred mode");
       expect(combined, id).toContain("do not write shared");
@@ -348,8 +348,8 @@ describe("getAgentContent", () => {
 // ---------------------------------------------------------------------------
 
 describe("getTeamSessionInstructions", () => {
-  test("returns real orchestrator session instructions for developer-team", () => {
-    const instructions = getTeamSessionInstructions("developer-team");
+  test("explicit legacy session retains detailed orchestrator instructions", () => {
+    const instructions = getTeamSessionInstructions("developer-team", { promptProfile: "legacy" });
     expect(instructions).toBeDefined();
     expect(instructions).toContain("# Deck Developer Team");
     expect(instructions).toContain("deck-developer-orchestrator");
@@ -363,8 +363,8 @@ describe("getTeamSessionInstructions", () => {
     expect(getTeamSessionInstructions("unknown-team")).toBeUndefined();
   });
 
-  test("session instructions contain all agent role references", () => {
-    const instructions = getTeamSessionInstructions("developer-team")!;
+  test("explicit legacy session retains all agent role references", () => {
+    const instructions = getTeamSessionInstructions("developer-team", { promptProfile: "legacy" })!;
     expect(instructions).toContain("deck-developer-explorer");
     expect(instructions).toContain("deck-developer-proposal");
     expect(instructions).toContain("deck-developer-spec");
@@ -960,9 +960,9 @@ describe("Developer Team language policy composition", () => {
 // ---------------------------------------------------------------------------
 
 describe("orchestrator invariant injection", () => {
-  test("session instructions contain '## Orchestrator Invariants' at start", () => {
+  test("default session instructions contain compact invariants at start", () => {
     const instructions = getTeamSessionInstructions("developer-team")!;
-    const invariantsIdx = instructions.indexOf("## Orchestrator Invariants");
+    const invariantsIdx = instructions.indexOf("## Compact Orchestrator Invariants");
 
     expect(invariantsIdx).toBe(0); // Invariants at start of session instructions
   });
@@ -974,9 +974,9 @@ describe("orchestrator invariant injection", () => {
     expect(packageInstrIdx).toBe(-1); // no capability instructions by default
   });
 
-  test("orchestrator agent body contains invariant section", () => {
+  test("default orchestrator agent body contains compact invariant section", () => {
     const content = getAgentContent("deck-developer-orchestrator")!;
-    expect(content.agentBody).toContain("## Orchestrator Invariants");
+    expect(content.agentBody).toContain("## Compact Orchestrator Invariants");
     expect(content.agentBody).toContain("INV-001");
     expect(content.agentBody).toContain("INV-002");
     expect(content.agentBody).toContain("INV-003");
@@ -985,15 +985,10 @@ describe("orchestrator invariant injection", () => {
     expect(content.agentBody).toContain("INV-006");
   });
 
-  test("orchestrator skill body contains invariant section", () => {
+  test("default orchestrator skill body references the compact runtime contract", () => {
     const content = getAgentContent("deck-developer-orchestrator")!;
-    expect(content.skillBody).toContain("## Orchestrator Invariants");
-    expect(content.skillBody).toContain("INV-001");
-    expect(content.skillBody).toContain("INV-002");
-    expect(content.skillBody).toContain("INV-003");
-    expect(content.skillBody).toContain("INV-004");
-    expect(content.skillBody).toContain("INV-005");
-    expect(content.skillBody).toContain("INV-006");
+    expect(content.skillBody).toContain("## Runtime Contract Reference");
+    expect(content.skillBody).toContain("Runtime-Enforced Team Contract remains binding");
   });
 
   test("non-orchestrator agents do NOT contain invariant section", () => {
@@ -1026,13 +1021,13 @@ describe("orchestrator invariant injection", () => {
     const second = getAgentContent("deck-developer-orchestrator")!;
 
     // No duplicates of invariant section header
-    const headerMatches = first.agentBody.match(/^## Orchestrator Invariants$/gm);
+    const headerMatches = first.agentBody.match(/^## Compact Orchestrator Invariants$/gm);
     expect(headerMatches).toHaveLength(1);
   });
 
   test("invariant section appears before context-authority guidance", () => {
     const instructions = getTeamSessionInstructions("developer-team")!;
-    const invariantsIdx = instructions.indexOf("## Orchestrator Invariants");
+    const invariantsIdx = instructions.indexOf("## Compact Orchestrator Invariants");
     const authorityIdx = instructions.indexOf("## Context Authority");
 
     expect(invariantsIdx).toBe(0); // Invariants at start
@@ -1054,13 +1049,12 @@ describe("getTeamSessionInstructions with personality", () => {
     expect(guiaInstructions).toContain("# Deck Developer Team");
   });
 
-  test("pragmatica personality returns current ORCHESTRATOR_SYSTEM_PROMPT behavior", () => {
+  test("pragmatica personality returns compact coordinator behavior", () => {
     const pragmaticaInstructions = getTeamSessionInstructions("developer-team", { personality: "pragmatica" });
     expect(pragmaticaInstructions).toBeDefined();
     expect(pragmaticaInstructions).toContain("# Deck Developer Team");
-    expect(pragmaticaInstructions).toContain("deck-developer-orchestrator");
-    // Pragmatica should contain the delegation table with 4+
-    expect(pragmaticaInstructions).toContain("4+");
+    expect(pragmaticaInstructions).toContain("## Triage and Flow");
+    expect(pragmaticaInstructions).toContain("Delegate each phase to its registered specialist");
     // Layer present
     expect(pragmaticaInstructions).toContain("Communication Style — Pragmatica");
   });

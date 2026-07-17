@@ -5,8 +5,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   STANDALONE_SKILLS,
   getStandaloneSkillBody,
@@ -188,15 +190,27 @@ describe("external/skills content", () => {
     it("generated bundle is idempotent", () => {
       const generatedPath = "packages/core/src/skills/external/content.generated.ts";
       const before = readFileSync(generatedPath, "utf-8");
-      const first = spawnSync("bun", ["scripts/generate-skill-bundle.ts"], { encoding: "utf-8" });
-      expect(first.status, first.stderr).toBe(0);
-      const afterFirst = readFileSync(generatedPath, "utf-8");
-      const second = spawnSync("bun", ["scripts/generate-skill-bundle.ts"], { encoding: "utf-8" });
-      expect(second.status, second.stderr).toBe(0);
-      const afterSecond = readFileSync(generatedPath, "utf-8");
+      const temporaryRoot = mkdtempSync(join(tmpdir(), "deck-skill-bundle-"));
+      try {
+        const firstPath = join(temporaryRoot, "first", "content.generated.ts");
+        const first = spawnSync("bun", ["scripts/generate-skill-bundle.ts", "--output", firstPath], { encoding: "utf-8" });
+        expect(first.status, first.stderr).toBe(0);
+        const afterFirst = readFileSync(firstPath, "utf-8");
+        expect(afterFirst).toBe(before);
+        expect(readFileSync(generatedPath, "utf-8")).toBe(before);
 
-      expect(afterFirst).toBe(before);
-      expect(afterSecond).toBe(afterFirst);
+        const secondPath = join(temporaryRoot, "second", "content.generated.ts");
+        const second = spawnSync("bun", ["scripts/generate-skill-bundle.ts", "--output", secondPath], { encoding: "utf-8" });
+        expect(second.status, second.stderr).toBe(0);
+        expect(readFileSync(secondPath, "utf-8")).toBe(afterFirst);
+        expect(readFileSync(generatedPath, "utf-8")).toBe(before);
+
+        const failure = spawnSync("bun", ["scripts/generate-skill-bundle.ts", "--output", temporaryRoot], { encoding: "utf-8" });
+        expect(failure.status).not.toBe(0);
+        expect(readFileSync(generatedPath, "utf-8")).toBe(before);
+      } finally {
+        rmSync(temporaryRoot, { recursive: true, force: true });
+      }
     });
 
     it("no system artifacts in bundle files (REQ-TEST-007)", () => {

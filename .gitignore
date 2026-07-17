@@ -13,6 +13,7 @@ coverage/
 sdd/
 .deck/pi/profiles/
 .deck/pi/sessions/
+.deck/runtime/
 apps/cli/install
 
 # ── Generated artifacts ───────────────────────────────────────────────────────

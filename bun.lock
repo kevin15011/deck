@@ -42,6 +42,7 @@
       "dependencies": {
         "@deck/adapter-supermemory": "workspace:*",
         "@deck/core": "workspace:*",
+        "@deck/sdd-runtime": "workspace:*",
       },
     },
     "packages/adapter-pi": {
@@ -49,6 +50,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@deck/core": "workspace:*",
+        "@deck/sdd-runtime": "workspace:*",
       },
     },
     "packages/adapter-supermemory": {
@@ -65,6 +67,9 @@
     "packages/sdd-runtime": {
       "name": "@deck/sdd-runtime",
       "version": "0.0.0",
+      "dependencies": {
+        "@deck/core": "workspace:*",
+      },
     },
   },
   "packages": {

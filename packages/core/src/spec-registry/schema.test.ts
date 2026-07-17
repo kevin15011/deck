@@ -36,4 +36,8 @@ describe("spec-registry schema repair telemetry constants", () => {
   test("exports warning-first repair incident validation rule", () => {
     expect(VALIDATION_RULE_CODES).toContain("repair_incident.artifact.missing");
   });
+
+  test("exports warning-first registry transaction metadata rule", () => {
+    expect(VALIDATION_RULE_CODES).toContain("events.event.metadata.invalid");
+  });
 });

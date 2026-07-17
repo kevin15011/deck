@@ -1449,4 +1449,46 @@ events:
       expect.objectContaining({ rule: "repair_incident.artifact.missing" })
     );
   });
+
+  test("accepts transaction metadata additively and warns on malformed optional values", async () => {
+    const directory = path.join(tempDir, "openspec", "changes", "transaction-metadata");
+    await fs.mkdir(directory);
+    await fs.writeFile(path.join(directory, "state.yaml"), `schema: spec-registry-v1
+changeId: transaction-metadata
+currentPhase: spec
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+provenance:
+  - phase: spec
+    agent: deck
+    timestamp: "2026-01-01T00:00:00Z"
+`);
+    await fs.writeFile(path.join(directory, "events.yaml"), `schema: spec-registry-events-v1
+events:
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-01-01T00:00:00Z"
+    actor: deck
+    intent_id: registry-intent:v1:fixture
+    idempotency_key: sha256:fixture
+    transaction_id: 42
+    batch_digest: sha256:fixture
+`);
+    for (const file of ["exploration.md", "proposal.md", "spec.md"]) await fs.writeFile(path.join(directory, file), `# ${file}`);
+
+    const result = await validateOpenSpecRegistry({ rootDir: tempDir, changeId: "transaction-metadata" });
+
+    expect(result.ok).toBe(true);
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      rule: "events.event.metadata.invalid",
+      severity: "warning",
+      field: "transaction_id",
+    }));
+    expect(result.issues.filter((issue) => issue.rule === "events.event.metadata.invalid")).toHaveLength(1);
+  });
 });

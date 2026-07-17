@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   DEFAULT_ORCHESTRATOR_PERSONALITY,
+  getDefaultDeckConfig,
   type NormalizedDeckConfig,
 } from "../../../config/deck-config";
 import {
@@ -40,6 +41,7 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
       },
     },
     orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
+    developerTeamExecution: getDefaultDeckConfig().developerTeamExecution,
     profiles: [],
     activeProfile: "default",
   };

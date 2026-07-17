@@ -114,6 +114,22 @@ export interface Profile {
   strategy?: ProfileStrategy;
 }
 
+export interface DeveloperTeamExecutionConfigV1 {
+  readonly schema: "developer-team-execution-config-v1";
+  readonly executionContracts: "off" | "observe" | "enforce";
+  readonly decisionKernel: "legacy" | "shadow" | "active";
+  readonly invocationAuthorization: {
+    readonly default: "static-compatible" | "invocation-required";
+    readonly opencode?: "static-compatible" | "invocation-required";
+    readonly pi?: "static-compatible" | "invocation-required";
+  };
+  readonly registryWriter: "distributed-compatible" | "centralized";
+  readonly routePolicy: "legacy-triage" | "shadow-risk-lanes" | "risk-lanes";
+  readonly promptProfile: "legacy" | "compact";
+  readonly telemetry: "off" | "local-safe";
+  readonly cohortPercent: number;
+}
+
 // ---------------------------------------------------------------------------
 // DeckConfig / NormalizedDeckConfig
 // ---------------------------------------------------------------------------
@@ -129,6 +145,10 @@ export type DeckConfig = {
   adaptiveMemory?: DeckAdaptiveMemoryConfig;
   packageInstructions?: DeckPackageInstructionConfig;
   orchestratorPersonality?: OrchestratorPersonality;
+  developerTeamExecution?: Partial<Omit<DeveloperTeamExecutionConfigV1, "schema" | "invocationAuthorization">> & {
+    schema?: "developer-team-execution-config-v1";
+    invocationAuthorization?: Partial<DeveloperTeamExecutionConfigV1["invocationAuthorization"]>;
+  };
   profiles?: Profile[];
   activeProfile?: string;
 };
@@ -141,6 +161,7 @@ export type NormalizedDeckConfig = {
   };
   packageInstructions: Record<PackageInstructionRunnerId, Record<PackageInstructionPackageId, boolean>>;
   orchestratorPersonality: OrchestratorPersonality;
+  developerTeamExecution: DeveloperTeamExecutionConfigV1;
   profiles: Profile[];
   activeProfile: string;
 };
@@ -185,7 +206,7 @@ export type ActiveMemoryProviderResolution = {
 const SECRET_FIELD_PATTERN =
   /(?:token|secret|credential|credentials|api[-_]?key|password|private[-_]?key|access[-_]?key|auth(?:orization)?)/i;
 
-const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "packageInstructions", "orchestratorPersonality", "profiles", "activeProfile"]);
+const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "packageInstructions", "orchestratorPersonality", "developerTeamExecution", "profiles", "activeProfile"]);
 const ADAPTIVE_MEMORY_FIELDS = new Set(["activeProvider", "supermemory"]);
 const SUPERMEMORY_FIELDS = new Set([
   "mcpServerName",
@@ -193,6 +214,12 @@ const SUPERMEMORY_FIELDS = new Set([
   "maxMemoriesPerSession",
 ]);
 const PACKAGE_INSTRUCTION_PACKAGE_FIELDS = new Set(PACKAGE_INSTRUCTION_PACKAGE_IDS);
+const DEVELOPER_TEAM_EXECUTION_FIELDS = new Set([
+  "schema", "executionContracts", "decisionKernel", "invocationAuthorization", "registryWriter",
+  "routePolicy", "promptProfile", "telemetry", "cohortPercent",
+]);
+const INVOCATION_AUTHORIZATION_FIELDS = new Set(["default", "opencode", "pi"]);
+const SAFE_CONTROL_FIELD_KEYS = new Set(["invocationAuthorization"]);
 
 export function getDeckConfigPath(projectRoot: string): string {
   return join(projectRoot, DECK_CONFIG_RELATIVE_PATH);
@@ -209,6 +236,17 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
       opencode: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
     },
     orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
+    developerTeamExecution: {
+      schema: "developer-team-execution-config-v1",
+      executionContracts: "observe",
+      decisionKernel: "shadow",
+      invocationAuthorization: { default: "static-compatible" },
+      registryWriter: "distributed-compatible",
+      routePolicy: "legacy-triage",
+      promptProfile: "compact",
+      telemetry: "off",
+      cohortPercent: 0,
+    },
     profiles: [],
     activeProfile: "default",
   };
@@ -393,6 +431,11 @@ export function validateDeckConfig(
     options?.configPath,
   );
 
+  const developerTeamExecution = normalizeDeveloperTeamExecutionConfig(
+    config.developerTeamExecution,
+    options?.configPath,
+  );
+
   const profiles = normalizeProfiles(config.profiles, config.activeProfile, options?.configPath);
   const activeProfile = profiles.length === 0 || config.activeProfile === undefined
     ? "default"
@@ -405,6 +448,7 @@ export function validateDeckConfig(
     adaptiveMemory,
     packageInstructions,
     orchestratorPersonality,
+    developerTeamExecution,
     profiles,
     activeProfile,
   };
@@ -449,6 +493,68 @@ function buildResolution(
   }
 
   return { activeProvider, source, config };
+}
+
+function executionConfigEnum<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T,
+  fieldPath: string,
+  configPath?: string,
+): T {
+  if (value === undefined) return fallback;
+  if (!allowed.includes(value as T)) {
+    throw new DeckConfigError("DECK_CONFIG_INVALID_SHAPE", `${fieldPath} has an unsupported value.`, { configPath, fieldPath });
+  }
+  return value as T;
+}
+
+function normalizeDeveloperTeamExecutionConfig(
+  value: unknown,
+  configPath?: string,
+): DeveloperTeamExecutionConfigV1 {
+  if (value === undefined || value === null) return getDefaultDeckConfig().developerTeamExecution;
+  assertPlainObject(value, "developerTeamExecution", configPath);
+  assertKnownFields(value, DEVELOPER_TEAM_EXECUTION_FIELDS, "developerTeamExecution", configPath);
+  if (value.schema !== undefined && value.schema !== "developer-team-execution-config-v1") {
+    throw new DeckConfigError("DECK_CONFIG_INVALID_SHAPE", "developerTeamExecution.schema is unsupported.", {
+      configPath,
+      fieldPath: "developerTeamExecution.schema",
+    });
+  }
+  const authorization = value.invocationAuthorization;
+  if (authorization !== undefined && authorization !== null) {
+    assertPlainObject(authorization, "developerTeamExecution.invocationAuthorization", configPath);
+    assertKnownFields(authorization, INVOCATION_AUTHORIZATION_FIELDS, "developerTeamExecution.invocationAuthorization", configPath);
+  }
+  const authorizationValue = authorization as Record<string, unknown> | undefined;
+  const cohortPercent = value.cohortPercent ?? 0;
+  if (typeof cohortPercent !== "number" || !Number.isFinite(cohortPercent) || cohortPercent < 0 || cohortPercent > 100) {
+    throw new DeckConfigError("DECK_CONFIG_INVALID_SHAPE", "developerTeamExecution.cohortPercent must be between 0 and 100.", {
+      configPath,
+      fieldPath: "developerTeamExecution.cohortPercent",
+    });
+  }
+  const authorizationModes = ["static-compatible", "invocation-required"] as const;
+  return {
+    schema: "developer-team-execution-config-v1",
+    executionContracts: executionConfigEnum(value.executionContracts, ["off", "observe", "enforce"] as const, "observe", "developerTeamExecution.executionContracts", configPath),
+    decisionKernel: executionConfigEnum(value.decisionKernel, ["legacy", "shadow", "active"] as const, "shadow", "developerTeamExecution.decisionKernel", configPath),
+    invocationAuthorization: {
+      default: executionConfigEnum(authorizationValue?.default, authorizationModes, "static-compatible", "developerTeamExecution.invocationAuthorization.default", configPath),
+      ...(authorizationValue?.opencode === undefined ? {} : {
+        opencode: executionConfigEnum(authorizationValue.opencode, authorizationModes, "static-compatible", "developerTeamExecution.invocationAuthorization.opencode", configPath),
+      }),
+      ...(authorizationValue?.pi === undefined ? {} : {
+        pi: executionConfigEnum(authorizationValue.pi, authorizationModes, "static-compatible", "developerTeamExecution.invocationAuthorization.pi", configPath),
+      }),
+    },
+    registryWriter: executionConfigEnum(value.registryWriter, ["distributed-compatible", "centralized"] as const, "distributed-compatible", "developerTeamExecution.registryWriter", configPath),
+    routePolicy: executionConfigEnum(value.routePolicy, ["legacy-triage", "shadow-risk-lanes", "risk-lanes"] as const, "legacy-triage", "developerTeamExecution.routePolicy", configPath),
+    promptProfile: executionConfigEnum(value.promptProfile, ["legacy", "compact"] as const, "compact", "developerTeamExecution.promptProfile", configPath),
+    telemetry: executionConfigEnum(value.telemetry, ["off", "local-safe"] as const, "off", "developerTeamExecution.telemetry", configPath),
+    cohortPercent,
+  };
 }
 
 function normalizeAdaptiveMemoryConfig(
@@ -846,7 +952,7 @@ function rejectSecretFields(value: unknown, fieldPath: string, configPath?: stri
 
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     const childPath = `${fieldPath}.${key}`;
-    if (SECRET_FIELD_PATTERN.test(key)) {
+    if (SECRET_FIELD_PATTERN.test(key) && !SAFE_CONTROL_FIELD_KEYS.has(key)) {
       throw new DeckConfigError(
         "SUPERMEMORY_CREDENTIAL_IN_DECK_CONFIG",
         "Deck config may not store Supermemory credentials.",

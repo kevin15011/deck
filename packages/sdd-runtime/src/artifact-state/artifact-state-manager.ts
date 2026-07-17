@@ -10,6 +10,16 @@
 
 import type { StateUpdate } from "../contracts/state-update";
 
+export type {
+  RegistryArtifactInspectionV1,
+  RegistryPairCommitRequestV1,
+  RegistryPairSnapshotV1,
+  RegistryPairStoreAdapterV1,
+  RegistryPairStoreResultV1,
+  RegistryStoreReasonV1,
+  RegistryWriterModeV1,
+} from "./registry-pair-store";
+
 // ── Store adapter boundary ──
 
 export interface ArtifactVersion {

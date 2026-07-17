@@ -386,7 +386,7 @@ describe("DeveloperTeamManifest", () => {
   // ---------------------------------------------------------------------------
 
   describe("buildDeveloperTeamManifest with orchestrator invariants", () => {
-    test("orchestrator agent instruction contains invariant section", () => {
+    test("orchestrator agent instruction contains compact invariant section", () => {
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
       });
@@ -395,7 +395,7 @@ describe("DeveloperTeamManifest", () => {
         (a) => a.agentId === "deck-developer-orchestrator",
       );
       expect(orchestrator).toBeDefined();
-      expect(orchestrator!.instruction).toContain("## Orchestrator Invariants");
+      expect(orchestrator!.instruction).toContain("## Compact Orchestrator Invariants");
       expect(orchestrator!.instruction).toContain("INV-001");
       expect(orchestrator!.instruction).toContain("INV-002");
       expect(orchestrator!.instruction).toContain("INV-003");
@@ -404,7 +404,7 @@ describe("DeveloperTeamManifest", () => {
       expect(orchestrator!.instruction).toContain("INV-006");
     });
 
-    test("orchestrator skill contains invariant section", () => {
+    test("orchestrator skill references the compact runtime contract", () => {
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
       });
@@ -413,12 +413,8 @@ describe("DeveloperTeamManifest", () => {
         (s) => s.agentId === "deck-developer-orchestrator",
       );
       expect(orchestratorSkill).toBeDefined();
-      expect(orchestratorSkill!.body).toContain("## Orchestrator Invariants");
-      expect(orchestratorSkill!.body).toContain("INV-001");
-      expect(orchestratorSkill!.body).toContain("INV-002");
-      expect(orchestratorSkill!.body).toContain("INV-003");
-      expect(orchestratorSkill!.body).toContain("INV-004");
-      expect(orchestratorSkill!.body).toContain("INV-006");
+      expect(orchestratorSkill!.body).toContain("## Runtime Contract Reference");
+      expect(orchestratorSkill!.body).toContain("Runtime-Enforced Team Contract remains binding");
     });
 
     test("non-orchestrator agents do NOT contain invariant section", () => {

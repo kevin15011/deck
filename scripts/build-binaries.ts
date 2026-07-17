@@ -96,6 +96,16 @@ async function generateSkillBundle(): Promise<void> {
   }
 }
 
+async function generateRunnerExecutionAssets(): Promise<void> {
+  const proc = Bun.spawnSync({
+    cmd: ["bun", "run", path.join(ROOT, "scripts/generate-runner-execution-assets.ts")],
+    cwd: ROOT,
+  });
+  if (!proc.success) {
+    throw new Error(`generate-runner-execution-assets failed: ${new TextDecoder().decode(proc.stderr)}`);
+  }
+}
+
 /**
  * Build binary for a specific target.
  *
@@ -238,6 +248,7 @@ async function buildBinaries(targets: readonly (readonly [string, string, string
   }
 
   const checksums: string[] = [];
+  await generateRunnerExecutionAssets();
 
   for (const [osName, archName, bunTarget] of targets) {
     console.log(`=== Building ${osName}-${archName} ===`);

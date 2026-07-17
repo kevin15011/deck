@@ -10,48 +10,65 @@ import {
   type MaterializeTeamProfileOptions,
 } from "./pi-team-profile";
 
+const compactPromptActivation = {
+  schema: "prompt-profile-activation-v1" as const,
+  status: "eligible" as const,
+  requestedProfile: "compact" as const,
+  effectiveProfile: "compact" as const,
+  reasonCodes: [] as const,
+  evidenceDigest: `sha256:${"a".repeat(64)}` as const,
+};
+
 function createTempDir(prefix = "deck-test-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
 describe("buildTeamSystemPrompt", () => {
-  test("includes all Developer Team agent roles for developer-team", () => {
+  test("builds the compact Developer Team coordinator prompt by default", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
 
-    expect(content).toContain("Developer Team");
-    expect(content).toContain("deck-developer-orchestrator");
-    expect(content).toContain("deck-developer-explorer");
-    expect(content).toContain("deck-developer-apply-general");
-    expect(content).toContain("deck-developer-verify");
-    expect(content).toContain("deck-developer-archive");
-    expect(content).toContain("Orchestrator");
-    expect(content).toContain("Explorer");
+    expect(content).toContain("# Deck Developer Team Coordinator");
+    expect(content).toContain("Runtime-Enforced Team Contract");
+    expect(content).toContain("## Triage and Flow");
+    expect(content).toContain("## Hard Stops");
   });
 
-  test("contains real orchestrator operating rules — not placeholder", () => {
+  test("uses compact session content by default regardless of obsolete rollout receipts", () => {
+    const compact = buildTeamSystemPrompt("developer-team");
+    const eligible = buildTeamSystemPrompt("developer-team", {
+      promptProfileActivation: compactPromptActivation,
+    });
+    const paused = buildTeamSystemPrompt("developer-team", {
+      promptProfileActivation: { ...compactPromptActivation, status: "rollout-paused" },
+    });
+
+    expect(compact.content).toContain("# Deck Developer Team Coordinator");
+    expect(compact.content).toContain("Runtime-Enforced Team Contract");
+    expect(eligible.content).toBe(compact.content);
+    expect(paused.content).toBe(compact.content);
+  });
+
+  test("contains deterministic flow and authority rules", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
 
-    // Should have delegation rules
-    expect(content).toContain("Delegation Rules");
-    expect(content).toContain("4+");
-
-    // Should have dependency graph
-    expect(content).toContain("Dependency Graph");
-
-    // Should NOT have placeholder text
+    expect(content).toContain("Automatic versus Interactive");
+    expect(content).toContain("Runtime Authority Order");
+    expect(content).toContain("deterministic decision policy");
     expect(content).not.toContain("Follow the team's established workflow");
   });
 
-  test("contains Deck-specific apply routing", () => {
+  test("contains Deck-specific specialist routing", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
-    expect(content).toContain("General");
-    expect(content).toContain("Backend");
-    expect(content).toContain("Frontend");
+    expect(content).toContain("Delegate each phase to its registered specialist");
+    expect(content).toContain("Apply");
+    expect(content).toContain("Verify");
+    expect(content).toContain("Review");
   });
 
-  test("references project AI notes", () => {
+  test("keeps official context authoritative", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
-    expect(content).toContain(".deck/ai-notes/");
+    expect(content).toContain("OpenSpec artifacts and Spec Registry remain authoritative");
+    expect(content).toContain("adaptive context is advisory");
   });
 
   test("throws for unknown team", () => {
@@ -219,7 +236,7 @@ describe("materializeTeamProfile", () => {
 
       const content = readFileSync(systemPromptPath, "utf-8");
       expect(content).toContain("Developer Team");
-      expect(content).toContain("deck-developer-orchestrator");
+      expect(content).toContain("Runtime-Enforced Team Contract");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -254,9 +271,11 @@ describe("materializeTeamProfile", () => {
       exists: () => false, // file does not exist yet -> should write
     });
 
-    expect(written).toHaveLength(1);
+    expect(written).toHaveLength(2);
     expect(written[0].path).toBe("/fake/.deck/pi/profiles/developer-team/system-prompt.md");
     expect(written[0].content).toContain("Developer Team");
+    expect(written[1].path).toBe("/fake/.deck/pi/profiles/developer-team/extensions/developer-team-execution.js");
+    expect(written[1].content).toContain('"tool_call"');
   });
 
   test("does not write if content is unchanged", () => {
@@ -279,8 +298,6 @@ describe("materializeTeamProfile", () => {
           writeCalled = true;
           writeFileSync(path, data, "utf-8");
         },
-        readFile: () => content,
-        exists: () => true,
       });
 
       // Since content matches, writeFile should not be called

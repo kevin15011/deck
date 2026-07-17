@@ -25,6 +25,8 @@ export type PiTeamLaunchPlan = {
   sessionDir: string;
   /** Directory containing profile artifacts (system-prompt.md, etc.) */
   profileDir: string;
+  /** Packaged runner-native execution extension loaded by Pi */
+  extensionPath: string;
   /** Whether this is a continuation of an existing session */
   isContinue: boolean;
   /** Whether this is a resume-picker session */
@@ -115,6 +117,7 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
 
   const sessionDir = buildTeamSessionDir(projectRoot, teamId);
   const profileDir = buildTeamProfileDir(projectRoot, teamId);
+  const extensionPath = join(profileDir, "extensions", "developer-team-execution.js");
 
   // Get canonical agent IDs from the team catalog
   const catalog = getDeveloperTeamCatalog();
@@ -124,6 +127,7 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
   const args: string[] = [
     "--session-dir", sessionDir,
     "--system-prompt", join(profileDir, "system-prompt.md"),
+    "--extension", extensionPath,
   ];
 
   const assignments = readDeveloperTeamModelConfigAssignments(projectRoot);
@@ -158,6 +162,7 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
     cwd: projectRoot,
     sessionDir,
     profileDir,
+    extensionPath,
     isContinue,
     isResume,
     agentIds,

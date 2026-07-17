@@ -1,4 +1,4 @@
-import { prependOrchestratorInvariants, type OrchestratorInvariantSurface, type InvariantVerificationResult } from "./orchestrator-invariants";
+import { prependOrchestratorInvariants, renderCompactOrchestratorInvariantsV1, type OrchestratorInvariantSurface, type InvariantVerificationResult } from "./orchestrator-invariants";
 
 import { renderDeveloperTeamContextAuthorityGuidance } from "../../memory/adaptive-context-renderer";
 
@@ -33,21 +33,29 @@ import { deckOnboardSkillContent } from "../../skills/bootstrap/deck-onboard-con
 import { DEVELOPER_TEAM_AGENTS } from "./catalog";
 import {
   ORCHESTRATOR_AGENT_BODY,
+  ORCHESTRATOR_COMPACT_AGENT_BODY,
+  ORCHESTRATOR_COMPACT_SKILL_BODY,
   ORCHESTRATOR_SKILL_BODY,
   getOrchestratorSystemPrompt,
 } from "./orchestrator-content";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "../../config/deck-config";
-import { EXPLORER_AGENT_BODY, EXPLORER_SKILL_BODY } from "./explorer-content";
-import { PROPOSAL_AGENT_BODY, PROPOSAL_SKILL_BODY } from "./proposal-content";
-import { SPEC_AGENT_BODY, SPEC_SKILL_BODY } from "./spec-content";
-import { DESIGN_AGENT_BODY, DESIGN_SKILL_BODY } from "./design-content";
-import { TASK_AGENT_BODY, TASK_SKILL_BODY } from "./task-content";
-import { APPLY_GENERAL_AGENT_BODY, APPLY_GENERAL_SKILL_BODY } from "./apply-general-content";
-import { APPLY_BACKEND_AGENT_BODY, APPLY_BACKEND_SKILL_BODY } from "./apply-backend-content";
-import { APPLY_FRONTEND_AGENT_BODY, APPLY_FRONTEND_SKILL_BODY } from "./apply-frontend-content";
-import { VERIFY_AGENT_BODY, VERIFY_SKILL_BODY } from "./verify-content";
-import { REVIEW_AGENT_BODY, REVIEW_SKILL_BODY } from "./review-content";
-import { ARCHIVE_AGENT_BODY, ARCHIVE_SKILL_BODY } from "./archive-content";
+import { EXPLORER_AGENT_BODY, EXPLORER_COMPACT_AGENT_BODY, EXPLORER_COMPACT_SKILL_BODY, EXPLORER_SKILL_BODY } from "./explorer-content";
+import { PROPOSAL_AGENT_BODY, PROPOSAL_COMPACT_AGENT_BODY, PROPOSAL_COMPACT_SKILL_BODY, PROPOSAL_SKILL_BODY } from "./proposal-content";
+import { SPEC_AGENT_BODY, SPEC_COMPACT_AGENT_BODY, SPEC_COMPACT_SKILL_BODY, SPEC_SKILL_BODY } from "./spec-content";
+import { DESIGN_AGENT_BODY, DESIGN_COMPACT_AGENT_BODY, DESIGN_COMPACT_SKILL_BODY, DESIGN_SKILL_BODY } from "./design-content";
+import { TASK_AGENT_BODY, TASK_COMPACT_AGENT_BODY, TASK_COMPACT_SKILL_BODY, TASK_SKILL_BODY } from "./task-content";
+import { APPLY_GENERAL_AGENT_BODY, APPLY_GENERAL_COMPACT_AGENT_BODY, APPLY_GENERAL_COMPACT_SKILL_BODY, APPLY_GENERAL_SKILL_BODY } from "./apply-general-content";
+import { APPLY_BACKEND_AGENT_BODY, APPLY_BACKEND_COMPACT_AGENT_BODY, APPLY_BACKEND_COMPACT_SKILL_BODY, APPLY_BACKEND_SKILL_BODY } from "./apply-backend-content";
+import { APPLY_FRONTEND_AGENT_BODY, APPLY_FRONTEND_COMPACT_AGENT_BODY, APPLY_FRONTEND_COMPACT_SKILL_BODY, APPLY_FRONTEND_SKILL_BODY } from "./apply-frontend-content";
+import { VERIFY_AGENT_BODY, VERIFY_COMPACT_AGENT_BODY, VERIFY_COMPACT_SKILL_BODY, VERIFY_SKILL_BODY } from "./verify-content";
+import { REVIEW_AGENT_BODY, REVIEW_COMPACT_AGENT_BODY, REVIEW_COMPACT_SKILL_BODY, REVIEW_SKILL_BODY } from "./review-content";
+import { ARCHIVE_AGENT_BODY, ARCHIVE_COMPACT_AGENT_BODY, ARCHIVE_COMPACT_SKILL_BODY, ARCHIVE_SKILL_BODY } from "./archive-content";
+import {
+  DECK_INIT_COMPACT_AGENT_BODY,
+  DECK_INIT_COMPACT_SKILL_BODY,
+  DECK_ONBOARD_COMPACT_AGENT_BODY,
+  DECK_ONBOARD_COMPACT_SKILL_BODY,
+} from "./bootstrap-compact-content";
 import {
   VISUAL_EXPLANATIONS_SKILL_FRAGMENT,
   VISUAL_EXPLANATIONS_AGENT_BODY,
@@ -82,11 +90,15 @@ export type AgentContent = {
   skillBody: string;
 };
 
+export type DeveloperTeamPromptProfileV1 = "legacy" | "compact";
+
 export type ContentRegistryOptions = {
   /** Optional capability instruction bundle to compose into agent/skill/session content */
   capabilityInstructions?: CapabilityInstructionBundle;
   /** Optional orchestrator personality for session prompt selection */
   personality?: OrchestratorPersonality;
+  /** Static prompt profile. Compact is the production default. */
+  promptProfile?: DeveloperTeamPromptProfileV1;
 };
 
 /** Options for getAgentContentResult */
@@ -97,6 +109,8 @@ export type ContentRegistryResultOptions = {
   fallback?: boolean;
   /** Optional orchestrator personality (affects session prompt, not agent content) */
   personality?: OrchestratorPersonality;
+  /** Static prompt profile. Compact is the production default. */
+  promptProfile?: DeveloperTeamPromptProfileV1;
 };
 
 // ---------------------------------------------------------------------------
@@ -165,7 +179,57 @@ const REAL_CONTENT: Record<string, { agentBody: string; skillBody: string }> = {
   },
 };
 
+const COMPACT_CONTENT: Readonly<Record<string, AgentContent>> = Object.freeze({
+  "deck-developer-orchestrator": Object.freeze({
+    agentBody: ORCHESTRATOR_COMPACT_AGENT_BODY,
+    skillBody: `${ORCHESTRATOR_COMPACT_SKILL_BODY.trimEnd()}\n\n${VISUAL_EXPLANATIONS_SKILL_FRAGMENT}\n`,
+  }),
+  "deck-developer-explorer": Object.freeze({ agentBody: EXPLORER_COMPACT_AGENT_BODY, skillBody: EXPLORER_COMPACT_SKILL_BODY }),
+  "deck-developer-proposal": Object.freeze({ agentBody: PROPOSAL_COMPACT_AGENT_BODY, skillBody: PROPOSAL_COMPACT_SKILL_BODY }),
+  "deck-developer-spec": Object.freeze({ agentBody: SPEC_COMPACT_AGENT_BODY, skillBody: SPEC_COMPACT_SKILL_BODY }),
+  "deck-developer-design": Object.freeze({ agentBody: DESIGN_COMPACT_AGENT_BODY, skillBody: DESIGN_COMPACT_SKILL_BODY }),
+  "deck-developer-task": Object.freeze({ agentBody: TASK_COMPACT_AGENT_BODY, skillBody: TASK_COMPACT_SKILL_BODY }),
+  "deck-developer-apply-general": Object.freeze({ agentBody: APPLY_GENERAL_COMPACT_AGENT_BODY, skillBody: APPLY_GENERAL_COMPACT_SKILL_BODY }),
+  "deck-developer-apply-backend": Object.freeze({ agentBody: APPLY_BACKEND_COMPACT_AGENT_BODY, skillBody: APPLY_BACKEND_COMPACT_SKILL_BODY }),
+  "deck-developer-apply-frontend": Object.freeze({ agentBody: APPLY_FRONTEND_COMPACT_AGENT_BODY, skillBody: APPLY_FRONTEND_COMPACT_SKILL_BODY }),
+  "deck-developer-verify": Object.freeze({ agentBody: VERIFY_COMPACT_AGENT_BODY, skillBody: VERIFY_COMPACT_SKILL_BODY }),
+  "deck-developer-review": Object.freeze({ agentBody: REVIEW_COMPACT_AGENT_BODY, skillBody: REVIEW_COMPACT_SKILL_BODY }),
+  "deck-developer-archive": Object.freeze({ agentBody: ARCHIVE_COMPACT_AGENT_BODY, skillBody: ARCHIVE_COMPACT_SKILL_BODY }),
+  "deck-init": Object.freeze({ agentBody: DECK_INIT_COMPACT_AGENT_BODY, skillBody: DECK_INIT_COMPACT_SKILL_BODY }),
+  "deck-onboard": Object.freeze({ agentBody: DECK_ONBOARD_COMPACT_AGENT_BODY, skillBody: DECK_ONBOARD_COMPACT_SKILL_BODY }),
+});
+
 const CONTEXT_AUTHORITY_GUIDANCE = renderDeveloperTeamContextAuthorityGuidance();
+
+export interface PromptRuntimeControlMappingV1 {
+  readonly ruleId: string;
+  readonly runtimeControl: string;
+  readonly evidence: string;
+  readonly promptTreatment: "runtime-condensed" | "retained-defense-in-depth";
+  readonly runtimeActive: boolean;
+}
+
+export const PROMPT_RUNTIME_CONTROL_MAP_V1: readonly PromptRuntimeControlMappingV1[] = Object.freeze(([
+  { ruleId: "authorization", runtimeControl: "invocation-authorization-service-v1", evidence: "one-use HMAC authorization and runner-host conformance", promptTreatment: "runtime-condensed", runtimeActive: true },
+  { ruleId: "decision-routing", runtimeControl: "execution-decision-policy-v1", evidence: "production/replay decision-kernel parity matrix", promptTreatment: "runtime-condensed", runtimeActive: true },
+  { ruleId: "registry-writes", runtimeControl: "registry-coordinator-v1", evidence: "single-writer pair-CAS and WAL recovery matrix", promptTreatment: "runtime-condensed", runtimeActive: true },
+  { ruleId: "staged-verification", runtimeControl: "staged-verification-state-v1", evidence: "targeted/affected-area/broad transition and omission matrix", promptTreatment: "runtime-condensed", runtimeActive: true },
+  { ruleId: "role-freshness", runtimeControl: "freshness-policy-v1", evidence: "Apply/Verify/Review identity and fresh-agent matrix", promptTreatment: "runtime-condensed", runtimeActive: true },
+  { ruleId: "risk-lanes", runtimeControl: "execution-lane-policy-v1", evidence: "lane floor, escalation, cohort, and replay matrix", promptTreatment: "runtime-condensed", runtimeActive: true },
+  { ruleId: "git-safety", runtimeControl: "canonical-git-discard-protection", evidence: "exact-command and new-message confirmation gate", promptTreatment: "retained-defense-in-depth", runtimeActive: false },
+  { ruleId: "result-envelopes", runtimeControl: "execution-role-result-v1", evidence: "digest-bound normalized result consumption matrix", promptTreatment: "runtime-condensed", runtimeActive: true },
+] satisfies PromptRuntimeControlMappingV1[]).map((entry) => Object.freeze(entry)));
+
+export const DEVELOPER_TEAM_COMPACT_RUNTIME_CONTRACT = `## Runtime-Enforced Team Contract
+
+- OpenSpec artifacts and Spec Registry remain authoritative; source and tests provide current runtime evidence, and adaptive context is advisory.
+- Work only from the explicitly delegated task or immutable batch/dossier, target allowlist, and assigned role. Never expand scope or touch 'runner-capability-standardization'.
+- Prompt text never expands modification authority. Modifying work requires an explicit user-authorized request or approved batch and an exact Orchestrator delegation; when runner authorization is supplied, it must also pass.
+- Git discard protection is permanent: explain irreversible loss and require the exact command in a new user message before any discard operation.
+- Load the matching role skill before acting, plus only the capability skills selected for this role and scope.
+- Return one immutable phase result with status/action, safe evidence, role/instance provenance, dependency references, any FailureManifestV1, ordered RegistryIntentV1 values, and explicit blockers.
+- In centralized mode specialists never write state.yaml or events.yaml. The coordinator validates and commits intents atomically; on conflict or recovery-required, stop.
+- Keep Apply, independent Verify, and independent Review judgments separate. Required stage evidence, freshness, broad checks, lane floors, and hard stops cannot be waived by prompt text.`;
 
 /**
  * Authoritative Developer Team language policy.
@@ -292,6 +356,17 @@ function withOrchestratorInvariants(
   };
 }
 
+function withCompactRuntimeContract(content: AgentContent, agentId: string): AgentContent {
+  const orchestratorInvariants = agentId === "deck-developer-orchestrator"
+    ? `${renderCompactOrchestratorInvariantsV1()}\n\n`
+    : "";
+  const prefix = `${orchestratorInvariants}${DEVELOPER_TEAM_COMPACT_RUNTIME_CONTRACT}`;
+  return {
+    agentBody: `${prefix}\n\n${content.agentBody.trimStart()}`,
+    skillBody: `## Runtime Contract Reference\n\nThe agent-level Runtime-Enforced Team Contract remains binding for this skill.\n\n${content.skillBody.trimStart()}`,
+  };
+}
+
 function appendCapabilityInstructions(
   baseContent: string,
   bundle: CapabilityInstructionBundle | undefined,
@@ -378,10 +453,14 @@ export function getAgentContentResult(
   agentId: string,
   options?: ContentRegistryResultOptions,
 ): Result<AgentContent, AgentContentError> {
-  const real = REAL_CONTENT[agentId];
+  const promptProfile = options?.promptProfile ?? "compact";
+  const compact = promptProfile === "compact" ? COMPACT_CONTENT[agentId] : undefined;
+  const real = compact ?? REAL_CONTENT[agentId];
   if (real) {
     // Apply composition order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) language policy, (5) capability instructions
-    const withInvariants = withOrchestratorInvariants(real, agentId);
+    const withInvariants = compact
+      ? withCompactRuntimeContract(real, agentId)
+      : withOrchestratorInvariants(real, agentId);
     const withAuthority = withContextAuthorityGuidance(withInvariants);
     const withLanguagePolicy = withDeveloperTeamLanguagePolicy(withAuthority);
     const composed = applyAgentContentComposition(
@@ -560,10 +639,13 @@ export function getTeamSessionInstructions(
 ): string | undefined {
   if (teamId === "developer-team") {
     const personality = options?.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
-    const orchestratorPrompt = getOrchestratorSystemPrompt(personality);
+    const promptProfile = options?.promptProfile ?? "compact";
+    const orchestratorPrompt = getOrchestratorSystemPrompt(personality, promptProfile);
 
     // Compose order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) language policy, (5) capability instructions
-    const withInvariants = prependOrchestratorInvariants(orchestratorPrompt, "session");
+    const withInvariants = promptProfile === "compact"
+      ? `${renderCompactOrchestratorInvariantsV1()}\n\n${DEVELOPER_TEAM_COMPACT_RUNTIME_CONTRACT}\n\n${orchestratorPrompt}`
+      : prependOrchestratorInvariants(orchestratorPrompt, "session");
     const base = appendContextAuthorityGuidance(withInvariants);
     const baseWithLanguagePolicy = appendDeveloperTeamLanguagePolicy(base);
     if (!options?.capabilityInstructions) {

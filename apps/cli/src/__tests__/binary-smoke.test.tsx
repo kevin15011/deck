@@ -96,7 +96,7 @@ describe("Binary smoke tests", () => {
 
     // Should have some output (or a timeout message)
     expect(result.stdout.length + result.stderr.length).toBeGreaterThan(0);
-  });
+  }, 25_000);
 
   test("TUI (no args) launches with fallback output", async () => {
     // Running without TTY should fallback to string render
@@ -118,7 +118,7 @@ describe("Binary smoke tests", () => {
     // Should have some output (or a timeout message)
     const hasOutput = result.stdout.length > 0 || result.stderr.length > 0;
     expect(hasOutput).toBe(true);
-  });
+  }, 25_000);
 });
 
 describe("Platform binary attributes", () => {

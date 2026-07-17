@@ -108,6 +108,10 @@ Each provenance entry must contain:
 
 Optional:
 - `note` (string): Free-text note about the write
+- `intentId` (string): Stable centralized-writer intent identity (warning-first)
+- `idempotencyKey` (string): Stable transition replay key (warning-first)
+- `transactionId` (string): Recoverable pair-transaction identity (warning-first)
+- `batchDigest` (string): Referenced execution batch digest, when present (warning-first)
 
 ---
 
@@ -133,6 +137,10 @@ Each event must contain:
 Optional:
 - `notes` (array): Array of strings with event notes
 - `registry_write` (string): `"non-deferred"` or `"reconciled-by-orchestrator"`
+- `intent_id` (string): Stable centralized-writer intent identity (warning-first)
+- `idempotency_key` (string): Stable transition replay key (warning-first)
+- `transaction_id` (string): Recoverable pair-transaction identity (warning-first)
+- `batch_digest` (string): Referenced execution batch digest, when present (warning-first)
 
 ### Auxiliary Repair Lifecycle Events
 

@@ -301,3 +301,34 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 `;
+
+export const ARCHIVE_COMPACT_AGENT_BODY = `# Archive Agent
+
+> Close an accepted change, preserve traceability, and move its authoritative artifacts into archive state. Do not archive incomplete, failed, blocked, or unapproved work.
+
+## Boundaries
+
+- Require completed Apply plus the Verify and Review evidence mandated by the change; surface warnings and accepted residual risk.
+- Confirm proposal, spec, design, tasks, implementation evidence, and registry history are coherent before closure.
+- Preserve append-only history and never erase failed attempts, warnings, provenance, or rollback information.
+- Produce \`archive-report.md\` and move the change through the canonical archive workflow only when all gates pass.
+- Load the matching role skill 'deck-developer-archive' before acting.
+
+${GIT_DISCARD_PROTECTION_RULE}
+`;
+
+export const ARCHIVE_COMPACT_SKILL_BODY = `# Archive Skill
+
+## Close the Change
+
+1. Read all active artifacts and required Apply, Verify, Review, test, build, rollout, and registry evidence.
+2. Reject archive when mandatory evidence is missing, contradictory, stale, or blocked.
+3. Summarize delivered scope, verification, deviations, warnings, rollback, and reusable learnings without rewriting history.
+4. Write \`archive-report.md\`, preserve registry provenance, and use the canonical archive transition.
+5. Archive means move, not duplicate: after the archive transition is verified, remove the source change directory from \`openspec/changes/\`.
+6. If cleanup fails, return a blocker and do not claim Archive completion.
+
+## Artifact and Return
+
+Return the archive report path, archived location, final status, evidence summary, residual warnings, ordered RegistryIntentV1 values, and blockers. Claim Archive completion only after artifact and registry persistence are verified.
+`;

@@ -27,6 +27,19 @@
     }
   },
   "orchestratorPersonality": "pragmatica",
+  "developerTeamExecution": {
+    "schema": "developer-team-execution-config-v1",
+    "executionContracts": "observe",
+    "decisionKernel": "shadow",
+    "invocationAuthorization": {
+      "default": "static-compatible"
+    },
+    "registryWriter": "distributed-compatible",
+    "routePolicy": "legacy-triage",
+    "promptProfile": "compact",
+    "telemetry": "off",
+    "cohortPercent": 0
+  },
   "profiles": [],
   "activeProfile": "default"
 }

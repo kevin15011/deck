@@ -17,4 +17,6 @@ For runner materialization, core definitions flow through an adapter, then the C
 
 For SDD, an active OpenSpec change supplies proposal, specification, design, and tasks. `@deck/sdd-runtime` coordinates the lifecycle and artifact-state boundaries; `state.yaml` and `events.yaml` preserve the change record. OpenSpec governs requirements and lifecycle but does not replace runtime source authority.
 
+Developer Team execution crosses a narrower runtime boundary: runner-native OpenCode/Pi hooks provide trusted per-execution context, the SDD control plane validates dossier history and authorization before effects, and the centralized registry coordinator commits ordered intents. Dedicated compact agent and skill bodies cover all 14 catalog roles and are the installation default; observe/shadow modes still keep automatic runtime effects non-authoritative until their separate rollout evidence passes. See [Developer Team execution operations](developer-team-execution.md) for rollout, telemetry, rollback, and acceptance evidence.
+
 Do not edit generated outputs by hand. For contribution procedure, see [CONTRIBUTING.md](../CONTRIBUTING.md); for release flow, see [release guidance](maintainers/releasing.md).

@@ -2,11 +2,15 @@ import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import * as api from "../index";
 
+type Digest = `sha256:${string}`;
 const d=(c:string)=>`sha256:${c.repeat(64)}` as const;
+const digestByte=(byte:number):Digest=>`sha256:${Buffer.alloc(32).fill(byte).toString("hex")}`;
 const time="2026-07-15T00:00:00.000Z";
 const canonical=(value:unknown):string=>value===null||typeof value!=="object"?JSON.stringify(value):Array.isArray(value)?`[${value.map(canonical).join(",")}]`:`{${Object.keys(value).sort().map(k=>`${JSON.stringify(k)}:${canonical((value as Record<string,unknown>)[k])}`).join(",")}}`;
-const hash=(value:unknown)=>`sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`;
+const hash=(value:unknown):Digest=>`sha256:${createHash("sha256").update(canonical(value)).digest("hex")}`;
 const exact=(fn:()=>unknown,message:string)=>expect(fn).toThrow(new Error(message));
+const rehashCausal=(patch:Record<string,unknown>)=>{const value={...patch} as Record<string,unknown>;delete value.digest;return{...value,digest:hash(value)};};
+const rehashDossierValue=(patch:Record<string,unknown>)=>{const value={...patch} as Record<string,unknown>;delete value.digest;const digest=hash(value);return{...value,digest};};
 const batch=api.buildApplyBatchContractV1({schema:"apply-batch-v1",changeId:"change",taskIds:["EG2-R3C"],dependencies:[],ownerRole:"apply-general",allowedTargets:["packages/sdd-runtime"],blockedTargets:[],acceptanceObligations:["REQ-CONTRACT-005"],verificationPlan:[],artifactDigests:{},authorizationGrantRef:d("a"),provenance:{actor:"apply-general",issuedAt:time},repositoryRoot:"/repo"});
 const finding=(overrides:Record<string,unknown>={})=>({batchId:batch.batchId,batchDigest:batch.digest,sourcePhase:"review",sourceArtifact:"review.md",severity:"low",category:"contract",rootCause:"implementation",requirementIds:["REQ-CONTRACT-005"],taskIds:["EG2-R3C"],locationKeys:["src/a.ts"],oracleId:"same",isSecurityRelevant:false,status:"open",relationship:"batch_related",evidence:[{kind:"test",checkId:"matrix",artifact:"review.md",resultCode:"failed"}],...overrides});
 const manifest=(findings:unknown[])=>api.buildFailureManifestV1({schema:"failure-manifest-v1",changeId:"change",batch,producerRole:"review",producerInstanceId:"review",findings,producedAt:time,repositoryRoot:"/repo"} as never);
@@ -66,6 +70,8 @@ describe("EG2-R3C exact ExecutionDossierV1 public acceptance",()=>{
   test("parseExecutionDossierV1 rejects a wrong previous digest",()=>{const revised=api.reviseExecutionDossierV1(dossier,{});exact(()=>api.parseExecutionDossierV1({...revised,previousDigest:d("f")},dossier),"invalid-evidence: dossier revision");});
   test("reviseExecutionDossierV1 issues revision three from a completely validated history",()=>{const second=api.reviseExecutionDossierV1(dossier,{});const third=api.reviseExecutionDossierV1(second,{},[dossier]);expect([third.revision,third.previousDigest,third.dossierId]).toEqual([3,second.digest,dossier.dossierId]);});
   test("parseExecutionDossierV1 accepts revision three only with its complete validated history",()=>{const second=api.reviseExecutionDossierV1(dossier,{});const third=api.reviseExecutionDossierV1(second,{},[dossier]);expect(api.parseExecutionDossierV1(third,[dossier,second])).toEqual(third);exact(()=>api.parseExecutionDossierV1(third,[second]),"invalid-evidence: dossier revision history");});
+  test("reviseExecutionDossierV1 rejects extra supplied history instead of slicing it",()=>{const second=api.reviseExecutionDossierV1(dossier,{});exact(()=>api.reviseExecutionDossierV1(second,{},[dossier,second]),"invalid-evidence: dossier revision history");});
+  test("reviseExecutionDossierV1 rejects unrelated predecessor history before prefix validation",()=>{const second=api.reviseExecutionDossierV1(dossier,{});const unrelated=api.createExecutionDossierV1({...base,causalContext:api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[],activeFindingIds:[],evidenceRefs:[],attemptSummaries:[]})});exact(()=>api.reviseExecutionDossierV1(second,{},[unrelated]),"invalid-evidence: dossier revision");});
   // B-B3-APPEND-ONLY-PREFIX-TRUNCATION-v1: individually named truncation tests.
   test("reviseExecutionDossierV1 rejects truncated registry intent history",()=>{
     const intent=api.buildRegistryIntentV1({schema:"registry-intent-v1",idempotencyKey:d("c"),changeId:"change",batchId:batch.batchId,batchDigest:batch.digest,base:{stateDigest:d("d"),eventsDigest:d("e")},phase:"apply",status:"ready",artifact:{kind:"progress",path:"apply-progress.md"},provenance:{agent:"general",model:"model",timestamp:time},event:{name:"implemented",actor:"general",timestamp:time,notes:[]}});
@@ -99,43 +105,92 @@ describe("EG2-R3C exact ExecutionDossierV1 public acceptance",()=>{
     // parseExecutionDossierV1 validates the same chain independently.
     expect(api.parseExecutionDossierV1(third,[dossier,second])).toEqual(third);
   });
+  test("parseExecutionDossierV1 rejects truncated registry-intent prefix at revision three",()=>{
+    const intent0=api.buildRegistryIntentV1({schema:"registry-intent-v1",idempotencyKey:d("c"),changeId:"change",batchId:batch.batchId,batchDigest:batch.digest,base:{stateDigest:d("d"),eventsDigest:d("e")},phase:"apply",status:"ready",artifact:{kind:"progress",path:"apply-progress.md"},provenance:{agent:"general",model:"model",timestamp:time},event:{name:"implemented",actor:"general",timestamp:time,notes:[]}});
+    const intent1=api.buildRegistryIntentV1({schema:"registry-intent-v1",idempotencyKey:d("b"),changeId:"change",batchId:batch.batchId,batchDigest:batch.digest,base:{stateDigest:d("d"),eventsDigest:d("e")},phase:"apply",status:"ready",artifact:{kind:"progress",path:"apply-progress.md"},provenance:{agent:"general",model:"model",timestamp:time},event:{name:"implemented",actor:"general",timestamp:time,notes:[]}});
+    const second=api.reviseExecutionDossierV1(dossier,{registryIntents:[intent0]});
+    const third=api.reviseExecutionDossierV1(second,{registryIntents:[intent0,intent1]},[dossier]);
+    exact(()=>api.parseExecutionDossierV1(rehashDossierValue({...third,registryIntents:[]}),[dossier,second]),"invalid-evidence: registry intent prefix");
+  });
+  test("parseExecutionDossierV1 rejects reordered registry-intent prefix at revision three",()=>{
+    const intent0=api.buildRegistryIntentV1({schema:"registry-intent-v1",idempotencyKey:d("c"),changeId:"change",batchId:batch.batchId,batchDigest:batch.digest,base:{stateDigest:d("d"),eventsDigest:d("e")},phase:"apply",status:"ready",artifact:{kind:"progress",path:"apply-progress.md"},provenance:{agent:"general",model:"model",timestamp:time},event:{name:"implemented",actor:"general",timestamp:time,notes:[]}});
+    const intent1=api.buildRegistryIntentV1({schema:"registry-intent-v1",idempotencyKey:d("b"),changeId:"change",batchId:batch.batchId,batchDigest:batch.digest,base:{stateDigest:d("d"),eventsDigest:d("e")},phase:"apply",status:"ready",artifact:{kind:"progress",path:"apply-progress.md"},provenance:{agent:"general",model:"model",timestamp:time},event:{name:"implemented",actor:"general",timestamp:time,notes:[]}});
+    const intent2=api.buildRegistryIntentV1({schema:"registry-intent-v1",idempotencyKey:d("f"),changeId:"change",batchId:batch.batchId,batchDigest:batch.digest,base:{stateDigest:d("d"),eventsDigest:d("e")},phase:"apply",status:"ready",artifact:{kind:"progress",path:"apply-progress.md"},provenance:{agent:"general",model:"model",timestamp:time},event:{name:"implemented",actor:"general",timestamp:time,notes:[]}});
+    const second=api.reviseExecutionDossierV1(dossier,{registryIntents:[intent0]});
+    const third=api.reviseExecutionDossierV1(second,{registryIntents:[intent0,intent1,intent2]},[dossier]);
+    exact(()=>api.parseExecutionDossierV1(rehashDossierValue({...third,registryIntents:[intent1,intent0,intent2]}),[dossier,second]),"invalid-evidence: registry intent prefix");
+  });
+  test("parseExecutionDossierV1 rejects inserted registry-intent mutation at revision three",()=>{
+    const intent0=api.buildRegistryIntentV1({schema:"registry-intent-v1",idempotencyKey:d("c"),changeId:"change",batchId:batch.batchId,batchDigest:batch.digest,base:{stateDigest:d("d"),eventsDigest:d("e")},phase:"apply",status:"ready",artifact:{kind:"progress",path:"apply-progress.md"},provenance:{agent:"general",model:"model",timestamp:time},event:{name:"implemented",actor:"general",timestamp:time,notes:[]}});
+    const intent1=api.buildRegistryIntentV1({schema:"registry-intent-v1",idempotencyKey:d("b"),changeId:"change",batchId:batch.batchId,batchDigest:batch.digest,base:{stateDigest:d("d"),eventsDigest:d("e")},phase:"apply",status:"ready",artifact:{kind:"progress",path:"apply-progress.md"},provenance:{agent:"general",model:"model",timestamp:time},event:{name:"implemented",actor:"general",timestamp:time,notes:[]}});
+    const intent2=api.buildRegistryIntentV1({schema:"registry-intent-v1",idempotencyKey:d("f"),changeId:"change",batchId:batch.batchId,batchDigest:batch.digest,base:{stateDigest:d("d"),eventsDigest:d("e")},phase:"apply",status:"ready",artifact:{kind:"progress",path:"apply-progress.md"},provenance:{agent:"general",model:"model",timestamp:time},event:{name:"implemented",actor:"general",timestamp:time,notes:[]}});
+    const second=api.reviseExecutionDossierV1(dossier,{registryIntents:[intent0,intent1]});
+    const third=api.reviseExecutionDossierV1(second,{registryIntents:[intent0,intent1,intent2]},[dossier]);
+    exact(()=>api.parseExecutionDossierV1(rehashDossierValue({...third,registryIntents:[intent0,intent2,intent1]}),[dossier,second]),"invalid-evidence: registry intent prefix");
+  });
   test("reviseExecutionDossierV1 rejects issuance truncation of prior-decision digests",()=>{
-    const digest1=`sha256:${Buffer.alloc(32).fill(1).toString("hex")}`;
-    const digest2=`sha256:${Buffer.alloc(32).fill(2).toString("hex")}`;
+    const digest1=digestByte(1);
+    const digest2=digestByte(2);
     const causal1=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
     const d1=api.createExecutionDossierV1({...base,causalContext:causal1});
     const causal2=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1,digest2],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
-    const d2=api.reviseExecutionDossierV1(d1,{causalContext:causal2},[d1]);
+    const d2=api.reviseExecutionDossierV1(d1,{causalContext:causal2});
     // Truncate: causal3 has [digest1] but previous had [digest1,digest2].
     const causal3Trunc=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
-    exact(()=>api.reviseExecutionDossierV1(d2,{causalContext:causal3Trunc},[d1,d2]),"invalid-evidence: decision digest prefix");
+    exact(()=>api.reviseExecutionDossierV1(d2,{causalContext:causal3Trunc},[d1]),"invalid-evidence: decision digest prefix");
   });
   test("parseExecutionDossierV1 accepts a valid depth-three prior-decision append chain",()=>{
-    const digest1=`sha256:${Buffer.alloc(32).fill(1).toString("hex")}`;
-    const digest2=`sha256:${Buffer.alloc(32).fill(2).toString("hex")}`;
-    const digest3=`sha256:${Buffer.alloc(32).fill(3).toString("hex")}`;
+    const digest1=digestByte(1);
+    const digest2=digestByte(2);
+    const digest3=digestByte(3);
     const causal1=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
     const d1=api.createExecutionDossierV1({...base,causalContext:causal1});
     const causal2=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1,digest2],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
-    const d2=api.reviseExecutionDossierV1(d1,{causalContext:causal2},[d1]);
+    const d2=api.reviseExecutionDossierV1(d1,{causalContext:causal2});
     const causal3=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1,digest2,digest3],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
-    const d3=api.reviseExecutionDossierV1(d2,{causalContext:causal3},[d1,d2]);
+    const d3=api.reviseExecutionDossierV1(d2,{causalContext:causal3},[d1]);
     expect([d3.revision,d3.causalContext.priorDecisionDigests.length]).toEqual([3,3]);
     expect(api.parseExecutionDossierV1(d3,[d1,d2])).toEqual(d3);
+  });
+  test("parseExecutionDossierV1 rejects truncated prior-decision digest prefix at revision three",()=>{
+    const digest1=digestByte(1);
+    const digest2=digestByte(2);
+    const digest3=digestByte(3);
+    const causal1=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
+    const d1=api.createExecutionDossierV1({...base,causalContext:causal1});
+    const causal2=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1,digest2],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
+    const d2=api.reviseExecutionDossierV1(d1,{causalContext:causal2});
+    const causal3=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1,digest2,digest3],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
+    const d3=api.reviseExecutionDossierV1(d2,{causalContext:causal3},[d1]);
+    const forged=rehashDossierValue({...d3,causalContext:rehashCausal({...d3.causalContext,priorDecisionDigests:[digest1]})});
+    exact(()=>api.parseExecutionDossierV1(forged,[d1,d2]),"invalid-evidence: decision digest prefix");
+  });
+  test("parseExecutionDossierV1 rejects mutated prior-decision prefix order at revision three",()=>{
+    const digest1=digestByte(1);
+    const digest2=digestByte(2);
+    const digest3=digestByte(3);
+    const causal1=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
+    const d1=api.createExecutionDossierV1({...base,causalContext:causal1});
+    const causal2=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1,digest2],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
+    const d2=api.reviseExecutionDossierV1(d1,{causalContext:causal2});
+    const causal3=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1,digest2,digest3],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
+    const d3=api.reviseExecutionDossierV1(d2,{causalContext:causal3},[d1]);
+    const forged=rehashDossierValue({...d3,causalContext:rehashCausal({...d3.causalContext,priorDecisionDigests:[digest1,digest3,digest2]})});
+    exact(()=>api.parseExecutionDossierV1(forged,[d1,d2]),"invalid-evidence: decision digest prefix");
   });
   // B-B3-PRIOR-DECISION-REORDER-ACCEPTED-v1: individually named issuance reorder test.
   // A reorder [A,B] → [B,A] is rejected by the prefix guard (index 0: B≠A).
   // Both the prefix guard and ordering guard throw in this scenario; the prefix
   // guard fires first, so the expected error is "decision digest prefix".
   test("reviseExecutionDossierV1 rejects reordered prior-decision digests at depth three",()=>{
-    const digest1=`sha256:${Buffer.alloc(32).fill(1).toString("hex")}`;
-    const digest2=`sha256:${Buffer.alloc(32).fill(2).toString("hex")}`;
+    const digest1=digestByte(1);
+    const digest2=digestByte(2);
     const causal1=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
     const d1=api.createExecutionDossierV1({...base,causalContext:causal1});
     const causal2=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest1,digest2],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
-    const d2=api.reviseExecutionDossierV1(d1,{causalContext:causal2},[d1]);
+    const d2=api.reviseExecutionDossierV1(d1,{causalContext:causal2});
     // Attempt [A,B] → [B,A] (reversed). Prefix guard catches index 0 mismatch (B≠A).
     const causal3Bad=api.buildCausalContextV1({schema:"causal-context-v1",batchDigest:batch.digest,priorDecisionDigests:[digest2,digest1],activeFindingIds:[current.findings[0]!.findingId],evidenceRefs:[],attemptSummaries:[]});
-    exact(()=>api.reviseExecutionDossierV1(d2,{causalContext:causal3Bad},[d1,d2]),"invalid-evidence: decision digest prefix");
+    exact(()=>api.reviseExecutionDossierV1(d2,{causalContext:causal3Bad},[d1]),"invalid-evidence: decision digest prefix");
   });
 });

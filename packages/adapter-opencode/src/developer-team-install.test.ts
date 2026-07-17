@@ -117,10 +117,43 @@ const completeStandaloneSkills = STANDALONE_SKILLS.map(({ skillId }) => {
   return { skillId, body: bundle.SKILL, files: bundle.files };
 });
 
+const compactPromptActivation = {
+  schema: "prompt-profile-activation-v1" as const,
+  status: "eligible" as const,
+  requestedProfile: "compact" as const,
+  effectiveProfile: "compact" as const,
+  reasonCodes: [] as const,
+  evidenceDigest: `sha256:${"a".repeat(64)}` as const,
+};
+
 describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
   test("generates 14 agent entries for opencode.json", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
     expect(Object.keys(plan.agentEntries)).toHaveLength(14);
+  });
+
+  test("installs compact content by default regardless of obsolete rollout receipts", () => {
+    const compact = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    const eligible = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      promptProfileActivation: compactPromptActivation,
+    });
+    const paused = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      promptProfileActivation: { ...compactPromptActivation, status: "rollout-paused" },
+    });
+    const expected = getAgentContent("deck-developer-apply-general", { promptProfile: "compact" })!;
+    const compactPrompt = compact.promptGenerationPlan.find(
+      (planned) => planned.agent.id === "deck-developer-apply-general",
+    )!;
+    const compactSkill = compact.skills.find(
+      (planned) => planned.agent.id === "deck-developer-apply-general",
+    )!;
+
+    expect(compact.promptProfile).toBe("compact");
+    expect(eligible.promptProfile).toBe("compact");
+    expect(paused.promptProfile).toBe("compact");
+    expect(paused.promptGenerationPlan).toEqual(compact.promptGenerationPlan);
+    expect(compactPrompt.content).toContain(expected.agentBody);
+    expect(compactSkill.content).toContain(expected.skillBody);
   });
 
   test("orchestrator has mode: primary", () => {
@@ -365,7 +398,7 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
   test("skill content comes from core registry", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
     const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestratorSkill.content).toContain("SDD Workflow");
+    expect(orchestratorSkill.content).toContain("Coordinate One Authoritative Flow");
     expect(orchestratorSkill.content).toContain("Visual Explanations");
   });
 });
@@ -857,7 +890,7 @@ describe("orchestratorPersonality in buildOpenCodeDeveloperTeamInstallPlan", () 
     // Verify personality option was consumed and content was generated
     const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
     expect(orchestratorSkill.content).toContain("# Orchestrator Skill");
-    expect(orchestratorSkill.content).toContain("## SDD Workflow");
+    expect(orchestratorSkill.content).toContain("## Coordinate One Authoritative Flow");
     // Verify agent entries also received personality-aware content
     const orchestratorEntry = plan.agentEntries["deck-developer-orchestrator"];
     expect(orchestratorEntry).toBeDefined();
@@ -876,7 +909,7 @@ describe("orchestratorPersonality in buildOpenCodeDeveloperTeamInstallPlan", () 
     // Should still generate valid content (falls back to pragmatica)
     const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
     expect(orchestratorSkill.content).toContain("# Orchestrator Skill");
-    expect(orchestratorSkill.content).toContain("## SDD Workflow");
+    expect(orchestratorSkill.content).toContain("## Coordinate One Authoritative Flow");
     // Verify fallback to pragmatica is captured on the plan
     expect(plan.personality).toBe("pragmatica");
   });
@@ -1120,7 +1153,7 @@ describe("Task 3 — drift detection between prompt and skill", () => {
   });
 
   // Task 3.3: Critical fragments present in skill
-  test("skill contains critical semantic fragments (heading, SDD Workflow, invariants)", () => {
+  test("skill contains critical compact semantic fragments", () => {
     const projectRoot = createTempProject();
     try {
       const configDir = createTempConfigDir(projectRoot);
@@ -1137,9 +1170,29 @@ describe("Task 3 — drift detection between prompt and skill", () => {
 
       // Verify critical fragments (presence check, not exact match per REQ-VAL-003)
       expect(content).toMatch(/# .*Orchestrator.*Skill/);
-      expect(content).toContain("## SDD Workflow");
+      expect(content).toContain("## Runtime Contract Reference");
+      expect(content).toContain("## Coordinate One Authoritative Flow");
       expect(content).toContain("Visual Explanations");
-      expect(content).toContain("INV-001");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("compact install plan covers every prompt and role skill", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+
+      expect(plan.promptProfile).toBe("compact");
+      expect(plan.promptGenerationPlan).toHaveLength(14);
+      expect(plan.skills).toHaveLength(14);
+      for (const prompt of plan.promptGenerationPlan) {
+        expect(prompt.content, prompt.agent.id).toContain("Runtime-Enforced Team Contract");
+      }
+      for (const skill of plan.skills) {
+        expect(skill.content, skill.agent.id).toContain("## Runtime Contract Reference");
+      }
     } finally {
       cleanup(projectRoot);
     }
@@ -1189,7 +1242,7 @@ describe("Task 3 — drift detection between prompt and skill", () => {
 // ---------------------------------------------------------------------------
 
 describe("orchestrator invariant verification in verifyOpenCodeDeveloperTeamInstall", () => {
-  test("verification passes when orchestrator skill contains all critical invariants", () => {
+  test("verification passes when compact invariants and runtime reference are installed", () => {
     const projectRoot = createTempProject();
     try {
       const configDir = createTempConfigDir(projectRoot);
@@ -1200,17 +1253,18 @@ describe("orchestrator invariant verification in verifyOpenCodeDeveloperTeamInst
 
       expect(verifyResult.valid).toBe(true);
 
-      // Invariants present in orchestrator skill
+      // The compact skill references the canonical contract; the prompt carries the invariant IDs.
       const orchestratorSkill = plan.skills.find(
         (s) => s.agent.id === "deck-developer-orchestrator",
       )!;
-      expect(orchestratorSkill.content).toContain("## Orchestrator Invariants");
-      // Verify ALL 5 critical invariants are present
-      expect(orchestratorSkill.content).toContain("INV-001");
-      expect(orchestratorSkill.content).toContain("INV-002");
-      expect(orchestratorSkill.content).toContain("INV-003");
-      expect(orchestratorSkill.content).toContain("INV-004");
-      expect(orchestratorSkill.content).toContain("INV-005");
+      expect(orchestratorSkill.content).toContain("## Runtime Contract Reference");
+      const orchestratorPrompt = plan.promptGenerationPlan.find(
+        (entry) => entry.agent.id === "deck-developer-orchestrator",
+      )!;
+      expect(orchestratorPrompt.content).toContain("## Compact Orchestrator Invariants");
+      for (const id of ["INV-001", "INV-002", "INV-003", "INV-004", "INV-005"]) {
+        expect(orchestratorPrompt.content).toContain(id);
+      }
     } finally {
       cleanup(projectRoot);
     }
@@ -1238,7 +1292,7 @@ describe("orchestrator invariant verification in verifyOpenCodeDeveloperTeamInst
     }
   });
 
-  test("installed skill file on disk contains all critical invariants", () => {
+  test("installed compact skill file contains the runtime contract reference", () => {
     const projectRoot = createTempProject();
     try {
       const configDir = createTempConfigDir(projectRoot);
@@ -1254,13 +1308,8 @@ describe("orchestrator invariant verification in verifyOpenCodeDeveloperTeamInst
       // Disk content must match planned content
       expect(diskContent).toBe(orchestratorSkill.content);
 
-      // Verify all invariants are present in the actual disk file
-      expect(diskContent).toContain("## Orchestrator Invariants");
-      expect(diskContent).toContain("INV-001");
-      expect(diskContent).toContain("INV-002");
-      expect(diskContent).toContain("INV-003");
-      expect(diskContent).toContain("INV-004");
-expect(diskContent).toContain("INV-005");
+      expect(diskContent).toContain("## Runtime Contract Reference");
+      expect(diskContent).toContain("Runtime-Enforced Team Contract remains binding");
     } finally {
       cleanup(projectRoot);
     }
@@ -1410,6 +1459,7 @@ describe("adapter plan binding isolation", () => {
       const planB = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, modelAssignments: { "deck-developer-orchestrator": "openai/zero" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, plan: planB });
       expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-developer-orchestrator"].model).toBe("openai/zero");
+      expect(readFileSync(join(configDir, "prompts", "deck-developer", "deck-developer-orchestrator.md"), "utf-8")).toContain("Runtime-Enforced Team Contract");
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, plan: planA });
       expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-developer-orchestrator"].model).toBe("openai/exact");
     } finally { cleanup(root); }

@@ -243,6 +243,7 @@ export type ValidationRuleCode =
   | "events.events.legacy_flat_list"
   | "events.event.required_field_missing"
   | "events.event.name_mismatch"
+  | "events.event.metadata.invalid"
   | "events.state.last_event_mismatch"
   // Artifact rules
   | "artifact.missing_for_completed_phase"
@@ -303,6 +304,7 @@ export const VALIDATION_RULE_CODES: readonly ValidationRuleCode[] = [
   "events.events.legacy_flat_list",
   "events.event.required_field_missing",
   "events.event.name_mismatch",
+  "events.event.metadata.invalid",
   "events.state.last_event_mismatch",
   "artifact.missing_for_completed_phase",
   "artifact.unregistered_present",

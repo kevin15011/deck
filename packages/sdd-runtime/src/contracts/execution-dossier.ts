@@ -67,15 +67,14 @@ export function reviseExecutionDossierV1(
   changes: Partial<Omit<ExecutionDossierInputV1, "schema" | "batch">>,
   history: readonly ExecutionDossierV1[] = [],
 ): ExecutionDossierV1 {
-  // B-B3-PRIOR-DECISION-REORDER-ACCEPTED-v1: the caller's history always
-  // includes `previous` itself (e.g. revise(d2, ..., [d1, d2])).  parseExecutionDossierV1
-  // expects only predecessors in the history chain.  Slice history when its length
-  // exceeds the expected predecessor count (revision - 1); pass as-is otherwise.
+  // Issuance validates the supplied previous revision against exactly its ordered
+  // ancestors. Extra or missing entries are evidence corruption, not a convenience
+  // shape to normalize, so reject before any prefix validation below.
   const expectedPredecessorCount = previous.revision - 1;
-  const historyForPrevious = history.length > expectedPredecessorCount
-    ? history.slice(0, expectedPredecessorCount)
-    : history;
-  const validatedPrevious = parseExecutionDossierV1(previous, historyForPrevious);
+  if (history.length !== expectedPredecessorCount) {
+    throw new Error("invalid-evidence: dossier revision history");
+  }
+  const validatedPrevious = parseExecutionDossierV1(previous, previous.revision === 1 ? undefined : history);
   const { dossierId: _id, digest: _digest, revision: _revision, previousDigest: _previous, ...base } = validatedPrevious;
   const input = {
     ...base,
@@ -120,7 +119,7 @@ export function reviseExecutionDossierV1(
   }
   return next;
 }
-type ExecutionDossierHistoryV1 = ExecutionDossierV1 | readonly ExecutionDossierV1[];
+export type ExecutionDossierHistoryV1 = ExecutionDossierV1 | readonly ExecutionDossierV1[];
 
 function parseDossierRevisionV1(value: unknown, previous?: ExecutionDossierV1): ExecutionDossierV1 {
   assertExactKeys(value, ["schema","dossierId","digest","revision","previousDigest","batch","priorManifest","currentManifest","delta","decision","lane","verification","causalContext","authorizationRef","registryIntents"], "dossier");
@@ -181,6 +180,21 @@ export function parseExecutionDossierV1(value: unknown, history?: ExecutionDossi
     previous = parseDossierRevisionV1(candidate, previous);
   }
   return parseDossierRevisionV1(value, previous);
+}
+
+export function parseExecutionDossierHistoryV1(value: unknown): readonly ExecutionDossierV1[] {
+  if (!Array.isArray(value) || value.length > 4_096) {
+    throw new Error("invalid-evidence: dossier revision history");
+  }
+  const parsed: ExecutionDossierV1[] = [];
+  let previous: ExecutionDossierV1 | undefined;
+  for (let index = 0; index < value.length; index += 1) {
+    if (!(index in value)) throw new Error("invalid-evidence: dossier revision history");
+    const current = parseDossierRevisionV1(value[index], previous);
+    parsed.push(current);
+    previous = current;
+  }
+  return deepFreeze(parsed);
 }
 
 function parseApplyNested(input: ExecutionDossierInputV1): void {

@@ -6,6 +6,7 @@ import {
   ORCHESTRATOR_PROMPT_PRAGMATICA,
   ORCHESTRATOR_SKILL_BODY,
   ORCHESTRATOR_SYSTEM_PROMPT,
+  ORCHESTRATOR_SYSTEM_PROMPT_COMPACT,
   PERSONALITY_COMMUNICATION_GUIDA,
   PERSONALITY_COMMUNICATION_PRAGMATICA,
   getOrchestratorSystemPrompt,
@@ -415,7 +416,7 @@ describe("getOrchestratorSystemPrompt", () => {
     // Core present in composition
     expect(guia).toContain("# Deck Developer Team");
     // Still longer than core
-    expect(guia.length).toBeGreaterThan(ORCHESTRATOR_SYSTEM_PROMPT.length);
+    expect(guia.length).toBeGreaterThan(ORCHESTRATOR_SYSTEM_PROMPT_COMPACT.length);
   });
 
   test("pragmatica variant is composition (not identity)", () => {
@@ -447,7 +448,7 @@ describe("getOrchestratorSystemPrompt", () => {
   });
 
   test("ORCHESTRATOR_PROMPT_GUIDA exports the guia variant", () => {
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toBe(getOrchestratorSystemPrompt("guia"));
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toBe(getOrchestratorSystemPrompt("guia", "legacy"));
   });
 
   test("ORCHESTRATOR_PROMPT_PRAGMATICA exports the pragmatica variant", () => {

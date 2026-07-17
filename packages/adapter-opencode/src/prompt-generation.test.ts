@@ -73,6 +73,21 @@ describe("buildPromptGenerationPlan", () => {
     expect(ids).toContain("deck-developer-review");
     expect(ids).toContain("deck-developer-archive");
   });
+
+  test("selects compact by default while retaining explicit legacy content", () => {
+    const compact = buildPromptGenerationPlan({ configDir: "/tmp", projectRoot: "/tmp" });
+    const legacy = buildPromptGenerationPlan({
+      configDir: "/tmp",
+      projectRoot: "/tmp",
+      promptProfile: "legacy",
+    });
+    const legacyApply = legacy.find((planned) => planned.agent.id === "deck-developer-apply-general")!;
+    const compactApply = compact.find((planned) => planned.agent.id === "deck-developer-apply-general")!;
+    const expected = getAgentContent("deck-developer-apply-general", { promptProfile: "compact" })!;
+
+    expect(compactApply.content).toContain(expected.agentBody);
+    expect(compactApply.content).not.toBe(legacyApply.content);
+  });
 });
 
 describe("applyPromptGeneration", () => {
@@ -566,7 +581,7 @@ describe("authorization card injection (REQ-OA-005)", () => {
     expect(verify.content).not.toContain("## Pre-Delegation Gate Checklist");
   });
 
-  test("apply agents without authorization have static placeholder only", () => {
+  test("apply agents without an injected card retain the usable modification gate", () => {
     const plan = buildPromptGenerationPlan({
       configDir: "/tmp/.config/opencode",
       projectRoot: "/tmp/project",
@@ -574,8 +589,9 @@ describe("authorization card injection (REQ-OA-005)", () => {
     });
 
     const applyGeneral = plan.find((p) => p.agent.id === "deck-developer-apply-general")!;
-    // Should have static placeholder, not injected gate checklist
-    expect(applyGeneral.content).toContain("<!-- Orchestrator will inject");
+    expect(applyGeneral.content).toContain("## Modification Gate");
+    expect(applyGeneral.content).toContain("explicitly authorizes modifying work");
+    expect(applyGeneral.content).not.toContain("<!-- Orchestrator will inject");
     expect(applyGeneral.content).not.toContain("## Pre-Delegation Gate Checklist");
   });
 

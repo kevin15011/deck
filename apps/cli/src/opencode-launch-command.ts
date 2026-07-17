@@ -5,6 +5,7 @@ import {
   applyOpenCodeDeveloperTeamInstall,
   buildOpenCodeDeveloperTeamInstallPlan,
   type MemoryDiagnostic,
+  type PromptProfileActivationV1,
 } from "@deck/adapter-opencode";
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
@@ -45,6 +46,8 @@ export type RunOpenCodeLaunchOptions = {
   commandExists?: (command: string) => boolean;
   opencodeCommand?: string;
   configDir?: string;
+  /** Retained for API compatibility; compact prompts are active by default. */
+  promptProfileActivation?: PromptProfileActivationV1;
   dryRun?: boolean;
 };
 
@@ -234,6 +237,7 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     supportedMemoryProviderIds: options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS,
     capabilityInstructions,
     standaloneSkills,
+    promptProfileActivation: options.promptProfileActivation,
   });
 
   allDiagnostics.push(...installPlan.memoryDiagnostics.map(toMemoryDiagnostic));

@@ -1,7 +1,8 @@
 import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { runOpenCodeLaunch } from "./opencode-launch-command";
 
 // Mock imports before importing the module under test
 const mockGetSupportedProviderIds = mock(() => ["engram", "supermemory"]);
@@ -65,5 +66,35 @@ describe("fail-open behavior", () => {
     
     // Should NOT block the flow
     expect(shouldBlock).toBe(false);
+  });
+});
+
+describe("production prompt activation", () => {
+  test("installs compact prompts without a rollout receipt", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-rollout-"));
+    const configDir = join(projectRoot, ".config", "opencode");
+    try {
+      mkdirSync(configDir, { recursive: true });
+      const result = await runOpenCodeLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        configDir,
+        commandExists: () => true,
+        dryRun: true,
+      });
+      const prompt = readFileSync(
+        join(configDir, "prompts", "deck-developer", "deck-developer-apply-general.md"),
+        "utf8",
+      );
+
+      expect(result.status).toBe("ready");
+      expect(prompt).toContain("# General Apply Agent");
+      expect(prompt).toContain("Runtime-Enforced Team Contract");
+      expect(prompt).toContain("RegistryIntentV1");
+      expect(prompt).toContain("## Modification Gate");
+      expect(prompt).not.toContain("Orchestrator will inject renderApplyAuthorizationCard()");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -13,6 +13,7 @@
 ```sh
 bun test apps/cli/src/upgrade-command/__tests__/release-descriptor.test.ts
 bun test scripts/prepare-release.test.ts
+bun test
 bun run build
 bunx tsc --noEmit
 ```
@@ -23,7 +24,7 @@ bunx tsc --noEmit
 bun run scripts/prepare-release.ts --help
 ```
 
-The [helper](../../scripts/prepare-release.ts) and [runtime schema](../../apps/cli/src/upgrade-command/release-descriptor.ts) remain authoritative for flags and accepted content.
+The [helper](../../scripts/prepare-release.ts) and [runtime schema](../../apps/cli/src/upgrade-command/release-descriptor.ts) remain authoritative for flags and accepted content. Developer Team compact prompts are part of the production build. For automatic runtime effects, also apply the [rollout interpretation](../developer-team-execution.md#release-interpretation): code release readiness does not imply that a runtime cohort is eligible to expand.
 4. Review the working tree, version, changelog, tests, generated freshness, and descriptor assets. Before creating a `v*` tag, pushing it, or publishing, stop and obtain explicit user confirmation in a new message. Do not automatically tag, push, or publish.
 5. After confirmation, create and push the stable tag using the agreed release process. Observe the [release workflow](../../.github/workflows/release.yml): it builds binaries, generates build information and the skill bundle, creates checksums, prepares `release.json`, and attaches release assets.
 6. After publication, confirm the release page contains the expected archives, checksums, and descriptor when applicable. Run the installed CLI's help/version or the relevant supported smoke check. Record any discrepancy before announcing completion.

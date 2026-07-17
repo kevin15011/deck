@@ -122,6 +122,7 @@ function buildPiAgentInstallPlanFromFiles(projectRoot: string, files: readonly D
       })),
     sddSkillFiles: [],
     memoryDiagnostics: [],
+    promptProfile: "compact",
   };
 }
 
@@ -483,6 +484,7 @@ async function applyTeamInstall(input: import("@deck/core").DeveloperTeamApplyIn
       })),
     sddSkillFiles: [],
     memoryDiagnostics: [],
+    promptProfile: "compact",
   };
 
   const result: DeveloperTeamApplyResult = applyDeveloperTeamInstall(plan);

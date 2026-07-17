@@ -51,6 +51,25 @@ describe("createEvent", () => {
     expect(event.metadata).toEqual({ source: "cli", phase: "proposal" });
   });
 
+  test("carries warning-first registry transaction metadata", () => {
+    const event = createEvent({
+      changeName: "centralized-writer",
+      type: "artifact.updated",
+      actor: "registry-coordinator",
+      intentId: "registry-intent:v1:fixture",
+      idempotencyKey: "sha256:fixture",
+      transactionId: "registry-tx-fixture",
+      batchDigest: "sha256:batch",
+    });
+
+    expect(event).toMatchObject({
+      intentId: "registry-intent:v1:fixture",
+      idempotencyKey: "sha256:fixture",
+      transactionId: "registry-tx-fixture",
+      batchDigest: "sha256:batch",
+    });
+  });
+
   test("creates a sync.targeted event (future-neutral)", () => {
     const event = createEvent({
       changeName: "add-dark-mode",

@@ -5,7 +5,7 @@
  * Recursively reads all files in each skill directory and generates
  * a TypeScript module with full skill bundles.
  *
- * Usage: bun scripts/generate-skill-bundle.ts
+ * Usage: bun scripts/generate-skill-bundle.ts [--output <temporary-path>]
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
@@ -16,7 +16,14 @@ import { STANDALONE_SKILLS } from "../packages/core/src/skills/external/index";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
 const EXTERNAL_SKILLS_DIR = join(ROOT, "packages/core/src/skills/external");
-const OUTPUT_FILE = join(EXTERNAL_SKILLS_DIR, "content.generated.ts");
+const outputArgumentIndex = process.argv.indexOf("--output");
+const OUTPUT_FILE = outputArgumentIndex === -1
+  ? join(EXTERNAL_SKILLS_DIR, "content.generated.ts")
+  : process.argv[outputArgumentIndex + 1];
+
+if (!OUTPUT_FILE) {
+  throw new Error("--output requires a destination path");
+}
 
 // Skill IDs come from the canonical runtime registry to prevent generator drift.
 const CANONICAL_SKILLS = STANDALONE_SKILLS.map((skill) => skill.skillId);
@@ -51,7 +58,8 @@ function walkSkillDirectory(skillDir: string): Record<string, string> {
   const files: Record<string, string> = {};
 
   function walk(dir: string, relPath: string = "") {
-    const entries = readdirSync(dir, { withFileTypes: true });
+    const entries = readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
     for (const entry of entries) {
       if (shouldExclude(entry.name)) continue;
 

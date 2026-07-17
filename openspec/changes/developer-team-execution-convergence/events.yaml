@@ -480,6 +480,64 @@ events:
     registry_write: non-deferred
     notes:
       - "The user's explicit Continua authorizes focused closure of the final two local Batch B oracles without scope expansion."
+  - phase: verify
+    status: failed
+    event: verify.batch-b.gate-repair-3.failed
+    artifact: verify-batch-b-gate-repair-3.md
+    timestamp: "2026-07-15"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Verify retained digest literal type errors and one unapproved prepare-release broad failure; all functional Batch B reproducers passed."
+  - phase: review
+    status: changes-requested
+    event: review.batch-b.gate-repair-3.failed
+    artifact: review-batch-b-gate-repair-3.md
+    timestamp: "2026-07-15"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Review retained unsafe history slicing and missing parser-side registry-intent truncation evidence."
+  - phase: apply
+    status: direct-recovery-gate-repair-4-authorized
+    event: repair.direct-recovery-gate-repair-4-started
+    artifact: repair-incident.md
+    timestamp: "2026-07-15"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "The explicit Continua authorizes combined closure of the exact remaining Batch B history, typing, and broad-evidence manifest."
+  - phase: verify
+    status: passed
+    event: verify.batch-b.gate-repair-4.completed
+    artifact: verify-batch-b-gate-repair-4.md
+    timestamp: "2026-07-15"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "All B-B1 through B-B7 findings closed; independent reproducers 25/25, typecheck passed, broad 3409/3409."
+  - phase: review
+    status: approved
+    event: review.batch-b.gate-repair-4.completed
+    artifact: review-batch-b-gate-repair-4.md
+    timestamp: "2026-07-15"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Final Batch B security, architecture, quality, test, compatibility, and scope Review approved with zero blocking findings."
+  - phase: apply
+    status: completed
+    event: apply.batch-b.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-15"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Batch B completed after consistent zero-blocking Verify and Review gate intents were reconciled; Batch C is unblocked."
   - phase: apply
     status: verify-review-required-direct-recovery
     event: repair.batch-b.direct-recovery.implemented
@@ -521,6 +579,391 @@ events:
     actor: deck-developer-apply-general
     registry_write: non-deferred
     notes:
-      - "INC-BATCH-B-FINAL-TWO-ORACLES-v1 attempt 1/1 completed. B-B3 history slicing fixed (slice only when length > expectedPredecessorCount); 4 depth-3 parser/issuance tests added; B-B7 exact 57-key export oracle implemented."
-      - "Apply blocking set is []. Affected cycle passed target tests 47/47, Batch B contracts 177/177, sdd-runtime 363/363, core 1474/1474, TypeScript clean."
-      - "Generated SHA-256 7ca11811594bcf72751d3f9b0b1a2bbfb9aaf2cdf68d07cef75e3c35ef7c1460 unchanged. Broad verification pending. Batch B completion deferred pending fresh Verify and Review."
+      - "INC-BATCH-B-FINAL-TWO-ORACLES-v1 attempt 1/1 completed. B-B3 history slicing fixed (slice only when length > expectedPredecessorCount); 6 depth-3 parser/issuance tests cover valid append, truncation, reorder, and parser-side prefix mutation; B-B7 exact 57-key export oracle implemented."
+      - "Apply blocking set is []. Affected cycle passed target tests 49/49, Batch B contracts 179/179, sdd-runtime 365/365, core 1474/1474, TypeScript clean."
+      - "Broad verification completed: bun test --timeout 30000 with 900000 ms wall timeout produced 3401 pass / 3 approved stale prepare-release failures / 3404 total across 190 files. No binary-doctor or unclassified failure occurred."
+      - "Generated SHA-256 7ca11811594bcf72751d3f9b0b1a2bbfb9aaf2cdf68d07cef75e3c35ef7c1460 unchanged; content.generated.ts is prior authorized Batch A generated state, not Gate Repair 3 drift. Batch B completion deferred pending fresh Verify and Review."
+  - phase: apply
+    status: verify-review-required-gate-repair-4
+    event: repair.batch-b.direct-recovery-gate-repair-4.implemented
+    artifact: apply-progress.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "INC-BATCH-B-HISTORY-TYPES-BROAD-CLOSURE-v1 attempt 1/1 completed. B-B3 registry parser truncation/reorder/mutation tests added, unsafe history slicing removed, digest literal typing fixed, and prepare-release SHA failure diagnosed as stale build-info gating."
+      - "Apply blocking set is []. Affected cycle passed direct/export 54/54, Batch B acceptance 86/86, contracts 184/184, sdd-runtime 370/370, core 1474/1474, and root typecheck."
+      - "Broad verification completed: bun test --timeout 30000 with 900000 ms wall timeout produced 3406 pass / 3 established stale prepare-release failures / 3409 total across 190 files. No binary-doctor or unclassified failure occurred."
+      - "Generated SHA-256 7ca11811594bcf72751d3f9b0b1a2bbfb9aaf2cdf68d07cef75e3c35ef7c1460 unchanged; build-info and prepare-release source/tests were not edited. Batch B completion deferred pending fresh Verify and Review."
+  - phase: apply
+    status: review-required
+    event: apply.batch-c.implemented
+    artifact: apply-progress.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "EG3-T1 and EG3-T2 implemented the pure deterministic decision kernel and its production/shadow control-plane boundary. Root-cause routing precedes terminal governance, and legacy evaluateRepairIncident behavior remains unchanged."
+      - "Focused, affected runtime/core, workspace typecheck, and broad verification passed. Shadow and invalid-evidence plans invoke zero adapter effects; replay uses the same kernel and returns the same action/rationale."
+      - "Generated SHA-256 remains 7ca11811594bcf72751d3f9b0b1a2bbfb9aaf2cdf68d07cef75e3c35ef7c1460. Fresh independent Review is required; apply.batch-c.completed was intentionally not recorded."
+  - phase: verify
+    status: failed
+    event: verify.batch-c.failed
+    artifact: verify-batch-c.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Verify found unsafe high-risk shrink routing, disconnected production caller, and incomplete Batch C safety/orchestration test evidence."
+  - phase: review
+    status: changes-requested
+    event: review.batch-c.failed
+    artifact: review-batch-c.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Review found disconnected production composition, fail-open active/shadow authority, incomplete high-risk routing, incomplete replay identity, missing legacy composition, and inadequate safety matrix coverage."
+  - phase: apply
+    status: batch-c-direct-recovery-authorized
+    event: repair.batch-c.direct-recovery.started
+    artifact: repair-incident.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Standing Automatic user authorization permits one coherent Batch C repair of the normalized Verify+Review manifest without Batch D or later scope expansion."
+  - phase: apply
+    status: verify-review-required-batch-c-direct-recovery
+    event: repair.batch-c.direct-recovery.implemented
+    artifact: apply-progress.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "The exact C-C1/C-C2/C-C3 and C-B1 through C-B6 Apply blocking set is empty after deterministic precedence, production composition, deny-by-default effect-boundary, canonical replay, legacy projection, and exact test repairs."
+      - "Affected suites, typecheck, Serena diagnostics, and broad verification passed; broad was 3418 pass / 0 fail under the required 900000 ms allowance with unchanged generated hash."
+      - "Fresh independent registry-deferred Verify and Review remain required; Batch C completion and Batch D authorization are not recorded."
+  - phase: verify
+    status: failed
+    event: verify.batch-c.direct-recovery.failed
+    artifact: verify-batch-c-direct-recovery.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Verify retained disconnected production composition and incomplete exact Batch C routing/production/authority/replay/legacy matrix coverage."
+  - phase: review
+    status: changes-requested
+    event: review.batch-c.direct-recovery.failed
+    artifact: review-batch-c-direct-recovery.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Review identified fail-open authority/Git state, data-loss routing, unsafe invalid identity, optional shadow legacy authority, missing exact tests, and an EG3/Batch D reachability contradiction."
+  - phase: apply
+    status: replan-required
+    event: repair.batch-c.replan.started
+    artifact: repair-incident.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "A focused Spec/Design repair will move real runner-host reachability to Batch D while preserving Batch C fail-closed control-plane obligations."
+  - phase: spec
+    status: changes-requested
+    event: spec.repair.batch-c.host-boundary-handoff.recorded
+    artifact: spec-repair-batch-c.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-spec
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Additive requirements retain Batch C host-ready boundary safety and move real runner-host reachability to Batch D's authorized bridge."
+  - phase: design
+    status: completed
+    event: design.batch-c.repair.completed
+    artifact: design-repair-batch-c.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-design
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Design repair defined a one-way Batch C composition boundary and the Batch D OpenCode/Pi host bridge contract without implementing later scope."
+  - phase: verify
+    status: failed
+    event: verify.batch-c.direct-recovery.failed
+    artifact: verify-batch-c-direct-recovery.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Verify retained a disconnected non-test production caller and incomplete exact Batch C routing/production/authority/replay/legacy test matrix."
+  - phase: review
+    status: changes-requested
+    event: review.batch-c.direct-recovery.failed
+    artifact: review-batch-c-direct-recovery.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Review retained disconnected production composition, fail-open authority/Git state, data-loss routing, invalid-input identity, optional shadow legacy authority, and inadequate exact safety tests."
+  - phase: apply
+    status: blocked-repair-planned
+    event: tasks.batch-c-host-boundary-repaired
+    artifact: tasks.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    notes:
+      - "Added one coherent EG3-R1 repair task for the Batch C host-facing control-plane boundary. EG3-R1 closes C-R2...C-R6 findings (authority/Git discriminated states, shared protected-risk classifier, total safe identity, explicit shadow/legacy/active composition, restrictive terminal governance, narrow effect API, exhaustive exact 68-row test matrix) and correctly defers C-R1/C-C2/C-B1 (production caller reachability) to Batch D under HO-BC-TO-BD-HOST-REACHABILITY-v1."
+      - "Updated EG4-T2 to require the mandatory host-reachability handoff proof (RQH-BC-001 through RQH-BC-003) before EG4-T2 completion. No micro-slices, no new task family, no Batch D implementation scope added. Batch D remains blocked on accepted EG3-R1 and the handoff contract."
+  - phase: apply
+    status: in-progress
+    event: repair.batch-c.host-boundary-repair.in-progress
+    artifact: apply-progress.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "EG3-R1 implemented the one-way Batch C composition, fail-closed authority/Git boundary, shared protected-risk predicate, safe invalid identity, replay record, and narrow effect port without Batch D runner work."
+      - "Focused sdd-runtime tests and root typecheck are green, but only 17 of the required 68 individually named Batch C matrix rows exist. C-R6/C-B6 remains the exact Apply blocker; no implemented/completion event is recorded."
+  - phase: apply
+    status: in-progress
+    event: repair.batch-c.host-boundary-repair.matrix-follow-up
+    artifact: apply-progress.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Added frozen terminal-governance replay wiring, a 68-ID literal scenario catalog, and a shared full-contract assertion helper; focused, affected, typecheck, and broad verification are green."
+      - "The catalog does not replace individual execution assertions. C-R6/C-B6 remains the exact Apply blocker because every named matrix row has not yet been migrated to invoke the helper with literal full expectations."
+  - phase: apply
+    status: verify-review-required-batch-c-host-boundary-repair
+    event: repair.batch-c.host-boundary-repair.implemented
+    artifact: apply-progress.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "All 68 literal Batch C matrix rows are individually named execution tests using the shared complete-contract assertion helper; the exact Apply blocking set is empty."
+      - "Focused, sdd-runtime, core, typecheck, and broad verification passed; generated SHA-256 is unchanged and Batch C completion remains pending fresh independent Verify and Review."
+  - phase: verify
+    status: failed
+    event: verify.batch-c.host-boundary-repair.failed
+    artifact: verify-batch-c-host-boundary-repair.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Verify accepted Batch D handoff deferral but retained C-R5 legacy/shadow/terminal composition and C-R6 semantic matrix evidence defects."
+  - phase: review
+    status: changes-requested
+    event: review.batch-c.host-boundary-repair.failed
+    artifact: review-batch-c-host-boundary-repair.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    reconciled_by: deck-developer-orchestrator
+    notes:
+      - "Review retained forged capability binding, unsafe replay identity, fail-open terminal/shadow composition, and synthetic matrix test rows."
+  - phase: apply
+    status: batch-c-host-boundary-gate-failed
+    event: repair.batch-c.host-boundary-security-oracle-repair.started
+    artifact: repair-incident.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Standing Automatic authorization permits one coherent security-and-oracle repair of the exact remaining Batch C host-boundary manifest without Batch D scope."
+  - phase: apply
+    status: verify-review-required-batch-c-final-repair
+    event: repair.batch-c.host-boundary-security-oracle-repair.implemented
+    artifact: apply-progress.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "Replaced synthetic matrix evidence with 68 executable public-boundary scenarios; closed mixed-root routing, unsupported-version safe identity, replay-bound capability enforcement, and shadow effect-binding admission."
+      - "Focused 86/86, sdd-runtime 456/456, core 1474/1474, typecheck, and broad 3495/3495 passed; generated SHA-256 remained unchanged and prohibited scope was untouched."
+      - "Apply blocking set is empty. Batch C completion remains pending fresh independent Verify and Review; Batch D host reachability remains open under HO-BC-TO-BD-HOST-REACHABILITY-v1."
+  - phase: verify
+    status: passed
+    event: verify.batch-c.final-repair.completed
+    artifact: verify-batch-c-final-repair.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-verify
+    registry_write: deferred-reconciled
+    reconciled_by: build-direct
+    notes:
+      - "Fresh Verify passed the then-current final repair with zero blockers and broad 3495/3495; its evidence is preserved as historical input to the subsequent Review."
+  - phase: review
+    status: changes-requested
+    event: review.batch-c.final-repair.failed
+    artifact: review-batch-c-final-repair.md
+    timestamp: "2026-07-16"
+    actor: deck-developer-review
+    registry_write: deferred-reconciled
+    reconciled_by: build-direct
+    notes:
+      - "Review found forged-plan delegation, legacy replay digest mismatch, incomplete legacy admission, and control-plane-to-adapter dependency."
+  - phase: apply
+    status: implementation-complete-direct-build
+    event: repair.batch-c.final-review-findings.implemented
+    artifact: apply-progress.md
+    timestamp: "2026-07-16"
+    actor: build-direct
+    registry_write: non-deferred
+    notes:
+      - "Closed BC-FR-01 through BC-FR-04 with canonical active-plan parsing, self-verifying legacy replay, complete legacy admission, and a neutral capability contract module."
+      - "Direct final gates passed: focused 149/149, sdd-runtime 459/459, core 1474/1474, typecheck clean, broad 3498/3498, generated hash unchanged, prohibited scope empty."
+      - "Per explicit user direction, no further subagents are invoked and no new independent-review claim is made."
+  - phase: apply
+    status: batch-d-eg4-eg5-implementation-complete-direct-build
+    event: apply.batch-d.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-16T22:30:00.000Z
+    actor: build-direct
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:29668a084489faf9808c04ebb8114ca7
+    idempotency_key: sha256:2a10a00367918e4bc5c3620016806f973dc0e06a1959bde2affd1352c3a7b141
+    transaction_id: registry-tx-batch-d-eg4-eg5-completion-v1
+    notes:
+      - EG4 authorization and OpenCode/Pi runner-host reachability pass with
+        equivalent fail-closed semantics.
+      - EG5 AST-preserving merge, safe edit WAL, pair CAS, lock ownership, and
+        deterministic recovery pass.
+      - "Direct gates: core 1485/1485, sdd-runtime 516/516, adapters and
+        reachability 799/799, broad 3598/3598, typecheck and standalone compile
+        passed."
+  - phase: apply
+    status: batch-e-eg6-implementation-complete-direct-build
+    event: apply.batch-e.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-17T02:47:49.000Z
+    actor: build-direct
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:95660cb45f2872a45a89bdfa58fcc303
+    idempotency_key: sha256:77d92ffcb0a190cfba81b91617fa13f261b69e9a38470a9db40b101223dba0d1
+    transaction_id: registry-tx-batch-e-eg6-completion-v1
+    notes:
+      - EG6 staged verification, bounded omission evidence, role independence, and
+        fresh-agent floors pass.
+      - Fast, Guarded, and Full-SDD routing is deterministic, no-downgrade, and
+        preserves legacy scorer/router behavior.
+      - "Final direct gates: focused 49/49, sdd-runtime 553/553, broad 3639/3639,
+        typecheck, deterministic bundle regeneration, and CLI dry-run build
+        passed."
+  - phase: apply
+    status: batch-f-eg7-implementation-complete-direct-build
+    event: apply.batch-f.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-17T03:09:29.000Z
+    actor: build-direct
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:63bfac15eb7975b55a338a783fb7ed37
+    idempotency_key: sha256:f4ebfa4b4339c9fb5591d8f552e1e3f743a27883749366d4d752813d571386a4
+    transaction_id: registry-tx-batch-f-eg7-completion-v1
+    notes:
+      - EG7 compact role content retains permanent safety, provider filtering,
+        independent quality, and coordinator-owned registry writes.
+      - Legacy static content remains byte-identical; compact reduces bytes by
+        30.26 percent and lexical tokens by 31.31 percent.
+      - "Final direct gates: Team/skills 1102/1102, core 1495/1495, broad
+        3646/3646, typecheck, canonical double generation, and CLI dry-run build
+        passed."
+  - phase: apply
+    status: batch-g-eg8-implementation-complete-direct-build
+    event: apply.batch-g.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-17T04:49:32.000Z
+    actor: build-direct
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:714406dcb7f020c659368cbc054cf2d0
+    idempotency_key: sha256:7aba22a299c184e34485b2fd28a1204ec5cb2dc9923febf962113a0c9f65811d
+    transaction_id: registry-tx-batch-g-eg8-completion-v1
+    notes:
+      - EG8 rollout gates, safe telemetry, prompt activation receipts, adapter
+        parity, and integrated bridge-to-registry flow pass.
+      - "Final direct gates: focused 1763/1763, broad 3688/3688, typecheck,
+        deterministic generation, build dry-run, and scope audits passed."
+      - Production cohort expansion remains paused until real evidence reaches at
+        least 100 eligible executions, 14 consecutive days, and all safety
+        thresholds.
+  - phase: apply
+    status: passed_with_warnings
+    event: apply.batch-g-registry.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-17T04:59:13.000Z
+    actor: build-direct
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:babd5b1c1b35fdfdbf25570a80a36930
+    idempotency_key: sha256:b2029e0ee4084192dccbfe182a7109a5b1577ec9e765ea623a508a106237ff0c
+    transaction_id: registry-tx-batch-g-status-normalization-v1
+    notes:
+      - Batch G implementation and direct technical gates passed.
+      - Canonical status is passed_with_warnings because no fresh independent
+        Verify or Review is claimed and production rollout evidence is not yet
+        eligible.
+      - The prior Batch G completion event is preserved as append-only history.
+  - phase: apply
+    status: passed_with_warnings
+    event: apply.batch-g-fix.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-17T05:13:02.000Z
+    actor: build-direct
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:d5c89575e8c23c851a4e7921e5fd5c37
+    idempotency_key: sha256:0658c97218e8035bf4cb5525369c6cab9abb530d8c17c85848778b7a011ff689
+    transaction_id: registry-tx-batch-g-manual-readiness-fix-v1
+    notes:
+      - OpenCode and Pi static-compatible hooks now preserve legacy delegation
+        when trusted host evidence is unavailable or fails.
+      - Static-compatible permits trusted shadow observation but cannot activate
+        V1 effects; invocation-required remains fail-closed.
+      - "Final repair gates: reachability 22/22, adapters 824/824, broad
+        3696/3696, typecheck, deterministic generation, and build dry-run passed."
+  - phase: apply
+    status: passed_with_warnings
+    event: apply.batch-h.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-17T05:58:45.166Z
+    actor: build-direct
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:d9013af6dcb3cde238525849c0a18637
+    idempotency_key: sha256:39319a52879b87151be288acc64e5a23baf45f0cbade4add757c79b65a1f7c16
+    transaction_id: registry-tx-batch-h-compact-default-v1
+    notes:
+      - Compact prompts are now the default for canonical, adapter, CLI, and
+        production installation paths; receipts cannot downgrade prompt bytes.
+      - "Final direct gates: focused 285/285 plus 14/14, docs and reachability
+        32/32, broad 3696/3696, typecheck, deterministic generation, build
+        dry-run, and scope audits passed."
+      - Status remains passed_with_warnings because no fresh independent Verify or
+        Review is claimed; runtime rollout evidence governs effects only.
+  - phase: apply
+    status: passed_with_warnings
+    event: apply.batch-h-total-compact.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-17T18:47:30.419Z
+    actor: build-direct
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:a5ae64b76f559cfd3e4f3b02f7706853
+    idempotency_key: sha256:84899b32760ae492b6f0feb1eb2029a6683969953c554d702e01bd752d7bc9b1
+    transaction_id: registry-tx-batch-h-total-compact-v1
+    notes:
+      - All 14 Developer Team catalog roles now have dedicated compact agent and
+        skill bodies in canonical sources and OpenCode/Pi materialization.
+      - "Final direct gates: compact and safety 192/192, affected 556/556,
+        adapters 155/155, broad 3699/3699, docs and reachability 32/32, typecheck,
+        deterministic generation, build dry-run, and scope audits passed."
+      - Legacy remains byte-identical; full compact output reduces bytes by 56.21
+        percent and lexical tokens by 60.13 percent.

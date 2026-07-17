@@ -100,6 +100,15 @@ const completeStandaloneSkills = STANDALONE_SKILLS.map(({ skillId }) => {
   return { skillId, body: bundle.SKILL, files: bundle.files };
 });
 
+const compactPromptActivation = {
+  schema: "prompt-profile-activation-v1" as const,
+  status: "eligible" as const,
+  requestedProfile: "compact" as const,
+  effectiveProfile: "compact" as const,
+  reasonCodes: [] as const,
+  evidenceDigest: `sha256:${"a".repeat(64)}` as const,
+};
+
 describe("buildDeveloperTeamInstallPlan", () => {
   test("includes all 14 agents, 14 skills + 2 sddSkillFiles, and project .pi paths", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/my-project");
@@ -121,6 +130,30 @@ describe("buildDeveloperTeamInstallPlan", () => {
     const skillIds = plan.skills.map((s) => s.agent.id);
     const expectedSkillIds = agentIds.filter((id) => id !== "deck-init" && id !== "deck-onboard");
     expect(skillIds).toEqual(expectedSkillIds);
+  });
+
+  test("installs compact content by default regardless of obsolete rollout receipts", () => {
+    const compact = buildDeveloperTeamInstallPlan("/tmp/project");
+    const eligible = buildDeveloperTeamInstallPlan("/tmp/project", {
+      promptProfileActivation: compactPromptActivation,
+    });
+    const paused = buildDeveloperTeamInstallPlan("/tmp/project", {
+      promptProfileActivation: { ...compactPromptActivation, status: "rollout-paused" },
+    });
+    const expected = getAgentContent("deck-developer-apply-general", { promptProfile: "compact" })!;
+    const compactAgent = compact.agents.find(
+      (planned) => planned.agent.id === "deck-developer-apply-general",
+    )!;
+    const compactSkill = compact.skills.find(
+      (planned) => planned.agent.id === "deck-developer-apply-general",
+    )!;
+
+    expect(compact.promptProfile).toBe("compact");
+    expect(eligible.promptProfile).toBe("compact");
+    expect(paused.promptProfile).toBe("compact");
+    expect(paused.agents).toEqual(compact.agents);
+    expect(compactAgent.content).toContain(expected.agentBody);
+    expect(compactSkill.content).toContain(expected.skillBody);
   });
 
   test("each planned agent has .pi/agents relative path with team-scoped ID and valid content", () => {
@@ -367,24 +400,24 @@ describe("applyDeveloperTeamInstall", () => {
       expect(content).toContain("name: deck-developer-orchestrator");
       expect(content).toContain("description:");
       expect(content).toContain("# Orchestrator Agent");
-      expect(content).toContain("## Project Standards (auto-resolved)");
+      expect(content).toContain("## Boundaries");
 
       // Spot-check one skill file — orchestrator has real content
       const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
       const skillContent = orchestratorSkill.content;
       expect(skillContent).toContain("# Orchestrator Skill");
-      expect(skillContent).toContain("SDD Workflow");
+      expect(skillContent).toContain("Coordinate One Authoritative Flow");
 
       // Explorer skill has real (non-placeholder) content
       const explorerSkill = plan.skills.find((s) => s.agent.id === "deck-developer-explorer")!;
       expect(explorerSkill.content).toContain("# Explorer Skill");
-      expect(explorerSkill.content).toContain("Investigation Steps");
+      expect(explorerSkill.content).toContain("## Investigate");
       expect(explorerSkill.content).not.toContain("Placeholder");
 
       // Explorer agent has real (non-placeholder) content
       const explorerAgent = plan.agents.find((a) => a.agent.id === "deck-developer-explorer")!;
       expect(explorerAgent.content).toContain("# Explorer Agent");
-      expect(explorerAgent.content).toContain("investigator, not an implementor");
+      expect(explorerAgent.content).toContain("Do not implement");
       expect(explorerAgent.content).not.toContain("Placeholder");
     } finally {
       cleanup(projectRoot);
@@ -509,7 +542,52 @@ describe("applyDeveloperTeamInstall - profile materialization", () => {
       // Profile content should contain Developer Team content
       const content = readFileSync(systemPromptPath, "utf-8");
       expect(content).toContain("Developer Team");
-      expect(content).toContain("deck-developer-orchestrator");
+      expect(content).toContain("Runtime-Enforced Team Contract");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("preserves an eligible compact receipt when apply materializes the profile", () => {
+    const projectRoot = createTempProject();
+    try {
+      const plan = buildDeveloperTeamInstallPlan(projectRoot, {
+        promptProfileActivation: compactPromptActivation,
+      });
+      const result = applyDeveloperTeamInstall(plan);
+      const content = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
+
+      expect(plan.promptProfile).toBe("compact");
+      expect(content).toContain("# Deck Developer Team Coordinator");
+      expect(content).toContain("Only the central coordinator commits ordered RegistryIntentV1 values");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("compact install plan covers every role agent and skill", () => {
+    const projectRoot = createTempProject();
+    try {
+      const plan = buildDeveloperTeamInstallPlan(projectRoot);
+
+      expect(plan.promptProfile).toBe("compact");
+      expect(plan.agents).toHaveLength(14);
+      expect(plan.skills).toHaveLength(12);
+      expect(plan.sddSkillFiles).toHaveLength(2);
+      for (const agent of plan.agents) {
+        if (agent.agent.id === "deck-developer-orchestrator") {
+          expect(agent.content).toContain("systemPromptMode: replace");
+          expect(agent.content).toContain(".deck/pi/profiles/<team>/system-prompt.md");
+        } else {
+          expect(agent.content, agent.agent.id).toContain("Runtime-Enforced Team Contract");
+        }
+      }
+      for (const skill of plan.skills) {
+        expect(skill.content, skill.agent.id).toContain("## Runtime Contract Reference");
+      }
+      for (const skill of plan.sddSkillFiles) {
+        expect(skill.content, skill.skillId).toContain("## Runtime Contract Reference");
+      }
     } finally {
       cleanup(projectRoot);
     }
@@ -1464,7 +1542,7 @@ describe("buildDeveloperTeamInstallPlan with capability instruction injection", 
     expect(orchestrator.content).toContain("## Role");
     // Verify skill content was also generated with personality
     const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestratorSkill.content).toContain("## SDD Workflow");
+    expect(orchestratorSkill.content).toContain("## Coordinate One Authoritative Flow");
     expect(orchestratorSkill.content).toContain("# Orchestrator Skill");
   });
 
@@ -1478,7 +1556,8 @@ describe("buildDeveloperTeamInstallPlan with capability instruction injection", 
     // Should still generate valid content (falls back to pragmatica)
     const orchestrator = plan.agents.find((a) => a.agent.id === "deck-developer-orchestrator")!;
     expect(orchestrator.content).toContain("## Role");
-    expect(orchestrator.content).toContain("Delegate real work");
+    expect(orchestrator.content).toContain("## Boundaries");
+    expect(orchestrator.content).toContain("runtime authorization");
   });
 });
 
@@ -1505,7 +1584,7 @@ describe("buildDeveloperTeamInstallPlan (capability instructions)", () => {
 // ---------------------------------------------------------------------------
 
 describe("verifyDeveloperTeamInstall with orchestrator invariants", () => {
-  test("orchestrator agent and skill contain invariant section", () => {
+  test("orchestrator agent and skill reference compact runtime invariants", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/test-project");
 
     const orchestrator = plan.agents.find(
@@ -1521,14 +1600,8 @@ describe("verifyDeveloperTeamInstall with orchestrator invariants", () => {
       (s) => s.agent.id === "deck-developer-orchestrator",
     );
     expect(orchestratorSkill).toBeDefined();
-    // Skill contains full invariant body (source of truth)
-    expect(orchestratorSkill!.content).toContain("## Orchestrator Invariants");
-    // Verify ALL 5 critical invariants are present in skill
-    expect(orchestratorSkill!.content).toContain("INV-001");
-    expect(orchestratorSkill!.content).toContain("INV-002");
-    expect(orchestratorSkill!.content).toContain("INV-003");
-    expect(orchestratorSkill!.content).toContain("INV-004");
-    expect(orchestratorSkill!.content).toContain("INV-005");
+    expect(orchestratorSkill!.content).toContain("## Runtime Contract Reference");
+    expect(orchestratorSkill!.content).toContain("Runtime-Enforced Team Contract remains binding");
   });
 
   test("non-orchestrator agents do NOT contain invariant section", () => {

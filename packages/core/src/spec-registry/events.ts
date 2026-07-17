@@ -30,6 +30,10 @@ export function createEvent(params: {
   actor: string;
   evidence?: string;
   metadata?: Record<string, unknown>;
+  intentId?: string;
+  idempotencyKey?: string;
+  transactionId?: string;
+  batchDigest?: string;
 }): SpecRegistryEvent {
   eventCounter++;
   const id = `evt-${Date.now().toString(36)}-${eventCounter.toString(36)}`;
@@ -43,5 +47,9 @@ export function createEvent(params: {
     actor: params.actor,
     ...(params.evidence !== undefined && { evidence: params.evidence }),
     ...(params.metadata !== undefined && { metadata: params.metadata }),
+    ...(params.intentId !== undefined && { intentId: params.intentId }),
+    ...(params.idempotencyKey !== undefined && { idempotencyKey: params.idempotencyKey }),
+    ...(params.transactionId !== undefined && { transactionId: params.transactionId }),
+    ...(params.batchDigest !== undefined && { batchDigest: params.batchDigest }),
   };
 }

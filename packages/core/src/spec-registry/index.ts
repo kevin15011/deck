@@ -12,3 +12,5 @@ export * from "./events";
 export * from "./schema";
 export * from "./yaml";
 export * from "./validator";
+export * from "./documents";
+export * from "./serializer";

@@ -81,6 +81,29 @@ describe("runPiLaunch", () => {
     }
   });
 
+  test("materializes compact prompts without a rollout receipt", async () => {
+    const projectRoot = createTempDir();
+    try {
+      const result = await runPiLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        flags: {},
+        commandExists: () => true,
+        dryRun: true,
+      });
+      const prompt = readFileSync(
+        join(projectRoot, ".deck", "pi", "profiles", "developer-team", "system-prompt.md"),
+        "utf8",
+      );
+
+      expect(result.status).toBe("ready");
+      expect(prompt).toContain("# Deck Developer Team Coordinator");
+      expect(prompt).toContain("Runtime-Enforced Team Contract");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("dry-run plan includes orchestrator model and thinking flags", async () => {
     const projectRoot = createTempDir();
     try {
