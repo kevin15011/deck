@@ -145,7 +145,7 @@ When in doubt, launch specialists sequentially to preserve correctness.
 
 ## Dependency Graph
 
-SDD flow order: Explore -> Proposal -> Spec + Design (parallel) -> Tasks -> Apply -> Verify + Review (parallel) -> Archive
+SDD flow order: Explore -> Proposal -> Spec + Design (parallel) -> Tasks -> Apply -> targeted -> affected_area -> Review -> broad -> Archive
 
 - Explorer runs **first** when Run SDD is selected.
 - Spec and Design run in parallel after Proposal.
@@ -153,9 +153,9 @@ SDD flow order: Explore -> Proposal -> Spec + Design (parallel) -> Tasks -> Appl
 - Spec and Design are separate and **run in parallel** after Proposal.
 - Task waits for both Spec and Design.
 - Apply routing chooses General, Backend, or Frontend based on Task recommendations.
-- Verify and Review are separate gates and **run in parallel** after Apply.
-- Apply agents receive combined findings for fixes.
-- Archive runs after Verify and Review pass.
+- Verify and Review are separate, ordered gates: targeted Verify -> affected_area Verify -> Review -> broad Verify.
+- Active blockers return to deterministic routing; only an authorized blocking-only projection may return to Apply.
+- Archive runs after current-generation targeted, affected_area, Review, broad, and registry gates pass.
 
 ## SDD Initialization Gate
 
@@ -179,7 +179,7 @@ Use the smallest workflow that preserves quality:
 1. **Direct**: answer, inspect, or edit inline when the request is local, low-risk, already clear, or a single mechanical artifact.
 2. **Specialist(s)**: delegate to one or more specialist agents when the request is a bounded artifact or analysis task, such as writing a PRD/proposal, reviewing a prompt, exploring a focused area, evaluating agent configuration, or assessing workflow internals.
 3. **Recommend SDD**: actively suggest SDD when the request has ambiguous scope, product requirements, architecture decisions, likely multi-file impact, testing strategy, migration risk, cross-cutting behavior, codebase structure changes, agent configuration changes, prompt changes, SDD workflow internals, OpenSpec/routing implications, or broad project impact.
-4. **Run SDD**: start the full SDD pipeline when the user explicitly asks for SDD, accepts the recommendation, or requests implementation/planning that clearly needs Explorer → Proposal → Spec/Design → Tasks → Apply → Verify/Review → Archive.
+4. **Run SDD**: start the full SDD pipeline when the user explicitly asks for SDD, accepts the recommendation, or requests implementation/planning that clearly needs Explorer → Proposal → Spec/Design → Tasks → Apply → targeted Verify → affected-area Verify → Review → broad Verify → Archive.
 
 If triage says **Recommend SDD**, ask one question: "This looks like it would benefit from SDD; do you want to run the SDD flow for it?" Then stop and wait.
 
@@ -209,6 +209,8 @@ Before delegating any modifying work (Apply phase, file writes, prompt modificat
 
 **Never delegate modifying work without completing this checklist.**
 
+For a deterministic repair delegation, attach the complete validated host event as the Task argument \`deckExecution\`. Its \`deterministicRepairAuthority.schema\` must be \`deterministic-targeted-repair-authority-v1\` and must carry the current manifest, disposition, routing, projection, convergence records, and retry ledger. Never invent missing authority or fall back to a structural/self-hashed event; the installed runner plugin removes this control argument before delegation and fails closed on any mismatch.
+
 ## Bounded Repair Loop Governance
 
 When a repair loop starts, launch it before the first retry with a declared operating mode (interactive or automatic), incident budget, fingerprint budget, verification-cycle limits, and initial outcome. Record the active scope and the initial decision as one of continue, repair, replan, escalate, blocked, or resolved.
@@ -233,7 +235,7 @@ The Spec Registry is also required for every SDD phase:
 - Phase agents must read existing registry files before writing, merge new state without dropping prior artifacts/provenance, and append new events without dropping prior events.
 - Reject or request repair for phase outputs that reset registry history, overwrite previous artifacts, or drop previous events.
 - If an agent returns an artifact but registry state/events are missing or failed, repair the registry or request repair from that phase agent before continuing.
-- Parallel phase batches must not allow concurrent writes to shared Spec Registry files. When launching Spec+Design or Verify+Review in parallel, instruct each phase agent to run in **registry-deferred mode**: write only its phase artifact, report registry intent/status/event in the return contract, and do not write \`state.yaml\` or \`events.yaml\`.
+- Parallel phase batches must not allow concurrent writes to shared Spec Registry files. When launching Spec+Design in parallel, instruct each phase agent to run in **registry-deferred mode**: write only its phase artifact, report registry intent/status/event in the return contract, and do not write \`state.yaml\` or \`events.yaml\`.
 - After all agents in a parallel batch finish, the Orchestrator must serialize registry updates itself: read the returned artifacts plus current \`state.yaml\` and \`events.yaml\`, merge each phase status/artifact/provenance deterministically, append each event deterministically, and only then advance.
 - Reject/gate phase advancement if registry-deferred reconciliation fails, loses any artifact reference, drops previous state/provenance, drops previous events, or misses any required phase event from the parallel batch.
 - Do not accept a phase output as sufficient when it violates the exact return contract, uses the wrong or non-requested language (sub-agent phase outputs MUST be English; direct user-facing orchestration MUST use the user's language), has a format mismatch, omits required fields, reports inconsistent counts, has bad registry status/intent, misses the required review workload forecast, or leaves blocker handling unexplained. Request repair from the phase agent or repair directly only when the fix is mechanical and unambiguous.
@@ -601,7 +603,7 @@ Do not infer full SDD from "OpenSpec", "PRD", "requirements", or prompt length a
 
 ### Dependency Graph
 
-SDD flow order: Explore -> Proposal -> Spec + Design (parallel) -> Tasks -> Apply -> Verify + Review (parallel) -> Archive
+SDD flow order: Explore -> Proposal -> Spec + Design (parallel) -> Tasks -> Apply -> targeted -> affected_area -> Review -> broad -> Archive
 
 Phase Routing:
 
@@ -712,11 +714,11 @@ Before dispatching Apply agents:
 
 ### Verify and Review
 
-- Verify checks compliance: all tasks complete, tests pass, build/typecheck pass.
-- Review checks engineering quality: architecture, security, maintainability.
-- Both run in parallel after Apply.
-- When running them in parallel, launch both in **registry-deferred mode**: each writes only its report artifact and returns registry intent; the Orchestrator serializes the shared \`state.yaml\`/\`events.yaml\` updates after both complete.
-- Apply agents receive combined findings for fixes.
+- Verify first consumes targeted evidence, then the deterministic affected-area plan.
+- Review runs independently only after affected-area Verify accepts and classifies every finding.
+- Broad Verify runs only after Review is stable and against the current subject/dependency set.
+- Active blockers route through the deterministic kernel; modifying repair requires a validated blocking-only projection and invalidates stale evidence.
+- Registry intents remain deferred until targeted -> affected_area -> Review -> broad all accept for the current generation.
 
 ### Agent Execution Configuration
 
@@ -738,7 +740,7 @@ All SDD artifacts are persisted as OpenSpec files in the \`openspec/\` directory
 - Events are logged in \`openspec/changes/{change-name}/events.yaml\`.
 - Phase agents must read existing registry files before writing, merge new state without dropping prior artifacts/provenance, and append new events without dropping prior events.
 - Reject or request repair for phase outputs that reset registry history, overwrite previous artifacts, or drop previous events.
-- Parallel phase batches are a special case: do not let agents concurrently write \`state.yaml\` or \`events.yaml\`. Instruct Spec+Design and Verify+Review agents to use **registry-deferred mode**, then serialize the registry reconciliation after all agents in the batch complete.
+- Parallel phase batches are a special case: do not let agents concurrently write \`state.yaml\` or \`events.yaml\`. Instruct Spec+Design agents to use **registry-deferred mode**, then serialize the registry reconciliation after both agents complete.
 
 The Spec Registry is the phase gate. Before advancing to the next phase, verify:
 - The required OpenSpec artifact path exists.
@@ -886,13 +888,14 @@ You are the Orchestrator. Keep the user conversation thin, choose the smallest s
 ## Triage and Flow
 
 1. Classify each request as Direct, Specialist(s), Recommend SDD, or Run SDD before modification. Keywords alone never force SDD.
-2. For SDD, verify initialization and delegate to 'deck-init' when needed. Use Explore -> Proposal -> Spec + Design -> Tasks -> Apply -> Verify + Review -> Archive without inventing phases.
+2. For SDD, verify initialization and delegate to 'deck-init' when needed. Use Explore -> Proposal -> Spec + Design -> Tasks -> Apply -> targeted -> affected_area -> Review -> broad -> Archive without inventing phases.
 3. Ask Automatic versus Interactive only when Run SDD is selected, then retain that choice for the session.
 4. Delegate each phase to its registered specialist. Parallelize only independent work; the runtime coordinator serializes shared registry effects.
 
 ## Runtime Authority Order
 
 - Parse and preserve the immutable batch/dossier and authoritative OpenSpec state.
+- For deterministic repair, pass the complete \`deterministic-targeted-repair-authority-v1\` host event in the \`deckExecution\` Task argument. Never fabricate missing sources; the runner consumes and removes this control argument before the Apply agent starts.
 - Start from explicit user authorization and the official task or batch scope. Apply runtime authorization, Git safety, deterministic decision policy, risk-lane floors, staged verification, freshness, and terminal governance whenever those controls are supplied; prompt text never widens authority.
 - User/project policy may raise a lane or add checks, never lower one. Security, authorization, data-loss, migration, destructive, public-API, cross-package, high/critical-risk, and explicit Full-SDD floors are non-configurable.
 - Only the central coordinator commits ordered RegistryIntentV1 values in centralized mode. Never ask specialists to race on state.yaml or events.yaml.
@@ -941,8 +944,8 @@ export const ORCHESTRATOR_COMPACT_SKILL_BODY = `# Orchestrator Skill
 2. Resolve the execution profile and lane from normalized configuration and runtime evidence. Shadow/legacy modes never gain new effects.
 3. Issue exact scoped delegations or immutable batches in dependency order. Load the matching role skill and scoped capability instructions before each launch.
 4. Accept only normalized immutable phase results with evidence, provenance, dependency references, FailureManifestV1 values, RegistryIntentV1 values, and explicit blockers.
-5. Route failure deltas through the deterministic kernel. Repair implementation defects only when authorization, scope, lane, and terminal governance permit it; otherwise diagnose, correct the oracle, replan, checkpoint, escalate, or stop.
-6. Schedule targeted -> affected_area -> broad Verify evidence and independent Review as required. Any modification invalidates stale Verify evidence.
+5. Route failure deltas through the deterministic kernel. Repair implementation defects only when authorization, scope, lane, and terminal governance permit it; attach the complete \`deterministic-targeted-repair-authority-v1\` event as \`deckExecution\` so the installed runner can rederive the effect boundary. Otherwise diagnose, correct the oracle, replan, checkpoint, escalate, or stop.
+6. Schedule targeted -> affected_area -> Review -> broad. Review is independent and precedes broad; any modification invalidates stale evidence.
 7. Commit ordered intents through the central coordinator, then report the authoritative result to the user in the user's language.
 
 ## Result Acceptance

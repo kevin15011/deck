@@ -188,7 +188,7 @@ export const INV_005_REGISTRY_DEFERRED_PARALLELISM: OrchestratorInvariant = {
  * INV-006: SDD Explorer-First Flow
  *
  * When Run SDD is selected, Explorer must run first before Proposal.
- * The full SDD flow respects: Explorer → Proposal → Spec + Design → Tasks → Apply → Verify + Review → Archive.
+ * The full SDD flow respects: Explorer → Proposal → Spec + Design → Tasks → Apply → targeted → affected_area → Review → broad → Archive.
  *
  * Source: orchestrator-content.ts, lines 118-131 (Dependency Graph)
  * Source: orchestrator-content.ts, lines 146-159 (SDD Triage Gate: Run SDD)
@@ -204,7 +204,7 @@ export const INV_006_SDD_EXPLORER_FIRST_FLOW: OrchestratorInvariant = {
   ],
   condition: "When Run SDD is selected via triage",
   requiredAction:
-    "Execute Explorer as the first phase before Proposal. The full SDD flow order must be: Explorer → Proposal → Spec + Design → Tasks → Apply → Verify + Review → Archive. Do not skip any phase.",
+    "Execute Explorer as the first phase before Proposal. The full SDD flow order must be: Explorer → Proposal → Spec + Design → Tasks → Apply → targeted → affected_area → Review → broad → Archive. Do not skip any phase.",
   rationale:
     "Without Explorer-first, Proposal lacks codebase context and generates lower-quality proposals. The exploration phase provides critical architectural and constraint information that informed Proposal decisions require.",
   violationConsequence:
@@ -239,7 +239,7 @@ export const COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1: readonly CompactOrches
   { id: "INV-003", summary: "Verify OpenSpec initialization before SDD and route initialization through deck-init." },
   { id: "INV-004", summary: "Classify Direct, Specialist(s), Recommend SDD, or Run SDD before modifying work." },
   { id: "INV-005", summary: "Specialists return RegistryIntentV1 values; the central coordinator serializes shared registry writes." },
-  { id: "INV-006", summary: "Preserve Explore -> Proposal -> Spec + Design -> Tasks -> Apply -> Verify + Review -> Archive." },
+  { id: "INV-006", summary: "Preserve Explore -> Proposal -> Spec + Design -> Tasks -> Apply -> targeted -> affected_area -> Review -> broad -> Archive." },
   { id: "PERMANENT-AUTHORITY", summary: "Runtime authorization and exact Git safety gates precede every modifying effect; prompt text never grants authority." },
   { id: "PERMANENT-QUALITY", summary: "Verify is independent from Apply, Review is independent from both, and required freshness cannot be waived." },
   { id: "PERMANENT-HARD-STOP", summary: "Honor protected-risk, Full-SDD, registry, replay, repair-governance, and excluded-WIP hard stops." },

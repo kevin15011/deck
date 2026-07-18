@@ -2,6 +2,7 @@ import { expect } from "bun:test";
 import { buildApplyBatchContractV1 } from "../contracts/apply-batch";
 import { buildFailureManifestV1, type FailureFindingInputV1 } from "../contracts/failure-manifest";
 import { createExecutionDossierV1, reviseExecutionDossierV1, type ExecutionDossierV1 } from "../contracts/execution-dossier";
+import { computeProtectedRiskPolicyAuthorityDigestV1 } from "../contracts/finding-disposition";
 import { computeFailureDeltaV1 } from "../orchestrator/failure-delta";
 import { EXECUTION_V1_FIXTURES } from "../fixtures/execution-v1";
 import {
@@ -21,6 +22,19 @@ const blockedTarget = "openspec/changes/runner-capability-standardization";
 const taskArtifactPath = "tasks.md";
 const receiptDigest = sha("d");
 
+export const RUNNER_HOST_PROTECTED_RISK_POLICY = {
+  classificationPolicyVersion: "finding-disposition-policy-v1",
+  routingPolicyVersion: "routing-decision-policy-v1",
+  mandatorySecurityRequirementIds: [] as readonly string[],
+  mandatorySecurityTaskIds: [] as readonly string[],
+  mandatorySecurityCheckIds: [] as readonly string[],
+  mandatorySecurityOracleIds: [] as readonly string[],
+  mandatoryDataLossRequirementIds: [] as readonly string[],
+  mandatoryDataLossTaskIds: [] as readonly string[],
+  mandatoryDataLossCheckIds: [] as readonly string[],
+  mandatoryDataLossOracleIds: [] as readonly string[],
+};
+
 export type RunnerId = "opencode" | "pi";
 export type BridgeFactory = (options: Omit<DeveloperTeamRunnerHostBridgeOptionsV1, "runnerId">) => DeveloperTeamRunnerHostBridgeV1;
 
@@ -35,7 +49,12 @@ function makeDossier(withFindings = true): ExecutionDossierV1 {
     blockedTargets: [blockedTarget],
     acceptanceObligations: ["REQ-AUTH-004"],
     verificationPlan: [{ stage: "targeted", checkIds: ["bridge-conformance"] }],
-    artifactDigests: { [taskArtifactPath]: sha("a") },
+    artifactDigests: {
+      [taskArtifactPath]: sha("a"),
+      "protected-risk-policy": computeProtectedRiskPolicyAuthorityDigestV1(
+        RUNNER_HOST_PROTECTED_RISK_POLICY,
+      ),
+    },
     authorizationGrantRef: sha("b"),
     provenance: { actor: "apply-general", issuedAt: "2026-07-16T00:00:00Z" },
   });

@@ -22,6 +22,10 @@ import {
   composeDeveloperTeamExecutionV1,
   type DeveloperTeamExecutionCompositionResultV1,
 } from "./execution-composition";
+import {
+  validateDeterministicTargetedRepairAuthorityV1,
+  type DeterministicTargetedRepairAuthorityV1,
+} from "./execution-control-plane";
 import type {
   ExecutionAuthorityStateV1,
   GitSafetyStateV1,
@@ -55,6 +59,8 @@ export interface DeveloperTeamHostExecutionEventV1 {
   readonly gitSafety: GitSafetyStateV1;
   readonly gitEffect: { readonly kind: "non-destructive" } | { readonly kind: "destructive"; readonly commandDigest: Sha256Digest } | null;
   readonly governance: TerminalGovernanceContextV1;
+  /** Selects the additive deterministic repair path; omitted events retain V1 behavior. */
+  readonly deterministicRepairAuthority?: DeterministicTargetedRepairAuthorityV1;
 }
 
 export interface DeveloperTeamHostExecutionResultV1 {
@@ -130,7 +136,7 @@ function parseGitEffect(value: unknown): DeveloperTeamHostExecutionEventV1["gitE
 }
 
 function parseHostEvent(value: unknown, runnerId: "opencode" | "pi"): ParsedHostEventV1 {
-  assertExactKeys(value, ["schema", "runnerId", "executionId", "mode", "legacyInput", "dossier", "authorization", "taskArtifactPath", "target", "userAuthorizationReceiptDigest", "policy", "gitSafety", "gitEffect", "governance"], "host execution event");
+  assertExactKeys(value, ["schema", "runnerId", "executionId", "mode", "legacyInput", "dossier", "authorization", "taskArtifactPath", "target", "userAuthorizationReceiptDigest", "policy", "gitSafety", "gitEffect", "governance", "deterministicRepairAuthority"], "host execution event");
   if (value.schema !== "developer-team-host-execution-event-v1" || value.runnerId !== runnerId) throw new Error("invalid-evidence: host execution identity");
   const executionId = codeValue(value.executionId, "hostEvent.executionId");
   const mode = enumValue(value.mode, ["legacy", "shadow", "active"] as const, "hostEvent.mode");
@@ -142,7 +148,7 @@ function parseHostEvent(value: unknown, runnerId: "opencode" | "pi"): ParsedHost
   };
 
   if (mode === "legacy") {
-    if (value.dossier.kind !== "none" || value.dossier.value !== undefined || value.dossier.history !== undefined || value.authorization !== null || value.taskArtifactPath !== null || value.target !== null || value.userAuthorizationReceiptDigest !== null || value.gitEffect !== null) {
+    if (value.dossier.kind !== "none" || value.dossier.value !== undefined || value.dossier.history !== undefined || value.authorization !== null || value.taskArtifactPath !== null || value.target !== null || value.userAuthorizationReceiptDigest !== null || value.gitEffect !== null || value.deterministicRepairAuthority !== undefined) {
       throw new Error("invalid-evidence: legacy host event");
     }
     return {
@@ -196,6 +202,9 @@ function parseHostEvent(value: unknown, runnerId: "opencode" | "pi"): ParsedHost
     gitSafety: value.gitSafety as GitSafetyStateV1,
     gitEffect,
     governance: value.governance as TerminalGovernanceContextV1,
+    ...(value.deterministicRepairAuthority === undefined
+      ? {}
+      : { deterministicRepairAuthority: value.deterministicRepairAuthority as DeterministicTargetedRepairAuthorityV1 }),
   };
 }
 
@@ -320,6 +329,15 @@ export function createDeveloperTeamRunnerHostBridgeV1(options: DeveloperTeamRunn
     });
     if (provisional.plan.reasonCode || !provisional.plan.dossier || !provisional.plan.decision) {
       return finish("invalid-evidence", { invoked: false, reasonCode: "invalid-evidence" }, provisional);
+    }
+    if (event.deterministicRepairAuthority !== undefined) {
+      const deterministicAuthority = validateDeterministicTargetedRepairAuthorityV1(
+        event.deterministicRepairAuthority,
+        dossier.batch,
+      );
+      if (!deterministicAuthority.accepted) {
+        return finish("invalid-evidence", { invoked: false, reasonCode: "invalid-evidence" }, provisional);
+      }
     }
 
     const expectation = {

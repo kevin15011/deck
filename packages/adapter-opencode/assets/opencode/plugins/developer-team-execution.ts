@@ -43,6 +43,17 @@ function applyAgent(args: Record<string, unknown>): boolean {
   return typeof role === "string" && APPLY_AGENTS.has(role);
 }
 
+function deterministicExecutionEvent(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object") return false;
+  const authority = (value as Record<string, unknown>).deterministicRepairAuthority;
+  return Boolean(
+    authority &&
+      typeof authority === "object" &&
+      (authority as Record<string, unknown>).schema ===
+        "deterministic-targeted-repair-authority-v1",
+  );
+}
+
 function authorizationInput(event: Record<string, unknown>, executionId: string, receipt: `sha256:${string}`) {
   if (!event.dossier || typeof event.dossier !== "object" || (event.dossier as Record<string, unknown>).kind !== "execution-dossier-v1") throw new Error("invalid-evidence");
   const dossierEnvelope = event.dossier as Record<string, unknown>;
@@ -88,29 +99,39 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
       "tool.execute.before": async (input: OpenCodePluginInput, output: OpenCodePluginOutput) => {
         const args = output.args;
         if (!args || !applyAgent(args)) return;
+        const callerEvent = args.deckExecution;
         delete args.deckExecution;
         const provider = (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT] as OpenCodeHostProviderV1 | undefined;
         const mode = options.invocationAuthorization ?? provider?.invocationAuthorization ?? "static-compatible";
         const resolveExecutionEvent = options.resolveExecutionEvent ?? provider?.resolveOpenCode;
-        if (!resolveExecutionEvent) {
+        const deterministicCallerEvent = deterministicExecutionEvent(callerEvent);
+        const deterministicCallerFallback = !resolveExecutionEvent && deterministicCallerEvent;
+        const failClosed = mode === "invocation-required" || deterministicCallerFallback;
+        if (!resolveExecutionEvent && !deterministicCallerEvent) {
           if (mode === "invocation-required") throw new Error("modification-not-authorized:AUTHZ_MISSING");
           return;
         }
         let rawEvent: unknown;
         try {
-          rawEvent = await resolveExecutionEvent(input, Object.freeze({ ...args }));
+          rawEvent = resolveExecutionEvent
+            ? await resolveExecutionEvent(input, Object.freeze({ ...args }))
+            : callerEvent;
         } catch {
-          if (mode === "invocation-required") throw new Error("invalid-evidence");
+          if (failClosed) throw new Error("invalid-evidence");
           return;
         }
         if (!rawEvent || typeof rawEvent !== "object" || !input.callID) {
-          if (mode === "invocation-required") throw new Error("modification-not-authorized:AUTHZ_MISSING");
+          if (failClosed) throw new Error("modification-not-authorized:AUTHZ_MISSING");
           return;
         }
-        if (mode === "static-compatible" && (rawEvent as Record<string, unknown>).mode !== "shadow") return;
+        if (
+          mode === "static-compatible" &&
+          !deterministicCallerFallback &&
+          (rawEvent as Record<string, unknown>).mode !== "shadow"
+        ) return;
         const receipt = receipts.get(input.sessionID);
         if (!receipt) {
-          if (mode === "invocation-required") throw new Error("modification-not-authorized:AUTHZ_MISSING");
+          if (failClosed) throw new Error("modification-not-authorized:AUTHZ_MISSING");
           return;
         }
         try {
@@ -134,7 +155,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
             throw new Error(outcome.authorizationCode ? `modification-not-authorized:${outcome.authorizationCode}` : outcome.code);
           }
         } catch (error) {
-          if (mode === "static-compatible") return;
+          if (!failClosed) return;
           if (error instanceof Error && /^(?:modification-not-authorized:AUTHZ_[A-Z_]+|invalid-evidence|adapter-error|host-hook-unsupported)$/.test(error.message)) throw error;
           throw new Error("invalid-evidence");
         }

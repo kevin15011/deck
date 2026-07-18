@@ -11,7 +11,13 @@ import {
   timestampValue,
   type Sha256Digest,
 } from "../contracts/canonical";
-import type { BatchId, VerificationStage } from "../contracts/apply-batch";
+import type { ApplyBatchContractV1, BatchId, VerificationStage } from "../contracts/apply-batch";
+import {
+  parseBlockingRepairProjectionV1,
+  validateBlockingRepairProjectionAtEffectBoundaryV1,
+  type BlockingRepairProjectionV1,
+  type RetryLedgerAuthorityV1,
+} from "../contracts/blocking-repair-projection";
 import {
   parseCausalContextV1,
   type CausalContextV1,
@@ -39,7 +45,28 @@ import {
   type StagedVerificationStateV1,
   type VerificationOmissionEvidenceV1,
 } from "../contracts/verification-state";
-import type { SafeEvidenceRefV1 } from "../contracts/failure-manifest";
+import {
+  parseFailureManifestV1,
+  type FailureManifestV1,
+  type SafeEvidenceRefV1,
+} from "../contracts/failure-manifest";
+import {
+  parseFindingDispositionEnvelopeV1,
+  type DispositionClassificationInputV1,
+  type FindingDispositionEnvelopeV1,
+  type ProtectedRiskAuthorityContextV1,
+} from "../contracts/finding-disposition";
+import {
+  parseRoutingDecisionV1,
+  type RoutingDecisionV1,
+  type RoutingPolicyInputV1,
+} from "../contracts/routing-decision";
+import {
+  parseExecutionConvergenceDossierWithAuthorityV1,
+  type ConvergenceAuthorityRecordSetV1,
+  type ConvergenceTransitionReceiptV1,
+  type ExecutionConvergenceDossierV1,
+} from "../contracts/execution-convergence";
 import {
   evaluateExecutionDecisionV1,
   resolveTerminalGovernanceGuardV1,
@@ -1159,6 +1186,184 @@ export function planExecutionDecisionV1(
       replayRecord,
       reasonCode: "invalid-evidence" as const,
       replay: () => undefined,
+    });
+  }
+}
+
+export interface DeterministicTargetedRepairAuthorityV1 {
+  readonly schema: "deterministic-targeted-repair-authority-v1";
+  readonly manifest: FailureManifestV1;
+  readonly classification: DispositionClassificationInputV1;
+  readonly protectedRiskAuthority: ProtectedRiskAuthorityContextV1;
+  readonly disposition: FindingDispositionEnvelopeV1;
+  readonly routingPolicy: RoutingPolicyInputV1;
+  readonly routing: RoutingDecisionV1;
+  readonly projection: BlockingRepairProjectionV1;
+  readonly retryLedger: RetryLedgerAuthorityV1;
+  readonly convergence: {
+    readonly current: ExecutionConvergenceDossierV1;
+    readonly history: readonly ExecutionConvergenceDossierV1[];
+    readonly receipts: readonly ConvergenceTransitionReceiptV1[];
+    readonly records: ConvergenceAuthorityRecordSetV1;
+  };
+  readonly authorizationRef: Sha256Digest;
+  readonly effectCapabilityBinding: string;
+  readonly excludedChangeTargets: readonly string[];
+  readonly target: string;
+}
+
+export type DeterministicTargetedRepairAuthorityResultV1 =
+  | {
+      readonly accepted: true;
+      readonly manifest: FailureManifestV1;
+      readonly disposition: FindingDispositionEnvelopeV1;
+      readonly routing: RoutingDecisionV1;
+      readonly projection: BlockingRepairProjectionV1;
+      readonly convergence: ExecutionConvergenceDossierV1;
+    }
+  | {
+      readonly accepted: false;
+      readonly outcome: "invalid-evidence";
+      readonly rationaleCodes: readonly string[];
+    };
+
+/**
+ * Resolves every authority source required before a deterministic repair effect.
+ * The input is self-contained so the bundled runner plugin never imports the Deck checkout.
+ */
+export function validateDeterministicTargetedRepairAuthorityV1(
+  input: unknown,
+  batch: ApplyBatchContractV1,
+): DeterministicTargetedRepairAuthorityResultV1 {
+  try {
+    assertExactKeys(
+      input,
+      [
+        "schema",
+        "manifest",
+        "classification",
+        "protectedRiskAuthority",
+        "disposition",
+        "routingPolicy",
+        "routing",
+        "projection",
+        "retryLedger",
+        "convergence",
+        "authorizationRef",
+        "effectCapabilityBinding",
+        "excludedChangeTargets",
+        "target",
+      ],
+      "deterministic targeted repair authority",
+    );
+    if (input.schema !== "deterministic-targeted-repair-authority-v1") {
+      throw new Error("unsupported-contract-version");
+    }
+    assertExactKeys(
+      input.convergence,
+      ["current", "history", "receipts", "records"],
+      "deterministic targeted repair convergence",
+    );
+    const manifest = parseFailureManifestV1(input.manifest, batch);
+    const disposition = parseFindingDispositionEnvelopeV1(
+      input.disposition,
+      manifest,
+      batch,
+      input.classification as DispositionClassificationInputV1,
+      input.protectedRiskAuthority as ProtectedRiskAuthorityContextV1,
+    );
+    const routing = parseRoutingDecisionV1(
+      input.routing,
+      manifest,
+      disposition,
+      batch,
+      input.routingPolicy as RoutingPolicyInputV1,
+      input.protectedRiskAuthority as ProtectedRiskAuthorityContextV1,
+    );
+    const routingPolicy = input.routingPolicy as RoutingPolicyInputV1;
+    const convergence = parseExecutionConvergenceDossierWithAuthorityV1(
+      input.convergence.current,
+      denseArray(input.convergence.history, "deterministic convergence.history") as unknown as readonly ExecutionConvergenceDossierV1[],
+      denseArray(input.convergence.receipts, "deterministic convergence.receipts") as unknown as readonly ConvergenceTransitionReceiptV1[],
+      input.convergence.records as ConvergenceAuthorityRecordSetV1,
+    );
+    assertExactKeys(
+      input.retryLedger,
+      [
+        "retryLedgerDigests",
+        "attemptRecords",
+        "currentConvergenceRevision",
+        "currentConvergenceDigest",
+        "currentDossier",
+        "dossierHistory",
+        "transitionReceipts",
+        "convergenceAuthorityRecords",
+        "projectionRecords",
+      ],
+      "deterministic retry ledger",
+    );
+    const retryLedger = input.retryLedger as unknown as RetryLedgerAuthorityV1;
+    if (
+      retryLedger.currentDossier?.digest !== convergence.digest ||
+      retryLedger.currentConvergenceRevision !== convergence.revision ||
+      retryLedger.currentConvergenceDigest !== convergence.digest
+    ) {
+      throw new Error("invalid-evidence: RETRY_LEDGER_MISMATCH");
+    }
+    assertDigest(input.authorizationRef, "deterministic authority.authorizationRef");
+    if (input.authorizationRef !== batch.authorizationGrantRef) {
+      throw new Error("invalid-evidence: STALE_AUTHORIZATION");
+    }
+    const effectCapabilityBinding = codeValue(
+      input.effectCapabilityBinding,
+      "deterministic authority.effectCapabilityBinding",
+    );
+    if (effectCapabilityBinding !== "targeted-repair-v1") {
+      throw new Error("invalid-evidence: EFFECT_CAPABILITY_MISMATCH");
+    }
+    const excludedChangeTargets = stringArray(
+      input.excludedChangeTargets,
+      "deterministic authority.excludedChangeTargets",
+      true,
+    );
+    const target = codeValue(input.target, "deterministic authority.target");
+    const projection = parseBlockingRepairProjectionV1(
+      input.projection,
+      batch,
+      routing,
+      {
+        routingPolicyVersion: routingPolicy.routingPolicyVersion,
+        manifest,
+        disposition,
+        retryLedger,
+        protectedRiskAuthority: input.protectedRiskAuthority as ProtectedRiskAuthorityContextV1,
+      },
+    );
+    if (!projection.allowedTargets.includes(target)) {
+      throw new Error("invalid-evidence: TARGET_OUTSIDE_PROJECTION");
+    }
+    const effect = validateBlockingRepairProjectionAtEffectBoundaryV1({
+      projection,
+      batch,
+      routing,
+      manifest,
+      disposition,
+      expectedConvergenceDossierDigest: convergence.digest,
+      expectedRoutingDecisionDigest: routing.digest,
+      expectedAuthorizationRef: input.authorizationRef,
+      expectedEffectCapabilityBinding: effectCapabilityBinding,
+      excludedChangeTargets,
+      routingPolicyVersion: routingPolicy.routingPolicyVersion,
+      retryLedger,
+      protectedRiskAuthority: input.protectedRiskAuthority as ProtectedRiskAuthorityContextV1,
+    });
+    if (!effect.accepted) return effect;
+    return deepFreeze({ accepted: true, manifest, disposition, routing, projection, convergence });
+  } catch {
+    return deepFreeze({
+      accepted: false,
+      outcome: "invalid-evidence" as const,
+      rationaleCodes: ["DETERMINISTIC_REPAIR_AUTHORITY_INVALID"],
     });
   }
 }

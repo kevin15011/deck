@@ -91,6 +91,16 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer runs **first**");
   });
 
+  test("uses the canonical targeted, affected, Review, broad convergence order", () => {
+    for (const prompt of [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_SYSTEM_PROMPT_COMPACT]) {
+      expect(prompt).toContain("targeted -> affected_area -> Review -> broad");
+      expect(prompt).toContain("deckExecution");
+      expect(prompt).toContain("deterministic-targeted-repair-authority-v1");
+      expect(prompt).not.toContain("Verify + Review (parallel)");
+      expect(prompt).not.toContain("Both run in parallel after Apply");
+    }
+  });
+
   // INV-004 strengthened wording — all surfaces
   test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {
     // Key clause: taking/delegating any step that may modify + protected types + prohibition

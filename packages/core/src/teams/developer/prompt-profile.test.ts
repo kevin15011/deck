@@ -21,9 +21,9 @@ import {
   transitionStagedVerificationV1,
 } from "../../../../sdd-runtime/src";
 
-const LEGACY_BYTES = 364_133;
-const LEGACY_LEXICAL_TOKENS = 78_915;
-const LEGACY_SHA256 = "dfda3c59cfcacea9a0ec45eb8e57ab71339c4b74f090e44b4feebd9638c134f9";
+const LEGACY_BYTES = 365_023;
+const LEGACY_LEXICAL_TOKENS = 79_051;
+const LEGACY_SHA256 = "4eb4caaeb12ff0242c2e753e211cdd76bb9d3b24b610c2c512f1976ecfbc9e36";
 
 const CONTROL_PLANE_AGENT_IDS = [
   "deck-developer-orchestrator",
