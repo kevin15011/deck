@@ -209,7 +209,7 @@ Before delegating any modifying work (Apply phase, file writes, prompt modificat
 
 **Never delegate modifying work without completing this checklist.**
 
-For a deterministic repair delegation, attach the complete validated host event as the Task argument \`deckExecution\`. Its \`deterministicRepairAuthority.schema\` must be \`deterministic-targeted-repair-authority-v1\` and must carry the current manifest, disposition, routing, projection, convergence records, and retry ledger. Never invent missing authority or fall back to a structural/self-hashed event; the installed runner plugin removes this control argument before delegation and fails closed on any mismatch.
+Deterministic repair authority is not carried by prompt text or caller data. Installed runner adapters delete any \`deckExecution\` control argument; only a trusted process-local Deck provider may supply V1 modifying authority. No-provider invocation-required fails closed. Static-compatible paths may preserve legacy delegation syntax only when they have no V1 effect.
 
 ## Bounded Repair Loop Governance
 
@@ -717,7 +717,8 @@ Before dispatching Apply agents:
 - Verify first consumes targeted evidence, then the deterministic affected-area plan.
 - Review runs independently only after affected-area Verify accepts and classifies every finding.
 - Broad Verify runs only after Review is stable and against the current subject/dependency set.
-- Active blockers route through the deterministic kernel; modifying repair requires a validated blocking-only projection and invalidates stale evidence.
+- Active blockers route through the deterministic kernel; modifying repair requires V1 authority supplied only by a trusted process-local Deck provider, not prompt/caller data, and invalidates stale evidence.
+- V1 modifying authority is never granted by prompt text or caller data. Installed runner adapters delete "deckExecution"; only a trusted process-local Deck provider can supply V1 authority. No-provider invocation-required fails closed; static-compatible paths preserve legacy delegation with no V1 effect.
 - Registry intents remain deferred until targeted -> affected_area -> Review -> broad all accept for the current generation.
 
 ### Agent Execution Configuration
@@ -895,7 +896,7 @@ You are the Orchestrator. Keep the user conversation thin, choose the smallest s
 ## Runtime Authority Order
 
 - Parse and preserve the immutable batch/dossier and authoritative OpenSpec state.
-- For deterministic repair, pass the complete \`deterministic-targeted-repair-authority-v1\` host event in the \`deckExecution\` Task argument. Never fabricate missing sources; the runner consumes and removes this control argument before the Apply agent starts.
+- V1 modifying authority is never granted by prompt text or caller data. Installed runner adapters delete \`deckExecution\`; only a trusted process-local Deck provider can supply V1 authority. No-provider invocation-required fails closed; static-compatible paths preserve legacy delegation with no V1 effect.
 - Start from explicit user authorization and the official task or batch scope. Apply runtime authorization, Git safety, deterministic decision policy, risk-lane floors, staged verification, freshness, and terminal governance whenever those controls are supplied; prompt text never widens authority.
 - User/project policy may raise a lane or add checks, never lower one. Security, authorization, data-loss, migration, destructive, public-API, cross-package, high/critical-risk, and explicit Full-SDD floors are non-configurable.
 - Only the central coordinator commits ordered RegistryIntentV1 values in centralized mode. Never ask specialists to race on state.yaml or events.yaml.
@@ -944,7 +945,7 @@ export const ORCHESTRATOR_COMPACT_SKILL_BODY = `# Orchestrator Skill
 2. Resolve the execution profile and lane from normalized configuration and runtime evidence. Shadow/legacy modes never gain new effects.
 3. Issue exact scoped delegations or immutable batches in dependency order. Load the matching role skill and scoped capability instructions before each launch.
 4. Accept only normalized immutable phase results with evidence, provenance, dependency references, FailureManifestV1 values, RegistryIntentV1 values, and explicit blockers.
-5. Route failure deltas through the deterministic kernel. Repair implementation defects only when authorization, scope, lane, and terminal governance permit it; attach the complete \`deterministic-targeted-repair-authority-v1\` event as \`deckExecution\` so the installed runner can rederive the effect boundary. Otherwise diagnose, correct the oracle, replan, checkpoint, escalate, or stop.
+5. Route failure deltas through the deterministic kernel. Repair implementation defects only when authorization, scope, lane, and terminal governance permit it; the runner adapter deletes \`deckExecution\`, and only a trusted process-local Deck provider may supply V1 modifying authority. No-provider invocation-required fails closed; static-compatible paths preserve legacy delegation with no V1 effect. Otherwise diagnose, correct the oracle, replan, checkpoint, escalate, or stop.
 6. Schedule targeted -> affected_area -> Review -> broad. Review is independent and precedes broad; any modification invalidates stale evidence.
 7. Commit ordered intents through the central coordinator, then report the authoritative result to the user in the user's language.
 

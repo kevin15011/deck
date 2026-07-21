@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   ORCHESTRATOR_AGENT_BODY,
+  ORCHESTRATOR_COMPACT_SKILL_BODY,
   ORCHESTRATOR_PROMPT_GUIDA,
   ORCHESTRATOR_PROMPT_PRAGMATICA,
   ORCHESTRATOR_SKILL_BODY,
@@ -91,13 +92,17 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Explorer runs **first**");
   });
 
-  test("uses the canonical targeted, affected, Review, broad convergence order", () => {
+  test("uses the canonical targeted, affected, Review, broad convergence order and rejects caller-controlled deckExecution authority", () => {
     for (const prompt of [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_SYSTEM_PROMPT_COMPACT]) {
       expect(prompt).toContain("targeted -> affected_area -> Review -> broad");
-      expect(prompt).toContain("deckExecution");
-      expect(prompt).toContain("deterministic-targeted-repair-authority-v1");
+      expect(prompt).not.toMatch(/attach .*deckExecution|pass .*deckExecution/i);
+      expect(prompt).not.toContain("deterministic-targeted-repair-authority-v1");
       expect(prompt).not.toContain("Verify + Review (parallel)");
       expect(prompt).not.toContain("Both run in parallel after Apply");
+      expect(prompt).toMatch(/runner adapters? delete[s]? (any )?[`"]?deckExecution/i);
+      expect(prompt).toMatch(/trusted process-local Deck provider/i);
+      expect(prompt).toMatch(/V1 modifying authority/i);
+      expect(prompt).toMatch(/fails closed/i);
     }
   });
 
@@ -189,6 +194,43 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
   test("contains SDD vs role-based delegation clarification", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("SDD vs. Role-Based Delegation");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("formal pipeline");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deterministic authority boundary (T-RA-01, T-RA-02)
+// ---------------------------------------------------------------------------
+
+describe("Deterministic authority boundary", () => {
+  test("no prompt surface instructs the coordinator to attach or pass deckExecution to an Apply agent", () => {
+    const surfaces = [
+      ORCHESTRATOR_SYSTEM_PROMPT,
+      ORCHESTRATOR_SYSTEM_PROMPT_COMPACT,
+      ORCHESTRATOR_SKILL_BODY,
+      ORCHESTRATOR_COMPACT_SKILL_BODY,
+    ];
+    for (const surface of surfaces) {
+      expect(surface).not.toMatch(/attach.*deckExecution|pass.*deckExecution/i);
+    }
+  });
+
+  test("system prompt and compact prompt state the accepted authority boundary", () => {
+    for (const prompt of [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_SYSTEM_PROMPT_COMPACT]) {
+      expect(prompt).toMatch(/runner adapters? delete[s]? (any )?[`"]?deckExecution/i);
+      expect(prompt).toMatch(/trusted process-local Deck provider/i);
+      expect(prompt).toMatch(/V1 modifying authority/i);
+      expect(prompt).toMatch(/fails closed/i);
+    }
+  });
+
+  test("skill bodies state the accepted authority boundary and do not delegate through deckExecution", () => {
+    for (const body of [ORCHESTRATOR_SKILL_BODY, ORCHESTRATOR_COMPACT_SKILL_BODY]) {
+      expect(body).toMatch(/runner adapters? delete[s]? (any )?[`"]?deckExecution/i);
+      expect(body).toMatch(/trusted process-local Deck provider/i);
+      expect(body).toMatch(/V1 modifying authority/i);
+      expect(body).toMatch(/fails closed/i);
+      expect(body).not.toMatch(/attach.*deckExecution|pass.*deckExecution/i);
+    }
   });
 });
 

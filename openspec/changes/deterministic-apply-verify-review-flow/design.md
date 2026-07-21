@@ -683,3 +683,62 @@ There are no unresolved Design choices. Task must now reconcile the six added re
 ## Dependency handoff
 
 Task may proceed only after confirming the Spec still matches `374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`, recording the post-replan Design digest, adding coverage for `REQ-DAVR-FD-03`, `REQ-DAVR-SEC-03`, `REQ-DAVR-RG-05`, `REQ-DAVR-MD-03`, `REQ-DAVR-BV-03`, and `REQ-DAVR-REG-03`, and preserving the exact four source/four test targets above. The Task phase must preserve the exclusion of existing changes and `runner-capability-standardization`, must not authorize direct generated-file or registry-YAML edits, and must keep Apply, independent Verify, and independent Review judgments separate. After Task reconciliation, the coordinator must still stop and request a new human-approved bounded batch identity; neither this Design nor the Task handoff authorizes Apply, repair-3, G2, registry mutation, or scope expansion.
+
+## Security replan: installed-runner authority boundary
+
+> **Later Design authority (2026-07-18):** this section resolves `REVIEW-G2-G6-PI-B1-CALLER-SUPPLIED-AUTHORITY` at the architecture/HOW level and is detailed in `design-replan-runner-authority.md`. It supersedes the earlier readiness statement only for the Pi/OpenCode runner-host authority slice. It does not reopen the exhausted G1 repair budget, alter the prior eight-file effect-authority batch, or authorize Apply.
+
+### Chosen authority path
+
+Use the existing **trusted process-local provider** as the sole source that may activate V1 modifying execution. The provider is installed by trusted Deck host code through the factory option or `deck.developer-team.execution-context.v1` process-local slot, is captured and frozen before user-controlled hooks run, and owns an immutable authorized event snapshot. The installed plugin/extension may use sanitized hook metadata only to equal-check the requested invocation; it must not derive claims from tool arguments, prompt text, or `deckExecution`.
+
+The adapter-created `InvocationAuthorizationServiceV1` owns a random 256-bit HMAC key in a private process closure shared only with the bridge. The provider and caller never receive that key. After a trusted provider event is structurally parsed, the adapter derives the existing V1 claims, binds them to the actual OpenCode `callID` or Pi `toolCallId` and current turn receipt, and issues a maximum-five-minute, one-use authorization. The shared bridge remains the final authority/effect owner: active effects require `validateAndReserve`, exact batch/task/role/action/target/blocked-target/receipt bindings, a fresh nonce, and the existing deterministic repair and Git-safety checks. Restart, expiry, replay, claim mismatch, or missing provider fails closed.
+
+No independently verifiable grant format or trust anchor is introduced by this replan. Therefore a caller object labelled as a grant is still caller data. A future grant path would require a separate additive contract with an independently pinned verifier and its own Spec/Design/Tasks; it cannot be inferred from self-consistency or a local re-signature.
+
+### Consumption boundary and precedence
+
+Both canonical adapters own the pre-bridge boundary. On every delegation/subagent hook with an object argument they delete `deckExecution` **before** role selection, provider lookup, mode selection, parsing, logging, telemetry, or delegation. They never forward its value to the provider, authorization service, bridge, or specialist. Provider selection and mode are pinned at plugin/extension initialization with this precedence:
+
+1. trusted factory option resolver/mode;
+2. trusted process-local host provider resolver/mode;
+3. no provider, with `static-compatible` as the default mode.
+
+Caller payloads and schema markers have no position in that list. Exact event behavior is:
+
+| Trusted provider | Verifiable grant | Mode | Result |
+|---|---|---|---|
+| present | absent, present, or caller-labelled | `invocation-required` | Ignore caller transport; resolve only the provider event. Valid `active` may reach the bridge; valid `shadow` remains non-effecting. Provider failure/malformed evidence returns redacted `invalid-evidence`. |
+| present | absent, present, or caller-labelled | `static-compatible` | Ignore caller transport. Provider `shadow` may be observed; provider `active`/`legacy` cannot activate the V1 effect path, and underlying legacy delegation remains untouched. |
+| absent | no independently pinned verifier exists | `invocation-required` | Strip `deckExecution`; return/throw `modification-not-authorized:AUTHZ_MISSING`; no local authorization is issued and the bridge is not called. |
+| absent | no independently pinned verifier exists | `static-compatible` | Strip `deckExecution`; preserve legacy delegation; do not call the V1 bridge or mint authority. |
+
+A caller marker can neither promote a provider V1 event, select `invocation-required`, turn `shadow` into `active`, nor make provider absence fail open. Provider-origin and mode are properties of trusted process construction, not event content.
+
+### Installed distribution and compatibility
+
+- OpenCode and Pi canonical TypeScript assets continue to bundle the shared runtime through `scripts/generate-runner-execution-assets.ts`; the installers copy the generated JavaScript by `import.meta.url`. Runtime execution must not import a repository checkout, OpenSpec files, `process.cwd()`, or `/home/kevinlb/deck`.
+- The trusted provider carries the already-authorized immutable event in memory. A distributed installation without that provider remains operational in `static-compatible` legacy mode but cannot perform deterministic V1 modifying effects. This fail-closed limitation is intentional.
+- `DeveloperTeamHostExecutionEventV1`, `InvocationAuthorizationEnvelopeV1`, existing HMAC claims, IDs, digests, and serialized V1 evidence remain unchanged. The change removes an unsafe adapter fallback and updates canonical prompt guidance; it does not migrate persisted data.
+- Pi and OpenCode must implement the same precedence table and rejection semantics. Generated assets are generator-owned effects, never hand-edited.
+
+```mermaid
+flowchart LR
+  C[Caller or prompt payload] --> A[Pi/OpenCode hook]
+  A -->|delete deckExecution first| S[Sanitized hook metadata]
+  H[Trusted process-local Deck provider] --> P[Provider event]
+  S -. equality checks only .-> P
+  P --> I[Parse provider event and issue one-use process-local HMAC]
+  I --> B[Shared bridge validateAndReserve]
+  B --> E[Bound targeted-repair effect]
+  A -->|no provider + required| X[AUTHZ_MISSING]
+  A -->|no provider + static| L[Legacy delegation; no V1 effect]
+```
+
+### Task impact, tests, and security gate
+
+The exact candidate implementation allowlist is eight files: the two canonical adapter assets, their two generator-owned outputs, their two reachability tests, and `packages/core/src/teams/developer/orchestrator-content.ts` plus its test. Shared runtime/bridge sources, adapter installer sources, the generator script, registry/YAML, other changes, and `runner-capability-standardization` are read-only validation dependencies and are not candidate targets. The reachability tests already install/load packaged assets and therefore own no-checkout, stripping, provider/no-provider, parity, generated-source digest, and absolute-path oracles; separate installer edits are unjustified.
+
+The future Task replan must require RED-first Pi/OpenCode probes for self-consistent caller payload, caller-labelled grant, conflicting caller/provider event, non-Apply stripping, missing provider in both modes, provider failure redaction, provider-active/static non-promotion, HMAC replay/expiry/invocation/claims binding, installed generated parity, and zero bridge/effect calls on every untrusted path. Rollout is one coherent secure release of canonical prompts and both regenerated assets; rollback may disable deterministic active execution or forward-fix, but must never restore caller-derived authority.
+
+Security lane is **CRITICAL**. Tasks are the only next action. Apply remains blocked until Tasks reconcile to this Design and the user sends a new message explicitly authorizing the exact batch `deterministic-apply-verify-review-flow-runner-authority-g2-g6`. The earlier “Procede” authorizes this Design replan only.

@@ -20,6 +20,7 @@ import type { ExecutionDossierV1 } from "../../sdd-runtime/src/contracts/executi
 import type { DeterministicTargetedRepairAuthorityV1 } from "../../sdd-runtime/src/execution/execution-control-plane";
 import { applyOpenCodeDeveloperTeamInstall, buildOpenCodeDeveloperTeamInstallPlan } from "./developer-team-install";
 import { createOpenCodeDeveloperTeamExecutionBridgeV1 } from "./developer-team-execution-bridge";
+import { createOpenCodeDeveloperTeamExecutionPluginV1 } from "../assets/opencode/plugins/developer-team-execution";
 
 let pluginModuleInstance = 0;
 
@@ -286,7 +287,7 @@ test("D-REACH-17 standalone packaged plugin rejects tampered deterministic autho
   ).rejects.toThrow("invalid-evidence");
 });
 
-test("D-REACH-18 installed plugin accepts a complete deterministic delegation without an external provider", async () => {
+test("D-REACH-18 OpenCode caller-only deckExecution with no provider fails closed in invocation-required", async () => {
   const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
   const args: Record<string, unknown> = {
     subagent_type: "deck-developer-apply-general",
@@ -295,8 +296,7 @@ test("D-REACH-18 installed plugin accepts a complete deterministic delegation wi
     }),
   };
   let bridgeCalls = 0;
-  const createPlugin = await loadOpenCodePluginFactory();
-  const hooks = await createPlugin({
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
     authorizationService: fixture.authorizationService,
     bridge: {
       ...fixture.bridge,
@@ -305,73 +305,95 @@ test("D-REACH-18 installed plugin accepts a complete deterministic delegation wi
         return fixture.bridge.execute(event);
       },
     },
-  })();
+    invocationAuthorization: "invocation-required",
+  });
+  const hooks = await plugin();
   await hooks["chat.message"](
-    { sessionID: "binary-only-session", messageID: "binary-only-message" },
+    { sessionID: "caller-only-required", messageID: "caller-only-required-message" },
     { message: { role: "user" }, parts: [{ type: "text", text: "Apply the authorized batch." }] },
   );
   await expect(
     hooks["tool.execute.before"](
-      { tool: "delegate", sessionID: "binary-only-session", callID: "binary-only-execution" },
+      { tool: "delegate", sessionID: "caller-only-required", callID: "caller-only-required-execution" },
+      { args },
+    ),
+  ).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
+  expect(args.deckExecution).toBeUndefined();
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-19 OpenCode caller-only deckExecution with no provider preserves legacy in static-compatible", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  const args: Record<string, unknown> = {
+    subagent_type: "deck-developer-apply-general",
+    deckExecution: fixture.event({
+      deterministicRepairAuthority: deterministicRepairAuthority(fixture.dossier),
+    }),
+  };
+  let bridgeCalls = 0;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: "static-compatible",
+  });
+  const hooks = await plugin();
+  await hooks["chat.message"](
+    { sessionID: "caller-only-static", messageID: "caller-only-static-message" },
+    { message: { role: "user" }, parts: [{ type: "text", text: "Apply the authorized batch." }] },
+  );
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "caller-only-static", callID: "caller-only-static-execution" },
       { args },
     ),
   ).resolves.toBeUndefined();
   expect(args.deckExecution).toBeUndefined();
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-20 OpenCode provider authority wins over conflicting caller deckExecution", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  const providerEvent = fixture.event();
+  const args: Record<string, unknown> = {
+    subagent_type: "deck-developer-apply-general",
+    deckExecution: fixture.event({ mode: "legacy" }),
+  };
+  let bridgeCalls = 0;
+  let seenEvent: unknown;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        seenEvent = event;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: "invocation-required",
+    resolveExecutionEvent: async () => providerEvent,
+  });
+  const hooks = await plugin();
+  await hooks["chat.message"](
+    { sessionID: "conflict-session", messageID: "conflict-message" },
+    { message: { role: "user" }, parts: [{ type: "text", text: "Apply the authorized batch." }] },
+  );
+  await hooks["tool.execute.before"](
+    { tool: "delegate", sessionID: "conflict-session", callID: "conflict-execution" },
+    { args },
+  );
+  expect(args.deckExecution).toBeUndefined();
   expect(bridgeCalls).toBe(1);
+  expect((seenEvent as Record<string, unknown>)?.mode).toBe("active");
   expect(fixture.delegationCount()).toBe(1);
-});
-
-test("D-REACH-19 installed plugin fails closed on tampered caller-carried deterministic authority", async () => {
-  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
-  const authority = deterministicRepairAuthority(fixture.dossier);
-  const createPlugin = await loadOpenCodePluginFactory();
-  const hooks = await createPlugin()();
-  await hooks["chat.message"](
-    { sessionID: "binary-only-tampered", messageID: "binary-only-tampered-message" },
-    { message: { role: "user" }, parts: [{ type: "text", text: "Apply the authorized batch." }] },
-  );
-  await expect(
-    hooks["tool.execute.before"](
-      { tool: "delegate", sessionID: "binary-only-tampered", callID: "binary-only-tampered-execution" },
-      {
-        args: {
-          subagent_type: "deck-developer-apply-general",
-          deckExecution: fixture.event({
-            deterministicRepairAuthority: {
-              ...authority,
-              authorizationRef: fixture.dossier.digest,
-            },
-          }),
-        },
-      },
-    ),
-  ).rejects.toThrow("invalid-evidence");
-});
-
-test("D-REACH-20 installed plugin rejects a caller-selected effect capability binding", async () => {
-  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
-  const createPlugin = await loadOpenCodePluginFactory();
-  const hooks = await createPlugin()();
-  await hooks["chat.message"](
-    { sessionID: "binding-session", messageID: "binding-message" },
-    { message: { role: "user" }, parts: [{ type: "text", text: "Apply the authorized batch." }] },
-  );
-  await expect(
-    hooks["tool.execute.before"](
-      { tool: "delegate", sessionID: "binding-session", callID: "binding-execution" },
-      {
-        args: {
-          subagent_type: "deck-developer-apply-general",
-          deckExecution: fixture.event({
-            deterministicRepairAuthority: deterministicRepairAuthority(
-              fixture.dossier,
-              "caller-selected-capability",
-            ),
-          }),
-        },
-      },
-    ),
-  ).rejects.toThrow("invalid-evidence");
 });
 
 test("D-REACH-21 caller marker cannot activate a provider-supplied V1 event", async () => {
@@ -495,4 +517,575 @@ test("OpenCode invocation-required hook redacts trusted-provider failures", asyn
     { tool: "delegate", sessionID: "session-required-error", callID: "required-provider-error" },
     { args: { subagent_type: "deck-developer-apply-general" } },
   )).rejects.toThrow("invalid-evidence");
+});
+
+const HOST_CONTEXT_SYMBOL = Symbol.for("deck.developer-team.execution-context.v1");
+
+test("D-REACH-22 OpenCode plugin captures resolver at init; late global installation has no effect", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let bridgeCalls = 0;
+  const bridge = {
+    ...fixture.bridge,
+    execute: async (event: unknown) => {
+      bridgeCalls += 1;
+      return fixture.bridge.execute(event);
+    },
+  };
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge,
+    invocationAuthorization: "invocation-required",
+  });
+  const hooks = await plugin();
+  const args: Record<string, unknown> = { subagent_type: "deck-developer-apply-general" };
+  await expect(
+    hooks["tool.execute.before"]({ tool: "delegate", sessionID: "late-global", callID: "late-global-1" }, { args }),
+  ).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
+  (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
+    resolveOpenCode: async () => fixture.event(),
+  } as any;
+  try {
+    await expect(
+      hooks["tool.execute.before"]({ tool: "delegate", sessionID: "late-global", callID: "late-global-2" }, { args }),
+    ).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
+  } finally {
+    delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];
+  }
+  expect(bridgeCalls).toBe(0);
+});
+
+test("D-REACH-23 OpenCode plugin captures mode at init; post-init options mutation has no effect", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  const options: Record<string, unknown> = {
+    authorizationService: fixture.authorizationService,
+    bridge: fixture.bridge,
+    invocationAuthorization: "static-compatible",
+  };
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1(options as any);
+  options.invocationAuthorization = "invocation-required";
+  const hooks = await plugin();
+  const args: Record<string, unknown> = { subagent_type: "deck-developer-apply-general" };
+  let rejection: unknown;
+  try {
+    await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "mutable-options", callID: "mutable-options-call" }, { args });
+  } catch (error) {
+    rejection = error;
+  }
+  expect(rejection).toBeUndefined();
+  expect(args.deckExecution).toBeUndefined();
+});
+
+test("D-REACH-24 OpenCode installed resolver returning null yields invalid-evidence in invocation-required", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let bridgeCalls = 0;
+  let resolverCalls = 0;
+  const bridge = {
+    ...fixture.bridge,
+    execute: async (event: unknown) => {
+      bridgeCalls += 1;
+      return fixture.bridge.execute(event);
+    },
+  };
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge,
+    invocationAuthorization: "invocation-required",
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return null;
+    },
+  });
+  const hooks = await plugin();
+  const args: Record<string, unknown> = { subagent_type: "deck-developer-apply-general" };
+  await expect(
+    hooks["tool.execute.before"]({ tool: "delegate", sessionID: "null-resolver", callID: "null-resolver-call" }, { args }),
+  ).rejects.toThrow("invalid-evidence");
+  expect(resolverCalls).toBe(1);
+  expect(bridgeCalls).toBe(0);
+});
+
+test("D-REACH-25 OpenCode installed resolver returning non-object yields invalid-evidence in invocation-required", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let bridgeCalls = 0;
+  let resolverCalls = 0;
+  const bridge = {
+    ...fixture.bridge,
+    execute: async (event: unknown) => {
+      bridgeCalls += 1;
+      return fixture.bridge.execute(event);
+    },
+  };
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge,
+    invocationAuthorization: "invocation-required",
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return "malformed";
+    },
+  });
+  const hooks = await plugin();
+  const args: Record<string, unknown> = { subagent_type: "deck-developer-apply-general" };
+  await expect(
+    hooks["tool.execute.before"]({ tool: "delegate", sessionID: "non-object-resolver", callID: "non-object-resolver-call" }, { args }),
+  ).rejects.toThrow("invalid-evidence");
+  expect(resolverCalls).toBe(1);
+  expect(bridgeCalls).toBe(0);
+});
+
+test("D-REACH-26 OpenCode non-Apply role strips caller deckExecution, provider not called, zero bridge", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let bridgeCalls = 0;
+  let resolverCalls = 0;
+  const bridge = {
+    ...fixture.bridge,
+    execute: async (event: unknown) => {
+      bridgeCalls += 1;
+      return fixture.bridge.execute(event);
+    },
+  };
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge,
+    invocationAuthorization: "invocation-required",
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return fixture.event();
+    },
+  });
+  const hooks = await plugin();
+  const args: Record<string, unknown> = { subagent_type: "verify-general", deckExecution: fixture.event() };
+  let rejection: unknown;
+  try {
+    await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "non-apply", callID: "non-apply-call" }, { args });
+  } catch (error) {
+    rejection = error;
+  }
+  expect(rejection).toBeUndefined();
+  expect(args.deckExecution).toBeUndefined();
+  expect(resolverCalls).toBe(0);
+  expect(bridgeCalls).toBe(0);
+});
+
+test("D-REACH-27 OpenCode non-Apply role preserves zero bridge/effect even when caller provides deckExecution", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let bridgeCalls = 0;
+  let resolverCalls = 0;
+  const bridge = {
+    ...fixture.bridge,
+    execute: async (event: unknown) => {
+      bridgeCalls += 1;
+      return fixture.bridge.execute(event);
+    },
+  };
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge,
+    invocationAuthorization: "invocation-required",
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return fixture.event();
+    },
+  });
+  const hooks = await plugin();
+  const args: Record<string, unknown> = { subagent_type: "review-general", deckExecution: fixture.event() };
+  let rejection: unknown;
+  try {
+    await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "non-apply-with-marker", callID: "non-apply-with-marker-call" }, { args });
+  } catch (error) {
+    rejection = error;
+  }
+  expect(rejection).toBeUndefined();
+  expect(args.deckExecution).toBeUndefined();
+  expect(resolverCalls).toBe(0);
+  expect(bridgeCalls).toBe(0);
+});
+
+test("D-REACH-28 OpenCode invalid invocationAuthorization string yields invalid-evidence with zero resolver/bridge/effect", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let resolverCalls = 0;
+  let bridgeCalls = 0;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: "unknown-mode" as any,
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return fixture.event();
+    },
+  });
+  const hooks = await plugin();
+  await hooks["chat.message"](
+    { sessionID: "invalid-mode", messageID: "invalid-mode-message" },
+    { message: { role: "user" }, parts: [{ type: "text", text: "Apply." }] },
+  );
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "invalid-mode", callID: "invalid-mode-call" },
+      { args: { subagent_type: "deck-developer-apply-general" } },
+    ),
+  ).rejects.toThrow("invalid-evidence");
+  expect(resolverCalls).toBe(0);
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-29 OpenCode null invocationAuthorization yields invalid-evidence with zero resolver/bridge/effect", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let resolverCalls = 0;
+  let bridgeCalls = 0;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: null as any,
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return fixture.event();
+    },
+  });
+  const hooks = await plugin();
+  await hooks["chat.message"](
+    { sessionID: "null-mode", messageID: "null-mode-message" },
+    { message: { role: "user" }, parts: [{ type: "text", text: "Apply." }] },
+  );
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "null-mode", callID: "null-mode-call" },
+      { args: { subagent_type: "deck-developer-apply-general" } },
+    ),
+  ).rejects.toThrow("invalid-evidence");
+  expect(resolverCalls).toBe(0);
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-30 OpenCode object invocationAuthorization yields invalid-evidence with zero resolver/bridge/effect", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let resolverCalls = 0;
+  let bridgeCalls = 0;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: { mode: "invocation-required" } as any,
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return fixture.event();
+    },
+  });
+  const hooks = await plugin();
+  await hooks["chat.message"](
+    { sessionID: "object-mode", messageID: "object-mode-message" },
+    { message: { role: "user" }, parts: [{ type: "text", text: "Apply." }] },
+  );
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "object-mode", callID: "object-mode-call" },
+      { args: { subagent_type: "deck-developer-apply-general" } },
+    ),
+  ).rejects.toThrow("invalid-evidence");
+  expect(resolverCalls).toBe(0);
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-31 OpenCode empty string invocationAuthorization yields invalid-evidence with zero resolver/bridge/effect", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let resolverCalls = 0;
+  let bridgeCalls = 0;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: "" as any,
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return fixture.event();
+    },
+  });
+  const hooks = await plugin();
+  await hooks["chat.message"](
+    { sessionID: "empty-mode", messageID: "empty-mode-message" },
+    { message: { role: "user" }, parts: [{ type: "text", text: "Apply." }] },
+  );
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "empty-mode", callID: "empty-mode-call" },
+      { args: { subagent_type: "deck-developer-apply-general" } },
+    ),
+  ).rejects.toThrow("invalid-evidence");
+  expect(resolverCalls).toBe(0);
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-32 OpenCode post-init mutation of invalid invocationAuthorization does not bypass", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  const options: any = {
+    authorizationService: fixture.authorizationService,
+    bridge: fixture.bridge,
+    invocationAuthorization: "invalid-mode",
+  };
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1(options);
+  options.invocationAuthorization = "invocation-required";
+  const hooks = await plugin();
+  await hooks["chat.message"](
+    { sessionID: "post-mutate", messageID: "post-mutate-message" },
+    { message: { role: "user" }, parts: [{ type: "text", text: "Apply." }] },
+  );
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "post-mutate", callID: "post-mutate-call" },
+      { args: { subagent_type: "deck-developer-apply-general" } },
+    ),
+  ).rejects.toThrow("invalid-evidence");
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-33 OpenCode late global provider does not bypass invalid invocationAuthorization", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let bridgeCalls = 0;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: "invalid-mode" as any,
+  });
+  const hooks = await plugin();
+  (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
+    resolveOpenCode: async () => fixture.event(),
+  } as any;
+  try {
+    await hooks["chat.message"](
+      { sessionID: "late-global-invalid", messageID: "late-global-invalid-message" },
+      { message: { role: "user" }, parts: [{ type: "text", text: "Apply." }] },
+    );
+    await expect(
+      hooks["tool.execute.before"](
+        { tool: "delegate", sessionID: "late-global-invalid", callID: "late-global-invalid-call" },
+        { args: { subagent_type: "deck-developer-apply-general" } },
+      ),
+    ).rejects.toThrow("invalid-evidence");
+  } finally {
+    delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];
+  }
+  expect(bridgeCalls).toBe(0);
+});
+
+test("D-REACH-34 OpenCode installed resolver with missing receipt yields invalid-evidence in invocation-required", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let bridgeCalls = 0;
+  let resolverCalls = 0;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: "invocation-required",
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return fixture.event();
+    },
+  });
+  const hooks = await plugin();
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "missing-receipt", callID: "missing-receipt-call" },
+      { args: { subagent_type: "deck-developer-apply-general" } },
+    ),
+  ).rejects.toThrow("invalid-evidence");
+  expect(resolverCalls).toBe(1);
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-35 OpenCode installed resolver with missing receipt yields invalid-evidence in static-compatible shadow", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let bridgeCalls = 0;
+  let resolverCalls = 0;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: "static-compatible",
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return fixture.event({ mode: "shadow" });
+    },
+  });
+  const hooks = await plugin();
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "missing-receipt-shadow", callID: "missing-receipt-shadow-call" },
+      { args: { subagent_type: "deck-developer-apply-general" } },
+    ),
+  ).rejects.toThrow("invalid-evidence");
+  expect(resolverCalls).toBe(1);
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-36 OpenCode absent resolver in invocation-required remains AUTHZ_MISSING", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let bridgeCalls = 0;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    invocationAuthorization: "invocation-required",
+  });
+  const hooks = await plugin();
+  await hooks["chat.message"](
+    { sessionID: "absent-resolver", messageID: "absent-resolver-message" },
+    { message: { role: "user" }, parts: [{ type: "text", text: "Apply." }] },
+  );
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "absent-resolver", callID: "absent-resolver-call" },
+      { args: { subagent_type: "deck-developer-apply-general" } },
+    ),
+  ).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-37 OpenCode getter invocationAuthorization invalid-then-valid fails invalid-evidence with single mode read", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let modeReads = 0;
+  let resolverCalls = 0;
+  let bridgeCalls = 0;
+  const options: Record<string, unknown> = {
+    authorizationService: fixture.authorizationService,
+    bridge: {
+      ...fixture.bridge,
+      execute: async (event: unknown) => {
+        bridgeCalls += 1;
+        return fixture.bridge.execute(event);
+      },
+    },
+    resolveExecutionEvent: async () => {
+      resolverCalls += 1;
+      return fixture.event();
+    },
+  };
+  Object.defineProperty(options, "invocationAuthorization", {
+    enumerable: true,
+    configurable: true,
+    get() {
+      modeReads += 1;
+      return modeReads === 1 ? "invalid-first" : "invocation-required";
+    },
+  });
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1(options as any);
+  const hooks = await plugin();
+  await hooks["chat.message"](
+    { sessionID: "getter-mode", messageID: "getter-mode-message" },
+    { message: { role: "user" }, parts: [{ type: "text", text: "Apply." }] },
+  );
+  await expect(
+    hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "getter-mode", callID: "getter-mode-call" },
+      { args: { subagent_type: "deck-developer-apply-general" } },
+    ),
+  ).rejects.toThrow("invalid-evidence");
+  expect(modeReads).toBe(1);
+  expect(resolverCalls).toBe(0);
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
+});
+
+test("D-REACH-38 OpenCode Proxy provider invocationAuthorization invalid-then-valid fails invalid-evidence with single mode read", async () => {
+  const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
+  let modeReads = 0;
+  let resolverCalls = 0;
+  let bridgeCalls = 0;
+  const provider = new Proxy(
+    {} as Record<string, unknown>,
+    {
+      get(_target, prop) {
+        if (prop === "invocationAuthorization") {
+          modeReads += 1;
+          return modeReads === 1 ? "invalid-first" : "invocation-required";
+        }
+        if (prop === "resolveOpenCode") {
+          return async () => {
+            resolverCalls += 1;
+            return fixture.event();
+          };
+        }
+        return undefined;
+      },
+    },
+  );
+  (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = provider;
+  try {
+    const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+      authorizationService: fixture.authorizationService,
+      bridge: {
+        ...fixture.bridge,
+        execute: async (event: unknown) => {
+          bridgeCalls += 1;
+          return fixture.bridge.execute(event);
+        },
+      },
+    });
+    const hooks = await plugin();
+    await hooks["chat.message"](
+      { sessionID: "proxy-provider-mode", messageID: "proxy-provider-mode-message" },
+      { message: { role: "user" }, parts: [{ type: "text", text: "Apply." }] },
+    );
+    await expect(
+      hooks["tool.execute.before"](
+        { tool: "delegate", sessionID: "proxy-provider-mode", callID: "proxy-provider-mode-call" },
+        { args: { subagent_type: "deck-developer-apply-general" } },
+      ),
+    ).rejects.toThrow("invalid-evidence");
+  } finally {
+    delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];
+  }
+  expect(modeReads).toBe(1);
+  expect(resolverCalls).toBe(0);
+  expect(bridgeCalls).toBe(0);
+  expect(fixture.delegationCount()).toBe(0);
 });

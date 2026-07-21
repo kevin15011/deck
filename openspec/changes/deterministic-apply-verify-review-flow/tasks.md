@@ -4,15 +4,25 @@
 
 - **Change ID:** `deterministic-apply-verify-review-flow`
 - **Execution mode:** Automatic
-- **Spec SHA-256:** `374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f` (revised; matches authoritative artifact)
-- **Design SHA-256:** `a2873999c3a1164393d57060db2032f2cf6aa8f9ca40f46c56e6911d9319d8fe` (revised; all Spec OQ-1..OQ-11 resolved)
+- **Spec SHA-256:** `374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f` (authoritative)
+- **Design SHA-256:** `9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1` (revised; resolves REVIEW-G2-G6-PI-B1-CALLER-SUPPLIED-AUTHORITY)
+- **Design replan SHA-256:** `7d389a846ca00c71c356ada41d78af4ffd0f140aa2acba431d1871611cb8306a`
 - **Recovery batch identity (G1):** `deterministic-apply-verify-review-flow-recovery-batch-g1`
 - **Recovery batch ceiling (G1):** exactly 8 files (4 source + 4 test) per `tasks-replan-g1.md`
-- **Proposed effect-authority recovery batch identity:** `deterministic-apply-verify-review-flow-recovery-batch-g1-effect-authority` (per `tasks-replan-effect-authority.md`; **NOT YET APPROVED** — requires named human approval)
-- **Proposed effect-authority recovery ceiling:** exactly 8 files (4 source + 4 test) per `tasks-replan-effect-authority.md` — same ceiling as G1 recovery batch
+- **Runner-authority batch identity:** `deterministic-apply-verify-review-flow-runner-authority-g2-g6`
+- **Runner-authority batch ceiling:** exactly 8 files (4 source + 4 test + 2 generated) per `tasks-replan-runner-authority.md`
+- **Effect-authority batch identity:** `deterministic-apply-verify-review-flow-recovery-batch-g1-effect-authority` (**NOT YET APPROVED** — requires named human approval)
 - **G2 Apply:** BLOCKED — explicit prohibition; no `G2_apply` route authorized in any task
 - **repair-3:** PROHIBITED — exhausted G1 two-attempt budget not reopened, reset, or converted to authorize-anyway path
-- **Human approval required:** a new explicit human-approved batch identity is mandatory before any modifying attempt from this change
+- **Human approval required:** a new explicit human-approved batch identity is mandatory before any modifying attempt
+- **Runner-authority G2-G6 repair-1 batch identity:** `deterministic-apply-verify-review-flow-runner-authority-g2-g6-repair-1` (**NOT YET APPROVED** — requires user authorization message with exact batch identity string)
+- **Runner-authority G2-G6 repair-1 batch ceiling:** exactly 1 file per `tasks-replan-runner-authority-repair-1.md`
+- **Runner-authority G2-G6 repair-2 batch identity:** `deterministic-apply-verify-review-flow-runner-authority-g2-g6-repair-2` (**NOT YET APPROVED** — requires user authorization message with exact batch identity string)
+- **Runner-authority G2-G6 repair-2 batch ceiling:** exactly 1 file per `tasks-replan-runner-authority-repair-2.md`
+- **Runner-authority G2-G6 prompt-profile-oracle-completion batch identity:** `deterministic-apply-verify-review-flow-runner-authority-prompt-profile-oracle-completion` (**NOT YET APPROVED** — requires user authorization message with exact batch identity string; NOT repair-3 — G1 repair-3 remains PROHIBITED)
+- **Runner-authority G2-G6 prompt-profile-oracle-completion batch ceiling:** exactly 1 file per `tasks-replan-runner-authority-oracle-completion.md`
+- **Provider-capture repair batch identity:** `deterministic-apply-verify-review-flow-runner-authority-provider-capture-repair` (**NOT YET APPROVED** — requires user authorization message with exact batch identity string; addresses REVIEW-RA-FINAL-B1, REVIEW-RA-FINAL-B2, REVIEW-RA-FINAL-B3)
+- **Provider-capture repair batch ceiling:** exactly 6 files per `tasks-replan-runner-authority-provider-capture-repair.md`
 
 ## Task group overview
 
@@ -20,6 +30,12 @@
 |-------|-------|-------|-------|
 | G-REC | Recovery batch (authority floors) | T-REC-01, T-REC-02, T-REC-03, T-REC-04 | Bounded to 8 files; G2/repair-3 prohibited; human batch approval required |
 | G-EA | Effect-authority recovery (Review blockers B1-B3) | T-EA-01, T-EA-02, T-EA-03 | Proposed bounded 8-file ceiling; NOT APPROVED; requires named human approval; defined in `tasks-replan-effect-authority.md` |
+| G-RA | Runner-authority boundary (Review blocker G2-G6-PI-B1) | T-RA-01, T-RA-02, T-RA-03, T-RA-04, T-RA-05, T-RA-06, T-RA-07, T-RA-08 | Exact 8-file ceiling; addresses `REVIEW-G2-G6-PI-B1-CALLER-SUPPLIED-AUTHORITY` |
+| G-RA-REP-1 | Runner-authority G2-G6 repair-1 (oracle + byte drift) | T-RA-REP-01 | Exact 1-file ceiling; addresses `VERIFY-G2-G6-TARGETED-GEN-OPEN-SPEC-PATH` and `VERIFY-G2-G6-AFFECTED-CORE-PROMPT-PROFILE-BYTE-DRIFT`; defined in `tasks-replan-runner-authority-repair-1.md` |
+| G-RA-REP-2 | Runner-authority G2-G6 repair-2 (lexical tokens drift) | T-RA-REP-02 | Exact 1-file ceiling; addresses `APPLY-G2-G6-REP1-LEXICAL-TOKENS-ORACLE-DRIFT`; defined in `tasks-replan-runner-authority-repair-2.md` |
+| G-RA-REP-3 | Runner-authority G2-G6 oracle-completion (SHA256 drift) | T-RA-REP-03 | Exact 1-file ceiling; addresses `APPLY-G2-G6-REP2-SHA256-ORACLE-DRIFT`; defined in `tasks-replan-runner-authority-oracle-completion.md` |
+| G-RA-PC | Runner-authority provider-capture repair (B1/B2/B3) | T-RA-PC-01, T-RA-PC-02, T-RA-PC-03, T-RA-PC-04, T-RA-PC-05, T-RA-PC-06 | Exact 6-file ceiling; addresses `REVIEW-RA-FINAL-B1` (provider/global re-read), `REVIEW-RA-FINAL-B2` (malformed evidence), `REVIEW-RA-FINAL-B3` (non-Apply tests); defined in `tasks-replan-runner-authority-provider-capture-repair.md` |
+| G-RA-MT | Runner-authority mode-taxonomy repair (B4/B5) | T-RA-MT-01, T-RA-MT-02, T-RA-MT-03, T-RA-MT-04, T-RA-MT-05, T-RA-MT-06 | Exact 6-file ceiling; addresses `REVIEW-RA-PC-B4` (invalid mode fails open), `REVIEW-RA-PC-B5` (OpenCode AUTHZ_MISSING vs Pi invalid-evidence taxonomy mismatch); defined in `tasks-replan-runner-authority-mode-taxonomy-repair.md` |
 | G1 | New contracts | T-01, T-02, T-03, T-04 | Original; pending recovery batch completion |
 | G2 | Orchestrator policy | T-05, T-06, T-07, T-08 | Original; G2_apply BLOCKED |
 | G3 | Execution / registry | T-09, T-10, T-11 | |
@@ -27,7 +43,7 @@
 | G5 | Contract + policy tests | T-14, T-15, T-16, T-17, T-18, T-19, T-20 | |
 | G6 | Integration + acceptance tests | T-21, T-22, T-23, T-24 | |
 
-**Total: 31 tasks across 8 groups (7 recovery + 24 original).**
+**Total: 54 tasks across 14 groups (7 recovery + 8 runner-authority + 3 repair + 6 provider-capture + 6 mode-taxonomy + 24 original).**
 
 ## Global constraints and exclusions
 
@@ -66,9 +82,7 @@ Specialists emit ordered `RegistryIntentV1` values only. The centralized coordin
 > **Ceiling:** exactly 4 source files + 4 test files (see `tasks-replan-g1.md` for full definition)
 > **G2_apply:** BLOCKED. **repair-3:** PROHIBITED. **Human batch approval:** required before any modifying attempt.
 > **Spec digest (authoritative):** `sha256:374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`
-> **Design digest (authoritative):** `sha256:a2873999c3a1164393d57060db2032f2cf6aa8f9ca40f46c56e6911d9319d8fe`
-
-The six added requirements (FD-03, SEC-03, RG-05, MD-03, BV-03, REG-03) require additive authority-bound additions to the same four contract source files and four colocated test files already defined in the original G1. The recovery batch does not replace or widen the original G1; it adds the mandatory authority floors before any subsequent group may proceed.
+> **Design digest (authoritative):** `sha256:9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1`
 
 Full task definitions (RED/GREEN oracles, completion evidence, rollback) are in `tasks-replan-g1.md`. Summary:
 
@@ -101,7 +115,7 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback) are in 
 > **Ceiling:** exactly 4 source files + 4 test files (same as G1 recovery batch); see `tasks-replan-effect-authority.md` for full definitions.
 > **G2_apply:** BLOCKED. **repair-3:** PROHIBITED. **Spec/Design replan:** NOT REQUIRED (Review confirmed).
 > **Spec digest (authoritative):** `sha256:374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`
-> **Design digest (authoritative):** `sha256:a2873999c3a1164393d57060db2032f2cf6aa8f9ca40f46c56e6911d9319d8fe`
+> **Design digest (authoritative):** `sha256:9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1`
 
 Addresses three Review blockers from `review-recovery-g1.md`:
 - **REVIEW-REC-G1-B1** (protected-risk effect authority): T-EA-01
@@ -132,6 +146,653 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 
 ---
 
+## G-RA — Runner-authority boundary (bounded 8-file ceiling)
+
+> **Batch identity:** `deterministic-apply-verify-review-flow-runner-authority-g2-g6`
+> **Ceiling:** exactly 4 source files + 2 generated assets + 2 reachability test files
+> **Addresses:** `REVIEW-G2-G6-PI-B1-CALLER-SUPPLIED-AUTHORITY` (critical)
+> **Spec digest (authoritative):** `sha256:374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`
+> **Design digest (authoritative):** `sha256:9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1`
+> **Design-replan digest:** `sha256:7d389a846ca00c71c356ada41d78af4ffd0f140aa2acba431d1871611cb8306a`
+
+### Runner-authority architecture summary
+
+The sole V1 modifying-authority source is a trusted process-local Deck host provider. Both adapters must:
+1. Delete `deckExecution` immediately, before checking whether the requested role is Apply.
+2. Never parse, hash, preserve, log, emit, copy, or pass its value to provider selection, mode selection, the provider, the authorization service, the bridge, telemetry, or the delegated specialist.
+3. If the role is not an Apply role, return after stripping — prevents the control object from leaking into non-modifying specialists.
+4. If the role is Apply, use only the provider captured at initialization. A caller marker cannot cause a provider lookup, choose a mode, alter fail-closed behavior, or activate the bridge.
+5. Parse the provider event and derive claims through a private `authorizationInputFromTrustedEvent`-style boundary. No equivalent helper may accept the removed caller object.
+6. Issue the process-local envelope only after provider resolution and exact structural/binding checks succeed.
+7. Pass only the reconstructed provider event plus local envelope to `DeveloperTeamRunnerHostBridgeV1`.
+
+`invocation-required` + no provider → `AUTHZ_MISSING`, zero bridge calls, zero effects.
+`static-compatible` + no provider → strip payload, preserve legacy delegation, zero V1 bridge/effect.
+Caller marker cannot promote provider V1, convert `shadow` to `active`, or force local authority mint.
+
+Installed generated assets must be standalone without: (1) absolute checkout path resolution, (2) filesystem read/import/require/dynamic import/resolution of OpenSpec or repository sources, or (3) cwd-derived Deck source lookup. The bundled excluded-WIP safety constant `runner-capability-standardization` (a hard-coded string literal in prompts) is exempt — it is documentation, not a runtime dependency. This oracle correction (finding `VERIFY-G2-G6-TARGETED-GEN-OPEN-SPEC-PATH`) requires no source or generated change.
+
+---
+
+### T-RA-01: Orchestrator — remove caller-authority instruction
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-general` |
+| **Priority** | P0 |
+| **Complexity** | C2 |
+| **Parallel** | sequential (G-RA) |
+| **Depends on** | none |
+| **Files (allowlist — source)** | `packages/core/src/teams/developer/orchestrator-content.ts` |
+| **Files (blocked)** | Any other prompt source; any generated file; any contract/execution/adapter file |
+| **Verification** | RED: no instruction tells orchestrator to attach `deckExecution` as a Task argument with `deterministicRepairAuthority.schema === "deterministic-targeted-repair-authority-v1"`; GREEN: canonical prompt surfaces describe out-of-band trusted provider authority and confirm adapter strips deckExecution before sub-agent receipt |
+| **Completion evidence** | `orchestrator-content.test.ts` updated (T-RA-02 passes); TypeScript compiles |
+| **Risk lane** | CRITICAL |
+| **Rollback** | Revert orchestrator-content.ts to pre-T-RA-01 state |
+
+#### Requirement/scenario coverage
+
+- `REVIEW-G2-G6-PI-B1-CALLER-SUPPLIED-AUTHORITY` — prompt must not instruct agents to manufacture modifying authority via `deckExecution`
+- Design decision 5: update canonical orchestrator guidance so prompts never instruct an agent to manufacture or attach modifying authority in `deckExecution`; host/provider authority is out-of-band
+- Decision 11 note: caller booleans never clearing authority; disagreement or missing authority blocks or escalates
+
+#### Change description
+
+Remove from `ORCHESTRATOR_SYSTEM_PROMPT` (Pre-Delegation Checklist section, line ~212) the instruction:
+
+> "For a deterministic repair delegation, attach the complete validated host event as the Task argument `deckExecution`. Its `deterministicRepairAuthority.schema` must be `deterministic-targeted-repair-authority-v1` and must carry the current manifest, disposition, routing, projection, convergence records, and retry ledger. Never invent missing authority or fall back to a structural/self-hashed event; the installed runner plugin removes this control argument before delegation and fails closed on any mismatch."
+
+Replace with a statement that trusted process-local provider authority is established out-of-band at adapter initialization, that `deckExecution` is stripped by the adapter before the sub-agent receives args, and that the orchestrator must not attempt to mint, forward, or re-sign caller-supplied authority.
+
+#### Why orchestrator-content.ts is in this batch
+
+The design explicitly requires updating the core prompt source to remove the caller-authority instruction. This file is on the runner-authority batch allowlist per design-replan-runner-authority.md § "Exact candidate Task allowlist" row 1. The instruction to attach `deckExecution` as a Task argument is the source-level enabler of the caller-supplied authority defect; removing it is mandatory and cannot be deferred to G4 T-12 without leaving the critical defect open longer.
+
+#### Why orchestrator-content.test.ts is also in this batch
+
+The existing test at line 97-98 asserts that `ORCHESTRATOR_SYSTEM_PROMPT` contains `deckExecution`. After T-RA-01 removes the instruction, that assertion will fail. The test must be updated as part of the same atomic change to keep the prompt/test contract valid.
+
+---
+
+### T-RA-02: Orchestrator test — update deckExecution assertions
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-general` |
+| **Priority** | P0 |
+| **Complexity** | C1 |
+| **Parallel** | sequential (G-RA, after T-RA-01) |
+| **Depends on** | T-RA-01 |
+| **Files (allowlist — test)** | `packages/core/src/teams/developer/orchestrator-content.test.ts` |
+| **Files (blocked)** | Any other test file; any source file |
+| **Verification** | RED: existing line 97-98 assertion (`expect(prompt).toContain("deckExecution")`) fails because T-RA-01 removed the instruction; GREEN: new assertion confirms deckExecution is not referenced as a caller-supplied Task argument in any prompt surface, and that trusted provider authority is documented |
+| **Completion evidence** | `orchestrator-content.test.ts` passes; TypeScript compiles |
+| **Risk lane** | HIGH |
+| **Rollback** | Revert orchestrator-content.test.ts to pre-T-RA-02 state |
+
+#### Change description
+
+Update the test at line 97-98 from:
+```ts
+expect(prompt).toContain("deckExecution");
+expect(prompt).toContain("deterministic-targeted-repair-authority-v1");
+```
+To assert that neither `deckExecution` nor `deterministic-targeted-repair-authority-v1` appears as a caller-supplied/modifying-authority instruction in any prompt surface. Add new assertions confirming the prompt documents out-of-band trusted provider establishment and the adapter stripping behavior.
+
+---
+
+### T-RA-03: OpenCode adapter — strip deckExecution, pin provider, remove caller fallback
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-backend` |
+| **Priority** | P0 |
+| **Complexity** | C3 |
+| **Parallel** | sequential (G-RA) |
+| **Depends on** | T-RA-01 |
+| **Files (allowlist — source)** | `packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.ts` |
+| **Files (blocked)** | Any other adapter file; any execution/runtime file; any generated file |
+| **Verification** | RED: caller `deckExecution` with no provider produces zero HMAC issuance, zero bridge calls, zero effects in both `invocation-required` and `static-compatible` modes; GREEN: valid trusted provider V1 event reaches bridge after local authorization; tampered provider authority fails closed; caller marker cannot promote provider V1 |
+| **Completion evidence** | `developer-team-execution-reachability.test.ts` updated (new runner-authority oracles pass); TypeScript compiles |
+| **Risk lane** | CRITICAL |
+| **Rollback** | Revert developer-team-execution.ts to pre-T-RA-03 state |
+
+#### Current defect (caller-supplied authority)
+
+The current OpenCode adapter at `tool.execute.before`:
+1. Captures `callerEvent = args.deckExecution` BEFORE role check
+2. Deletes `deckExecution` from args
+3. Checks `deterministicCallerEvent = deterministicExecutionEvent(callerEvent)`
+4. Sets `deterministicCallerFallback = !resolveExecutionEvent && deterministicCallerEvent`
+5. When `!resolveExecutionEvent && !deterministicCallerEvent` → throws AUTHZ_MISSING in invocation-required mode
+6. BUT when `!resolveExecutionEvent && deterministicCallerEvent` (steps 102-108) → proceeds to use `callerEvent` as `rawEvent` (line 118)
+
+This allows a caller with `deckExecution` (but no provider) to activate V1 bridge/effect — exactly the critical defect.
+
+#### Fix description
+
+In the `tool.execute.before` hook, BEFORE the `applyAgent(args)` check:
+1. If `args` is an object, immediately `delete args.deckExecution` — do not read it first
+2. After deletion, check whether args is an Apply agent args
+3. If not Apply, return immediately (no further processing)
+4. If Apply, resolve the provider and derive authority ONLY from the provider event
+5. Remove all `deterministicCallerEvent`, `deterministicCallerFallback`, and `callerEvent` variable usage
+6. In `invocation-required` mode with no provider: throw `modification-not-authorized:AUTHZ_MISSING`
+7. In `static-compatible` mode with no provider: return without bridge call or effect
+
+Exact behavioral contract (from design § "Authorization lifecycle"):
+
+| Provider state | Caller/grant-shaped payload | Effective mode | Bridge/effect behavior |
+|---|---|---|---|
+| valid trusted provider event | any | `invocation-required` | provider `active` may reach effect after local auth + bridge validation; `shadow` non-effecting |
+| provider fails/malformed | any | `invocation-required` | fail closed with redacted `invalid-evidence`; no local authorization/effect |
+| provider absent | absent or present | `invocation-required` | strip payload; `AUTHZ_MISSING`; no issue/bridge/effect |
+| provider `shadow` | any | `static-compatible` | caller ignored; shadow may reach bridge observation; no effect |
+| provider `active` or `legacy` | any | `static-compatible` | caller ignored; V1 bridge not activated; preserve underlying legacy delegation |
+| provider fails/absent | absent or present | `static-compatible` | strip payload; preserve underlying legacy delegation; no V1 bridge/effect |
+
+---
+
+### T-RA-04: OpenCode generated asset — regenerate from fixed canonical source
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-general` |
+| **Priority** | P0 |
+| **Complexity** | C1 |
+| **Parallel** | sequential (G-RA, after T-RA-03) |
+| **Depends on** | T-RA-03 |
+| **Files (allowlist — generated)** | `packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.generated.js` |
+| **Files (blocked)** | Any other generated file; any source file |
+| **Verification** | RED: generated file SHA-256 differs from pre-T-RA-03 value `f08ef142d20c568dccf8c714554134c5a3c9ace790313e4bc7d8f85097d98cae`; GREEN: `scripts/generate-runner-execution-assets.ts` runs successfully; generated output contains no `process.cwd()`, `/home/kevinlb/deck`, or OpenSpec path; source digest comment updated |
+| **Completion evidence** | Generated file exists at correct path; generator exit code 0 |
+| **Risk lane** | CRITICAL |
+| **Rollback** | Restore pre-T-RA-04 generated file from git |
+
+#### Important
+
+This file is **generator-owned**. Apply edits the canonical TypeScript source and invokes the canonical generator. The generated output is a build artifact with no independent edit authority.
+
+#### Generator invocation
+
+```bash
+bun run scripts/generate-runner-execution-assets.ts
+```
+
+The generator reads `packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.ts` and produces `packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.generated.js` with a `// source-sha256:<hash>` comment.
+
+---
+
+### T-RA-05: Pi adapter — strip deckExecution, pin provider, remove caller fallback
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-backend` |
+| **Priority** | P0 |
+| **Complexity** | C3 |
+| **Parallel** | sequential (G-RA) |
+| **Depends on** | T-RA-01 |
+| **Files (allowlist — source)** | `packages/adapter-pi/assets/pi/extensions/developer-team-execution.ts` |
+| **Files (blocked)** | Any other Pi adapter file; any execution/runtime file; any generated file |
+| **Verification** | RED: caller `deckExecution` with no provider produces zero bridge calls, zero effects in both modes; GREEN: parity with OpenCode — same behavioral matrix; tampered provider fails closed; caller marker cannot promote |
+| **Completion evidence** | `developer-team-execution-reachability.test.ts` (Pi) updated; TypeScript compiles |
+| **Risk lane** | CRITICAL |
+| **Rollback** | Revert developer-team-execution.ts to pre-T-RA-05 state |
+
+#### Current defect (identical to OpenCode)
+
+The current Pi adapter at `tool_call` (lines 100-117) has the same caller-supplied authority defect:
+- Captures `callerEvent = input.deckExecution` before role check
+- Sets `deterministicCallerFallback = !resolveExecutionEvent && deterministicCallerEvent`
+- Falls back to `callerEvent` when no resolver exists
+
+#### Fix description
+
+Identical pattern to T-RA-03 but for the Pi `tool_call` hook:
+1. Immediately `delete input.deckExecution` before any role check or provider resolution
+2. If not Apply agent, return `undefined` immediately (no further processing)
+3. Resolve provider from factory option or global slot only
+4. No `callerEvent`, `deterministicCallerEvent`, or `deterministicCallerFallback` variables
+5. Behavioral matrix identical to OpenCode
+
+**Pi/OpenCode parity**: provider selection, stripping, mode semantics, denial codes, bridge calls, and effect counts must be semantically identical across both adapters.
+
+#### Worktree note
+
+The Pi canonical source has pre-existing uncommitted modifications (worktree evidence, digest `e24e50d2cc867a11cb2e9000f1c132efbeb387f255d79966fc780f1e7c1544eb`). Apply must reconcile these changes **in place** without git discard/restore/checkout. The Apply agent must inspect the worktree state, preserve unrelated modifications, and apply only the runner-authority fix to this file.
+
+---
+
+### T-RA-06: Pi generated asset — regenerate from fixed canonical source
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-general` |
+| **Priority** | P0 |
+| **Complexity** | C1 |
+| **Parallel** | sequential (G-RA, after T-RA-05) |
+| **Depends on** | T-RA-05 |
+| **Files (allowlist — generated)** | `packages/adapter-pi/assets/pi/extensions/developer-team-execution.generated.js` |
+| **Files (blocked)** | Any other generated file; any source file |
+| **Verification** | RED: generated file SHA-256 differs from pre-T-RA-05 value `d6d39cb14cfd8244cdd4e8d60ffda3629fe92e31cd694f0b5b1dfa81b8335aeb`; GREEN: generator exit code 0; no checkout/OpenSpec/cwd path; source digest comment updated |
+| **Completion evidence** | Generated file exists at correct path; generator exit code 0 |
+| **Risk lane** | CRITICAL |
+| **Rollback** | Restore pre-T-RA-06 generated file from git |
+
+#### Important
+
+This file is **generator-owned**. Apply edits the canonical TypeScript source and invokes the canonical generator.
+
+---
+
+### T-RA-07: OpenCode reachability — runner-authority oracles
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-backend` |
+| **Priority** | P0 |
+| **Complexity** | C3 |
+| **Parallel** | sequential (G-RA, after T-RA-04) |
+| **Depends on** | T-RA-04 |
+| **Files (allowlist — test)** | `packages/adapter-opencode/src/developer-team-execution-reachability.test.ts` |
+| **Files (blocked)** | Any other test file; any source file |
+| **Verification** | RED: caller-only `deckExecution` with no provider → zero bridge calls, `AUTHZ_MISSING` in invocation-required, legacy preserved in static-compatible; caller marker cannot promote provider V1; GREEN: all new runner-authority oracles pass; existing tests D-REACH-04..17, D-REACH-21, EG8-REACH-11..16 still pass |
+| **Completion evidence** | `bun test developer-team-execution-reachability.test.ts` 100% pass |
+| **Risk lane** | CRITICAL |
+| **Rollback** | Revert reachability test to pre-T-RA-07 state |
+
+#### Test oracle requirements (per design § "Task-ready test oracles")
+
+1. Complete caller `deckExecution` with no provider → zero HMAC issuance, zero bridge calls, zero effects
+2. Caller-labelled grant, marker-only authority, tampered authority, caller-selected capability → same non-authoritative provenance result
+3. `invocation-required` + missing provider → `AUTHZ_MISSING`, even in Automatic mode
+4. `static-compatible` + missing/failing provider → preserves legacy delegation, never activates V1
+5. Conflicting caller and provider events → only provider authority used; caller cannot alter batch/target/role/action/mode/receipt
+6. Caller marker cannot promote provider `active` event in static-compatible mode
+7. `deckExecution` removed for Apply and non-Apply before any provider or specialist sees it
+8. Provider failure details redacted; no secret-shaped value in output/telemetry
+9. Process-local authorization rejects expiry, future time, restart, replay, invocation/role/change/batch/task/receipt/action/target/blocked-target mismatch
+10. OpenCode and Pi outcome/effect-count matrices identical
+11. Generated assets match canonical sources after generator run; no checkout/cwd/deck path dependency
+12. Current V1 replay, bridge, deterministic authority, Git-safety, and static-compatible suites remain green
+
+#### Tests to replace
+
+The following existing tests will fail after T-RA-03 because they validate the buggy fallback behavior (caller `deckExecution` activates V1 when no provider exists). They must be updated or replaced:
+
+- **D-REACH-18** (currently: installed plugin accepts complete deterministic delegation without external provider, expects bridgeCalls=1) → replace with test verifying `AUTHZ_MISSING` and zero bridge calls
+- **D-REACH-19** (currently: installed plugin fails closed on tampered caller-carried authority, expects `invalid-evidence`) → update to reflect new behavior where caller event is never used, so tampered caller event with no provider → `AUTHZ_MISSING`
+- **D-REACH-20** (currently: installed plugin rejects caller-selected capability, expects `invalid-evidence`) → update to reflect new behavior
+
+#### Tests to preserve (correct behavior, unchanged)
+
+D-REACH-04, D-REACH-05, D-REACH-06, D-REACH-09, D-REACH-15, D-REACH-16, D-REACH-17, D-REACH-21, EG8-REACH-11, EG8-REACH-13, EG8-REACH-14, and all static-compatible/providerr error redaction tests.
+
+---
+
+### T-RA-08: Pi reachability — runner-authority oracles
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-backend` |
+| **Priority** | P0 |
+| **Complexity** | C3 |
+| **Parallel** | sequential (G-RA, after T-RA-06) |
+| **Depends on** | T-RA-06 |
+| **Files (allowlist — test)** | `packages/adapter-pi/src/developer-team-execution-reachability.test.ts` |
+| **Files (blocked)** | Any other test file; any source file |
+| **Verification** | RED: same behavioral matrix as OpenCode (oracles 1-12); GREEN: Pi tests pass; OpenCode/Pi effect-count matrices identical |
+| **Completion evidence** | `bun test developer-team-execution-reachability.test.ts` (Pi) 100% pass |
+| **Risk lane** | CRITICAL |
+| **Rollback** | Revert reachability test to pre-T-RA-08 state |
+
+#### Tests to replace
+
+Same as T-RA-07 for Pi:
+- D-REACH-18 → replace with `AUTHZ_MISSING` oracle
+- D-REACH-19 → update for new behavior
+- D-REACH-20 → update for new behavior
+
+#### Tests to preserve
+
+D-REACH-01, D-REACH-02, D-REACH-03, D-REACH-10, EG8-REACH-12, EG8-REACH-15, EG8-REACH-16, and all static-compatible/provider error redaction tests.
+
+---
+
+## G-RA-REP-1 — Runner-authority G2-G6 repair-1 (oracle + byte drift correction)
+
+> **Batch identity:** `deterministic-apply-verify-review-flow-runner-authority-g2-g6-repair-1`
+> **Ceiling:** exactly 1 file (test oracle correction only)
+> **Addresses:** `VERIFY-G2-G6-TARGETED-GEN-OPEN-SPEC-PATH` (oracle correction) and `VERIFY-G2-G6-AFFECTED-CORE-PROMPT-PROFILE-BYTE-DRIFT` (byte drift repair)
+> **Spec digest (authoritative):** `sha256:374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`
+> **Design digest (authoritative):** `sha256:9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1`
+> **Design-replan digest:** `sha256:7d389a846ca00c71c356ada41d78af4ffd0f140aa2acba431d1871611cb8306a`
+> **Apply authority:** BLOCKED — requires new exact user message authorizing batch identity `deterministic-apply-verify-review-flow-runner-authority-g2-g6-repair-1`
+
+### Failed Verify bindings
+
+| Binding | Digest / value |
+|---|---|
+| Dossier | `sha256:ab19faedb74876f7460c80719016c2d1c58f985fcdc1dff586aeeef8712d8c` |
+| Evidence | `sha256:8e903ba48d283f71e4f7f0f9510b685269e7514a56eb85aa1baa0c149a4fe18e` |
+| Decision | `sha256:41a452255c3524f3197e5d55cad39104fdd9cdfad6ee9abc4ea1b22b79d8e976` |
+
+### Finding 1: VERIFY-G2-G6-TARGETED-GEN-OPEN-SPEC-PATH — Oracle Correction
+
+The no-checkout oracle in the G-RA architecture summary (line ~160) incorrectly flagged the bundled excluded-WIP safety constant `openspec/changes/runner-capability-standardization`. This constant is embedded as a hard-coded string literal in prompts (documentation, not runtime dependency) and is exempt. The oracle text has been corrected to a semantic property:
+
+> Installed generated assets must be standalone without: (1) absolute checkout path resolution, (2) filesystem read/import/require/dynamic import/resolution of OpenSpec or repository sources, or (3) cwd-derived Deck source lookup. The bundled excluded-WIP safety constant `runner-capability-standardization` (a hard-coded string literal in prompts) is exempt — it is documentation, not a runtime dependency.
+
+This correction requires no source or generated change.
+
+### Finding 2: VERIFY-G2-G6-AFFECTED-CORE-PROMPT-PROFILE-BYTE-DRIFT — Byte Drift Repair
+
+T-RA-01 (orchestrator-content.ts) removed the caller-authority instruction and added out-of-band trusted provider documentation. This changed `LEGACY_BYTES` from `365_023` to `365_242` (+219 bytes). The test assertion at `prompt-profile.test.ts` line 80 now fails.
+
+### T-RA-REP-01: Update LEGACY_BYTES oracle
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-general` |
+| **Priority** | P0 |
+| **Complexity** | C1 |
+| **Parallel** | sequential (G-RA-REP-1) |
+| **Depends on** | T-RA-01 (authorized orchestrator prompt change) |
+| **Files (allowlist — test only)** | `packages/core/src/teams/developer/prompt-profile.test.ts` |
+| **Files (blocked)** | Any other file; any source; any generated asset; `orchestrator-content.ts` (T-RA-01 applied); `orchestrator-content.test.ts` (T-RA-02 applied) |
+| **Verification** | RED: `LEGACY_BYTES = 365_023` fails (received 365242); GREEN: `LEGACY_BYTES = 365_242` passes |
+| **Completion evidence** | `bun test packages/core/src/teams/developer/prompt-profile.test.ts` — 8 pass, 0 fail |
+| **Risk lane** | **CRITICAL** (closes evidence for a security boundary; oracle correction, not behavior weakening) |
+| **Rollback** | Revert `LEGACY_BYTES` to `365_023` — no Git discard required; prior value documented in `tasks-replan-runner-authority-repair-1.md` |
+
+### RED/GREEN Checks
+
+| Check | Before Repair | After Repair |
+|-------|---------------|--------------|
+| `LEGACY_BYTES = 365_023` assertion | FAIL (received 365242) | N/A |
+| `LEGACY_BYTES = 365_242` assertion | N/A | PASS |
+| `LEGACY_SHA256` assertion | PASS | PASS |
+| Other 6 assertions | PASS | PASS |
+| **Total** | **7 pass / 1 fail** | **8 pass / 0 fail** |
+
+### Dependency order
+
+```
+T-RA-01 → T-RA-02 → ... → T-RA-08 (parent G-RA batch)
+                                              ↓
+                                    T-RA-REP-01 (oracle + byte repair)
+```
+
+### Complexity summary (G-RA-REP-1 only)
+
+| Task | Complexity | Risk |
+|------|------------|------|
+| T-RA-REP-01 | C1 | CRITICAL |
+
+**G-RA-REP-1 totals: C1×1**
+
+### Verification schedule (fresh after repair)
+
+1. **Targeted**: `LEGACY_BYTES` updated to `365_242`; test passes
+2. **Affected-area**: `prompt-profile.test.ts` 8/8 pass; no other test affected
+3. **Independent Review**: fresh reviewer validates oracle correction semantics and byte drift recomputation
+4. **Broad**: repository-wide TypeScript compile; no regression in prompt or adapter tests
+
+---
+
+## G-RA-REP-2 — Runner-authority G2-G6 repair-2 (lexical tokens drift correction)
+
+> **Batch identity:** `deterministic-apply-verify-review-flow-runner-authority-g2-g6-repair-2`
+> **Ceiling:** exactly 1 file (test oracle correction only)
+> **Addresses:** `APPLY-G2-G6-REP1-LEXICAL-TOKENS-ORACLE-DRIFT` (rootCause task_plan, destination replan_tasks, owner task)
+> **Spec digest (authoritative):** `sha256:374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`
+> **Design digest (authoritative):** `sha256:9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1`
+> **Design-replan digest:** `sha256:7d389a846ca00c71c356ada41d78af4ffd0f140aa2acba431d1871611cb8306a`
+> **Apply authority:** BLOCKED — requires new exact user message authorizing batch identity `deterministic-apply-verify-review-flow-runner-authority-g2-g6-repair-2`
+
+### Failed Apply bindings
+
+| Binding | Digest / value |
+|---|---|
+| Blocker | `APPLY-G2-G6-REP1-LEXICAL-TOKENS-ORACLE-DRIFT` |
+| Location | `packages/core/src/teams/developer/prompt-profile.test.ts:25` / assertion line 81 |
+| Expected | `LEGACY_LEXICAL_TOKENS = 79_051` |
+| Received | `79_092` |
+| Delta | +41 lexical tokens |
+| Focused result | 7 pass / 1 fail |
+| Affected result | 1076 pass / 1 fail |
+
+### T-RA-REP-02: Update LEGACY_LEXICAL_TOKENS oracle
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-general` |
+| **Priority** | P0 |
+| **Complexity** | C1 |
+| **Parallel** | sequential (G-RA-REP-2) |
+| **Depends on** | T-RA-01 (authorized orchestrator prompt change); T-RA-REP-01 (prior repair of LEGACY_BYTES) |
+| **Files (allowlist — test only)** | `packages/core/src/teams/developer/prompt-profile.test.ts` |
+| **Files (blocked)** | Any other file; any source; any generated asset; `orchestrator-content.ts` (T-RA-01 applied); `orchestrator-content.test.ts` (T-RA-02 applied); LEGACY_BYTES constant (repair-1 preserved: 365_242) |
+| **Verification** | RED: `LEGACY_LEXICAL_TOKENS = 79_051` fails (received 79092); GREEN: `LEGACY_LEXICAL_TOKENS = 79_092` passes |
+| **Completion evidence** | `bun test packages/core/src/teams/developer/prompt-profile.test.ts` — 8 pass, 0 fail |
+| **Risk lane** | **CRITICAL** (closes evidence for a security boundary; oracle correction, not behavior weakening) |
+| **Rollback** | Revert `LEGACY_LEXICAL_TOKENS` to `79_051` — no Git discard required; prior value documented in `tasks-replan-runner-authority-repair-2.md` |
+
+### RED/GREEN Checks
+
+| Check | Before Repair-2 | After Repair-2 |
+|-------|-----------------|----------------|
+| `LEGACY_BYTES = 365_242` assertion | PASS (repair-1 preserved) | PASS |
+| `LEGACY_LEXICAL_TOKENS = 79_051` assertion | FAIL (received 79092) | N/A |
+| `LEGACY_LEXICAL_TOKENS = 79_092` assertion | N/A | PASS |
+| `LEGACY_SHA256` assertion | PASS | PASS |
+| Other 6 assertions | PASS | PASS |
+| **Total** | **7 pass / 1 fail** | **8 pass / 0 fail** |
+
+### Dependency order
+
+```
+T-RA-01 → T-RA-02 → ... → T-RA-08 (parent G-RA batch)
+                                              ↓
+                                    T-RA-REP-01 (LEGACY_BYTES repair)
+                                              ↓
+                                    T-RA-REP-02 (LEGACY_LEXICAL_TOKENS repair)
+```
+
+### Complexity summary (G-RA-REP-2 only)
+
+| Task | Complexity | Risk |
+|------|------------|------|
+| T-RA-REP-02 | C1 | CRITICAL |
+
+**G-RA-REP-2 totals: C1×1**
+
+### Verification schedule (fresh after repair-2)
+
+1. **Targeted**: `LEGACY_LEXICAL_TOKENS` updated to `79_092`; test passes
+2. **Affected-area**: `prompt-profile.test.ts` 8/8 pass; no other test affected
+3. **Independent Review**: fresh reviewer validates oracle correction semantics and lexical token drift recomputation
+4. **Broad**: repository-wide TypeScript compile; no regression in prompt or adapter tests
+
+---
+
+## G-RA-REP-3 — Runner-authority G2-G6 prompt-profile-oracle-completion (SHA256 drift correction)
+
+> **Batch identity:** `deterministic-apply-verify-review-flow-runner-authority-prompt-profile-oracle-completion`
+> **Ceiling:** exactly 1 file (test oracle correction only)
+> **Addresses:** `APPLY-G2-G6-REP2-SHA256-ORACLE-DRIFT` (rootCause task_plan, destination replan_tasks, owner task)
+> **NOT repair-3:** G1 `repair-3` remains PROHIBITED — exhausted G1 two-attempt budget not reopened. This is a newly authorized normal-workflow oracle-completion batch after Task-plan omissions, not reopening G1 repair governance.
+> **Spec digest (authoritative):** `sha256:374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`
+> **Design digest (authoritative):** `sha256:9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1`
+> **Design-replan digest:** `sha256:7d389a846ca00c71c356ada41d78af4ffd0f140aa2acba431d1871611cb8306a`
+> **Apply authority:** BLOCKED — requires new exact user message authorizing batch identity `deterministic-apply-verify-review-flow-runner-authority-prompt-profile-oracle-completion`
+
+### Failed Apply bindings
+
+| Binding | Digest / value |
+|---|---|
+| Blocker | `APPLY-G2-G6-REP2-SHA256-ORACLE-DRIFT` |
+| Location | `packages/core/src/teams/developer/prompt-profile.test.ts:26` / assertion line 82 |
+| Expected (stale) | `4eb4caaeb12ff0242c2e753e211cdd76bb9d3b24b610c2c512f1976ecfbc9e36` |
+| Received (stable candidate) | `617d589136d3c20d9baed0ffd159dfef0fd5762ff92790f1c121c39d22a0aa54` |
+| Focused result | 7 pass / 1 fail |
+| Affected result | 1076 pass / 1 fail |
+
+### Deterministic Legacy Snapshot Assertion Inventory
+
+The test file `prompt-profile.test.ts` contains exactly **3 chained deterministic legacy snapshot assertions**:
+
+| # | Constant | Line | Value | Assertion Line | Status |
+|---|----------|------|-------|----------------|--------|
+| 1 | `LEGACY_BYTES` | 24 | `365_242` | 80 | **PASS** (repair-1) |
+| 2 | `LEGACY_LEXICAL_TOKENS` | 25 | `79_092` | 81 | **PASS** (repair-2) |
+| 3 | `LEGACY_SHA256` | 26 | `4eb4caaeb...` | 82 | **FAIL** (drift exposed) |
+
+**No additional chained snapshot oracle exists after SHA-256.** SHA-256 is the terminal oracle in the chain. It depends on the concatenated legacy content (bytes + tokens), but no subsequent assertion depends on SHA-256.
+
+### T-RA-REP-03: Update LEGACY_SHA256 oracle
+
+| Field | Value |
+|-------|-------|
+| **Owner** | `apply-general` |
+| **Priority** | P0 |
+| **Complexity** | C1 |
+| **Parallel** | sequential (G-RA-REP-3) |
+| **Depends on** | T-RA-01 (authorized orchestrator prompt change); T-RA-REP-01 (LEGACY_BYTES repair); T-RA-REP-02 (LEGACY_LEXICAL_TOKENS repair) |
+| **Files (allowlist — test only)** | `packages/core/src/teams/developer/prompt-profile.test.ts` |
+| **Files (blocked)** | Any other file; any source; any generated asset; `LEGACY_BYTES` constant (365_242 from repair-1 preserved); `LEGACY_LEXICAL_TOKENS` constant (79_092 from repair-2 preserved) |
+| **Verification** | RED: `LEGACY_SHA256 = "4eb4caaeb..."` fails (received `617d5891...`); GREEN: `LEGACY_SHA256 = "617d589136d3c20d9baed0ffd159dfef0fd5762ff92790f1c121c39d22a0aa54"` passes |
+| **Completion evidence** | `bun test packages/core/src/teams/developer/prompt-profile.test.ts` — 8 pass, 0 fail |
+| **Risk lane** | **CRITICAL** (closes evidence for a security boundary; oracle correction, not behavior weakening) |
+| **Rollback** | Revert `LEGACY_SHA256` to `4eb4caaeb12ff0242c2e753e211cdd76bb9d3b24b610c2c512f1976ecfbc9e36` — no Git discard required; prior value documented in `tasks-replan-runner-authority-oracle-completion.md` |
+
+### RED/GREEN Checks
+
+| Check | Before Oracle-Completion | After Oracle-Completion |
+|-------|-------------------------|------------------------|
+| `LEGACY_BYTES = 365_242` assertion | PASS (repair-1 preserved) | PASS |
+| `LEGACY_LEXICAL_TOKENS = 79_092` assertion | PASS (repair-2 preserved) | PASS |
+| `LEGACY_SHA256 = "4eb4caaeb..."` assertion | FAIL (received 617d5891...) | N/A |
+| `LEGACY_SHA256 = "617d5891..."` assertion | N/A | PASS |
+| Other 5 assertions | PASS | PASS |
+| **Total** | **7 pass / 1 fail** | **8 pass / 0 fail** |
+
+### Scope/Diff Proof
+
+- **File changed:** exactly 1 (`prompt-profile.test.ts`)
+- **Constant changed:** exactly 1 (`LEGACY_SHA256` on line 26)
+- **Value changed:** exactly 1 SHA-256 hex string (40 bytes)
+- **Bytes/tokens preserved:** `LEGACY_BYTES = 365_242` and `LEGACY_LEXICAL_TOKENS = 79_092` are untouched
+- **No other file touched:** source, generated, state, events, registry, other tests all unchanged
+
+### Dependency order
+
+```
+T-RA-01 → T-RA-02 → ... → T-RA-08 (parent G-RA batch)
+                                              ↓
+                                    T-RA-REP-01 (LEGACY_BYTES repair)
+                                              ↓
+                                    T-RA-REP-02 (LEGACY_LEXICAL_TOKENS repair)
+                                              ↓
+                                    T-RA-REP-03 (LEGACY_SHA256 oracle-completion)
+```
+
+### Complexity summary (G-RA-REP-3 only)
+
+| Task | Complexity | Risk |
+|------|------------|------|
+| T-RA-REP-03 | C1 | CRITICAL |
+
+**G-RA-REP-3 totals: C1×1**
+
+### Verification schedule (fresh after oracle-completion)
+
+1. **Targeted**: `LEGACY_SHA256` updated to `617d589136d3c20d9baed0ffd159dfef0fd5762ff92790f1c121c39d22a0aa54`; test passes
+2. **Affected-area**: `prompt-profile.test.ts` 8/8 pass; no other test affected
+3. **Independent Review**: fresh reviewer validates oracle correction semantics and SHA-256 drift recomputation (performed twice independently)
+4. **Broad**: repository-wide TypeScript compile; no regression in prompt or adapter tests
+
+---
+
+## G-RA-PC — Runner-authority provider-capture repair (bounded 6-file ceiling)
+
+> **Batch identity:** `deterministic-apply-verify-review-flow-runner-authority-provider-capture-repair`
+> **Ceiling:** exactly 6 files (2 canonical adapter TS + 2 generated JS + 2 reachability test)
+> **Addresses:** `REVIEW-RA-FINAL-B1` (provider/global options reread), `REVIEW-RA-FINAL-B2` (installed resolver returning null/non-object → invalid-evidence), `REVIEW-RA-FINAL-B3` (non-Apply role tests)
+> **Spec digest (authoritative):** `sha256:374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`
+> **Design digest (authoritative):** `sha256:9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1`
+> **Design-replan digest:** `sha256:7d389a846ca00c71c356ada41d78af4ffd0f140aa2acba431d1871611cb8306a`
+> **Apply authority:** BLOCKED — requires new exact user message authorizing batch identity `deterministic-apply-verify-review-flow-runner-authority-provider-capture-repair`
+
+Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard stops) are in `tasks-replan-runner-authority-provider-capture-repair.md`. Summary:
+
+| Task | Source files | Test/generated files | Covers |
+|------|-------------|---------------------|--------|
+| T-RA-PC-01 | `developer-team-execution.ts` (OpenCode) | — | B1: freeze resolver/mode at init; B2: invalid-evidence for installed resolver returning null/non-object |
+| T-RA-PC-02 | `developer-team-execution.ts` (Pi) | — | B1: freeze resolver/mode at init; B2: invalid-evidence for installed resolver returning null/non-object |
+| T-RA-PC-03 | — | `developer-team-execution.generated.js` (OpenCode) | Regenerate after T-RA-PC-01 |
+| T-RA-PC-04 | — | `developer-team-execution.generated.js` (Pi) | Regenerate after T-RA-PC-02 |
+| T-RA-PC-05 | — | `developer-team-execution-reachability.test.ts` (OpenCode) | B1/B2/B3 tests: late-global-provider, mutable-options, null/non-object resolver, non-Apply stripping |
+| T-RA-PC-06 | — | `developer-team-execution-reachability.test.ts` (Pi) | B1/B2/B3 tests: late-global-provider, mutable-options, null/non-object resolver, non-Apply stripping |
+
+**Dependency order:** T-RA-PC-01 → T-RA-PC-03 → T-RA-PC-05; T-RA-PC-02 → T-RA-PC-04 → T-RA-PC-06 (T-RA-PC-01 and T-RA-PC-02 can run in parallel)
+**Complexity totals:** C3×4, C1×2 = C14
+**Risk lane:** CRITICAL for all six tasks
+
+### Dispatch policy for G-RA-PC
+
+1. **TDD rule:** new tests (D-REACH-22..27, D-REACH-22..27-Pi) must RED before source changes and GREEN after fixes.
+2. **Existing tests preserved:** all prior authority tests remain GREEN; no existing test is modified.
+3. **apply-backend owns:** T-RA-PC-01 (OpenCode adapter TS), T-RA-PC-02 (Pi adapter TS), T-RA-PC-05 (OpenCode tests), T-RA-PC-06 (Pi tests).
+4. **apply-general owns:** T-RA-PC-03 (OpenCode generated), T-RA-PC-04 (Pi generated) — via `bun run scripts/generate-runner-execution-assets.ts`.
+5. **Generated assets:** byte parity required; regenerate after source fixes before test execution.
+6. Root cause `implementation` → `targeted_repair` (this batch).
+7. Root cause `requirement`, `architecture`, `batch_shape` → `replan_spec` / `replan_design` / `replan_tasks`.
+8. Root cause `oracle` → `correct_oracle` (non-modifying).
+9. Any unrecognized combination → `stop`.
+
+---
+
+## G-RA-MT — Runner-authority mode-taxonomy repair (bounded 6-file ceiling)
+
+> **Batch identity:** `deterministic-apply-verify-review-flow-runner-authority-mode-taxonomy-repair`
+> **Ceiling:** exactly 6 files (2 canonical adapter TS + 2 generated JS + 2 reachability test)
+> **Addresses:** `REVIEW-RA-PC-B4` (invalid mode fails open with valid provider), `REVIEW-RA-PC-B5` (OpenCode AUTHZ_MISSING vs Pi invalid-evidence taxonomy mismatch for missing receipt)
+> **Spec digest (authoritative):** `sha256:374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`
+> **Design digest (authoritative):** `sha256:9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1`
+> **Design-replan digest:** `sha256:7d389a846ca00c71c356ada41d78af4ffd0f140aa2acba431d1871611cb8306a`
+> **Apply authority:** BLOCKED — requires new exact user message authorizing batch identity `deterministic-apply-verify-review-flow-runner-authority-mode-taxonomy-repair`
+
+Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard stops) are in `tasks-replan-runner-authority-mode-taxonomy-repair.md`. Summary:
+
+| Task | Source files | Test/generated files | Covers |
+|------|-------------|---------------------|--------|
+| T-RA-MT-01 | `developer-team-execution.ts` (OpenCode) | — | B4: mode validation (unknown/null/string/object → invalid-evidence); B5: missing receipt from installed resolver → invalid-evidence (not AUTHZ_MISSING) |
+| T-RA-MT-02 | — | `developer-team-execution.generated.js` (OpenCode) | Regenerate after T-RA-MT-01 |
+| T-RA-MT-03 | — | `developer-team-execution-reachability.test.ts` (OpenCode) | B4/B5 tests: invalid mode at init, mutable invalid mode, absent resolver AUTHZ_MISSING, missing receipt → invalid-evidence |
+| T-RA-MT-04 | `developer-team-execution.ts` (Pi) | — | B4: mode validation; B5: taxonomy parity confirmation for missing receipt |
+| T-RA-MT-05 | — | `developer-team-execution.generated.js` (Pi) | Regenerate after T-RA-MT-04 |
+| T-RA-MT-06 | — | `developer-team-execution-reachability.test.ts` (Pi) | B4/B5 tests: invalid mode at init, mutable invalid mode, absent resolver AUTHZ_MISSING, missing receipt → invalid-evidence |
+
+**Dependency order:** T-RA-MT-01 → T-RA-MT-02 → T-RA-MT-03; T-RA-MT-04 → T-RA-MT-05 → T-RA-MT-06 (T-RA-MT-01 and T-RA-MT-04 can run in parallel)
+**Complexity totals:** C3×4, C1×2 = C14
+**Risk lane:** CRITICAL for all six tasks
+
+### Dispatch policy for G-RA-MT
+
+1. **TDD rule:** new tests (D-REACH-28..36, D-REACH-28..36-Pi) must RED before source changes and GREEN after fixes.
+2. **Existing tests preserved:** all prior authority tests remain GREEN; B1-B3 tests from G-RA-PC remain GREEN; no existing test is modified.
+3. **apply-backend owns:** T-RA-MT-01 (OpenCode adapter TS), T-RA-MT-04 (Pi adapter TS), T-RA-MT-03 (OpenCode tests), T-RA-MT-06 (Pi tests).
+4. **apply-general owns:** T-RA-MT-02 (OpenCode generated), T-RA-MT-05 (Pi generated) — via `bun run scripts/generate-runner-execution-assets.ts`.
+5. **Generated assets:** byte parity required; regenerate after source fixes before test execution.
+6. Root cause `implementation` → `targeted_repair` (this batch).
+7. Root cause `requirement`, `architecture`, `batch_shape` → `replan_spec` / `replan_design` / `replan_tasks`.
+8. Root cause `oracle` → `correct_oracle` (non-modifying).
+9. Any unrecognized combination → `stop`.
+10. **Taxonomy parity:** OpenCode and Pi must return identical error codes for identical scenarios; `AUTHZ_MISSING` only when resolver is truly absent.
+
+---
+
 ## G1 — New contracts
 
 ### T-01: FindingDispositionEnvelopeV1
@@ -150,13 +811,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | TypeScript compiles; contract unit tests pass; V1 compatibility fixture unchanged |
 | **Risk lane** | HIGH |
 | **Rollback** | Delete `finding-disposition.ts`; revert to V1-only path |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-FD-01 (total disposition classification, stable ID, deterministic)
-- REQ-DAVR-FD-02 (V1 projection without reinterpretation)
-- REQ-DAVR-OF-01 (non-blocking reportable, non-authorizing)
-- REQ-DAVR-SEC-01 (safe evidence, redaction)
-- Scenarios: disposition reachability, stability across reruns, ambiguous→blocking, V1 projection, baseline exclusion
 
 ---
 
@@ -177,14 +831,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | HIGH |
 | **Rollback** | Delete `routing-decision.ts` |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-RD-01 (total root-cause routing table)
-- REQ-DAVR-RD-02 (mixed-owner split)
-- REQ-DAVR-DT-01, DT-02 (deterministic, total, gap-free)
-- REQ-DAVR-SEC-02 (protected-risk never downgraded)
-- REQ-DAVR-IEV-01, IEV-02 (fail closed, verify-runtime diagnosis destination)
-- Scenarios: total coverage, security→escalate, auth/Git→stop, env/transport/cap→diagnosis, unknown→stop
-
 ---
 
 ### T-03: BlockingRepairProjectionV1
@@ -204,14 +850,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | CRITICAL |
 | **Rollback** | Delete `blocking-repair-projection.ts` |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-MD-01, MD-02 (minimal dossier, immutable original batch, effect-boundary rejection)
-- REQ-DAVR-CS-01, CS-02 (scope cannot broaden, restricted to authorized targets)
-- REQ-DAVR-BA-01, BA-02 (anchored blocking only, objective/reproducible authorization)
-- REQ-DAVR-SEC-01 (no secrets in projection)
-- REQ-DAVR-SAF-04 (excluded-scope hard stop)
-- Scenarios: minimal dossier contents, original batch unchanged, oversized rejection, auth mismatch rejection
-
 ---
 
 ### T-04: ExecutionConvergenceDossierV1 + ExecutionConvergenceStateV1
@@ -230,17 +868,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | Convergence dossier/state schema tests pass; state machine transition oracle tests pass |
 | **Risk lane** | HIGH |
 | **Rollback** | Delete `execution-convergence.ts` |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-IR-01, IR-02 (role independence)
-- REQ-DAVR-TV-01, TV-02, TV-03 (targeted→affected→Review→broad order)
-- REQ-DAVR-BV-01, BV-02 (broad after stability, invalidation after modification)
-- REQ-DAVR-RV-01, RV-02 (scoped revalidation, Review reuse conditions)
-- REQ-DAVR-RG-01, RG-02, RG-03, RG-04 (retry identity, progress, bounded convergence)
-- REQ-DAVR-DT-01 (identical inputs → identical decisions)
-- REQ-DAVR-REG-01, REG-02 (registry single-writer, commit-ready evidence requirement)
-- REQ-DAVR-ROL-01, ROL-02 (rollback stops progression, preserves history)
-- Scenarios: state transition table, Review gate, broad invalidation, generation increment
 
 ---
 
@@ -262,14 +889,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | CRITICAL |
 | **Rollback** | Revert decision-kernel.ts to pre-T-05 state |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-RD-01, RD-02
-- REQ-DAVR-IEV-01, IEV-02
-- REQ-DAVR-SEC-02
-- REQ-DAVR-CS-01 (scope-broaden rejection at kernel level)
-- REQ-DAVR-RG-01 (retry identity binding at kernel level)
-- Scenarios: total coverage, mixed-owner split, protected-risk override
-
 ---
 
 ### T-06: Failure delta — blocking progress computation
@@ -287,12 +906,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | `failure-delta.test.ts` disposition-aware progress tests pass |
 | **Risk lane** | HIGH |
 | **Rollback** | Revert failure-delta.ts |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-RG-02 (positive progress proof)
-- REQ-DAVR-RG-04 (convergence with adaptive-quality-control loop breaker)
-- REQ-DAVR-OF-01 (non-blocking zero credit)
-- Scenarios: positive progress, no progress→checkpoint, negative progress→replan, recommendation zero credit
 
 ---
 
@@ -312,13 +925,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | HIGH |
 | **Rollback** | Revert staged-verification.ts |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-TV-01, TV-02, TV-03 (targeted→Review ordering, Review adds only blocking)
-- REQ-DAVR-BV-01, BV-02 (broad final gate, post-modification invalidation)
-- REQ-DAVR-SAF-01 (mandatory broad floors not deferred)
-- REQ-DAVR-RG-04 (loop breaker integration)
-- Scenarios: Review blocked while scoped incomplete, Review at scoped gate, broad after stability
-
 ---
 
 ### T-08: Freshness policy — post-repair invalidation and Review reuse
@@ -336,14 +942,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | `freshness-policy.test.ts` post-repair invalidation tests pass |
 | **Risk lane** | MEDIUM |
 | **Rollback** | Revert freshness-policy.ts |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-IR-01 (role freshness, no identity collision)
-- REQ-DAVR-IR-02 (causal evidence sharing does not transfer conclusions)
-- REQ-DAVR-RV-01 (repair invalidates stale scoped evidence)
-- REQ-DAVR-RV-02 (Review reuse requires unchanged dependencies)
-- REQ-DAVR-OF-01 (non-blocking findings not shared as conclusions)
-- Scenarios: identity collision rejected, attempt summaries stripped, stale→fresh revalidation
 
 ---
 
@@ -365,15 +963,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | CRITICAL |
 | **Rollback** | Revert execution-control-plane.ts to pre-convergence state; keep V1 replay path intact |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-IR-01 (independent role identities)
-- REQ-DAVR-TV-02 (Review only after scoped pass)
-- REQ-DAVR-BV-01, BV-02 (broad after Review stable)
-- REQ-DAVR-RV-01 (modification invalidates evidence)
-- REQ-DAVR-REG-01 (registry single-writer)
-- REQ-DAVR-DT-01 (deterministic replay)
-- Scenarios: Review scheduling, broad scheduling, generation invalidation, registry commit ordering
-
 ---
 
 ### T-10: Repair loop governance — unified retry identity
@@ -392,14 +981,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | HIGH |
 | **Rollback** | Revert repair-loop-governance.ts |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-RG-01 (single stable retry identity)
-- REQ-DAVR-RG-02 (positive progress required)
-- REQ-DAVR-RG-03 (terminal governance maintains/increases restrictiveness)
-- REQ-DAVR-RG-04 (adaptive-quality-control integration)
-- REQ-DAVR-CS-01 (scope-broaden creates new identity)
-- Scenarios: identity stability, changed target set→new identity, no-progress handling, hard budget stop
-
 ---
 
 ### T-11: Registry coordinator — atomic intent chain commit
@@ -417,12 +998,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | Registry coordinator chain tests pass; existing single-intent commit tests still pass |
 | **Risk lane** | CRITICAL |
 | **Rollback** | Revert registry-coordinator.ts; existing `commit` and `commitAll` remain available for legacy consumers |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-REG-01 (single-writer, centralized, conflict stop)
-- REQ-DAVR-REG-02 (commit-ready requires current evidence)
-- REQ-DAVR-ROL-01, ROL-02 (rollback preserves history, no partial chain)
-- Scenarios: atomic chain commit, stale base conflict, recovery-required hard stop
 
 ---
 
@@ -444,11 +1019,7 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | MEDIUM |
 | **Rollback** | Revert orchestrator-content.ts to pre-T-12 state |
 
-#### Requirement/scenario coverage
-- Covers exploration finding: legacy/full prompt said "Verify and Review run in parallel" — must be removed
-- REQ-DAVR-TV-01, TV-02 (canonical sequencing in prompts)
-- REQ-DAVR-BV-01 (broad after Review stable in prompts)
-- Prompt text is descriptive only, never modification authority
+> **Note:** orchestrator-content.ts is already updated by T-RA-01 (G-RA runner-authority batch) before this task runs. T-RA-01 removes the caller-authority instruction. T-12 makes additional changes to remove legacy parallelism language and express canonical flow. These are independent changes to the same file; T-RA-01 runs first and does not block T-12.
 
 ---
 
@@ -467,13 +1038,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | All six prompt-content tests pass |
 | **Risk lane** | MEDIUM |
 | **Rollback** | Revert individual content files to pre-T-13 state |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-BA-01 (only blocking authorizes repair)
-- REQ-DAVR-IR-01 (Apply-owned checks vs independent Verify evidence distinguished)
-- REQ-DAVR-TV-03 (Review may add blocking only)
-- REQ-DAVR-OF-01, OF-02 (non-blocking non-authorizing, scope growth→replan)
-- Covers exploration finding: compact Apply skills told agents to run checks themselves; now clarified
 
 ---
 
@@ -495,11 +1059,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | HIGH |
 | **Rollback** | Delete finding-disposition.test.ts |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-FD-01, FD-02
-- REQ-DAVR-OF-01
-- 8 scenarios from spec FD area
-
 ---
 
 ### T-15: RoutingDecisionV1 tests
@@ -517,12 +1076,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | `routing-decision.test.ts` 100% pass |
 | **Risk lane** | HIGH |
 | **Rollback** | Delete routing-decision.test.ts |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-RD-01, RD-02
-- REQ-DAVR-IEV-01, IEV-02
-- REQ-DAVR-DT-01, DT-02
-- 12+ scenarios from spec RD/DT/IEV areas
 
 ---
 
@@ -542,12 +1095,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | CRITICAL |
 | **Rollback** | Delete blocking-repair-projection.test.ts |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-MD-01, MD-02
-- REQ-DAVR-CS-01, CS-02
-- REQ-DAVR-BA-01, BA-02
-- 8 scenarios from spec MD/CS/BA areas
-
 ---
 
 ### T-17: State machine + convergence dossier tests
@@ -565,14 +1112,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | `execution-convergence.test.ts` 100% pass |
 | **Risk lane** | HIGH |
 | **Rollback** | Delete execution-convergence.test.ts |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-TV-01, TV-02, TV-03
-- REQ-DAVR-BV-01, BV-02
-- REQ-DAVR-RV-01, RV-02
-- REQ-DAVR-RG-01, RG-02, RG-03
-- REQ-DAVR-REG-01, REG-02
-- 20+ scenarios from spec TV/BV/RV/RG/REG areas
 
 ---
 
@@ -592,11 +1131,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | HIGH |
 | **Rollback** | Revert augmentation to pre-T-18 |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-RG-01, RG-02, RG-03, RG-04
-- REQ-DAVR-OF-01
-- 12+ scenarios from spec RG area
-
 ---
 
 ### T-19: Staged verification + freshness policy tests
@@ -615,13 +1149,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | HIGH |
 | **Rollback** | Revert augmentation to pre-T-19 |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-TV-01, TV-02
-- REQ-DAVR-BV-01, BV-02
-- REQ-DAVR-RV-01, RV-02
-- REQ-DAVR-IR-01, IR-02
-- 10+ scenarios from spec TV/BV/RV/IR areas
-
 ---
 
 ### T-20: Decision kernel total-table + mixed-owner tests
@@ -639,12 +1166,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | Augmented `decision-kernel.test.ts` 100% pass |
 | **Risk lane** | HIGH |
 | **Rollback** | Revert augmentation to pre-T-20 |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-RD-01, RD-02
-- REQ-DAVR-IEV-01, IEV-02
-- REQ-DAVR-SEC-02
-- 10+ scenarios from spec RD/IEV area
 
 ---
 
@@ -666,14 +1187,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | HIGH |
 | **Rollback** | Revert augmentation to pre-T-21 |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-IR-01, IR-02
-- REQ-DAVR-TV-02, TV-03
-- REQ-DAVR-BV-01, BV-02
-- REQ-DAVR-RV-01
-- REQ-DAVR-DT-01
-- REQ-DAVR-REG-01, REG-02
-
 ---
 
 ### T-22: Effect boundary + projection enforcement tests
@@ -691,12 +1204,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Completion evidence** | Augmented effect boundary tests 100% pass |
 | **Risk lane** | CRITICAL |
 | **Rollback** | Revert augmentation to pre-T-22 |
-
-#### Requirement/scenario coverage
-- REQ-DAVR-MD-02
-- REQ-DAVR-CS-02
-- REQ-DAVR-BA-01
-- REQ-DAVR-SAF-02, SAF-03, SAF-04
 
 ---
 
@@ -716,12 +1223,6 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | HIGH |
 | **Rollback** | Revert augmentation to pre-T-23 |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-REG-01, REG-02
-- REQ-DAVR-ROL-01, ROL-02
-- REQ-DAVR-DT-01
-- Full lifecycle scenarios
-
 ---
 
 ### T-24: Adapter bridge + prompt parity tests
@@ -740,65 +1241,85 @@ Full task definitions (RED/GREEN oracles, completion evidence, rollback, hard st
 | **Risk lane** | MEDIUM |
 | **Rollback** | Revert prompt augmentation to pre-T-24 |
 
-#### Requirement/scenario coverage
-- REQ-DAVR-TV-01, TV-02 (prompt/runtime parity)
-- REQ-DAVR-BV-01 (prompt/runtime parity)
-- REQ-DAVR-IR-01 (role independence in prompts)
-- Prompt parity scenarios from exploration
-
 ---
 
 ## Dependency order (execution sequence)
 
 ```
+G-RA: T-RA-01 → T-RA-02 → T-RA-03 → T-RA-04 → T-RA-05 → T-RA-06 → T-RA-07 → T-RA-08
+        (orchestrator-content.ts + test, then OpenCode adapter + generated + tests, then Pi adapter + generated + tests)
+
+G-REC: T-REC-01 → T-REC-02 → T-REC-03 → T-REC-04
+G-EA:  T-EA-01 → T-EA-02 → T-EA-03   (NOT APPROVED — requires named human approval)
+
 G1: T-01 → T-02 → T-03 → T-04    (contracts, no dependencies on each other beyond stated)
 
 G2: T-05 → T-06 → T-07 → T-08    (orchestrator policy, each depends on G1)
-                                    T-05 depends on T-01, T-02
-                                    T-06 depends on T-01, T-05
-                                    T-07 depends on T-04, T-05
-                                    T-08 depends on T-04, T-06, T-07
+        T-05 depends on T-01, T-02
+        T-06 depends on T-01, T-05
+        T-07 depends on T-04, T-05
+        T-08 depends on T-04, T-06, T-07
 
 G3: T-09 → T-10 → T-11            (execution/registry, depends on G1+G2)
-                                    T-09 depends on T-04, T-05, T-06, T-07, T-08
-                                    T-10 depends on T-03, T-06, T-09
-                                    T-11 depends on T-04, T-09
+        T-09 depends on T-04, T-05, T-06, T-07, T-08
+        T-10 depends on T-03, T-06, T-09
+        T-11 depends on T-04, T-09
 
 G4: T-12 → T-13                   (prompts, depends on G3 runtime)
-                                    T-12 depends on T-09
-                                    T-13 depends on T-12
+        T-12 depends on T-09
+        T-13 depends on T-12
 
 G5: T-14..T-20                    (contract+policy tests, parallel after respective prod code)
-                                    T-14 ← T-01
-                                    T-15 ← T-02
-                                    T-16 ← T-03
-                                    T-17 ← T-04
-                                    T-18 ← T-06, T-10
-                                    T-19 ← T-07, T-08
-                                    T-20 ← T-05
+        T-14 ← T-01
+        T-15 ← T-02
+        T-16 ← T-03
+        T-17 ← T-04
+        T-18 ← T-06, T-10
+        T-19 ← T-07, T-08
+        T-20 ← T-05
 
 G6: T-21..T-24                    (integration+acceptance tests, parallel after G5)
-                                    T-21 ← T-09
-                                    T-22 ← T-03, T-09
-                                    T-23 ← T-11, T-21
-                                    T-24 ← T-12, T-13, T-21
+        T-21 ← T-09
+        T-22 ← T-03, T-09
+        T-23 ← T-11, T-21
+        T-24 ← T-12, T-13, T-21
 ```
+
+---
 
 ## Review Workload Forecast
 
 | Reviewer pool | Estimated tasks requiring independent Review |
 |---------------|---------------------------------------------|
-| `apply-backend` (self-review for G1-G3) | T-01..T-11 — independent Review by a second `apply-backend` instance |
+| `apply-backend` (self-review for G-RA, G1-G3) | T-RA-01..T-RA-08, T-01..T-11 — independent Review by a second `apply-backend` instance |
+| `apply-general` (G-RA orchestrator prompts) | T-RA-01, T-RA-02 — Review by `review` role |
 | `apply-general` (G4 prompts) | T-12, T-13 — Review by `review` role |
-| `verify` (test verification) | T-14..T-24 — Review by `review` role |
-| `review` (final acceptance) | T-14..T-24 — independent `review` role |
+| `verify` (test verification) | T-RA-07, T-RA-08, T-14..T-24 — Review by `review` role |
+| `review` (final acceptance) | T-RA-07, T-RA-08, T-14..T-24 — independent `review` role |
 
-**Independent Verify**: Each of T-14..T-24 requires a fresh `verify`-role instance to prove staged verification passes before Review runs.
+**Independent Verify**: Each of T-RA-07, T-RA-08, T-14..T-24 requires a fresh `verify`-role instance to prove staged verification passes before Review runs.
+
+**G-RA Review priority**: Given `REVIEW-G2-G6-PI-B1-CALLER-SUPPLIED-AUTHORITY` is critical, T-RA-03 through T-RA-08 (adapter + generated + reachability tests) should receive independent Review immediately after Verify confirms the new behavioral oracles pass.
 
 ## Complexity summary
 
 | ID | Area | Complexity | Notes |
 |----|------|------------|-------|
+| T-RA-01 | Orchestrator prompt (runner-authority fix) | C2 | Remove caller-authority instruction |
+| T-RA-02 | Orchestrator test update | C1 | Update deckExecution assertions |
+| T-RA-03 | OpenCode adapter strip/fallback removal | C3 | Remove caller fallback, pin provider |
+| T-RA-04 | OpenCode generated asset | C1 | Regenerate from fixed source |
+| T-RA-05 | Pi adapter strip/fallback removal | C3 | Remove caller fallback, pin provider |
+| T-RA-06 | Pi generated asset | C1 | Regenerate from fixed source |
+| T-RA-07 | OpenCode reachability (runner-authority) | C3 | New behavioral oracles |
+| T-RA-08 | Pi reachability (runner-authority) | C3 | New behavioral oracles |
+| T-REC-01 | FD contract recovery | C4 | |
+| T-REC-02 | Routing contract recovery | C4 | |
+| T-REC-03 | Projection contract recovery | C5 | |
+| T-REC-04 | Convergence contract recovery | C5 | |
+| T-EA-01 | Effect-authority B1 | C5 | |
+| T-EA-02 | Effect-authority B2 | C5 | |
+| T-EA-03 | Effect-authority B3 | C5 | |
 | T-01 | FD contract | C3 | New schema, 4-disposition logic |
 | T-02 | Routing contract | C4 | 12+ root-cause table, stable digest |
 | T-03 | Projection contract | C4 | Effect boundary, minimality |
@@ -824,7 +1345,7 @@ G6: T-21..T-24                    (integration+acceptance tests, parallel after 
 | T-23 | E2E+registry chain tests | C4 | |
 | T-24 | Bridge+prompt parity tests | C3 | |
 
-**Complexity totals: C2×2, C3×12, C4×11, C5×3**
+**Complexity totals: C1×2, C2×4, C3×14, C4×11, C5×8**
 
 ## Open Questions / Blockers
 
@@ -835,15 +1356,17 @@ All 11 Spec OQs (OQ-1..OQ-11) are resolved by design.md and are **not** blockers
 ### Classified as Blockers to Apply (not to Tasks)
 
 - **Spec SHA-256 drift**: if spec.md changes (verified by digest), Tasks must be reconciled before Apply. Authoritative digest is `374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f`.
-- **Design SHA-256 drift**: if design.md changes (verified by digest), Tasks must be reconciled before Apply. Authoritative digest is `a2873999c3a1164393d57060db2032f2cf6aa8f9ca40f46c56e6911d9319d8fe`.
+- **Design SHA-256 drift**: if design.md changes (verified by digest), Tasks must be reconciled before Apply. Authoritative digest is `9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1`.
+- **Design-replan SHA-256 drift**: if design-replan-runner-authority.md changes, Tasks must be reconciled. Authoritative digest is `7d389a846ca00c71c356ada41d78af4ffd0f140aa2acba431d1871611cb8306a`.
 - **Target allowlist intersection with existing OpenSpec change**: any overlap with another active change's targets hard-stops that task's batch.
 - **`runner-capability-standardization` intersection**: hard stop on any target, repair route, or scope expansion.
 - **V1 compatibility regression**: any existing V1 fixture or replay test failing after implementation must be diagnosed before the next modifying batch.
 - **Adaptive-quality-control ceiling hit**: repeated verify/fix cycles on same identity reaching the configured ceiling without successful repair must trigger replan/split/escalation before another Apply batch is issued.
+- **Pi worktree state**: the pre-existing uncommitted Pi canonical source changes must be reconciled in place during T-RA-05. Apply must not use git discard/restore/checkout to eliminate these changes. The worktree evidence is an independent signal, not pre-approval for the runner-authority batch.
 
 ### No Unresolved External Preconditions
 
-All inputs are available in the current repository state. No external service, human approval gate, or remote artifact is required before Tasks can proceed.
+All inputs are available in the current repository state. No external service, human approval gate, or remote artifact is required before Tasks can proceed, except named human approval for the runner-authority batch identity.
 
 ---
 
@@ -852,25 +1375,24 @@ All inputs are available in the current repository state. No external service, h
 | Field | Value |
 |-------|-------|
 | **Status** | `tasks_replan_completed` |
-| **Recommended next action** | `human_approval_required` for proposed effect-authority batch identity `deterministic-apply-verify-review-flow-recovery-batch-g1-effect-authority`; new explicit human-approved batch identity required before any modifying attempt |
-| **Tasks total** | 31 (24 original + 7 recovery: T-REC-01..04 + T-EA-01..03) |
-| **Groups total** | 8 (G-REC + G-EA + G1..G6) |
-| **Dependency order** | G-REC (T-REC-01→T-REC-02→T-REC-03→T-REC-04) → G-EA (T-EA-01→T-EA-02→T-EA-03) → G1 → G2 → G3 → G4 → G5 → G6 |
-| **Recovery batch identity (G1)** | `deterministic-apply-verify-review-flow-recovery-batch-g1` |
-| **Recovery batch ceiling (G1)** | exactly 8 files (4 source + 4 test): `finding-disposition.{ts,test.ts}`, `routing-decision.{ts,test.ts}`, `blocking-repair-projection.{ts,test.ts}`, `execution-convergence.{ts,test.ts}` |
-| **Proposed effect-authority batch identity** | `deterministic-apply-verify-review-flow-recovery-batch-g1-effect-authority` (**NOT APPROVED** — requires named human approval) |
-| **Proposed effect-authority batch ceiling** | exactly 8 files (4 source + 4 test) — same ceiling as G1 recovery batch; see `tasks-replan-effect-authority.md` |
-| **Apply readiness** | **NOT AUTHORIZED.** No Apply, G2, repair-3, or scope expansion is authorized by this Task replan. A new explicit named human-approved batch identity is required through the normal OpenSpec workflow before any modifying attempt. Pre-batch gate: (1) spec SHA-256 confirmed `374a8fb1...`; (2) design SHA-256 confirmed `a2873999...`; (3) no target intersection with `runner-capability-standardization` or other active OpenSpec change; (4) worktree policy satisfied; (5) V1 compatibility confirmed. |
+| **Recommended next action** | `human_approval_required` — user must authorize `deterministic-apply-verify-review-flow-runner-authority-g2-g6` in a new explicit message before any modifying attempt |
+| **Tasks total** | 39 (8 G-RA + 7 recovery + 24 original) |
+| **Groups total** | 9 (G-RA + G-REC + G-EA + G1..G6) |
+| **Dependency order** | G-RA (T-RA-01→T-RA-02→T-RA-03→T-RA-04→T-RA-05→T-RA-06→T-RA-07→T-RA-08) → G-REC → G-EA → G1 → G2 → G3 → G4 → G5 → G6 |
+| **Runner-authority batch identity** | `deterministic-apply-verify-review-flow-runner-authority-g2-g6` |
+| **Runner-authority batch ceiling** | exactly 8 files: `orchestrator-content.ts`, `orchestrator-content.test.ts`, `developer-team-execution.ts` (OpenCode), `developer-team-execution.ts` (Pi), `developer-team-execution.generated.js` (OpenCode), `developer-team-execution.generated.js` (Pi), `developer-team-execution-reachability.test.ts` (OpenCode), `developer-team-execution-reachability.test.ts` (Pi) |
+| **Apply readiness** | **NOT AUTHORIZED.** No Apply, G2, repair-3, or scope expansion is authorized by this Task replan. A new explicit named human-approved batch identity is required through the normal OpenSpec workflow before any modifying attempt. |
 | **G2 Apply** | **BLOCKED** — explicit prohibition in all dispatch policy entries |
 | **repair-3** | **PROHIBITED** — exhausted G1 two-attempt budget not reopened |
-| **Spec/Design replan required for effect-authority** | **NO** — Review confirmed revised Spec and Design already require the missing boundaries |
-| **Blockers to Apply** | (1) spec SHA-256 drift from `374a8fb1...`; (2) design SHA-256 drift from `a2873999...`; (3) target intersection; (4) worktree state; (5) V1 regression; (6) missing named human-approved batch identity for proposed effect-authority batch |
+| **Spec/Design replan required for runner-authority** | **NO** — design-replan-runner-authority.md resolved the architecture |
+| **Blockers to Apply** | (1) spec SHA-256 drift from `374a8fb1...`; (2) design SHA-256 drift from `9850e208...`; (3) design-replan SHA-256 drift from `7d389a84...`; (4) target intersection; (5) Pi worktree state reconciliation; (6) V1 regression; (7) missing named human-approved batch identity for runner-authority batch |
 | **FailureManifestV1** | none (forward reconciliation, not a reactive batch failure) |
 | **RegistryIntentV1 values** | `[]` — no intent emitted by this bounded Task replan |
-| **Risk lane** | CRITICAL for T-REC-01..04; CRITICAL for T-EA-01..03; CRITICAL for T-03, T-09, T-11, T-22 (original) |
-| **Complexity floor** | C2 (prompts); ceiling C5 (control plane + convergence authority + effect-authority recovery) |
-| **Tasks.md SHA-256 (post-effect-authority-replan)** | `sha256:a3f8c2d71b5e4a6f7b8c0d3e2f1a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2` |
-| **Preconditions.md SHA-256 (post-effect-authority-replan)** | `sha256:b4e9d3c82c6f5b7a4d9e8c2f1b3a7c6d5e4f3b2a1c0d9e8f7a6b5c4d3e2f1a0b` |
+| **Risk lane** | CRITICAL for T-RA-03..T-RA-08, T-REC-01..T-REC-04, T-EA-01..T-EA-03, T-03, T-09, T-11, T-22 |
+| **Complexity floor** | C1 (test updates); ceiling C5 (control plane + convergence authority + effect-authority recovery + runner-authority critical path) |
+| **Spec SHA-256** | `sha256:374a8fb1a155830624083829aa8ccbbe609032e6a1b4c8064169372b4bfb8d7f` |
+| **Design SHA-256** | `sha256:9850e208e6f364232c4418481e6cc99eb063a68a1afdf77db52ae703ca2e9bc1` |
+| **Design-replan SHA-256** | `sha256:7d389a846ca00c71c356ada41d78af4ffd0f140aa2acba431d1871611cb8306a` |
 
 ---
 
@@ -895,4 +1417,4 @@ All inputs are available in the current repository state. No external service, h
 17. **repair-3 is PROHIBITED.** The exhausted G1 two-attempt budget is not reopened, reset, or converted into an authorize-anyway path.
 18. **No modifying batch may be issued without a new explicit human-approved batch identity.**
 
-(End of file — total lines: ~520)
+(End of file — total lines: ~900)

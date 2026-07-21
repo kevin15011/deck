@@ -77,6 +77,18 @@ function authorizationInput(event: Record<string, unknown>, executionId: string,
 export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTeamExecutionExtensionOptionsV1 = {}) {
   const authorizationService = options.authorizationService ?? createInvocationAuthorizationServiceV1();
   const bridge = options.bridge ?? createPiDeveloperTeamExecutionBridgeV1({ authorizationService, delegate: async () => {} });
+  const provider = (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT] as PiHostProviderV1 | undefined;
+  // Capture selected invocationAuthorization exactly once (immutable snapshot). Do not re-read options or provider mode fields.
+  const capturedOptionsMode = options.invocationAuthorization;
+  const capturedProviderMode = capturedOptionsMode !== undefined ? undefined : provider?.invocationAuthorization;
+  const rawMode = capturedOptionsMode !== undefined
+    ? capturedOptionsMode
+    : capturedProviderMode !== undefined
+      ? capturedProviderMode
+      : "static-compatible";
+  const modeIsValid = rawMode === "invocation-required" || rawMode === "static-compatible";
+  const mode = modeIsValid ? (rawMode as "invocation-required" | "static-compatible") : "static-compatible";
+  const resolveExecutionEvent = options.resolveExecutionEvent ?? provider?.resolvePi;
   let latestReceipt: `sha256:${string}` | undefined;
 
   return function registerDeveloperTeamExecutionExtension(pi: PiExtensionApi): void {
@@ -86,13 +98,13 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
     });
     pi.on("tool_call", async (event) => {
       const input = event?.input;
-      if (!input || typeof input !== "object" || !applyAgent(input)) return undefined;
+      if (!input || typeof input !== "object") return undefined;
       delete input.deckExecution;
-      const provider = (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT] as PiHostProviderV1 | undefined;
-      const mode = options.invocationAuthorization ?? provider?.invocationAuthorization ?? "static-compatible";
-      const resolveExecutionEvent = options.resolveExecutionEvent ?? provider?.resolvePi;
+      if (!applyAgent(input)) return undefined;
+      if (!modeIsValid) return { block: true, reason: "invalid-evidence" };
+      const failClosed = mode === "invocation-required";
       if (!resolveExecutionEvent) {
-        return mode === "invocation-required"
+        return failClosed
           ? { block: true, reason: "modification-not-authorized:AUTHZ_MISSING" }
           : undefined;
       }
@@ -100,16 +112,19 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
       try {
         rawEvent = await resolveExecutionEvent(Object.freeze({ ...event, input: undefined }), Object.freeze({ ...input }));
       } catch {
-        return mode === "invocation-required"
+        return failClosed
           ? { block: true, reason: "invalid-evidence" }
           : undefined;
       }
-      if (!rawEvent || typeof rawEvent !== "object" || !event.toolCallId || !latestReceipt) {
-        return mode === "invocation-required"
-          ? { block: true, reason: "modification-not-authorized:AUTHZ_MISSING" }
+      if (!rawEvent || typeof rawEvent !== "object" || !event.toolCallId) {
+        return failClosed
+          ? { block: true, reason: "invalid-evidence" }
           : undefined;
       }
       if (mode === "static-compatible" && (rawEvent as Record<string, unknown>).mode !== "shadow") return undefined;
+      if (!latestReceipt) {
+        return { block: true, reason: "invalid-evidence" };
+      }
       const executionId = event.toolCallId as string;
       try {
         const issued = authorizationInput(rawEvent as Record<string, unknown>, executionId, latestReceipt);
@@ -128,13 +143,13 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
           userAuthorizationReceiptDigest: latestReceipt,
         });
         if (outcome.code !== "executed" && outcome.code !== "shadow-complete" && outcome.code !== "legacy-complete") {
-          return mode === "invocation-required"
+          return failClosed
             ? { block: true, reason: outcome.authorizationCode ? `modification-not-authorized:${outcome.authorizationCode}` : outcome.code }
             : undefined;
         }
         return undefined;
       } catch {
-        return mode === "invocation-required"
+        return failClosed
           ? { block: true, reason: "invalid-evidence" }
           : undefined;
       }
