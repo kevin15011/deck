@@ -1039,4 +1039,1117 @@ describe("ExecutionConvergenceStateV1 + DossierV1", () => {
     ).toThrow(/illegal-transition|invalid-evidence/);
   });
 
+  test("RED REVIEW-FINAL-B1: caller-selected retry ledger growth on apply_result_accepted rejected", () => {
+    const emptyActive = sha256Digest({ activeBlockingFindingIds: [] });
+    const v1 = baseDossier();
+    const first = createExecutionConvergenceDossierV1({
+      baseDossier: v1,
+      state: {
+        lifecycle: "awaiting_apply_result",
+        generation: 0,
+        implementationSubjectDigest: DIGEST_B,
+        activeBlockingSetDigest: emptyActive,
+      },
+    });
+    const result = buildConvergenceResultRecordV1({
+      stage: "apply",
+      evidenceDigest: DIGEST_A,
+      generation: 1,
+      implementationSubjectDigest: DIGEST_A,
+      dependencySetDigest: DIGEST_C,
+      activeBlockingSetDigest: emptyActive,
+    });
+    const evidence = buildConvergenceStageEvidenceV1({
+      stage: "apply",
+      evidenceDigest: DIGEST_A,
+      generation: 1,
+      implementationSubjectDigest: DIGEST_A,
+      dependencySetDigest: DIGEST_C,
+      activeBlockingSetDigest: emptyActive,
+      referencedResultDigest: result.digest,
+    });
+    const forgedAttemptDigest = DIGEST_A;
+    expect(() =>
+      appendExecutionConvergenceRevisionWithAuthorityV1(first, {
+        event: "apply_result_accepted",
+        activeBlockingSetDigest: emptyActive,
+        implementationSubjectDigest: DIGEST_A,
+        stageEvidence: evidence,
+        expectedDependencySetDigest: DIGEST_C,
+        retryLedgerDigests: [forgedAttemptDigest],
+      }),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    const legal = appendExecutionConvergenceRevisionWithAuthorityV1(first, {
+      event: "apply_result_accepted",
+      activeBlockingSetDigest: emptyActive,
+      implementationSubjectDigest: DIGEST_A,
+      stageEvidence: evidence,
+      expectedDependencySetDigest: DIGEST_C,
+    });
+    expect(legal.dossier.retryLedgerDigests).toEqual([]);
+    const { digest: _d, convergenceId: _c, ...rest } = legal.dossier;
+    const injectedPayload = { ...rest, retryLedgerDigests: [forgedAttemptDigest] as const };
+    const injectedDigest = sha256Digest(injectedPayload);
+    const injected = {
+      ...injectedPayload,
+      convergenceId: `convergence:v1:${injectedDigest.slice(7, 39)}` as const,
+      digest: injectedDigest,
+    };
+    expect(() =>
+      parseExecutionConvergenceDossierWithAuthorityV1(injected, [first], [legal.receipt], {
+        stageEvidence: [evidence],
+        invalidations: [],
+        resultRecords: [result],
+      }),
+    ).toThrow(/illegal-transition|opaque-evidence|invalid-evidence/);
+  });
+
+  test("GREEN: legal repair_effect_succeeded appends event-derived retry ledger digest", () => {
+    const emptyActive = sha256Digest({ activeBlockingFindingIds: [] });
+    const v1 = baseDossier();
+    let head = createExecutionConvergenceDossierV1({
+      baseDossier: v1,
+      state: {
+        lifecycle: "awaiting_apply_result",
+        generation: 0,
+        implementationSubjectDigest: DIGEST_B,
+        activeBlockingSetDigest: emptyActive,
+      },
+    });
+    const history: typeof head[] = [];
+    const receipts: ReturnType<typeof appendExecutionConvergenceRevisionWithAuthorityV1>["receipt"][] =
+      [];
+    const stageEvidenceRecords: ReturnType<typeof buildConvergenceStageEvidenceV1>[] = [];
+    const resultRecords: ReturnType<typeof buildConvergenceResultRecordV1>[] = [];
+    const dep = DIGEST_C;
+    const subject1 = DIGEST_A;
+
+    let evidenceSeq = 0;
+    const uniqueEvidenceDigest = (): typeof DIGEST_A => {
+      evidenceSeq += 1;
+      return sha256Digest({ evidenceSeq, kind: "stage-evidence" });
+    };
+    const advance = (
+      event: "apply_result_accepted" | "targeted_has_blockers" | "route_repair",
+      generation: number,
+    ) => {
+      // stage "apply" avoids reconstruct injecting scoped digests on non-accepting events.
+      const stage = "apply" as const;
+      const evidenceDigest = uniqueEvidenceDigest();
+      const result = buildConvergenceResultRecordV1({
+        stage,
+        evidenceDigest,
+        generation,
+        implementationSubjectDigest: subject1,
+        dependencySetDigest: dep,
+        activeBlockingSetDigest: emptyActive,
+      });
+      resultRecords.push(result);
+      const evidence = buildConvergenceStageEvidenceV1({
+        stage,
+        evidenceDigest,
+        generation,
+        implementationSubjectDigest: subject1,
+        dependencySetDigest: dep,
+        activeBlockingSetDigest: emptyActive,
+        referencedResultDigest: result.digest,
+      });
+      stageEvidenceRecords.push(evidence);
+      const step = appendExecutionConvergenceRevisionWithAuthorityV1(
+        head,
+        {
+          event,
+          activeBlockingSetDigest: emptyActive,
+          implementationSubjectDigest: subject1,
+          stageEvidence: evidence,
+          expectedDependencySetDigest: dep,
+        },
+        history,
+      );
+      history.push(head);
+      receipts.push(step.receipt);
+      head = step.dossier;
+    };
+
+    advance("apply_result_accepted", 1);
+    advance("targeted_has_blockers", 1);
+    advance("route_repair", 1);
+    expect(head.state.lifecycle).toBe("repair_pending");
+    const repairPending = head;
+
+    const projectionDigest = DIGEST_B;
+    const attemptFields = {
+      retryIdentity: DIGEST_A,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: repairPending.revision,
+      convergenceDigest: repairPending.digest,
+      terminalEffectResult: "succeeded" as const,
+    };
+    const attemptDigest = sha256Digest({
+      schema: "retry-attempt-record-v1",
+      retryIdentity: attemptFields.retryIdentity,
+      attemptNumber: attemptFields.attemptNumber,
+      projectionDigest: attemptFields.projectionDigest,
+      convergenceRevision: attemptFields.convergenceRevision,
+      convergenceDigest: attemptFields.convergenceDigest,
+      terminalEffectResult: attemptFields.terminalEffectResult,
+    });
+    const attempt = { ...attemptFields, digest: attemptDigest };
+
+    const effectEvidenceDigest = uniqueEvidenceDigest();
+    const effectResult = buildConvergenceResultRecordV1({
+      stage: "apply",
+      evidenceDigest: effectEvidenceDigest,
+      generation: 2,
+      implementationSubjectDigest: subject1,
+      dependencySetDigest: dep,
+      activeBlockingSetDigest: emptyActive,
+    });
+    resultRecords.push(effectResult);
+    const effectEvidence = buildConvergenceStageEvidenceV1({
+      stage: "apply",
+      evidenceDigest: effectEvidenceDigest,
+      generation: 2,
+      implementationSubjectDigest: subject1,
+      dependencySetDigest: dep,
+      activeBlockingSetDigest: emptyActive,
+      referencedResultDigest: effectResult.digest,
+    });
+    stageEvidenceRecords.push(effectEvidence);
+    const effectStep = appendExecutionConvergenceRevisionWithAuthorityV1(
+      repairPending,
+      {
+        event: "repair_effect_succeeded",
+        activeBlockingSetDigest: emptyActive,
+        implementationSubjectDigest: subject1,
+        stageEvidence: effectEvidence,
+        expectedDependencySetDigest: dep,
+        repairProjectionDigest: projectionDigest,
+        retryAttemptRecords: [attempt],
+        retryLedgerDigests: [attempt.digest],
+      },
+      history,
+    );
+    history.push(repairPending);
+    receipts.push(effectStep.receipt);
+    head = effectStep.dossier;
+    expect(head.retryLedgerDigests).toEqual([attempt.digest]);
+    expect(head.state.lifecycle).toBe("targeted_pending");
+    expect(head.state.generation).toBe(2);
+
+    const parsed = parseExecutionConvergenceDossierWithAuthorityV1(head, history, receipts, {
+      stageEvidence: stageEvidenceRecords,
+      invalidations: [],
+      resultRecords,
+      retryAttemptRecords: [attempt],
+    });
+    expect(parsed.digest).toBe(head.digest);
+    expect(parsed.retryLedgerDigests).toEqual([attempt.digest]);
+  });
+
+  /**
+   * Shared helper: legal chain to repair_pending (empty retry ledger).
+   */
+  function reachRepairPending(): {
+    repairPending: ReturnType<typeof createExecutionConvergenceDossierV1>;
+    history: ReturnType<typeof createExecutionConvergenceDossierV1>[];
+    receipts: ReturnType<typeof appendExecutionConvergenceRevisionWithAuthorityV1>["receipt"][];
+    stageEvidenceRecords: ReturnType<typeof buildConvergenceStageEvidenceV1>[];
+    resultRecords: ReturnType<typeof buildConvergenceResultRecordV1>[];
+    emptyActive: ReturnType<typeof sha256Digest>;
+    dep: typeof DIGEST_C;
+    subject1: typeof DIGEST_A;
+    uniqueEvidenceDigest: () => typeof DIGEST_A;
+  } {
+    const emptyActive = sha256Digest({ activeBlockingFindingIds: [] });
+    const v1 = baseDossier();
+    let head = createExecutionConvergenceDossierV1({
+      baseDossier: v1,
+      state: {
+        lifecycle: "awaiting_apply_result",
+        generation: 0,
+        implementationSubjectDigest: DIGEST_B,
+        activeBlockingSetDigest: emptyActive,
+      },
+    });
+    const history: typeof head[] = [];
+    const receipts: ReturnType<typeof appendExecutionConvergenceRevisionWithAuthorityV1>["receipt"][] =
+      [];
+    const stageEvidenceRecords: ReturnType<typeof buildConvergenceStageEvidenceV1>[] = [];
+    const resultRecords: ReturnType<typeof buildConvergenceResultRecordV1>[] = [];
+    const dep = DIGEST_C;
+    const subject1 = DIGEST_A;
+    let evidenceSeq = 0;
+    const uniqueEvidenceDigest = (): typeof DIGEST_A => {
+      evidenceSeq += 1;
+      return sha256Digest({ evidenceSeq, kind: "stage-evidence" });
+    };
+    const advance = (
+      event: "apply_result_accepted" | "targeted_has_blockers" | "route_repair",
+      generation: number,
+    ) => {
+      const stage = "apply" as const;
+      const evidenceDigest = uniqueEvidenceDigest();
+      const result = buildConvergenceResultRecordV1({
+        stage,
+        evidenceDigest,
+        generation,
+        implementationSubjectDigest: subject1,
+        dependencySetDigest: dep,
+        activeBlockingSetDigest: emptyActive,
+      });
+      resultRecords.push(result);
+      const evidence = buildConvergenceStageEvidenceV1({
+        stage,
+        evidenceDigest,
+        generation,
+        implementationSubjectDigest: subject1,
+        dependencySetDigest: dep,
+        activeBlockingSetDigest: emptyActive,
+        referencedResultDigest: result.digest,
+      });
+      stageEvidenceRecords.push(evidence);
+      const step = appendExecutionConvergenceRevisionWithAuthorityV1(
+        head,
+        {
+          event,
+          activeBlockingSetDigest: emptyActive,
+          implementationSubjectDigest: subject1,
+          stageEvidence: evidence,
+          expectedDependencySetDigest: dep,
+        },
+        history,
+      );
+      history.push(head);
+      receipts.push(step.receipt);
+      head = step.dossier;
+    };
+    advance("apply_result_accepted", 1);
+    advance("targeted_has_blockers", 1);
+    advance("route_repair", 1);
+    expect(head.state.lifecycle).toBe("repair_pending");
+    expect(head.retryLedgerDigests).toEqual([]);
+    return {
+      repairPending: head,
+      history,
+      receipts,
+      stageEvidenceRecords,
+      resultRecords,
+      emptyActive,
+      dep,
+      subject1,
+      uniqueEvidenceDigest,
+    };
+  }
+
+  function buildAttemptRecord(fields: {
+    retryIdentity: typeof DIGEST_A;
+    attemptNumber: number;
+    projectionDigest: typeof DIGEST_A;
+    convergenceRevision: number;
+    convergenceDigest: typeof DIGEST_A;
+    terminalEffectResult: "succeeded" | "failed";
+    priorAttemptDigest?: typeof DIGEST_A;
+  }) {
+    const digest = sha256Digest({
+      schema: "retry-attempt-record-v1",
+      retryIdentity: fields.retryIdentity,
+      attemptNumber: fields.attemptNumber,
+      projectionDigest: fields.projectionDigest,
+      ...(fields.priorAttemptDigest === undefined
+        ? {}
+        : { priorAttemptDigest: fields.priorAttemptDigest }),
+      convergenceRevision: fields.convergenceRevision,
+      convergenceDigest: fields.convergenceDigest,
+      terminalEffectResult: fields.terminalEffectResult,
+    });
+    return { ...fields, digest };
+  }
+
+  function appendRepairEffect(input: {
+    predecessor: ReturnType<typeof createExecutionConvergenceDossierV1>;
+    history: ReturnType<typeof createExecutionConvergenceDossierV1>[];
+    emptyActive: ReturnType<typeof sha256Digest>;
+    dep: typeof DIGEST_C;
+    subject1: typeof DIGEST_A;
+    generation: number;
+    projectionDigest: typeof DIGEST_A;
+    attempt: ReturnType<typeof buildAttemptRecord>;
+    uniqueEvidenceDigest: () => typeof DIGEST_A;
+    event?: "repair_effect_succeeded" | "repair_effect_failed";
+    /** Complete records resolving predecessor.retryLedgerDigests (per-identity authority). */
+    predecessorRetryAttemptRecords?: ReturnType<typeof buildAttemptRecord>[];
+  }) {
+    const evidenceDigest = input.uniqueEvidenceDigest();
+    const result = buildConvergenceResultRecordV1({
+      stage: "apply",
+      evidenceDigest,
+      generation: input.generation,
+      implementationSubjectDigest: input.subject1,
+      dependencySetDigest: input.dep,
+      activeBlockingSetDigest: input.emptyActive,
+    });
+    const evidence = buildConvergenceStageEvidenceV1({
+      stage: "apply",
+      evidenceDigest,
+      generation: input.generation,
+      implementationSubjectDigest: input.subject1,
+      dependencySetDigest: input.dep,
+      activeBlockingSetDigest: input.emptyActive,
+      referencedResultDigest: result.digest,
+    });
+    const step = appendExecutionConvergenceRevisionWithAuthorityV1(
+      input.predecessor,
+      {
+        event: input.event ?? "repair_effect_succeeded",
+        activeBlockingSetDigest: input.emptyActive,
+        implementationSubjectDigest: input.subject1,
+        stageEvidence: evidence,
+        expectedDependencySetDigest: input.dep,
+        repairProjectionDigest: input.projectionDigest,
+        retryAttemptRecords: [input.attempt],
+        predecessorRetryAttemptRecords: input.predecessorRetryAttemptRecords ?? [],
+        retryLedgerDigests: [...input.predecessor.retryLedgerDigests, input.attempt.digest],
+      },
+      input.history,
+    );
+    return { step, result, evidence };
+  }
+
+  test("RED REVIEW-FINAL-B2: empty-ledger attempt-1 with detached priorAttemptDigest rejected", () => {
+    const ctx = reachRepairPending();
+    const projectionDigest = DIGEST_B;
+    const detachedPrior = DIGEST_A; // unrelated valid digest; not from predecessor ledger
+    const detached = buildAttemptRecord({
+      retryIdentity: DIGEST_A,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: ctx.repairPending.revision,
+      convergenceDigest: ctx.repairPending.digest,
+      terminalEffectResult: "succeeded",
+      priorAttemptDigest: detachedPrior,
+    });
+
+    expect(() =>
+      appendRepairEffect({
+        predecessor: ctx.repairPending,
+        history: ctx.history,
+        emptyActive: ctx.emptyActive,
+        dep: ctx.dep,
+        subject1: ctx.subject1,
+        generation: 2,
+        projectionDigest,
+        attempt: detached,
+        uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+      }),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // Authority replay also rejects a hand-crafted successor carrying the detached record.
+    const legal = buildAttemptRecord({
+      retryIdentity: DIGEST_A,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: ctx.repairPending.revision,
+      convergenceDigest: ctx.repairPending.digest,
+      terminalEffectResult: "succeeded",
+    });
+    const legalAppend = appendRepairEffect({
+      predecessor: ctx.repairPending,
+      history: ctx.history,
+      emptyActive: ctx.emptyActive,
+      dep: ctx.dep,
+      subject1: ctx.subject1,
+      generation: 2,
+      projectionDigest,
+      attempt: legal,
+      uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+    });
+    // Forge successor state from legal append but swap retry digest to detached record.
+    const { digest: _d, convergenceId: _c, ...rest } = legalAppend.step.dossier;
+    const forgedPayload = {
+      ...rest,
+      retryLedgerDigests: [detached.digest] as const,
+    };
+    const forgedDigest = sha256Digest(forgedPayload);
+    const forged = {
+      ...forgedPayload,
+      convergenceId: `convergence:v1:${forgedDigest.slice(7, 39)}` as const,
+      digest: forgedDigest,
+    };
+    expect(() =>
+      parseExecutionConvergenceDossierWithAuthorityV1(
+        forged,
+        [...ctx.history, ctx.repairPending],
+        [...ctx.receipts, legalAppend.step.receipt],
+        {
+          stageEvidence: [...ctx.stageEvidenceRecords, legalAppend.evidence],
+          invalidations: [],
+          resultRecords: [...ctx.resultRecords, legalAppend.result],
+          retryAttemptRecords: [detached],
+        },
+      ),
+    ).toThrow(/illegal-transition|opaque-evidence|invalid-evidence|retry ledger/);
+  });
+
+  test("RED REVIEW-FINAL-B2: non-empty predecessor ledger rejects wrong prior / wrong attemptNumber", () => {
+    const ctx = reachRepairPending();
+    const projectionDigest = DIGEST_B;
+    const attempt1 = buildAttemptRecord({
+      retryIdentity: DIGEST_A,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: ctx.repairPending.revision,
+      convergenceDigest: ctx.repairPending.digest,
+      terminalEffectResult: "succeeded",
+    });
+    const first = appendRepairEffect({
+      predecessor: ctx.repairPending,
+      history: ctx.history,
+      emptyActive: ctx.emptyActive,
+      dep: ctx.dep,
+      subject1: ctx.subject1,
+      generation: 2,
+      projectionDigest,
+      attempt: attempt1,
+      uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+    });
+    ctx.history.push(ctx.repairPending);
+    ctx.receipts.push(first.step.receipt);
+    ctx.stageEvidenceRecords.push(first.evidence);
+    ctx.resultRecords.push(first.result);
+    let head = first.step.dossier;
+    expect(head.retryLedgerDigests).toEqual([attempt1.digest]);
+
+    // Return to repair_pending for attempt 2.
+    const reenter = (
+      event: "targeted_has_blockers" | "route_repair",
+      generation: number,
+    ) => {
+      const evidenceDigest = ctx.uniqueEvidenceDigest();
+      const result = buildConvergenceResultRecordV1({
+        stage: "apply",
+        evidenceDigest,
+        generation,
+        implementationSubjectDigest: ctx.subject1,
+        dependencySetDigest: ctx.dep,
+        activeBlockingSetDigest: ctx.emptyActive,
+      });
+      ctx.resultRecords.push(result);
+      const evidence = buildConvergenceStageEvidenceV1({
+        stage: "apply",
+        evidenceDigest,
+        generation,
+        implementationSubjectDigest: ctx.subject1,
+        dependencySetDigest: ctx.dep,
+        activeBlockingSetDigest: ctx.emptyActive,
+        referencedResultDigest: result.digest,
+      });
+      ctx.stageEvidenceRecords.push(evidence);
+      const step = appendExecutionConvergenceRevisionWithAuthorityV1(
+        head,
+        {
+          event,
+          activeBlockingSetDigest: ctx.emptyActive,
+          implementationSubjectDigest: ctx.subject1,
+          stageEvidence: evidence,
+          expectedDependencySetDigest: ctx.dep,
+        },
+        ctx.history,
+      );
+      ctx.history.push(head);
+      ctx.receipts.push(step.receipt);
+      head = step.dossier;
+    };
+    reenter("targeted_has_blockers", 2);
+    reenter("route_repair", 2);
+    expect(head.state.lifecycle).toBe("repair_pending");
+    expect(head.retryLedgerDigests).toEqual([attempt1.digest]);
+    const repairPending2 = head;
+
+    // Wrong prior (unrelated) with correct attempt number.
+    const wrongPrior = buildAttemptRecord({
+      retryIdentity: DIGEST_A,
+      attemptNumber: 2,
+      projectionDigest,
+      convergenceRevision: repairPending2.revision,
+      convergenceDigest: repairPending2.digest,
+      terminalEffectResult: "succeeded",
+      priorAttemptDigest: DIGEST_C, // not attempt1.digest
+    });
+    expect(() =>
+      appendRepairEffect({
+        predecessor: repairPending2,
+        history: ctx.history,
+        emptyActive: ctx.emptyActive,
+        dep: ctx.dep,
+        subject1: ctx.subject1,
+        generation: 3,
+        projectionDigest,
+        attempt: wrongPrior,
+        predecessorRetryAttemptRecords: [attempt1],
+        uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+      }),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // Wrong attempt number (skips to 3) with correct prior.
+    const wrongNumber = buildAttemptRecord({
+      retryIdentity: DIGEST_A,
+      attemptNumber: 3,
+      projectionDigest,
+      convergenceRevision: repairPending2.revision,
+      convergenceDigest: repairPending2.digest,
+      terminalEffectResult: "succeeded",
+      priorAttemptDigest: attempt1.digest,
+    });
+    expect(() =>
+      appendRepairEffect({
+        predecessor: repairPending2,
+        history: ctx.history,
+        emptyActive: ctx.emptyActive,
+        dep: ctx.dep,
+        subject1: ctx.subject1,
+        generation: 3,
+        projectionDigest,
+        attempt: wrongNumber,
+        predecessorRetryAttemptRecords: [attempt1],
+        uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+      }),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // Missing predecessor record resolution rejects.
+    expect(() =>
+      appendRepairEffect({
+        predecessor: repairPending2,
+        history: ctx.history,
+        emptyActive: ctx.emptyActive,
+        dep: ctx.dep,
+        subject1: ctx.subject1,
+        generation: 3,
+        projectionDigest,
+        attempt: buildAttemptRecord({
+          retryIdentity: DIGEST_A,
+          attemptNumber: 2,
+          projectionDigest,
+          convergenceRevision: repairPending2.revision,
+          convergenceDigest: repairPending2.digest,
+          terminalEffectResult: "succeeded",
+          priorAttemptDigest: attempt1.digest,
+        }),
+        predecessorRetryAttemptRecords: [],
+        uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+      }),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // GREEN path: contiguous attempt 2 with exact same-identity prior.
+    const attempt2 = buildAttemptRecord({
+      retryIdentity: DIGEST_A,
+      attemptNumber: 2,
+      projectionDigest,
+      convergenceRevision: repairPending2.revision,
+      convergenceDigest: repairPending2.digest,
+      terminalEffectResult: "succeeded",
+      priorAttemptDigest: attempt1.digest,
+    });
+    const second = appendRepairEffect({
+      predecessor: repairPending2,
+      history: ctx.history,
+      emptyActive: ctx.emptyActive,
+      dep: ctx.dep,
+      subject1: ctx.subject1,
+      generation: 3,
+      projectionDigest,
+      attempt: attempt2,
+      predecessorRetryAttemptRecords: [attempt1],
+      uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+    });
+    ctx.history.push(repairPending2);
+    ctx.receipts.push(second.step.receipt);
+    expect(second.step.dossier.retryLedgerDigests).toEqual([attempt1.digest, attempt2.digest]);
+
+    const parsed = parseExecutionConvergenceDossierWithAuthorityV1(
+      second.step.dossier,
+      ctx.history,
+      ctx.receipts,
+      {
+        stageEvidence: [...ctx.stageEvidenceRecords, second.evidence],
+        invalidations: [],
+        resultRecords: [...ctx.resultRecords, second.result],
+        retryAttemptRecords: [attempt1, attempt2],
+      },
+    );
+    expect(parsed.retryLedgerDigests).toEqual([attempt1.digest, attempt2.digest]);
+  });
+
+  test("GREEN: repair_effect_failed appends attempt-1 without prior link", () => {
+    const ctx = reachRepairPending();
+    const projectionDigest = DIGEST_B;
+    const attempt1 = buildAttemptRecord({
+      retryIdentity: DIGEST_A,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: ctx.repairPending.revision,
+      convergenceDigest: ctx.repairPending.digest,
+      terminalEffectResult: "failed",
+    });
+    // repair_effect_failed does not require modifying generation+1 stage evidence validation
+    // the same way — but stage evidence is still needed for authority replay.
+    const evidenceDigest = ctx.uniqueEvidenceDigest();
+    const result = buildConvergenceResultRecordV1({
+      stage: "apply",
+      evidenceDigest,
+      generation: 1,
+      implementationSubjectDigest: ctx.subject1,
+      dependencySetDigest: ctx.dep,
+      activeBlockingSetDigest: ctx.emptyActive,
+    });
+    const evidence = buildConvergenceStageEvidenceV1({
+      stage: "apply",
+      evidenceDigest,
+      generation: 1,
+      implementationSubjectDigest: ctx.subject1,
+      dependencySetDigest: ctx.dep,
+      activeBlockingSetDigest: ctx.emptyActive,
+      referencedResultDigest: result.digest,
+    });
+    const step = appendExecutionConvergenceRevisionWithAuthorityV1(
+      ctx.repairPending,
+      {
+        event: "repair_effect_failed",
+        activeBlockingSetDigest: ctx.emptyActive,
+        implementationSubjectDigest: ctx.subject1,
+        stageEvidence: evidence,
+        expectedDependencySetDigest: ctx.dep,
+        repairProjectionDigest: projectionDigest,
+        retryAttemptRecords: [attempt1],
+        retryLedgerDigests: [attempt1.digest],
+      },
+      ctx.history,
+    );
+    expect(step.dossier.retryLedgerDigests).toEqual([attempt1.digest]);
+    expect(step.dossier.state.lifecycle).toBe("stopped");
+
+    const parsed = parseExecutionConvergenceDossierWithAuthorityV1(
+      step.dossier,
+      [...ctx.history, ctx.repairPending],
+      [...ctx.receipts, step.receipt],
+      {
+        stageEvidence: [...ctx.stageEvidenceRecords, evidence],
+        invalidations: [],
+        resultRecords: [...ctx.resultRecords, result],
+        retryAttemptRecords: [attempt1],
+      },
+    );
+    expect(parsed.retryLedgerDigests).toEqual([attempt1.digest]);
+  });
+
+  test("RED/GREEN REVIEW-FINAL-B3: per-identity counters — B attempt1 after A; cross-identity priors reject", () => {
+    const ctx = reachRepairPending();
+    const projectionDigest = DIGEST_B;
+    const identityA = DIGEST_A;
+    const identityB = DIGEST_C;
+
+    // Legal identity A attempt 1.
+    const attemptA1 = buildAttemptRecord({
+      retryIdentity: identityA,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: ctx.repairPending.revision,
+      convergenceDigest: ctx.repairPending.digest,
+      terminalEffectResult: "succeeded",
+    });
+    const first = appendRepairEffect({
+      predecessor: ctx.repairPending,
+      history: ctx.history,
+      emptyActive: ctx.emptyActive,
+      dep: ctx.dep,
+      subject1: ctx.subject1,
+      generation: 2,
+      projectionDigest,
+      attempt: attemptA1,
+      uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+    });
+    ctx.history.push(ctx.repairPending);
+    ctx.receipts.push(first.step.receipt);
+    ctx.stageEvidenceRecords.push(first.evidence);
+    ctx.resultRecords.push(first.result);
+    let head = first.step.dossier;
+
+    // Identity-changing re-entry to repair_pending (global ledger still holds A).
+    const reenter = (event: "targeted_has_blockers" | "route_repair", generation: number) => {
+      const evidenceDigest = ctx.uniqueEvidenceDigest();
+      const result = buildConvergenceResultRecordV1({
+        stage: "apply",
+        evidenceDigest,
+        generation,
+        implementationSubjectDigest: ctx.subject1,
+        dependencySetDigest: ctx.dep,
+        activeBlockingSetDigest: ctx.emptyActive,
+      });
+      ctx.resultRecords.push(result);
+      const evidence = buildConvergenceStageEvidenceV1({
+        stage: "apply",
+        evidenceDigest,
+        generation,
+        implementationSubjectDigest: ctx.subject1,
+        dependencySetDigest: ctx.dep,
+        activeBlockingSetDigest: ctx.emptyActive,
+        referencedResultDigest: result.digest,
+      });
+      ctx.stageEvidenceRecords.push(evidence);
+      const step = appendExecutionConvergenceRevisionWithAuthorityV1(
+        head,
+        {
+          event,
+          activeBlockingSetDigest: ctx.emptyActive,
+          implementationSubjectDigest: ctx.subject1,
+          stageEvidence: evidence,
+          expectedDependencySetDigest: ctx.dep,
+        },
+        ctx.history,
+      );
+      ctx.history.push(head);
+      ctx.receipts.push(step.receipt);
+      head = step.dossier;
+    };
+    reenter("targeted_has_blockers", 2);
+    reenter("route_repair", 2);
+    expect(head.state.lifecycle).toBe("repair_pending");
+    expect(head.retryLedgerDigests).toEqual([attemptA1.digest]);
+    const repairPendingB = head;
+
+    // RED: B attempt2 / prior A (global-length semantics) must reject.
+    const bAsAttempt2 = buildAttemptRecord({
+      retryIdentity: identityB,
+      attemptNumber: 2,
+      projectionDigest,
+      convergenceRevision: repairPendingB.revision,
+      convergenceDigest: repairPendingB.digest,
+      terminalEffectResult: "succeeded",
+      priorAttemptDigest: attemptA1.digest,
+    });
+    expect(() =>
+      appendRepairEffect({
+        predecessor: repairPendingB,
+        history: ctx.history,
+        emptyActive: ctx.emptyActive,
+        dep: ctx.dep,
+        subject1: ctx.subject1,
+        generation: 3,
+        projectionDigest,
+        attempt: bAsAttempt2,
+        predecessorRetryAttemptRecords: [attemptA1],
+        uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+      }),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // RED: skipped B number (3) rejects.
+    const bSkipped = buildAttemptRecord({
+      retryIdentity: identityB,
+      attemptNumber: 3,
+      projectionDigest,
+      convergenceRevision: repairPendingB.revision,
+      convergenceDigest: repairPendingB.digest,
+      terminalEffectResult: "succeeded",
+    });
+    expect(() =>
+      appendRepairEffect({
+        predecessor: repairPendingB,
+        history: ctx.history,
+        emptyActive: ctx.emptyActive,
+        dep: ctx.dep,
+        subject1: ctx.subject1,
+        generation: 3,
+        projectionDigest,
+        attempt: bSkipped,
+        predecessorRetryAttemptRecords: [attemptA1],
+        uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+      }),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // RED: B attempt1 with wrong prior (A) rejects.
+    const bWrongPrior = buildAttemptRecord({
+      retryIdentity: identityB,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: repairPendingB.revision,
+      convergenceDigest: repairPendingB.digest,
+      terminalEffectResult: "succeeded",
+      priorAttemptDigest: attemptA1.digest,
+    });
+    expect(() =>
+      appendRepairEffect({
+        predecessor: repairPendingB,
+        history: ctx.history,
+        emptyActive: ctx.emptyActive,
+        dep: ctx.dep,
+        subject1: ctx.subject1,
+        generation: 3,
+        projectionDigest,
+        attempt: bWrongPrior,
+        predecessorRetryAttemptRecords: [attemptA1],
+        uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+      }),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // GREEN: B attempt1 / no prior — new identity, zero matching predecessor records.
+    const attemptB1 = buildAttemptRecord({
+      retryIdentity: identityB,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: repairPendingB.revision,
+      convergenceDigest: repairPendingB.digest,
+      terminalEffectResult: "succeeded",
+    });
+    const bAppend = appendRepairEffect({
+      predecessor: repairPendingB,
+      history: ctx.history,
+      emptyActive: ctx.emptyActive,
+      dep: ctx.dep,
+      subject1: ctx.subject1,
+      generation: 3,
+      projectionDigest,
+      attempt: attemptB1,
+      predecessorRetryAttemptRecords: [attemptA1],
+      uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+    });
+    ctx.history.push(repairPendingB);
+    ctx.receipts.push(bAppend.step.receipt);
+    expect(bAppend.step.dossier.retryLedgerDigests).toEqual([attemptA1.digest, attemptB1.digest]);
+
+    const parsed = parseExecutionConvergenceDossierWithAuthorityV1(
+      bAppend.step.dossier,
+      ctx.history,
+      ctx.receipts,
+      {
+        stageEvidence: [...ctx.stageEvidenceRecords, bAppend.evidence],
+        invalidations: [],
+        resultRecords: [...ctx.resultRecords, bAppend.result],
+        retryAttemptRecords: [attemptA1, attemptB1],
+      },
+    );
+    expect(parsed.retryLedgerDigests).toEqual([attemptA1.digest, attemptB1.digest]);
+  });
+
+  test("RED REVIEW-FINAL-B4: terminal repair_effect without attempt record rejects; non-terminal zero growth", () => {
+    const ctx = reachRepairPending();
+    const projectionDigest = DIGEST_B;
+    const evidenceDigest = ctx.uniqueEvidenceDigest();
+    const result = buildConvergenceResultRecordV1({
+      stage: "apply",
+      evidenceDigest,
+      generation: 2,
+      implementationSubjectDigest: ctx.subject1,
+      dependencySetDigest: ctx.dep,
+      activeBlockingSetDigest: ctx.emptyActive,
+    });
+    const evidence = buildConvergenceStageEvidenceV1({
+      stage: "apply",
+      evidenceDigest,
+      generation: 2,
+      implementationSubjectDigest: ctx.subject1,
+      dependencySetDigest: ctx.dep,
+      activeBlockingSetDigest: ctx.emptyActive,
+      referencedResultDigest: result.digest,
+    });
+
+    // RED: repair_effect_succeeded with zero retryAttemptRecords / no ledger growth.
+    expect(() =>
+      appendExecutionConvergenceRevisionWithAuthorityV1(
+        ctx.repairPending,
+        {
+          event: "repair_effect_succeeded",
+          activeBlockingSetDigest: ctx.emptyActive,
+          implementationSubjectDigest: ctx.subject1,
+          stageEvidence: evidence,
+          expectedDependencySetDigest: ctx.dep,
+          repairProjectionDigest: projectionDigest,
+        },
+        ctx.history,
+      ),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    expect(() =>
+      appendExecutionConvergenceRevisionWithAuthorityV1(
+        ctx.repairPending,
+        {
+          event: "repair_effect_succeeded",
+          activeBlockingSetDigest: ctx.emptyActive,
+          implementationSubjectDigest: ctx.subject1,
+          stageEvidence: evidence,
+          expectedDependencySetDigest: ctx.dep,
+          repairProjectionDigest: projectionDigest,
+          retryAttemptRecords: [],
+          retryLedgerDigests: [],
+        },
+        ctx.history,
+      ),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // RED: repair_effect_failed with zero records.
+    const failEvidenceDigest = ctx.uniqueEvidenceDigest();
+    const failResult = buildConvergenceResultRecordV1({
+      stage: "apply",
+      evidenceDigest: failEvidenceDigest,
+      generation: 1,
+      implementationSubjectDigest: ctx.subject1,
+      dependencySetDigest: ctx.dep,
+      activeBlockingSetDigest: ctx.emptyActive,
+    });
+    const failEvidence = buildConvergenceStageEvidenceV1({
+      stage: "apply",
+      evidenceDigest: failEvidenceDigest,
+      generation: 1,
+      implementationSubjectDigest: ctx.subject1,
+      dependencySetDigest: ctx.dep,
+      activeBlockingSetDigest: ctx.emptyActive,
+      referencedResultDigest: failResult.digest,
+    });
+    expect(() =>
+      appendExecutionConvergenceRevisionWithAuthorityV1(
+        ctx.repairPending,
+        {
+          event: "repair_effect_failed",
+          activeBlockingSetDigest: ctx.emptyActive,
+          implementationSubjectDigest: ctx.subject1,
+          stageEvidence: failEvidence,
+          expectedDependencySetDigest: ctx.dep,
+          repairProjectionDigest: projectionDigest,
+        },
+        ctx.history,
+      ),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // RED: multiple attempt records on terminal event.
+    const a1 = buildAttemptRecord({
+      retryIdentity: DIGEST_A,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: ctx.repairPending.revision,
+      convergenceDigest: ctx.repairPending.digest,
+      terminalEffectResult: "succeeded",
+    });
+    const a1b = buildAttemptRecord({
+      retryIdentity: DIGEST_C,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: ctx.repairPending.revision,
+      convergenceDigest: ctx.repairPending.digest,
+      terminalEffectResult: "succeeded",
+    });
+    expect(() =>
+      appendExecutionConvergenceRevisionWithAuthorityV1(
+        ctx.repairPending,
+        {
+          event: "repair_effect_succeeded",
+          activeBlockingSetDigest: ctx.emptyActive,
+          implementationSubjectDigest: ctx.subject1,
+          stageEvidence: evidence,
+          expectedDependencySetDigest: ctx.dep,
+          repairProjectionDigest: projectionDigest,
+          retryAttemptRecords: [a1, a1b],
+          retryLedgerDigests: [a1.digest, a1b.digest],
+        },
+        ctx.history,
+      ),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // RED: outcome mismatch (failed record on succeeded event).
+    const wrongOutcome = buildAttemptRecord({
+      retryIdentity: DIGEST_A,
+      attemptNumber: 1,
+      projectionDigest,
+      convergenceRevision: ctx.repairPending.revision,
+      convergenceDigest: ctx.repairPending.digest,
+      terminalEffectResult: "failed",
+    });
+    expect(() =>
+      appendExecutionConvergenceRevisionWithAuthorityV1(
+        ctx.repairPending,
+        {
+          event: "repair_effect_succeeded",
+          activeBlockingSetDigest: ctx.emptyActive,
+          implementationSubjectDigest: ctx.subject1,
+          stageEvidence: evidence,
+          expectedDependencySetDigest: ctx.dep,
+          repairProjectionDigest: projectionDigest,
+          retryAttemptRecords: [wrongOutcome],
+          retryLedgerDigests: [wrongOutcome.digest],
+        },
+        ctx.history,
+      ),
+    ).toThrow(/retry ledger|illegal-transition|invalid-evidence/);
+
+    // RED: authority replay rejects terminal successor with no ledger growth.
+    const legal = appendRepairEffect({
+      predecessor: ctx.repairPending,
+      history: ctx.history,
+      emptyActive: ctx.emptyActive,
+      dep: ctx.dep,
+      subject1: ctx.subject1,
+      generation: 2,
+      projectionDigest,
+      attempt: a1,
+      uniqueEvidenceDigest: ctx.uniqueEvidenceDigest,
+    });
+    const { digest: _d, convergenceId: _c, ...rest } = legal.step.dossier;
+    const strippedPayload = {
+      ...rest,
+      retryLedgerDigests: [] as const,
+    };
+    const strippedDigest = sha256Digest(strippedPayload);
+    const stripped = {
+      ...strippedPayload,
+      convergenceId: `convergence:v1:${strippedDigest.slice(7, 39)}` as const,
+      digest: strippedDigest,
+    };
+    expect(() =>
+      parseExecutionConvergenceDossierWithAuthorityV1(
+        stripped,
+        [...ctx.history, ctx.repairPending],
+        [...ctx.receipts, legal.step.receipt],
+        {
+          stageEvidence: [...ctx.stageEvidenceRecords, legal.evidence],
+          invalidations: [],
+          resultRecords: [...ctx.resultRecords, legal.result],
+          retryAttemptRecords: [],
+        },
+      ),
+    ).toThrow(/illegal-transition|opaque-evidence|invalid-evidence|retry ledger/);
+
+    // GREEN: non-terminal events still append zero records (targeted_has_blockers path).
+    const afterLegal = legal.step.dossier;
+    const ntDigest = ctx.uniqueEvidenceDigest();
+    const ntResult = buildConvergenceResultRecordV1({
+      stage: "apply",
+      evidenceDigest: ntDigest,
+      generation: 2,
+      implementationSubjectDigest: ctx.subject1,
+      dependencySetDigest: ctx.dep,
+      activeBlockingSetDigest: ctx.emptyActive,
+    });
+    const ntEvidence = buildConvergenceStageEvidenceV1({
+      stage: "apply",
+      evidenceDigest: ntDigest,
+      generation: 2,
+      implementationSubjectDigest: ctx.subject1,
+      dependencySetDigest: ctx.dep,
+      activeBlockingSetDigest: ctx.emptyActive,
+      referencedResultDigest: ntResult.digest,
+    });
+    const ntStep = appendExecutionConvergenceRevisionWithAuthorityV1(
+      afterLegal,
+      {
+        event: "targeted_has_blockers",
+        activeBlockingSetDigest: ctx.emptyActive,
+        implementationSubjectDigest: ctx.subject1,
+        stageEvidence: ntEvidence,
+        expectedDependencySetDigest: ctx.dep,
+      },
+      [...ctx.history, ctx.repairPending],
+    );
+    expect(ntStep.dossier.retryLedgerDigests).toEqual([a1.digest]);
+  });
+
 });

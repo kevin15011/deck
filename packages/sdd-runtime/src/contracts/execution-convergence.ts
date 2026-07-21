@@ -171,6 +171,18 @@ export interface ConvergenceTransitionReceiptV1 {
   digest: Sha256Digest;
 }
 
+/** Complete retry-attempt record referenced by retryLedgerDigests (additive authority). */
+export interface ConvergenceRetryAttemptRecordV1 {
+  digest: Sha256Digest;
+  retryIdentity: Sha256Digest;
+  attemptNumber: number;
+  projectionDigest: Sha256Digest;
+  priorAttemptDigest?: Sha256Digest;
+  convergenceRevision: number;
+  convergenceDigest: Sha256Digest;
+  terminalEffectResult: "succeeded" | "failed" | "rejected";
+}
+
 export interface ConvergenceAuthorityAppendInputV1 {
   event: ConvergenceTransitionEventV1;
   activeBlockingSetDigest: Sha256Digest;
@@ -190,6 +202,20 @@ export interface ConvergenceAuthorityAppendInputV1 {
   dispositionDigest?: Sha256Digest;
   routingDecisionDigest?: Sha256Digest;
   repairProjectionDigest?: Sha256Digest;
+  /**
+   * Event-derived retry-attempt records to append on permitted effect outcomes.
+   * Caller-selected digest lists are never a growth source; see retryLedgerDigests.
+   */
+  retryAttemptRecords?: readonly ConvergenceRetryAttemptRecordV1[];
+  /**
+   * Complete attempt records resolving predecessor.retryLedgerDigests in exact order.
+   * Required when the predecessor ledger is non-empty so per-identity counters can be derived.
+   */
+  predecessorRetryAttemptRecords?: readonly ConvergenceRetryAttemptRecordV1[];
+  /**
+   * Optional exact-equality assertion against the event-derived retry ledger.
+   * Not a source of ledger growth.
+   */
   retryLedgerDigests?: readonly Sha256Digest[];
   registryIntentDigests?: readonly Sha256Digest[];
 }
@@ -764,7 +790,20 @@ export function appendExecutionConvergenceRevisionWithAuthorityV1(
     nextRole.push(receipt.digest);
   }
 
-  const nextRetry = authority.retryLedgerDigests ?? validatedPrevious.retryLedgerDigests;
+  const nextRepairProjection =
+    authority.repairProjectionDigest ?? validatedPrevious.repairProjectionDigest;
+  // Retry ledger growth is event-derived from resolved attempt records only.
+  // Per-identity counters require complete predecessor attempt-record resolution.
+  const nextRetry = deriveRetryLedgerDigestsForTransition(
+    validatedPrevious,
+    authority.event,
+    authority.retryAttemptRecords ?? [],
+    nextRepairProjection,
+    authority.predecessorRetryAttemptRecords ?? [],
+  );
+  if (authority.retryLedgerDigests !== undefined) {
+    assertExactDigestList(nextRetry, authority.retryLedgerDigests, "retry ledger");
+  }
   const nextRegistry = authority.registryIntentDigests ?? validatedPrevious.registryIntentDigests;
   assertAppendOnlyPrefix(validatedPrevious.retryLedgerDigests, nextRetry, "retry ledger");
   assertAppendOnlyPrefix(validatedPrevious.invalidationRecordDigests, nextInvalidation, "invalidation records");
@@ -779,7 +818,7 @@ export function appendExecutionConvergenceRevisionWithAuthorityV1(
       state: nextState,
       dispositionDigest: authority.dispositionDigest ?? validatedPrevious.dispositionDigest,
       routingDecisionDigest: authority.routingDecisionDigest ?? validatedPrevious.routingDecisionDigest,
-      repairProjectionDigest: authority.repairProjectionDigest ?? validatedPrevious.repairProjectionDigest,
+      repairProjectionDigest: nextRepairProjection,
       retryLedgerDigests: [...nextRetry],
       invalidationRecordDigests: nextInvalidation,
       roleResultDigests: nextRole,
@@ -797,12 +836,15 @@ export interface ConvergenceAuthorityRecordSetV1 {
   stageEvidence: readonly ConvergenceStageEvidenceV1[];
   invalidations: readonly ConvergenceInvalidationV1[];
   resultRecords: readonly ConvergenceResultRecordV1[];
+  /** Complete retry-attempt records referenced by dossier retryLedgerDigests. */
+  retryAttemptRecords?: readonly ConvergenceRetryAttemptRecordV1[];
 }
 
 function indexAuthorityRecords(records: ConvergenceAuthorityRecordSetV1): {
   stageByDigest: Map<string, ConvergenceStageEvidenceV1>;
   invByDigest: Map<string, ConvergenceInvalidationV1>;
   resultByDigest: Map<string, ConvergenceResultRecordV1>;
+  attemptByDigest: Map<string, ConvergenceRetryAttemptRecordV1>;
 } {
   const stageByDigest = new Map<string, ConvergenceStageEvidenceV1>();
   for (const ev of records.stageEvidence) {
@@ -860,7 +902,187 @@ function indexAuthorityRecords(records: ConvergenceAuthorityRecordSetV1): {
     }
     resultByDigest.set(result.digest, recomputed);
   }
-  return { stageByDigest, invByDigest, resultByDigest };
+  const attemptByDigest = new Map<string, ConvergenceRetryAttemptRecordV1>();
+  for (const attempt of records.retryAttemptRecords ?? []) {
+    const recomputed = recomputeRetryAttemptRecordDigest(attempt);
+    if (recomputed !== attempt.digest || attemptByDigest.has(attempt.digest)) {
+      throw new Error("invalid-evidence: illegal-transition");
+    }
+    attemptByDigest.set(attempt.digest, attempt);
+  }
+  return { stageByDigest, invByDigest, resultByDigest, attemptByDigest };
+}
+
+/** Must match blocking-repair-projection computeRetryAttemptRecordDigestV1 payload. */
+function recomputeRetryAttemptRecordDigest(
+  record: Omit<ConvergenceRetryAttemptRecordV1, "digest"> & { digest?: Sha256Digest },
+): Sha256Digest {
+  return sha256Digest(
+    cloneCanonical({
+      schema: "retry-attempt-record-v1",
+      retryIdentity: record.retryIdentity,
+      attemptNumber: record.attemptNumber,
+      projectionDigest: record.projectionDigest,
+      ...(record.priorAttemptDigest === undefined ? {} : { priorAttemptDigest: record.priorAttemptDigest }),
+      convergenceRevision: record.convergenceRevision,
+      convergenceDigest: record.convergenceDigest,
+      terminalEffectResult: record.terminalEffectResult,
+    }),
+  );
+}
+
+/**
+ * Permitted terminal-effect events that may append exactly one retry-attempt digest.
+ * Other events must preserve the predecessor retry ledger exactly.
+ */
+function retryLedgerOutcomeForEvent(
+  event: ConvergenceTransitionEventV1,
+): "succeeded" | "failed" | undefined {
+  if (event === "repair_effect_succeeded") return "succeeded";
+  if (event === "repair_effect_failed") return "failed";
+  return undefined;
+}
+
+/**
+ * Resolve predecessor.retryLedgerDigests to complete attempt records (exact order).
+ * Rejects missing, duplicate, or digest-mismatched carriers.
+ */
+function resolvePredecessorRetryAttemptRecords(
+  predecessor: ExecutionConvergenceDossierV1,
+  supplied: readonly ConvergenceRetryAttemptRecordV1[],
+): ConvergenceRetryAttemptRecordV1[] {
+  const byDigest = new Map<string, ConvergenceRetryAttemptRecordV1>();
+  for (const record of supplied) {
+    assertDigest(record.digest, "predecessorRetryAttempt.digest");
+    if (recomputeRetryAttemptRecordDigest(record) !== record.digest) {
+      throw new Error("invalid-evidence: retry ledger");
+    }
+    if (byDigest.has(record.digest)) {
+      throw new Error("invalid-evidence: retry ledger");
+    }
+    byDigest.set(record.digest, record);
+  }
+  const resolved: ConvergenceRetryAttemptRecordV1[] = [];
+  for (const digest of predecessor.retryLedgerDigests) {
+    const record = byDigest.get(digest);
+    if (!record) {
+      throw new Error("invalid-evidence: retry ledger");
+    }
+    resolved.push(record);
+  }
+  // Supplied set may only contain predecessor ledger members (no extras that skip resolution).
+  if (byDigest.size !== predecessor.retryLedgerDigests.length) {
+    throw new Error("invalid-evidence: retry ledger");
+  }
+  return resolved;
+}
+
+function validateRetryAttemptRecordForLedgerAppend(
+  record: ConvergenceRetryAttemptRecordV1,
+  predecessor: ExecutionConvergenceDossierV1,
+  outcome: "succeeded" | "failed",
+  repairProjectionDigest: Sha256Digest | undefined,
+  predecessorAttempts: readonly ConvergenceRetryAttemptRecordV1[],
+): void {
+  assertDigest(record.digest, "retryAttempt.digest");
+  assertDigest(record.retryIdentity, "retryAttempt.retryIdentity");
+  assertDigest(record.projectionDigest, "retryAttempt.projectionDigest");
+  assertDigest(record.convergenceDigest, "retryAttempt.convergenceDigest");
+  if (record.priorAttemptDigest !== undefined) {
+    assertDigest(record.priorAttemptDigest, "retryAttempt.priorAttemptDigest");
+  }
+  if (recomputeRetryAttemptRecordDigest(record) !== record.digest) {
+    throw new Error("invalid-evidence: retry ledger");
+  }
+  if (record.terminalEffectResult !== outcome) {
+    throw new Error("invalid-evidence: retry ledger");
+  }
+  if (
+    record.convergenceRevision !== predecessor.revision ||
+    record.convergenceDigest !== predecessor.digest
+  ) {
+    throw new Error("invalid-evidence: retry ledger");
+  }
+  if (repairProjectionDigest === undefined || record.projectionDigest !== repairProjectionDigest) {
+    throw new Error("invalid-evidence: retry ledger");
+  }
+
+  // Per-identity counter/prior — matches validateRetryAttemptAgainstLedgerV1.
+  const forIdentity = predecessorAttempts.filter((r) => r.retryIdentity === record.retryIdentity);
+  const expectedAttemptNumber = forIdentity.length + 1;
+  if (!Number.isInteger(record.attemptNumber) || record.attemptNumber !== expectedAttemptNumber) {
+    throw new Error("invalid-evidence: retry ledger");
+  }
+  if (expectedAttemptNumber === 1) {
+    // Schema omits priorAttemptDigest for a new identity's first attempt.
+    if (record.priorAttemptDigest !== undefined) {
+      throw new Error("invalid-evidence: retry ledger");
+    }
+  } else {
+    const expectedPrior = forIdentity[expectedAttemptNumber - 2]!;
+    if (record.priorAttemptDigest !== expectedPrior.digest) {
+      throw new Error("invalid-evidence: retry ledger");
+    }
+  }
+}
+
+/**
+ * Derive the successor retry ledger from permitted event outcome + resolved attempt records.
+ * Caller-selected digest lists are never a growth source.
+ * Terminal repair_effect_succeeded/failed MUST append exactly one validated attempt record.
+ * Non-terminal events MUST append zero records (exact predecessor list).
+ * Counter/prior are per record.retryIdentity against complete predecessor attempt records.
+ */
+function deriveRetryLedgerDigestsForTransition(
+  predecessor: ExecutionConvergenceDossierV1,
+  event: ConvergenceTransitionEventV1,
+  attemptRecords: readonly ConvergenceRetryAttemptRecordV1[],
+  repairProjectionDigest: Sha256Digest | undefined,
+  predecessorRetryAttemptRecords: readonly ConvergenceRetryAttemptRecordV1[] = [],
+): Sha256Digest[] {
+  const outcome = retryLedgerOutcomeForEvent(event);
+
+  if (outcome === undefined) {
+    // Non-terminal: zero attempt-record appends; exact predecessor list.
+    if (attemptRecords.length !== 0) {
+      throw new Error("invalid-evidence: illegal-transition");
+    }
+    return [...predecessor.retryLedgerDigests];
+  }
+
+  // Terminal repair effect: exactly one resolved attempt record with matching outcome.
+  if (attemptRecords.length !== 1) {
+    throw new Error("invalid-evidence: retry ledger");
+  }
+  const predecessorAttempts = resolvePredecessorRetryAttemptRecords(
+    predecessor,
+    predecessorRetryAttemptRecords,
+  );
+  const record = attemptRecords[0]!;
+  validateRetryAttemptRecordForLedgerAppend(
+    record,
+    predecessor,
+    outcome,
+    repairProjectionDigest,
+    predecessorAttempts,
+  );
+  if (predecessor.retryLedgerDigests.includes(record.digest)) {
+    throw new Error("invalid-evidence: retry ledger");
+  }
+  return [...predecessor.retryLedgerDigests, record.digest];
+}
+
+function assertExactDigestList(
+  expected: readonly Sha256Digest[],
+  actual: readonly Sha256Digest[],
+  label: string,
+): void {
+  if (
+    actual.length !== expected.length ||
+    expected.some((digest, index) => actual[index] !== digest)
+  ) {
+    throw new Error(`invalid-evidence: ${label}`);
+  }
 }
 
 function recomputeReceiptDigest(receipt: ConvergenceTransitionReceiptV1): Sha256Digest {
@@ -977,7 +1199,8 @@ export function parseExecutionConvergenceDossierWithAuthorityV1(
     throw new Error("invalid-evidence: opaque-evidence");
   }
   const structural = parseExecutionConvergenceDossierV1(value, history);
-  const { stageByDigest, invByDigest, resultByDigest } = indexAuthorityRecords(authorityRecords);
+  const { stageByDigest, invByDigest, resultByDigest, attemptByDigest } =
+    indexAuthorityRecords(authorityRecords);
 
   if (structural.revision === 1) {
     if (
@@ -1059,6 +1282,49 @@ export function parseExecutionConvergenceDossierWithAuthorityV1(
         throw new Error("invalid-evidence: illegal-transition");
       }
     }
+
+    // Retry ledger: event-derived from resolved attempt records; exact successor compare.
+    const addedRetryDigests = successor.retryLedgerDigests.slice(
+      predecessor.retryLedgerDigests.length,
+    );
+    if (
+      successor.retryLedgerDigests.length < predecessor.retryLedgerDigests.length ||
+      predecessor.retryLedgerDigests.some(
+        (digest, index) => successor.retryLedgerDigests[index] !== digest,
+      )
+    ) {
+      throw new Error("invalid-evidence: illegal-transition");
+    }
+    const resolvedAttempts: ConvergenceRetryAttemptRecordV1[] = [];
+    for (const digest of addedRetryDigests) {
+      const record = attemptByDigest.get(digest);
+      if (!record) {
+        throw new Error("invalid-evidence: opaque-evidence");
+      }
+      resolvedAttempts.push(record);
+    }
+    // Complete predecessor ledger records — required for per-identity counter/prior.
+    const predecessorAttempts: ConvergenceRetryAttemptRecordV1[] = [];
+    for (const digest of predecessor.retryLedgerDigests) {
+      const record = attemptByDigest.get(digest);
+      if (!record) {
+        throw new Error("invalid-evidence: opaque-evidence");
+      }
+      predecessorAttempts.push(record);
+    }
+    let expectedRetry: Sha256Digest[];
+    try {
+      expectedRetry = deriveRetryLedgerDigestsForTransition(
+        predecessor,
+        receipt.event,
+        resolvedAttempts,
+        successor.repairProjectionDigest ?? predecessor.repairProjectionDigest,
+        predecessorAttempts,
+      );
+    } catch {
+      throw new Error("invalid-evidence: illegal-transition");
+    }
+    assertExactDigestList(expectedRetry, successor.retryLedgerDigests, "illegal-transition");
   }
 
   return structural;
