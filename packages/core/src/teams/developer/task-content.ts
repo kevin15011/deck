@@ -69,6 +69,10 @@ You are owner-aware and dependency-aware. Do not produce a flat naive task list 
 
 Follow the matching skill (\`deck-developer-task\`) for detailed task breakdown methodology, structured output template, routing rules, artifact persistence, and return format.
 
+## Design EII Fidelity
+
+Preserve every Design Exact Implementation Instruction by EII ID and canonical target; do not reinterpret, dilute, replace, or summarize it away. Missing, ambiguous, conflicting, or infeasible direction blocks with \`design-instruction-ambiguous\`.
+
 ## Return Contract
 
 Return a structured task list in the format defined by the matching skill. The orchestrator will use your tasks to route Apply agents.
@@ -482,6 +486,9 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 Follow the cognitive-doc-design skill for artifact structure and documentation patterns.
+## Exact Implementation Instruction Fidelity
+
+For each task, carry the originating requirement and acceptance scenario, Design constraint and EII ID, EII mode and exact text or semantic constraints, excluded targets, rollout condition, and rollback boundary. A \`byte-verbatim\` EII must reference its exact target and fenced text; a \`semantic-constrained\` EII must carry every declared clause, invariant, intent, and prohibition. If any required Design direction is missing, ambiguous, conflicting, or infeasible, stop task generation for that target and return blocker \`design-instruction-ambiguous\`; do not invent a decision for Apply.
 `;
 
 export const TASK_COMPACT_AGENT_BODY = `# Task Agent
@@ -497,6 +504,9 @@ export const TASK_COMPACT_AGENT_BODY = `# Task Agent
 - Write or update \`tasks.md\` and \`preconditions.md\`; load 'deck-developer-task' before acting.
 
 ${GIT_DISCARD_PROTECTION_RULE}
+## Design EII Fidelity
+
+Preserve every Design Exact Implementation Instruction by EII ID and canonical target; do not reinterpret, dilute, replace, or summarize it away. Missing, ambiguous, conflicting, or infeasible direction blocks with \`design-instruction-ambiguous\`.
 `;
 
 export const TASK_COMPACT_SKILL_BODY = `# Task Skill
@@ -521,4 +531,7 @@ export const TASK_COMPACT_SKILL_BODY = `# Task Skill
 ## Artifact and Return
 
 Write or update \`tasks.md\` and \`preconditions.md\`. Return paths, task/group counts, routing, dependency order, readiness for Apply, ordered RegistryIntentV1 values, and blockers.
+## Exact Implementation Instruction Fidelity
+
+For each task, carry the originating requirement and acceptance scenario, Design constraint and EII ID, EII mode and exact text or semantic constraints, excluded targets, rollout condition, and rollback boundary. A \`byte-verbatim\` EII must reference its exact target and fenced text; a \`semantic-constrained\` EII must carry every declared clause, invariant, intent, and prohibition. If any required Design direction is missing, ambiguous, conflicting, or infeasible, stop task generation for that target and return blocker \`design-instruction-ambiguous\`; do not invent a decision for Apply.
 `;

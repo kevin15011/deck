@@ -68,7 +68,7 @@ Follow the matching skill (\`deck-developer-verify\`) for detailed verification 
 
 ## Return Contract
 
-Return a structured verify report in the format defined by the matching skill. The orchestrator will combine this with Review findings for Apply fixes.
+Return a structured verify report in the format defined by the matching skill. On failure, the return must state: what failed, why it matters to the user/change, whether it is blocking, and the next decision/action. Full anchors remain in \`verify-report.md\`. Do not implement a fix, change requirements, or weaken independent judgment. Internal returns remain English. The orchestrator will combine this with Review findings for Apply fixes.
 `;
 
 // ---------------------------------------------------------------------------
@@ -299,6 +299,9 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 Follow the cognitive-doc-design skill for artifact structure and documentation patterns.
+## Failure Return Semantics
+
+On failure, the return must state: what failed, why it matters to the user/change, whether it is blocking, and the next decision/action. Full anchors remain in \`verify-report.md\`. Do not implement a fix, change requirements, or weaken independent judgment. Internal returns remain English.
 `;
 
 export const VERIFY_COMPACT_AGENT_BODY = `# Verify Agent
@@ -313,6 +316,9 @@ export const VERIFY_COMPACT_AGENT_BODY = `# Verify Agent
 - Load the matching role skill 'deck-developer-verify' before acting.
 
 ${GIT_DISCARD_PROTECTION_RULE}
+## Failure Return Semantics
+
+On failure, the return must state: what failed, why it matters to the user/change, whether it is blocking, and the next decision/action. Full anchors remain in \`verify-report.md\`. Do not implement a fix, change requirements, or weaken independent judgment. Internal returns remain English.
 `;
 
 export const VERIFY_COMPACT_SKILL_BODY = `# Verify Skill
@@ -324,6 +330,10 @@ export const VERIFY_COMPACT_SKILL_BODY = `# Verify Skill
 3. A failed stage blocks advancement. Skip or defer only with the machine-readable reason, evidence, policy, expiry/next trigger, and risk acceptance authorized by the lane; mandatory broad checks cannot be deferred.
 4. For behavior changes require prior RED evidence and passing applicable stages. For generated changes require canonical-source change, canonical generator invocation, no direct edit, and byte-identical regeneration evidence.
 5. Emit normalized findings with requirement/task/location/check anchors and classify unrelated baseline findings separately.
+
+## Failure Return Semantics
+
+On failure, the return must state: what failed, why it matters to the user/change, whether it is blocking, and the next decision/action. Full anchors remain in \`verify-report.md\`. Do not implement a fix, change requirements, or weaken independent judgment. Internal returns remain English.
 
 ## Return
 

@@ -374,10 +374,24 @@ describe("ORCHESTRATOR_SKILL_BODY", () => {
 
   // --- Need 7: Mermaid Phase Summaries ---
 
-  test("skill body contains phase summary diagram guidance", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Phase Summary Diagrams");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("explanatory and non-authoritative");
+  test("skill body contains conditional non-authoritative diagram guidance", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("User Phase Communication");
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/optional/i);
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/non-authoritative/i);
+    expect(ORCHESTRATOR_SKILL_BODY).toMatch(/never a phase gate/i);
     expect(ORCHESTRATOR_SKILL_BODY).toContain("runner-agnostic");
+    expect(ORCHESTRATOR_SKILL_BODY).not.toContain(
+      "After each planning phase (Proposal, Spec, Design, Task), include a concise Mermaid diagram",
+    );
+  });
+
+  test("personality cannot hide blockers, approvals, failures, decisions, or authorizations", () => {
+    for (const body of [PERSONALITY_COMMUNICATION_GUIDA, PERSONALITY_COMMUNICATION_PRAGMATICA]) {
+      expect(body).toContain("Content-preserving overlay");
+      expect(body).toMatch(/Do not remove, weaken, hide, or reorder that content/);
+    }
+    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).not.toContain("Phase completions get one line");
+    expect(PERSONALITY_COMMUNICATION_PRAGMATICA).toMatch(/enough space to be explicit/);
   });
 
   // --- Need 2: Post-Archive Git Suggestions ---

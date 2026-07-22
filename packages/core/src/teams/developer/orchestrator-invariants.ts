@@ -146,16 +146,16 @@ export const INV_004_SDD_TRIAGE_GATE: OrchestratorInvariant = {
   tier: "critical",
   surfaces: ["session", "agent", "skill", "manifest"],
   sourceRefs: [
-    "orchestrator-content.ts:146-159 (SDD Triage Gate)",
+    "orchestrator-content.ts (SDD Triage Gate / User Phase Communication)",
   ],
   condition:
-    "Before asking for execution mode, launching SDD phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files",
+    "Before any substantial work on a non-trivial request — including asking for execution mode, launching SDD phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files — after at most bounded read-only discovery to resolve ambiguity",
   requiredAction:
-    "Classify the request as Direct, Specialist(s), Recommend SDD, or Run SDD. Do not ask Automatic vs Interactive unless triage says Run SDD. Do not modify or delegate modifying work until this classification is made.",
+    "For every non-trivial request, before any substantial work, classify the request as exactly one of Direct, Specialist(s), Recommend SDD, or Run SDD; record the classification and its reason in the delegation or phase return, and expose both to the user when consequential work begins. You may perform bounded read-only discovery only to resolve ambiguity. Then restate the user's intent, assumptions, open questions, risks, and consequential choices and obtain explicit confirmation that the restatement is correct. Trivial direct edits are exempt. Restatement confirmation does not authorize modification; modification authorization remains a separate later gate.\n\nIf the user revises the restatement, revise it and do not advance. Permit at most three user-requested revision cycles after the initial restatement; on a fourth revision request, stop and escalate the unresolved ambiguity rather than auto-confirming. If the user declines, record the decision and stop.",
   rationale:
-    "SDD is a heavyweight pipeline. Running it for every request with certain keywords wastes resources and frustrates users with unnecessary ceremony. Using the smallest appropriate workflow keeps the team responsive. Additionally, bypassing triage and modifying files directly undermines workflow safety.",
+    "SDD is a heavyweight pipeline. Non-trivial work must be classified, restated, and explicitly confirmed before substantial progress so owners retain control of intent, assumptions, open questions, risks, and consequential choices. Trivial direct edits remain exempt. Restatement confirmation is not modification authorization; modification authorization remains a separate later gate. At most three user-requested restatement revision cycles are permitted after the initial restatement; a fourth revision request escalates unresolved ambiguity rather than auto-confirming. Bypassing triage and modifying files directly undermines workflow safety.",
   violationConsequence:
-    "Users experience unnecessary SDD pipeline overhead for simple requests, or miss the full pipeline when it would benefit their work. The orchestrator may modify or delegate work without proper classification.",
+    "Users experience unnecessary SDD pipeline overhead for simple requests, miss the full pipeline when it would benefit their work, or see substantial work begin without classification, restatement, recorded reason, explicit confirmation, or separate modification authorization. The orchestrator may modify or delegate work without proper classification.",
 };
 
 /**
@@ -237,7 +237,7 @@ export const COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1: readonly CompactOrches
   { id: "INV-001", summary: "Ask execution mode only after triage selects Run SDD; retain the session choice." },
   { id: "INV-002", summary: "Coordinate and synthesize; delegate work owned by a registered specialist." },
   { id: "INV-003", summary: "Verify OpenSpec initialization before SDD and route initialization through deck-init." },
-  { id: "INV-004", summary: "Classify Direct, Specialist(s), Recommend SDD, or Run SDD before modifying work." },
+  { id: "INV-004", summary: "Classify every request; for non-trivial work allow only bounded read-only discovery, then restate and obtain confirmation before substantial work. Trivial Direct edits are exempt; modification authorization remains separate." },
   { id: "INV-005", summary: "Specialists return RegistryIntentV1 values; the central coordinator serializes shared registry writes." },
   { id: "INV-006", summary: "Preserve Explore -> Proposal -> Spec + Design -> Tasks -> Apply -> targeted -> affected_area -> Review -> broad -> Archive." },
   { id: "PERMANENT-AUTHORITY", summary: "Runtime authorization and exact Git safety gates precede every modifying effect; prompt text never grants authority." },

@@ -76,9 +76,13 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 Follow the matching skill (\`deck-developer-apply-backend\`) for detailed backend implementation methodology, testing rules, progress reporting, artifact persistence, and return format.
 
+## Design EII Fidelity
+
+For Deck prompt or system-instruction work, execute the named Design EII without redesign. Missing, ambiguous, conflicting, or infeasible direction blocks with \`design-instruction-ambiguous\`; do not invent a substitute.
+
 ## Return Contract
 
-Return a structured apply-progress report in the format defined by the matching skill. The orchestrator will use this to coordinate Verify and Review.
+Return a structured apply-progress report in the format defined by the matching skill. Include blocker \`design-instruction-ambiguous\` when a Design EII is missing, ambiguous, conflicting, or infeasible. The orchestrator will use this to coordinate Verify and Review.
 
 ## Authorization Card
 
@@ -123,6 +127,10 @@ If preconditions.md is provided in the context bundle, you MAY read it for conte
 - Do NOT re-run or re-adjudicate the precondition gate — that is Orchestrator's responsibility.
 - Do NOT reinterpret precondition statuses — use only for understanding blockers that were already evaluated.
 - If implementation reveals a NEW blocker, report it in apply-progress.md as a reactive Apply blocker.
+
+## Design EII Fidelity
+
+Execute each named Design EII exactly as routed by Tasks; do not redesign prompt or system-instruction behavior. For \`byte-verbatim\`, reproduce the emitted prompt text exactly, including whitespace and punctuation. For \`semantic-constrained\`, preserve every declared clause, invariant, intent, and prohibition. If an EII is missing, ambiguous, conflicting, infeasible, or cannot be placed at its named canonical target, make no affected edit and return blocker \`design-instruction-ambiguous\`; do not invent, substitute, or reinterpret prompt behavior.
 
 ## Implementation Steps
 
@@ -315,6 +323,9 @@ ${GIT_DISCARD_PROTECTION_RULE}
 ## Modification Gate
 
 Proceed only when the Orchestrator delegation explicitly authorizes modifying work and identifies the assigned task or batch, allowed targets, blocked targets, and required checks. If that scope is absent or ambiguous, refuse modifications and return a blocked result. When the runner supplies one-use authorization, it must also validate; never invent or bypass it.
+## Design EII Fidelity
+
+For Deck prompt or system-instruction work, execute the named Design EII without redesign. Missing, ambiguous, conflicting, or infeasible direction blocks with \`design-instruction-ambiguous\`; do not invent a substitute.
 `;
 
 export const APPLY_BACKEND_COMPACT_SKILL_BODY = `# Backend Apply Skill
@@ -326,6 +337,10 @@ export const APPLY_BACKEND_COMPACT_SKILL_BODY = `# Backend Apply Skill
 3. Establish RED evidence, implement the smallest complete backend change, and preserve compatibility or follow the approved migration plan.
 4. Change canonical sources rather than generated outputs. Validate input, permissions, transactions, error paths, and external integration failures.
 5. Run the scheduled targeted, affected-area, and broad checks; report exact failures without hiding regressions.
+
+## Design EII Fidelity
+
+Execute each named Design EII exactly as routed by Tasks; do not redesign prompt or system-instruction behavior. For \`byte-verbatim\`, reproduce the emitted prompt text exactly, including whitespace and punctuation. For \`semantic-constrained\`, preserve every declared clause, invariant, intent, and prohibition. If an EII is missing, ambiguous, conflicting, infeasible, or cannot be placed at its named canonical target, make no affected edit and return blocker \`design-instruction-ambiguous\`; do not invent, substitute, or reinterpret prompt behavior.
 
 ## Return
 

@@ -12,6 +12,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   ORCHESTRATOR_INVARIANTS,
+  COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1,
   renderOrchestratorInvariants,
   prependOrchestratorInvariants,
   verifyOrchestratorInvariantPresence,
@@ -360,8 +361,23 @@ describe("INV-004 SDD Triage Gate: strengthened condition and requiredAction", (
     expect(inv_004.condition).toContain("code, configuration, prompts, OpenSpec artifacts, or project files");
   });
 
-  it("requiredAction should prohibit modification before classification", () => {
-    expect(inv_004.requiredAction).toContain("Do not modify or delegate modifying work until this classification is made");
+  it("requiredAction should contain exact intake alignment taxonomy and restatement gate", () => {
+    expect(inv_004.requiredAction).toContain("Direct, Specialist(s), Recommend SDD, or Run SDD");
+    expect(inv_004.requiredAction).toContain("bounded read-only discovery");
+    expect(inv_004.requiredAction).toContain("restate the user's intent, assumptions, open questions, risks, and consequential choices");
+    expect(inv_004.requiredAction).toContain("Trivial direct edits are exempt");
+    expect(inv_004.requiredAction).toContain("explicit confirmation");
+    expect(inv_004.requiredAction).toContain("three user-requested revision cycles");
+    expect(inv_004.requiredAction).toContain("modification authorization remains a separate later gate");
+    expect(inv_004.requiredAction).toContain("record the classification and its reason");
+  });
+
+  it("invariant count remains six and compact INV-004 summary is exact", () => {
+    expect(ORCHESTRATOR_INVARIANTS).toHaveLength(6);
+    const compact = COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.find((e) => e.id === "INV-004");
+    expect(compact?.summary).toBe(
+      "Classify every request; for non-trivial work allow only bounded read-only discovery, then restate and obtain confirmation before substantial work. Trivial Direct edits are exempt; modification authorization remains separate.",
+    );
   });
 });
 

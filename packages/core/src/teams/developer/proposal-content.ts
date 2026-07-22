@@ -62,9 +62,13 @@ ${GIT_DISCARD_PROTECTION_RULE}
 
 Follow the matching skill (\`deck-developer-proposal\`) for detailed proposal methodology, structured output template, artifact persistence, and return format.
 
+## Collaboration and Approval
+
+Treat \`proposal.md\` as a collaborative draft and revision loop. Creating or revising the draft never constitutes approval. Preserve prior decisions, dependencies, risks, rollback, and unresolved decisions on every revision. Return the consequential choices and a specific approval question. Only the Orchestrator may record explicit human approval evidence; Spec and Design must not begin until that evidence exists.
+
 ## Return Contract
 
-Return a structured proposal in the format defined by the matching skill. The orchestrator will pass your proposal to Spec and Design agents for parallel execution.
+Return a structured proposal in the format defined by the matching skill. Provide enough information for the Orchestrator to frame the user as client, system owner, domain authority, and active stakeholder. Approval is awaited; Spec and Design must not begin until the Orchestrator records explicit human approval evidence. "Ready for Spec and Design" is permitted only as a conditional after recorded approval.
 `;
 
 // ---------------------------------------------------------------------------
@@ -200,9 +204,13 @@ exploration when available. Be concise.}
 - [ ] {How to verify this change succeeded}
 - [ ] {Measurable outcome}
 
+## Collaboration and Approval
+
+Treat \`proposal.md\` as a collaborative draft and revision loop. Creating or revising the draft never constitutes approval. Preserve prior decisions, dependencies, risks, rollback, and unresolved decisions on every revision. Return the consequential choices and a specific approval question. Only the Orchestrator may record explicit human approval evidence; Spec and Design must not begin until that evidence exists.
+
 ## Next Steps
 
-Ready for Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) in parallel.
+Await recorded human approval via the Orchestrator before Spec or Design. After recorded approval, Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) may proceed in parallel.
 
 ## Mermaid Summary Source
 
@@ -263,7 +271,7 @@ Return EXACTLY this format to the orchestrator:
 - **Mermaid Source**: {fenced Mermaid diagram summarizing this phase, or "N/A — no structural relationships to diagram"}
 
 ### Next Step
-Ready for Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) in parallel.
+Await recorded human approval via the Orchestrator. After recorded approval, Spec (\`deck-developer-spec\`) and Design (\`deck-developer-design\`) may proceed in parallel.
 \`\`\`
 
 ${GIT_DISCARD_PROTECTION_RULE}
@@ -295,6 +303,11 @@ export const PROPOSAL_COMPACT_AGENT_BODY = `# Proposal Agent
 - Load the matching role skill 'deck-developer-proposal' before acting.
 
 ${GIT_DISCARD_PROTECTION_RULE}
+## Collaboration and Approval
+
+Treat \`proposal.md\` as a collaborative draft and revision loop. Creating or revising the draft never constitutes approval. Preserve prior decisions, dependencies, risks, rollback, and unresolved decisions on every revision. Return the consequential choices and a specific approval question. Only the Orchestrator may record explicit human approval evidence; Spec and Design must not begin until that evidence exists.
+
+Approval is awaited; do not treat draft completion as approval. Ready for Spec/Design only after recorded approval.
 `;
 
 export const PROPOSAL_COMPACT_SKILL_BODY = `# Proposal Skill
@@ -309,5 +322,7 @@ export const PROPOSAL_COMPACT_SKILL_BODY = `# Proposal Skill
 
 ## Artifact and Return
 
-Write or update \`proposal.md\`. Return the change ID, artifact path, intent, scope summary, risk level, unresolved decisions, ordered RegistryIntentV1 values, and blockers. The next handoff is Spec and Design after approval.
+Treat \`proposal.md\` as a collaborative draft and revision loop. Creating or revising the draft never constitutes approval. Preserve prior decisions, dependencies, risks, rollback, and unresolved decisions on every revision. Return the consequential choices and a specific approval question. Only the Orchestrator may record explicit human approval evidence; Spec and Design must not begin until that evidence exists.
+
+Write or update \`proposal.md\`. Return the change ID, artifact path, intent, scope summary, risk level, unresolved decisions, ordered RegistryIntentV1 values, and blockers. Frame the user as client, system owner, domain authority, and active stakeholder. The next handoff is Spec and Design only after recorded approval.
 `;

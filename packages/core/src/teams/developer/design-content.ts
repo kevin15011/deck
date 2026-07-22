@@ -74,9 +74,13 @@ Design does not formally depend on Spec. Both depend on Proposal and run in para
 
 Follow the matching skill (\`deck-developer-design\`) for detailed design methodology, structured output template, artifact persistence, and return format.
 
+## Prompt Authority
+
+When the change modifies Deck-owned prompts, skills, or system instructions, Design—not Tasks or Apply—must reason about and define the change in a stable \`## Exact Implementation Instructions\` section. Do not complete Design with an ambiguous target, missing mode, or untestable instruction.
+
 ## Return Contract
 
-Return a structured technical design in the format defined by the matching skill. The orchestrator will pass your design to the Task Agent along with the Spec artifact.
+Return a structured technical design in the format defined by the matching skill. Retain technical-lead prose, architecture, file impact, testing, tradeoffs, risks, dependencies, and open decisions. When prompt/system-instruction work is in scope, include the exact editable target list and an EII summary. The orchestrator will pass your design to the Task Agent along with the Spec artifact.
 `;
 
 // ---------------------------------------------------------------------------
@@ -245,6 +249,14 @@ If none apply, state "None specific to this change."}
 
 - {External dependency or prerequisite, if any. Omit if none.}
 
+## Exact Implementation Instructions
+
+Include this section whenever the change modifies Deck-owned prompts, skills, or system instructions. Create one independently testable EII per canonical symbol or named section; a symbol may have multiple EIIs only when concerns require different modes. Each EII must include: EII ID; editable source target; mode (\`byte-verbatim\` or \`semantic-constrained\`); required change; preserved constraints; affected tests/assertions; prohibited reinterpretations; and ambiguity-stop behavior. For \`byte-verbatim\`, provide the exact emitted prompt text in a fenced block, including whitespace and punctuation. For \`semantic-constrained\`, enumerate every required clause, invariant, intent, and prohibition. Use \`byte-verbatim\` for security-, authorization-, or destructive-operation-critical text. Do not use \`byte-verbatim\` for user-language-, personality-, data-, or composition-dependent text.
+
+## Return Requirements
+
+Retain technical-lead prose, architecture, file impact, testing, tradeoffs, risks, dependencies, and open decisions. Add the exact editable target list and an EII summary when the change modifies Deck-owned prompts, skills, or system instructions. The EII section is additive and conditional, not a replacement template.
+
 ## Next Steps
 
 Ready for Task (\`deck-developer-task\`) to break this design into implementation tasks, combined with Spec.
@@ -351,6 +363,11 @@ export const DESIGN_COMPACT_AGENT_BODY = `# Design Agent
 - Write or update \`openspec/changes/{change-name}/design.md\` and load 'deck-developer-design' before acting.
 
 ${GIT_DISCARD_PROTECTION_RULE}
+## Prompt Authority
+
+When the change modifies Deck-owned prompts, skills, or system instructions, Design—not Tasks or Apply—must reason about and define the change in a stable \`## Exact Implementation Instructions\` section. Do not complete Design with an ambiguous target, missing mode, or untestable instruction.
+
+Return includes exact editable targets and EII summary when prompt/system-instruction work is in scope.
 `;
 
 export const DESIGN_COMPACT_SKILL_BODY = `# Design Skill
@@ -365,5 +382,9 @@ export const DESIGN_COMPACT_SKILL_BODY = `# Design Skill
 
 ## Artifact and Return
 
-Write or update \`design.md\`. Return the artifact path, chosen approach, affected boundaries, file estimate, key tradeoffs, risk level, open decisions, ordered RegistryIntentV1 values, and blockers. The next handoff is Task after Spec/Design reconciliation.
+## Exact Implementation Instructions
+
+Include this section whenever the change modifies Deck-owned prompts, skills, or system instructions. Create one independently testable EII per canonical symbol or named section; a symbol may have multiple EIIs only when concerns require different modes. Each EII must include: EII ID; editable source target; mode (\`byte-verbatim\` or \`semantic-constrained\`); required change; preserved constraints; affected tests/assertions; prohibited reinterpretations; and ambiguity-stop behavior. For \`byte-verbatim\`, provide the exact emitted prompt text in a fenced block, including whitespace and punctuation. For \`semantic-constrained\`, enumerate every required clause, invariant, intent, and prohibition. Use \`byte-verbatim\` for security-, authorization-, or destructive-operation-critical text. Do not use \`byte-verbatim\` for user-language-, personality-, data-, or composition-dependent text.
+
+Write or update \`design.md\`. Return the artifact path, chosen approach, affected boundaries, file estimate, key tradeoffs, risk level, open decisions, exact editable target list, EII summary when applicable, ordered RegistryIntentV1 values, and blockers. The next handoff is Task after Spec/Design reconciliation.
 `;

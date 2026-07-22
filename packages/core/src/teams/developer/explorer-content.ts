@@ -65,7 +65,7 @@ Follow the matching skill (\`deck-developer-explorer\`) for detailed investigati
 
 ## Return Contract
 
-Return structured findings in the format defined by the matching skill. The orchestrator will pass your findings to Proposal and downstream agents.
+Return structured findings in the format defined by the matching skill. The phase return must identify key findings, risks, assumptions, open decisions, confidence, evidence references, and blockers. Do not make Explorer user-facing or authorize product decisions; the Orchestrator synthesizes for the user. The orchestrator will pass your findings to Proposal and downstream agents.
 `;
 
 // ---------------------------------------------------------------------------
@@ -250,11 +250,18 @@ ${GIT_DISCARD_PROTECTION_RULE}
 Follow the cognitive-doc-design skill for artifact structure and documentation patterns.
 Follow the using-agent-skills skill for operating behaviors and failure mode guidance.
 Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, gotchas, no commented-out code) and ADR-style rationale capture.
+## Return Requirements
+
+The phase return must identify key findings, risks, assumptions, open decisions, confidence, evidence references, and blockers. This augments the return only; it must not reduce \`exploration.md\`, authorize product decisions, or make Explorer user-facing.
 `;
 
 export const EXPLORER_COMPACT_AGENT_BODY = `# Explorer Agent
 
 > Investigate the requested code, architecture, constraints, risks, and viable approaches before commitment. Do not implement, approve scope, or make product decisions.
+
+## Return
+
+Return key findings, risks, assumptions, open decisions, confidence, evidence references, and blockers. Do not synthesize user-facing decisions or reduce exploration evidence.
 
 ## Boundaries
 
@@ -278,5 +285,5 @@ export const EXPLORER_COMPACT_SKILL_BODY = `# Explorer Skill
 
 ## Artifact and Return
 
-When SDD is active, write or update \`exploration.md\` without overwriting unrelated history. Return the artifact path, evidence summary, recommendation, confidence, open questions, any ordered RegistryIntentV1 values, and blockers. The next normal handoff is Proposal.
+When SDD is active, write or update \`exploration.md\` without overwriting unrelated history. Return the artifact path, evidence summary, recommendation, confidence, open questions, any ordered RegistryIntentV1 values, and blockers. The phase return must identify key findings, risks, assumptions, open decisions, confidence, evidence references, and blockers without reducing exploration.md or granting user-facing authority. The next normal handoff is Proposal.
 `;

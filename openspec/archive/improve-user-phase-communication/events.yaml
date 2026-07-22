@@ -1,0 +1,231 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-07-22T14:29:32Z"
+    actor: deck-developer-explorer
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "The user approved the four recommended defaults before Proposal."
+  - phase: proposal
+    status: in_progress
+    event: proposal.started
+    artifact: proposal.md
+    timestamp: 2026-07-22T14:38:43.992Z
+    actor: deck-developer-proposal
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:38ae7230094a39929e01b9d9854f6d73
+    idempotency_key: sha256:84284a36e1f920b0475ea808dd42ce21a3b7445b891cf5e36e33520ec1218f51
+    transaction_id: registry-tx-42590702-a999-4644-89ef-6c607e4de156
+    notes:
+      - Proposal draft created for interactive user review.
+      - No human Proposal approval is claimed or recorded by this intent.
+  - phase: proposal
+    status: approved
+    event: proposal.approved
+    artifact: proposal.md
+    timestamp: 2026-07-22T15:07:09.542Z
+    actor: human-user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:197f1cfdcd9269d868bc20b4222d6ba3
+    idempotency_key: sha256:66311c45405e8b0ffece3e34362fa1f34172beda71142224a98cf0ba964e194d
+    transaction_id: registry-tx-cb347e53-7eaf-48e9-997d-d5824ddcaf1c
+    notes:
+      - "The user explicitly approved the collaborative Proposal with the message:
+        Procede."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: 2026-07-22T00:00:00.000Z
+    actor: deck-developer-spec
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:17143f5434cd0ce5e494660ea4d7b779
+    idempotency_key: sha256:d81d1d7458b41ed398e4f16009506df4f764b517c0484f91c6a1503b4945c7c3
+    transaction_id: registry-tx-66b218c3-8d70-4759-8de3-3f54e212f958
+    notes:
+      - Spec artifact at openspec/changes/improve-user-phase-communication/spec.md
+      - 8 capabilities, 38 requirements, 32 Given/When/Then scenarios, 10
+        validation rules, 8 error contracts, compliance matrix, 1 conditional
+        non-authoritative Mermaid source
+      - Spec and Design may proceed in parallel per the approved Proposal
+      - Apply remains blocked until developer-team-execution-convergence closes or
+        an explicit target handoff is established
+      - Centralized coordinator must commit this intent; specialist does not write
+        shared registry YAML
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: 2026-07-22T15:42:26.607Z
+    actor: deck-developer-design
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:72c471f9db2648d2ce78c49ffd5079c3
+    idempotency_key: sha256:e2719c200d371b9d3ac6d5444311891c67d9cd3fd1218e920381f4fabcc7e409
+    transaction_id: registry-tx-573ec356-1754-44d8-b44f-c024d0db8244
+    notes:
+      - Design reconciles the approved Proposal and completed Spec.
+      - Task may proceed after centralized reconciliation; Apply remains blocked
+        until developer-team-execution-convergence closes or explicitly hands off
+        overlapping targets.
+      - No runner-capability-standardization target is authorized.
+  - phase: design
+    status: approved
+    event: design.approved
+    artifact: design.md
+    timestamp: 2026-07-22T15:49:12.301Z
+    actor: human-user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:12873a5b8d529c0810582afa0455349a
+    idempotency_key: sha256:7a47bf855f2df132ab33554aedb02db9757f6c31b79675ba0d7c4a31515b89ce
+    transaction_id: registry-tx-a8167b16-e699-4b3f-8c64-a88c4fd9f09c
+    notes:
+      - "The user confirmed the technical direction and authorized Task planning
+        with: Si, procede."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: 2026-07-22T16:09:34.927Z
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:0c1e08ba0225a8c083027c408f24ae79
+    idempotency_key: sha256:34693fdc5e57056a81490b7a67c547050f11584eff4fca7d7b5b8e2c86c56ce8
+    transaction_id: registry-tx-38c0d91a-cfaa-4182-8946-64eccd14cc84
+    notes:
+      - Task phase artifact at
+        openspec/changes/improve-user-phase-communication/tasks.md
+      - 15 tasks, 3 execution groups, 67 EIIs preserved, 38 requirements covered
+      - Apply remains blocked until developer-team-execution-convergence closes or
+        explicitly hands off overlapping targets
+      - No runner-capability-standardization target is authorized
+      - Centralized coordinator must commit this intent; specialist does not write
+        shared registry YAML
+  - phase: tasks
+    status: approved
+    event: tasks.approved
+    artifact: tasks.md
+    timestamp: 2026-07-22T16:21:35.953Z
+    actor: human-user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:2f7750eb15273dda906eebec70377d40
+    idempotency_key: sha256:b09f8858aa319b041c175462da36d69823525016d1c4ca0e5442abe265e61d13
+    transaction_id: registry-tx-caad2071-efe9-4d9f-9436-71222dc7c1c0
+    notes:
+      - The user approved proceeding with the current task plan.
+      - The user prioritized this change and authorized a non-destructive handoff
+        from developer-team-execution-convergence.
+      - No discard operation is authorized or performed.
+  - phase: tasks
+    status: approved
+    event: tasks.approved
+    artifact: preconditions.md
+    timestamp: 2026-07-22T16:23:17.742Z
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:44ab6e4c5349fee9bd69a0a2dd28e510
+    idempotency_key: sha256:99a42fba265f7b4ab7b95b1c31edeaf858be0dd2e40e49dbf0b6a2a168a7a392
+    transaction_id: registry-tx-1aec8b7e-3041-40a6-ad5e-98aef9236a5e
+    notes:
+      - "Precondition artifact updated: PC-1 satisfied by explicit non-destructive
+        handoff from developer-team-execution-convergence to current HEAD."
+      - Apply is ready against current HEAD; must not edit older change artifacts
+        or perform discard/reset/delete operations.
+      - No runner-capability-standardization target is authorized; PC-2 remains
+        active.
+      - No destructive Git operation is authorized or performed.
+  - phase: apply
+    status: passed_with_warnings
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-22T16:46:02.034Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:936108049a789587e212bf70203802a1
+    idempotency_key: sha256:eed1a47673a7b2cd9b72f320412ce85380742f3be2771f89e45375b48096d9af
+    transaction_id: registry-tx-44482bef-2849-40fa-93c4-a2a2308f1277
+    notes:
+      - deterministic-replay-evidence
+      - not-contemporaneous-original-RED
+      - replay-RED-exit-1-11-UPC-fails
+      - replay-GREEN-exit-0-214-pass
+      - hash-equivalence-15-of-15
+      - original-process-deviation-warning-retained
+      - missing-red-evidence-blocking-gap-closed-by-replay
+      - state-status-passed_with_warnings
+      - event-name-apply.completed-canonical
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-22T16:56:09.769Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:7de82c3f3c84ceea4d700faf8cd31bf2
+    idempotency_key: sha256:bce144d40375bb7eda593346e21a929383abe9cf6ac39cf59bf2c40fa3b16c31
+    transaction_id: registry-tx-219faebe-8ae2-412e-b9bc-f13f4963e7c4
+    notes:
+      - targeted-pass
+      - affected-area-pass
+      - broad-not-run-review-required-first
+      - apply-process-warning-missing-contemporaneous-red-retained
+      - deterministic-replay-validated-red-1-pass-11-fail-green-214-pass
+      - failure-manifest-none
+      - registry-only-artifact-path-repair
+  - phase: review
+    status: passed_with_warnings
+    event: review.passed
+    artifact: review-report.md
+    timestamp: 2026-07-22T17:12:49.999Z
+    actor: deck-developer-review
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:e468a4cffaccc88fd94c8574d8017d75
+    idempotency_key: sha256:c1760428f5763ea6546d391cb779d76b6ff1a4520049d1797339cc2b76764da9
+    transaction_id: registry-tx-178eb127-dea9-4225-b9ae-ada009576a6d
+    notes:
+      - engineering-blockers-none
+      - low-findings-1-non-blocking
+      - apply-process-warning-missing-red-evidence-retained
+      - broad-required-after-review
+  - phase: review
+    status: passed_with_warnings
+    event: review.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-22T17:25:35.650Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:23ebc3c66d2594788fee75d969e60789
+    idempotency_key: sha256:0a4d8d133de02d5ee0560605cf45eb45029167aef256115dbd98b2ca0050a1ab
+    transaction_id: registry-tx-27df61f7-8d9c-410a-9f24-32a7710febe1
+    notes:
+      - broad-pass
+      - repository-bun-test-3845-pass-0-fail
+      - typescript-noemit-pass
+      - compact-budget-pass-byte-ratio-0.4574-token-ratio-0.4184
+      - source-test-freshness-matched-verify-and-review-anchors
+      - scope-audit-pass-no-generated-or-protected-paths
+      - apply-process-warning-missing-red-evidence-retained
+      - review-low-finding-rev-low-001-retained
+      - failure-manifest-none
+  - phase: archive
+    status: archived
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: 2026-07-22T17:25:35.650Z
+    actor: deck-developer-archive
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:cfa671a7a98e81445869cd0b6573c21a
+    idempotency_key: sha256:e66442c065601e2665a39660f75164c35db5c3337cb77663a51c7b5d4c22d8a0
+    transaction_id: registry-tx-b9491773-1e50-4fab-8cf6-d3412c41d6a3
+    notes:
+      - deterministic-replay-RED-GREEN-proven
+      - missing-red-evidence-warning-retained
+      - REV-LOW-001-retained-non-blocking
+      - 3845-tests-pass-0-fail
+      - typescript-noemit-pass
+      - compact-byte-ratio-0.4574-token-ratio-0.4184
+      - scope-audit-pass
+      - failure-manifest-none
+      - no-source-changes-after-review-anchors

@@ -79,7 +79,7 @@ Follow the matching skill (\`deck-developer-review\`) for detailed review method
 
 ## Return Contract
 
-Return a structured review report in the format defined by the matching skill. The orchestrator will combine this with Verify findings for Apply fixes.
+Return a structured review report in the format defined by the matching skill. On requested changes, the return must state: what failed, impact, whether it is blocking, and the next decision/action. Full anchors remain in \`review-report.md\`. Do not implement a fix, change requirements, or weaken independent judgment. Internal returns remain English. The orchestrator will combine this with Verify findings for Apply fixes.
 `;
 
 // ---------------------------------------------------------------------------
@@ -338,6 +338,9 @@ Follow the \`documentation-and-adrs\` skill for comment guidance (why-vs-what, g
 Follow the frontend-ui-engineering skill for production-quality UI/component, state, accessibility, responsive, loading/error/empty-state, and frontend quality guidance.
 Follow the security-and-hardening skill for security review of input validation, auth, secrets, injection, exposure, and external integration risks.
 Follow the performance-optimization skill for performance review of scalability, Core Web Vitals, load behavior, data access, bundle size, and latency risks.
+## Failure Return Semantics
+
+On requested changes, the return must state: what failed, impact, whether it is blocking, and the next decision/action. Full anchors remain in \`review-report.md\`. Do not implement a fix, change requirements, or weaken independent judgment. Internal returns remain English.
 `;
 
 export const REVIEW_COMPACT_AGENT_BODY = `# Review Agent
@@ -352,6 +355,9 @@ export const REVIEW_COMPACT_AGENT_BODY = `# Review Agent
 - Load the matching role skill 'deck-developer-review' before acting.
 
 ${GIT_DISCARD_PROTECTION_RULE}
+## Failure Return Semantics
+
+On requested changes, the return must state: what failed, impact, whether it is blocking, and the next decision/action. Full anchors remain in \`review-report.md\`. Do not implement a fix, change requirements, or weaken independent judgment. Internal returns remain English.
 `;
 
 export const REVIEW_COMPACT_SKILL_BODY = `# Review Skill
@@ -363,6 +369,10 @@ export const REVIEW_COMPACT_SKILL_BODY = `# Review Skill
 3. Review correctness, architecture, security, maintainability, performance, compatibility, and scope. Anchor every blocking finding as required by the agent contract.
 4. Keep optional new scope separate and non-blocking. Never silently expand the batch or rewrite requirements, registry history, or prior findings.
 5. Report zero findings explicitly when appropriate; do not invent work to justify Review.
+
+## Failure Return Semantics
+
+On requested changes, the return must state: what failed, impact, whether it is blocking, and the next decision/action. Full anchors remain in \`review-report.md\`. Do not implement a fix, change requirements, or weaken independent judgment. Internal returns remain English.
 
 ## Return
 
