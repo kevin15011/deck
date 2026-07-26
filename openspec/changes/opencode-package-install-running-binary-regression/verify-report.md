@@ -281,3 +281,221 @@ The coordinator owns centralized registry writes. V1 returns intent only.
 ## R1 readiness
 
 R1 may proceed: **No**. The blocking changed-path/prohibition failure must be resolved or formally reconciled before independent Review.
+
+---
+
+# V2 Fresh Independent Verify — PASS
+
+## V2 decision
+
+V2 **PASSES**. R1 may proceed after the coordinator validates and serializes the ordered V2 registry intent. V1 remains preserved above as historical failed evidence and was not overwritten.
+
+This V2 result is bound to checkpoint commit `3b5b22d` (`feat(developer-team): add skill discovery and safe OpenCode setup`). Immediate source/test drift after the checkpoint is absent: current worktree source/test digest for the 15 implementation targets equals the `3b5b22d` digest, and `git diff --name-only 3b5b22d` contains no `apps/`, `packages/`, or `docs/` path.
+
+## V2 official bases and amendment
+
+| Artifact | SHA-256 / evidence |
+|---|---|
+| `HEAD` | `3b5b22d` |
+| `spec.md` | `007dacb13bacc4e891454dd11a7d9a2de4db229cf36656374202df4283c7846a` |
+| `design.md` | `b52aa1174d4408f1132738a00cc630399ed0419ef8ce3192defb6ed83ae28465` |
+| `tasks.md` | `fb06ccbafc96093bd891a5f24454f74991d30d9c4f18d6cdb90d3a7ebe4a7c50` |
+| `apply-progress.md` | `19be2c95ef1d52fbd44b9f2b9677a6bccf7371d4d35eadd06afcc7b6d3c3c799` |
+| `verify-report.md` before V2 append | `9a92279827a71d04795fa42ada466e3536910e3e81a742e7ff00a4b49d9aaae3` |
+| `state.yaml` | `da9a9b1a754e7ae487402e283ef0ebdffb0588f23620fbcafa1e752bc265fa01` |
+| `events.yaml` | `83ae544211848ec97621c0cadc42aa029f71665b504c77e44c5cd1195d71341c` |
+
+Exact V2 amendment read from `tasks.md` lines 177-188: V2 depends on V1 historical failure, user-authorized commit `3b5b22d`, and a clean post-commit worktree; V2 must rerun every V1 behavioral/focused/affected/typecheck/build/diff/rooted-OpenSpec/static/freshness/disposable-sandbox check; preserve V1; bind source/test evidence to `3b5b22d`; reconcile the commit's complete path set against the archived `agent-skill-registry-discovery` allowlists and this change's 15-file allowlist; and block if any committed path lacks an authoritative owner or if any implementation file differs from the checkpoint.
+
+## V2 check evidence
+
+| Check ID | Command / method | Result |
+|---|---|---|
+| V2-FOCUSED-7 | `bun test packages/adapter-opencode/src/model-discovery-context.test.ts packages/adapter-opencode/src/required-tools.test.ts packages/adapter-opencode/src/capability-inventory.test.ts packages/adapter-opencode/src/install-tools.test.ts packages/adapter-opencode/src/runner-adapter.test.ts apps/cli/src/tui/runner-dashboard/__tests__/runner-install-contract.test.ts apps/cli/src/tui/__tests__/runner-install-e2e.test.tsx` | PASS, exit `0`; `81 pass`, `0 fail`; `Ran 81 tests across 7 files` |
+| V2-AFFECTED-4 | `bun test packages/adapter-opencode/src/context-mode-integration.test.ts packages/adapter-opencode/src/runner-capabilities.test.ts apps/cli/src/tui/runner-dashboard/action-runner.test.ts apps/cli/src/tui/runner-dashboard/render.test.tsx` | PASS, exit `0`; `49 pass`, `0 fail`; `Ran 49 tests across 4 files` |
+| V2-TYPECHECK | `bunx tsc --noEmit` | PASS, exit `0`; `0` TypeScript diagnostics |
+| V2-BUILD-DRY-RUN | `bun run build:dry-run` | PASS, exit `0`; dry run `linux-x64`; built `deck` |
+| V2-DIFF-CHECK | `git diff --check` | PASS, exit `0`; no whitespace errors |
+| V2-OPENSPEC-ROOTED | `bun run deck -- openspec validate --json --change opencode-package-install-running-binary-regression --root /home/kevinlb/deck` from `/home/kevinlb/deck` | PASS, exit `0`; `ok: true`; `validChanges: 1`; `totalErrors: 0`; `totalWarnings: 0` |
+| V2-COVERAGE-34-51 | Parsed `spec.md` requirement/scenario headings and checked Design coverage matrix lines 472-513 | PASS; `34/34` requirements and `51/51` scenarios; first/last requirement `REQ-EVD-01` / `REQ-TST-04`; first/last scenario `EVD-01-S1` / `TST-04-S1` |
+| V2-RED-INTEGRITY | Inspected `apply-progress.md` T1-T6 RED/GREEN blocks | PASS; T1-T6 each contain RED command, exit `1`, failure anchor(s), GREEN exit `0`, and pass/zero-fail result; T3 also contains supplemental RED evidence |
+| V2-FRESHNESS | Hash 15 implementation files at `3b5b22d` and in current worktree | PASS; source/test digest `40509fe8bb7ca486e3d5ca4ee61d1e61e3501c07d7217133182f302dc0659d6a` at both points; no post-checkpoint source/test drift |
+| V2-CURRENT-WORKTREE | `git status --short` before V2 append | PASS; only coordinator-owned successor artifacts were modified: `events.yaml`, `state.yaml`, `tasks.md` |
+| V2-STATIC-PROHIBITION | Added-line scan of the 15 implementation targets in commit `3b5b22d` plus path audit | PASS; no `runner-capability-standardization`, dependency/lock/generated path, secret file, Git-state path, process-kill API, process enumeration/signaling invocation, binary staging/replacement, retry loop, or automated live-home/network fixture. Twelve lexical hits were reviewed as inert/allowed: `pgrep` appears only in sanitizer keyword text and an inert v0.9.0 stderr fixture; `https://example.test` appears only in fixtures; the `curl` line is the existing injected production installer seam and tests supply sentinels rather than network. |
+| V2-COMMIT-PATH-OWNERSHIP | Enumerated `git diff-tree --no-commit-id --name-only -r 3b5b22d` | PASS; exactly `72` paths, `0` unknown, `0` forbidden/generated/dependency/Git-state/secret paths, `2` shared OPCR/ASRD paths explicitly accounted for |
+| V2-DISPOSABLE-SANDBOX | Fresh `/tmp/deck-cbm-v2-*` sandbox with sandbox `HOME`, XDG roots, project root, and PATH; harness-owned fake `codebase-memory-mcp` v0.9.0 executable started as retained child PID; installer/download/shell sentinels injected | PASS; result `codebase-memory already-present`, `success: true`, `installerInvoked: false`; sentinel calls `0`; sentinel file absent; checksum unchanged `14ff81a61ea02bd5dd562a6c1a35e4e1526505b23ec7242a6f6aabda531ac924`; real user root snapshots unchanged; only harness PID `294621` was signaled for cleanup; sandbox root removed |
+
+## 72-path ownership audit
+
+Authoritative evidence anchors:
+
+- Current change 15-file implementation allowlist: `tasks.md` lines 14-30 and `design.md` lines 394-418.
+- Current change OpenSpec lifecycle artifacts: current change proposal/spec/design/tasks/apply-progress/verify/state/events/preconditions/exploration, with V2 allowing successor lifecycle artifacts as evidence/lifecycle files (`tasks.md` lines 177-188).
+- Archived `agent-skill-registry-discovery` artifacts: `openspec/archive/agent-skill-registry-discovery/tasks.md` lines 254-576, 736-1017, 1029-1048, and archive lifecycle artifacts under `openspec/archive/agent-skill-registry-discovery/`.
+
+| # | Path | Authoritative owner |
+|---:|---|---|
+| 1 | `apps/cli/src/cli-args.test.ts` | ASRD T7 |
+| 2 | `apps/cli/src/cli-args.ts` | ASRD T7 |
+| 3 | `apps/cli/src/main.tsx` | ASRD T7 |
+| 4 | `apps/cli/src/skill-registry-command.test.ts` | ASRD T7 / T-RR-001i / T-RR-008 / T-RR-009 |
+| 5 | `apps/cli/src/skill-registry-command.ts` | ASRD T7 / T-RR-008 / T-RR-009 |
+| 6 | `apps/cli/src/tui/__tests__/runner-install-e2e.test.tsx` | OPCR 15-file implementation allowlist |
+| 7 | `apps/cli/src/tui/app.tsx` | OPCR 15-file implementation allowlist |
+| 8 | `apps/cli/src/tui/runner-dashboard/__tests__/runner-install-contract.test.ts` | OPCR 15-file implementation allowlist |
+| 9 | `apps/cli/src/tui/runner-dashboard/action-runner.ts` | OPCR 15-file implementation allowlist |
+| 10 | `apps/cli/src/tui/screens/runner-dashboard-screens.tsx` | OPCR 15-file implementation allowlist |
+| 11 | `docs/architecture.md` | ASRD T12 |
+| 12 | `openspec/archive/agent-skill-registry-discovery/apply-progress.md` | ASRD archived lifecycle artifact |
+| 13 | `openspec/archive/agent-skill-registry-discovery/archive-report.md` | ASRD archived lifecycle artifact |
+| 14 | `openspec/archive/agent-skill-registry-discovery/design.md` | ASRD archived lifecycle artifact |
+| 15 | `openspec/archive/agent-skill-registry-discovery/events.yaml` | ASRD archived lifecycle artifact |
+| 16 | `openspec/archive/agent-skill-registry-discovery/exploration.md` | ASRD archived lifecycle artifact |
+| 17 | `openspec/archive/agent-skill-registry-discovery/preconditions.md` | ASRD archived lifecycle artifact |
+| 18 | `openspec/archive/agent-skill-registry-discovery/proposal.md` | ASRD archived lifecycle artifact |
+| 19 | `openspec/archive/agent-skill-registry-discovery/repair-incident.md` | ASRD archived lifecycle artifact |
+| 20 | `openspec/archive/agent-skill-registry-discovery/review-report.md` | ASRD archived lifecycle artifact |
+| 21 | `openspec/archive/agent-skill-registry-discovery/spec.md` | ASRD archived lifecycle artifact |
+| 22 | `openspec/archive/agent-skill-registry-discovery/state.yaml` | ASRD archived lifecycle artifact |
+| 23 | `openspec/archive/agent-skill-registry-discovery/tasks.md` | ASRD archived lifecycle artifact |
+| 24 | `openspec/archive/agent-skill-registry-discovery/verify-report.md` | ASRD archived lifecycle artifact |
+| 25 | `openspec/changes/opencode-package-install-running-binary-regression/apply-progress.md` | OPCR lifecycle evidence artifact |
+| 26 | `openspec/changes/opencode-package-install-running-binary-regression/design.md` | OPCR lifecycle artifact |
+| 27 | `openspec/changes/opencode-package-install-running-binary-regression/events.yaml` | OPCR lifecycle artifact |
+| 28 | `openspec/changes/opencode-package-install-running-binary-regression/exploration.md` | OPCR lifecycle artifact |
+| 29 | `openspec/changes/opencode-package-install-running-binary-regression/preconditions.md` | OPCR lifecycle artifact |
+| 30 | `openspec/changes/opencode-package-install-running-binary-regression/proposal.md` | OPCR lifecycle artifact |
+| 31 | `openspec/changes/opencode-package-install-running-binary-regression/spec.md` | OPCR lifecycle artifact |
+| 32 | `openspec/changes/opencode-package-install-running-binary-regression/state.yaml` | OPCR lifecycle artifact |
+| 33 | `openspec/changes/opencode-package-install-running-binary-regression/tasks.md` | OPCR lifecycle artifact |
+| 34 | `openspec/changes/opencode-package-install-running-binary-regression/verify-report.md` | OPCR lifecycle evidence artifact |
+| 35 | `packages/adapter-opencode/src/capability-inventory.test.ts` | OPCR 15-file implementation allowlist |
+| 36 | `packages/adapter-opencode/src/capability-inventory.ts` | OPCR 15-file implementation allowlist |
+| 37 | `packages/adapter-opencode/src/install-tools.test.ts` | OPCR 15-file implementation allowlist |
+| 38 | `packages/adapter-opencode/src/install-tools.ts` | OPCR 15-file implementation allowlist |
+| 39 | `packages/adapter-opencode/src/model-discovery-context.test.ts` | OPCR 15-file implementation allowlist |
+| 40 | `packages/adapter-opencode/src/model-discovery-context.ts` | OPCR 15-file implementation allowlist |
+| 41 | `packages/adapter-opencode/src/prompt-generation.test.ts` | ASRD T10 |
+| 42 | `packages/adapter-opencode/src/prompt-generation.ts` | ASRD T10 |
+| 43 | `packages/adapter-opencode/src/required-tools.test.ts` | OPCR 15-file implementation allowlist |
+| 44 | `packages/adapter-opencode/src/required-tools.ts` | OPCR 15-file implementation allowlist |
+| 45 | `packages/adapter-opencode/src/runner-adapter.test.ts` | Shared: OPCR 15-file implementation allowlist; ASRD T5a / T-RR-001 / T-RR-006 |
+| 46 | `packages/adapter-opencode/src/runner-adapter.ts` | Shared: OPCR 15-file implementation allowlist; ASRD T5a / T-RR-006 |
+| 47 | `packages/adapter-pi/src/orchestrator-prompt.test.ts` | ASRD T11 |
+| 48 | `packages/adapter-pi/src/pi-team-profile.test.ts` | ASRD T11 |
+| 49 | `packages/adapter-pi/src/pi-team-profile.ts` | ASRD T11 |
+| 50 | `packages/adapter-pi/src/registry-consumption.test.ts` | ASRD T11r |
+| 51 | `packages/adapter-pi/src/runner-adapter.test.ts` | ASRD T5b / T-RR-001 |
+| 52 | `packages/adapter-pi/src/runner-adapter.ts` | ASRD T5b |
+| 53 | `packages/core/src/adapter-registry.test.ts` | ASRD T1 |
+| 54 | `packages/core/src/index.ts` | ASRD T1 |
+| 55 | `packages/core/src/runner-adapter.ts` | ASRD T1 |
+| 56 | `packages/core/src/skill-discovery/contracts.ts` | ASRD T1 |
+| 57 | `packages/core/src/skill-discovery/discovery.test.ts` | ASRD T2 / T-RR-001 / T-RR-002 / T-RR-007 |
+| 58 | `packages/core/src/skill-discovery/discovery.ts` | ASRD T2 / T-RR-001 / T-RR-002 / T-RR-007 / T-RR-009 |
+| 59 | `packages/core/src/skill-discovery/index.ts` | ASRD T1 |
+| 60 | `packages/core/src/skill-discovery/persistence.test.ts` | ASRD T4 / T-RR-005 |
+| 61 | `packages/core/src/skill-discovery/persistence.ts` | ASRD T4 / T-RR-005 |
+| 62 | `packages/core/src/skill-discovery/registry.test.ts` | ASRD T3 / T-RR-003 / T-RR-008 / T-RR-009 |
+| 63 | `packages/core/src/skill-discovery/registry.ts` | ASRD T3 / T-RR-003 / T-RR-008 / T-RR-009 |
+| 64 | `packages/core/src/skills/bootstrap/deck-init-content.ts` | ASRD T8 |
+| 65 | `packages/core/src/skills/bootstrap/index.test.ts` | ASRD T8 |
+| 66 | `packages/core/src/teams/developer/content-registry.test.ts` | ASRD T6 |
+| 67 | `packages/core/src/teams/developer/content-registry.ts` | ASRD T6 |
+| 68 | `packages/core/src/teams/developer/orchestrator-content.test.ts` | ASRD T9 |
+| 69 | `packages/core/src/teams/developer/orchestrator-content.ts` | ASRD T9 |
+| 70 | `packages/core/src/teams/developer/prompt-profile.test.ts` | ASRD T9 |
+| 71 | `packages/core/src/teams/developer/skill-discovery-content.test.ts` | ASRD T6 |
+| 72 | `packages/core/src/teams/developer/skill-discovery-content.ts` | ASRD T6 |
+
+Ownership summary: `72/72` paths have an evidence-backed owner. `2/72` are shared with explicit OPCR+ASRD ownership (`packages/adapter-opencode/src/runner-adapter.ts`, `packages/adapter-opencode/src/runner-adapter.test.ts`). `0/72` are unknown. `0/72` are generated, dependency/lock, secret, Git-state, or `runner-capability-standardization` paths.
+
+## Current uncommitted path confirmation
+
+Before this V2 append, `git status --short` showed only coordinator-owned successor lifecycle artifacts:
+
+```text
+M openspec/changes/opencode-package-install-running-binary-regression/events.yaml
+ M openspec/changes/opencode-package-install-running-binary-regression/state.yaml
+ M openspec/changes/opencode-package-install-running-binary-regression/tasks.md
+```
+
+After this append, the only additional authorized path is this report: `openspec/changes/opencode-package-install-running-binary-regression/verify-report.md`. No source/test/Apply/registry/config/Git/generated/dependency/user-home/process/archive path was modified by Verify.
+
+## FailureManifestV1
+
+None. V2 has no blocking failures.
+
+## Ordered RegistryIntentV1 values
+
+1. `registry-intent:v1:verify:opencode-package-install-running-binary-regression:v2:passed` — phase `verify`, status `passed`, actor `deck-developer-verify`, checkpoint `3b5b22d`, report base digest `sha256:9a92279827a71d04795fa42ada466e3536910e3e81a742e7ff00a4b49d9aaae3`, source/test digest `sha256:40509fe8bb7ca486e3d5ca4ee61d1e61e3501c07d7217133182f302dc0659d6a`, checks: focused `81/81`, affected `49/49`, typecheck/build/diff/OpenSpec/static/freshness/sandbox/path-ownership all passing.
+
+## V2 provenance and blockers
+
+- Role / instance: independent `deck-developer-verify`, fresh V2 after user-authorized clean commit checkpoint.
+- Adaptive context: loaded as advisory only; official OpenSpec/source/test evidence controlled this result.
+- Centralized mode: Verify did not write `state.yaml` or `events.yaml`.
+- Git safety: no destructive Git command was run.
+- Blockers: none.
+- R1 readiness: **R1 may proceed** after coordinator intent validation/serialization.
+
+# V2 Post-Restart Runtime Validation Addendum — PASS preserved
+
+## Addendum decision
+
+Independent post-restart validation preserves the V2 PASS. The current runtime evidence shows that OpenCode model discovery now completes successfully, the latest setup run intentionally skipped external installers because installed tools were positively detected, and the OpenCode configuration contains the expected enabled MCP/team shape. No contrary evidence was found.
+
+## Addendum official bases and integrity checks
+
+- `verify-report.md` pre-addendum SHA-256 matched the delegated V2 base: `51ffb50e841b82fcdef69367604984208363ec772d618c0635516f096538808e`.
+- `state.yaml` SHA-256 matched the delegated base: `7c6af5ecdb6af933a64dfc8b7c6c18de6c4ccd956ef073e3c2ab558bf5508ece`.
+- `events.yaml` SHA-256 matched the delegated base: `0a2dc625b9ff35524576d5457c6c88b91631fae39eb31dcfc3eec6aa293d9916`.
+- `/tmp/deck-tui.log` SHA-256 matched the delegated base: `86889bbabb52773d5b54a041bbbf892b2d7dd02f50ded94c2a98c0f183ef45ab`.
+- `/tmp/deck-install-debug.log` SHA-256 matched the delegated base: `edd1b92946f0e133a2bff476c109afb3f3a28515c6192a00a49e34c2e0de36e0`.
+
+## Runtime evidence confirmed after OpenCode restart
+
+| Check | Evidence | Result |
+| --- | --- | --- |
+| Latest setup duration and counters | `/tmp/deck-tui.log` lines 150-151: `duration=56ms`, `executed=6`, `failed=0`, `skipped=5`, `informational=1`. | PASS |
+| Installed-tool detection and installer skip | `/tmp/deck-tui.log` lines 104-126: context-mode, codebase-memory, RTK, and Serena each returned `already-present`; lines 105, 114, 120, and 126 state `installer not run`. | PASS |
+| MCP config writes and Developer Team apply | `/tmp/deck-tui.log` lines 127-142 show MCP config writes and Developer Team apply completed; lines 152-153 summarize executed config writes and five MCP servers after install: `codebase-memory`, `context-mode`, `context7`, `serena`, `supermemory`. | PASS |
+| Current MCP config shape | Current `~/.config/opencode/opencode.json` contains five enabled MCP entries. The current config key set is `codebase-memory-mcp`, `context-mode`, `context7`, `serena`, and `supermemory`; this is the current config representation of the five post-install bindings and no secret/config values were inspected or recorded. | PASS |
+| Developer Team entries and deck skills | Current OpenCode config contains 14 Deck agent entries with both `model` and `prompt` assignments: 12 `deck-developer-*` roles plus `deck-init` and `deck-onboard`. Current skill directories contain the corresponding 14 deck skills. | PASS |
+| Current OpenCode model discovery | `opencode models --verbose` exited `0` after restart in `5973ms`; output summary only: `stdoutLines=8691`, `stdoutBytes=162655`, `stderrBytes=0`; no `OpenCode model discovery is unavailable` or timeout text was present. Model names/content were not recorded. | PASS |
+| Installed executable versions | Current executable evidence: `opencode` at `/home/kevinlb/.opencode/bin/opencode`, version `1.18.5`; `codebase-memory-mcp` at `/home/kevinlb/.local/bin/codebase-memory-mcp`, version `0.9.0`; `rtk` at `/home/kevinlb/.local/bin/rtk`, version `0.43.0`; `serena` at `/home/kevinlb/.local/bin/serena`, version `1.5.3`. | PASS |
+
+## Fact/inference boundary
+
+- Fact: before restart, the user observed `OpenCode model discovery is unavailable` / timeout from both `bun run deck:run` and the previously installed Deck binary.
+- Fact: after restarting OpenCode, the current `opencode models --verbose` command exits successfully without the unavailable/timeout error.
+- Inference: the pre-restart failure is consistent with stale or transient OpenCode runtime state.
+- Limitation: the available logs and current runtime evidence do not prove the exact root cause of the pre-restart timeout.
+- Fact: the 56ms setup run is expected because installed tools were positively detected and external installers were intentionally skipped; it is not evidence of an incomplete setup.
+
+## Addendum hygiene check
+
+- `git diff --check` was run after appending this addendum and exited `0` with no stdout/stderr findings.
+- Current uncommitted paths include pre-existing coordinator-owned OpenSpec state/task paths plus this report; this Verify invocation only modified `openspec/changes/opencode-package-install-running-binary-regression/verify-report.md`.
+
+## Addendum FailureManifestV1
+
+```json
+[]
+```
+
+## Addendum RegistryIntentV1 values
+
+```json
+[]
+```
+
+## Addendum provenance and blockers
+
+- Role/instance: independent Verify specialist, post-restart addendum invocation.
+- Authorized write scope observed: only this `verify-report.md` addendum was appended.
+- Adaptive context: loaded as advisory only; official OpenSpec/source/runtime evidence controlled this result.
+- Centralized mode: Verify did not write `state.yaml` or `events.yaml`.
+- Git safety: no destructive Git command was run.
+- Blockers: none.
+- R1 readiness: **R1 may proceed** after coordinator intent validation/serialization.

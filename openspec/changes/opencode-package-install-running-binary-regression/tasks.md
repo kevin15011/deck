@@ -31,7 +31,7 @@
 
 ## Deterministic Order
 
-`T1 → T2 → T3 → T4 → T5 → T6 → V1 → R1 → B1 → Archive`
+`T1 → T2 → T3 → T4 → T5 → T6 → V1 (historical failed scope audit) → user-authorized commit checkpoint → V2 → R1 → B1 → Archive`
 
 Tasks are serialized. T2 and T3 have partially disjoint production files, but both establish the same evidence/result contract and append to one Apply evidence artifact; parallel editing would create avoidable contract and evidence races.
 
@@ -156,7 +156,7 @@ Tasks are serialized. T2 and T3 have partially disjoint production files, but bo
 - **Priority:** P0
 - **Complexity:** M
 - **Parallel:** No
-- **Depends on:** V1 PASS
+- **Depends on:** V2 PASS
 - **Files:** evidence-only `review-report.md`.
 - **Verification:** review correctness, evidence precedence, TOCTOU/concurrency, cancellation, package isolation, diagnostic secrecy/bounds, status compatibility, accessibility, maintainability, exact scope, TDD evidence, and all prohibited behaviors. A blocking finding stops before broad; no automatic repair.
 - **Completion evidence:** explicit APPROVE or anchored REQUEST_CHANGES.
@@ -173,6 +173,19 @@ Tasks are serialized. T2 and T3 have partially disjoint production files, but bo
 - **Verification:** exact `bun test`, then `git diff --check` and rooted OpenSpec validation. Any failure blocks Archive and requires user decision before repair.
 - **Completion evidence:** exact pass/fail/skip counts and stable source/test digest.
 - **Rollback:** none.
+
+## V2 — Fresh independent Verify after clean commit checkpoint
+
+- **Owner:** `deck-developer-verify`
+- **Priority:** P0
+- **Complexity:** M
+- **Parallel:** No
+- **Depends on:** V1 historical failure; user-authorized commit `3b5b22d`; clean post-commit worktree.
+- **Files:** evidence-only `verify-report.md`.
+- **Verification:** rerun every V1 behavioral, focused, affected, typecheck, build, diff, rooted OpenSpec, static-prohibition, freshness, and disposable-sandbox check. Preserve V1 as historical failed evidence. Bind source/test evidence to commit `3b5b22d` and prove no post-checkpoint implementation drift. Reconcile the commit's complete path set against the union of the finalized archived `agent-skill-registry-discovery` allowlists and this change's exact 15-file implementation allowlist; every path must have one authoritative owner and no unknown path may be accepted. Confirm T1-T6 `apply-progress.md` changed-path evidence and final file digests where recorded. OpenSpec successor artifacts (`tasks.md`, `state.yaml`, `events.yaml`, `verify-report.md`) are evidence/lifecycle files, not implementation expansion.
+- **Completion evidence:** fresh V2 PASS with exact counts, commit/path ownership table, stable source/test digest, clean worktree except authorized successor OpenSpec evidence, and safe sandbox proof.
+- **Rollback:** none; Verify is read-only except its report.
+- **Ambiguity stop:** if any committed path cannot be attributed to one of the two authoritative OpenSpec changes, or any current implementation file differs from the commit checkpoint without a separately authorized task, return a blocking FailureManifestV1.
 
 ## Archive
 
@@ -197,15 +210,15 @@ Tasks are serialized. T2 and T3 have partially disjoint production files, but bo
 | Complexity | Task IDs | Count |
 |---|---|---:|
 | L | T2, T3, T5 | 3 |
-| M | T1, T4, T6, V1, R1 | 5 |
+| M | T1, T4, T6, V1, V2, R1 | 6 |
 | S | B1, Archive | 2 |
-| **Total** | T1–T6, V1, R1, B1, Archive | **10** |
+| **Total** | T1–T6, V1, V2, R1, B1, Archive | **11** |
 
 ## Routing and Batches
 
 1. **Backend batch:** T1 → T2 → T3 → T4.
 2. **Frontend batch:** T5 → T6.
-3. **Independent quality:** V1 → R1 → B1.
+3. **Independent quality:** V1 historical failure → commit checkpoint → V2 → R1 → B1.
 4. **Closure:** Archive.
 
 ## Review Workload Forecast

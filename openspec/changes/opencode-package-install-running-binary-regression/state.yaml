@@ -1,7 +1,7 @@
 schema: spec-registry-v1
 changeId: opencode-package-install-running-binary-regression
 name: OpenCode Package Install Running Binary Regression
-currentPhase: verify
+currentPhase: review
 status: failed
 artifacts:
   exploration: exploration.md
@@ -12,6 +12,7 @@ artifacts:
   preconditions: preconditions.md
   apply_progress: apply-progress.md
   verify_report: verify-report.md
+  review_report: review-report.md
 provenance:
   - phase: explore
     agent: deck-developer-explorer
@@ -86,3 +87,29 @@ provenance:
     registryWrite: deferred-reconciled
     note: "V1 behavior, build, validation, freshness, and disposable sandbox checks passed, but Verify failed because unrelated pre-existing worktree changes prevented proof of the exact 15-file Apply allowlist; R1 is blocked."
     intentId: registry-intent:v1:verify:opencode-package-install-running-binary-regression:v1:failed:blocking-scope-allowlist
+  - phase: tasks
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-26T04:30:16.980Z"
+    registryWrite: non-deferred
+    note: "The user authorized committing all accumulated work as checkpoint 3b5b22d; the worktree became clean and V2 was scheduled to reconcile committed path ownership across the archived and active OpenSpec changes before R1."
+  - phase: verify
+    agent: deck-developer-verify
+    model: unknown
+    timestamp: "2026-07-26T04:44:32.755Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh V2 passed focused 81/81, affected 49/49, typecheck, build, diff, rooted validation, 34/51 coverage, RED integrity, sandbox, freshness, and 72/72 committed-path ownership reconciliation; R1 is unblocked."
+    intentId: registry-intent:v1:verify:opencode-package-install-running-binary-regression:v2:passed
+  - phase: verify
+    agent: deck-developer-verify
+    model: unknown
+    timestamp: "2026-07-26T04:59:35.242Z"
+    registryWrite: deferred-reconciled
+    note: "Post-restart live validation preserved V2 PASS: setup completed in 56ms with zero failures because four installed tools intentionally skipped external installers; model discovery, MCP bindings, and all 14 team entries/skills validated."
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-26T05:15:42.165Z"
+    registryWrite: deferred-reconciled
+    note: "R1 requested changes for four blocking correctness/security/test findings in config precedence, secret sanitization/direct exceptions, multibyte bounds, and missing adversarial coverage; broad and Archive are blocked."
+    intentId: registry-intent:v1:review:opencode-package-install-running-binary-regression:r1:request-changes

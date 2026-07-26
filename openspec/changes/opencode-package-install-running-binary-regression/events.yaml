@@ -127,3 +127,49 @@ events:
       - "Focused checks passed 81/81 and affected checks passed 49/49; typecheck, build, diff-check, rooted validation, freshness, and disposable sandbox passed."
       - "The sandbox proved already-present behavior, zero installer sentinel calls, unchanged sandbox checksum, and no real-user-root mutation."
       - "V1 failed only because unrelated pre-existing tracked and untracked worktree changes prevented proof of the exact 15-file Apply allowlist; R1 is blocked pending user decision."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-26T04:30:16.980Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "At the user's explicit request, all accumulated authorized work was committed as 3b5b22d and the worktree was confirmed clean."
+      - "V1 remains historical failed evidence; fresh V2 must reconcile every committed path to the archived or active authoritative OpenSpec allowlist."
+      - "R1, broad, and Archive remain blocked until V2 passes."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-07-26T04:44:32.755Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:opencode-package-install-running-binary-regression:v2:passed
+    notes:
+      - "Fresh V2 passed focused 81/81 and affected 49/49 plus typecheck, build, diff-check, rooted validation, and disposable sandbox checks."
+      - "All 72 checkpoint paths have authoritative ownership, no unknown or forbidden path remains, and the 15 implementation files have no post-checkpoint drift."
+      - "R1 independent Review is unblocked."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-07-26T04:59:35.242Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Post-restart OpenCode model discovery exited 0 without timeout or unavailable errors."
+      - "The latest setup completed in 56ms with zero failures because four positively detected tools intentionally skipped external installers."
+      - "Five enabled MCP bindings, 14 Developer Team agents, and 14 corresponding Deck skills were confirmed; V2 PASS remains valid."
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-07-26T05:15:42.165Z"
+    actor: deck-developer-review
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:review:opencode-package-install-running-binary-regression:r1:request-changes
+    notes:
+      - "R1 found four blocking issues: malformed config precedence, sanitizer/direct-exception secret leakage, multibyte bound overflow, and missing adversarial tests."
+      - "The post-restart installation itself is valid and its fast duration is explained by intentional already-present skips."
+      - "Broad and Archive are blocked pending explicit user authorization, bounded repair, fresh Verify, and fresh Review."
