@@ -7,6 +7,7 @@
 
 import { readFileSync, existsSync, writeFileSync, appendFileSync, readdirSync, statSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
@@ -25,7 +26,28 @@ export type RunnerActionRunResult = {
   status: RunnerActionRunStatus;
   message: string;
   diagnostics: string[];
+  packageOutcome?: RunnerPackageInstallOutcome;
+  cause?: string;
   raw?: unknown;
+};
+
+export type RunnerPackageInstallOutcome = "already-present" | "executed" | "failed" | "skipped";
+
+export type RunnerPackageInstallDiagnostic = {
+  stage: string;
+  code: string;
+  exitCode?: number;
+  lines: readonly string[];
+};
+
+export type RunnerPackageInstallResult = {
+  id: string;
+  outcome: RunnerPackageInstallOutcome;
+  success: boolean;
+  message: string;
+  installerInvoked?: boolean;
+  cause?: string;
+  diagnostic?: RunnerPackageInstallDiagnostic;
 };
 
 /**
@@ -34,8 +56,8 @@ export type RunnerActionRunResult = {
 export type PackageInstallerFn = (
   runnerCommand: string | undefined,
   packages: Array<{ id: string; name: string; source: string }>,
-  onResult: (result: { success: boolean; message?: string }) => void,
-) => Promise<Array<{ success: boolean; message?: string }>>;
+  onResult: (result: RunnerPackageInstallResult) => void,
+) => Promise<RunnerPackageInstallResult[]>;
 
 /**
  * Generic team bundle installer — adapters provide their own.
@@ -90,7 +112,7 @@ export type RunnerActionRunnerDependencies = {
   validateMcpConfig?: McpConfigValidatorFn;
   writeDeckConfig?: typeof writeDeckConfig;
   onActionResult?: (result: RunnerActionRunResult) => void;
-  onInstallResult?: (result: { success: boolean; message?: string }) => void;
+  onInstallResult?: (result: RunnerPackageInstallResult) => void;
   // Backward-compatible aliases for Pi-specific tests
   piCommand?: string;
   writeSupermemoryPiMcpConfig?: McpConfigWriterFn;
@@ -116,6 +138,311 @@ export function getRunnerReviewPlanRunBlockDiagnostics(
   return redactDiagnostics(diagnostics);
 }
 
+const TUI_DIAGNOSTIC_LINE_LIMIT = 8;
+const TUI_DIAGNOSTIC_SCALAR_LIMIT = 240;
+const TUI_DIAGNOSTIC_BYTE_LIMIT = 1_280;
+const TUI_CAUSE_LINE_LIMIT = 2;
+const TUI_CAUSE_BYTE_LIMIT = 320;
+const PACKAGE_OUTCOMES = new Set<RunnerPackageInstallOutcome>(["already-present", "executed", "failed", "skipped"]);
+
+function isRunnerPackageOutcome(value: unknown): value is RunnerPackageInstallOutcome {
+  return typeof value === "string" && PACKAGE_OUTCOMES.has(value as RunnerPackageInstallOutcome);
+}
+
+function isSatisfiedPackageOutcome(outcome: RunnerPackageInstallOutcome): boolean {
+  return outcome === "already-present" || outcome === "executed";
+}
+
+function packageInstallIntegrityFailure(action: RunnerAction, reason: string): RunnerActionRunResult {
+  const safeReason = sanitizeActionText(reason) || "invalid package result";
+  return {
+    actionId: action.id,
+    status: "failed",
+    message: `Package installer result integrity failure: ${safeReason}.`,
+    diagnostics: [safeReason],
+    cause: safeReason,
+  };
+}
+
+function validatePackageInstallResult(
+  value: unknown,
+  expectedIds: ReadonlySet<string>,
+  seenIds: Set<string>,
+): { result?: RunnerPackageInstallResult; reason?: string } {
+  if (!value || typeof value !== "object") return { reason: "result is not an object" };
+  const candidate = value as Record<string, unknown>;
+  const id = candidate.id;
+  if (typeof id !== "string" || id.length === 0) return { reason: "missing package ID" };
+  if (!expectedIds.has(id)) return { reason: "unknown package ID" };
+  if (seenIds.has(id)) return { reason: "duplicate package ID" };
+  seenIds.add(id);
+
+  const outcome = candidate.outcome;
+  if (!isRunnerPackageOutcome(outcome)) return { reason: "missing or unknown package outcome" };
+  if (typeof candidate.success !== "boolean") return { reason: "missing package success flag" };
+  if (candidate.success !== isSatisfiedPackageOutcome(outcome)) return { reason: "package outcome and success disagree" };
+  if (candidate.installerInvoked !== undefined && typeof candidate.installerInvoked !== "boolean") {
+    return { reason: "invalid installer invocation flag" };
+  }
+  if (candidate.installerInvoked !== undefined && outcome !== "failed" && candidate.installerInvoked !== (outcome === "executed")) {
+    return { reason: "package outcome and installer invocation disagree" };
+  }
+  if (candidate.cause !== undefined && typeof candidate.cause !== "string") return { reason: "invalid package cause" };
+  if (typeof candidate.message !== "string") return { reason: "missing package message" };
+
+  const diagnostic = candidate.diagnostic;
+  if (diagnostic !== undefined) {
+    if (!diagnostic || typeof diagnostic !== "object") return { reason: "invalid package diagnostic" };
+    const diagnosticRecord = diagnostic as Record<string, unknown>;
+    if (typeof diagnosticRecord.stage !== "string" || typeof diagnosticRecord.code !== "string" || !Array.isArray(diagnosticRecord.lines) || !diagnosticRecord.lines.every((line) => typeof line === "string")) {
+      return { reason: "invalid package diagnostic fields" };
+    }
+    if (diagnosticRecord.exitCode !== undefined && typeof diagnosticRecord.exitCode !== "number") return { reason: "invalid package diagnostic exit code" };
+  }
+
+  return {
+    result: {
+      id,
+      outcome,
+      success: candidate.success,
+      message: candidate.message,
+      ...(typeof candidate.installerInvoked === "boolean" ? { installerInvoked: candidate.installerInvoked } : {}),
+      ...(typeof candidate.cause === "string" ? { cause: candidate.cause } : {}),
+      ...(diagnostic ? {
+        diagnostic: {
+          stage: (diagnostic as Record<string, unknown>).stage as string,
+          code: (diagnostic as Record<string, unknown>).code as string,
+          ...((diagnostic as Record<string, unknown>).exitCode === undefined ? {} : { exitCode: (diagnostic as Record<string, unknown>).exitCode as number }),
+          lines: (diagnostic as Record<string, unknown>).lines as readonly string[],
+        },
+      } : {}),
+    },
+  };
+}
+
+function projectPackageInstallResults(
+  action: RunnerAction,
+  packages: Array<{ id: string; name: string; source: string }>,
+  installResults: unknown,
+): RunnerActionRunResult {
+  if (!Array.isArray(installResults) || installResults.length === 0) {
+    return {
+      actionId: action.id,
+      status: "failed",
+      message: `Package installer returned no result for ${action.source ?? action.toolId ?? action.id}; installation outcome is unknown.`,
+      diagnostics: redactDiagnostics(action.diagnostics ?? []),
+      cause: "Package installer returned no result.",
+    };
+  }
+
+  const expectedIds = new Set(packages.map((pkg) => pkg.id));
+  if (expectedIds.size !== packages.length) return packageInstallIntegrityFailure(action, "duplicate expected package ID");
+  const seenIds = new Set<string>();
+  const safeResults: RunnerPackageInstallResult[] = [];
+  for (const installResult of installResults) {
+    const validation = validatePackageInstallResult(installResult, expectedIds, seenIds);
+    if (validation.reason) return packageInstallIntegrityFailure(action, validation.reason);
+    safeResults.push(validation.result!);
+  }
+
+  const missingId = packages.some((pkg) => !seenIds.has(pkg.id));
+  if (missingId) return packageInstallIntegrityFailure(action, "missing package result");
+
+  const safeDiagnostics = boundTuiDiagnostics(safeResults.flatMap((result) => {
+    const lines = result.diagnostic?.lines ?? [];
+    return lines.length > 0 ? lines : result.cause ? [result.cause] : [];
+  }));
+  const hasFailed = safeResults.some((result) => result.outcome === "failed");
+  const hasSkipped = safeResults.some((result) => result.outcome === "skipped");
+  const allAlreadyPresent = safeResults.every((result) => result.outcome === "already-present");
+  const allSkipped = safeResults.every((result) => result.outcome === "skipped");
+  const outcome: RunnerPackageInstallOutcome = hasFailed || (hasSkipped && !allSkipped)
+    ? "failed"
+    : allAlreadyPresent
+      ? "already-present"
+      : allSkipped
+        ? "skipped"
+        : "executed";
+  const status: RunnerActionRunStatus = outcome === "already-present"
+    ? "skipped"
+    : outcome === "executed"
+      ? "executed"
+      : outcome === "failed"
+        ? "failed"
+        : "skipped";
+  const firstFailure = safeResults.find((result) => result.outcome === "failed" || result.outcome === "skipped");
+  const first = safeResults[0]!;
+  const causeLines = boundTuiDiagnostics([
+    ...(firstFailure?.cause ? [firstFailure.cause] : []),
+    ...(firstFailure?.diagnostic?.lines ?? []),
+    ...safeDiagnostics,
+  ]);
+  const cause = status === "failed"
+    ? boundTuiCause(causeLines.length > 0 ? causeLines : [failureFallback(firstFailure?.diagnostic)])
+    : first.cause ? boundTuiCause([first.cause]) : undefined;
+  const message = safeResults.length === 1
+    ? sanitizeActionText(first.message) || "Package install completed."
+    : outcome === "failed"
+      ? "Package install reported a failure."
+      : outcome === "already-present"
+        ? "All requested packages already present; installers not run."
+        : outcome === "skipped"
+          ? "Package installation was skipped."
+          : "Packages installed.";
+  const diagnostic = first.diagnostic;
+  const raw = {
+    id: first.id,
+    outcome,
+    ...(diagnostic ? {
+      diagnostic: {
+        stage: diagnostic.stage,
+        code: diagnostic.code,
+        ...(diagnostic.exitCode === undefined ? {} : { exitCode: diagnostic.exitCode }),
+        lines: safeDiagnostics,
+      },
+    } : {}),
+  };
+
+  return {
+    actionId: action.id,
+    status,
+    packageOutcome: outcome,
+    message,
+    diagnostics: safeDiagnostics,
+    ...(cause ? { cause } : {}),
+    raw,
+  };
+}
+
+function failureFallback(diagnostic?: RunnerPackageInstallDiagnostic): string {
+  const stage = diagnostic?.stage === "post-install"
+    ? "Post-install"
+    : diagnostic?.stage
+      ? diagnostic.stage.charAt(0).toUpperCase() + diagnostic.stage.slice(1)
+      : "Install";
+  return `${stage} failed${diagnostic?.exitCode === undefined ? "." : ` (exit ${diagnostic.exitCode}).`}`;
+}
+
+function boundTuiDiagnostics(values: readonly unknown[]): string[] {
+  const sanitized = values
+    .flatMap((value) => sanitizeActionText(value).split("\n"))
+    .filter(Boolean);
+  const meaningful = sanitized.filter((line) => /error|failed|failure|fatal|denied|permission|not found|no such|unable|cannot|text file busy|etxtbsy|exit|checksum|timeout|timed out|pgrep|copy/iu.test(line));
+  const selected = meaningful.length > 0 ? meaningful : sanitized;
+  const result: string[] = [];
+  let bytes = 0;
+  for (const line of selected) {
+    if (result.length >= TUI_DIAGNOSTIC_LINE_LIMIT) break;
+    const boundedScalars = truncateActionScalars(line, TUI_DIAGNOSTIC_SCALAR_LIMIT);
+    const remaining = TUI_DIAGNOSTIC_BYTE_LIMIT - bytes;
+    if (remaining <= 0) break;
+    const bounded = truncateActionUtf8(boundedScalars, remaining);
+    if (!bounded) continue;
+    result.push(bounded);
+    bytes += Buffer.byteLength(bounded, "utf8");
+  }
+  return [...new Set(result)];
+}
+
+function boundTuiCause(values: readonly unknown[]): string {
+  const lines = boundTuiDiagnostics(values).slice(0, TUI_CAUSE_LINE_LIMIT);
+  let cause = "";
+  for (const line of lines) {
+    const next = cause ? `${cause} · ${line}` : line;
+    const bounded = truncateActionUtf8(next, TUI_CAUSE_BYTE_LIMIT);
+    if (!bounded) break;
+    cause = bounded;
+    if (bounded !== next) break;
+  }
+  return cause;
+}
+
+function sanitizeActionText(value: unknown): string {
+  let text = typeof value === "string" ? value.replace(/\r\n?/g, "\n") : String(value ?? "");
+  text = stripVTControlCharacters(text)
+    .replace(/\t/g, " ")
+    .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\p{Cf}]/gu, "");
+  text = text.replace(/[\u2500-\u257f\u2580-\u259f\u2800-\u28ff◐◓◑◒◴◷◶◵⟳]/gu, "");
+
+  const urls: string[] = [];
+  text = text.replace(/\b(?:https?|wss?|git\+https?):\/\/[^\s]+/giu, (url) => {
+    const token = `__DECK_TUI_URL_${urls.length}__`;
+    urls.push(redactActionUrl(url));
+    return token;
+  });
+
+  text = redactActionSecrets(text);
+  const roots = [
+    [process.env.XDG_CONFIG_HOME, "$XDG_CONFIG_HOME"],
+    [process.env.XDG_CACHE_HOME, "$XDG_CACHE_HOME"],
+    [process.env.XDG_STATE_HOME, "$XDG_STATE_HOME"],
+    [process.env.HOME, "~"],
+  ].filter((entry): entry is [string, string] => Boolean(entry[0])).sort((left, right) => right[0].length - left[0].length);
+  for (const [root, replacement] of roots) text = text.split(root).join(replacement);
+  text = text
+    .replace(/(?<![\w:~])(?:[A-Za-z]:[\\/]|\\\\)[^\s,;]+/g, "<path>")
+    .replace(/(?<![\w:~/])\/(?:[^\s,;<>"']+\/)*[^\s,;<>"']+/g, "<path>")
+    .split("\n")
+    .map((line) => redactActionSecrets(line).replace(/ +/g, " ").trim())
+    .join("\n");
+  text = text.replace(/__DECK_TUI_URL_(\d+)__/g, (_match, index: string) => urls[Number(index)] ?? "<url>");
+  return text;
+}
+
+function redactActionSecrets(value: string): string {
+  const keys = "token|secret|password|passwd|api-key|api_key|authorization|proxy-authorization|cookie|set-cookie|credential|client-secret|client_secret|access-key|access_key";
+  return value
+    .replace(new RegExp(`((?:${keys})\\s*[:=]\\s*)[^\\s,;]+`, "giu"), "$1[REDACTED]")
+    .replace(/\bBearer\s+[^\s,;]+/giu, "Bearer [REDACTED]")
+    .replace(/\b[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[REDACTED]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]+\b/g, "[REDACTED]");
+}
+
+function redactActionUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.username || parsed.password) {
+      parsed.username = "[REDACTED]";
+      parsed.password = "[REDACTED]";
+    }
+    const secretKeys = /token|secret|password|passwd|key|authorization|credential|cookie/i;
+    for (const key of [...parsed.searchParams.keys()]) if (secretKeys.test(key)) parsed.searchParams.set(key, "[REDACTED]");
+    return parsed.toString();
+  } catch {
+    return redactActionSecrets(value);
+  }
+}
+
+function truncateActionScalars(value: string, max: number): string {
+  const scalars = [...value];
+  if (scalars.length <= max) return value;
+  return scalars.slice(0, Math.max(0, max - 1)).join("") + "…";
+}
+
+function truncateActionUtf8(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
+  const suffix = "…";
+  const suffixBytes = Buffer.byteLength(suffix, "utf8");
+  if (maxBytes <= suffixBytes) return Buffer.from(value, "utf8").subarray(0, maxBytes).toString("utf8");
+  const source = Buffer.from(value, "utf8");
+  let end = maxBytes - suffixBytes;
+  while (end > 0 && (source[end]! & 0xc0) === 0x80) end--;
+  let prefix = source.subarray(0, end).toString("utf8");
+  while (prefix.includes("\ufffd") && end > 0) {
+    end--;
+    prefix = source.subarray(0, end).toString("utf8");
+  }
+  return `${prefix}${suffix}`;
+}
+
+function isUnsatisfiedInstallResult(action: RunnerAction, result: RunnerActionRunResult): boolean {
+  if (!action.id.startsWith("capability.")) return false;
+  if (result.status === "failed") return true;
+  return result.status === "skipped" && result.packageOutcome !== "already-present";
+}
+
 export async function runRunnerReviewPlan(
   plan: RunnerReviewPlan,
   dependencies: RunnerActionRunnerDependencies = {},
@@ -139,10 +466,9 @@ export async function runRunnerReviewPlan(
   }
 
   const results: RunnerActionRunResult[] = [];
-  
-  // Track failed install actions by capability prefix for MCP gating
-  const failedInstallCapabilities = new Set<string>();
-  
+  const unsatisfiedInstallCapabilities = new Set<string>();
+  const satisfiedInstallCapabilities = new Set<string>();
+
   const runAndRecord = async (action: RunnerAction, deps: RunnerActionRunnerDependencies = dependencies) => {
     const result = await runRunnerAction(action, deps);
     results.push(result);
@@ -150,32 +476,27 @@ export async function runRunnerReviewPlan(
     return result;
   };
 
-  // Run installs first to track failures for MCP gating
   for (const action of [...plan.groups.automaticInstalls, ...plan.groups.manualSteps]) {
     log(`runRunnerReviewPlan: install/manual ${action.id} kind=${action.kind} status=${action.status}`);
     const result = await runAndRecord(action);
     log(`runRunnerReviewPlan: install/manual ${action.id} result=${result.status} msg=${result.message?.substring(0, 100)}`);
-    
-    // Track failed install actions by capability prefix
-    if (result.status === "failed" && action.id.startsWith("capability.")) {
-      // Extract capability prefix: capability.serena.install -> capability.serena
+
+    if (isUnsatisfiedInstallResult(action, result)) {
       const parts = action.id.split(".");
-      if (parts.length >= 2) {
-        failedInstallCapabilities.add(`${parts[0]}.${parts[1]}`);
-      }
+      if (parts.length >= 2) unsatisfiedInstallCapabilities.add(`${parts[0]}.${parts[1]}`);
+    } else if (result.packageOutcome && isSatisfiedPackageOutcome(result.packageOutcome) && dependencies.dashboardState?.runnerScope !== "pi") {
+      const parts = action.id.split(".");
+      if (parts.length >= 2) satisfiedInstallCapabilities.add(`${parts[0]}.${parts[1]}`);
     }
   }
 
-  // Security boundary: visible config writes happen after installs
   log(`runRunnerReviewPlan: processing ${plan.groups.configWrites.length} configWrites`);
   for (const action of plan.groups.configWrites) {
-    // Gate write-mcp-config and write-pi-mcp-config actions by prior failed installs
     if (action.kind === "write-mcp-config" || action.kind === "write-pi-mcp-config") {
       log(`runRunnerReviewPlan: configWrite action ${action.id} kind=${action.kind} capabilityId=${action.capabilityId}`);
       const capabilityPrefix = action.id.replace(".mcp-config", "");
-      
-      // Check if the prerequisite install failed
-      if (failedInstallCapabilities.has(capabilityPrefix)) {
+
+      if (unsatisfiedInstallCapabilities.has(capabilityPrefix)) {
         const skippedResult: RunnerActionRunResult = {
           actionId: action.id,
           status: "skipped",
@@ -184,44 +505,35 @@ export async function runRunnerReviewPlan(
         };
         results.push(skippedResult);
         dependencies.onActionResult?.(skippedResult);
-        log(`runRunnerReviewPlan: configWrite ${action.id} SKIPPED (install failed)`);
+        log(`runRunnerReviewPlan: configWrite ${action.id} SKIPPED (install unsatisfied)`);
         continue;
       }
-      
-      // For binary-requiring capabilities, verify executable exists on PATH
+
       const capabilityId = action.capabilityId as string | undefined;
       if (capabilityId && capabilityId !== "context7") {
-        // Serena, rtk, codebase-memory-mcp, context-mode require local binaries
-        const executableName = capabilityId === "serena" ? "serena" 
+        const executableName = capabilityId === "serena" ? "serena"
           : capabilityId === "rtk" ? "rtk"
           : capabilityId === "codebase-memory-mcp" ? "codebase-memory-mcp"
           : capabilityId === "context-mode" ? "context-mode"
           : null;
-        
-        if (executableName) {
-          // Cross-platform executable lookup (avoiding Unix-only `which` command)
-          const executableExists = checkExecutableExists(executableName);
-          if (!executableExists) {
-            // Executable not found on PATH - skip MCP write
-            const failedResult: RunnerActionRunResult = {
-              actionId: action.id,
-              status: "failed",
-              message: `Cannot write MCP config for '${capabilityId}': executable '${executableName}' not found on PATH.`,
-              diagnostics: [`Binary '${executableName}' not found in PATH.`],
-            };
-            results.push(failedResult);
-            dependencies.onActionResult?.(failedResult);
-            log(`runRunnerReviewPlan: configWrite ${action.id} FAILED (executable not found)`);
-            continue;
-          }
+
+        if (executableName && !satisfiedInstallCapabilities.has(capabilityPrefix) && !checkExecutableExists(executableName)) {
+          const failedResult: RunnerActionRunResult = {
+            actionId: action.id,
+            status: "failed",
+            message: `Cannot write MCP config for '${capabilityId}': executable '${executableName}' not found on PATH.`,
+            diagnostics: [`Binary '${executableName}' not found in PATH.`],
+          };
+          results.push(failedResult);
+          dependencies.onActionResult?.(failedResult);
+          log(`runRunnerReviewPlan: configWrite ${action.id} FAILED (executable not found)`);
+          continue;
         }
       }
     }
-    
+
     log(`runRunnerReviewPlan: configWrite ${action.id} kind=${action.kind} status=${action.status}`);
-    const result = await runAndRecord(action);
-    log(`runRunnerReviewPlan: configWrite ${action.id} result=${result.status}`);
-    if (action.kind === "write-mcp-config" && result.status === "failed") return results;
+    await runAndRecord(action);
   }
 
   const memoryResolution = resolveMemoryProviderAfterConfigWrite(dependencies);
@@ -295,6 +607,27 @@ export async function runRunnerAction(
   }
 }
 
+function sanitizePackageCallbackResult(value: RunnerPackageInstallResult): RunnerPackageInstallResult {
+  const diagnostic = value.diagnostic;
+  const safeLines = boundTuiDiagnostics(diagnostic?.lines ?? (value.cause ? [value.cause] : []));
+  return {
+    id: typeof value.id === "string" ? value.id : "",
+    outcome: isRunnerPackageOutcome(value.outcome) ? value.outcome : "failed",
+    success: value.success === true,
+    message: sanitizeActionText(value.message) || "Package install completed.",
+    ...(typeof value.installerInvoked === "boolean" ? { installerInvoked: value.installerInvoked } : {}),
+    ...(value.cause ? { cause: boundTuiCause([value.cause]) } : {}),
+    ...(diagnostic ? {
+      diagnostic: {
+        stage: sanitizeActionText(diagnostic.stage),
+        code: sanitizeActionText(diagnostic.code),
+        ...(diagnostic.exitCode === undefined ? {} : { exitCode: diagnostic.exitCode }),
+        lines: safeLines,
+      },
+    } : {}),
+  };
+}
+
 async function runPackageInstall(
   action: RunnerAction,
   dependencies: RunnerActionRunnerDependencies,
@@ -308,7 +641,6 @@ async function runPackageInstall(
     return skippedResult(action, "Runner command is required to install packages; run preflight or provide dependencies.runnerCommand before installation.");
   }
 
-  // Use toolId (or id fallback) as the catalog lookup key; source is the module name for display
   const packageId = action.toolId ?? action.id;
   const packageName = action.source ?? action.toolId ?? action.id;
   const runner = dependencies.installPackages;
@@ -316,31 +648,14 @@ async function runPackageInstall(
     return skippedResult(action, "Package installer not provided; install requires adapter-specific package installer.");
   }
 
+  const packages = [{ id: packageId, name: packageName, source: action.source ?? "" }];
   const installResults = await runner(
     dependencies.runnerCommand,
-    [{ id: packageId, name: packageName, source: action.source ?? "" }],
-    dependencies.onInstallResult ?? (() => undefined),
+    packages,
+    (result) => dependencies.onInstallResult?.(sanitizePackageCallbackResult(result)),
   );
 
-  if (installResults.length === 0) {
-    return {
-      actionId: action.id,
-      status: "failed",
-      message: `Package installer returned no result for ${packageName}; installation outcome is unknown.`,
-      diagnostics: redactDiagnostics(action.diagnostics ?? []),
-      raw: redactRaw(installResults),
-    };
-  }
-
-  const failed = installResults.some((result) => !result.success);
-
-  return {
-    actionId: action.id,
-    status: failed ? "failed" : "executed",
-    message: failed ? "Package install reported a failure." : `Installed ${packageName}.`,
-    diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...installResults.flatMap((result) => result.message ? [result.message] : [])]),
-    raw: redactRaw(installResults),
-  };
+  return projectPackageInstallResults(action, packages, installResults);
 }
 
 async function runInternalPackageInstall(

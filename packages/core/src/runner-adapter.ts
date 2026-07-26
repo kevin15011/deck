@@ -22,6 +22,7 @@ import type {
 } from "./runner-capability";
 import type { AdaptiveMemoryProvider } from "./memory/adaptive-memory";
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles";
+import type { SkillDiscoverySourceProviderV1 } from "./skill-discovery/contracts";
 
 // ---------------------------------------------------------------------------
 // Aliases for ergonomic use in adapter consumers
@@ -556,6 +557,13 @@ export interface RunnerAdapter {
   validateModelAssignments?(
     input: RunnerModelAssignmentValidationInput,
   ): Promise<RunnerModelAssignmentValidationResult>;
+
+
+  /**
+   * Optional read-only provider for active-runner skill discovery.
+   * Adapters that do not expose discovery remain valid RunnerAdapter values.
+   */
+  readonly skillDiscovery?: SkillDiscoverySourceProviderV1;
 
   // -------------------------------------------------------------------------
   // Developer Team installation

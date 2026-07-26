@@ -609,6 +609,70 @@ describe("authorization card injection (REQ-OA-005)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// EII-ASRD-011: OpenCode active-runner prompt materialization
+// ---------------------------------------------------------------------------
+
+describe("OpenCode active-runner skill discovery materialization (EII-ASRD-011)", () => {
+  test("injects status-only OpenCode context across personality and profile paths", () => {
+    for (const promptProfile of ["legacy", "compact"] as const) {
+      for (const personality of ["pragmatica", "guia"] as const) {
+        const plan = buildPromptGenerationPlan({
+          configDir: "/tmp/.config/opencode",
+          projectRoot: "/tmp/project",
+          personality,
+          promptProfile,
+        });
+        const orchestrator = plan.find((planned) => planned.agent.id === "deck-developer-orchestrator")!;
+        const runtimeIndex = orchestrator.content.indexOf("## Skill Discovery Runtime Context");
+        const authorityIndex = orchestrator.content.indexOf("## Skill Discovery Authority Boundary");
+        const runtimeContext = orchestrator.content.slice(runtimeIndex, authorityIndex);
+
+        expect(runtimeIndex).toBeGreaterThan(-1);
+        expect(orchestrator.content.match(/## Skill Discovery Runtime Context/g)).toHaveLength(1);
+        expect(orchestrator.content.match(/## Skill Discovery Authority Boundary/g)).toHaveLength(1);
+        expect(orchestrator.content).toContain("- active_runner_id: opencode");
+        expect(orchestrator.content).toContain("deck skill-registry validate --runner opencode");
+        expect(orchestrator.content).toContain("deck skill-registry discover --runner opencode");
+        expect(orchestrator.content).toContain("deck skill-registry refresh --runner opencode");
+        expect(orchestrator.content).toContain("bounded direct discovery");
+
+        expect(orchestrator.content).not.toContain("--runner pi");
+        expect(orchestrator.content).not.toContain(".pi/skills");
+        expect(runtimeContext).not.toMatch(/candidate|description|body|rules/i);
+      }
+    }
+  });
+
+  test("keeps specialist consultation and loading guidance in core composition", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      promptProfile: "compact",
+    });
+    const specialist = plan.find((planned) => planned.agent.id === "deck-developer-apply-backend")!;
+
+    expect(specialist.content.match(/## Specialist Skill Discovery Contract/g)).toHaveLength(1);
+    expect(specialist.content).toContain("Verify the selected candidate's normalized locator or runner exposure immediately before loading");
+    expect(specialist.content).toContain("active runner's normal loading mechanism");
+    expect(specialist.content).not.toContain("candidate_document:");
+    expect(specialist.content).not.toContain("winner:");
+  });
+
+  test("preserves skill-loading gate ordering before runtime materialization", () => {
+    const plan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      promptProfile: "compact",
+    });
+    const orchestrator = plan.find((planned) => planned.agent.id === "deck-developer-orchestrator")!;
+
+    expect(orchestrator.content.indexOf("# Skill Loading Gate")).toBeLessThan(
+      orchestrator.content.indexOf("## Skill Discovery Runtime Context"),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Developer Team language policy propagation to OpenCode prompts (REQ-ADAPT-001,
 // REQ-LEAK-001, REQ-LEAK-002, REQ-TEST-001, REQ-TEST-003)
 // ---------------------------------------------------------------------------

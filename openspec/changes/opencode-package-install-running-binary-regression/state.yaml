@@ -1,0 +1,88 @@
+schema: spec-registry-v1
+changeId: opencode-package-install-running-binary-regression
+name: OpenCode Package Install Running Binary Regression
+currentPhase: verify
+status: failed
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T19:28:52.972Z"
+    registryWrite: deferred-reconciled
+    note: "Exploration established a pre-existing upstream running-binary replacement defect exposed by Deck installed-evidence and diagnostic gaps; handoff to Proposal is unblocked."
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T19:36:47.457Z"
+    registryWrite: deferred-reconciled
+    note: "Collaborative Proposal draft created; explicit human approval remains required before Spec and Design."
+    intentId: registry-intent:v1:480ad8730bd47ec475f124298cd20888
+    idempotencyKey: sha256:3578f34d515def8c140c4dfa40aca6c280b072e42c1e4adc7097a7f3ba6a57cf
+  - phase: proposal
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T19:41:12.931Z"
+    registryWrite: non-deferred
+    note: "The user explicitly approved the Proposal in Automatic mode; Spec and Design may begin in parallel."
+  - phase: spec
+    agent: deck-developer-spec
+    model: unknown
+    timestamp: "2026-07-24T19:44:38.081Z"
+    registryWrite: deferred-reconciled
+    note: "Initial Spec completed with 22 requirements and 45 scenarios; parallel Design reconciliation remains required before Tasks."
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T20:07:26.685Z"
+    registryWrite: deferred-reconciled
+    note: "Initial technical Design completed; explicit reconciliation with the parallel Spec remains required before Tasks."
+    intentId: registry-intent:v1:9362c7230716cee493c0fd9cbfeb852f
+    idempotencyKey: sha256:bcae0cee6665120504069fa934b4346988b07109db03ba90c0978561d6881523
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T20:37:41.651Z"
+    registryWrite: deferred-reconciled
+    note: "Final Spec/Design reconciliation resolved all technical choices and produced complete normative coverage; Spec summary metadata must be corrected before Tasks."
+    intentId: registry-intent:v1:b58b59b0ed19fa41795c6b9aec84403e
+    idempotencyKey: sha256:ff8f0ca272ed0a3cca06026cf880bbca7d43dabf259767435b864ddbe089edcf
+  - phase: spec
+    agent: deck-developer-spec
+    model: unknown
+    timestamp: "2026-07-24T20:42:08.162Z"
+    registryWrite: deferred-reconciled
+    note: "Final Spec reconciliation corrected stale metadata to 34 requirements and 51 scenarios and closed all Spec/Design decisions; Tasks are unblocked."
+  - phase: tasks
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T20:46:52.986Z"
+    registryWrite: non-deferred
+    note: "After two empty Task-specialist returns with no file changes, the coordinator recorded the reconciled 10-task execution plan and no-preconditions artifact; explicit Apply authorization remains pending."
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T21:39:54.317Z"
+    registryWrite: non-deferred
+    note: "The user explicitly authorized Apply through completion within the exact 15-file tasks.md allowlist plus apply-progress.md evidence; no commit, push, live-home/process, binary replacement, implicit upgrade, dependency, or Git-state change is authorized."
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T23:09:13.452Z"
+    registryWrite: non-deferred
+    note: "Authorized T1-T6 completed with genuine RED/GREEN evidence, 80 backend affected passes, 50 frontend focused/affected passes, clean typecheck/diff, and exact-scope audits; independent V1 is required next."
+  - phase: verify
+    agent: deck-developer-verify
+    model: unknown
+    timestamp: "2026-07-24T23:22:30.536Z"
+    registryWrite: deferred-reconciled
+    note: "V1 behavior, build, validation, freshness, and disposable sandbox checks passed, but Verify failed because unrelated pre-existing worktree changes prevented proof of the exact 15-file Apply allowlist; R1 is blocked."
+    intentId: registry-intent:v1:verify:opencode-package-install-running-binary-regression:v1:failed:blocking-scope-allowlist

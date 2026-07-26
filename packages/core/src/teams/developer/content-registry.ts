@@ -73,6 +73,12 @@ import { getDeveloperTeamCatalog } from "./catalog";
 // ---------------------------------------------------------------------------
 
 // Result type for error-returning operations
+import {
+  SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1,
+  SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1,
+  renderSkillDiscoveryRuntimeContextV1,
+} from "./skill-discovery-content";
+import type { SkillDiscoveryRuntimeContextV1 } from "../../skill-discovery/contracts";
 export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
 // Error type for content registry operations
@@ -99,6 +105,8 @@ export type ContentRegistryOptions = {
   personality?: OrchestratorPersonality;
   /** Static prompt profile. Compact is the production default. */
   promptProfile?: DeveloperTeamPromptProfileV1;
+  /** Active runner context supplied by the materializer; no runner is inferred. */
+  skillDiscoveryRuntimeContext?: SkillDiscoveryRuntimeContextV1;
 };
 
 /** Options for getAgentContentResult */
@@ -341,6 +349,29 @@ function withDeveloperTeamLanguagePolicy(content: AgentContent): AgentContent {
  * @param agentId - Target agent ID
  * @returns Content with invariants prepended for orchestrator agent only
  */
+/**
+ * Compose the shared discovery contract only into non-Orchestrator Developer
+ * Team surfaces. Registry records and descriptions are never passed here.
+ */
+function withSpecialistSkillDiscoveryContract(
+  content: AgentContent,
+  agentId: string,
+): AgentContent {
+  const isDeveloperTeamSpecialist =
+    agentId !== "deck-developer-orchestrator" &&
+    DEVELOPER_TEAM_AGENTS.some((agent) => agent.id === agentId);
+  if (!isDeveloperTeamSpecialist || content.agentBody.includes(SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1)) {
+    return content;
+  }
+
+  const appendContract = (surface: string): string =>
+    `${surface.trimEnd()}\n\n${SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1}\n`;
+  return {
+    agentBody: appendContract(content.agentBody),
+    skillBody: appendContract(content.skillBody),
+  };
+}
+
 function withOrchestratorInvariants(
   content: AgentContent,
   agentId: string,
@@ -457,12 +488,13 @@ export function getAgentContentResult(
   const compact = promptProfile === "compact" ? COMPACT_CONTENT[agentId] : undefined;
   const real = compact ?? REAL_CONTENT[agentId];
   if (real) {
-    // Apply composition order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) language policy, (5) capability instructions
+    // Apply composition order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) shared specialist discovery contract, (5) language policy, (6) capability instructions
     const withInvariants = compact
       ? withCompactRuntimeContract(real, agentId)
       : withOrchestratorInvariants(real, agentId);
     const withAuthority = withContextAuthorityGuidance(withInvariants);
-    const withLanguagePolicy = withDeveloperTeamLanguagePolicy(withAuthority);
+    const withDiscovery = withSpecialistSkillDiscoveryContract(withAuthority, agentId);
+    const withLanguagePolicy = withDeveloperTeamLanguagePolicy(withDiscovery);
     const composed = applyAgentContentComposition(
       withLanguagePolicy,
       agentId,
@@ -484,7 +516,8 @@ export function getAgentContentResult(
       // Apply same composition order as real content
       const withInvariants = withOrchestratorInvariants(fallbackContent, agentId);
       const withAuthority = withContextAuthorityGuidance(withInvariants);
-      const withLanguagePolicy = withDeveloperTeamLanguagePolicy(withAuthority);
+      const withDiscovery = withSpecialistSkillDiscoveryContract(withAuthority, agentId);
+      const withLanguagePolicy = withDeveloperTeamLanguagePolicy(withDiscovery);
       const composed = applyAgentContentComposition(
         withLanguagePolicy,
         agentId,
@@ -633,6 +666,21 @@ export function getUnknownAgentContent(agentId: string, _suggestions: string[]):
  *
  * Returns undefined for unknown team IDs.
  */
+/**
+ * Add the optional runtime context without duplicating the fixed authority
+ * boundary if a later orchestrator surface already carries it.
+ */
+function appendSkillDiscoveryRuntimeContext(
+  baseContent: string,
+  context: SkillDiscoveryRuntimeContextV1,
+): string {
+  const rendered = renderSkillDiscoveryRuntimeContextV1(context);
+  const contextWithoutDuplicateBoundary = baseContent.includes(SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1)
+    ? rendered.replace(`\n\n${SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1}`, "")
+    : rendered;
+  return `${baseContent.trimEnd()}\n\n${contextWithoutDuplicateBoundary}\n`;
+}
+
 export function getTeamSessionInstructions(
   teamId: string,
   options?: ContentRegistryOptions,
@@ -642,17 +690,20 @@ export function getTeamSessionInstructions(
     const promptProfile = options?.promptProfile ?? "compact";
     const orchestratorPrompt = getOrchestratorSystemPrompt(personality, promptProfile);
 
-    // Compose order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) language policy, (5) capability instructions
+    // Compose order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) language policy, (5) optional active-runner discovery context, (6) capability instructions
     const withInvariants = promptProfile === "compact"
       ? `${renderCompactOrchestratorInvariantsV1()}\n\n${DEVELOPER_TEAM_COMPACT_RUNTIME_CONTRACT}\n\n${orchestratorPrompt}`
       : prependOrchestratorInvariants(orchestratorPrompt, "session");
     const base = appendContextAuthorityGuidance(withInvariants);
     const baseWithLanguagePolicy = appendDeveloperTeamLanguagePolicy(base);
+    const withSkillDiscoveryRuntimeContext = options?.skillDiscoveryRuntimeContext
+      ? appendSkillDiscoveryRuntimeContext(baseWithLanguagePolicy, options.skillDiscoveryRuntimeContext)
+      : baseWithLanguagePolicy;
     if (!options?.capabilityInstructions) {
-      return baseWithLanguagePolicy;
+      return withSkillDiscoveryRuntimeContext;
     }
     return appendCapabilityInstructions(
-      baseWithLanguagePolicy,
+      withSkillDiscoveryRuntimeContext,
       options.capabilityInstructions,
       { surface: "session" },
     );

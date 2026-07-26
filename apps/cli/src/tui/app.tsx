@@ -35,6 +35,7 @@ import {
   type OpenCodePreflightResult,
   type OpenCodeToolsReview,
   type OpenCodeToolInstallResult,
+  type OpenCodeToolInstallResultExact,
 } from "@deck/adapter-opencode";
 import {
   type DeveloperTeamModelAssignments,
@@ -71,6 +72,7 @@ import {
   reviewOpenCodeTools,
   buildOpenCodeRunnerCapabilityInventory,
   installOpenCodeTools,
+  createOpenCodeEvidenceContext,
   OPENCODE_INSTALLABLE_TOOLS,
   getSelectableOpenCodeTools,
 } from "@deck/adapter-opencode";
@@ -116,7 +118,7 @@ import {
   SupermemorySetupScreen,
   type SupermemorySetupValues,
 } from "./screens/developer-team-screens";
-import { runRunnerReviewPlan, type RunnerActionRunResult, type RunnerActionRunnerDependencies } from "./runner-dashboard/action-runner";
+import { runRunnerReviewPlan, type RunnerActionRunResult, type RunnerActionRunnerDependencies, type RunnerPackageInstallResult } from "./runner-dashboard/action-runner";
 import {
   getDashboardContinueEffect,
   getDashboardToggleAction,
@@ -1040,12 +1042,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           // Fall back to default behavior for OpenCode or supermemory
           return adapter.writeMcpConfig?.(options) ?? { ok: false, path: "", diagnostics: ["No MCP config writer available"] };
         },
-        installPackages: async (runnerCommand: string | undefined, packages: Array<{ id: string; name: string; source: string }>, onResult: (result: { success: boolean; message?: string }) => void) => {
-          // For Pi runner, delegate to adapter's runAction instead of using OpenCode catalog
+        installPackages: async (runnerCommand: string | undefined, packages: Array<{ id: string; name: string; source: string }>, onResult: (result: RunnerPackageInstallResult) => void): Promise<RunnerPackageInstallResult[]> => {
+          // For Pi runner, delegate to the adapter's existing action path; keep its behavior unchanged.
           if (dashboardState.runnerScope === "pi") {
             log(`installPackages (Pi): delegating to adapter.runAction for ${packages.map(p => p.id).join(", ")}`);
-            const results: Array<{ success: boolean; message?: string }> = [];
-            
+            const results: RunnerPackageInstallResult[] = [];
+
             for (const pkg of packages) {
               const action: import("@deck/core").RunnerAction = {
                 id: `capability.${pkg.id}.install`,
@@ -1056,81 +1058,98 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
                 source: pkg.source,
                 status: "ready" as const,
               };
-              
+
               try {
                 const actionResult = await adapter.runAction(action as any, { runnerCommand: "pi" } as any);
-                const success = actionResult.status === "executed";
-                results.push({
-                  success,
-                  message: actionResult.message || (success ? `Installed ${pkg.id}` : `Failed to install ${pkg.id}`),
-                });
-                onResult({ success, message: actionResult.message });
+                const outcome: RunnerPackageInstallResult["outcome"] = actionResult.status === "executed"
+                  ? "executed"
+                  : actionResult.status === "failed"
+                    ? "failed"
+                    : "skipped";
+                const result: RunnerPackageInstallResult = {
+                  id: pkg.id,
+                  outcome,
+                  success: outcome === "executed",
+                  message: actionResult.message || (outcome === "executed" ? `Installed ${pkg.id}` : `Failed to install ${pkg.id}`),
+                  ...(actionResult.diagnostics?.length ? { cause: actionResult.diagnostics[0] } : {}),
+                };
+                results.push(result);
+                onResult(result);
               } catch (error) {
                 const errorMsg = error instanceof Error ? error.message : String(error);
                 log(`installPackages (Pi): error for ${pkg.id}: ${errorMsg}`);
-                results.push({
+                const result: RunnerPackageInstallResult = {
+                  id: pkg.id,
+                  outcome: "failed",
                   success: false,
                   message: errorMsg,
-                });
-                onResult({ success: false, message: errorMsg });
+                };
+                results.push(result);
+                onResult(result);
               }
             }
-            
+
             log(`installPackages (Pi): results=${results.map(r => `${r.success ? "ok" : "fail"}`).join(",")}`);
             return results;
           }
-          
-          // For OpenCode runner, use the existing OpenCode catalog
+
+          const projectOpenCodeResult = (result: OpenCodeToolInstallResultExact): RunnerPackageInstallResult => ({
+            id: result.toolId,
+            outcome: result.outcome,
+            success: result.success,
+            message: result.message,
+            installerInvoked: result.installerInvoked,
+            ...(result.cause ? { cause: result.cause } : {}),
+            ...(result.diagnostic ? {
+              diagnostic: {
+                stage: result.diagnostic.stage,
+                code: result.diagnostic.code,
+                ...(result.diagnostic.exitCode === undefined ? {} : { exitCode: result.diagnostic.exitCode }),
+                lines: [...result.diagnostic.lines],
+              },
+            } : {}),
+          });
+
+          // OpenCode package identity is the exact catalog/tool ID; display names are not lookup keys.
           log(`installPackages (OpenCode): installing ${packages.map(p => `${p.id}(${p.source})`).join(", ")}`);
-          // Use package.id as the catalog lookup key (not name/source)
           const selectedToolIds = packages.map(p => p.id).filter(Boolean);
-          // Get the tools from the catalog (not re-reviewing installed status — plan already decided)
           const toolsToInstall = OPENCODE_INSTALLABLE_TOOLS.filter(t => selectedToolIds.includes(t.id));
           log(`installPackages (OpenCode): matched ${toolsToInstall.length}/${selectedToolIds.length} tools from catalog`);
-          
-          // Handle each requested package - return failure for zero matches
+
           if (toolsToInstall.length === 0) {
-            // No matches - return honest failure for each requested package
-            return packages.map(p => ({ 
-              success: false, 
-              message: `No installable OpenCode tool matched id "${p.id}".` 
+            return packages.map((pkg) => ({
+              id: pkg.id,
+              outcome: "failed" as const,
+              success: false,
+              message: `No installable OpenCode tool matched id "${pkg.id}".`,
             }));
           }
-          
-          // Handle partial matches - packages not in catalog should fail
-          // Use Set<string> since pkg.id is string, but t.id is InstallableOpenCodeToolId (narrower)
-          const matchedIds: Set<string> = new Set(toolsToInstall.map(t => t.id));
-          const results: Array<{ success: boolean; message?: string }> = [];
 
+          const installResults = await installOpenCodeTools(
+            runnerCommand ?? "opencode",
+            toolsToInstall,
+            (result) => onResult(projectOpenCodeResult(result)),
+            undefined,
+            {
+              projectRoot,
+              evidenceContext: createOpenCodeEvidenceContext({ projectRoot }),
+            },
+          );
+
+          // Preserve every returned result so the action runner can reject unknown/duplicate IDs.
+          const results = installResults.map(projectOpenCodeResult);
           for (const pkg of packages) {
-            if (!matchedIds.has(pkg.id)) {
-              // This package was requested but not found in catalog - honest failure
-              results.push({ 
-                success: false, 
-                message: `No installable OpenCode tool matched id "${pkg.id}".` 
+            if (!installResults.some((result) => result.toolId === pkg.id)) {
+              results.push({
+                id: pkg.id,
+                outcome: "failed",
+                success: false,
+                message: `No package result returned for tool ID "${pkg.id}".`,
               });
             }
           }
-          
-          // Install matched tools
-          const installResults = await installOpenCodeTools("opencode", toolsToInstall, (r) => {
-            onResult({ success: r.success, message: r.message });
-          });
-          
-          // Map install results to the matched tools
-          for (const tool of toolsToInstall) {
-            // Match by tool.id (lowercase) or tool.name case-insensitively
-            const installResult = installResults.find(r => 
-              r.tool.toLowerCase() === tool.id.toLowerCase() || 
-              r.tool.toLowerCase() === tool.name.toLowerCase()
-            );
-            results.push({ 
-              success: installResult?.success ?? false, 
-              message: installResult?.message 
-            });
-          }
-          
-          log(`installPackages (OpenCode): results=${results.map(r => `${r.success ? "ok" : "fail"}`).join(",")}`);
+
+          log(`installPackages (OpenCode): results=${results.map(r => `${r.id}:${r.outcome}`).join(",")}`);
           return results;
         },
         installTeamBundle: async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments }) => {

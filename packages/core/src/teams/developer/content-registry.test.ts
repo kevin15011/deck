@@ -16,6 +16,11 @@ import {
   buildCapabilityInstructionBundle,
   type CapabilityInstructionBundle,
 } from "./instruction-bundles/index";
+import {
+  SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1,
+  SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1,
+  renderSkillDiscoveryRuntimeContextV1,
+} from "./skill-discovery-content";
 
 const DEVELOPER_AGENT_IDS = [
   "deck-developer-orchestrator",
@@ -1070,5 +1075,109 @@ describe("getTeamSessionInstructions with personality", () => {
     const unknownInstructions = getTeamSessionInstructions("developer-team", { personality: "unknown-personality" });
     const pragmaticaInstructions = getTeamSessionInstructions("developer-team", { personality: "pragmatica" });
     expect(unknownInstructions).toBe(pragmaticaInstructions);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skill discovery composition — REQ-001, REQ-013, REQ-014, REQ-015, REQ-016,
+// REQ-027 and EII-ASRD-001/EII-ASRD-002/EII-ASRD-010
+// ---------------------------------------------------------------------------
+
+describe("shared skill discovery composition", () => {
+  const specialistAgentIds = DEVELOPER_AGENT_IDS.filter(
+    (id) => id !== "deck-developer-orchestrator",
+  );
+
+  test("composes the specialist contract exactly once for every specialist in both profiles", () => {
+    for (const promptProfile of ["legacy", "compact"] as const) {
+      for (const agentId of specialistAgentIds) {
+        const content = getAgentContent(agentId, { promptProfile })!;
+
+        for (const surface of [content.agentBody, content.skillBody]) {
+          expect(surface).toContain(SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1);
+          expect(surface.match(/## Skill Discovery Authority Boundary/g)).toHaveLength(1);
+          expect(surface.indexOf(SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1)).toBeGreaterThan(-1);
+        }
+      }
+    }
+  });
+
+  test("places specialist discovery content before capability bundles without injecting registry data", () => {
+    const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
+    const content = getAgentContent("deck-developer-apply-general", {
+      promptProfile: "compact",
+      capabilityInstructions: bundle,
+    })!;
+
+    const contractIndex = content.agentBody.indexOf("## Specialist Skill Discovery Contract");
+    const packageIndex = content.agentBody.indexOf("## Package Instructions (configured)");
+
+    expect(contractIndex).toBeGreaterThan(-1);
+    expect(packageIndex).toBeGreaterThan(-1);
+    expect(contractIndex).toBeLessThan(packageIndex);
+    expect(content.agentBody).not.toContain("candidate_document:");
+    expect(content.agentBody).not.toContain("winner");
+    expect(content.agentBody).not.toContain("/home/");
+  });
+
+  test("does not add the specialist contract to the Orchestrator-owned surface", () => {
+    const content = getAgentContent("deck-developer-orchestrator", { promptProfile: "compact" })!;
+    expect(content.agentBody).not.toContain(SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1);
+    expect(content.skillBody).not.toContain(SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1);
+  });
+
+  test("composes one active-runner runtime context before capability bundles for both profiles", () => {
+    const bundle: CapabilityInstructionBundle = {
+      instructions: [
+        {
+          packageId: "codebase-memory",
+          surface: "session",
+          markdown: "## Session capability bundle",
+        },
+      ],
+    };
+
+    for (const promptProfile of ["legacy", "compact"] as const) {
+      const instructions = getTeamSessionInstructions("developer-team", {
+        promptProfile,
+        skillDiscoveryRuntimeContext: { activeRunnerId: "opencode" },
+        capabilityInstructions: bundle,
+      })!;
+
+      const runtimeIndex = instructions.indexOf("## Skill Discovery Runtime Context");
+      const packageIndex = instructions.indexOf("## Package Instructions (configured)");
+
+      expect(runtimeIndex).toBeGreaterThan(-1);
+      expect(packageIndex).toBeGreaterThan(-1);
+      expect(runtimeIndex).toBeLessThan(packageIndex);
+      expect(instructions.match(/## Skill Discovery Authority Boundary/g)).toHaveLength(1);
+      expect(instructions).toContain("active_runner_id: opencode");
+      expect(instructions).toContain("deck skill-registry validate --runner opencode");
+      expect(instructions).toContain("deck skill-registry discover --runner opencode");
+      expect(instructions).toContain("deck skill-registry refresh --runner opencode");
+      expect(instructions).not.toContain("/home/");
+      expect(instructions).not.toContain(".pi/skills");
+    }
+  });
+
+  test("renders absent runtime context as indeterminate direct fallback without guessing a runner", () => {
+    const rendered = renderSkillDiscoveryRuntimeContextV1();
+
+    expect(rendered).toContain("status: indeterminate");
+    expect(rendered).toContain("reason_code: missing_runtime_context");
+    expect(rendered).toContain("bounded direct discovery");
+    expect(rendered).toContain(".atl/skill-registry.md");
+    expect(rendered).not.toContain("active_runner_id: opencode");
+    expect(rendered).not.toContain("active_runner_id: pi");
+    expect(rendered).not.toContain("--runner opencode");
+    expect(rendered).not.toContain("--runner pi");
+    expect(rendered.match(/## Skill Discovery Authority Boundary/g)).toHaveLength(1);
+  });
+
+  test("preserves the byte-verbatim authority boundary in every shared fragment", () => {
+    expect(SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1).toContain(SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1);
+    expect(renderSkillDiscoveryRuntimeContextV1({ activeRunnerId: "pi" })).toContain(
+      SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1,
+    );
   });
 });

@@ -45,6 +45,17 @@ export type ParsedArgs =
       };
     }
   | {
+      command: "skill-registry-validate" | "skill-registry-discover" | "skill-registry-refresh";
+      flags: {
+        /** Active runner selected for discovery. Refresh may resolve this interactively. */
+        runner?: string;
+        /** Project root directory. */
+        root?: string;
+        /** Output stable JSON instead of human-readable text. */
+        json?: boolean;
+      };
+    }
+  | {
       command: "pi-launch";
       teamId: string;
       flags: {
@@ -241,6 +252,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     };
   }
 
+  if (first === "skill-registry") {
+    return parseSkillRegistryArgs(rest);
+  }
+
   if (first !== "pi") {
     return { command: "tui" };
   }
@@ -317,5 +332,96 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(shouldResume ? { resume: true } : {}),
     },
     ...(memoryProvider ? { memoryProvider } : {}),
+  };
+}
+
+function parseSkillRegistryArgs(args: string[]): ParsedArgs {
+  const [subcommand, ...flags] = args;
+  if (subcommand !== "validate" && subcommand !== "discover" && subcommand !== "refresh") {
+    return {
+      command: "error",
+      message: "Usage: deck skill-registry <validate|discover|refresh> [options]",
+    };
+  }
+
+  let runner: string | undefined;
+  let root: string | undefined;
+  let json = false;
+  const seen = new Set<string>();
+
+  for (let i = 0; i < flags.length; i += 1) {
+    const flag = flags[i]!;
+    if (flag === "--json") {
+      if (seen.has("json")) return duplicateSkillRegistryFlag(flag);
+      seen.add("json");
+      json = true;
+      continue;
+    }
+
+    if (flag === "--runner" || flag === "--root") {
+      const key = flag.slice(2);
+      if (seen.has(key)) return duplicateSkillRegistryFlag(flag);
+      const value = flags[i + 1];
+      if (value === undefined || value.startsWith("--")) {
+        return {
+          command: "error",
+          message: `Flag ${flag} requires a value.`,
+        };
+      }
+      seen.add(key);
+      if (key === "runner") runner = value;
+      else root = value;
+      i += 1;
+      continue;
+    }
+
+    if (flag.startsWith("--runner=") || flag.startsWith("--root=")) {
+      const separator = flag.indexOf("=");
+      const key = flag.slice(2, separator);
+      const value = flag.slice(separator + 1);
+      if (seen.has(key)) return duplicateSkillRegistryFlag(flag);
+      if (!value) {
+        return {
+          command: "error",
+          message: `Flag --${key} requires a value.`,
+        };
+      }
+      seen.add(key);
+      if (key === "runner") runner = value;
+      else root = value;
+      continue;
+    }
+
+    return {
+      command: "error",
+      message: `Unknown flag for skill-registry ${subcommand}: ${flag}.`,
+    };
+  }
+
+  if ((subcommand === "validate" || subcommand === "discover") && !runner) {
+    return {
+      command: "error",
+      message: `Usage: deck skill-registry ${subcommand} --runner <id> [--root <path>] [--json]`,
+    };
+  }
+
+  const command = `skill-registry-${subcommand}` as
+    | "skill-registry-validate"
+    | "skill-registry-discover"
+    | "skill-registry-refresh";
+  return {
+    command,
+    flags: {
+      ...(runner ? { runner } : {}),
+      ...(root ? { root } : {}),
+      ...(json ? { json: true } : {}),
+    },
+  };
+}
+
+function duplicateSkillRegistryFlag(flag: string): ParsedArgs {
+  return {
+    command: "error",
+    message: `Duplicate flag for skill-registry: ${flag}.`,
   };
 }

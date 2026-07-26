@@ -290,7 +290,12 @@ function buildPromptContent(
 
   const isOrchestrator = agent.id === "deck-developer-orchestrator";
   let baseContent = isOrchestrator
-    ? (getTeamSessionInstructions("developer-team", { capabilityInstructions, personality, promptProfile }) ??
+    ? (getTeamSessionInstructions("developer-team", {
+      capabilityInstructions,
+      personality,
+      promptProfile,
+      skillDiscoveryRuntimeContext: { activeRunnerId: "opencode" },
+    }) ??
       content.agentBody)
     : content.agentBody;
 

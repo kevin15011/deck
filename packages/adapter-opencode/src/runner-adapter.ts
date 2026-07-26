@@ -13,7 +13,7 @@ import { appendFileSync, writeFileSync, existsSync, promises as fs } from "node:
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
 function log(msg: string) { if (!process.env.DECK_DEBUG) return; try { appendFileSync(LOG, `${_ts()} [opencode-adapter] ${msg}\n`); } catch {} }
-import { join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type {
   RunnerAdapter,
@@ -50,9 +50,22 @@ import type {
   RunnerModelInventoryResult,
   RunnerModelAssignmentValidationInput,
   RunnerModelAssignmentValidationResult,
+  OpaqueSkillInventoryResultV1,
+  OpaqueSkillObservationV1,
+  SkillDiscoveryDiagnosticV1,
+  SkillDiscoverySourceBindingV1,
+  SkillDiscoverySourceDeclarationV1,
+  SkillDiscoverySourceProviderV1,
+  SkillDiscoverySourceSetV1,
+  SkillLocatorResolutionV1,
 } from "@deck/core";
 
-import { getModelCatalog } from "@deck/core";
+import {
+  getModelCatalog,
+  SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
+  SKILL_DISCOVERY_SOURCE_SCHEMA,
+  SKILL_DISCOVERY_V1_BOUNDS,
+} from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 
 // ---------------------------------------------------------------------------
@@ -60,8 +73,8 @@ import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/exter
 // ---------------------------------------------------------------------------
 
 import { inspectOpenCodeEnvironment } from "./preflight";
-import type { OpenCodeToolsReview } from "./required-tools";
-import { reviewOpenCodeTools } from "./required-tools";
+import type { OpenCodeToolsReview, OpenCodeEvidenceContext } from "./required-tools";
+import { createOpenCodeEvidenceContext, reviewOpenCodeTools } from "./required-tools";
 import {
   buildOpenCodeRunnerCapabilityInventory,
   type OpenCodeRunnerCapabilityInventory,
@@ -94,6 +107,7 @@ import { LastKnownGoodStore, ModelInventoryCache, buildDiscoveryFingerprint, bui
 import { nodeOpenCodeCommandRunner, OPENCODE_DISCOVERY_TIMEOUT_MS, type ModelDiscoveryFileSystem, type OpenCodeCommandRunner } from "./opencode-models-cli";
 import { collectOpenCodeDiscoveryContext } from "./model-discovery-context";
 import type { RunnerModelInventory, RunnerModelEntry } from "@deck/core";
+import { installOpenCodeTools, type OpenCodeToolInstallResultExact } from "./install-tools";
 
 // ---------------------------------------------------------------------------
 // Adapter factory
@@ -115,6 +129,16 @@ export type OpenCodeRunnerAdapterOptions = {
   productionDiscoveryDependencies?: Partial<OpenCodeProductionDiscoveryDependencies>;
   /** Isolated install root for adapter integration tests; production retains OpenCode's config directory. */
   developerTeamConfigDir?: string;
+  /** Optional read-only OpenCode inventory seam for runner-exposed skills. */
+  skillInventoryDiscovery?: OpenCodeSkillInventoryDiscovery;
+  /** Optional home directory seam used to resolve the legacy OpenCode root. */
+  skillDiscoveryHomeDir?: string;
+  /** Deterministic OpenCode package evidence review seam; production uses the runner context. */
+  toolsReview?: OpenCodeToolsReview | ((context: RunnerActionContext) => OpenCodeToolsReview);
+  /** Deterministic package installer seam for adapter contract tests. */
+  installTools?: typeof installOpenCodeTools;
+  /** Optional evidence context provider shared by preflight and effect-time rechecks. */
+  evidenceContext?: (context: RunnerActionContext) => OpenCodeEvidenceContext;
 };
 
 export type DiscoveryTimers = { setTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout>; clearTimeout(timer: ReturnType<typeof setTimeout>): void };
@@ -132,6 +156,387 @@ export type OpenCodeProductionDiscoveryDependencies = {
   resolveWorkspaceRoot: (projectRoot: string) => Promise<string>;
   resolvePluginEntry: (reference: string, fromDirectory: string) => Promise<string | null>;
 };
+
+export type OpenCodeSkillInventoryDiscovery = (input: {
+  readonly projectRoot: string;
+}) => Promise<OpaqueSkillInventoryResultV1>;
+
+type OpenCodeSkillDiscoveryFileSystem = {
+  readonly stat: (path: string) => Promise<{
+    isDirectory: () => boolean;
+    isFile: () => boolean;
+  }>;
+  readonly access?: (path: string) => Promise<void>;
+  readonly readdir?: (path: string) => Promise<readonly string[]>;
+  readonly realpath: (path: string) => Promise<string>;
+};
+
+export type OpenCodeSkillDiscoveryProviderOptions = {
+  readonly configDir?: string;
+  readonly homeDir?: string;
+  readonly skillInventoryDiscovery?: OpenCodeSkillInventoryDiscovery;
+  readonly fileSystem?: OpenCodeSkillDiscoveryFileSystem;
+};
+
+const OPENCODE_CONFIG_SKILLS_SOURCE_ID = "opencode-config-skills" as const;
+const OPENCODE_LEGACY_SKILLS_SOURCE_ID = "opencode-legacy-skills" as const;
+const OPENCODE_RUNNER_INVENTORY_SOURCE_ID = "opencode-inventory" as const;
+const OPENCODE_SKILL_LOCATOR_PREFIX = "runner:opencode:";
+
+function defaultOpenCodeSkillDiscoveryFileSystem(): OpenCodeSkillDiscoveryFileSystem {
+  return {
+    stat: async (path) => fs.stat(path),
+    access: async (path) => fs.access(path),
+    readdir: async (path) => fs.readdir(path),
+    realpath: (path) => fs.realpath(path),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function errorCode(error: unknown): string | undefined {
+  return isRecord(error) && typeof error.code === "string" ? error.code : undefined;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR";
+}
+
+function safeDiagnostic(
+  code: string,
+  sourceId?: string,
+): SkillDiscoveryDiagnosticV1 {
+  return {
+    code,
+    ...(sourceId ? { source_id: sourceId } : {}),
+    message: "OpenCode skill discovery could not fully evaluate this source.",
+  };
+}
+
+function boundDiagnostics(
+  diagnostics: readonly SkillDiscoveryDiagnosticV1[],
+  sourceId?: string,
+): readonly SkillDiscoveryDiagnosticV1[] {
+  if (diagnostics.length <= SKILL_DISCOVERY_V1_BOUNDS.maxDiagnostics) return [...diagnostics];
+  return [
+    ...diagnostics.slice(0, SKILL_DISCOVERY_V1_BOUNDS.maxDiagnostics - 1),
+    safeDiagnostic("diagnostic_limit_reached", sourceId),
+  ];
+}
+
+function isSafeOpaqueId(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 256
+    && /^[A-Za-z0-9][A-Za-z0-9._~-]*$/.test(value)
+    && value !== "."
+    && value !== "..";
+}
+
+function copySignals(
+  value: unknown,
+  maxCount: number,
+): { valid: true; value?: readonly string[] } | { valid: false } {
+  if (value === undefined) return { valid: true };
+  if (!Array.isArray(value) || value.length > maxCount || value.some((item) => typeof item !== "string")) {
+    return { valid: false };
+  }
+  return { valid: true, value: [...value] as string[] };
+}
+
+function normalizeOpaqueInventoryResult(
+  value: unknown,
+): OpaqueSkillInventoryResultV1 {
+  const raw = isRecord(value) ? value : {};
+  const rawObservations = Array.isArray(raw.observations) ? raw.observations : [];
+  const diagnostics: SkillDiscoveryDiagnosticV1[] = [];
+  let indeterminate = raw.outcome !== "complete" || !Array.isArray(raw.observations);
+  if (!Array.isArray(raw.observations)) diagnostics.push(safeDiagnostic("malformed_inventory", OPENCODE_RUNNER_INVENTORY_SOURCE_ID));
+  if (rawObservations.length > SKILL_DISCOVERY_V1_BOUNDS.maxCandidateRecords) {
+    indeterminate = true;
+    diagnostics.push(safeDiagnostic("truncated_output", OPENCODE_RUNNER_INVENTORY_SOURCE_ID));
+  }
+
+  const observations: OpaqueSkillObservationV1[] = [];
+  for (const item of rawObservations.slice(0, SKILL_DISCOVERY_V1_BOUNDS.maxCandidateRecords)) {
+    if (!isRecord(item) || !isSafeOpaqueId(item.opaqueId) || typeof item.name !== "string" || !item.name.trim()) {
+      diagnostics.push(safeDiagnostic("unsafe_opaque_id", OPENCODE_RUNNER_INVENTORY_SOURCE_ID));
+      continue;
+    }
+
+    const taskSignals = copySignals(item.taskSignals, SKILL_DISCOVERY_V1_BOUNDS.maxTaskSignals);
+    const technologySignals = copySignals(item.technologySignals, SKILL_DISCOVERY_V1_BOUNDS.maxTechnologySignals);
+    const pathSignals = copySignals(item.pathSignals, SKILL_DISCOVERY_V1_BOUNDS.maxPathSignals);
+    if (!taskSignals.valid || !technologySignals.valid || !pathSignals.valid) {
+      diagnostics.push(safeDiagnostic("invalid_signal_bound", OPENCODE_RUNNER_INVENTORY_SOURCE_ID));
+      continue;
+    }
+
+    const observation: OpaqueSkillObservationV1 = {
+      opaqueId: item.opaqueId,
+      name: item.name,
+      ...(typeof item.description === "string" ? { description: item.description } : {}),
+      ...(taskSignals.value ? { taskSignals: taskSignals.value } : {}),
+      ...(technologySignals.value ? { technologySignals: technologySignals.value } : {}),
+      ...(pathSignals.value ? { pathSignals: pathSignals.value } : {}),
+      ...(item.observedCategory === "runner_exposed" || item.observedCategory === "deck_materialized"
+        ? { observedCategory: item.observedCategory }
+        : {}),
+    };
+    observations.push(observation);
+  }
+
+  const rawDiagnosticCount = Array.isArray(raw.diagnostics) ? raw.diagnostics.length : 0;
+  const rawDiagnostics = Array.from(
+    { length: Math.min(rawDiagnosticCount, SKILL_DISCOVERY_V1_BOUNDS.maxDiagnostics + 1) },
+    () => safeDiagnostic("source_warning", OPENCODE_RUNNER_INVENTORY_SOURCE_ID),
+  );
+  const allDiagnostics = boundDiagnostics(
+    [...diagnostics, ...rawDiagnostics],
+    OPENCODE_RUNNER_INVENTORY_SOURCE_ID,
+  );
+  if (indeterminate) {
+    return {
+      outcome: "indeterminate",
+      observations,
+      reasonCode: "partial_source_evaluation",
+      diagnostics: allDiagnostics,
+    };
+  }
+  return { outcome: "complete", observations, diagnostics: allDiagnostics };
+}
+
+function deriveOpenCodeHomeDirectory(configDir: string): string {
+  const absoluteConfigDir = resolve(configDir);
+  const configParent = dirname(absoluteConfigDir);
+  return basename(absoluteConfigDir) === "opencode" && basename(configParent) === ".config"
+    ? dirname(configParent)
+    : dirname(absoluteConfigDir);
+}
+
+function createSourceDeclaration(
+  sourceId: string,
+  sourceCategory: SkillDiscoverySourceDeclarationV1["sourceCategory"],
+  scope: SkillDiscoverySourceDeclarationV1["scope"],
+  locatorStrategy: SkillDiscoverySourceDeclarationV1["locatorStrategy"],
+  expectedContent: SkillDiscoverySourceDeclarationV1["expectedContent"],
+): SkillDiscoverySourceDeclarationV1 {
+  return {
+    schema: SKILL_DISCOVERY_SOURCE_SCHEMA,
+    sourceId,
+    sourceCategory,
+    scope,
+    runnerId: "opencode",
+    locatorStrategy,
+    expectedContent,
+    safeLocatorBase: sourceId,
+  };
+}
+
+function createFilesystemBinding(
+  declaration: SkillDiscoverySourceDeclarationV1,
+  absoluteRoot: string,
+): SkillDiscoverySourceBindingV1 {
+  const binding = {
+    kind: "filesystem" as const,
+    declaration,
+    absoluteRoot,
+    descriptorBasename: "SKILL.md" as const,
+  } satisfies SkillDiscoverySourceBindingV1;
+  // Runtime-only roots must not become enumerable serialization data.
+  Object.defineProperty(binding, "absoluteRoot", { enumerable: false, value: absoluteRoot });
+  return binding;
+}
+
+function pathIsWithin(root: string, candidate: string): boolean {
+  const child = relative(root, candidate);
+  return child === "" || (!child.startsWith(`..${sep}`) && child !== ".." && !isAbsolute(child));
+}
+
+function decodeLocatorPart(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function isSafeRelativeSkillPath(value: string): boolean {
+  if (!value || value.startsWith("/") || value.startsWith("~") || value.includes("\\") || value.includes("\0")) return false;
+  if (/^[A-Za-z]:/.test(value) || value.startsWith("//")) return false;
+  const segments = value.split("/");
+  return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
+}
+
+async function inspectOpenCodeSkillRoot(
+  fileSystem: OpenCodeSkillDiscoveryFileSystem,
+  root: string,
+): Promise<"available" | "absent" | "indeterminate"> {
+  try {
+    const stats = await fileSystem.stat(root);
+    if (!stats.isDirectory()) return "indeterminate";
+  } catch (error) {
+    return isNotFoundError(error) ? "absent" : "indeterminate";
+  }
+  try {
+    if (fileSystem.access) await fileSystem.access(root);
+    else if (fileSystem.readdir) await fileSystem.readdir(root);
+    else return "indeterminate";
+    return "available";
+  } catch {
+    return "indeterminate";
+  }
+}
+
+/**
+ * Read-only OpenCode source provider. Generic project roots belong to core;
+ * this adapter contributes only OpenCode's configured and legacy user roots,
+ * plus an explicitly injected opaque runner inventory when available.
+ */
+export function createOpenCodeSkillDiscoveryProvider(
+  options: OpenCodeSkillDiscoveryProviderOptions = {},
+): SkillDiscoverySourceProviderV1 {
+  const configDir = resolve(options.configDir ?? join(homedir(), ".config", "opencode"));
+  const homeDir = resolve(options.homeDir ?? deriveOpenCodeHomeDirectory(configDir));
+  const fileSystem = options.fileSystem ?? defaultOpenCodeSkillDiscoveryFileSystem();
+  const inventoryCache = new Map<string, Promise<OpaqueSkillInventoryResultV1>>();
+  const filesystemSources = () => [
+    {
+      sourceId: OPENCODE_CONFIG_SKILLS_SOURCE_ID,
+      root: join(configDir, "skills"),
+    },
+    {
+      sourceId: OPENCODE_LEGACY_SKILLS_SOURCE_ID,
+      root: join(homeDir, ".opencode", "skills"),
+    },
+  ] as const;
+  const declarations = new Map<string, SkillDiscoverySourceDeclarationV1>([
+    [OPENCODE_CONFIG_SKILLS_SOURCE_ID, createSourceDeclaration(OPENCODE_CONFIG_SKILLS_SOURCE_ID, "user_runner", "user", "runner_relative", "skill_md")],
+    [OPENCODE_LEGACY_SKILLS_SOURCE_ID, createSourceDeclaration(OPENCODE_LEGACY_SKILLS_SOURCE_ID, "user_runner", "user", "runner_relative", "skill_md")],
+  ]);
+  const inventoryDeclaration = createSourceDeclaration(OPENCODE_RUNNER_INVENTORY_SOURCE_ID, "runner_exposed", "runner", "runner_opaque", "opaque_inventory_v1");
+
+  const readCurrentInventory = (projectRoot: string): Promise<OpaqueSkillInventoryResultV1> => Promise.resolve()
+    .then(() => options.skillInventoryDiscovery!({ projectRoot }))
+    .then((result) => normalizeOpaqueInventoryResult(result))
+    .catch(() => ({
+      outcome: "indeterminate" as const,
+      observations: [],
+      reasonCode: "partial_source_evaluation" as const,
+      diagnostics: [safeDiagnostic("inventory_unavailable", OPENCODE_RUNNER_INVENTORY_SOURCE_ID)],
+    }));
+
+  const readInventory = (projectRoot: string): Promise<OpaqueSkillInventoryResultV1> => {
+    const cacheKey = resolve(projectRoot);
+    const cached = inventoryCache.get(cacheKey);
+    if (cached) return cached;
+    const pending = readCurrentInventory(projectRoot);
+    inventoryCache.set(cacheKey, pending);
+    return pending;
+  };
+
+  return {
+    schema: SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
+    runnerId: "opencode",
+    async listSources(input): Promise<SkillDiscoverySourceSetV1> {
+      const diagnostics: SkillDiscoveryDiagnosticV1[] = [];
+      let indeterminate = false;
+      const sources: SkillDiscoverySourceBindingV1[] = [];
+
+      for (const source of filesystemSources()) {
+        const state = await inspectOpenCodeSkillRoot(fileSystem, source.root);
+        if (state === "indeterminate") {
+          indeterminate = true;
+          diagnostics.push(safeDiagnostic("source_unreadable", source.sourceId));
+        }
+        sources.push(createFilesystemBinding(declarations.get(source.sourceId)!, source.root));
+      }
+
+      if (options.skillInventoryDiscovery) {
+        const inventory = await readInventory(input.projectRoot);
+        if (inventory.outcome === "indeterminate") indeterminate = true;
+        diagnostics.push(...inventory.diagnostics);
+        sources.push({
+          kind: "opaque_inventory",
+          declaration: inventoryDeclaration,
+          readInventory: () => readInventory(input.projectRoot),
+        });
+      }
+
+      const bounded = boundDiagnostics(diagnostics);
+      return indeterminate
+        ? { outcome: "indeterminate", sources, reasonCode: "partial_source_evaluation", diagnostics: bounded }
+        : { outcome: "complete", sources, diagnostics: bounded };
+    },
+    async resolveLocator(input): Promise<SkillLocatorResolutionV1> {
+      if (typeof input.locator !== "string" || !input.locator.startsWith(OPENCODE_SKILL_LOCATOR_PREFIX)) {
+        return { status: "rejected", diagnostic: safeDiagnostic("locator_rejected") };
+      }
+      const token = input.locator.slice(OPENCODE_SKILL_LOCATOR_PREFIX.length);
+      const separator = token.indexOf("/");
+      if (separator <= 0) return { status: "rejected", diagnostic: safeDiagnostic("locator_rejected") };
+      const sourceId = token.slice(0, separator);
+      const encodedValue = token.slice(separator + 1);
+
+      if (sourceId === OPENCODE_RUNNER_INVENTORY_SOURCE_ID) {
+        if (!options.skillInventoryDiscovery) return { status: "rejected", diagnostic: safeDiagnostic("source_unavailable", sourceId) };
+        const opaqueId = decodeLocatorPart(encodedValue);
+        if (!isSafeOpaqueId(opaqueId)) return { status: "rejected", diagnostic: safeDiagnostic("unsafe_opaque_id", sourceId) };
+        const inventory = await readCurrentInventory(input.projectRoot);
+        if (inventory.outcome !== "complete") {
+          return { status: "rejected", diagnostic: safeDiagnostic("inventory_unavailable", sourceId) };
+        }
+        return inventory.observations.some((observation) => observation.opaqueId === opaqueId)
+          ? { status: "available", loadReference: opaqueId }
+          : { status: "missing" };
+      }
+
+      const source = filesystemSources().find((candidate) => candidate.sourceId === sourceId);
+      if (!source || !declarations.has(sourceId)) return { status: "rejected", diagnostic: safeDiagnostic("unknown_source") };
+      const decodedPath = decodeLocatorPart(encodedValue);
+      if (!decodedPath || !isSafeRelativeSkillPath(decodedPath) || (decodedPath !== "SKILL.md" && !decodedPath.endsWith("/SKILL.md"))) {
+        return { status: "rejected", diagnostic: safeDiagnostic("locator_rejected", sourceId) };
+      }
+
+      const rootPath = resolve(source.root);
+      const candidatePath = resolve(rootPath, decodedPath);
+      if (!pathIsWithin(rootPath, candidatePath)) return { status: "rejected", diagnostic: safeDiagnostic("traversal_rejected", sourceId) };
+
+      let canonicalRoot: string;
+      try {
+        canonicalRoot = await fileSystem.realpath(rootPath);
+      } catch (error) {
+        return isNotFoundError(error)
+          ? { status: "missing" }
+          : { status: "rejected", diagnostic: safeDiagnostic("source_unreadable", sourceId) };
+      }
+
+      let canonicalCandidate: string;
+      try {
+        canonicalCandidate = await fileSystem.realpath(candidatePath);
+      } catch (error) {
+        return isNotFoundError(error)
+          ? { status: "missing" }
+          : { status: "rejected", diagnostic: safeDiagnostic("locator_unavailable", sourceId) };
+      }
+      if (!pathIsWithin(resolve(canonicalRoot), resolve(canonicalCandidate))) {
+        return { status: "rejected", diagnostic: safeDiagnostic("traversal_rejected", sourceId) };
+      }
+      try {
+        const stats = await fileSystem.stat(canonicalCandidate);
+        return stats.isFile()
+          ? { status: "available", loadReference: canonicalCandidate }
+          : { status: "rejected", diagnostic: safeDiagnostic("descriptor_rejected", sourceId) };
+      } catch (error) {
+        return isNotFoundError(error)
+          ? { status: "missing" }
+          : { status: "rejected", diagnostic: safeDiagnostic("locator_unavailable", sourceId) };
+      }
+    },
+  };
+}
 
 function nodeProductionDiscoveryDependencies(): OpenCodeProductionDiscoveryDependencies {
   const fileSystem: ModelDiscoveryFileSystem = {
@@ -213,16 +618,47 @@ class OpenCodeRunnerAdapterImpl {
   readonly runnerId: RunnerId = "opencode";
   readonly displayName: string = "OpenCode";
   readonly environmentIds: readonly RunnerEnvironmentId[] = [...OPENCODE_ENVIRONMENT_IDS];
+  readonly skillDiscovery: SkillDiscoverySourceProviderV1;
 
   #inventoryDiscovery: (request: RunnerModelDiscoveryRequest) => Promise<RunnerModelInventoryResult>;
   #latestReady: Extract<RunnerModelInventoryResult, { state: "ready" }> | null = null;
   #planBindings = new WeakMap<RunnerDeveloperTeamInstallPlan, { nativePlan: OpenCodeDeveloperTeamInstallPlan; validation: { changedAgentIds: readonly string[]; fingerprint?: string; modelAssignments: DeveloperTeamModelAssignments; thinkingAssignments: DeveloperTeamThinkingAssignments } }>();
   #developerTeamConfigDir?: string;
+  #toolsReview?: OpenCodeRunnerAdapterOptions["toolsReview"];
+  #installTools: typeof installOpenCodeTools;
+  #evidenceContext?: OpenCodeRunnerAdapterOptions["evidenceContext"];
 
   constructor(options?: OpenCodeRunnerAdapterOptions) {
     this.#developerTeamConfigDir = options?.developerTeamConfigDir;
+    this.#toolsReview = options?.toolsReview;
+    this.#installTools = options?.installTools ?? installOpenCodeTools;
+    this.#evidenceContext = options?.evidenceContext;
     this.#inventoryDiscovery = options?.inventoryDiscovery
       ?? createDefaultOpenCodeInventoryDiscovery(options?.productionDiscoveryDependencies);
+    const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
+    this.skillDiscovery = createOpenCodeSkillDiscoveryProvider({
+      configDir,
+      homeDir: options?.skillDiscoveryHomeDir,
+      skillInventoryDiscovery: options?.skillInventoryDiscovery,
+    });
+  }
+
+  private getEvidenceContext(context: RunnerActionContext): OpenCodeEvidenceContext {
+    return this.#evidenceContext?.(context) ?? createOpenCodeEvidenceContext({
+      projectRoot: context.projectRoot,
+      workspaceRoot: context.projectRoot,
+      currentDirectory: context.projectRoot,
+    });
+  }
+
+  private getToolsReview(context: RunnerActionContext): OpenCodeToolsReview {
+    if (typeof this.#toolsReview === "function") return this.#toolsReview(context);
+    if (this.#toolsReview) return this.#toolsReview;
+    return reviewOpenCodeTools({
+      projectRoot: context.projectRoot,
+      workspaceRoot: context.projectRoot,
+      evidenceContext: this.getEvidenceContext(context),
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -260,7 +696,12 @@ class OpenCodeRunnerAdapterImpl {
   // -------------------------------------------------------------------------
 
   async getCapabilityInventory(input: CapabilityInventoryInput): Promise<CapabilityInventory> {
-    const toolsReview = reviewOpenCodeTools();
+    const actionContext: RunnerActionContext = {
+      projectRoot: input.projectRoot,
+      runnerId: this.runnerId,
+      environmentId: input.environmentId,
+    };
+    const toolsReview = this.getToolsReview(actionContext);
     const runnerScope = "opencode";
 
     const inventory = buildOpenCodeRunnerCapabilityInventory(toolsReview, {
@@ -320,7 +761,7 @@ class OpenCodeRunnerAdapterImpl {
     return {
       capabilities,
       runnerId: this.runnerId,
-      environmentId: input?.environmentId ?? "opencode-development",
+      environmentId: input.environmentId,
     };
   }
 
@@ -458,37 +899,62 @@ class OpenCodeRunnerAdapterImpl {
   // -------------------------------------------------------------------------
 
   async runAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
-    // Handle action based on its kind
     switch (action.kind) {
       case "install-opencode-plugin": {
-        const { installOpenCodeTools } = require("./install-tools");
-        const toolsReview = reviewOpenCodeTools();
-        const plan = buildOpenCodeInstallationPlan({ tools: toolsReview.tools, selectedToolIds: [action.toolId ?? action.capabilityId ?? ""].filter(Boolean) });
+        const toolId = action.toolId ?? action.capabilityId;
+        const toolsReview = this.getToolsReview(context);
+        const plan = buildOpenCodeInstallationPlan({
+          tools: toolsReview.tools,
+          selectedToolIds: toolId ? [toolId] : [],
+        });
+        const evidence = toolId ? toolsReview.evidence?.[toolId as keyof NonNullable<OpenCodeToolsReview["evidence"]>] : undefined;
 
         if (plan.length === 0) {
+          if (evidence?.state === "usable") {
+            return projectOpenCodeInstallResult(action, {
+              toolId: (toolId ?? "") as InstallableOpenCodeTool["id"],
+              tool: action.title,
+              outcome: "already-present",
+              success: true,
+              installerInvoked: false,
+              message: `${action.title} already present; installer not run.`,
+            });
+          }
           return {
             actionId: action.id,
             status: "skipped",
-            message: `Tool ${action.toolId ?? action.capabilityId} is already installed or not available.`,
+            message: `Tool ${toolId ?? action.capabilityId} is not available for installation.`,
             diagnostics: [],
           };
         }
 
         try {
-          const results = await installOpenCodeTools("opencode", plan, () => {});
+          const results = await this.#installTools(
+            "opencode",
+            plan,
+            () => {},
+            undefined,
+            {
+              projectRoot: context.projectRoot,
+              evidenceContext: this.getEvidenceContext(context),
+            },
+          );
           const firstResult = results[0];
-          return {
-            actionId: action.id,
-            status: firstResult?.success ? "executed" : "failed",
-            message: firstResult?.success ? `${action.title} completed.` : `Installation failed: ${firstResult?.error}`,
-            diagnostics: firstResult?.success ? [] : [firstResult?.error ?? "Unknown error"],
-          };
+          if (!firstResult) {
+            return {
+              actionId: action.id,
+              status: "failed",
+              message: `${action.title} returned no package result.`,
+              diagnostics: ["No package result returned."],
+            };
+          }
+          return projectOpenCodeInstallResult(action, firstResult);
         } catch (error) {
           return {
             actionId: action.id,
             status: "failed",
             message: `Installation failed: ${error instanceof Error ? error.message : String(error)}`,
-            diagnostics: [error instanceof Error ? error.message : String(error)],
+            diagnostics: ["Installation failed."],
           };
         }
       }
@@ -1012,6 +1478,57 @@ function findModelInInventory(
 // ---------------------------------------------------------------------------
 // Singleton instance for drop-in replacement
 // ---------------------------------------------------------------------------
+
+function projectOpenCodeInstallResult(
+  action: RunnerAction,
+  result: OpenCodeToolInstallResultExact,
+): RunnerActionRunResult {
+  const status: RunnerActionRunResult["status"] = result.outcome === "already-present"
+    ? "skipped"
+    : result.outcome === "executed"
+      ? "executed"
+      : result.outcome === "failed"
+        ? "failed"
+        : "skipped";
+  const diagnostics = boundActionDiagnostics(result.cause ? [result.cause] : result.diagnostic?.lines ?? []);
+  const raw = {
+    id: result.toolId,
+    outcome: result.outcome,
+    ...(result.diagnostic ? {
+      diagnostic: {
+        stage: result.diagnostic.stage,
+        code: result.diagnostic.code,
+        ...(result.diagnostic.exitCode === undefined ? {} : { exitCode: result.diagnostic.exitCode }),
+        lines: boundActionDiagnostics(result.diagnostic.lines),
+      },
+    } : {}),
+  };
+  return {
+    actionId: action.id,
+    status,
+    message: result.message,
+    diagnostics,
+    raw,
+  };
+}
+
+function boundActionDiagnostics(values: readonly string[]): readonly string[] {
+  const result: string[] = [];
+  let bytes = 0;
+  for (const value of values) {
+    if (result.length >= 8) break;
+    const line = [...value].slice(0, 240).join("");
+    const remaining = 1_280 - bytes;
+    if (remaining <= 0) break;
+    const bounded = Buffer.byteLength(line, "utf8") <= remaining
+      ? line
+      : Buffer.from(line, "utf8").subarray(0, remaining).toString("utf8");
+    if (!bounded) continue;
+    result.push(bounded);
+    bytes += Buffer.byteLength(bounded, "utf8");
+  }
+  return result;
+}
 
 export const openCodeRunnerAdapter: RunnerAdapter = createOpenCodeRunnerAdapter();
 

@@ -5,6 +5,8 @@ import {
   RunnerNotRegisteredError,
 } from "./adapter-registry";
 import type { RunnerAdapter } from "./runner-adapter";
+import { SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA } from "./skill-discovery";
+import type { SkillDiscoverySourceProviderV1 } from "./skill-discovery";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -102,6 +104,34 @@ function createMockAdapter(
     },
   };
 }
+
+
+describe("RunnerAdapter skill discovery contract", () => {
+  test("keeps adapters without the optional provider compatible", () => {
+    const adapter = createMockAdapter("pi", ["pi-development"]);
+
+    expect(adapter.skillDiscovery).toBeUndefined();
+  });
+
+  test("preserves the selected adapter runner identity on its provider", () => {
+    const provider = {
+      schema: SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
+      runnerId: "opencode",
+      listSources: async () => ({
+        outcome: "complete",
+        sources: [],
+        diagnostics: [],
+      }),
+      resolveLocator: async () => ({ status: "missing" }),
+    } satisfies SkillDiscoverySourceProviderV1;
+    const adapter: RunnerAdapter = {
+      ...createMockAdapter("opencode", ["opencode-development"]),
+      skillDiscovery: provider,
+    };
+
+    expect(adapter.skillDiscovery?.runnerId).toBe(adapter.runnerId);
+  });
+});
 
 
 describe("RunnerAdapter dynamic model discovery contract", () => {

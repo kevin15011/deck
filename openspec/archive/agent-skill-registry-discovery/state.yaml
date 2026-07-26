@@ -1,0 +1,381 @@
+schema: spec-registry-v1
+changeId: agent-skill-registry-discovery
+name: Agent Skill Registry Discovery
+currentPhase: archive
+status: archived
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  repair_incident: repair-incident.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+  archive_report: archive-report.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-22T21:54:50.698Z"
+    registryWrite: deferred-reconciled
+    note: "Interactive Explore completed; registry pair bootstrapped by the central coordinator."
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-22T22:08:15.059Z"
+    registryWrite: deferred-reconciled
+    note: "Interactive Proposal draft completed; awaiting explicit client approval."
+    intentId: registry-intent:v1:b3596ec5721d83c8e26ceca81363d6a7
+    idempotencyKey: sha256:776c3255a485638f7133abcf5655c14b0c1668b6a83e17212cd964b24c14e9bd
+  - phase: proposal
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-22T22:21:04.743Z"
+    registryWrite: non-deferred
+    note: "Explicit client approval recorded in Interactive mode."
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/mimo-v2.5-pro
+    timestamp: "2026-07-23T00:10:00.000Z"
+    registryWrite: deferred-reconciled
+    note: "Interactive Spec completed with 32 requirements and 56 scenarios."
+    intentId: registry-intent:v1:bc4f7afbd5faef740f4ab033f4b67c5f
+    idempotencyKey: sha256:0c74b423ab773b6556c1550cf94b79c5eaf23bdc7faec29eda1175fd172dedbf
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-22T22:45:06.428Z"
+    registryWrite: deferred-reconciled
+    note: "Interactive Design completed in parallel with Spec; reconciliation is required before Tasks."
+    intentId: registry-intent:v1:a896a9993db7e4c26d9d6faac95cacc7
+    idempotencyKey: sha256:4b4acfaa06b9c90a8a965d83d51ea521ccb6fbb6e1b9c187fd01b9f39a02ca71
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/mimo-v2.5-pro
+    timestamp: "2026-07-23T01:30:00.000Z"
+    registryWrite: deferred-reconciled
+    note: "Spec revised after five client-approved reconciliation decisions; 32 requirements and 62 scenarios."
+    intentId: registry-intent:v1:spec-revision-completed
+    idempotencyKey: sha256:940e5c93dfe8ee1dce342c112d3d51decfeb0661b18344f0da11a33db157ce70
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T13:59:35.868Z"
+    registryWrite: deferred-reconciled
+    note: "Final Design reconciliation completed against the revised Spec; all prior reconciliation items closed."
+    intentId: registry-intent:v1:c23e849fe25fb0d95b8e8305e32db33f
+    idempotencyKey: sha256:d6cdccf5d6526c7a03491b1f23397f30c9c3ad81bf1f8b925e99a88079ed0d72
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-23T14:05:00.000Z"
+    registryWrite: deferred-reconciled
+    note: "Interactive Tasks completed: 13 implementation tasks plus independent Verify and Review; Apply authorization remains pending."
+    intentId: registry-intent:v1:49c2b0adad4a01309244f42075f216e7
+    idempotencyKey: sha256:49c2b0adad4a01309244f42075f216e7495ed3167f78224eae428f735ce6b06f
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T14:18:56.114Z"
+    registryWrite: non-deferred
+    note: "The client explicitly authorized source modifications for T1-T12; no commit or push authorized."
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-23T14:35:00.000Z"
+    registryWrite: deferred-reconciled
+    note: "User-approved bounded Tasks amendment added test-only T11r for the stale Pi registry-consumption oracle."
+    intentId: registry-intent:v1:ba548e259a4b45b04b66ebc91b625f26
+    idempotencyKey: sha256:ba548e259a4b45b04b66ebc91b625f26d61753b5861037d425c4c8d3d8521c86
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T17:17:29.152Z"
+    registryWrite: non-deferred
+    note: "T1-T12 and user-approved T11r completed; targeted and affected-area Apply checks green; no commit or push performed."
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: "2026-07-23T17:38:05.258Z"
+    registryWrite: deferred-reconciled
+    note: "Independent targeted and affected-area Verify passed with two non-blocking registry warnings and one scenario-count metadata warning."
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T18:04:39.056Z"
+    registryWrite: deferred-reconciled
+    note: "Independent Review requested changes with six blocking findings; broad checks are blocked."
+    intentId: registry-intent:v1:c3f51e9a9ef2d07d252008be3e1b61df
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-23T19:10:00.000Z"
+    registryWrite: deferred-reconciled
+    note: "User-authorized planning added bounded repair tasks T-RR-001 through T-RR-006, fresh V2/R2 gates, and pre-archive metadata task T-META-001. Repair Apply remains unauthorized."
+    intentId: registry-intent:v1:5fbccea2b9042082b9e23456878d54c8
+    idempotencyKey: sha256:5fbccea2b9042082b9e23456878d54c8bd49d826a1d9be7cc5b17d9a9cf1abf5
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T20:03:35.209Z"
+    registryWrite: non-deferred
+    note: "The user authorized bounded repairs T-RR-001 through T-RR-006; broad checks remain blocked pending fresh V2 and R2."
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-23T20:43:16.002Z"
+    registryWrite: deferred-reconciled
+    note: "Bounded T-RR-001i test-only integration task added after RR-Wave 1 exposed a stale CLI fixture; no new file or production scope."
+    intentId: registry-intent:v1:b3d3ea9d
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T21:18:36.291Z"
+    registryWrite: non-deferred
+    note: "All authorized Review repair tasks T-RR-001 through T-RR-006 plus bounded integration task T-RR-001i completed with targeted checks green; fresh V2 is required next."
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: "2026-07-23T21:33:18.550Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh V2 failed on the exact rootless OpenSpec validate command and missing immutable official RED evidence anchors; R2 and broad checks remain blocked."
+    intentId: registry-intent:v1:verify:agent-skill-registry-discovery:v2:failed
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-23T21:55:10.624Z"
+    registryWrite: deferred-reconciled
+    note: "User-authorized documentary task T-RR-V2E-001 and fresh V3 were added; V2 remains historical failed evidence."
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T21:55:11.624Z"
+    registryWrite: non-deferred
+    note: "The user authorized T-RR-V2E-001 documentary evidence repair only; no source or test changes are authorized."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: unknown
+    timestamp: "2026-07-23T22:08:19.179Z"
+    registryWrite: non-deferred
+    note: "T-RR-V2E-001 is blocked: immutable executed RED command/count/output evidence could not be recovered for T-RR-001, T-RR-003, T-RR-004, and T-RR-005 without fabrication."
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-23T22:22:26.368Z"
+    registryWrite: deferred-reconciled
+    note: "User-authorized T-RR-V2E-002 added for isolated reconstructed RED evidence in /tmp; repository source and tests remain immutable."
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T22:22:27.368Z"
+    registryWrite: non-deferred
+    note: "Isolated RED reconstruction T-RR-V2E-002 started under the user's option-1 authorization."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-luna
+    timestamp: "2026-07-23T22:46:27.292Z"
+    registryWrite: deferred-reconciled
+    note: "T-RR-V2E-002 completed: isolated reconstructed RED evidence proves R1-001, R1-003, R1-004, and R1-005 regressions while the real source/test manifest remained byte-identical; V3 is unblocked."
+    intentId: registry-intent:v1:apply:agent-skill-registry-discovery:artifact=apply-progress.md
+  - phase: verify
+    agent: deck-developer-verify
+    model: unknown
+    timestamp: "2026-07-23T23:00:17.585Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh V3 passed with non-blocking OpenSpec event-name warnings and the pre-archive scenario-count mismatch; fresh R2 is unblocked while broad remains blocked."
+    intentId: registry-intent:v1:verify:agent-skill-registry-discovery:v3:passed-with-warnings
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T23:09:23.435Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh R2 requested changes for one HIGH source-binding-width DoS gap; broad checks remain blocked."
+    intentId: registry-intent:v1:6e1c6a94e87c6a66ab0f764076d5116e
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-23T23:33:37.173Z"
+    registryWrite: deferred-reconciled
+    note: "User-authorized T-RR-007, fresh V4, and fresh R3 added for R2-001; broad remains blocked."
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-23T23:33:38.173Z"
+    registryWrite: non-deferred
+    note: "T-RR-007 bounded source-width repair started under explicit user authorization."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: openai/gpt-5.6-luna
+    timestamp: "2026-07-23T23:47:33.268Z"
+    registryWrite: non-deferred
+    note: "T-RR-007 completed: provider source consumption is bounded to 501 bindings before copy/sort; targeted and affected checks passed. Fresh V4 and R3 remain required."
+  - phase: verify
+    agent: deck-developer-verify
+    model: unknown
+    timestamp: "2026-07-24T00:02:27.360Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh V4 passed with non-blocking registry-name and scenario-count warnings; R3 is unblocked while broad remains blocked."
+    intentId: registry-intent:v1:verify:agent-skill-registry-discovery:v4:passed-with-warnings
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T00:15:36.489Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh R3 requested changes: the CLI/registry composed path reuses the original unbounded source collection after bounded discovery; broad remains blocked."
+    intentId: registry-intent:v1:review:agent-skill-registry-discovery:r3:failed
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-24T00:37:11.889Z"
+    registryWrite: deferred-reconciled
+    note: "Definitive consolidated T-RR-008, V5, and terminal R4 added; no automatic repair round may follow R4."
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T00:37:12.889Z"
+    registryWrite: non-deferred
+    note: "T-RR-008 definitive end-to-end bounded-source repair started under explicit user authorization."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: openai/gpt-5.6-luna
+    timestamp: "2026-07-24T01:00:27.572Z"
+    registryWrite: deferred-reconciled
+    note: "T-RR-008 completed: CLI/registry now use bounded indexed source normalization with no downstream raw iterator reuse; targeted and affected checks passed."
+    intentId: sha256:f67fd944a5967fec41fd19e72eaa054fe9cc448169941eb894f974e274d2e269
+  - phase: verify
+    agent: deck-developer-verify
+    model: unknown
+    timestamp: "2026-07-24T01:17:36.081Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh V5 passed with non-blocking historical registry and scenario-count warnings; terminal R4 is unblocked."
+    intentId: registry-intent:v1:verify:agent-skill-registry-discovery:v5:passed-with-warnings
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T01:36:08.279Z"
+    registryWrite: deferred-reconciled
+    note: "Terminal R4 failed: production source-scope hashing omits mandatory Core generic declarations and rejects valid project-relative locator bases. Broad and Archive are hard-stopped."
+    intentId: registry-intent:v1:review:agent-skill-registry-discovery:r4:failed
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-24T01:59:55.702Z"
+    registryWrite: deferred-reconciled
+    note: "Explicit user decision reopened terminal governance for T-RR-009, V6, and final terminal R5."
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T01:59:56.702Z"
+    registryWrite: non-deferred
+    note: "T-RR-009 source-scope integrity repair started under explicit user authorization."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: unknown
+    timestamp: "2026-07-24T02:10:33.931Z"
+    registryWrite: non-deferred
+    note: "T-RR-009 blocked with design-instruction-ambiguous: the canonical Core generic-source factory is private in disallowed discovery.ts and production composition occurs in disallowed CLI code."
+  - phase: tasks
+    agent: deck-developer-task
+    model: atlascloud/zai-org/glm-5.2
+    timestamp: "2026-07-24T14:10:51.293Z"
+    registryWrite: deferred-reconciled
+    note: "The user explicitly expanded T-RR-009 to the required five-file canonical factory, CLI composition, and registry validation scope."
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T14:10:52.293Z"
+    registryWrite: non-deferred
+    note: "T-RR-009 restarted under the expanded explicit user authorization."
+  - phase: apply
+    agent: deck-developer-apply-backend
+    model: openai/gpt-5.6-luna
+    timestamp: "2026-07-24T14:35:55.267Z"
+    registryWrite: non-deferred
+    note: "T-RR-009 completed: complete Core generic plus active-runner scope now drives hashing/readiness; safe locator validation and boundedness checks passed."
+  - phase: verify
+    agent: deck-developer-verify
+    model: unknown
+    timestamp: "2026-07-24T14:53:32.737Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh V6 passed all required checks with complete source-scope hash and locator integrity proof; terminal R5 is unblocked."
+    intentId: registry-intent:v1:verify:agent-skill-registry-discovery:v6:passed
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T15:11:01.817Z"
+    registryWrite: deferred-reconciled
+    note: "Terminal R5 approved with zero findings; all R1-R4 findings are closed and the broad gate is released."
+    intentId: registry-intent:v1:review:agent-skill-registry-discovery:r5:passed
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: "2026-07-24T15:20:50.886Z"
+    registryWrite: deferred-reconciled
+    note: "Mandatory broad gate failed 3949/3950 on core purity: skill-discovery-content.ts contains concrete runner/provider literals. T-META-001 and Archive are blocked."
+    intentId: registry-intent:v1:verify:agent-skill-registry-discovery:broad:failed
+  - phase: tasks
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T15:46:59.810Z"
+    registryWrite: non-deferred
+    note: "After two empty specialist returns, the coordinator recorded user-authorized T-BROAD-001, V7, R6, and broad successor sequencing without expanding source scope."
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T15:47:00.810Z"
+    registryWrite: non-deferred
+    note: "T-BROAD-001 runner-neutral Core content repair started under explicit user authorization."
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-luna
+    timestamp: "2026-07-24T16:02:48.984Z"
+    registryWrite: deferred-reconciled
+    note: "T-BROAD-001 completed: Core shared content is runner-neutral, purity and semantic contract suites pass, and EII-ASRD-002 remains intact."
+    intentId: registry-intent:v1:apply:agent-skill-registry-discovery:t-broad-001:completed
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: "2026-07-24T16:41:19.540Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh V7 passed focused Core purity, shared content contracts, OpenCode/Pi materialization, typecheck, build, diff, rooted OpenSpec, EII-ASRD-002, no-evasion, and freshness checks; terminal R6 is unblocked."
+    intentId: registry-intent:v1:verify:agent-skill-registry-discovery:v7:passed
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-24T16:51:08.205Z"
+    registryWrite: deferred-reconciled
+    note: "Terminal R6 approved with zero blocking and zero non-blocking findings; EII-ASRD-002, runner neutrality, no-evasion, scope, freshness, and all R1-R5 closures passed; the exact broad successor is released."
+    intentId: registry-intent:v1:review:agent-skill-registry-discovery:r6:passed
+    idempotencyKey: sha256:124b90ec87bc37d4b45d6ce34da6cc36eed30350776e2a7c7f4a4d06c12708e8
+  - phase: verify
+    agent: deck-developer-verify
+    model: unknown
+    timestamp: "2026-07-24T17:08:45.430Z"
+    registryWrite: deferred-reconciled
+    note: "Mandatory broad successor passed the exact bun run test command with 3950/3950 tests; diff-check and rooted OpenSpec validation passed; T-META-001 is unblocked pending its separate Spec modification authorization."
+    intentId: registry-intent:v1:verify:agent-skill-registry-discovery:broad-successor:passed
+  - phase: spec
+    agent: deck-developer-spec
+    model: unknown
+    timestamp: "2026-07-24T17:24:23.221Z"
+    registryWrite: non-deferred
+    note: "User-authorized T-META-001 completed: the summary scenario count now matches the 69 authoritative scenario headings; requirements and scenario bodies remain unchanged; Archive is unblocked."
+  - phase: archive
+    agent: deck-developer-archive
+    model: unknown
+    timestamp: "2026-07-24T17:30:00.000Z"
+    registryWrite: deferred-reconciled
+    note: "All mandatory closure gates passed and archive-report.md was prepared; canonical move is authorized and ready."
+    intentId: registry-intent:v1:archive:agent-skill-registry-discovery:initiated
+    idempotencyKey: sha256:archive-agent-skill-registry-discovery-initiated
+  - phase: archive
+    agent: deck-developer-archive
+    model: unknown
+    timestamp: "2026-07-24T17:35:00.000Z"
+    registryWrite: deferred-reconciled
+    note: "Canonical archive move completed: the active source directory is absent, the 14-artifact destination is intact, and Git diff-check passed."
+    intentId: registry-intent:v1:archive:agent-skill-registry-discovery:completed
+    idempotencyKey: sha256:archive-agent-skill-registry-discovery-completed

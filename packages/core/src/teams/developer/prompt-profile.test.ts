@@ -10,6 +10,7 @@ import {
 } from "./content-registry";
 import { buildCapabilityInstructionBundle } from "./instruction-bundles";
 import { getOrchestratorSystemPrompt } from "./orchestrator-content";
+import { SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1 } from "./skill-discovery-content";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY } from "../../config/deck-config";
 import {
   consumeExecutionRoleResultV1,
@@ -21,9 +22,9 @@ import {
   transitionStagedVerificationV1,
 } from "../../../../sdd-runtime/src";
 
-const LEGACY_BYTES = 384067;
-const LEGACY_LEXICAL_TOKENS = 82620;
-const LEGACY_SHA256 = "ee298f400cdfd732ddeb75e767aaf5c1731274abafa518d36af7e6135ba16370";
+const LEGACY_BYTES = 462243;
+const LEGACY_LEXICAL_TOKENS = 96694;
+const LEGACY_SHA256 = "dcf504ae968b348cafa639a625fea081912d0286999a20016dee726ae0a20bca";
 
 const CONTROL_PLANE_AGENT_IDS = [
   "deck-developer-orchestrator",
@@ -80,6 +81,30 @@ describe("Developer Team prompt profiles", () => {
     expect(Buffer.byteLength(legacy)).toBe(LEGACY_BYTES);
     expect(lexicalTokens(legacy)).toBe(LEGACY_LEXICAL_TOKENS);
     expect(createHash("sha256").update(legacy).digest("hex")).toBe(LEGACY_SHA256);
+  });
+
+  test("keeps compact and legacy Orchestrator discovery semantics aligned", () => {
+    const legacyAgent = getAgentContent("deck-developer-orchestrator", { promptProfile: "legacy" })!;
+    const compactAgent = getAgentContent("deck-developer-orchestrator", { promptProfile: "compact" })!;
+    const legacyPrompt = getOrchestratorSystemPrompt(DEFAULT_ORCHESTRATOR_PERSONALITY, "legacy");
+    const compactPrompt = getOrchestratorSystemPrompt(DEFAULT_ORCHESTRATOR_PERSONALITY, "compact");
+
+    for (const surface of [
+      legacyAgent.agentBody,
+      legacyAgent.skillBody,
+      compactAgent.agentBody,
+      compactAgent.skillBody,
+      legacyPrompt,
+      compactPrompt,
+    ]) {
+      expect(surface).toContain(SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1);
+      expect(surface).not.toMatch(/cache compact rules|inject matching rules|pre-digest|agents do NOT read the registry|Project Standards \(auto-resolved\)/i);
+    }
+
+    for (const term of ["session-start", "read-only", "direct discovery", "authorization"]) {
+      expect(legacyPrompt.toLowerCase()).toContain(term);
+      expect(compactPrompt.toLowerCase()).toContain(term);
+    }
   });
 
   test("provides a dedicated compact body for every Developer Team role", () => {

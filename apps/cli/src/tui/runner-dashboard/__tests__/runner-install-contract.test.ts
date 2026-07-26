@@ -32,7 +32,7 @@ describe("runRunnerReviewPlan contract tests", () => {
   // Test install failure prevents MCP config write (REQ-MCP-001)
   describe("Install failure gates MCP config (REQ-MCP-001)", () => {
     test("skips MCP config when install failed for same capability", async () => {
-      const mockInstallPackages = vi.fn(async () => [{ success: false, message: "Install failed" }]);
+      const mockInstallPackages = vi.fn(async (_command: string | undefined, packages: Array<{ id: string }>) => [{ id: packages[0]?.id, outcome: "failed" as const, success: false, message: "Install failed" }]);
 
       const plan = createMinimalPlan({
         automaticInstalls: [
@@ -60,7 +60,7 @@ describe("runRunnerReviewPlan contract tests", () => {
     });
 
     test("allows MCP config when install succeeded", async () => {
-      const mockInstallPackages = vi.fn(async () => [{ success: true, message: "Installed" }]);
+      const mockInstallPackages = vi.fn(async (_command: string | undefined, packages: Array<{ id: string }>) => [{ id: packages[0]?.id, outcome: "executed" as const, success: true, message: "Installed" }]);
 
       const plan = createMinimalPlan({
         automaticInstalls: [
@@ -90,13 +90,9 @@ describe("runRunnerReviewPlan contract tests", () => {
   // Test binary check fails prevents dependent config (REQ-EXE-001)
   describe("Binary check gates MCP config (REQ-EXE-001)", () => {
     test("skips MCP config when binary not found on PATH", async () => {
-      const mockInstallPackages = vi.fn(async () => [{ success: true, message: "Installed" }]);
-
       // Create plan with binary-requiring capability
       const plan = createMinimalPlan({
-        automaticInstalls: [
-          createTestAction("capability.serena.install", "install-opencode-plugin", "Install Serena", "serena", "serena", "oraios/serena"),
-        ],
+        automaticInstalls: [],
         configWrites: [
           createTestAction("capability.serena.mcp-config", "write-mcp-config", "Write MCP config", "serena"),
         ],
@@ -108,7 +104,6 @@ describe("runRunnerReviewPlan contract tests", () => {
 
       const dependencies: RunnerActionRunnerDependencies = {
         runnerCommand: "opencode",
-        installPackages: mockInstallPackages,
         writeMcpConfig: async () => ({ ok: true, path: "/tmp/mcp.json", diagnostics: [] }),
       };
 
@@ -129,7 +124,7 @@ describe("runRunnerReviewPlan contract tests", () => {
   // Test that MCP-only capabilities don't require binary check
   describe("MCP-only capabilities skip binary check", () => {
     test("allows context7 MCP config without binary check", async () => {
-      const mockInstallPackages = vi.fn(async () => [{ success: true, message: "Installed" }]);
+      const mockInstallPackages = vi.fn(async (_command: string | undefined, packages: Array<{ id: string }>) => [{ id: packages[0]?.id, outcome: "executed" as const, success: true, message: "Installed" }]);
 
       const plan = createMinimalPlan({
         automaticInstalls: [
@@ -165,9 +160,9 @@ describe("runRunnerReviewPlan contract tests", () => {
     test("runs installs first, then config writes", async () => {
       const executionOrder: string[] = [];
 
-      const mockInstallPackages = vi.fn(async () => {
+      const mockInstallPackages = vi.fn(async (_command: string | undefined, packages: Array<{ id: string }>) => {
         executionOrder.push("install");
-        return [{ success: true, message: "Installed" }];
+        return [{ id: packages[0]?.id, outcome: "executed" as const, success: true, message: "Installed" }];
       });
 
       const mockWriteMcpConfig = vi.fn(async () => {
@@ -230,6 +225,159 @@ describe("runRunnerReviewPlan contract tests", () => {
 });
 
 // Helper to create minimal plan for testing
+describe("T5 rich package outcome projection and dependency isolation", () => {
+  type PackageOutcome = "already-present" | "executed" | "failed" | "skipped";
+
+  function packageResult(
+    id: string | undefined,
+    outcome: PackageOutcome,
+    message: string,
+    extra: Record<string, unknown> = {},
+  ) {
+    return {
+      ...(id === undefined ? {} : { id }),
+      outcome,
+      success: outcome === "already-present" || outcome === "executed",
+      message,
+      ...extra,
+    };
+  }
+
+  test("projects already-present as a satisfied skipped action and drops raw captures", async () => {
+    const rawCapture = "raw stderr with /home/private/token=do-not-leak";
+    const writeMcpConfig = vi.fn(async () => ({ ok: true, path: "/tmp/mcp.json", diagnostics: [] }));
+    const installPackages = vi.fn(async (_command: string | undefined, packages: Array<{ id: string }>) => [
+      packageResult(packages[0]?.id, "already-present", "codebase-memory already present; installer not run.", {
+        cause: "binary is already usable",
+        diagnostic: {
+          stage: "evidence",
+          code: "already-present",
+          lines: ["binary is already usable"],
+        },
+        raw: { stderr: rawCapture },
+      }),
+    ]);
+    const observed: unknown[] = [];
+
+    const results = await runRunnerReviewPlan(createMinimalPlan({
+      automaticInstalls: [createTestAction("capability.codebase-memory.install", "install-opencode-plugin", "Install codebase-memory", "codebase-memory", "codebase-memory", "DeusData/codebase-memory-mcp")],
+      configWrites: [createTestAction("capability.codebase-memory.mcp-config", "write-mcp-config", "Write codebase-memory MCP config", "codebase-memory")],
+    }), {
+      runnerCommand: "opencode",
+      installPackages: installPackages as never,
+      writeMcpConfig,
+      onActionResult: (result) => observed.push(result),
+    });
+
+    const install = results.find((result) => result.actionId === "capability.codebase-memory.install");
+    const config = results.find((result) => result.actionId === "capability.codebase-memory.mcp-config");
+    expect(install).toMatchObject({
+      status: "skipped",
+      packageOutcome: "already-present",
+      message: "codebase-memory already present; installer not run.",
+    });
+    expect(config?.status).toBe("executed");
+    expect(writeMcpConfig).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(results)).not.toContain(rawCapture);
+    expect(JSON.stringify(observed)).not.toContain(rawCapture);
+  });
+
+  test("ordinary skipped outcomes gate only the matching dependent config", async () => {
+    const writes: string[] = [];
+    const installPackages = vi.fn(async (_command: string | undefined, packages: Array<{ id: string }>) => [
+      packageResult(packages[0]?.id, "skipped", "installation was skipped before mutation"),
+    ]);
+    const results = await runRunnerReviewPlan(createMinimalPlan({
+      automaticInstalls: [createTestAction("capability.context7.install", "install-opencode-plugin", "Install Context7", "context7", "context7", "@upstash/context7-mcp")],
+      configWrites: [
+        createTestAction("capability.context7.mcp-config", "write-mcp-config", "Write Context7 MCP config", "context7"),
+        createTestAction("capability.unrelated.mcp-config", "write-mcp-config", "Write unrelated MCP config", "context7"),
+      ],
+    }), {
+      runnerCommand: "opencode",
+      installPackages: installPackages as never,
+      writeMcpConfig: async ({ serverName }) => {
+        writes.push(serverName);
+        return { ok: true, path: "/tmp/mcp.json", diagnostics: [] };
+      },
+    });
+
+    expect(results.find((result) => result.actionId === "capability.context7.mcp-config")).toMatchObject({
+      status: "skipped",
+      message: expect.stringContaining("install failed"),
+    });
+    expect(results.find((result) => result.actionId === "capability.unrelated.mcp-config")?.status).toBe("executed");
+    expect(writes).toEqual(["context7"]);
+  });
+
+  test("rejects missing, unknown, and duplicate package IDs as integrity failures", async () => {
+    const cases = [
+      ["missing id", [packageResult(undefined, "executed", "installed")] ],
+      ["unknown id", [packageResult("rtk", "executed", "installed")] ],
+      ["duplicate id", [packageResult("context7", "executed", "installed"), packageResult("context7", "executed", "installed")] ],
+    ] as const;
+
+    for (const [label, packageResults] of cases) {
+      const results = await runRunnerReviewPlan(createMinimalPlan({
+        automaticInstalls: [createTestAction("capability.context7.install", "install-opencode-plugin", "Install Context7", "context7", "context7", "@upstash/context7-mcp")],
+      }), {
+        runnerCommand: "opencode",
+        installPackages: vi.fn(async () => packageResults) as never,
+      });
+      const result = results[0];
+      expect(result?.status, label).toBe("failed");
+      expect(result?.message, label).toContain("integrity");
+    }
+  });
+
+  test("rejects inconsistent outcome and success combinations", async () => {
+    const results = await runRunnerReviewPlan(createMinimalPlan({
+      automaticInstalls: [createTestAction("capability.context7.install", "install-opencode-plugin", "Install Context7", "context7", "context7", "@upstash/context7-mcp")],
+    }), {
+      runnerCommand: "opencode",
+      installPackages: vi.fn(async () => [{
+        id: "context7",
+        outcome: "already-present",
+        success: false,
+        message: "invalid result",
+      }]) as never,
+    });
+
+    expect(results[0]?.status).toBe("failed");
+    expect(results[0]?.message).toContain("integrity");
+  });
+
+  test("sanitizes and bounds package diagnostics before action callbacks", async () => {
+    const hostile = [
+      "\u001b[31merror\u001b[0m /home/private/.config token=super-secret ░░░",
+      ...Array.from({ length: 10 }, (_, index) => `failure ${index} ${"x".repeat(300)}`),
+    ];
+    const results = await runRunnerReviewPlan(createMinimalPlan({
+      automaticInstalls: [createTestAction("capability.context7.install", "install-opencode-plugin", "Install Context7", "context7", "context7", "@upstash/context7-mcp")],
+    }), {
+      runnerCommand: "opencode",
+      installPackages: vi.fn(async () => [packageResult("context7", "failed", "Package install failed.", {
+        cause: hostile.join("\n"),
+        diagnostic: { stage: "install", code: "installer-failed", lines: hostile },
+      })]) as never,
+    });
+
+    const result = results[0]!;
+    const diagnostics = result.diagnostics;
+    const serialized = JSON.stringify(result);
+    expect(result.status).toBe("failed");
+    expect(result.cause).not.toContain("\u001b");
+    expect(result.cause).not.toContain("/home/private");
+    expect(result.cause).not.toContain("super-secret");
+    expect(result.cause).not.toContain("░");
+    expect(diagnostics.length).toBeLessThanOrEqual(8);
+    expect(diagnostics.every((line) => [...line].length <= 240)).toBe(true);
+    expect(Buffer.byteLength(diagnostics.join(""), "utf8")).toBeLessThanOrEqual(1280);
+    expect(serialized).not.toContain("do-not-leak");
+    expect(result.raw).toMatchObject({ id: "context7", outcome: "failed" });
+  });
+});
+
 function createMinimalPlan(groups: {
   automaticInstalls?: RunnerAction[];
   manualSteps?: RunnerAction[];

@@ -23,6 +23,10 @@ function createTempDir(prefix = "deck-test-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
+function countOccurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1;
+}
+
 describe("buildTeamSystemPrompt", () => {
   test("builds the compact Developer Team coordinator prompt by default", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
@@ -31,6 +35,46 @@ describe("buildTeamSystemPrompt", () => {
     expect(content).toContain("Runtime-Enforced Team Contract");
     expect(content).toContain("## Triage and Flow");
     expect(content).toContain("## Hard Stops");
+  });
+
+  test("materializes the Pi runtime context before adaptive memory", () => {
+    const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "engram",
+      displayName: "Engram Memory",
+      buildInjection: () => ({
+        instructions: [
+          {
+            surface: "session",
+            markdown: "Use Engram memory for persistent context.",
+            teamId: "developer-team",
+          },
+        ],
+        toolBindings: [],
+      }),
+    };
+
+    const { content } = buildTeamSystemPrompt("developer-team", { memoryProvider: engramProvider });
+
+    expect(content).toContain("## Skill Discovery Runtime Context");
+    expect(content).toContain("- active_runner_id: pi");
+    expect(content).toContain("- validate_command: deck skill-registry validate --runner pi");
+    expect(content).toContain("- discover_command: deck skill-registry discover --runner pi");
+    expect(content).toContain("- refresh_command: deck skill-registry refresh --runner pi");
+    expect(content).toContain("Verify a selected candidate's current locator or runner exposure immediately before loading it");
+    expect(content).toContain("load it only through the active runner's normal skill mechanism.");
+    expect(content).toContain("bounded direct discovery");
+    expect(content).not.toContain("## Skill: ");
+    expect(content).not.toContain("--runner opencode");
+    expect(content).not.toContain(".pi/skills");
+    expect(content).not.toContain(".opencode/skills");
+    expect(content).not.toContain("~/.pi/");
+    expect(content).not.toContain("~/.config/opencode/");
+    expect(countOccurrences(content, "## Skill Discovery Authority Boundary")).toBe(1);
+
+    const runtimeContextIndex = content.indexOf("## Skill Discovery Runtime Context");
+    const adaptiveMemoryIndex = content.indexOf("## Adaptive Memory (provider-injected)");
+    expect(runtimeContextIndex).toBeGreaterThanOrEqual(0);
+    expect(adaptiveMemoryIndex).toBeGreaterThan(runtimeContextIndex);
   });
 
   test("uses compact session content by default regardless of obsolete rollout receipts", () => {
@@ -237,6 +281,14 @@ describe("materializeTeamProfile", () => {
       const content = readFileSync(systemPromptPath, "utf-8");
       expect(content).toContain("Developer Team");
       expect(content).toContain("Runtime-Enforced Team Contract");
+      expect(content).toContain("- active_runner_id: pi");
+      expect(content).toContain("deck skill-registry refresh --runner pi");
+      expect(content).not.toContain("--runner opencode");
+      expect(content).not.toContain(".pi/skills");
+      expect(content).not.toContain(".opencode/skills");
+      expect(content).not.toContain("~/.pi/");
+      expect(content).not.toContain("~/.config/opencode/");
+      expect(countOccurrences(content, "## Skill Discovery Authority Boundary")).toBe(1);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }

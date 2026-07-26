@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename, dirname, join, normalize } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import type { ModelDiscoveryFileSystem } from "./opencode-models-cli";
 
 export type SafeFileState = {
@@ -40,6 +40,71 @@ export type CollectOpenCodeDiscoveryContextInput = {
   resolveWorkspaceRoot: (projectRoot: string) => Promise<string>;
   resolvePluginEntry: (reference: string, fromDirectory: string) => Promise<string | null>;
 };
+
+export type OpenCodeConfigCandidate = {
+  path: string;
+  directory: string;
+  source: "global" | "explicit" | "project" | "project-opencode" | "config-dir";
+};
+
+export type EnumerateOpenCodeConfigCandidatesInput = {
+  projectRoot: string;
+  workspaceRoot: string;
+  homeDir: string;
+  xdgConfigHome?: string;
+  env: Readonly<Record<string, string | undefined>>;
+};
+
+/**
+ * Enumerate only supported local OpenCode configuration sources.
+ * This function is intentionally pure: it performs no filesystem, shell, or network work.
+ */
+export function enumerateOpenCodeConfigCandidates(
+  input: EnumerateOpenCodeConfigCandidatesInput,
+): readonly OpenCodeConfigCandidate[] {
+  if (input.env.OPENCODE_PURE) return [];
+
+  const candidates: OpenCodeConfigCandidate[] = [];
+  const seen = new Set<string>();
+  const add = (path: string, source: OpenCodeConfigCandidate["source"]): void => {
+    const normalizedPath = normalize(path);
+    if (seen.has(normalizedPath)) return;
+    seen.add(normalizedPath);
+    candidates.push({ path: normalizedPath, directory: dirname(normalizedPath), source });
+  };
+  const addPair = (root: string, source: OpenCodeConfigCandidate["source"]): void => {
+    add(join(root, "opencode.json"), source);
+    add(join(root, "opencode.jsonc"), source);
+  };
+
+  addPair(join(input.env.XDG_CONFIG_HOME ?? input.xdgConfigHome ?? join(input.homeDir, ".config"), "opencode"), "global");
+
+  if (input.env.OPENCODE_CONFIG) {
+    add(
+      isAbsolute(input.env.OPENCODE_CONFIG)
+        ? input.env.OPENCODE_CONFIG
+        : resolve(input.projectRoot, input.env.OPENCODE_CONFIG),
+      "explicit",
+    );
+  }
+
+  if (!input.env.OPENCODE_DISABLE_PROJECT_CONFIG) {
+    const projectDirectories: string[] = [];
+    for (let cursor = input.projectRoot; ; cursor = dirname(cursor)) {
+      projectDirectories.push(cursor);
+      if (cursor === input.workspaceRoot || dirname(cursor) === cursor) break;
+    }
+    for (const directory of projectDirectories.reverse()) addPair(directory, "project");
+  }
+
+  if (!input.env.OPENCODE_DISABLE_PROJECT_CONFIG) {
+    addPair(join(input.projectRoot, ".opencode"), "project-opencode");
+  }
+
+  if (input.env.OPENCODE_CONFIG_DIR) addPair(input.env.OPENCODE_CONFIG_DIR, "config-dir");
+
+  return candidates;
+}
 
 const envName = /^[A-Z][A-Z0-9_]{1,127}$/;
 
@@ -212,7 +277,7 @@ function projectRootConfig(value: unknown, references: ConfigReferences): unknow
 
 
 
-function parseJsonc(raw: string): unknown {
+export function parseJsonc(raw: string): unknown {
   let withoutComments = "";
   let quote: "\"" | "'" | null = null;
   for (let index = 0; index < raw.length; index++) {
@@ -271,20 +336,31 @@ export async function collectOpenCodeDiscoveryContext(input: CollectOpenCodeDisc
   const projectRoot = await canonicalPath(input.fs, input.projectRoot);
   const workspaceRoot = await canonicalPath(input.fs, await input.resolveWorkspaceRoot(projectRoot));
   const configHome = input.env.XDG_CONFIG_HOME || input.xdgConfigHome || join(input.homeDir, ".config");
-  const configRoots = [join(configHome, "opencode"), input.env.OPENCODE_CONFIG_DIR, join(projectRoot, ".opencode")].filter((path): path is string => Boolean(path));
-  const candidates = [join(configHome, "opencode", "opencode.json"), join(configHome, "opencode", "opencode.jsonc")];
-  if (input.env.OPENCODE_CONFIG) candidates.push(input.env.OPENCODE_CONFIG);
-  if (!input.env.OPENCODE_DISABLE_PROJECT_CONFIG) for (let cursor = projectRoot;; cursor = dirname(cursor)) {
-    candidates.push(join(cursor, "opencode.json"), join(cursor, "opencode.jsonc"));
-    if (cursor === workspaceRoot || dirname(cursor) === cursor) break;
-  }
-  for (const root of configRoots) candidates.push(join(root, "opencode.json"), join(root, "opencode.jsonc"));
-  const uniqueCandidates = [...new Set(candidates.map(normalize))];
-  const configCandidates = await Promise.all(uniqueCandidates.map((path) => safeFileState(input.fs, path, "config")));
-  const parsedConfigs = await Promise.all(uniqueCandidates.map(async (path) => { try { return projectConfig(parseJsonc(await input.fs.readFile(path))); } catch { return undefined; } }));
-  const virtualConfig = input.env.OPENCODE_CONFIG_CONTENT === undefined ? undefined : projectInlineConfig(input.env.OPENCODE_CONFIG_CONTENT);
+  const configRoots = [
+    join(configHome, "opencode"),
+    !input.env.OPENCODE_DISABLE_PROJECT_CONFIG ? join(projectRoot, ".opencode") : undefined,
+    input.env.OPENCODE_CONFIG_DIR,
+  ].filter((path): path is string => Boolean(path));
+  const candidateDefinitions = enumerateOpenCodeConfigCandidates({
+    projectRoot,
+    workspaceRoot,
+    homeDir: input.homeDir,
+    xdgConfigHome: configHome,
+    env: input.env,
+  });
+  const configCandidates = await Promise.all(candidateDefinitions.map((candidate) => safeFileState(input.fs, candidate.path, "config")));
+  const parsedConfigs = await Promise.all(candidateDefinitions.map(async (candidate) => {
+    try {
+      return projectConfig(parseJsonc(await input.fs.readFile(candidate.path)));
+    } catch {
+      return undefined;
+    }
+  }));
+  const virtualConfig = input.env.OPENCODE_PURE || input.env.OPENCODE_CONFIG_CONTENT === undefined
+    ? undefined
+    : projectInlineConfig(input.env.OPENCODE_CONFIG_CONTENT);
   if (virtualConfig) configCandidates.push({ logicalPath: "virtual:OPENCODE_CONFIG_CONTENT", realPath: null, exists: true, kind: "file", size: input.env.OPENCODE_CONFIG_CONTENT!.length, mtimeMs: null, ctimeMs: null, mode: null, dev: null, ino: null, safeDigest: createHash("sha256").update(JSON.stringify(virtualConfig.value)).digest("hex"), digestDisposition: "sanitized" });
-  const projectedConfigs = parsedConfigs.map((config, index) => config && { config, directory: dirname(uniqueCandidates[index]!) });
+  const projectedConfigs = parsedConfigs.map((config, index) => config && { config, directory: candidateDefinitions[index]!.directory });
   if (virtualConfig) projectedConfigs.push({ config: virtualConfig, directory: projectRoot });
   const envNames = new Set<string>();
   const pluginPaths = new Set<string>();
@@ -296,8 +372,10 @@ export async function collectOpenCodeDiscoveryContext(input: CollectOpenCodeDisc
       if (resolved) pluginPaths.add(await canonicalPath(input.fs, resolved));
     }
   }
-  if (!input.env.OPENCODE_DISABLE_DEFAULT_PLUGINS) for (const root of configRoots) for (const directory of [join(root, "plugin"), join(root, "plugins")]) {
-    for (const entry of await input.fs.readdir?.(directory).catch(() => []) ?? []) if (/\.(?:[cm]?js|ts)$/.test(entry)) pluginPaths.add(join(directory, entry));
+  if (!input.env.OPENCODE_PURE && !input.env.OPENCODE_DISABLE_DEFAULT_PLUGINS) {
+    for (const root of configRoots) for (const directory of [join(root, "plugin"), join(root, "plugins")]) {
+      for (const entry of await input.fs.readdir?.(directory).catch(() => []) ?? []) if (/\.(?:[cm]?js|ts)$/.test(entry)) pluginPaths.add(join(directory, entry));
+    }
   }
   const authState = await safeFileState(input.fs, join(input.env.XDG_DATA_HOME || input.xdgDataHome || join(input.homeDir, ".local", "share"), "opencode", "auth.json"));
   const { safeDigest: _digest, digestDisposition: _disposition, ...authFile } = authState;

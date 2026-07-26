@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   ORCHESTRATOR_AGENT_BODY,
+  ORCHESTRATOR_COMPACT_AGENT_BODY,
   ORCHESTRATOR_COMPACT_SKILL_BODY,
   ORCHESTRATOR_PROMPT_GUIDA,
   ORCHESTRATOR_PROMPT_PRAGMATICA,
@@ -12,6 +13,8 @@ import {
   PERSONALITY_COMMUNICATION_PRAGMATICA,
   getOrchestratorSystemPrompt,
 } from "./orchestrator-content";
+
+import { SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1 } from "./skill-discovery-content";
 
 // Import git-safety for rule presence assertion
 import { GIT_SAFETY_SENTINEL } from "./git-safety";
@@ -124,8 +127,8 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain(".deck/ai-notes/");
   });
 
-  test("references skill injection via Project Standards", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Project Standards");
+  test("does not inject skill rules through Project Standards", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("Project Standards");
   });
 
   test("does not contain runtime-specific model assignment details", () => {
@@ -266,6 +269,86 @@ describe("ORCHESTRATOR_AGENT_BODY", () => {
 
   test("does not contain placeholder comment", () => {
     expect(ORCHESTRATOR_AGENT_BODY).not.toContain("Placeholder");
+  });
+});
+
+describe("T9 skill discovery prompt lifecycle", () => {
+  const legacySurfaces = [
+    ORCHESTRATOR_SYSTEM_PROMPT,
+    ORCHESTRATOR_AGENT_BODY,
+    ORCHESTRATOR_SKILL_BODY,
+  ];
+  const compactSurfaces = [
+    ORCHESTRATOR_SYSTEM_PROMPT_COMPACT,
+    ORCHESTRATOR_COMPACT_AGENT_BODY,
+    ORCHESTRATOR_COMPACT_SKILL_BODY,
+  ];
+  const allSurfaces = [...legacySurfaces, ...compactSurfaces];
+
+  const countOccurrences = (value: string, needle: string): number =>
+    value.split(needle).length - 1;
+
+  test("keeps the fixed authority boundary exactly once on every prompt surface", () => {
+    for (const surface of allSurfaces) {
+      expect(countOccurrences(surface, SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1)).toBe(1);
+    }
+  });
+
+  test("replaces legacy registry-rule injection with one session-start validation", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("read-only validation exactly once at session start");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Cache only the bounded status projection");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("one primary migration/regeneration offer");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("deck skill-registry refresh");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("must not revalidate mid-session");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("active-runner direct discovery");
+
+    for (const surface of allSurfaces) {
+      expect(surface).not.toMatch(/cache compact rules|inject matching rules|pre-digest|agents do NOT read the registry|Project Standards \(auto-resolved\)/i);
+    }
+  });
+
+  test("keeps the legacy and compact system prompts semantically aligned", () => {
+    const requiredTerms = [
+      "session-start",
+      "read-only",
+      "status",
+      "ready",
+      "missing",
+      "stale",
+      "invalid",
+      "indeterminate",
+      "direct discovery",
+      "verify",
+      "normal loading mechanism",
+      "authorization",
+      "never watch",
+    ];
+
+    for (const term of requiredTerms) {
+      expect(ORCHESTRATOR_SYSTEM_PROMPT.toLowerCase()).toContain(term.toLowerCase());
+      expect(ORCHESTRATOR_SYSTEM_PROMPT_COMPACT.toLowerCase()).toContain(term.toLowerCase());
+    }
+  });
+
+  test("adds bounded context projection without candidate or body injection", () => {
+    for (const surface of allSurfaces) {
+      expect(surface).toContain("Skill Discovery Context");
+      expect(surface).toContain("registry_path");
+      expect(surface).toContain("reason_code");
+      expect(surface).toContain("active_runner_id");
+      expect(surface).toContain("smallest relevant set");
+      expect(surface).not.toContain("## Skill: ");
+      expect(surface).not.toContain("loadReference");
+      expect(surface).not.toContain("/home/");
+    }
+  });
+
+  test("keeps the Orchestrator non-writing and leaves loading to specialists", () => {
+    expect(ORCHESTRATOR_AGENT_BODY).toContain("no direct write or loading");
+    expect(ORCHESTRATOR_AGENT_BODY).toContain("matching skill");
+    expect(ORCHESTRATOR_COMPACT_AGENT_BODY).toContain("never write during validation");
+    expect(ORCHESTRATOR_COMPACT_SKILL_BODY).toContain("registry-only");
+    expect(ORCHESTRATOR_COMPACT_SKILL_BODY).toContain("Reject phase results that claim discovery authority or undelegated writes");
   });
 });
 

@@ -1,0 +1,647 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-07-22T21:54:50.698Z"
+    actor: deck-developer-explorer
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Formal exploration completed in Interactive mode."
+      - "The artifact defines an agent-facing, discovery-only, machine-local skill registry direction."
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-07-22T22:08:15.059Z"
+    actor: deck-developer-proposal
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:b3596ec5721d83c8e26ceca81363d6a7
+    idempotency_key: sha256:776c3255a485638f7133abcf5655c14b0c1668b6a83e17212cd964b24c14e9bd
+    notes:
+      - "Interactive Proposal completed as a collaborative draft."
+      - "Explicit client approval is required before Spec and Design."
+  - phase: proposal
+    status: approved
+    event: proposal.approved
+    artifact: proposal.md
+    timestamp: "2026-07-22T22:21:04.743Z"
+    actor: human:user
+    registry_write: non-deferred
+    notes:
+      - "The client explicitly approved the Proposal in Interactive mode."
+      - "Spec and Design may begin in parallel."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-07-23T00:10:00.000Z"
+    actor: deck-developer-spec
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:bc4f7afbd5faef740f4ab033f4b67c5f
+    idempotency_key: sha256:0c74b423ab773b6556c1550cf94b79c5eaf23bdc7faec29eda1175fd172dedbf
+    notes:
+      - "Interactive Spec completed with 32 RFC 2119 requirements and 56 Given/When/Then scenarios."
+      - "All discovered registry metadata is treated as hostile untrusted input."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-07-22T22:45:06.428Z"
+    actor: deck-developer-design
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:a896a9993db7e4c26d9d6faac95cacc7
+    idempotency_key: sha256:4b4acfaa06b9c90a8a965d83d51ea521ccb6fbb6e1b9c187fd01b9f39a02ca71
+    notes:
+      - "Interactive Design completed in parallel with Spec."
+      - "Spec and Design require explicit reconciliation before Tasks."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-07-23T01:30:00.000Z"
+    actor: deck-developer-spec
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:spec-revision-completed
+    idempotency_key: sha256:940e5c93dfe8ee1dce342c112d3d51decfeb0661b18344f0da11a33db157ce70
+    notes:
+      - "Spec revised after five explicit client-approved reconciliation decisions."
+      - "The revised Spec contains 32 requirements and 62 scenarios."
+      - "Remaining technical contract details are delegated to Design and Tasks."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-07-23T13:59:35.868Z"
+    actor: deck-developer-design
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:c23e849fe25fb0d95b8e8305e32db33f
+    idempotency_key: sha256:d6cdccf5d6526c7a03491b1f23397f30c9c3ad81bf1f8b925e99a88079ed0d72
+    notes:
+      - "Final Design reconciliation completed against the revised Spec and five client-approved decisions."
+      - "The Design proves coverage of all 32 requirements and closes all prior reconciliation items."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-23T14:05:00.000Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:49c2b0adad4a01309244f42075f216e7
+    idempotency_key: sha256:49c2b0adad4a01309244f42075f216e7495ed3167f78224eae428f735ce6b06f
+    notes:
+      - "Interactive Tasks completed with 13 implementation tasks, one independent Verify task, and one independent Review task."
+      - "preconditions.md records no unresolved external conditions."
+      - "Apply remains gated by explicit user modification authorization."
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T14:18:56.114Z"
+    actor: human:user
+    registry_write: non-deferred
+    notes:
+      - "The client explicitly authorized implementation of T1-T12 within the tasks.md allowlists."
+      - "No commit or push is authorized."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-23T14:35:00.000Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:ba548e259a4b45b04b66ebc91b625f26
+    idempotency_key: sha256:ba548e259a4b45b04b66ebc91b625f26d61753b5861037d425c4c8d3d8521c86
+    notes:
+      - "User-approved bounded amendment added T11r for one stale Pi test oracle."
+      - "T11r authorizes only packages/adapter-pi/src/registry-consumption.test.ts."
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T14:35:01.000Z"
+    actor: human:user
+    registry_write: non-deferred
+    notes:
+      - "The client explicitly authorized the bounded test-only T11r repair."
+      - "Apply resumed without commit or push authorization."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T17:17:29.152Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "T1-T12 and user-approved T11r completed."
+      - "Targeted and affected-area Apply checks are green; all modified paths match revised tasks.md allowlists."
+      - "No commit or push was performed."
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-07-23T17:38:05.258Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Independent targeted and affected-area verification passed."
+      - "Targeted checks reported 467 passes; affected-area checks reported 2744 passes and zero failures."
+      - "Broad verification remains deferred until after independent Review."
+      - "Non-blocking warnings are preserved in verify-report.md."
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-07-23T18:04:39.056Z"
+    actor: deck-developer-review
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:c3f51e9a9ef2d07d252008be3e1b61df
+    notes:
+      - "Independent Review requested changes for six blocking findings."
+      - "Broad checks and Archive are blocked pending user-authorized repairs, fresh Verify, and fresh Review."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-23T19:10:00.000Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:5fbccea2b9042082b9e23456878d54c8
+    idempotency_key: sha256:5fbccea2b9042082b9e23456878d54c8bd49d826a1d9be7cc5b17d9a9cf1abf5
+    notes:
+      - "Bounded repair planning added T-RR-001 through T-RR-006 and fresh V2/R2 gates."
+      - "No source or test implementation is authorized by this planning event."
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-07-23T19:10:01.000Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Review remains failed until the six planned repairs are explicitly authorized, implemented, freshly verified, and freshly reviewed."
+  - phase: repair
+    status: started
+    event: repair.started
+    artifact: repair-incident.md
+    timestamp: "2026-07-23T20:03:35.209Z"
+    actor: human:user
+    registry_write: non-deferred
+    notes:
+      - "The user authorized bounded repairs T-RR-001 through T-RR-006."
+      - "Fresh V2 and R2 are mandatory before broad checks."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T20:03:36.209Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Bounded repair Apply started."
+      - "No commit or push is authorized."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-23T20:43:16.002Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:b3d3ea9d
+    notes:
+      - "T-RR-001i added as a test-only integration task on an already authorized file."
+      - "No production scope or file allowlist expansion occurred."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T20:43:17.002Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Repair Apply continues under the existing user-authorized file allowlist."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T21:18:36.291Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "T-RR-001 through T-RR-006 and T-RR-001i completed within their exact file allowlists."
+      - "Targeted checks, TypeScript, and diff checks passed."
+      - "Fresh independent V2 is required before R2; broad remains blocked."
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: "2026-07-23T21:33:18.550Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:agent-skill-registry-discovery:v2:failed
+    notes:
+      - "All targeted and affected-area tests passed, as did typecheck, build dry-run, diff-check, and rooted OpenSpec validation."
+      - "The exact rootless OpenSpec validation command failed with change-not-found."
+      - "Official Apply artifacts lack immutable RED command/count/output anchors for the repair tasks."
+      - "R2 and broad checks remain blocked pending user decision and a fresh successor Verify."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-23T21:55:10.624Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "T-RR-V2E-001 documentary repair and V3 fresh Verify added under explicit user authorization."
+      - "V2 remains historical failed evidence; R2 now depends on V3 PASS."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T21:55:11.624Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Documentary-only T-RR-V2E-001 started."
+      - "No source/test or Git modification is authorized."
+  - phase: apply
+    status: blocked
+    event: apply.blocked
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T22:08:19.179Z"
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    notes:
+      - "A truthful seven-task RED evidence ledger was recorded."
+      - "Executed RED evidence is complete for T-RR-002, T-RR-006, and T-RR-001i."
+      - "Executed RED command/count/output evidence is unavailable for T-RR-001, T-RR-003, T-RR-004, and T-RR-005."
+      - "V3, R2, and broad checks remain blocked; no evidence was fabricated."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-23T22:22:26.368Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "T-RR-V2E-002 added for one consolidated isolated RED reconstruction in /tmp."
+      - "The real repository source/test tree is read-only for this task."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T22:22:27.368Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "T-RR-V2E-002 started under explicit user authorization."
+      - "Only reconstructed evidence may be recorded in the repository."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T22:46:27.292Z"
+    actor: deck-developer-apply-general
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:apply:agent-skill-registry-discovery:artifact=apply-progress.md
+    notes:
+      - "Four missing defects were independently reproduced in disposable copies as isolated reconstructed RED evidence."
+      - "The real source/test manifest remained byte-identical and only apply-progress.md changed."
+      - "All current GREEN successor checks passed; V3 is the next required gate."
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-07-23T23:00:17.585Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:agent-skill-registry-discovery:v3:passed-with-warnings
+    notes:
+      - "Fresh targeted and affected-area checks, typecheck, build dry-run, diff-check, and rooted OpenSpec validation passed."
+      - "RED evidence integrity passed, including honestly labeled isolated reconstruction."
+      - "Three event-name warnings and the 62-versus-69 scenario-count mismatch remain non-blocking for V3."
+      - "Fresh R2 is unblocked; broad remains blocked until R2."
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-07-23T23:09:23.435Z"
+    actor: deck-developer-review
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:6e1c6a94e87c6a66ab0f764076d5116e
+    notes:
+      - "R1-001, R1-003, R1-004, R1-005, and R1-006 are closed."
+      - "R1-002 remains blocking because sourceSet.sources is copied and sorted before any width bound."
+      - "Broad checks remain blocked pending user decision, bounded repair, fresh Verify, and fresh Review."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-23T23:33:37.173Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "T-RR-007, V4, and R3 added for the user-authorized R2-001 repair."
+      - "Repair scope is limited to Core discovery source and test plus normal Apply evidence."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T23:33:38.173Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "T-RR-007 started under explicit user authorization."
+      - "Broad checks remain blocked pending V4 and R3."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-23T23:47:33.268Z"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "T-RR-007 recorded RED 16 pass/1 fail and GREEN 17/17 with affected source-composition checks 26/26."
+      - "Existing 500-record bound and diagnostic vocabulary were reused without contract changes."
+      - "V3 is stale for discovery scope; fresh V4 and R3 remain mandatory."
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-07-24T00:02:27.360Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:agent-skill-registry-discovery:v4:passed-with-warnings
+    notes:
+      - "Fresh V4 targeted and affected-area checks passed with stable source/test digest."
+      - "T-RR-007 bounded-work and RED/GREEN evidence passed independent verification."
+      - "R3 is unblocked; broad remains blocked until R3."
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-07-24T00:15:36.489Z"
+    actor: deck-developer-review
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:review:agent-skill-registry-discovery:r3:failed
+    notes:
+      - "T-RR-007 correctly bounds direct discovery work."
+      - "The composed CLI/registry path still re-iterates, copies, sorts, hashes, and retains the original unbounded provider collection."
+      - "Broad remains blocked pending user decision and an end-to-end bounded repair."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-24T00:37:11.889Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "T-RR-008, V5, and terminal R4 added as the definitive closure sequence."
+      - "A blocking R4 is a hard stop; no further automatic repair round is allowed."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T00:37:12.889Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "T-RR-008 started under explicit user authorization."
+      - "Scope is limited to the definitive CLI/registry end-to-end bounded-source repair."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T01:00:27.572Z"
+    actor: deck-developer-apply-backend
+    registry_write: reconciled-by-orchestrator
+    intent_id: sha256:f67fd944a5967fec41fd19e72eaa054fe9cc448169941eb894f974e274d2e269
+    notes:
+      - "T-RR-008 RED was 21 pass/4 fail; GREEN targeted was 25/25."
+      - "Core skill-discovery passed 46/46 and affected CLI/OpenCode/Pi passed 68/68."
+      - "Pathological iterators are never invoked downstream; indexed reads are capped at 501 and retained work at 500."
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-07-24T01:17:36.081Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:agent-skill-registry-discovery:v5:passed-with-warnings
+    notes:
+      - "Fresh V5 passed all targeted and affected-area checks with stable source/test digest."
+      - "End-to-end bounded-source no-bypass proof passed."
+      - "Terminal R4 is unblocked; broad remains blocked until R4."
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-07-24T01:36:08.279Z"
+    actor: deck-developer-review
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:review:agent-skill-registry-discovery:r4:failed
+    notes:
+      - "T-RR-008 closed the end-to-end unbounded-work defect."
+      - "R4-001 found production source-scope hashing omits mandatory Core generic declarations and rejects valid project-relative locator bases."
+      - "R4 is terminal; broad and Archive are hard-stopped and no automatic repair may follow."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-24T01:59:55.702Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "The user explicitly reopened terminal governance for T-RR-009, V6, and final terminal R5."
+      - "T-RR-009 is limited to registry source-scope composition and validation integrity."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T01:59:56.702Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "T-RR-009 started under explicit user authorization."
+  - phase: apply
+    status: blocked
+    event: apply.blocked
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T02:10:33.931Z"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "T-RR-009 stopped before source/test edits with design-instruction-ambiguous."
+      - "The canonical generic-source factory is private in discovery.ts and provider-only production composition originates in CLI code outside the current allowlist."
+      - "No RED tests or source edits were made; scope expansion requires a new explicit user decision."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-24T14:10:51.293Z"
+    actor: deck-developer-task
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "The user explicitly expanded existing T-RR-009 to five files; no new task was added."
+      - "The canonical factory may be internally exported and reused without public package export."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T14:10:52.293Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "T-RR-009 restarted under expanded explicit user authorization."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T14:35:55.267Z"
+    actor: deck-developer-apply-backend
+    registry_write: non-deferred
+    notes:
+      - "T-RR-009 actual RED was 25 pass/7 fail; focused GREEN was 32/32."
+      - "Core skill-discovery passed 50/50 and affected CLI/OpenCode/Pi/discovery passed 71/71."
+      - "Complete source-scope hash, locator validation, active-runner exclusivity, and bounded iterator invariants are covered."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-07-24T14:53:32.737Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:agent-skill-registry-discovery:v6:passed
+    notes:
+      - "Fresh V6 targeted, affected-area, typecheck, build, diff, and rooted OpenSpec checks passed."
+      - "Complete source-scope hash, locator matrix, active-runner exclusivity, and boundedness proofs passed."
+      - "Terminal R5 is unblocked."
+  - phase: review
+    status: passed
+    event: review.passed
+    artifact: review-report.md
+    timestamp: "2026-07-24T15:11:01.817Z"
+    actor: deck-developer-review
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:review:agent-skill-registry-discovery:r5:passed
+    notes:
+      - "Terminal R5 approved with zero blocking and zero non-blocking findings."
+      - "All historical R1-R4 findings are closed."
+      - "Broad gate released."
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: "2026-07-24T15:20:50.886Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:agent-skill-registry-discovery:broad:failed
+    notes:
+      - "Mandatory broad bun run test completed with 3949 pass and 1 fail."
+      - "Core purity audit found concrete runner/provider literals in packages/core/src/teams/developer/skill-discovery-content.ts."
+      - "T-META-001 and Archive are blocked pending user decision and a fresh broad successor."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-24T15:46:59.810Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "User-authorized T-BROAD-001, V7, R6, and broad successor sequence recorded after two task-specialist invocations returned empty without edits."
+      - "Source scope remains one existing Core content file."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T15:47:00.810Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "T-BROAD-001 started under explicit user authorization."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T16:02:48.984Z"
+    actor: deck-developer-apply-general
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:apply:agent-skill-registry-discovery:t-broad-001:completed
+    notes:
+      - "Focused purity moved from 0/1 to 1/1; shared contracts passed 232/232 and adapter materialization/registry consumption passed 108/108."
+      - "EII-ASRD-002 semantics remain intact and no concrete runner/provider examples remain."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-07-24T16:41:19.540Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:agent-skill-registry-discovery:v7:passed
+    notes:
+      - "Fresh V7 passed 341/341 focused purity, shared Core contract, and OpenCode/Pi materialization and registry-consumption tests."
+      - "Typecheck, build dry-run, diff-check, rooted OpenSpec validation, EII-ASRD-002 fidelity, no-evasion, scope, and freshness checks passed."
+      - "Terminal focused Review R6 is unblocked; broad remains gated on a non-blocking R6."
+  - phase: review
+    status: passed
+    event: review.passed
+    artifact: review-report.md
+    timestamp: "2026-07-24T16:51:08.205Z"
+    actor: deck-developer-review
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:review:agent-skill-registry-discovery:r6:passed
+    idempotency_key: sha256:124b90ec87bc37d4b45d6ce34da6cc36eed30350776e2a7c7f4a4d06c12708e8
+    notes:
+      - "Terminal R6 approved with zero blocking and zero non-blocking findings."
+      - "EII-ASRD-002 fidelity, 22 specialist composition surfaces, runner neutrality, no-evasion, exact scope, freshness, and R1-R5 closure audits passed."
+      - "The exact broad successor gate bun run test is released."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-07-24T17:08:45.430Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:agent-skill-registry-discovery:broad-successor:passed
+    notes:
+      - "The exact mandatory broad successor bun run test passed 3950/3950 with zero failures and zero skips."
+      - "Source/test freshness remained stable; git diff --check and rooted OpenSpec validation passed."
+      - "T-META-001 is unblocked but still requires its separately specified Spec modification authorization before Archive."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-07-24T17:24:23.221Z"
+    actor: deck-developer-spec
+    registry_write: non-deferred
+    notes:
+      - "User-authorized T-META-001 changed only the Spec summary scenario count from 62 to 69."
+      - "All 32 requirements and 69 authoritative scenario headings and bodies remain unchanged."
+      - "Rooted OpenSpec validation passes without a scenario-count mismatch; Archive is unblocked."
+  - phase: archive
+    status: initiated
+    event: archive.initiated
+    artifact: archive-report.md
+    timestamp: "2026-07-24T17:30:00.000Z"
+    actor: deck-developer-archive
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:archive:agent-skill-registry-discovery:initiated
+    idempotency_key: sha256:archive-agent-skill-registry-discovery-initiated
+    notes:
+      - "V7 PASS, terminal R6 APPROVE, broad successor 3950/3950 PASS, and T-META-001 completion were confirmed."
+      - "Historical broad failure and four non-blocking registry event-name warnings remain preserved."
+      - "archive-report.md is prepared and the canonical move to openspec/archive/agent-skill-registry-discovery/ is authorized."
+  - phase: archive
+    status: archived
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: "2026-07-24T17:35:00.000Z"
+    actor: deck-developer-archive
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:archive:agent-skill-registry-discovery:completed
+    idempotency_key: sha256:archive-agent-skill-registry-discovery-completed
+    notes:
+      - "Canonical filesystem move verified: the active source directory is absent and the 14-artifact archived destination is intact."
+      - "Git diff-check passed; no Git discard, commit, or push operation was performed."
+      - "The archived registry status is finalized as archived."

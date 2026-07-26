@@ -98,7 +98,11 @@ export function buildTeamSystemPrompt(
   const configPath = options?.projectRoot ?? ".";
   const personality = options?.orchestratorPersonality ?? readDeckConfig(configPath).orchestratorPersonality;
   const promptProfile = "compact" as const;
-  const instructions = getTeamSessionInstructions(teamId, { personality, promptProfile });
+  const instructions = getTeamSessionInstructions(teamId, {
+    personality,
+    promptProfile,
+    skillDiscoveryRuntimeContext: { activeRunnerId: "pi" },
+  });
   const base = instructions ?? [
     `# Deck ${teamId} Session`,
     "",

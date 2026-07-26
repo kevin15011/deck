@@ -67,7 +67,7 @@ export function buildOpenCodeRunnerCapabilityInventory(
     if (!capability) continue;
     if (!isCapabilityInScope(capability.runnerScope, runnerScope)) continue;
 
-    const installed = isCapabilityInstalled(capabilityId, installedNames, capability.detector.pluginNames ?? []);
+    const installed = isCapabilityInstalled(capabilityId, review, installedNames, capability.detector.pluginNames ?? []);
     const status: OpenCodeCapabilityStatus = installed
       ? "ready"
       : capability.installKind === "external"
@@ -81,6 +81,8 @@ export function buildOpenCodeRunnerCapabilityInventory(
       status,
       toolId: capability.toolId,
       source: capability.source,
+      commands: capability.detector.commands,
+      mcpServers: capability.detector.mcpServerNames,
       diagnostics: installed
         ? []
         : [
@@ -130,9 +132,21 @@ function buildInstalledNameSet(review: OpenCodeToolsReview | undefined): Set<str
   return new Set(values.map(normalizeName));
 }
 
-function isCapabilityInstalled(capabilityId: OpenCodeCapabilityId, installedNames: Set<string>, detectorNames: string[]): boolean {
+function isCapabilityInstalled(
+  capabilityId: OpenCodeCapabilityId,
+  review: OpenCodeToolsReview | undefined,
+  installedNames: Set<string>,
+  detectorNames: string[],
+): boolean {
   const capability = getUserFacingOpenCodeCapability(capabilityId);
   if (!capability) return false;
+
+  const evidence = review?.evidence?.[capabilityId as keyof NonNullable<OpenCodeToolsReview["evidence"]>];
+  if (evidence) return evidence.state === "usable";
+
+  // Command-backed capabilities must never be re-promoted from package/config declarations
+  // when a strict evidence review is unavailable.
+  if (capability.detector.commands?.length || capability.installKind === "mcp-server") return false;
 
   // For npm-package-plus-mcp kind, detect via mcpServerNames and commands only (not pluginNames)
   // This ensures context-mode detection uses MCP config, not legacy plugin array

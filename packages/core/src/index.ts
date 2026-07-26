@@ -165,6 +165,10 @@ export type {
   RunnerDeckInstallInput,
   RunnerDeckInstallStatus,
 } from "./runner-adapter";
+
+// Runner-neutral skill discovery contracts and source-provider interfaces
+export * from "./skill-discovery";
+
 // Adapter registry — CLI-side registration with runtime lookup
 export {
   createAdapterRegistry,

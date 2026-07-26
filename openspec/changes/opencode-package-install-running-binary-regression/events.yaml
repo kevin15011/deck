@@ -1,0 +1,129 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-07-24T19:28:52.972Z"
+    actor: deck-developer-explorer
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "The upstream v0.9.0 installer fails to detect its running process because Linux process names are limited to 15 characters, then cannot overwrite the active executable."
+      - "The archived agent-skill-registry-discovery change did not modify the package installer path; it exposed pre-existing Deck detection and diagnostic gaps rather than introducing the replacement defect."
+      - "Proposal must define install-versus-upgrade semantics and a bounded repair without process-name killing or hidden success."
+  - phase: proposal
+    status: in_progress
+    event: proposal.started
+    artifact: proposal.md
+    timestamp: "2026-07-24T19:36:47.457Z"
+    actor: deck-developer-proposal
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:480ad8730bd47ec475f124298cd20888
+    idempotency_key: sha256:3578f34d515def8c140c4dfa40aca6c280b072e42c1e4adc7097a7f3ba6a57cf
+    notes:
+      - "Proposal draft defines Runner Setup as idempotent install-missing capability assurance."
+      - "Genuine installer failures remain failures and the dashboard gains bounded sanitized diagnostics."
+      - "Spec and Design remain blocked pending explicit human Proposal approval."
+  - phase: proposal
+    status: approved
+    event: proposal.approved
+    artifact: proposal.md
+    timestamp: "2026-07-24T19:41:12.931Z"
+    actor: human:user
+    registry_write: non-deferred
+    notes:
+      - "The user explicitly approved the Proposal by responding 'Procede'."
+      - "Spec and Design may begin in parallel in Automatic mode."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-07-24T19:44:38.081Z"
+    actor: deck-developer-spec
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Initial Spec defines 22 requirements and 45 acceptance scenarios."
+      - "Installed evidence, immediate recheck, truthful failures, bounded diagnostics, safety, concurrency, and test isolation are covered."
+      - "Parallel Design reconciliation remains required before Tasks."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-07-24T20:07:26.685Z"
+    actor: deck-developer-design
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:9362c7230716cee493c0fd9cbfeb852f
+    idempotency_key: sha256:bcae0cee6665120504069fa934b4346988b07109db03ba90c0978561d6881523
+    notes:
+      - "Initial Design defines a shared installed-evidence resolver, effect-boundary recheck, single-flight coordination, and bounded diagnostics."
+      - "No process killing, binary replacement, implicit upgrade, or prompt/system change is introduced."
+      - "Parallel Spec reconciliation remains required before Tasks."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-07-24T20:37:41.651Z"
+    actor: deck-developer-design
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:b58b59b0ed19fa41795c6b9aec84403e
+    idempotency_key: sha256:ff8f0ca272ed0a3cca06026cf880bbca7d43dabf259767435b864ddbe089edcf
+    notes:
+      - "Final reconciliation resolved outcome mapping, config evidence precedence, diagnostic bounds, UI presentation, cancellation, single-flight, and dependency gating."
+      - "All 34 normative requirement headings and 51 scenario headings are covered with no open technical decisions."
+      - "The stale Spec summary count must be corrected before Tasks."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-07-24T20:42:08.162Z"
+    actor: deck-developer-spec
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Final reconciliation corrected stale initial metadata from 22/45 to 34 requirements and 51 scenarios."
+      - "All four open decisions are resolved consistently with Design and no contradictions remain."
+      - "Tasks are unblocked."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-07-24T20:46:52.986Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "Two registered Task-specialist invocations returned empty and wrote no artifacts."
+      - "The coordinator recorded 10 dependency-valid tasks covering 34/34 requirements and 51/51 scenarios without expanding the reconciled Design allowlist."
+      - "preconditions.md records None; explicit source/test Apply authorization remains pending."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T21:39:54.317Z"
+    actor: human:user
+    registry_write: non-deferred
+    notes:
+      - "The user explicitly authorized Apply through completion within the exact tasks.md scope."
+      - "Authorization covers only the 15 source/test targets plus apply-progress.md evidence."
+      - "No commit, push, live-home/process interaction, binary replacement, implicit upgrade, dependency, generated-file, Git-state, or runner-capability-standardization change is authorized."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-07-24T23:09:13.452Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - "T1-T4 completed with genuine RED evidence, 80 backend affected passes, typecheck and diff-check green."
+      - "T5-T6 completed with genuine RED evidence, 50 frontend focused/affected passes, typecheck and diff-check green."
+      - "All source/test changes match the exact 15-file allowlist; V1 independent Verify is required next."
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: "2026-07-24T23:22:30.536Z"
+    actor: deck-developer-verify
+    registry_write: reconciled-by-orchestrator
+    intent_id: registry-intent:v1:verify:opencode-package-install-running-binary-regression:v1:failed:blocking-scope-allowlist
+    notes:
+      - "Focused checks passed 81/81 and affected checks passed 49/49; typecheck, build, diff-check, rooted validation, freshness, and disposable sandbox passed."
+      - "The sandbox proved already-present behavior, zero installer sentinel calls, unchanged sandbox checksum, and no real-user-root mutation."
+      - "V1 failed only because unrelated pre-existing tracked and untracked worktree changes prevented proof of the exact 15-file Apply allowlist; R1 is blocked pending user decision."

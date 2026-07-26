@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { collectOpenCodeDiscoveryContext } from "./model-discovery-context";
+import {
+  collectOpenCodeDiscoveryContext,
+  enumerateOpenCodeConfigCandidates,
+  parseJsonc,
+} from "./model-discovery-context";
 
 import { buildDiscoveryFingerprint } from "./model-inventory-cache";
 
@@ -111,5 +115,60 @@ describe("OpenCode production discovery context", () => {
     expect(jsonc.configCandidates.find((candidate) => candidate.logicalPath.endsWith("opencode.json"))?.digestDisposition).toBe("sanitized");
     expect(JSON.stringify({ first, changedModel, changedSecret, jsonc })).not.toContain("secret-one");
     expect(JSON.stringify({ first, changedModel, changedSecret, jsonc })).not.toContain("secret-two");
+  });
+
+  test("enumerates the authoritative local config layers in precedence order", () => {
+    expect(enumerateOpenCodeConfigCandidates({
+      projectRoot: "/workspace/project",
+      workspaceRoot: "/workspace",
+      homeDir: "/home/fixture",
+      env: {
+        XDG_CONFIG_HOME: "/fixture/config",
+        OPENCODE_CONFIG: "overrides/custom.jsonc",
+        OPENCODE_CONFIG_DIR: "/fixture/alternate",
+      },
+    }).map((candidate) => candidate.path)).toEqual([
+      "/fixture/config/opencode/opencode.json",
+      "/fixture/config/opencode/opencode.jsonc",
+      "/workspace/project/overrides/custom.jsonc",
+      "/workspace/opencode.json",
+      "/workspace/opencode.jsonc",
+      "/workspace/project/opencode.json",
+      "/workspace/project/opencode.jsonc",
+      "/workspace/project/.opencode/opencode.json",
+      "/workspace/project/.opencode/opencode.jsonc",
+      "/fixture/alternate/opencode.json",
+      "/fixture/alternate/opencode.jsonc",
+    ]);
+  });
+
+  test("honors project-disable and pure controls without evaluating config content", () => {
+    const base = {
+      projectRoot: "/workspace/project",
+      workspaceRoot: "/workspace",
+      homeDir: "/home/fixture",
+      env: { OPENCODE_CONFIG: "custom.json", OPENCODE_CONFIG_DIR: "/fixture/alternate" },
+    };
+
+    expect(enumerateOpenCodeConfigCandidates({
+      ...base,
+      env: { ...base.env, OPENCODE_DISABLE_PROJECT_CONFIG: "1" },
+    }).map((candidate) => candidate.path)).toEqual([
+      "/home/fixture/.config/opencode/opencode.json",
+      "/home/fixture/.config/opencode/opencode.jsonc",
+      "/workspace/project/custom.json",
+      "/fixture/alternate/opencode.json",
+      "/fixture/alternate/opencode.jsonc",
+    ]);
+    expect(enumerateOpenCodeConfigCandidates({
+      ...base,
+      env: { ...base.env, OPENCODE_PURE: "1" },
+    })).toEqual([]);
+  });
+
+  test("parses comments and trailing commas through the shared JSONC parser", () => {
+    expect(parseJsonc('{\n  // local-only fixture\n  "mcp": { "codebase-memory": {}, },\n}')).toEqual({
+      mcp: { "codebase-memory": {} },
+    });
   });
 });

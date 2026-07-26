@@ -391,4 +391,61 @@ describe("parseArgs", () => {
       message: expect.stringContaining("Usage"),
     });
   });
+
+  // -------------------------------------------------------------------------
+  // deck skill-registry tests (agent-skill-registry-discovery / T7)
+  // -------------------------------------------------------------------------
+
+  test("parses runner-bound skill-registry validate with strict flags", () => {
+    const result = parseArgs([
+      "skill-registry",
+      "validate",
+      "--runner",
+      "opencode",
+      "--root",
+      "/tmp/project",
+      "--json",
+    ]);
+    expect(result).toEqual<ParsedArgs>({
+      command: "skill-registry-validate",
+      flags: { runner: "opencode", root: "/tmp/project", json: true },
+    });
+  });
+
+  test("parses discover and allows refresh to omit the runner for interactive selection", () => {
+    expect(parseArgs(["skill-registry", "discover", "--runner=pi"])).toEqual<ParsedArgs>({
+      command: "skill-registry-discover",
+      flags: { runner: "pi" },
+    });
+    expect(parseArgs(["skill-registry", "refresh", "--json"])).toEqual<ParsedArgs>({
+      command: "skill-registry-refresh",
+      flags: { json: true },
+    });
+  });
+
+  test("requires a runner for read-only skill-registry operations", () => {
+    expect(parseArgs(["skill-registry", "validate"])).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("--runner"),
+    });
+    expect(parseArgs(["skill-registry", "discover", "--json"])).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("--runner"),
+    });
+  });
+
+  test("rejects generate, reason, and unknown skill-registry options", () => {
+    expect(parseArgs(["skill-registry", "generate", "--runner", "pi"])).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("skill-registry"),
+    });
+    expect(parseArgs(["skill-registry", "refresh", "--reason", "user-approved"])).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("Unknown flag"),
+    });
+    expect(parseArgs(["skill-registry", "refresh", "--unknown"])).toEqual<ParsedArgs>({
+      command: "error",
+      message: expect.stringContaining("Unknown flag"),
+    });
+  });
 });

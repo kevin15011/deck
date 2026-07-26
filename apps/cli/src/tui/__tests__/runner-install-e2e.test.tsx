@@ -26,8 +26,9 @@ function createActionResult(
   actionId: string,
   status: RunnerActionRunResult["status"],
   message: string,
+  extra: Partial<RunnerActionRunResult> = {},
 ): RunnerActionRunResult {
-  return { actionId, status, message, diagnostics: [] };
+  return { actionId, status, message, diagnostics: [], ...extra };
 }
 
 const PASSING_PI_PREFLIGHT: PiPreflightResult = {
@@ -85,6 +86,103 @@ const FAILING_OPENCODE_PREFLIGHT: OpenCodePreflightResult = {
   ],
   summary: { ready: false, failed: 1, warnings: 0 },
 };
+
+describe("T6 identified package outcomes and inline causes", () => {
+  test("renders already-present identity and explicitly says the installer was not run", () => {
+    const state = createMockedOpenCodeDashboardState({ screen: "install-progress" });
+    const output = renderToString(
+      <RunnerDashboardScreens
+        state={state}
+        installResults={[createActionResult(
+          "capability.codebase-memory.install",
+          "skipped",
+          "codebase-memory already present; installer not run.",
+          { packageOutcome: "already-present" },
+        )]}
+      />,
+    );
+
+    expect(output).toContain("… [capability.codebase-memory.install] codebase-memory already present;");
+    expect(output).toContain("installer not run.");
+    expect(output).not.toContain("installer completed");
+  });
+
+  test("renders one identified bounded cause without exposing terminal noise or secrets", () => {
+    const state = createMockedOpenCodeDashboardState({ screen: "install-progress" });
+    const output = renderToString(
+      <RunnerDashboardScreens
+        state={state}
+        installResults={[createActionResult(
+          "capability.codebase-memory.install",
+          "failed",
+          "Package install failed.",
+          {
+            cause: "\u001b[31merror\u001b[0m failed to copy binary to /home/private/bin token=super-secret ░░░",
+            diagnostics: ["error failed to copy binary"],
+          },
+        )]}
+      />,
+    );
+
+    expect(output).toContain("✗ [capability.codebase-memory.install] Package install failed.");
+    expect(output).toContain("  error failed to copy binary to <path> token=[REDACTED]");
+    expect(output).not.toContain("\u001b");
+    expect(output).not.toContain("/home/private");
+    expect(output).not.toContain("super-secret");
+    expect(output).not.toContain("░");
+  });
+
+  test("preserves the progress view final-five behavior while identifying each action", () => {
+    const state = createMockedOpenCodeDashboardState({ screen: "install-progress" });
+    const results = Array.from({ length: 6 }, (_, index) => createActionResult(
+      `capability.tool-${index}.install`,
+      "executed",
+      `Installed tool-${index}`,
+    ));
+    const output = renderToString(<RunnerDashboardScreens state={state} installResults={results} />);
+
+    expect(output).not.toContain("tool-0");
+    for (let index = 1; index < 6; index++) {
+      expect(output).toContain(`[capability.tool-${index}.install]`);
+    }
+  });
+
+  test("renders completion failures with identity and one inline cause", () => {
+    const state = createMockedOpenCodeDashboardState({ screen: "complete" });
+    const output = renderToString(
+      <RunnerDashboardScreens
+        state={state}
+        installResults={[createActionResult(
+          "capability.serena.install",
+          "failed",
+          "Serena install failed.",
+          { cause: "Install failed (exit 1)." },
+        )]}
+      />,
+    );
+
+    expect(output).toContain("✗ [capability.serena.install] Serena install failed.");
+    expect(output).toContain("  Install failed (exit 1).");
+  });
+
+  test("keeps symbols and words meaningful without relying on color", () => {
+    const state = createMockedOpenCodeDashboardState({ screen: "install-progress" });
+    const output = renderToString(
+      <RunnerDashboardScreens
+        state={state}
+        installResults={[
+          createActionResult("capability.context7.install", "skipped", "Context7 already present; installer not run.", { packageOutcome: "already-present" }),
+          createActionResult("capability.serena.install", "failed", "Serena install failed.", { cause: "Install failed." }),
+        ]}
+      />,
+    );
+
+    expect(output).toContain("…");
+    expect(output).toContain("✗");
+    expect(output).toContain("already present");
+    expect(output).toContain("failed");
+  });
+});
 
 function createMinimalPlan(overrides?: Partial<RunnerReviewPlan>): RunnerReviewPlan {
   return {

@@ -125,6 +125,28 @@ if (parsed.command === "openspec-validate") {
   }
 }
 
+if (
+  parsed.command === "skill-registry-validate" ||
+  parsed.command === "skill-registry-discover" ||
+  parsed.command === "skill-registry-refresh"
+) {
+  try {
+    const { runSkillRegistryCommand } = await import("./skill-registry-command");
+    const result = await runSkillRegistryCommand(parsed);
+    if (parsed.flags.json) {
+      console.log(JSON.stringify(result.json, null, 2));
+    } else {
+      console.log(result.human);
+    }
+    process.exit(result.exitCode);
+  } catch {
+    // Keep runtime failures bounded; command internals already return safe
+    // structured status/reason output for expected failures.
+    console.error("deck skill-registry failed.");
+    process.exit(2);
+  }
+}
+
 if (parsed.command === "pi-launch") {
   const projectRoot = resolveProjectRoot() ?? process.cwd();
   const result = await runPiLaunch({

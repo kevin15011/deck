@@ -64,8 +64,15 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT (re-exported from @deck/core)", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain(".deck/ai-notes/");
   });
 
-  test("references skill injection via Project Standards", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Project Standards");
+  test("keeps runner-specific discovery materialization out of core content", () => {
+    for (const content of [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_AGENT_BODY, ORCHESTRATOR_SKILL_BODY]) {
+      expect(content).not.toContain("--runner pi");
+      expect(content).not.toContain("--runner opencode");
+      expect(content).not.toContain(".pi/skills");
+      expect(content).not.toContain(".opencode/skills");
+      expect(content).not.toContain("~/.pi/");
+      expect(content).not.toContain("~/.config/opencode/skills");
+    }
   });
 
   test("does not contain OpenCode-specific model assignment details", () => {

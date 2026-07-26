@@ -1,40 +1,106 @@
+import { spawn as nodeSpawn } from "node:child_process";
+import { accessSync, constants, existsSync } from "node:fs";
+import { delimiter, join, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
+
 import type { InstallableOpenCodeTool } from "./installation-plan";
-import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, appendFileSync, accessSync, constants } from "node:fs";
-import { join } from "node:path";
+import {
+  resolveOpenCodeInstalledEvidence,
+  type OpenCodeEvidenceContext,
+  type OpenCodeInstalledEvidence,
+  type OpenCodeInstalledEvidenceReason,
+  type ResolveOpenCodeInstalledEvidence,
+} from "./required-tools";
 
-const DEBUG_LOG = "/tmp/deck-install-debug.log";
+const MAX_SCRIPT_BYTES = 1024 * 1024;
+const MAX_CAPTURE_BYTES = 65_536;
+const MAX_DIAGNOSTIC_LINES = 6;
+const MAX_DIAGNOSTIC_SCALARS = 240;
+const MAX_DIAGNOSTIC_BYTES = 1_024;
+const MAX_CAUSE_LINES = 2;
+const MAX_CAUSE_BYTES = 320;
 
-function debugLog(...args: unknown[]): void {
-  if (!process.env.DECK_DEBUG) return;
-  const msg = args.map((a) => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ");
-  const timestamp = new Date().toISOString();
-  const line = `[${timestamp}] ${msg}\n`;
-  try { appendFileSync(DEBUG_LOG, line, "utf-8"); } catch {}
-}
+export type InstallCommandResult = {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+};
+
+export type RunInstallCommand = (command: string, args: string[]) => Promise<InstallCommandResult>;
+
+export type OpenCodeToolInstallOutcome = "already-present" | "executed" | "failed" | "skipped";
+
+export type OpenCodeRawInstallDiagnostic = {
+  stage: "evidence" | "download" | "install" | "post-install";
+  exitCode?: number;
+  stdout: string;
+  stderr: string;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  stdoutBytes: number;
+  stderrBytes: number;
+};
+
+export type OpenCodeInstallDiagnostic = {
+  stage: OpenCodeRawInstallDiagnostic["stage"];
+  code: string;
+  exitCode?: number;
+  lines: readonly string[];
+  original?: OpenCodeRawInstallDiagnostic;
+};
+
+type OpenCodeToolInstallResultBase = {
+  toolId: InstallableOpenCodeTool["id"];
+  tool: string;
+  message: string;
+  cause?: string;
+  diagnostic?: OpenCodeInstallDiagnostic;
+  raw?: OpenCodeRawInstallDiagnostic;
+};
+
+export type OpenCodeToolInstallResultExact =
+  | (OpenCodeToolInstallResultBase & { outcome: "already-present"; success: true; installerInvoked: false })
+  | (OpenCodeToolInstallResultBase & { outcome: "executed"; success: true; installerInvoked: true })
+  | (OpenCodeToolInstallResultBase & { outcome: "failed"; success: false; installerInvoked: boolean })
+  | (OpenCodeToolInstallResultBase & { outcome: "skipped"; success: false; installerInvoked: false });
 
 /**
- * Check if a command exists in PATH and is executable.
- * Also checks common user-tool bin directories (e.g., ~/.local/bin) since
- * uv/pipx may install tools there and the current process PATH may not include them.
+ * Legacy callback/state compatibility. The installer never emits this shape;
+ * it allows the pre-T5 TUI callback accumulator to remain source-compatible.
  */
+export type OpenCodeToolInstallResult = OpenCodeToolInstallResultExact | {
+  tool?: string;
+  success: boolean;
+  message?: string;
+  toolId?: never;
+  outcome?: never;
+  installerInvoked?: never;
+};
+
+export type DownloadOpenCodeScript = (url: string, signal?: AbortSignal) => Promise<string>;
+export type RunOpenCodeShellScript = (script: string, tool: InstallableOpenCodeTool, signal?: AbortSignal) => Promise<InstallCommandResult>;
+
+export type InstallOpenCodeToolsOptions = {
+  commandExists?: (command: string) => boolean;
+  evidenceContext?: OpenCodeEvidenceContext;
+  resolveEvidence?: ResolveOpenCodeInstalledEvidence;
+  evidenceResolver?: ResolveOpenCodeInstalledEvidence;
+  downloadScript?: DownloadOpenCodeScript;
+  download?: DownloadOpenCodeScript;
+  runShellScript?: RunOpenCodeShellScript;
+  signal?: AbortSignal;
+  projectRoot?: string;
+  homeDirectory?: string;
+};
+
+const singleFlights = new Map<string, Promise<OpenCodeToolInstallResultExact>>();
+
 export function commandExistsInPath(command: string): boolean {
-  const path = process.env.PATH ?? "";
-  const pathDirs = path.split(":");
-
-  // Add common user-tool bin directories that may not be in current PATH
-  // uv typically installs to ~/.local/bin, pipx uses similar paths
-  const homeDir = process.env.HOME ?? "";
-  const userBinDirs = homeDir ? [join(homeDir, ".local", "bin")] : [];
-  const allDirs = [...pathDirs, ...userBinDirs];
-
-  return allDirs.some((dir) => {
+  const pathValue = process.env.PATH ?? "";
+  const pathDelimiter = process.platform === "win32" ? ";" : delimiter;
+  return pathValue.split(pathDelimiter).some((directory) => {
     try {
-      const fullPath = join(dir, command);
-      // Use accessSync with execute permission to verify executability, not just existence
-      // This avoids false positives from directories or non-executable files
-      // constants.F_OK = 0 (existence), constants.X_OK = 1 (executable)
-      accessSync(fullPath, constants.X_OK);
+      accessSync(join(directory || process.cwd(), command), constants.X_OK);
       return true;
     } catch {
       return false;
@@ -42,549 +108,504 @@ export function commandExistsInPath(command: string): boolean {
   });
 }
 
-export type OpenCodeToolInstallResult = {
-  tool: string;
-  success: boolean;
-  message?: string;
-};
-
-type InstallCommandResult = {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-};
-
-type RunInstallCommand = (command: string, args: string[]) => Promise<InstallCommandResult>;
-
-/** Shell to use for script execution — bash if available (mac/linux compatibility) */
-function getShellCommand(): string {
-  // mac uses bash as sh, linux often uses dash which lacks pipefail
-  return process.platform === "darwin" ? "sh" : (existsSync("/bin/bash") ? "/bin/bash" : "sh");
-}
-
-export type InstallOpenCodeToolsOptions = {
-  /** Custom command existence checker (defaults to checking PATH) */
-  commandExists?: (command: string) => boolean;
-};
-
+/**
+ * Install selected OpenCode tools in input order while keeping detection and effects
+ * at explicit, injectable boundaries.
+ */
 export async function installOpenCodeTools(
   command: string | undefined,
   plan: InstallableOpenCodeTool[],
-  onResult: (result: OpenCodeToolInstallResult) => void,
+  onResult: (result: OpenCodeToolInstallResultExact) => void,
   runInstallCommand: RunInstallCommand = runDefaultInstallCommand,
-  options?: InstallOpenCodeToolsOptions,
-): Promise<OpenCodeToolInstallResult[]> {
+  options: InstallOpenCodeToolsOptions = {},
+): Promise<OpenCodeToolInstallResultExact[]> {
   if (!command) return [];
 
-  // Use injected commandExists or default to PATH-based check
-  const cmdExists = options?.commandExists ?? commandExistsInPath;
+  const results: OpenCodeToolInstallResultExact[] = [];
+  const seenToolIds = new Set<string>();
+  const resolver = options.resolveEvidence ?? options.evidenceResolver ?? (options.evidenceContext ? resolveOpenCodeInstalledEvidence : undefined);
+  const context = options.evidenceContext;
+  const commandExists = options.commandExists ?? commandExistsInPath;
+  const projectRoot = options.projectRoot ?? context?.projectRoot ?? process.cwd();
+  const homeDirectory = options.homeDirectory ?? context?.homeDirectory ?? process.env.HOME ?? "";
 
-  const results: OpenCodeToolInstallResult[] = [];
-
-  debugLog("[install-tools] Starting installation of tools:", plan.map((t) => `${t.id} (${t.installKind})`));
+  const emit = (result: OpenCodeToolInstallResultExact): void => {
+    results.push(result);
+    onResult(result);
+  };
 
   for (const tool of plan) {
-    debugLog(`[install-tools] Processing tool: ${tool.name}, installKind: ${tool.installKind}`);
-
-    if (tool.installKind === "external") {
-      const result = {
-        tool: tool.name,
-        success: false,
-        message: `Manual install required from ${tool.module}.`,
-      };
-      debugLog(`[install-tools] ${tool.name}: external, skipping automatic install`);
-      results.push(result);
-      onResult(result);
+    if (options.signal?.aborted) {
+      emit(createInstallResult(tool, "skipped", false, `${tool.name} installation skipped because cancellation was requested.`));
       continue;
     }
+    if (seenToolIds.has(tool.id)) {
+      emit(failureFromText(tool, "evidence", "duplicate-tool-id", undefined, "", "Duplicate tool ID in installation plan.", false, context));
+      continue;
+    }
+    seenToolIds.add(tool.id);
 
-    if (tool.installKind === "shell-script" || tool.installKind === "shell-script-plus-mcp") {
-      // Install binary via shell script (curl -fsSL <url> | sh)
-      debugLog(`[install-tools] ${tool.name}: ${tool.installKind} install starting`);
-      if (!tool.shellInstallUrl) {
-        debugLog(`[install-tools] ${tool.name}: ERROR - missing shell install URL`);
-        const result = {
-          tool: tool.name,
-          success: false,
-          message: `Missing shell install URL for ${tool.name}.`,
-        };
-        results.push(result);
-        onResult(result);
+    const key = `${resolve(projectRoot)}\u0000${resolve(homeDirectory || projectRoot)}\u0000${tool.id}`;
+    const existing = singleFlights.get(key);
+    if (existing) {
+      if (options.signal?.aborted) {
+        emit(createInstallResult(tool, "skipped", false, `${tool.name} installation skipped because cancellation was requested.`));
         continue;
       }
-
-      debugLog(`[install-tools] ${tool.name}: Downloading from ${tool.shellInstallUrl}`);
-      try {
-        const { stdout, stderr, exitCode } = await runInstallCommand("curl", ["-fsSL", tool.shellInstallUrl]);
-        debugLog(`[install-tools] ${tool.name}: curl exitCode=${exitCode}, stdout.length=${stdout.length}, stderr.length=${stderr.length}`);
-
-        // Pipe stdout to shell
-        debugLog(`[install-tools] ${tool.name}: Executing shell script...`);
-        const shell = getShellCommand();
-        // Cast to ChildProcess to resolve the intersection-type narrowing to `never`.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const shellProcess = nodeSpawn(shell, ["-s"], { stdio: ["pipe", "pipe", "pipe"] }) as any;
-        shellProcess.stdin?.write(stdout);
-        shellProcess.stdin?.end();
-
-        let shellStdout = "";
-        let shellStderr = "";
-        shellProcess.stdout?.on("data", (chunk: string | Buffer) => { shellStdout += chunk.toString(); });
-        shellProcess.stderr?.on("data", (chunk: string | Buffer) => { shellStderr += chunk.toString(); });
-
-        const shellExitCode = await new Promise<number>((resolve) => {
-          shellProcess.on("close", (code: number | null) => resolve(code ?? 1));
-        });
-
-        debugLog(`[install-tools] ${tool.name}: shell exitCode=${shellExitCode}`);
-        debugLog(`[install-tools] ${tool.name}: shell stdout (first 500 chars): ${shellStdout.substring(0, 500)}`);
-        debugLog(`[install-tools] ${tool.name}: shell stderr (first 500 chars): ${shellStderr.substring(0, 500)}`);
-
-        // Run post-install command if specified
-        let postInstallOk = true;
-        let postInstallMessage = "";
-        if (tool.postInstallCommand && shellExitCode === 0) {
-          const [cmd, ...args] = tool.postInstallCommand;
-          debugLog(`[install-tools] ${tool.name}: Running post-install: ${cmd} ${args.join(" ")}`);
-          const { exitCode: postExitCode, stderr: postStderr } = await runInstallCommand(cmd, args);
-          postInstallOk = postExitCode === 0;
-          debugLog(`[install-tools] ${tool.name}: post-install exitCode=${postExitCode}`);
-          postInstallMessage = postExitCode === 0
-            ? ` Post-install '${tool.postInstallCommand.join(" ")}' succeeded.`
-            : ` Post-install '${tool.postInstallCommand.join(" ")}' failed: ${postStderr}`;
-        }
-
-        const result = {
-          tool: tool.name,
-          success: shellExitCode === 0 && postInstallOk,
-          message: shellExitCode === 0
-            ? (postInstallOk ? undefined : postInstallMessage.trim())
-            : (shellStderr || shellStdout || `Shell install failed with exit code ${shellExitCode}`).trim(),
-        };
-        debugLog(`[install-tools] ${tool.name}: FINAL RESULT - success=${result.success}, message=${result.message}`);
-        results.push(result);
-        onResult(result);
-      } catch (error) {
-        debugLog(`[install-tools] ${tool.name}: ERROR - ${error instanceof Error ? error.message : String(error)}`);
-        const result = {
-          tool: tool.name,
-          success: false,
-          message: error instanceof Error ? error.message : "Shell install failed.",
-        };
-        results.push(result);
-        onResult(result);
-      }
-      continue;
-    }
-
-    if (tool.installKind === "npm-package") {
-      // Install npm package globally using `npm install -g <module>`
-      debugLog(`[install-tools] ${tool.name}: npm-package install: npm install -g ${tool.module}`);
-      try {
-        const { stdout, stderr, exitCode } = await runInstallCommand("npm", ["install", "-g", tool.module]);
-        debugLog(`[install-tools] ${tool.name}: npm exitCode=${exitCode}`);
-        const result = {
-          tool: tool.name,
-          success: exitCode === 0,
-          message: exitCode === 0 ? undefined : (stderr || stdout).trim(),
-        };
-        results.push(result);
-        onResult(result);
-      } catch (error) {
-        debugLog(`[install-tools] ${tool.name}: npm ERROR - ${error instanceof Error ? error.message : String(error)}`);
-        const result = {
-          tool: tool.name,
-          success: false,
-          message: error instanceof Error ? error.message : "Unable to run npm install.",
-        };
-        results.push(result);
-        onResult(result);
-      }
-      continue;
-    }
-
-    if (tool.installKind === "npm-package-plus-mcp") {
-      // Install npm package globally + MCP config handled separately (write-mcp-config action)
-      // Same as npm-package: execute npm install -g <module>
-      debugLog(`[install-tools] ${tool.name}: npm-package-plus-mcp install: npm install -g ${tool.module}`);
-      try {
-        const { stdout, stderr, exitCode } = await runInstallCommand("npm", ["install", "-g", tool.module]);
-        debugLog(`[install-tools] ${tool.name}: npm exitCode=${exitCode}`);
-        const result = {
-          tool: tool.name,
-          success: exitCode === 0,
-          message: exitCode === 0 ? undefined : (stderr || stdout).trim(),
-        };
-        results.push(result);
-        onResult(result);
-      } catch (error) {
-        debugLog(`[install-tools] ${tool.name}: npm ERROR - ${error instanceof Error ? error.message : String(error)}`);
-        const result = {
-          tool: tool.name,
-          success: false,
-          message: error instanceof Error ? error.message : "Unable to run npm install.",
-        };
-        results.push(result);
-        onResult(result);
-      }
-      continue;
-    }
-
-    if (tool.installKind === "opencode-plugin") {
-      // Install plugin via OpenCode's own plugin system, which registers it in the correct cache
-      debugLog(`[install-tools] ${tool.name}: opencode-plugin install (opencode plugin ${tool.module} --global)`);
-
-      // Step 1: Install via opencode plugin command (registers in ~/.cache/opencode/packages/ and adds to global config)
-      debugLog(`[install-tools] ${tool.name}: running opencode plugin ${tool.module} --global`);
-      try {
-        const { stdout, stderr, exitCode } = await runInstallCommand("opencode", ["plugin", tool.module, "--global"]);
-        debugLog(`[install-tools] ${tool.name}: opencode plugin exitCode=${exitCode}`);
-        if (exitCode !== 0) {
-          // Fallback: try npm install -g + manual plugin entry
-          debugLog(`[install-tools] ${tool.name}: opencode plugin failed, trying npm fallback`);
-          const npmResult = await runInstallCommand("npm", ["install", "-g", tool.module]);
-          debugLog(`[install-tools] ${tool.name}: npm install exitCode=${npmResult.exitCode}`);
-          if (npmResult.exitCode !== 0) {
-            const result = {
-              tool: tool.name,
-              success: false,
-              message: `Failed to install ${tool.module}: ${(npmResult.stderr || npmResult.stdout).trim()}`,
-            };
-            results.push(result);
-            onResult(result);
-            continue;
-          }
-          // Manual plugin entry fallback
-          const homeDir = process.env.HOME ?? "/home/user";
-          const configPath = join(homeDir, ".config", "opencode", "opencode.json");
-          const result = installOpenCodePlugin({ configPath, homeDir, pluginName: tool.module });
-          results.push(result);
-          onResult(result);
+      const leader = await existing;
+      if (leader.outcome === "executed" && resolver && context) {
+        const after = safeResolve(resolver, tool.id, context);
+        if (after?.state === "usable") {
+          emit(createInstallResult(tool, "already-present", false, `${tool.name} already present; installer not run.`));
           continue;
         }
-        const result = {
-          tool: tool.name,
-          success: true,
-          message: `Installed ${tool.module} via opencode plugin`,
-        };
-        results.push(result);
-        onResult(result);
-      } catch (error) {
-        const result = {
-          tool: tool.name,
-          success: false,
-          message: `Plugin install error: ${error instanceof Error ? error.message : String(error)}`,
-        };
-        results.push(result);
-        onResult(result);
       }
+      emit(cloneSafeResult(leader));
       continue;
     }
 
-    if (tool.installKind === "mcp-server") {
-      // MCP servers are configured via capability-plan.ts, not installed via install-tools.ts
-      // The install-tools.ts handles npm and plugin installations only
-      debugLog(`[install-tools] ${tool.name}: mcp-server - skipping (handled by write-mcp-config action)`);
-      const result = {
-        tool: tool.name,
-        success: false,
-        message: `${tool.name} is an MCP server configured via write-mcp-config action, not install-tools.`,
-      };
-      results.push(result);
-      onResult(result);
-      continue;
-    }
-
-    if (tool.installKind === "python-tool") {
-      // Serena is a Python tool that requires uv or pipx for installation
-      // Policy: Never install Python automatically. If python3 is missing, skip Serena entirely.
-      // If Python exists but neither uv nor pipx exists, warn/skip.
-      // Only write MCP config if final serena verification passes.
-      debugLog(`[install-tools] ${tool.name}: python-tool install starting`);
-
-      // Step 1: Check if Python exists (REQUIRED - never install Python)
-      debugLog(`[install-tools] ${tool.name}: Checking for python3...`);
-      const pythonExists = cmdExists("python3");
-      if (!pythonExists) {
-        // Python missing - skip Serena entirely, do not configure MCP
-        debugLog(`[install-tools] ${tool.name}: python3 not found - skipping Serena (Python is required but not installed)`);
-        const result = {
-          tool: tool.name,
-          success: false,
-          message: `Skipped: Python3 is not installed. Serena requires Python. Install Python3 first, then re-run Deck install.`,
-        };
-        results.push(result);
-        onResult(result);
-        continue;
-      }
-      debugLog(`[install-tools] ${tool.name}: python3 found`);
-
-      // Step 2: Check if serena already exists
-      debugLog(`[install-tools] ${tool.name}: Checking if serena is already in PATH...`);
-      const serenaExists = cmdExists("serena");
-      if (serenaExists) {
-        debugLog(`[install-tools] ${tool.name}: serena already in PATH - enabling MCP`);
-        const result = {
-          tool: tool.name,
-          success: true,
-          message: `Serena found in PATH. MCP configuration will be enabled.`,
-        };
-        results.push(result);
-        onResult(result);
-        continue;
-      }
-      debugLog(`[install-tools] ${tool.name}: serena not in PATH, trying to install...`);
-
-      // Step 3: Try to install via uv or pipx
-      const uvExists = cmdExists("uv");
-      const pipxExists = cmdExists("pipx");
-
-      if (uvExists) {
-        // Use uv to install
-        debugLog(`[install-tools] ${tool.name}: Installing via uv tool install serena`);
-        try {
-          const { stdout, stderr, exitCode } = await runInstallCommand("uv", ["tool", "install", "serena"]);
-          debugLog(`[install-tools] ${tool.name}: uv install exitCode=${exitCode}`);
-
-          if (exitCode !== 0) {
-            debugLog(`[install-tools] ${tool.name}: uv install failed: ${stderr || stdout}`);
-            const result = {
-              tool: tool.name,
-              success: false,
-              message: `Failed to install via uv: ${(stderr || stdout).trim()}`,
-            };
-            results.push(result);
-            onResult(result);
-            continue;
-          }
-
-          // Step 4: Verify serena is now in PATH after uv install
-          debugLog(`[install-tools] ${tool.name}: Verifying serena is now in PATH...`);
-          const serenaNowExists = cmdExists("serena");
-          if (!serenaNowExists) {
-            debugLog(`[install-tools] ${tool.name}: serena verification FAILED after uv install`);
-            const result = {
-              tool: tool.name,
-              success: false,
-              message: `Serena installation succeeded but 'serena' not found in PATH. The current shell may need to pick up the new bin directory (try: export PATH="$HOME/.local/bin:$PATH" or restart your terminal). MCP will not be configured.`,
-            };
-            results.push(result);
-            onResult(result);
-            continue;
-          }
-
-          debugLog(`[install-tools] ${tool.name}: serena verification PASSED after uv install`);
-          const result = {
-            tool: tool.name,
-            success: true,
-            message: `Serena installed via uv and verified. MCP configuration will be enabled.`,
-          };
-          results.push(result);
-          onResult(result);
-          continue;
-        } catch (error) {
-          debugLog(`[install-tools] ${tool.name}: uv install ERROR - ${error instanceof Error ? error.message : String(error)}`);
-          const result = {
-            tool: tool.name,
-            success: false,
-            message: `uv install failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-          };
-          results.push(result);
-          onResult(result);
-          continue;
-        }
-      } else if (pipxExists) {
-        // Use pipx to install
-        debugLog(`[install-tools] ${tool.name}: Installing via pipx install serena`);
-        try {
-          const { stdout, stderr, exitCode } = await runInstallCommand("pipx", ["install", "serena"]);
-          debugLog(`[install-tools] ${tool.name}: pipx install exitCode=${exitCode}`);
-
-          if (exitCode !== 0) {
-            debugLog(`[install-tools] ${tool.name}: pipx install failed: ${stderr || stdout}`);
-            const result = {
-              tool: tool.name,
-              success: false,
-              message: `Failed to install via pipx: ${(stderr || stdout).trim()}`,
-            };
-            results.push(result);
-            onResult(result);
-            continue;
-          }
-
-          // Step 4: Verify serena is now in PATH after pipx install
-          debugLog(`[install-tools] ${tool.name}: Verifying serena is now in PATH...`);
-          const serenaNowExists = cmdExists("serena");
-          if (!serenaNowExists) {
-            debugLog(`[install-tools] ${tool.name}: serena verification FAILED after pipx install`);
-            const result = {
-              tool: tool.name,
-              success: false,
-              message: `Serena installation succeeded but 'serena' not found in PATH. The current shell may need to pick up the new bin directory (try: export PATH="$HOME/.local/bin:$PATH" or restart your terminal). MCP will not be configured.`,
-            };
-            results.push(result);
-            onResult(result);
-            continue;
-          }
-
-          debugLog(`[install-tools] ${tool.name}: serena verification PASSED after pipx install`);
-          const result = {
-            tool: tool.name,
-            success: true,
-            message: `Serena installed via pipx and verified. MCP configuration will be enabled.`,
-          };
-          results.push(result);
-          onResult(result);
-          continue;
-        } catch (error) {
-          debugLog(`[install-tools] ${tool.name}: pipx install ERROR - ${error instanceof Error ? error.message : String(error)}`);
-          const result = {
-            tool: tool.name,
-            success: false,
-            message: `pipx install failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-          };
-          results.push(result);
-          onResult(result);
-          continue;
-        }
-      } else {
-        // Neither uv nor pipx exists - skip with warning
-        debugLog(`[install-tools] ${tool.name}: Neither uv nor pipx found - skipping Serena`);
-        const result = {
-          tool: tool.name,
-          success: false,
-          message: `Skipped: Python3 exists but neither 'uv' nor 'pipx' is installed. Install uv or pipx first, then re-run Deck install.`,
-        };
-        results.push(result);
-        onResult(result);
-        continue;
-      }
-    }
-
-    debugLog(`[install-tools] ${tool.name}: Unknown installKind "${tool.installKind}", falling through to opencode plugin install`);
+    const work = executeTool(tool, runInstallCommand, commandExists, resolver, context, options);
+    singleFlights.set(key, work);
     try {
-      const { stdout, stderr, exitCode } = await runInstallCommand(command, ["plugin", tool.module, "--global"]);
-      const result = {
-        tool: tool.name,
-        success: exitCode === 0,
-        message: exitCode === 0 ? undefined : (stderr || stdout).trim(),
-      };
-      results.push(result);
-      onResult(result);
-    } catch (error) {
-      const result = {
-        tool: tool.name,
-        success: false,
-        message: error instanceof Error ? error.message : "Unable to run installation command.",
-      };
-      results.push(result);
-      onResult(result);
+      emit(await work);
+    } finally {
+      if (singleFlights.get(key) === work) singleFlights.delete(key);
     }
   }
 
-  debugLog("[install-tools] Installation complete. Results:", results);
   return results;
 }
 
-type OpenCodePluginInstallResult = {
-  tool: string;
-  success: boolean;
-  message?: string;
-};
-
-/**
- * Adds an OpenCode plugin to the global opencode.json plugin array.
- *
- * OpenCode plugins are in-process modules that run inside the OpenCode runner.
- * The plugin entry in opencode.json is just the plugin name string, e.g.:
- *   { "plugin": ["context-mode", "rtk"] }
- *
- * This does NOT run `opencode plugin install` CLI command - that command is for
- * OpenCode's own plugin registry, not for in-process plugins like context-mode.
- */
-function installOpenCodePlugin(options: {
-  configPath: string;
-  homeDir: string;
-  pluginName: string;
-}): OpenCodePluginInstallResult {
-  debugLog(`[installOpenCodePlugin] configPath=${options.configPath}, pluginName=${options.pluginName}`);
-  debugLog(`[installOpenCodePlugin] config exists: ${existsSync(options.configPath)}`);
-
-  let config: Record<string, unknown> = {};
-  if (existsSync(options.configPath)) {
-    try {
-      const content = readFileSync(options.configPath, "utf-8");
-      debugLog(`[installOpenCodePlugin] existing config content: ${content.substring(0, 200)}`);
-      config = JSON.parse(content) as Record<string, unknown>;
-    } catch (error) {
-      debugLog(`[installOpenCodePlugin] ERROR parsing config: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        tool: options.pluginName,
-        success: false,
-        message: `Could not parse opencode.json: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  } else {
-    debugLog(`[installOpenCodePlugin] config file does not exist, creating new`);
+async function executeTool(
+  tool: InstallableOpenCodeTool,
+  runInstallCommand: RunInstallCommand,
+  commandExists: (command: string) => boolean,
+  resolver: ResolveOpenCodeInstalledEvidence | undefined,
+  context: OpenCodeEvidenceContext | undefined,
+  options: InstallOpenCodeToolsOptions,
+): Promise<OpenCodeToolInstallResultExact> {
+  if (resolver && context) {
+    const initial = safeResolve(resolver, tool.id, context);
+    if (!initial) return evidenceFailure(tool, "evidence", "evidence-resolution-failed");
+    if (initial.state === "usable") return createInstallResult(tool, "already-present", false, `${tool.name} already present; installer not run.`);
+    if (initial.state === "indeterminate") return evidenceFailure(tool, "evidence", "evidence-indeterminate");
   }
 
-  // Ensure plugin array exists
-  if (!Array.isArray(config.plugin)) {
-    config.plugin = [];
-    debugLog(`[installOpenCodePlugin] created new plugin array`);
-  }
-
-  const pluginArray = config.plugin as string[];
-  debugLog(`[installOpenCodePlugin] current plugin array: ${JSON.stringify(pluginArray)}`);
-
-  if (!pluginArray.includes(options.pluginName)) {
-    pluginArray.push(options.pluginName);
-    debugLog(`[installOpenCodePlugin] added ${options.pluginName}, new plugin array: ${JSON.stringify(pluginArray)}`);
-  } else {
-    debugLog(`[installOpenCodePlugin] ${options.pluginName} already in plugin array`);
-  }
+  if (tool.installKind === "external") return createInstallResult(tool, "skipped", false, `Manual install required from ${tool.module}.`);
+  if (tool.installKind === "mcp-server") return createInstallResult(tool, "skipped", false, `${tool.name} is an MCP server configured via write-mcp-config action, not install-tools.`);
 
   try {
-    writeFileSync(options.configPath, JSON.stringify(config, null, 2), "utf-8");
-    debugLog(`[installOpenCodePlugin] SUCCESS - wrote config to ${options.configPath}`);
-    return {
-      tool: options.pluginName,
-      success: true,
-      message: `Added '${options.pluginName}' to plugin array in opencode.json`,
-    };
+    if (tool.installKind === "shell-script" || tool.installKind === "shell-script-plus-mcp") {
+      return await executeShellTool(tool, runInstallCommand, resolver, context, options);
+    }
+    if (tool.installKind === "python-tool") {
+      return await executePythonTool(tool, runInstallCommand, commandExists, resolver, context, options);
+    }
+    if (tool.installKind === "opencode-plugin") {
+      return await executePluginTool(tool, runInstallCommand, resolver, context, options);
+    }
+    return await executeCommandTool(tool, runInstallCommand, resolver, context, options);
   } catch (error) {
-    debugLog(`[installOpenCodePlugin] ERROR writing config: ${error instanceof Error ? error.message : String(error)}`);
-    return {
-      tool: options.pluginName,
-      success: false,
-      message: `Could not write opencode.json: ${error instanceof Error ? error.message : String(error)}`,
-    };
+    return failureFromText(tool, "install", "installer-exception", 1, "", error instanceof Error ? error.message : String(error), true, context);
   }
 }
 
-async function runDefaultInstallCommand(command: string, args: string[]): Promise<InstallCommandResult> {
-  return new Promise((resolve) => {
-    const process = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+async function executeShellTool(
+  tool: InstallableOpenCodeTool,
+  runInstallCommand: RunInstallCommand,
+  resolver: ResolveOpenCodeInstalledEvidence | undefined,
+  context: OpenCodeEvidenceContext | undefined,
+  options: InstallOpenCodeToolsOptions,
+): Promise<OpenCodeToolInstallResultExact> {
+  if (!tool.shellInstallUrl) return failureFromText(tool, "download", "missing-install-url", undefined, "", `Missing shell install URL for ${tool.name}.`, false, context);
+
+  let downloaded: string;
+  let downloadResult: InstallCommandResult | undefined;
+  try {
+    const download = options.downloadScript ?? options.download;
+    if (download) downloaded = await download(tool.shellInstallUrl, options.signal);
+    else {
+      downloadResult = await runInstallCommand("curl", ["-fsSL", tool.shellInstallUrl]);
+      if (downloadResult.exitCode !== 0) return failureFromCommand(tool, "download", "download-failed", downloadResult, false, context);
+      downloaded = downloadResult.stdout;
+    }
+  } catch (error) {
+    return failureFromText(tool, "download", "download-failed", undefined, "", error instanceof Error ? error.message : String(error), false, context);
+  }
+
+  if (Buffer.byteLength(downloaded, "utf8") > MAX_SCRIPT_BYTES) {
+    return failureFromText(tool, "download", "download-too-large", undefined, "", "Downloaded installer script exceeded the 1 MiB limit.", false, context);
+  }
+  if (options.signal?.aborted) return createInstallResult(tool, "skipped", false, `${tool.name} installation skipped because cancellation was requested.`);
+
+  if (resolver && context) {
+    const second = safeResolve(resolver, tool.id, context);
+    if (!second) return evidenceFailure(tool, "evidence", "evidence-resolution-failed");
+    if (second.state === "usable") return createInstallResult(tool, "already-present", false, `${tool.name} already present; installer not run.`);
+    if (second.state === "indeterminate") return evidenceFailure(tool, "evidence", "evidence-indeterminate");
+  }
+
+  const shellResult = options.runShellScript
+    ? await options.runShellScript(downloaded, tool, options.signal)
+    : await runDefaultShellScript(downloaded);
+  if (shellResult.exitCode !== 0) return failureFromCommand(tool, "install", "installer-failed", shellResult, true, context);
+
+  const postInstall = await runPostInstall(tool, runInstallCommand, context);
+  if (postInstall) return postInstall;
+  return completeMutation(tool, resolver, context, "executed");
+}
+
+async function executeCommandTool(
+  tool: InstallableOpenCodeTool,
+  runInstallCommand: RunInstallCommand,
+  resolver: ResolveOpenCodeInstalledEvidence | undefined,
+  context: OpenCodeEvidenceContext | undefined,
+  options: InstallOpenCodeToolsOptions,
+): Promise<OpenCodeToolInstallResultExact> {
+  const result = await runInstallCommand("npm", ["install", "-g", tool.module]);
+  if (result.exitCode !== 0) return failureFromCommand(tool, "install", "installer-failed", result, true, context);
+  return completeMutation(tool, resolver, context, "executed");
+}
+
+async function executePluginTool(
+  tool: InstallableOpenCodeTool,
+  runInstallCommand: RunInstallCommand,
+  resolver: ResolveOpenCodeInstalledEvidence | undefined,
+  context: OpenCodeEvidenceContext | undefined,
+  options: InstallOpenCodeToolsOptions,
+): Promise<OpenCodeToolInstallResultExact> {
+  const result = await runInstallCommand("opencode", ["plugin", tool.module, "--global"]);
+  if (result.exitCode !== 0) {
+    const fallback = await runInstallCommand("npm", ["install", "-g", tool.module]);
+    if (fallback.exitCode !== 0) return failureFromCommand(tool, "install", "installer-failed", fallback, true, context);
+  }
+  return completeMutation(tool, resolver, context, "executed");
+}
+
+async function executePythonTool(
+  tool: InstallableOpenCodeTool,
+  runInstallCommand: RunInstallCommand,
+  commandExists: (command: string) => boolean,
+  resolver: ResolveOpenCodeInstalledEvidence | undefined,
+  context: OpenCodeEvidenceContext | undefined,
+  options: InstallOpenCodeToolsOptions,
+): Promise<OpenCodeToolInstallResultExact> {
+  if (!commandExists("python3")) return createInstallResult(tool, "skipped", false, "Skipped: Python3 is not installed. Serena requires Python.");
+  if (commandExists("serena")) return createInstallResult(tool, "already-present", false, "Serena found in PATH. MCP configuration will be enabled.");
+
+  const installer = commandExists("uv") ? "uv" : commandExists("pipx") ? "pipx" : undefined;
+  if (!installer) return createInstallResult(tool, "skipped", false, "Skipped: Python3 exists but neither 'uv' nor 'pipx' is installed.");
+  const args = installer === "uv" ? ["tool", "install", "serena"] : ["install", "serena"];
+  const result = await runInstallCommand(installer, args);
+  if (result.exitCode !== 0) return failureFromCommand(tool, "install", "installer-failed", result, true, context);
+  if (!resolver && !commandExists("serena")) {
+    const failure = failureFromText(tool, "post-install", "post-evidence-failed", 0, result.stdout, "Serena installation completed but the executable was not found in PATH.", true, context);
+    return { ...failure, message: "Serena installation succeeded but 'serena' not found in PATH." };
+  }
+  const completed = await completeMutation(tool, resolver, context, "executed");
+  if (completed.outcome === "executed") {
+    return { ...completed, message: `Serena installed via ${installer} and verified.` };
+  }
+  return completed;
+}
+
+async function runPostInstall(
+  tool: InstallableOpenCodeTool,
+  runInstallCommand: RunInstallCommand,
+  context: OpenCodeEvidenceContext | undefined,
+): Promise<OpenCodeToolInstallResultExact | undefined> {
+  if (!tool.postInstallCommand) return undefined;
+  const [command, ...args] = tool.postInstallCommand;
+  try {
+    const result = await runInstallCommand(command!, args);
+    if (result.exitCode !== 0) return failureFromCommand(tool, "post-install", "post-installer-failed", result, true, context);
+  } catch (error) {
+    return failureFromText(tool, "post-install", "post-installer-failed", undefined, "", error instanceof Error ? error.message : String(error), true, context);
+  }
+  return undefined;
+}
+
+async function completeMutation(
+  tool: InstallableOpenCodeTool,
+  resolver: ResolveOpenCodeInstalledEvidence | undefined,
+  context: OpenCodeEvidenceContext | undefined,
+  outcome: "executed",
+): Promise<OpenCodeToolInstallResultExact> {
+  if (resolver && context) {
+    const after = safeResolve(resolver, tool.id, context);
+    if (!after) return evidenceFailure(tool, "evidence", "evidence-resolution-failed", true);
+    if (after.state !== "usable") return evidenceFailure(tool, "post-install", "post-evidence-failed", true);
+  }
+  return createInstallResult(tool, outcome, true, `${tool.name} installation completed.`);
+}
+
+function safeResolve(
+  resolver: ResolveOpenCodeInstalledEvidence,
+  toolId: InstallableOpenCodeTool["id"],
+  context: OpenCodeEvidenceContext,
+): OpenCodeInstalledEvidence | undefined {
+  try {
+    return resolver(toolId, context);
+  } catch {
+    return undefined;
+  }
+}
+
+function evidenceFailure(
+  tool: InstallableOpenCodeTool,
+  stage: "evidence" | "post-install",
+  code: string,
+  installerInvoked = false,
+): OpenCodeToolInstallResultExact {
+  return failureFromText(tool, stage, code, undefined, "", stage === "evidence" ? "Installed evidence could not be established safely." : "Installer completed without usable installed evidence.", installerInvoked, undefined);
+}
+
+function failureFromCommand(
+  tool: InstallableOpenCodeTool,
+  stage: "download" | "install" | "post-install",
+  code: string,
+  result: InstallCommandResult,
+  installerInvoked: boolean,
+  context: OpenCodeEvidenceContext | undefined,
+): OpenCodeToolInstallResultExact {
+  return failureFromText(tool, stage, code, result.exitCode, result.stdout, result.stderr, installerInvoked, context);
+}
+
+function failureFromText(
+  tool: InstallableOpenCodeTool,
+  stage: "evidence" | "download" | "install" | "post-install",
+  code: string,
+  exitCode: number | undefined,
+  stdout: string,
+  stderr: string,
+  installerInvoked: boolean,
+  context: OpenCodeEvidenceContext | undefined,
+): OpenCodeToolInstallResultExact {
+  const capture = buildDiagnostic(stage, code, exitCode, stdout, stderr, context);
+  return createInstallResult(tool, "failed", installerInvoked, `${tool.name} installation failed.`, capture);
+}
+
+function createInstallResult(
+  tool: InstallableOpenCodeTool,
+  outcome: OpenCodeToolInstallOutcome,
+  installerInvoked: boolean,
+  message: string,
+  failure?: DiagnosticBuild,
+): OpenCodeToolInstallResultExact {
+  const result = {
+    toolId: tool.id,
+    tool: tool.name,
+    outcome,
+    success: outcome === "already-present" || outcome === "executed",
+    installerInvoked,
+    message,
+    ...(failure?.cause ? { cause: failure.cause } : {}),
+    ...(failure?.diagnostic ? { diagnostic: failure.diagnostic } : {}),
+  } as OpenCodeToolInstallResultExact & { raw?: OpenCodeRawInstallDiagnostic };
+  if (failure?.raw) {
+    Object.defineProperty(result, "raw", { value: failure.raw, enumerable: false, configurable: false, writable: false });
+    if (result.diagnostic) Object.defineProperty(result.diagnostic, "original", { value: failure.raw, enumerable: false, configurable: false, writable: false });
+  }
+  return result;
+}
+
+function cloneSafeResult(result: OpenCodeToolInstallResultExact): OpenCodeToolInstallResultExact {
+  const diagnostic = result.diagnostic ? {
+    stage: result.diagnostic.stage,
+    code: result.diagnostic.code,
+    ...(result.diagnostic.exitCode === undefined ? {} : { exitCode: result.diagnostic.exitCode }),
+    lines: [...result.diagnostic.lines],
+  } : undefined;
+  return {
+    toolId: result.toolId,
+    tool: result.tool,
+    outcome: result.outcome,
+    success: result.success,
+    installerInvoked: result.installerInvoked,
+    message: result.message,
+    ...(result.cause ? { cause: result.cause } : {}),
+    ...(diagnostic ? { diagnostic } : {}),
+  } as OpenCodeToolInstallResultExact;
+}
+
+type DiagnosticBuild = {
+  cause: string;
+  diagnostic: OpenCodeInstallDiagnostic;
+  raw: OpenCodeRawInstallDiagnostic;
+};
+
+function buildDiagnostic(
+  stage: OpenCodeRawInstallDiagnostic["stage"],
+  code: string,
+  exitCode: number | undefined,
+  stdout: string,
+  stderr: string,
+  context: OpenCodeEvidenceContext | undefined,
+): DiagnosticBuild {
+  const stdoutCapture = captureTail(stdout);
+  const stderrCapture = captureTail(stderr);
+  const raw: OpenCodeRawInstallDiagnostic = {
+    stage,
+    ...(exitCode === undefined ? {} : { exitCode }),
+    stdout: stdoutCapture.value,
+    stderr: stderrCapture.value,
+    stdoutTruncated: stdoutCapture.truncated,
+    stderrTruncated: stderrCapture.truncated,
+    stdoutBytes: stdoutCapture.bytes,
+    stderrBytes: stderrCapture.bytes,
+  };
+  const lines = sanitizeDiagnostic(stderrCapture.value, stdoutCapture.value, context);
+  const fallback = `${stageLabel(stage)} failed${exitCode === undefined ? "." : ` (exit ${exitCode}).`}`;
+  const boundedLines = boundLines(lines.length > 0 ? lines : [fallback]);
+  const cause = boundCause(boundedLines.length > 0 ? boundedLines : [fallback]);
+  const diagnostic: OpenCodeInstallDiagnostic = { stage, code, ...(exitCode === undefined ? {} : { exitCode }), lines: boundedLines };
+  return { cause, diagnostic, raw };
+}
+
+function captureTail(value: string): { value: string; bytes: number; truncated: boolean } {
+  const bytes = Buffer.byteLength(value, "utf8");
+  if (bytes <= MAX_CAPTURE_BYTES) return { value, bytes, truncated: false };
+  const buffer = Buffer.from(value, "utf8");
+  let start = buffer.length - MAX_CAPTURE_BYTES;
+  while (start < buffer.length && (buffer[start]! & 0xc0) === 0x80) start++;
+  return { value: buffer.subarray(start).toString("utf8"), bytes, truncated: true };
+}
+
+function sanitizeDiagnostic(stderr: string, stdout: string, context: OpenCodeEvidenceContext | undefined): string[] {
+  const normalized = `${stderr}\n${stdout}`.replace(/\r\n?/g, "\n");
+  const withoutVt = stripVTControlCharacters(normalized)
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\p{Cf}]/gu, "")
+    .replace(/\t/g, " ");
+  const progress = /[\u2500-\u257f\u2580-\u259f\u2800-\u28ff◐◓◑◒◴◷◶◵⟳]/gu;
+  const roots = context ? [
+    [context.env.XDG_CONFIG_HOME, "$XDG_CONFIG_HOME"],
+    [context.env.XDG_CACHE_HOME, "$XDG_CACHE_HOME"],
+    [context.env.XDG_STATE_HOME, "$XDG_STATE_HOME"],
+    [context.homeDirectory, "~"],
+  ].filter((entry): entry is [string, string] => Boolean(entry[0])).sort((a, b) => b[0].length - a[0].length) : [];
+  const urlTokens: string[] = [];
+  const protectedUrls = withoutVt.replace(/\b(?:https?|wss?|git\+https?):\/\/[^\s]+/gi, (url) => {
+    const redacted = redactUrl(url);
+    const token = `__DECK_URL_${urlTokens.length}__`;
+    urlTokens.push(redacted);
+    return token;
+  });
+  const sanitized = redactSecrets(protectedUrls)
+    .split("\n")
+    .map((line) => {
+      let result = line.replace(progress, "");
+      for (const [root, replacement] of roots) result = result.split(root).join(replacement);
+      result = result.replace(/(?<![\w:~])(?:[A-Za-z]:[\\/]|\\\\)[^\s,;]+/g, "<path>");
+      result = result.replace(/(?<![\w:~/])\/(?:[^\s,;<>"']+\/)*[^\s,;<>"']+/g, "<path>");
+      result = redactSecrets(result).replace(/ +/g, " ").trim();
+      return result;
+    })
+    .map((line) => line.replace(/__DECK_URL_(\d+)__/g, (_, index: string) => urlTokens[Number(index)] ?? "<url>"))
+    .filter(Boolean);
+  const meaningful = sanitized.filter((line) => /error|failed|failure|fatal|denied|permission|not found|no such|unable|cannot|text file busy|etxtbsy|exit|checksum|timeout|timed out|pgrep|copy/iu.test(line));
+  const selected = meaningful.length > 0 ? meaningful : sanitized;
+  return [...new Set(selected)];
+}
+
+function redactSecrets(value: string): string {
+  const keys = "token|secret|password|passwd|api-key|api_key|authorization|proxy-authorization|cookie|set-cookie|credential|client-secret|client_secret|access-key|access_key";
+  return value
+    .replace(new RegExp(`((?:${keys})\\s*[:=]\\s*)[^\\s,;]+`, "giu"), "$1[REDACTED]")
+    .replace(/\bBearer\s+[^\s,;]+/giu, "Bearer [REDACTED]")
+    .replace(/\b[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[REDACTED]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[REDACTED]")
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, "[REDACTED]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]+\b/g, "[REDACTED]");
+}
+
+function redactUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.username || parsed.password) {
+      parsed.username = "[REDACTED]";
+      parsed.password = "[REDACTED]";
+    }
+    const secretKeys = /token|secret|password|passwd|key|authorization|credential|cookie/i;
+    for (const key of [...parsed.searchParams.keys()]) if (secretKeys.test(key)) parsed.searchParams.set(key, "[REDACTED]");
+    return parsed.toString();
+  } catch {
+    return redactSecrets(value);
+  }
+}
+
+function boundLines(lines: readonly string[]): string[] {
+  const result: string[] = [];
+  let bytes = 0;
+  for (const line of lines) {
+    if (result.length >= MAX_DIAGNOSTIC_LINES) break;
+    const scalarBounded = truncateScalars(line, MAX_DIAGNOSTIC_SCALARS);
+    const remaining = MAX_DIAGNOSTIC_BYTES - bytes;
+    if (remaining <= 0) break;
+    const bounded = truncateUtf8(scalarBounded, remaining);
+    if (!bounded) continue;
+    result.push(bounded);
+    bytes += Buffer.byteLength(bounded, "utf8");
+  }
+  return result;
+}
+
+function boundCause(lines: readonly string[]): string {
+  const selected = lines.slice(0, MAX_CAUSE_LINES);
+  let cause = "";
+  for (const line of selected) {
+    const next = cause ? `${cause} · ${line}` : line;
+    const bounded = truncateUtf8(next, MAX_CAUSE_BYTES);
+    if (!bounded) break;
+    cause = bounded;
+    if (bounded !== next) break;
+  }
+  return cause;
+}
+
+function truncateScalars(value: string, max: number): string {
+  const scalars = [...value];
+  if (scalars.length <= max) return value;
+  const suffix = "…";
+  return scalars.slice(0, Math.max(0, max - suffix.length)).join("") + suffix;
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
+  const suffix = "…";
+  const suffixBytes = Buffer.byteLength(suffix, "utf8");
+  if (maxBytes < suffixBytes) return Buffer.from(value, "utf8").subarray(0, maxBytes).toString("utf8");
+  let output = Buffer.from(value, "utf8").subarray(0, maxBytes - suffixBytes).toString("utf8");
+  output += suffix;
+  return output;
+}
+
+function stageLabel(stage: OpenCodeRawInstallDiagnostic["stage"]): string {
+  return stage === "post-install" ? "Post-install" : stage.charAt(0).toUpperCase() + stage.slice(1);
+}
+
+function runDefaultInstallCommand(command: string, args: string[]): Promise<InstallCommandResult> {
+  return new Promise((resolveResult) => {
+    const child = nodeSpawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("close", (code) => resolveResult({ exitCode: code ?? 1, stdout, stderr }));
+    child.on("error", (error) => resolveResult({ exitCode: 1, stdout, stderr: error.message }));
+  });
+}
 
-    if (process.stdout) {
-      process.stdout.on("data", (chunk) => {
-        stdout += chunk.toString();
-      });
-    }
-    if (process.stderr) {
-      process.stderr.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
-    }
-
-    process.on("close", (code) => {
-      resolve({ exitCode: code ?? 1, stdout, stderr });
-    });
-
-    process.on("error", (error) => {
-      resolve({ exitCode: 1, stdout, stderr: error.message });
-    });
+function runDefaultShellScript(script: string): Promise<InstallCommandResult> {
+  return new Promise((resolveResult) => {
+    const shell = process.platform === "darwin" ? "sh" : existsSync("/bin/bash") ? "/bin/bash" : "sh";
+    const child = nodeSpawn(shell, ["-s"], { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.stdin?.write(script);
+    child.stdin?.end();
+    child.on("close", (code) => resolveResult({ exitCode: code ?? 1, stdout, stderr }));
+    child.on("error", (error) => resolveResult({ exitCode: 1, stdout, stderr: error.message }));
   });
 }
