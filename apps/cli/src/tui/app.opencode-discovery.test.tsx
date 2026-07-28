@@ -31,9 +31,98 @@ function createInkHarness() {
 
 async function flush() {
   await Promise.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 50));
 }
 
+const RENDER_WAIT_TIMEOUT_MS = 5_000;
+const DIAGNOSTIC_TAIL_LENGTH = 2_048;
+
+type OutputPredicate = (freshOutput: string, completeOutput: string) => boolean;
+type OutputExpectation = Readonly<{
+  description: string;
+  boundary: number;
+  predicate: OutputPredicate;
+  timeoutMs?: number;
+}>;
+
+type OutputHarness = Readonly<{ output: () => string }>;
+type RenderWaiter = Readonly<{ waitUntilRenderFlush: () => Promise<unknown> }>;
+
+function tail(value: string): string {
+  return value.slice(-DIAGNOSTIC_TAIL_LENGTH);
+}
+
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function waitForFreshOutput(
+  harness: OutputHarness,
+  instance: RenderWaiter,
+  expectation: OutputExpectation,
+): Promise<void> {
+  const timeoutMs = expectation.timeoutMs ?? RENDER_WAIT_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const completeOutput = harness.output();
+    const freshOutput = completeOutput.slice(expectation.boundary);
+    if (expectation.predicate(freshOutput, completeOutput)) return;
+
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(
+        `Timed out after ${timeoutMs}ms waiting for ${expectation.description}; boundary=${expectation.boundary}; ` +
+        `fresh tail=${JSON.stringify(tail(freshOutput))}; complete tail=${JSON.stringify(tail(completeOutput))}`,
+      );
+    }
+    await withTimeout(
+      instance.waitUntilRenderFlush(),
+      remainingMs,
+      `Render flush timed out while waiting for ${expectation.description}; boundary=${expectation.boundary}; ` +
+      `fresh tail=${JSON.stringify(tail(freshOutput))}; complete tail=${JSON.stringify(tail(completeOutput))}`,
+    );
+  }
+}
+
+function containsFresh(description: string, text: string, boundary: number): OutputExpectation {
+  return {
+    description,
+    boundary,
+    predicate: (freshOutput) => freshOutput.includes(text),
+  };
+}
+
+function createDiscoveryCleanup(
+  instance: Readonly<{ unmount: () => void; waitUntilExit: () => Promise<unknown> }>,
+  resources: Readonly<{ close: () => void }>,
+): () => Promise<void> {
+  return async () => {
+    let failure: unknown;
+    instance.unmount();
+    try {
+      await withTimeout(
+        instance.waitUntilExit(),
+        RENDER_WAIT_TIMEOUT_MS,
+        `Ink exit timed out after ${RENDER_WAIT_TIMEOUT_MS}ms`,
+      );
+    } catch (error) {
+      failure = error;
+    } finally {
+      resources.close();
+    }
+    if (failure) throw failure;
+  };
+}
 const ready = {
   state: "ready" as const,
   source: "live" as const,
@@ -70,49 +159,89 @@ async function mountDiscovery(discover: (request: any) => Promise<any>, resolveP
       patchConsole: false,
     },
   );
-  await flush();
-  const press = async (input: string) => {
+  await waitForFreshOutput(
+    harness,
+    instance,
+    containsFresh("initial home menu", "Your AI environment, configured.", 0),
+  );
+  const press = async (input: string, description: string, expectedText: string) => {
+    const boundary = harness.output().length;
     harness.input(input);
-    await flush();
-    await instance.waitUntilRenderFlush();
+    await waitForFreshOutput(harness, instance, containsFresh(description, expectedText, boundary));
   };
-  for (let index = 0; index < 3; index++) await press("j");
-  await press("\r");
-  await press("j");
-  await press("\r");
-  await press("\r");
-  return { harness, instance, press };
+  for (let index = 0; index < 3; index++) {
+    await press("j", `home cursor redraw ${index + 1}`, "Your AI environment, configured.");
+  }
+  await press("\r", "runner selection prompt", "Select which runner/environment owns the model configuration.");
+  await press("j", "OpenCode runner selection", "OpenCode");
+  await press("\r", "OpenCode team selection prompt", "Select which team you want to configure for opencode-development.");
+  await press("\r", "OpenCode discovery loading state", "Reading models from OpenCode");
+
+  const cleanup = createDiscoveryCleanup(instance, {
+    close: () => {
+      harness.stdin.removeAllListeners();
+      harness.stdout.removeAllListeners();
+      harness.stdout.end();
+      harness.stdout.destroy();
+    },
+  });
+  return { harness, instance, press, cleanup };
+}
+
+
+async function actAndWait(
+  harness: OutputHarness,
+  instance: RenderWaiter,
+  action: () => void,
+  description: string,
+  expectedText: string,
+): Promise<void> {
+  const boundary = harness.output().length;
+  action();
+  await waitForFreshOutput(harness, instance, containsFresh(description, expectedText, boundary));
 }
 
 describe("DeckApp OpenCode discovery composition", () => {
   test("keeps the latest displayed result when an older project request completes late", async () => {
     const requests: Array<Deferred<any>> = [];
     const seenRequests: any[] = [];
+    const secondRequestObserved = deferred<void>();
     let projectRoot = "/fixture/project-a";
     const mounted = await mountDiscovery(
       async (request) => {
         seenRequests.push(request);
         const pending = deferred<any>();
         requests.push(pending);
+        if (requests.length === 2) secondRequestObserved.resolve(undefined);
         return pending.promise;
       },
       () => projectRoot,
     );
     try {
       expect(requests).toHaveLength(1);
-      expect(mounted.harness.output()).toContain("Reading models from OpenCode");
       projectRoot = "/fixture/project-b";
-      await mounted.press("r");
+      const requestBoundary = mounted.harness.output().length;
+      mounted.harness.input("r");
+      await withTimeout(
+        secondRequestObserved.promise,
+        RENDER_WAIT_TIMEOUT_MS,
+        `Timed out after ${RENDER_WAIT_TIMEOUT_MS}ms waiting for the project B discovery request`,
+      );
       expect(seenRequests.map((request) => request.projectRoot)).toEqual(["/fixture/project-a", "/fixture/project-b"]);
       requests[1]?.resolve({ state: "blocked", source: "none", inventory: null, error: { code: "timeout", message: "request B", retryable: true } });
-      await flush();
-      expect(mounted.harness.output()).toContain("request B");
+      await waitForFreshOutput(
+        mounted.harness,
+        mounted.instance,
+        containsFresh("project B blocked result", "request B", requestBoundary),
+      );
+      const staleBoundary = mounted.harness.output().length;
       requests[0]?.resolve({ state: "blocked", source: "none", inventory: null, error: { code: "timeout", message: "request A", retryable: true } });
-      await flush();
+      await withTimeout(mounted.instance.waitUntilRenderFlush(), RENDER_WAIT_TIMEOUT_MS, "out-of-order request did not settle");
+      const freshOutput = mounted.harness.output().slice(staleBoundary);
+      expect(freshOutput).not.toContain("request A");
       expect(mounted.harness.output()).toContain("request B");
-      expect(mounted.harness.output()).not.toContain("request A");
     } finally {
-      mounted.instance.unmount();
+      await mounted.cleanup();
     }
   });
 
@@ -120,12 +249,15 @@ describe("DeckApp OpenCode discovery composition", () => {
     const pending = deferred<any>();
     const mounted = await mountDiscovery(async () => pending.promise, () => "/fixture/project");
     try {
-      expect(mounted.harness.output()).toContain("Reading models from OpenCode");
-      pending.resolve(ready);
-      await flush();
-      expect(mounted.harness.output()).toContain("Select an agent to configure");
+      await actAndWait(
+        mounted.harness,
+        mounted.instance,
+        () => pending.resolve(ready),
+        "ready discovery result",
+        "Select an agent to configure",
+      );
     } finally {
-      mounted.instance.unmount();
+      await mounted.cleanup();
     }
   });
 
@@ -137,18 +269,25 @@ describe("DeckApp OpenCode discovery composition", () => {
       return current.promise;
     }, () => "/fixture/project");
     try {
-      requests[0]?.deferred.resolve({ ...ready, inventory: { providers: [], modelsByProvider: {} } });
-      await flush();
-      expect(mounted.harness.output()).toContain("OpenCode reported no available models.");
-      expect(mounted.harness.output()).toContain("Retry discovery");
-      await mounted.press("\r");
+      await actAndWait(
+        mounted.harness,
+        mounted.instance,
+        () => requests[0]?.deferred.resolve({ ...ready, inventory: { providers: [], modelsByProvider: {} } }),
+        "empty discovery result",
+        "OpenCode reported no available models.",
+      );
+      await mounted.press("\r", "retry discovery loading state", "Reading models from OpenCode");
       expect(requests[1]?.request.mode).toBe("rescan");
-      requests[1]?.deferred.resolve({ state: "stale", source: "last-known-good", discoveredAt: 1, fingerprint: "fixture", inventory: ready.inventory, error: { code: "timeout", message: "offline", retryable: true } });
-      await flush();
-      expect(mounted.harness.output()).toContain("Last known OpenCode models");
+      await actAndWait(
+        mounted.harness,
+        mounted.instance,
+        () => requests[1]?.deferred.resolve({ state: "stale", source: "last-known-good", discoveredAt: 1, fingerprint: "fixture", inventory: ready.inventory, error: { code: "timeout", message: "offline", retryable: true } }),
+        "stale discovery result",
+        "Last known OpenCode models",
+      );
       expect(mounted.harness.output()).toContain("Select an agent to configure");
     } finally {
-      mounted.instance.unmount();
+      await mounted.cleanup();
     }
   });
 
@@ -156,14 +295,17 @@ describe("DeckApp OpenCode discovery composition", () => {
     const pending = deferred<any>();
     const mounted = await mountDiscovery(async () => pending.promise, () => "/fixture/project");
     try {
-      pending.resolve({ ...ready, inventory: { providers: [], modelsByProvider: {} } });
-      await flush();
-      expect(mounted.harness.output()).toContain("OpenCode reported no available models.");
-      await mounted.press("j");
-      await mounted.press("\r");
-      expect(mounted.harness.output()).toContain("Select an agent to configure");
+      await actAndWait(
+        mounted.harness,
+        mounted.instance,
+        () => pending.resolve({ ...ready, inventory: { providers: [], modelsByProvider: {} } }),
+        "empty discovery result",
+        "OpenCode reported no available models.",
+      );
+      await mounted.press("j", "Back option selection", "Back");
+      await mounted.press("\r", "return to agent selection", "Select an agent to configure");
     } finally {
-      mounted.instance.unmount();
+      await mounted.cleanup();
     }
   });
 
@@ -171,12 +313,46 @@ describe("DeckApp OpenCode discovery composition", () => {
     const pending = deferred<any>();
     const mounted = await mountDiscovery(async () => pending.promise, () => "/fixture/project");
     try {
-      pending.resolve({ state: "blocked", source: "none", inventory: null, error: { code: "timeout", message: "fixture timeout", retryable: true } });
-      await flush();
-      expect(mounted.harness.output()).toContain("OpenCode model discovery is unavailable.");
+      await actAndWait(
+        mounted.harness,
+        mounted.instance,
+        () => pending.resolve({ state: "blocked", source: "none", inventory: null, error: { code: "timeout", message: "fixture timeout", retryable: true } }),
+        "blocked discovery result",
+        "OpenCode model discovery is unavailable.",
+      );
       expect(mounted.harness.output()).toContain("fixture timeout");
     } finally {
-      mounted.instance.unmount();
+      await mounted.cleanup();
     }
+  });
+});
+
+
+describe("fresh output synchronization contract", () => {
+  test("rejects matching output that predates the action boundary", async () => {
+    let output = "stale ready frame";
+    const expectation = {
+      description: "fresh ready frame",
+      boundary: output.length,
+      predicate: (freshOutput: string) => freshOutput.includes("ready frame"),
+      timeoutMs: 5,
+    };
+
+    await expect(waitForFreshOutput(
+      { output: () => output },
+      { waitUntilRenderFlush: async () => {} },
+      expectation,
+    )).rejects.toThrow(/fresh ready frame.*boundary/s);
+  });
+
+  test("async cleanup unmounts and closes streams even when settling fails", async () => {
+    const calls: string[] = [];
+    const cleanup = createDiscoveryCleanup(
+      { unmount: () => calls.push("unmount"), waitUntilExit: async () => { throw new Error("fixture exit failure"); } },
+      { close: () => calls.push("close") },
+    );
+
+    await expect(cleanup()).rejects.toThrow("fixture exit failure");
+    expect(calls).toEqual(["unmount", "close"]);
   });
 });

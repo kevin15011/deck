@@ -388,3 +388,21 @@ describe("User Phase Communication contract", () => {
     void relative;
   });
 });
+
+
+describe("streamlined ownership user communication", () => {
+  test("keeps Automatic low-noise while making target validation conditional", () => {
+    const combined = [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_SYSTEM_PROMPT_COMPACT, ORCHESTRATOR_SKILL_BODY, ORCHESTRATOR_COMPACT_SKILL_BODY].join("\n");
+    expect(combined).toContain("no routine");
+    expect(combined).toContain("target/product validation");
+    expect(combined).not.toContain("unconditional post-Apply");
+  });
+
+  test("Apply roles distinguish non-independent local and functional evidence from final QA", () => {
+    for (const body of [APPLY_GENERAL_SKILL_BODY, APPLY_GENERAL_COMPACT_SKILL_BODY, APPLY_BACKEND_SKILL_BODY, APPLY_BACKEND_COMPACT_SKILL_BODY, APPLY_FRONTEND_SKILL_BODY, APPLY_FRONTEND_COMPACT_SKILL_BODY]) {
+      expect(body).toContain("functional exercise");
+      expect(body).toContain("non-independent");
+      expect(body).toContain("fresh");
+    }
+  });
+});

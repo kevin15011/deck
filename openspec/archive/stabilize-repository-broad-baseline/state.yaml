@@ -1,0 +1,282 @@
+schema: spec-registry-v1
+changeId: stabilize-repository-broad-baseline
+name: Stabilize repository BROAD baseline
+currentPhase: archive
+status: archived
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  design: design.md
+  spec: spec.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply-progress: apply-progress.md
+  verify-report: verify-report.md
+  review-report: review-report.md
+  archive-report: archive-report.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-27T18:29:06.760Z
+    registryWrite: deferred-reconciled
+    note: Exploration completed by the specialist and bootstrapped by the central Orchestrator.
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-27T18:37:47.811Z
+    registryWrite: deferred-reconciled
+    note: Collaborative Proposal draft completed; explicit human approval remains required before Spec and Design.
+  - phase: proposal
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-27T18:43:14.821Z
+    registryWrite: non-deferred
+    note: Recorded explicit human approval to begin Spec and Design.
+    intentId: registry-intent:v1:7a2483e6ce9ad2cdc93a3f8b9715b251
+    idempotencyKey: sha256:68eb687551a7b2c6f6c2531fbc9add11df951b004235556ca755e1c9219c1505
+    transactionId: registry-tx-750337fb-74b5-4ce6-90b9-5de80ac3af79
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-27T19:01:13.881Z
+    registryWrite: non-deferred
+    note: Completed the approved bounded eight-path Design independently from
+      concurrent Spec.
+    intentId: registry-intent:v1:26ee5944f288c4aef412cce1103124e8
+    idempotencyKey: sha256:298f3c4661032a15e55d16725259d746082ec381fbcc301d7713e9de16ac16b8
+    transactionId: registry-tx-157b75b0-9a5e-470a-8baf-e12f246fe6b7
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/mimo-v2.5-pro
+    timestamp: 2026-07-27T19:04:18.245Z
+    registryWrite: non-deferred
+    note: Spec completed independently from Design; central serialization followed
+      the already-committed Design intent.
+    intentId: registry-intent:v1:005a0d900df1619191ebfcea245755ad
+    idempotencyKey: sha256:110d001a05445d353e5104f0addf3fe884624b79bd3205b73cedd97b063661f0
+    transactionId: registry-tx-8aa31a62-9246-4d8e-927d-19be53d31acc
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/mimo-v2.5-pro
+    timestamp: 2026-07-27T19:32:02.858Z
+    registryWrite: non-deferred
+    note: Corrected declared scenario counts after Spec/Design reconciliation; all
+      34 requirements remain covered by 50 scenarios.
+    intentId: registry-intent:v1:2683358ea8b0c8e95f7b21bb168cf679
+    idempotencyKey: sha256:584acc22397c0211403f18a1b1608cc48d304e785f460aef0147f43efb7171cd
+    transactionId: registry-tx-e09dfe3a-3dff-4380-90e8-f6bc0cd431c9
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-27T19:36:34.732Z
+    registryWrite: non-deferred
+    note: "Corrected Spec reconciled: 34 requirements and 50 unique scenarios are
+      covered; Design is ready for Tasks."
+    intentId: registry-intent:v1:3da30a783dc912d8204ec1acc5b040ae
+    idempotencyKey: sha256:7e373d5edeae3e84a95d84dd32c200536427a3c7abb4b8346f813ada548d811d
+    transactionId: registry-tx-835a14a3-cfba-40af-81c0-069dba4bb197
+  - phase: design
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-27T19:40:58.683Z
+    registryWrite: non-deferred
+    note: Recorded explicit human approval of reconciled Spec and Design to begin
+      Tasks.
+    intentId: registry-intent:v1:02f39fccc1b47fe9fb752f69745d3c93
+    idempotencyKey: sha256:49515c105286abaf9a90c2bfbcf8ef12f1915426c9d0cf7650e5828a22219760
+    transactionId: registry-tx-c59eae4e-1e24-4ae7-9392-c50d15f054f2
+  - phase: tasks
+    agent: deck-developer-task
+    model: minimax-coding-plan/MiniMax-M3
+    timestamp: 2026-07-27T19:49:47.672Z
+    registryWrite: non-deferred
+    note: Repaired Tasks to match the approved Design exactly; Apply remains
+      unauthorized.
+    intentId: registry-intent:v1:187a060cb7d331f485fe567bf4b78f9c
+    idempotencyKey: sha256:46e2747551e8fd742d5cbaca4a720ab19adf62475b7f6dd000f6262461436043
+    transactionId: registry-tx-9ab5f8db-ad9a-4f8f-9d52-0c3f047b345e
+  - phase: tasks
+    agent: deck-developer-task
+    model: minimax-coding-plan/MiniMax-M3
+    timestamp: 2026-07-27T19:49:47.672Z
+    registryWrite: non-deferred
+    note: Recorded that no external preconditions block a separately authorized Apply.
+    intentId: registry-intent:v1:17e515aad2611e006897bc88eaea5ab9
+    idempotencyKey: sha256:4f9074d21506c36126885dfe8cbe0c13e3d47bb5eb76dbbf2c835a8700aa8aa0
+    transactionId: registry-tx-c123dd63-6a2f-40d5-9ea5-b4ead95538ee
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-28T02:19:43.183Z
+    registryWrite: non-deferred
+    note: Recovery continuation preserved partial edits, completed the authorized
+      eight-target implementation, and left final QA to independent roles.
+    intentId: registry-intent:v1:5f01b1d079a81f3f838b9f25b711a184
+    idempotencyKey: sha256:4be7cd59bafcca7289746ceac6f772d478fe6f5ea33ce8bd5b99c0d0ca3b3c4a
+    transactionId: registry-tx-96ed4465-b751-49c8-a6e8-97a55a42190c
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-28T02:38:09.970Z
+    registryWrite: non-deferred
+    note: Fresh targeted Verify failed with blocking artifact conflict, Doctor
+      unit-isolation, and RED-evidence findings.
+    intentId: registry-intent:v1:7c4a5d2541487c68d8a6329c4514b03c
+    idempotencyKey: sha256:1a99d2d34e734afcc100e749713a79c7e8e64616932736ce8869bedf6c3fe045
+    transactionId: registry-tx-e9bb9185-fe69-44c9-9a5d-d68603c77845
+  - phase: tasks
+    agent: deck-developer-task
+    model: minimax-coding-plan/MiniMax-M3
+    timestamp: 2026-07-28T02:51:57.643Z
+    registryWrite: non-deferred
+    note: Repaired Tasks after failed targeted Verify to align with the approved
+      four-member Doctor Design.
+    intentId: registry-intent:v1:74e7218ba08f51f2b1b8dd042d7b6895
+    idempotencyKey: sha256:c86e10e8cc861a3135449c6b5f45c4e8a484fa3a564e69c1634c44e5f65fd5b2
+    transactionId: registry-tx-614b54ba-2f4c-4aad-92f3-6dd6652e63ec
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-28T03:06:30.094Z
+    registryWrite: non-deferred
+    note: Completed the authorized four-member Doctor seam repair with fresh
+      deterministic RED/GREEN and a green Apply-local full suite; final QA remains
+      independent.
+    intentId: registry-intent:v1:c48871f39728cc0d7aaaeba4cae1871f
+    idempotencyKey: sha256:becec29f05420a0c6eee5355699a207228b7ad9b6b13412041899e50149f8447
+    transactionId: registry-tx-b2b2d7fc-7b21-4110-b336-266aaddcc5dd
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-28T03:12:03.633Z
+    registryWrite: non-deferred
+    note: Fresh independent targeted Verify rerun after four-member Doctor repair.
+    intentId: registry-intent:v1:78c947f5bbdf0bcf7fad02b655211353
+    idempotencyKey: sha256:a5153ed3db2d1720d81af74a5fc69098c31107e683ee1c9df7f00b8941576b3e
+    transactionId: registry-tx-ce9f2d96-152f-4083-a8eb-d363919d26d8
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-28T03:25:30.981Z
+    registryWrite: non-deferred
+    note: Fresh independent affected-area Verify passed after fresh scheduled
+      commands and hygiene inspection.
+    intentId: registry-intent:v1:e485badeccd31a55a3f41f2f54cb1bdc
+    idempotencyKey: sha256:aaac2307ad87ac35b1688a74e546ea3f38f0ce053dd9395350da269c2f262d8e
+    transactionId: registry-tx-0399a695-27ca-4d28-89d2-95b0b46a1993
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-28T03:48:46.882Z
+    registryWrite: non-deferred
+    note: Fresh independent T13 engineering Review after passed targeted and
+      affected-area Verify.
+    intentId: registry-intent:v1:ba6dc52bd7d578ad0ae6e3fa7bd72169
+    idempotencyKey: sha256:ce69a13eeac890e358bc1af174f850b479130931fb23ca151edaa6f772188e00
+    transactionId: registry-tx-90f5478f-f4f1-48bb-88da-53ba8bf5f78d
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-28T04:11:27.256Z
+    registryWrite: non-deferred
+    note: Completed the authorized five-finding independent Review repair with
+      per-finding RED/GREEN, strict sandbox/process lifecycle oracles, and a green
+      Apply-local full suite; final QA remains independent.
+    intentId: registry-intent:v1:7924dadafa0cda4814ccdf8f23924595
+    idempotencyKey: sha256:0689e62e2cd4b064a4870979c85be2ef831c9b3d066eac8afedc271c661a7ba5
+    transactionId: registry-tx-084d1f75-3113-4785-9270-b4b007c12d98
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-28T04:16:55.362Z
+    registryWrite: non-deferred
+    note: role=deck-developer-verify; runner=opencode;
+      instance=deck-developer-verify:opencode:openai-gpt-5.5:2026-07-28T04:16:55.362Z
+    intentId: registry-intent:v1:2c4b41e5e96fcb5cde99df548fbbd677
+    idempotencyKey: sha256:64bec26e5cdd7942e02f045339d270eab14c218e0ac6b7812299cf265f511373
+    transactionId: registry-tx-87ec9e8f-1b5a-44ee-a556-d63284c40919
+    batchDigest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-28T04:31:21.348Z
+    registryWrite: non-deferred
+    note: fresh independent affected-area Verify after Review repair; runner opencode
+    intentId: registry-intent:v1:563bd822b0fd0f53e8b169e30317571c
+    idempotencyKey: sha256:9efc4899ed4570c2ad378824a68d7a7093703f8b0f33ece0c4d6381e4636c1d9
+    transactionId: registry-tx-66b3eaec-4f91-4a11-96e3-c8e0da3e8227
+    batchDigest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-28T04:46:41.964Z
+    registryWrite: non-deferred
+    note: runner=opencode;
+      instance=deck-developer-review:gpt-5.6-sol:2026-07-28-fresh-t13-repair
+    intentId: registry-intent:v1:e16e5329d5881f9449839c69e8699cef
+    idempotencyKey: sha256:61e2f2a6ef2a12b0c1b7afcb886bb6d48945b2440318f3e5546d08ab81443df6
+    transactionId: registry-tx-85ec1621-5d39-456e-85e0-3acec707ac4f
+    batchDigest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-28T05:02:49.097Z
+    registryWrite: non-deferred
+    note: Completed bounded F-REV-BIN-002 containment oracle repair.
+    intentId: registry-intent:v1:124c3daac47b4bffad52a123d13cb5ea
+    idempotencyKey: sha256:8133242b11c330b51dcc533a8061777acc5291554fab8dfa2dbc7ee183b3fc1a
+    transactionId: registry-tx-90286483-fdca-4447-bde0-117ac96fd16f
+    batchDigest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-28T05:19:25.874Z
+    registryWrite: non-deferred
+    note: fresh independent targeted Verify after F-REV-BIN-002 containment repair;
+      runner=opencode
+    intentId: registry-intent:v1:47edc94cd6038b3f6e4bff18f552788b
+    idempotencyKey: sha256:31ea322f7d8ba3e922146474e65cd13ec65d4b4b44d076570693001e9f1bbff9
+    transactionId: registry-tx-dcd40c7a-68c6-4bae-be81-9159d139ff07
+    batchDigest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-28T05:35:32.351Z
+    registryWrite: non-deferred
+    note: fresh independent affected-area verify after containment repair
+    intentId: registry-intent:v1:b7586a653923ca615a3d29831b6024ba
+    idempotencyKey: sha256:1e640e404c1376fc7d2c4ff0e5d9e8468726e5fe8ab53519057678b8e6a94457
+    transactionId: registry-tx-25eb1519-73fe-4fd0-ae11-95a99fdfa101
+    batchDigest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-28T05:47:46.706Z
+    registryWrite: non-deferred
+    note: producerInstance=deck-developer-review:opencode:openai-gpt-5.6-sol:2026-07-28T05:47:46.706Z;
+      fresh independent T13 Review passed after F-REV-BIN-002 containment repair
+    intentId: registry-intent:v1:6c6bc712a38f069dd40335f266a1d5b5
+    idempotencyKey: sha256:fe704368f7b423d9595da09aec13302d244d3ef8b17a90fabda481ffd0b91b45
+    transactionId: registry-tx-743eac71-193f-4c0f-9a75-a9071c2f2031
+    batchDigest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-28T06:02:50.000Z
+    registryWrite: non-deferred
+    note: fresh-final-mandatory-broad-T14
+    intentId: registry-intent:v1:93cdfaae2bf3a5bab6237b15f30a5aa6
+    idempotencyKey: sha256:39f88a272586496c91ba5a9a2cb1b827bec90ac816ee2d0650a1f40ca44d67ee
+    transactionId: registry-tx-9e501804-23c3-4fbd-952b-34135cbc9e33
+    batchDigest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+  - phase: archive
+    agent: deck-developer-archive
+    model: minimax-coding-plan/MiniMax-M2.5-highspeed
+    timestamp: 2026-07-28T06:15:00.000Z
+    registryWrite: non-deferred
+    note: Archive candidate independently checked; central coordinator serialized
+      this transition.
+    intentId: registry-intent:v1:259087d2bb762372c926c457224a585b
+    idempotencyKey: sha256:3b78a12b2be30ba992e85851ca641263e106704ad0fe44713bd442a6a1e29dd2
+    transactionId: registry-tx-46cb4153-6fd7-4e6d-bede-9c4066de0882

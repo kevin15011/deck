@@ -100,7 +100,7 @@ describe("Task 2: Rendering and verification helpers", () => {
 ### INV-001: Execution Mode Gate
 **Required Action**: Ask user...
 
-### INV-002: Pure Delegator
+### INV-002: Coordinator Ownership
 **Required Action**: Delegate...
 
 ### INV-003: SDD Initialization Gate
@@ -130,7 +130,7 @@ const result = verifyOrchestratorInvariantPresence(fullOutput, {
 ## Orchestrator Invariants
 
 ### INV-001: Execution Mode Gate
-### INV-002: Pure Delegator
+### INV-002: Coordinator Ownership
 ### INV-003: SDD Initialization Gate
 ### INV-005: Registry-Deferred Parallelism
 `;
@@ -147,7 +147,7 @@ const result = verifyOrchestratorInvariantPresence(fullOutput, {
       const noHeader = `# Some Content
 
 INV-001: Execution Mode Gate
-INV-002: Pure Delegator
+INV-002: Coordinator Ownership
 `;
 
       const result = verifyOrchestratorInvariantPresence(noHeader, {
@@ -203,5 +203,45 @@ describe("Export verification", () => {
       expect(inv.requiredAction).toBeTruthy();
       expect(inv.sourceRefs.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("INV-002 rendered coordinator ownership", () => {
+  it("renders every bounded direct operation and specialist-only boundary without pure-delegator language", () => {
+    const rendered = renderOrchestratorInvariants({ surface: "session" });
+    expect(rendered).toContain("Coordinator Ownership");
+    expect(rendered).toContain(
+      "bounded, mechanical, deterministic, authorized, non-destructive, and requires no specialist implementation or judgment",
+    );
+
+    for (const directOperation of [
+      "git status/diff/log inspection",
+      "exact staging and commit",
+      "deterministic artifact, digest, count, and existence checks",
+      "centralized intent reconciliation",
+      "synthesis",
+      "resolved-decision recording",
+    ]) {
+      expect(rendered).toContain(directOperation);
+    }
+
+    for (const specialistOwned of [
+      "behavior changes",
+      "specialist artifacts",
+      "broad or build execution",
+      "protected-risk",
+      "architecture",
+      "migration",
+      "security",
+      "data-loss",
+      "public-API judgment",
+      "Verify",
+      "Review",
+    ]) {
+      expect(rendered).toContain(specialistOwned);
+    }
+
+    expect(rendered).not.toContain("Pure Delegator");
+    expect(rendered).not.toContain("Delegate the task to the appropriate specialist agent");
   });
 });

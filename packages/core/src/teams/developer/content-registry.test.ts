@@ -1181,3 +1181,28 @@ describe("shared skill discovery composition", () => {
     );
   });
 });
+
+
+describe("streamlined ownership composition parity", () => {
+  test("materializes candidate-validation semantics in compact and legacy Orchestrator content", () => {
+    for (const promptProfile of ["compact", "legacy"] as const) {
+      const content = getAgentContent("deck-developer-orchestrator", { promptProfile })!;
+      const combined = Object.values(content).join("\n");
+      expect(combined).toContain("## Explicit Commit-Only Requests");
+      expect(combined).toContain("functional exercise");
+      expect(combined).toContain("fresh final independent QA");
+      expect(combined).not.toContain("Pure Delegator");
+    }
+  });
+
+  test("materializes non-independent Apply-local functional evidence in every Apply role", () => {
+    for (const agentId of ["deck-developer-apply-general", "deck-developer-apply-backend", "deck-developer-apply-frontend"] as const) {
+      for (const promptProfile of ["compact", "legacy"] as const) {
+        const combined = Object.values(getAgentContent(agentId, { promptProfile })!).join("\n");
+        expect(combined).toContain("functional exercise");
+        expect(combined).toContain("non-independent");
+        expect(combined).toContain("conditional target");
+      }
+    }
+  });
+});

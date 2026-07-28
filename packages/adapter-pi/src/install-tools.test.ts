@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 import { installPiTools } from "./install-tools";
 import type { InstallablePiTool } from "./installation-plan";
@@ -20,16 +21,14 @@ describe("installPiTools with installKind dispatch", () => {
       "pi",
       [{ id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "shared-binary" }],
       () => {},
-      async () => ({ exitCode: 0, stdout: "", stderr: "" }), // pi install won't run
+      {
+        runInstallCommand: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        checkSharedBinaryUsability: async (command) => ({ status: "ready", command, resolvedPath: "/fixture/rtk", version: "1.0.0" }),
+      },
     );
 
-    expect(results).toHaveLength(1);
-    const result = results[0];
-    // Status should be "reused" (success), NOT failed
-    expect(result.status).toBe("reused");
-    expect(result.success).toBe(true);
-    expect(result.installKind).toBe("shared-binary");
-    expect(result.message).toContain("Reusing existing");
+    expect(results).toEqual([expect.objectContaining({ status: "reused", success: true, installKind: "shared-binary" })]);
+    expect(results[0].message).toContain("Reusing existing");
   });
 
   test("shared-binary-plus-mcp: returns reused when context-mode binary is ready", async () => {
@@ -37,14 +36,12 @@ describe("installPiTools with installKind dispatch", () => {
       "pi",
       [{ id: "context-mode", name: "context-mode", source: "context-mode (shared binary)", required: false, installKind: "shared-binary-plus-mcp" }],
       () => {},
-      async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      {
+        checkSharedBinaryUsability: async (command) => ({ status: "ready", command, resolvedPath: "/fixture/context-mode", version: "1.0.0" }),
+      },
     );
 
-    expect(results).toHaveLength(1);
-    const result = results[0];
-    expect(result.status).toBe("reused");
-    expect(result.success).toBe(true);
-    expect(result.installKind).toBe("shared-binary-plus-mcp");
+    expect(results).toEqual([expect.objectContaining({ status: "reused", success: true, installKind: "shared-binary-plus-mcp" })]);
   });
 
   test("shared-binary-plus-mcp: returns reused when codebase-memory-mcp binary is ready", async () => {
@@ -52,14 +49,12 @@ describe("installPiTools with installKind dispatch", () => {
       "pi",
       [{ id: "codebase-memory-mcp", name: "codebase-memory-mcp", source: "DeusData/codebase-memory-mcp", required: false, installKind: "shared-binary-plus-mcp" }],
       () => {},
-      async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      {
+        checkSharedBinaryUsability: async (command) => ({ status: "ready", command, resolvedPath: "/fixture/codebase-memory-mcp", version: "1.0.0" }),
+      },
     );
 
-    expect(results).toHaveLength(1);
-    const result = results[0];
-    expect(result.status).toBe("reused");
-    expect(result.success).toBe(true);
-    expect(result.installKind).toBe("shared-binary-plus-mcp");
+    expect(results).toEqual([expect.objectContaining({ status: "reused", success: true, installKind: "shared-binary-plus-mcp" })]);
   });
 
   test("python-tool: returns reused when serena binary is ready", async () => {
@@ -67,31 +62,34 @@ describe("installPiTools with installKind dispatch", () => {
       "pi",
       [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
       () => {},
-      async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      {
+        checkSharedBinaryUsability: async (command) => ({ status: "ready", command, resolvedPath: "/fixture/serena", version: "1.0.0" }),
+      },
     );
 
-    expect(results).toHaveLength(1);
-    const result = results[0];
-    expect(result.status).toBe("reused");
-    expect(result.success).toBe(true);
-    expect(result.installKind).toBe("python-tool");
+    expect(results).toEqual([expect.objectContaining({ status: "reused", success: true, installKind: "python-tool" })]);
   });
 
-  test("python-tool: returns manual-verified when uv/pipx not available", async () => {
-    // Mock healthcheck to return "missing" (not ready)
-    // Mock uv/pipx to fail
+  test("python-tool: returns manual-verified after exact uv/pipx failures", async () => {
+    const commands: string[][] = [];
     const results = await installPiTools(
       "pi",
       [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
       () => {},
-      async () => ({ exitCode: 1, stdout: "", stderr: "command not found" }),
+      {
+        runInstallCommand: async (command, args) => {
+          commands.push([command, ...args]);
+          return { exitCode: 1, stdout: "", stderr: "command not found" };
+        },
+        checkSharedBinaryUsability: async (command) => ({ status: "missing", command }),
+      },
     );
 
-    expect(results).toHaveLength(1);
-    const result = results[0];
-    // Status should be "manual-verified" (success), NOT failed
-    expect(result.success).toBe(true);
-    expect(["manual-verified", "reused"]).toContain(result.status);
+    expect(commands).toEqual([
+      ["uv", "tool", "install", "serena"],
+      ["pipx", "install", "serena"],
+    ]);
+    expect(results).toEqual([expect.objectContaining({ status: "manual-verified", success: true })]);
   });
 
   test("npm-package-plus-mcp: installs context7 via npx", async () => {
@@ -131,6 +129,7 @@ describe("installPiTools with installKind dispatch", () => {
 
   test("dispatch does NOT log to console - output leaks into Ink TUI", async () => {
     const logs: string[] = [];
+    const probeCalls: string[] = [];
     const originalLog = console.log;
     console.log = (...args) => logs.push(args.join(" "));
 
@@ -139,14 +138,144 @@ describe("installPiTools with installKind dispatch", () => {
         "pi",
         [{ id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "shared-binary" }],
         () => {},
-        async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        {
+          runInstallCommand: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+          checkSharedBinaryUsability: async (command) => {
+            probeCalls.push(command);
+            return { status: "ready", command, resolvedPath: "/fixture/rtk", version: "fixture-1" };
+          },
+        },
       );
 
-      // Verify NO console.log with "[install-tools]" prefix - this would leak into TUI
-      expect(logs.some(l => l.includes("[install-tools]"))).toBe(false);
+      expect(probeCalls).toEqual(["rtk"]);
+      expect(logs.some((line) => line.includes("[install-tools]"))).toBe(false);
     } finally {
       console.log = originalLog;
     }
+  });
+
+
+  test("every shared-binary unit path declares a deterministic usability probe", () => {
+    const source = readFileSync(import.meta.path, "utf8");
+    const dispatchTest = source.match(
+      /test\("dispatch does NOT log to console - output leaks into Ink TUI"[\s\S]*?\n  \}\);/,
+    )?.[0];
+
+    expect(dispatchTest).toContain("checkSharedBinaryUsability");
+  });
+
+
+  test("uses same-fourth-position dependency overrides for deterministic shared-binary probes", async () => {
+    const probeCalls: Array<{ command: string; timeoutMs: number }> = [];
+    const commandCalls: string[][] = [];
+    const results = await installPiTools(
+      "pi",
+      [{ id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "shared-binary" }],
+      () => {},
+      {
+        runInstallCommand: async (command, args) => {
+          commandCalls.push([command, ...args]);
+          return { exitCode: 1, stdout: "", stderr: "not available" };
+        },
+        checkSharedBinaryUsability: async (command, options) => {
+          probeCalls.push({ command, timeoutMs: options?.timeoutMs ?? -1 });
+          return { status: "ready", command, resolvedPath: `/fixture/${command}`, version: "fixture-1" };
+        },
+        sharedBinaryUsabilityTimeoutMs: 1_234,
+      },
+    );
+
+    expect(results[0]).toMatchObject({ status: "reused", success: true });
+    expect(probeCalls).toEqual([{ command: "rtk", timeoutMs: 1_234 }]);
+    expect(commandCalls).toEqual([]);
+  });
+
+
+  test("blocks a shared binary that remains missing after the no-op install attempt", async () => {
+    const probeCalls: string[] = [];
+    const results = await installPiTools(
+      "pi",
+      [{ id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "shared-binary" }],
+      () => {},
+      {
+        checkSharedBinaryUsability: async (command) => {
+          probeCalls.push(command);
+          return { status: "missing", command };
+        },
+      },
+    );
+
+    expect(probeCalls).toEqual(["rtk", "rtk"]);
+    expect(results).toEqual([expect.objectContaining({ status: "blocked", success: false, message: "rtk installed but not usable" })]);
+  });
+
+  test("fails closed without installation when a shared binary is initially unusable", async () => {
+    const commands: string[][] = [];
+    const results = await installPiTools(
+      "pi",
+      [{ id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "shared-binary" }],
+      () => {},
+      {
+        runInstallCommand: async (command, args) => {
+          commands.push([command, ...args]);
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+        checkSharedBinaryUsability: async (command) => ({ status: "unusable", command, resolvedPath: "/fixture/rtk", reason: "fixture unusable" }),
+      },
+    );
+
+    expect(commands).toEqual([]);
+    expect(results).toEqual([expect.objectContaining({ status: "blocked", success: false, message: "fixture unusable" })]);
+  });
+
+  test("falls back from uv to pipx and reports the exact successful Serena outcome", async () => {
+    const commands: string[][] = [];
+    const probes = [
+      { status: "missing" as const, command: "serena" },
+      { status: "ready" as const, command: "serena", resolvedPath: "/fixture/serena", version: "2.0.0" },
+    ];
+    const results = await installPiTools(
+      "pi",
+      [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
+      () => {},
+      {
+        runInstallCommand: async (command, args) => {
+          commands.push([command, ...args]);
+          return { exitCode: command === "uv" ? 1 : 0, stdout: "", stderr: "" };
+        },
+        checkSharedBinaryUsability: async () => probes.shift()!,
+      },
+    );
+
+    expect(commands).toEqual([
+      ["uv", "tool", "install", "serena"],
+      ["pipx", "install", "serena"],
+    ]);
+    expect(results).toEqual([expect.objectContaining({ status: "installed", success: true, message: "Installed serena via pipx (2.0.0)" })]);
+  });
+
+  test("fails closed when Serena remains explicitly unusable after an injected uv install", async () => {
+    const statuses = [
+      { status: "missing" as const, command: "serena" },
+      { status: "unusable" as const, command: "serena", resolvedPath: "/fixture/serena", reason: "fixture healthcheck failed" },
+    ];
+    const commands: string[][] = [];
+
+    const results = await installPiTools(
+      "pi",
+      [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
+      () => {},
+      {
+        runInstallCommand: async (command, args) => {
+          commands.push([command, ...args]);
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+        checkSharedBinaryUsability: async () => statuses.shift()!,
+      },
+    );
+
+    expect(commands).toEqual([["uv", "tool", "install", "serena"]]);
+    expect(results[0]).toMatchObject({ status: "blocked", success: false, message: "fixture healthcheck failed" });
   });
 });
 

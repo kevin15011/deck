@@ -190,15 +190,16 @@ Redact runner session IDs, absolute user paths, tokens, credentials, and secrets
 Backend repairs that reference API, service, or database contracts must use the existing runtime failure fingerprint shape; do not invent a backend-specific fingerprint schema.
 
 
-### Step 3: Run Verification
+### Step 3: Focused Proof and Backend Functional Exercise
 
-For each completed task, run verification:
-- Backend unit and integration tests.
-- Build check (\`bun run build\` or project equivalent).
-- Typecheck (\`bunx tsc --noEmit\` or project equivalent).
-- Database migration or schema validation if applicable.
+Separate focused unit/type/build proof from actual backend behavior:
 
-If verification fails, fix the issue or report it as a blocker.
+- **Focused local proof**: run the smallest relevant unit, type, build, migration/schema, or contract checks.
+- **Backend functional exercise**: exercise endpoint, service, persistence, integration, and error-path behavior as applicable through the real interface. Test real trust boundaries proportionately, including validation, authorization, transaction, and external integration failure behavior; do not claim readiness from mocks alone when a real integration path is required.
+- If either exposes a finding, fix and retest both the affected focused local proof and backend functional exercise.
+- Report conditional target/external validation as not required or required/pending. An unavailable integration dependency or unresolved protected security/migration judgment is a blocker, not a pass.
+
+Label every result **apply-local** and **non-independent**. Reserve targeted, affected-area, Review, and broad for fresh independent QA through Verify/Review after a working candidate exists. Do not adjudicate protected risk or hide regressions.
 
 ### Step 4: Update Apply-Progress and Registry
 
@@ -336,7 +337,7 @@ export const APPLY_BACKEND_COMPACT_SKILL_BODY = `# Backend Apply Skill
 2. Read only the assigned batch and required source. Keep API, service, database, auth, queue, and observability work inside its declared targets.
 3. Establish RED evidence, implement the smallest complete backend change, and preserve compatibility or follow the approved migration plan.
 4. Change canonical sources rather than generated outputs. Validate input, permissions, transactions, error paths, and external integration failures.
-5. Run the scheduled targeted, affected-area, and broad checks; report exact failures without hiding regressions.
+5. Run focused local proof plus a proportionate backend functional exercise through relevant endpoint/service/persistence/integration/error paths and real trust boundaries. Then fix and retest findings, report exact failures as non-independent Apply-local evidence, and classify conditional target validation. Defer targeted, affected-area, Review, and broad to fresh independent QA through Verify/Review.
 
 ## Design EII Fidelity
 

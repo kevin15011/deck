@@ -876,3 +876,116 @@ describe("bounded repair loop governance content", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("evaluateRepairIncident()");
   });
 });
+
+
+const EXPLICIT_COMMIT_ONLY_RULE_V1_EXPECTED = `## Explicit Commit-Only Requests
+
+Treat an explicit commit-only request as authorization to record the unambiguous intended snapshot, not as acceptance, verification, review, release, Archive, amend, push, branch change, or authority to widen scope.
+
+1. Run bounded \`git status\`, relevant unstaged and staged \`git diff\`, and recent \`git log\` inspection.
+2. If unrelated work or intended paths are ambiguous, ask once for the exact path set and stop; never infer permission to include unrelated work.
+3. Stage only the explicitly intended paths with exact pathspecs. Never use broad staging that can capture unrelated work. Re-check staged status and \`git diff --cached\` before committing.
+4. Apply bounded, risk-relevant secret and safety checks without exposing sensitive values. A secret match, protected-risk question, excluded target, or unclear safety judgment stops the commit or routes the judgment to the appropriate specialist.
+5. Execute only the explicitly requested commit with the requested or repository-consistent message. Do not amend, push, change branches, release, Archive, or perform any destructive Git operation unless separately authorized; destructive operations still require the canonical new-message, exact-command confirmation flow.
+6. Do not launch Verify or Review solely because a commit was requested. If current final independent QA evidence does not bind to the exact committed subject and dependencies, report the commit as an **unverified snapshot**. Never imply acceptance, release readiness, Archive readiness, or commit-ready registry evidence.`;
+
+describe("streamlined Orchestrator ownership and candidate validation", () => {
+  const surfaces = [
+    ["legacy session", ORCHESTRATOR_SYSTEM_PROMPT],
+    ["compact session", ORCHESTRATOR_SYSTEM_PROMPT_COMPACT],
+    ["legacy agent", ORCHESTRATOR_AGENT_BODY],
+    ["compact agent", ORCHESTRATOR_COMPACT_AGENT_BODY],
+    ["legacy skill", ORCHESTRATOR_SKILL_BODY],
+    ["compact skill", ORCHESTRATOR_COMPACT_SKILL_BODY],
+  ] as const;
+
+  test("removes pure-delegator prohibitions from every surface", () => {
+    for (const [, surface] of surfaces) {
+      expect(surface).not.toContain("Pure Delegator");
+      expect(surface).not.toContain("delegate everything");
+      expect(surface).not.toContain("never execute any specialist-capable task");
+      expect(surface).not.toContain("never execute specialized agent work itself");
+    }
+  });
+
+  test("composes every shared fragment exactly once in all six legacy and compact surfaces", async () => {
+    const exports = await import("./orchestrator-content");
+    const fragmentNames = [
+      "ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1",
+      "ORCHESTRATOR_PRE_QA_FUNCTIONAL_LOOP_V1",
+      "ORCHESTRATOR_PHASE_DECISION_ABSORPTION_V1",
+      "ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1",
+    ] as const;
+
+    for (const name of fragmentNames) {
+      expect(name in exports).toBe(true);
+      const fragment = (exports as unknown as Record<string, string>)[name];
+      for (const [surfaceName, surface] of surfaces) {
+        expect(surface.split(fragment).length - 1, `${name} composition count in ${surfaceName}`).toBe(1);
+      }
+    }
+
+    expect((exports as unknown as Record<string, string>).ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1).toBe(EXPLICIT_COMMIT_ONLY_RULE_V1_EXPECTED);
+  });
+
+  test("requires the non-destructive condition through the canonical ownership fragment on all six surfaces", async () => {
+    const { ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1: ownership } = await import("./orchestrator-content");
+    const directOwnershipPredicate =
+      "bounded, mechanical, deterministic, explicitly authorized, non-destructive, and requires no specialist implementation or judgment";
+
+    expect(ownership).toContain(directOwnershipPredicate);
+    expect(ownership.split("non-destructive").length - 1).toBe(1);
+    for (const [surfaceName, surface] of surfaces) {
+      expect(surface).toContain(directOwnershipPredicate);
+      expect(surface.split("non-destructive").length - 1, `non-destructive count in ${surfaceName}`).toBe(1);
+    }
+  });
+
+  test("locks the complete bounded coordinator and specialist ownership examples", async () => {
+    const { ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1: ownership } = await import("./orchestrator-content");
+    for (const directOperation of [
+      "`git status`/`git diff`/`git log` inspection",
+      "exact staging and commit",
+      "deterministic artifact/digest/count/existence checks",
+      "centralized RegistryIntentV1 reconciliation",
+      "synthesis",
+      "recording a resolved in-scope decision",
+    ]) {
+      expect(ownership).toContain(directOperation);
+    }
+    for (const specialistOwned of [
+      "behavior changes",
+      "specialist phase artifacts",
+      "broad or build execution",
+      "protected-risk",
+      "architecture",
+      "migration",
+      "security",
+      "data-loss",
+      "public-API judgment",
+      "Verify",
+      "Review",
+    ]) {
+      expect(ownership).toContain(specialistOwned);
+    }
+  });
+
+  test("locks relevant unstaged/staged diff inspection and exact commit handling", async () => {
+    const { ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1: commitOnly } = await import("./orchestrator-content");
+    expect(commitOnly).toContain("relevant unstaged and staged `git diff`");
+    expect(commitOnly).toContain("recent `git log`");
+    expect(commitOnly).toContain("Stage only the explicitly intended paths with exact pathspecs");
+    expect(commitOnly).toContain("Execute only the explicitly requested commit");
+  });
+
+  test("orders Apply-local functional validation before fresh independent final QA", () => {
+    for (const [, surface] of surfaces) {
+      expect(surface).toContain("local proof");
+      expect(surface).toContain("functional exercise");
+      expect(surface).toContain("fresh final independent QA");
+      expect(surface.indexOf("functional exercise")).toBeLessThan(surface.indexOf("fresh final independent QA"));
+      expect(surface).toContain("Automatic");
+      expect(surface).not.toContain("git add .");
+    }
+  });
+});

@@ -22,9 +22,10 @@ import {
   transitionStagedVerificationV1,
 } from "../../../../sdd-runtime/src";
 
-const LEGACY_BYTES = 462243;
-const LEGACY_LEXICAL_TOKENS = 96694;
-const LEGACY_SHA256 = "dcf504ae968b348cafa639a625fea081912d0286999a20016dee726ae0a20bca";
+// Refreshed for EII-SOA-007 through EII-SOA-010 composed legacy output.
+const LEGACY_BYTES = 481194;
+const LEGACY_LEXICAL_TOKENS = 100021;
+const LEGACY_SHA256 = "8c634904bf996eec9f6bd6e19b3db2cd72a4c3bdf55f96a614505a4402a48c03";
 
 const CONTROL_PLANE_AGENT_IDS = [
   "deck-developer-orchestrator",
@@ -222,5 +223,18 @@ describe("Developer Team prompt profiles", () => {
     const compact = generatedStaticContent("compact");
     expect(Buffer.byteLength(compact)).toBeLessThanOrEqual(Math.floor(Buffer.byteLength(legacy) * 0.7));
     expect(lexicalTokens(compact)).toBeLessThanOrEqual(Math.floor(lexicalTokens(legacy) * 0.7));
+  });
+});
+
+
+describe("streamlined ownership profile parity", () => {
+  test("keeps ownership and pre-QA semantics in compact and legacy profiles", () => {
+    for (const promptProfile of ["compact", "legacy"] as const) {
+      const orchestrator = Object.values(getAgentContent("deck-developer-orchestrator", { promptProfile })!).join("\n");
+      expect(orchestrator).toContain("bounded");
+      expect(orchestrator).toContain("functional exercise");
+      expect(orchestrator).toContain("## Explicit Commit-Only Requests");
+      expect(orchestrator).not.toContain("Pure Delegator");
+    }
   });
 });

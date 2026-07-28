@@ -70,41 +70,42 @@ export const INV_001_EXECUTION_MODE_GATE: OrchestratorInvariant = {
   tier: "critical",
   surfaces: ["session", "agent", "skill", "manifest"],
   sourceRefs: [
-    "orchestrator-content.ts:161-168 (Execution Mode section)",
+    "orchestrator-content.ts (Execution Mode section)",
   ],
-  condition: "First change request in a session",
+  condition: "Run SDD selected after triage for the first change request in a session",
   requiredAction:
-    "Ask user which execution mode they prefer: Automatic (run all phases back-to-back without pausing) or Interactive (default, pause after each phase). Cache the mode for the session.",
+    "Ask which execution mode the user prefers and cache it for the session. Automatic has no routine phase-by-phase or functional-acceptance pause and continues after automated candidate validation; pause only for genuinely required target/product validation or an existing approval or hard stop. Interactive retains phase decisions. Execution mode never grants authority or waives safety or independent QA.",
   rationale:
-    "Without explicit user preference, the orchestrator assumes Interactive mode by default, which may cause unnecessary pauses during bulk execution. Asking upfront ensures alignment with user intent.",
+    "Mode selection follows triage and controls communication cadence without becoming an authority, acceptance, or quality bypass.",
   violationConsequence:
-    "User experiences unexpected pauses or the orchestrator runs without confirmation when Automatic was preferred.",
-};
+    "The workflow pauses unnecessarily, advances without a required decision, or misrepresents mode as authorization or quality evidence.",
+};;
 
 /**
- * INV-002: Pure Delegator
+ * INV-002: Coordinator Ownership
  *
- * The orchestrator never executes specialized agent work itself.
- * It always delegates to the appropriate specialist agent.
+ * The Orchestrator directly performs bounded, mechanical, deterministic, and
+ * authorized coordination while specialists retain implementation, protected
+ * judgment, and independent Verify and Review work.
  *
- * Source: orchestrator-content.ts, lines 64-79 (Your Identity: Pure Delegator)
+ * Source: orchestrator-content.ts (Coordinator Ownership Boundary)
  */
-export const INV_002_PURE_DELEGATOR: OrchestratorInvariant = {
+export const INV_002_COORDINATOR_OWNERSHIP: OrchestratorInvariant = {
   id: "INV-002",
-  title: "Pure Delegator",
+  title: "Coordinator Ownership",
   tier: "critical",
   surfaces: ["session", "agent", "skill", "manifest"],
   sourceRefs: [
-    "orchestrator-content.ts:64-79 (Your Identity: Pure Delegator)",
+    "orchestrator-content.ts (Coordinator Ownership section)",
   ],
-  condition: "Any task that has a specialist agent capable of handling it",
+  condition: "Any coordinator operation or specialist-owned work",
   requiredAction:
-    "Delegate the task to the appropriate specialist agent. Do not execute the work yourself.",
+    "Own work directly only when it is bounded, mechanical, deterministic, authorized, non-destructive, and requires no specialist implementation or judgment. Direct examples are bounded git status/diff/log inspection, exact staging and commit, deterministic artifact, digest, count, and existence checks, centralized intent reconciliation, synthesis, and resolved-decision recording. Delegate behavior changes, specialist artifacts, broad or build execution, protected-risk, architecture, migration, security, data-loss, or public-API judgment, Verify, and Review to the appropriate specialist. Ambiguity, risk, or scope uncertainty requires clarification, delegation, or stop. Ownership never widens authority.",
   rationale:
-    "The orchestrator's role is coordination and synthesis, not implementation. Executing specialist work fills context with implementation details and blocks specialized agents from doing what they do best.",
+    "Qualitative ownership keeps mechanical coordination efficient while preserving specialist implementation, protected judgment, and independent quality roles.",
   violationConsequence:
-    "Orchestrator context inflates with implementation details, losing objectivity and coordination ability. Specialized agents are blocked from contributing.",
-};
+    "The coordinator either adds avoidable delegation overhead or crosses implementation, judgment, authority, or independent-QA boundaries.",
+};;
 
 /**
  * INV-003: SDD Initialization Gate
@@ -221,7 +222,7 @@ export const INV_006_SDD_EXPLORER_FIRST_FLOW: OrchestratorInvariant = {
  */
 export const ORCHESTRATOR_INVARIANTS: readonly OrchestratorInvariant[] = [
   INV_001_EXECUTION_MODE_GATE,
-  INV_002_PURE_DELEGATOR,
+  INV_002_COORDINATOR_OWNERSHIP,
   INV_003_SDD_INITIALIZATION_GATE,
   INV_004_SDD_TRIAGE_GATE,
   INV_005_REGISTRY_DEFERRED_PARALLELISM,
@@ -234,8 +235,8 @@ export interface CompactOrchestratorInvariantSummaryV1 {
 }
 
 export const COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1: readonly CompactOrchestratorInvariantSummaryV1[] = Object.freeze([
-  { id: "INV-001", summary: "Ask execution mode only after triage selects Run SDD; retain the session choice." },
-  { id: "INV-002", summary: "Coordinate and synthesize; delegate work owned by a registered specialist." },
+  { id: "INV-001", summary: "After Run SDD triage, Automatic has no routine pause after automated candidate validation; pause only for required target/product validation, approval, or a hard stop. Mode grants no authority and waives no QA." },
+  { id: "INV-002", summary: "Directly own authorized bounded coordinator operations; specialists own implementation and judgment, heavy execution, Verify, and Review. Ambiguity or risk routes to clarify, delegate, or stop." },
   { id: "INV-003", summary: "Verify OpenSpec initialization before SDD and route initialization through deck-init." },
   { id: "INV-004", summary: "Classify every request; for non-trivial work allow only bounded read-only discovery, then restate and obtain confirmation before substantial work. Trivial Direct edits are exempt; modification authorization remains separate." },
   { id: "INV-005", summary: "Specialists return RegistryIntentV1 values; the central coordinator serializes shared registry writes." },
@@ -244,7 +245,7 @@ export const COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1: readonly CompactOrches
   { id: "PERMANENT-QUALITY", summary: "Verify is independent from Apply, Review is independent from both, and required freshness cannot be waived." },
   { id: "PERMANENT-HARD-STOP", summary: "Honor protected-risk, Full-SDD, registry, replay, repair-governance, and excluded-WIP hard stops." },
   { id: "PERMANENT-SKILLS", summary: "Load the matching role skill and only scope-relevant capability instructions before delegation." },
-].map((entry) => Object.freeze(entry)));
+].map((entry) => Object.freeze(entry)));;
 
 export function renderCompactOrchestratorInvariantsV1(): string {
   return [

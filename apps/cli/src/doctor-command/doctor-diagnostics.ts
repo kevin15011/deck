@@ -267,14 +267,16 @@ function checkClaudeOrCodexRuntime(runtime: "claude" | "codex", installed: boole
 // Memory provider checks
 // ---------------------------------------------------------------------------
 
-function checkMemoryProviders(): DoctorCategoryResult[] {
+function checkMemoryProviders(
+  binaryAvailable: typeof memoryBinaryAvailable,
+): DoctorCategoryResult[] {
   const results: DoctorCategoryResult[] = [];
 
   // Check engram and supermemory
   for (const provider of MEMORY_PROVIDERS) {
     const items: DoctorCheckItem[] = [];
     try {
-      const available = memoryBinaryAvailable(provider.command);
+      const available = binaryAvailable(provider.command);
       items.push({
         status: available ? "ok" : "warning",
         message: available
@@ -301,7 +303,7 @@ function checkMemoryProviders(): DoctorCategoryResult[] {
   // Check Serena binary separately
   const serenaItems: DoctorCheckItem[] = [];
   try {
-    const available = memoryBinaryAvailable("serena");
+    const available = binaryAvailable("serena");
     serenaItems.push({
       status: available ? "ok" : "warning",
       message: available
@@ -352,11 +354,13 @@ function checkPiMcp(): DoctorCategoryResult {
   }
 }
 
-function checkOpenCodeMcp(): DoctorCategoryResult {
+function checkOpenCodeMcp(
+  readMcpSection: typeof readOpenCodeMcpSection,
+): DoctorCategoryResult {
   const items: DoctorCheckItem[] = [];
 
   try {
-    const mcpSection = readOpenCodeMcpSection();
+    const mcpSection = readMcpSection();
     if (!mcpSection) {
       items.push({
         status: "warning",
@@ -413,7 +417,23 @@ function checkOpenCodeMcp(): DoctorCategoryResult {
  * Build the binary upgrade availability check result.
  * Uses decideReleaseAvailability for commit-aware comparison.
  */
-async function buildBinaryUpgradeCheck(): Promise<DoctorBinaryResult> {
+type DoctorDiagnosticsDependencies = Readonly<{
+  runDeckChecks: typeof runDeckChecks;
+  fetchReleaseDescriptor: typeof fetchReleaseDescriptor;
+  memoryBinaryAvailable: typeof memoryBinaryAvailable;
+  readOpenCodeMcpSection: typeof readOpenCodeMcpSection;
+}>;
+
+const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
+  runDeckChecks,
+  fetchReleaseDescriptor,
+  memoryBinaryAvailable,
+  readOpenCodeMcpSection,
+};
+
+async function buildBinaryUpgradeCheck(
+  fetchDescriptor: typeof fetchReleaseDescriptor,
+): Promise<DoctorBinaryResult> {
   const buildInfo = getBuildInfo();
   const xdg = getDeckXdgPaths();
 
@@ -423,23 +443,17 @@ async function buildBinaryUpgradeCheck(): Promise<DoctorBinaryResult> {
   let reason: string | undefined;
 
   try {
-    // Fetch latest release descriptor
-    const descriptor = await fetchReleaseDescriptor();
+    const descriptor = await fetchDescriptor();
     if (descriptor && descriptor.kind === "descriptor") {
-      // Extract version and commit from descriptor
       latestVersion = descriptor.descriptor.version;
       latestCommit = descriptor.commit ?? undefined;
-
-      // Use decideReleaseAvailability for commit-aware comparison
       const decision = decideReleaseAvailability(
         buildInfo.version,
         buildInfo.commit,
         latestVersion,
         latestCommit,
       );
-
       upgradeAvailable = decision.kind === "available";
-      // Only include reason for non-network-error variants
       reason = decision.kind === "network-error" ? "Network error checking for updates" : decision.reason;
     } else if (descriptor && descriptor.kind === "legacy") {
       reason = descriptor.reason === "missing"
@@ -464,10 +478,9 @@ async function buildBinaryUpgradeCheck(): Promise<DoctorBinaryResult> {
     },
     executablePath: process.execPath ?? null,
     globalConfigDir: xdg.configDir,
-    globalConfigExists: false, // Will be filled by doctor-checks
-    bundledSkillCount: 0, // Will be filled by doctor-checks
+    globalConfigExists: false,
+    bundledSkillCount: 0,
     upgradeAvailable,
-    // Extended fields for upgrade reporting
     latestVersion,
     latestCommit,
     reason,
@@ -534,7 +547,15 @@ function calculateSummary(
  *
  * @returns DoctorDiagnosticsResult
  */
-export async function runDoctorDiagnostics(): Promise<DoctorDiagnosticsResult> {
+export async function runDoctorDiagnostics(
+  overrides: Partial<DoctorDiagnosticsDependencies> = {},
+): Promise<DoctorDiagnosticsResult> {
+  const dependencies: DoctorDiagnosticsDependencies = {
+    runDeckChecks: overrides.runDeckChecks ?? defaultDoctorDiagnosticsDependencies.runDeckChecks,
+    fetchReleaseDescriptor: overrides.fetchReleaseDescriptor ?? defaultDoctorDiagnosticsDependencies.fetchReleaseDescriptor,
+    memoryBinaryAvailable: overrides.memoryBinaryAvailable ?? defaultDoctorDiagnosticsDependencies.memoryBinaryAvailable,
+    readOpenCodeMcpSection: overrides.readOpenCodeMcpSection ?? defaultDoctorDiagnosticsDependencies.readOpenCodeMcpSection,
+  };
   const runtimes: DoctorRuntimeResult[] = [];
   let memoryCritical = false;
 
@@ -584,7 +605,7 @@ export async function runDoctorDiagnostics(): Promise<DoctorDiagnosticsResult> {
   // 3. Memory providers
   let memoryResults: DoctorCategoryResult[] = [];
   try {
-    memoryResults = checkMemoryProviders();
+    memoryResults = checkMemoryProviders(dependencies.memoryBinaryAvailable);
   } catch (err) {
     memoryResults = [
       {
@@ -601,7 +622,7 @@ export async function runDoctorDiagnostics(): Promise<DoctorDiagnosticsResult> {
 
   // 4. MCP validation (synchronous, called directly)
   const piMcpResult = checkPiMcp();
-  const opencodeMcpResult = checkOpenCodeMcp();
+  const opencodeMcpResult = checkOpenCodeMcp(dependencies.readOpenCodeMcpSection);
   const mcpResults: DoctorCategoryResult[] = [piMcpResult, opencodeMcpResult];
 
   // 5. Deck-owned checks (manifest, state, config, binaries, runner config)
@@ -609,7 +630,7 @@ export async function runDoctorDiagnostics(): Promise<DoctorDiagnosticsResult> {
   let binaryResults: DoctorCategoryResult[] = [];
   let runnerConfigResults: DoctorCategoryResult[] = [];
   try {
-    const deckChecks = await runDeckChecks();
+    const deckChecks = await dependencies.runDeckChecks();
     deckResults = deckChecks.deck;
     binaryResults = deckChecks.binary;
     runnerConfigResults = deckChecks.runnerConfig;
@@ -627,7 +648,7 @@ export async function runDoctorDiagnostics(): Promise<DoctorDiagnosticsResult> {
   // 6. Binary upgrade availability check (commit-aware)
   let binaryResult: DoctorBinaryResult;
   try {
-    binaryResult = await buildBinaryUpgradeCheck();
+    binaryResult = await buildBinaryUpgradeCheck(dependencies.fetchReleaseDescriptor);
   } catch (err) {
     binaryResult = {
       buildInfo: null,

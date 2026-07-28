@@ -11,6 +11,10 @@ import {
   verifyOpenCodeDeveloperTeamInstall,
 } from "./developer-team-install";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
+import {
+  ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1,
+  ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1,
+} from "../../core/src/teams/developer/orchestrator-content";
 import { getStandaloneSkill, STANDALONE_SKILLS } from "@deck/core/skills/external";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { createOpenCodeRunnerAdapter } from "./runner-adapter";
@@ -1463,5 +1467,31 @@ describe("adapter plan binding isolation", () => {
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, plan: planA });
       expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-developer-orchestrator"].model).toBe("openai/exact");
     } finally { cleanup(root); }
+  });
+});
+
+
+describe("streamlined ownership installed-content semantics", () => {
+  test("exposes compact pre-QA and exact commit-only guidance through core install content", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
+      configDir: "/tmp/.config/opencode",
+    });
+    const orchestratorSkill = plan.skills.find(({ agent }) => agent.id === "deck-developer-orchestrator")!.content;
+    const orchestratorPrompt = plan.promptGenerationPlan.find(({ agent }) => agent.id === "deck-developer-orchestrator")!.content;
+
+    for (const materialized of [orchestratorSkill, orchestratorPrompt]) {
+      expect(materialized).toContain(ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1);
+      expect(materialized).toContain(ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1);
+      expect(materialized).toContain("functional exercise");
+      expect(materialized).toContain("fresh final independent QA");
+      expect(materialized).not.toContain("Pure Delegator");
+    }
+
+    for (const agentId of ["deck-developer-apply-general", "deck-developer-apply-backend", "deck-developer-apply-frontend"] as const) {
+      const apply = plan.skills.find(({ agent }) => agent.id === agentId)!.content;
+      expect(apply).toContain("functional exercise");
+      expect(apply).toContain("non-independent");
+      expect(apply).toMatch(/conditional target(?:\/product)? validation/);
+    }
   });
 });

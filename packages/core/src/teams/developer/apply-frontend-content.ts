@@ -193,15 +193,16 @@ Redact runner session IDs, absolute user paths, tokens, credentials, and secrets
 Frontend repairs that affect UI behavior must preserve accessibility obligations, including keyboard interaction, focus behavior, ARIA semantics, and screen-reader-visible state.
 
 
-### Step 3: Run Verification
+### Step 3: Focused Proof and Frontend Functional Exercise
 
-For each completed task, run verification:
-- Frontend unit and component tests.
-- Build check (\`bun run build\` or project equivalent).
-- Typecheck (\`bunx tsc --noEmit\` or project equivalent).
-- Accessibility checks if applicable.
+Separate component/type/accessibility proof from actual frontend behavior:
 
-If verification fails, fix the issue or report it as a blocker.
+- **Focused local proof**: run the smallest relevant unit, component, type, build, integration, and accessibility checks.
+- **Frontend functional exercise**: exercise actual interaction/browser/integration behavior through the relevant interface. Cover keyboard, focus, loading, error, empty, responsive, and contract behavior as applicable; screenshot-only or mock-only evidence is insufficient when interaction is in scope.
+- If either exposes a finding, fix and retest both the affected focused local proof and frontend functional exercise.
+- Classify conditional target/product validation, including real-browser, device, or product validation, as not required or required/pending. A missing authoritative contract or unavailable required target environment blocks readiness.
+
+Label every result **apply-local** and **non-independent**. Reserve targeted, affected-area, Review, and broad for fresh Verify/Review after a working candidate exists. Do not add a default user pause.
 
 ### Step 4: Update Apply-Progress and Registry
 
@@ -349,7 +350,7 @@ export const APPLY_FRONTEND_COMPACT_SKILL_BODY = `# Frontend Apply Skill
 2. Read only the assigned batch and required UI/contracts. Follow the established design system and avoid unrelated visual redesign.
 3. Establish RED evidence, implement the smallest complete frontend change, and cover keyboard, focus, semantic, responsive, loading, error, and empty states as applicable.
 4. Consume shared/backend contracts exactly; report incompatible contracts rather than mocking around them. Change canonical sources rather than generated output.
-5. Run scheduled component, affected-area, integration, build, and type checks; report exact failures without hiding regressions.
+5. Run focused local proof plus a proportionate frontend functional exercise through actual interaction/browser/integration behavior; retain relevant component, integration, build, type, and accessibility checks when proportionate. Then fix and retest findings, label evidence non-independent and Apply-local, classify conditional target/product validation, and leave targeted, affected-area, Review, and broad to fresh Verify/Review.
 
 ## Design EII Fidelity
 

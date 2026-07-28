@@ -50,17 +50,59 @@ type RunInstallCommand = (command: string, args: string[]) => Promise<InstallCom
  * - pi-package: use pi install <source>
  * - external, manual: return manual status
  */
+type SharedBinaryUsabilityProbe = typeof checkSharedBinaryUsability;
+
+type PiToolInstallDependencies = Readonly<{
+  runInstallCommand: RunInstallCommand;
+  checkSharedBinaryUsability: SharedBinaryUsabilityProbe;
+  sharedBinaryUsabilityTimeoutMs: number;
+}>;
+
+type PiToolInstallDependencyOverrides = Partial<PiToolInstallDependencies>;
+
+const defaultPiToolInstallDependencies: PiToolInstallDependencies = {
+  runInstallCommand: runDefaultInstallCommand,
+  checkSharedBinaryUsability,
+  sharedBinaryUsabilityTimeoutMs: 5_000,
+};
+
+function resolvePiToolInstallDependencies(
+  input: RunInstallCommand | PiToolInstallDependencyOverrides | undefined,
+): PiToolInstallDependencies {
+  if (typeof input === "function") {
+    return { ...defaultPiToolInstallDependencies, runInstallCommand: input };
+  }
+  return {
+    runInstallCommand: input?.runInstallCommand ?? defaultPiToolInstallDependencies.runInstallCommand,
+    checkSharedBinaryUsability: input?.checkSharedBinaryUsability ?? defaultPiToolInstallDependencies.checkSharedBinaryUsability,
+    sharedBinaryUsabilityTimeoutMs: input?.sharedBinaryUsabilityTimeoutMs ?? defaultPiToolInstallDependencies.sharedBinaryUsabilityTimeoutMs,
+  };
+}
+
+export function installPiTools(
+  command: string | undefined,
+  plan: InstallablePiTool[],
+  onResult: (result: PiToolInstallResult) => void,
+  runInstallCommand?: RunInstallCommand,
+): Promise<PiToolInstallResult[]>;
+export function installPiTools(
+  command: string | undefined,
+  plan: InstallablePiTool[],
+  onResult: (result: PiToolInstallResult) => void,
+  overrides?: PiToolInstallDependencyOverrides,
+): Promise<PiToolInstallResult[]>;
+
 export async function installPiTools(
   command: string | undefined,
   plan: InstallablePiTool[],
   onResult: (result: PiToolInstallResult) => void,
-  runInstallCommand: RunInstallCommand = runDefaultInstallCommand,
+  dependencyInput?: RunInstallCommand | PiToolInstallDependencyOverrides,
 ): Promise<PiToolInstallResult[]> {
+  const dependencies = resolvePiToolInstallDependencies(dependencyInput);
   const results: PiToolInstallResult[] = [];
 
   for (const tool of plan) {
-    // Dispatch based on installKind
-    const result = await dispatchInstallByKind(tool, command, runInstallCommand);
+    const result = await dispatchInstallByKind(tool, command, dependencies);
     results.push(result);
     onResult(result);
   }
@@ -80,13 +122,10 @@ export async function installPiTools(
 async function dispatchInstallByKind(
   tool: InstallablePiTool,
   command: string | undefined,
-  runInstallCommand: RunInstallCommand,
+  dependencies: PiToolInstallDependencies,
 ): Promise<PiToolInstallResult> {
   const { id: toolId, name, source, installKind } = tool;
 
-  // Note: No console.log here - output leaks into Ink TUI. Use debug file or caller-provided logger.
-
-  // Handle external/manual without requiring pi command
   if (installKind === "external" || installKind === "manual") {
     return {
       tool: name,
@@ -98,7 +137,6 @@ async function dispatchInstallByKind(
     };
   }
 
-  // If no pi command available, fail for non-manual kinds
   if (!command) {
     return {
       tool: name,
@@ -110,32 +148,23 @@ async function dispatchInstallByKind(
     };
   }
 
-  // Dispatch based on installKind
   switch (installKind) {
     case "shared-binary":
     case "shared-binary-plus-mcp": {
-      // For shared binaries, check if already usable and reuse
       const binaryName = getSharedBinaryCommand(toolId);
-      const sharedResult = await installSharedBinary(
+      const sharedResult = await installSharedBinaryWithDependencies(
         toolId,
         binaryName,
-        async () => {
-          // Installation function - currently throws as binary install is manual
-          // In the future, this could install the binary via npm/pip
-          // Note: No console.log here - output leaks into Ink TUI
-        },
+        async () => {},
+        dependencies,
       );
-
-      // Map shared-binary result status to PiToolInstallResultStatus
-      // reused/installed/manual-verified are SUCCESS, not failed
       const statusMap: Record<SharedBinaryInstallResult["status"], PiToolInstallResultStatus> = {
-        "reused": "reused",
-        "installed": "installed",
+        reused: "reused",
+        installed: "installed",
         "manual-verified": "manual-verified",
-        "blocked": "blocked",
-        "missing": "failed",
+        blocked: "blocked",
+        missing: "failed",
       };
-
       return {
         tool: name,
         success: sharedResult.status === "reused" || sharedResult.status === "installed",
@@ -147,17 +176,14 @@ async function dispatchInstallByKind(
     }
 
     case "python-tool": {
-      // For python tools, try uv/pipx
-      const serenaResult = await installSerena();
-
+      const serenaResult = await installSerenaWithDependencies(dependencies);
       const statusMap: Record<SharedBinaryInstallResult["status"], PiToolInstallResultStatus> = {
-        "reused": "reused",
-        "installed": "installed",
+        reused: "reused",
+        installed: "installed",
         "manual-verified": "manual-verified",
-        "blocked": "blocked",
-        "missing": "failed",
+        blocked: "blocked",
+        missing: "failed",
       };
-
       return {
         tool: name,
         success: serenaResult.status === "reused" || serenaResult.status === "installed" || serenaResult.status === "manual-verified",
@@ -169,14 +195,9 @@ async function dispatchInstallByKind(
     }
 
     case "npm-package-plus-mcp": {
-      // For npm packages with MCP (e.g., @upstash/context7-mcp)
       try {
-        // Extract package name from source (e.g., "npm:@upstash/context7-mcp" -> "@upstash/context7-mcp")
         const packageName = source.replace(/^npm:/, "");
-        const { stdout, stderr, exitCode } = await runInstallCommand("npx", ["-y", packageName]);
-
-        // For npx, we just verify it runs (the MCP server runs on demand)
-        // Exit code 0 means the package was fetched successfully
+        const { stdout, stderr, exitCode } = await dependencies.runInstallCommand("npx", ["-y", packageName]);
         const success = exitCode === 0;
         return {
           tool: name,
@@ -201,10 +222,8 @@ async function dispatchInstallByKind(
 
     case "pi-package":
     default: {
-      // Default: use pi install <source>
       try {
-        const { stdout, stderr, exitCode } = await runInstallCommand(command, ["install", source]);
-
+        const { stdout, stderr, exitCode } = await dependencies.runInstallCommand(command, ["install", source]);
         const success = exitCode === 0;
         return {
           tool: name,
@@ -261,18 +280,18 @@ function getSharedBinaryCommand(toolId: string): string {
  * @param command - The command to check/install
  * @param installFn - Async function to install the binary if missing
  */
-export async function installSharedBinary(
+async function installSharedBinaryWithDependencies(
   capabilityId: string,
   command: string,
-  installFn: () => Promise<void>
+  installFn: () => Promise<void>,
+  dependencies: PiToolInstallDependencies,
 ): Promise<SharedBinaryInstallResult> {
-  // Step 1: Check if binary is usable
-  const usabilityResult = await checkSharedBinaryUsability(command, {
-    healthcheckArgs: ["--version", "--help"],
-    timeoutMs: 5000,
-  });
+  const probeOptions = {
+    healthcheckArgs: ["--version", "--help"] as [string, string],
+    timeoutMs: dependencies.sharedBinaryUsabilityTimeoutMs,
+  };
+  const usabilityResult = await dependencies.checkSharedBinaryUsability(command, probeOptions);
 
-  // Binary is ready - reuse it!
   if (usabilityResult.status === "ready") {
     return {
       capabilityId,
@@ -282,8 +301,6 @@ export async function installSharedBinary(
       message: `Reusing existing ${command} (${usabilityResult.version ?? "unknown version"})`,
     };
   }
-
-  // Binary exists but unusable
   if (usabilityResult.status === "unusable") {
     return {
       capabilityId,
@@ -293,16 +310,9 @@ export async function installSharedBinary(
     };
   }
 
-  // Binary is missing - try to install
   try {
     await installFn();
-    
-    // Re-verify after installation
-    const postInstallResult = await checkSharedBinaryUsability(command, {
-      healthcheckArgs: ["--version", "--help"],
-      timeoutMs: 5000,
-    });
-
+    const postInstallResult = await dependencies.checkSharedBinaryUsability(command, probeOptions);
     if (postInstallResult.status === "ready") {
       return {
         capabilityId,
@@ -312,13 +322,13 @@ export async function installSharedBinary(
         message: `Installed ${command} (${postInstallResult.version ?? "unknown version"})`,
       };
     }
-
-    // Installation succeeded but binary still not usable
     return {
       capabilityId,
       command,
       status: "blocked",
-      message: `${command} installed but not usable`,
+      message: postInstallResult.status === "unusable"
+        ? (postInstallResult.reason ?? `${command} exists but failed healthcheck`)
+        : `${command} installed but not usable`,
     };
   } catch (error) {
     return {
@@ -328,6 +338,19 @@ export async function installSharedBinary(
       message: error instanceof Error ? error.message : `Failed to install ${command}`,
     };
   }
+}
+
+export async function installSharedBinary(
+  capabilityId: string,
+  command: string,
+  installFn: () => Promise<void>,
+): Promise<SharedBinaryInstallResult> {
+  return installSharedBinaryWithDependencies(
+    capabilityId,
+    command,
+    installFn,
+    defaultPiToolInstallDependencies,
+  );
 }
 
 /**
@@ -340,83 +363,74 @@ export async function installSharedBinary(
  * If prerequisites (uv/pipx) are not available, returns manual-verified status
  * with instructions.
  */
-export async function installSerena(): Promise<SharedBinaryInstallResult> {
-  const serenaCheck = await checkSharedBinaryUsability("serena", {
-    healthcheckArgs: ["--version", "--help"],
-    timeoutMs: 5000,
-  });
+async function installSerenaWithDependencies(
+  dependencies: PiToolInstallDependencies,
+): Promise<SharedBinaryInstallResult> {
+  const probeOptions = {
+    healthcheckArgs: ["--version", "--help"] as [string, string],
+    timeoutMs: dependencies.sharedBinaryUsabilityTimeoutMs,
+  };
+  const probe = () => dependencies.checkSharedBinaryUsability("serena", probeOptions);
+  const initial = await probe();
 
-  // Already installed
-  if (serenaCheck.status === "ready") {
+  if (initial.status === "ready") {
     return {
       capabilityId: "serena",
       command: "serena",
       status: "reused",
-      version: serenaCheck.version,
-      message: `Reusing existing serena (${serenaCheck.version ?? "unknown version"})`,
+      version: initial.version,
+      message: `Reusing existing serena (${initial.version ?? "unknown version"})`,
     };
   }
-
-  if (serenaCheck.status === "unusable") {
+  if (initial.status === "unusable") {
     return {
       capabilityId: "serena",
       command: "serena",
       status: "blocked",
-      message: serenaCheck.reason ?? "serena exists but failed healthcheck",
+      message: initial.reason ?? "serena exists but failed healthcheck",
     };
   }
 
-  // Try uv tool install serena
-  try {
-    const uvResult = await runDefaultInstallCommand("uv", ["tool", "install", "serena"]);
-    if (uvResult.exitCode === 0) {
-      const postUvCheck = await checkSharedBinaryUsability("serena", {
-        healthcheckArgs: ["--version", "--help"],
-        timeoutMs: 5000,
-      });
-      if (postUvCheck.status === "ready") {
+  for (const [installer, args] of [
+    ["uv", ["tool", "install", "serena"]],
+    ["pipx", ["install", "serena"]],
+  ] as const) {
+    try {
+      const result = await dependencies.runInstallCommand(installer, [...args]);
+      if (result.exitCode !== 0) continue;
+      const postInstall = await probe();
+      if (postInstall.status === "ready") {
         return {
           capabilityId: "serena",
           command: "serena",
           status: "installed",
-          version: postUvCheck.version,
-          message: `Installed serena via uv (${postUvCheck.version ?? "unknown version"})`,
+          version: postInstall.version,
+          message: `Installed serena via ${installer} (${postInstall.version ?? "unknown version"})`,
         };
       }
-    }
-  } catch {
-    // uv not available, try pipx
-  }
-
-  // Try pipx install serena
-  try {
-    const pipxResult = await runDefaultInstallCommand("pipx", ["install", "serena"]);
-    if (pipxResult.exitCode === 0) {
-      const postPipxCheck = await checkSharedBinaryUsability("serena", {
-        healthcheckArgs: ["--version", "--help"],
-        timeoutMs: 5000,
-      });
-      if (postPipxCheck.status === "ready") {
+      if (postInstall.status === "unusable") {
         return {
           capabilityId: "serena",
           command: "serena",
-          status: "installed",
-          version: postPipxCheck.version,
-          message: `Installed serena via pipx (${postPipxCheck.version ?? "unknown version"})`,
+          status: "blocked",
+          message: postInstall.reason ?? "serena exists but failed healthcheck",
         };
       }
+    } catch {
+      // Try the next supported installer.
     }
-  } catch {
-    // pipx not available either
   }
 
-  // Neither uv nor pipx available - manual verification required
   return {
     capabilityId: "serena",
     command: "serena",
     status: "manual-verified",
     message: "Serena requires manual installation: run 'uv tool install serena' or 'pipx install serena'",
   };
+}
+
+export async function installSerena(): Promise<SharedBinaryInstallResult> {
+  return installSerenaWithDependencies(defaultPiToolInstallDependencies);
 }
 
 /**

@@ -1,0 +1,511 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-07-26T22:01:19Z"
+    actor: deck-developer-explorer
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - Investigated coordinator-owned operations, delegation pressure, post-Apply functional acceptance, final independent quality gates, and commit-only behavior.
+      - Recommended a new change with no fast-route abstraction and no new canonical phase.
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: 2026-07-26T22:23:01.073Z
+    actor: deck-developer-proposal
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:e11b6ea8967d6a2143f2ea17c8763929
+    idempotency_key: sha256:448c35821a2bff20e24c4a0cdf7fb984599f005768f27dcee95e625b5068fcf6
+    transaction_id: registry-tx-4955c8ef-5426-44ba-90ad-712892ffbee9
+    notes:
+      - Authored the bounded ownership and pre-QA implementation-testing proposal.
+      - Proposal completion is not approval; Spec and Design require recorded
+        human approval.
+  - phase: proposal
+    status: approved
+    event: proposal.approved
+    artifact: proposal.md
+    timestamp: 2026-07-26T22:31:29.065Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:54187128ee0d47cae6b34ee822c3431d
+    idempotency_key: sha256:abeb0fc8a37b5feea64bc3dc3b51b3a6149b129509373f4a8bb4924bec478c7c
+    transaction_id: registry-tx-e38d998b-67f0-4cd9-9400-543cc3119174
+    notes:
+      - "User approved the Proposal with the message: Prosigue."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: 2026-07-26T22:50:39.611Z
+    actor: deck-developer-design
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:819c3f480560c439e93e9bf944a9f8f0
+    idempotency_key: sha256:4fe0f3a45219a82c2814f51c04830ff137e4a355a5c52ad70126bd3d1198f908
+    transaction_id: registry-tx-6edf7ec2-d2b7-43b2-aa08-8a5041154d24
+    notes:
+      - Selected in-place INV-002 supersession with compact/legacy parity and no
+        new runtime state.
+      - Defined pre-QA functional validation, commit-only snapshot handling,
+        decision absorption, EIIs, and unchanged final QA floors.
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: 2026-07-26T23:15:00.000Z
+    actor: deck-developer-spec
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:71d9a9656f245ca0c77b20f1ccd32ecd
+    idempotency_key: sha256:9009ab1cbda6639c7a92c9e90dc25cfee51ed149cfe57627515b36be87bd598b
+    transaction_id: registry-tx-67121734-e4e5-4b10-aeb5-7efdc382b3f6
+    notes:
+      - Specified 40 requirements across 10 areas with 69 Given/When/Then
+        acceptance scenarios.
+      - Supersedes only the pure-delegator condition of REQ-OIS-002 from
+        persistent-orchestrator-invariants; all other invariant requirements
+        preserved.
+      - Defines coordinator ownership boundary, pre-QA implementation testing
+        loop, single fresh final QA cycle, commit-only semantics, and safety-floor
+        preservation.
+  - phase: design
+    status: approved
+    event: design.approved
+    artifact: design.md
+    timestamp: 2026-07-26T23:01:12.366Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:a8c20da11127da02a1d435026e33b214
+    idempotency_key: sha256:66452a3489dd22d959a07aa686b87d3c848c58153294c9d76735641bdb229f11
+    transaction_id: registry-tx-5cc0f684-3936-4669-8c23-a6b52d719dc0
+    notes:
+      - "User approved Spec and Design with the message: Procede."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: 2026-07-26T23:45:00.000Z
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:345b28f7ce6dfec1706a08580a4f83f0
+    idempotency_key: sha256:d8d2ca464e83c63a4bc26faeca7ada435a1c71e5abbdf09f69f4f1f379d7cebd
+    transaction_id: registry-tx-b23e3847-4103-4f3e-9e9f-ff82993fb917
+    notes:
+      - 10 tasks (T1..T10) with 9 Low + 1 Medium complexity; canonical order
+        T1->T2->T3->{T4,T5,T6 in parallel}->T7->T8->T9->T10.
+      - T4 parallel only with T5/T6; T5 parallel only with T4/T6; T6 parallel only
+        with T4/T5. T7 is NOT parallel with T4/T5/T6 and depends on all three.
+      - "Spec coverage: all 40 requirements across 10 areas (OWN, GIT, CMT, TST,
+        FND, QA, NOB, REC, SAF, CMP) anchored per task."
+      - "Design EII coverage: all 19 EIIs (EII-SOA-001..EII-SOA-019) including the
+        byte-verbatim commit-only block (EII-SOA-007) and INV-002 in-place rename
+        (EII-SOA-002)."
+      - "Source allowlist: 5 canonical content targets only. Test allowlist: 12
+        focused test targets only (10 core + 2 OpenCode adapter). Generated
+        outputs, runtime scheduler, adapter production sources, registry schemas,
+        historical artifacts, unrelated WIP, and runner-capability-standardization
+        remain blocked."
+      - "Preconditions: None. Blocker code design-spec-supersession-missing
+        reserved for actual Spec/Design supersession contradiction;
+        runtime-scheduler-reachability-changed reserved for new production caller
+        of scheduleExecutionRoleInvocationV1."
+  - phase: tasks
+    status: approved
+    event: tasks.approved
+    artifact: tasks.md
+    timestamp: 2026-07-26T23:22:06.275Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:a79603bf798b0f2bf33ed2b0e5dfe0e6
+    idempotency_key: sha256:344158be0c3261e3e75c9e230d40f76a88ead043b9199e4ce75dcde67da350d0
+    transaction_id: registry-tx-cfa9356b-99f8-4f43-acbf-9bbab00f2a0a
+    notes:
+      - "User authorized implementation with the message: Procede."
+      - Authorization is limited to T1 through T10 and the exact approved
+        source/test allowlist; excluded WIP and protected targets remain
+        untouched.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-26T23:45:46.891Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:6e2283325e77800bab0184347ebe2c43
+    idempotency_key: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    transaction_id: registry-tx-ce3b8fbc-44ac-4827-9aec-06d243d1068f
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - T1-T10 completed in dependency order.
+      - Working candidate functionally exercised; final independent QA not run.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: preconditions.md
+    timestamp: 2026-07-26T23:49:43.802Z
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:987434a9b2ddb2be7190bcbbf0005789
+    idempotency_key: sha256:3e6bc5cc78a132259aab9a1326d4feaf2410a725d75461722dab9ac5ef87cd89
+    transaction_id: registry-tx-daa990cc-456c-4af4-a303-bf3b56369721
+    notes:
+      - Registered preconditions.md; it declares no external preconditions.
+      - Apply working-candidate evidence remains unchanged and final independent
+        QA remains deferred.
+  - phase: apply
+    status: approved
+    event: apply.approved
+    artifact: apply-progress.md
+    timestamp: 2026-07-27T13:50:48.080Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:19ffc1e357579ac0a6e9911a33a96ae5
+    idempotency_key: sha256:dd558905dc421e7edc33a8f8866eb8bbfa5983c291a948efe6d729cc30a3e59a
+    transaction_id: registry-tx-34937cde-ebad-4303-b8eb-d66f14a01bf4
+    notes:
+      - "User accepted the working candidate with: Si, procede."
+      - Installed OpenCode prompt and role-skill materialization was validated
+        before acceptance.
+      - Acceptance selects the candidate and does not satisfy Verify, Review, or
+        broad evidence.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-27T14:19:43.158Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:2160b3d6b71060f382c207bb6b08f55b
+    idempotency_key: sha256:b7bbe8d99b1ff9df2eaa6fae7df12893a5c97747919715abb957d3d55f8d0749
+    transaction_id: registry-tx-78b32152-7566-46d8-b5b9-f27d26cee1ef
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - TARGETED retry passed after a user-authorized candidate-subject
+        oracle-recipe clarification.
+      - Affected-area, Review, and broad remain pending.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-27T14:26:42.269Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:d6c263bcfb0eb782068959702bb340f2
+    idempotency_key: sha256:63c80aee81f6df424d40a6e8b09309af9f6f24cb051a04e3897ab60ff4d9471f
+    transaction_id: registry-tx-560dffbc-a2e8-4e70-9f84-21b62f15d2a2
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - AFFECTED_AREA passed.
+      - Review and broad remain pending.
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: 2026-07-27T14:37:06.621Z
+    actor: deck-developer-review
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:768767c12941baf0e0f2bd57547c1bb7
+    idempotency_key: sha256:b0dbf901dd60bf9e802f46c315284bacecf8ebca9012f2b1e80e393597edab41
+    transaction_id: registry-tx-cbf4a818-27d9-40a2-9474-0709c06fb618
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - Review requested changes for R1-B01 and R1-B02.
+      - Mandatory broad remains blocked pending repair and fresh independent QA.
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: 2026-07-27T15:05:27.415Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:4d8c5341eaca320589b29ac1d1a63368
+    idempotency_key: sha256:24eeefaa033351d7a8c111686c52fcc13f355c6b883d2150e35f20d58bdf56c3
+    transaction_id: registry-tx-8c5008b9-610a-4505-b272-99ffb99875c1
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - "User authorized the bounded repair with the message: Procede."
+      - Repair is limited to R1-B01 and R1-B02 within the approved source/test
+        allowlist; all dependent QA evidence is invalidated.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-27T15:13:52.142Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:c4b4e0501d45b2058d19532311d836b0
+    idempotency_key: sha256:8358156ffcefaa82ad3d3bdb7162d1437b27ec045b355eaaea5215b27630dc3e
+    transaction_id: registry-tx-22a58ce1-f710-4d7b-9b8b-7c06102c7463
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - Repaired stale INV-002 documentation and completed ownership regression
+        oracles.
+      - Fresh independent targeted, affected-area, Review, and broad evidence
+        remains required.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-27T15:27:43.396Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:1b9fbfd69acdb8671f77a8b2d750a0e2
+    idempotency_key: sha256:2650247b23b4fc9e77b1ed0e43cd2ad92c4b26afa2090a107f70a94242503728
+    transaction_id: registry-tx-608a6740-58b4-46bd-b6c5-ce5c6a37a834
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - TARGETED post-repair final QA only.
+      - Candidate subject
+        sha256:2c225c8c60a7cd0ce84961a55ea016962b5a191ebbe055b0184185c3d9058650
+        and binary diff
+        sha256:91e48016de8ec67285e38ca44fdd27552d92be35235ca4d9c2d22dc5b9ce47f7
+        matched before and after checks.
+      - AFFECTED_AREA, Review, and broad remain pending.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-27T15:38:13.055Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:28398a744f8512e7fecddf25a9e0b7fc
+    idempotency_key: sha256:9c61e23612ca4c1f43ceeb2fbd9df20f965084ee621d23fc0557732c0195d707
+    transaction_id: registry-tx-a7896099-8c8b-472c-8acb-5b2be531d372
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - AFFECTED_AREA post-repair final QA passed for the repaired candidate.
+      - TARGETED was not rerun except identity/freshness guards.
+      - Review and broad remain pending.
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: 2026-07-27T15:52:53.026Z
+    actor: deck-developer-review-opencode-r2-post-repair
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:c37f412d929222af1545eb6d431bba2f
+    idempotency_key: sha256:1e64b740ae19e637f03141dd41e5b50de244d6b87a359be81529e35a0fe112fe
+    transaction_id: registry-tx-4957fe9f-b46e-4d69-954a-6c19bd428fdc
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - R1-B01 and R1-B02 are closed.
+      - R2-B01 blocks approval because the canonical direct Coordinator ownership
+        predicate omits the required non-destructive condition.
+      - Mandatory broad remains blocked and has not run.
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: 2026-07-27T16:03:34.247Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:1f702c6cf4b8e7ad13c13e6103f39fc6
+    idempotency_key: sha256:4e4d79559404d4039a02e7d9f3a43d330e7f7ae9371a5aa761e75a23b361ce99
+    transaction_id: registry-tx-48124601-b346-428c-9b0a-2c427597e995
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - "User authorized the bounded R2-B01 repair with the message: Procede."
+      - Repair is limited to the accepted non-destructive ownership condition and
+        its regression oracles; all dependent QA evidence is invalidated.
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: 2026-07-27T16:47:02.578Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:3c5add7e0f87abfa2ba98d774e399ca0
+    idempotency_key: sha256:b8254112074ae2647c4d44accda0069effbb59dbab8abb13098e036c761156a9
+    transaction_id: registry-tx-b716cc8d-bb36-424f-9ceb-b26608587c4c
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - "User authorized adding
+        packages/core/src/teams/developer/prompt-profile.test.ts with the message:
+        Procede."
+      - Authority is limited to refreshing the deterministic prompt-profile
+        fixture required by R2-B01; no other target expansion is authorized.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-27T16:50:18.840Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:e8a41ec4ef00a27f0a6dbaa719902222
+    idempotency_key: sha256:28b4b337081b3ea9054424898cfcab602367082f9ed411391a6c69b6a4617f45
+    transaction_id: registry-tx-4b85014d-4e09-4d86-9dad-2f43b0a820ea
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - R2-B01 non-destructive ownership repair completed
+      - Authorized deterministic prompt-profile fixture refreshed
+      - Fresh independent TARGETED, AFFECTED_AREA, Review, and broad remain
+        required
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-27T00:00:00.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:8a2b0f961fd065852dd3182da6fb2be5
+    idempotency_key: sha256:36a1a628862fc0079c2757ea634de5c4cd347030765503a50b5f096261237500
+    transaction_id: registry-tx-78dba04f-ec98-4b15-a88c-3615050bd36a
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - TARGETED final QA passed for final R2-B01 repaired candidate.
+      - Candidate HEAD 552172640f3b4172e6a395a8314b3aac0b4d2e20; subject
+        sha256:16267e67783189f37af28b990ee30c807b6cc7b28ae43077f80b919122595acf;
+        binary diff
+        sha256:aae9a2304fc16585dd37e17a9156eeec54c4435a5ac2004e8eb128851b9eacd9.
+      - AFFECTED_AREA, Review, and broad remain pending.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-27T17:15:09.063Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:aa9dd84f65abf192620b8fecb517e8d1
+    idempotency_key: sha256:4383d18b8c2ee1d18fe58ae1ac7713c0fb4c47994c0b775570e7f361071c8003
+    transaction_id: registry-tx-d2270a04-b8d3-47ac-a453-babb781e53d3
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - R2 AFFECTED_AREA final QA passed
+      - Review and broad remain pending
+      - Centralized registry YAML not written by Verify
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: 2026-07-27T17:31:44.486Z
+    actor: deck-developer-review-opencode-r3-final-r2
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:8e73d174045fd193d4bdd95d232d7c51
+    idempotency_key: sha256:f4849baee59cf6c9a21a7216a3f502c2b9a763a65c5fd8188fe2efb579743f60
+    transaction_id: registry-tx-8b562a6a-85a5-4fa1-b704-3072b4e43e42
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - Approved exact R2-B01 repaired 17-file candidate.
+      - Closed R1-B01, R1-B02, and R2-B01.
+      - Mandatory broad is released next and has not yet run.
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: 2026-07-27T17:45:08.584Z
+    actor: deck-developer-verify-opencode-broad-r2
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:dad4b8bb3792ddb3d5f6bf94557e9664
+    idempotency_key: sha256:66d0e80ffb5a2cebae9618dfcc75bf80185ff803ab5c924f74b5f4fcad379746
+    transaction_id: registry-tx-14e271b3-518e-4c9a-800c-4d4c52e2150d
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - BROAD repository-wide test suite failed with exit code 1.
+      - Candidate identity and approved Review binding remained unchanged.
+      - Archive is blocked until BROAD is rerun and passes after an authorized
+        disposition.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T14:01:57.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:bc437bce0e9e9c2fda12a4202efc6152
+    idempotency_key: sha256:2a0ba8e2dd02e7021228d894413705dd2f6f34c0d529f3ead1abd2647285f71e
+    transaction_id: registry-tx-25ff4d4b-f8f8-44f0-8e3d-990b27fdb7b0
+    batch_digest: sha256:9ed8a1fc481e23a830e7fee10c42d081208620ae1737dd3bb17492ba099e8589
+    notes:
+      - TARGETED Verify passed; affected_area, independent Review, and mandatory
+        BROAD remain.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T14:15:34.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:1f5cb92b4db79750da3d0e7bb0946865
+    idempotency_key: sha256:f7e1ad8b2db7964ea0f043c389f14985158ebc5544aea5ab02285dc0eb00874a
+    transaction_id: registry-tx-67202bd8-c325-4bb2-99bf-5546da415816
+    notes:
+      - AFFECTED_AREA final-QA passed for exact 17-path candidate.
+      - "Commands passed: core developer, adapter-opencode, adapter-pi parity,
+        git-safety, typecheck, rooted OpenSpec validation."
+      - Centralized registry YAML was not written by Verify.
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: 2026-07-28T14:50:05.787Z
+    actor: deck-developer-review
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:f450ff8a2fd9633fa597edcec4c0c310
+    idempotency_key: sha256:d57961df1ede5de1e882b6c6a170891837e5ea88104acaf6db9a6948c6cb11d1
+    transaction_id: registry-tx-5e5819e1-19b6-4cd0-b1c6-ae9af39c5b74
+    batch_digest: sha256:84991286cdf742a6092a26361f9aff350d1febd4b227a039b54ec8720127a731
+    notes:
+      - R4-B01 blocks mandatory BROAD.
+      - Coordinator must apply this intent atomically against the supplied base.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-28T15:19:17.316Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:fa36524e1bb7c99a272a0b77434cc7b2
+    idempotency_key: sha256:02f1ff48d2df30421187ab8330ef9f91305c25aa05b187f671cbc3b5d1049ad7
+    transaction_id: registry-tx-e52cb64a-3cf8-4359-982f-6ba7c98cd179
+    batch_digest: sha256:8c510cb6681770130b204c34d971f5153ce111e635fbe6c8b20fc668d78823ce
+    notes:
+      - R4-B01 closed by durable OpenCode adapter-boundary tests
+      - Fresh independent Verify and Review remain required
+      - R4-N01 remains non-blocking and out of scope
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T15:40:00.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:5c7c9183d9693619cd9ddbd0feac2c24
+    idempotency_key: sha256:01ba25e760b81b0a2ba1667c05311af23a28347a98d197b9e005a180fc2b9303
+    transaction_id: registry-tx-96bba4e1-8d0a-4857-bb20-c15a73a2ad52
+    batch_digest: sha256:8c510cb6681770130b204c34d971f5153ce111e635fbe6c8b20fc668d78823ce
+    notes:
+      - TARGETED Verify passed for R4-B01 repaired candidate.
+      - AFFECTED_AREA Verify, independent Review, and mandatory BROAD remain
+        required.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T15:47:34.253Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:8f576344b853f7f7be31d24bd53208c1
+    idempotency_key: sha256:5f44a809edad4c2dfd449ef9e709a4f177e9247bad835d29693cabb7bcb92859
+    transaction_id: registry-tx-a4e96d87-51a6-4291-b3c1-5f54e35919c6
+    batch_digest: sha256:8c510cb6681770130b204c34d971f5153ce111e635fbe6c8b20fc668d78823ce
+    notes:
+      - AFFECTED_AREA only
+      - R4-B01 adapter-boundary repair verified
+      - Independent Review then mandatory BROAD remain
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: 2026-07-28T15:58:16.781Z
+    actor: deck-developer-review
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:a4bec17971fb76223de6335cfa0d2d60
+    idempotency_key: sha256:f31edaf39b2a5acafcbdaf53dcce8e80208755b5860d3edc65cb4429dd5046c9
+    transaction_id: registry-tx-413603fd-bb96-4cd6-a56a-3fe51fba5ed6
+    batch_digest: sha256:8c510cb6681770130b204c34d971f5153ce111e635fbe6c8b20fc668d78823ce
+    notes:
+      - R5-B01 blocks mandatory BROAD; R4-B01 is closed.
+      - Exact 17-path candidate remains bound to
+        sha256:4f1913c37b377efdf19423c13fa4fc36f6b5ae2bb023ee1e490340141c812904.

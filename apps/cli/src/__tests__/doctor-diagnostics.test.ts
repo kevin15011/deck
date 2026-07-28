@@ -58,6 +58,28 @@ function fabOkMcpResult() {
   };
 }
 
+
+function fabDependencies() {
+  return {
+    runDeckChecks: vi.fn(async () => ({ deck: [], binary: [], runnerConfig: [] })),
+    fetchReleaseDescriptor: vi.fn(() => ({
+      kind: "legacy" as const,
+      reason: "missing" as const,
+      info: {
+        tagName: "v0.0.0",
+        version: "0.0.0",
+        downloadUrl: "",
+        sha256: "",
+        publishedAt: "2026-01-01T00:00:00.000Z",
+        body: "",
+        commit: null,
+      },
+    })),
+    memoryBinaryAvailable: vi.fn((_command: string) => false),
+    readOpenCodeMcpSection: vi.fn((): Record<string, unknown> | null => null),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Test scenarios
 // ---------------------------------------------------------------------------
@@ -69,7 +91,7 @@ describe("runDoctorDiagnostics", () => {
     mockDetectSelectedRuntimes.mockReturnValue([]);
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     expect(result.runtimes).toHaveLength(0);
     expect(result.hasCriticalErrors).toBe(true);
@@ -94,7 +116,7 @@ describe("runDoctorDiagnostics", () => {
     });
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     const pi = result.runtimes.find((r) => r.runtimeId === "pi");
     expect(pi).toBeDefined();
@@ -126,7 +148,7 @@ describe("runDoctorDiagnostics", () => {
     });
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     const pi = result.runtimes.find((r) => r.runtimeId === "pi");
     const packagesCategory = pi!.checks.find((c) => c.category === "Packages");
@@ -142,7 +164,7 @@ describe("runDoctorDiagnostics", () => {
     mockDetectSelectedRuntimes.mockReturnValue([fabClaudeStatus()]);
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     const claude = result.runtimes.find((r) => r.runtimeId === "claude");
     expect(claude).toBeDefined();
@@ -155,54 +177,32 @@ describe("runDoctorDiagnostics", () => {
 
   // ── Engram available ─────────────────────────────────────────────────────
 
-  test("Engram binary in PATH → Engram shows ok", async () => {
-    const originalPath = process.env.PATH;
-    const { writeFileSync, unlinkSync, existsSync } = await import("node:fs");
-    const pathModule = await import("node:path");
+  test("Engram normal-path check returns a redacted diagnostic category", async () => {
+    const dependencies = fabDependencies();
+    dependencies.memoryBinaryAvailable.mockImplementation((command) => command === "engram");
 
-    try {
-      // Create a fake engram binary in /tmp so the existsSync check passes
-      const fakeEngramPath = pathModule.join("/tmp", "engram");
-      writeFileSync(fakeEngramPath, "#!/bin/sh", { mode: 0o755 });
+    const result = await runDoctorDiagnostics(dependencies);
 
-      process.env.PATH = "/tmp:/usr/bin:/bin";
-
-      const result = await runDoctorDiagnostics();
-
-      const engramCategory = result.memory.find((m) => m.category === "Engram");
-      expect(engramCategory).toBeDefined();
-      expect(engramCategory!.status).toBe("ok");
-    } finally {
-      process.env.PATH = originalPath;
-      // Clean up temp file
-      try {
-        unlinkSync("/tmp/engram");
-      } catch {
-        // ignore
-      }
-    }
+    expect(dependencies.memoryBinaryAvailable).toHaveBeenCalledWith("engram");
+    const engramCategory = result.memory.find((item) => item.category === "Engram");
+    expect(engramCategory).toMatchObject({ status: "ok" });
+    expect(JSON.stringify(engramCategory)).not.toMatch(/Bearer\s+eyJ/i);
   });
 
   // ── Supermemory without binary ───────────────────────────────────────────
 
-  test("Supermemory binary absent → warning without credential exposure", async () => {
-    const originalPath = process.env.PATH;
+  test("Supermemory normal-path check never exposes credentials", async () => {
+    const dependencies = fabDependencies();
+    dependencies.memoryBinaryAvailable.mockReturnValue(false);
 
-    try {
-      process.env.PATH = "/nonexistent";
+    const result = await runDoctorDiagnostics(dependencies);
 
-      const result = await runDoctorDiagnostics();
-
-      const smCategory = result.memory.find((m) => m.category === "Supermemory");
-      expect(smCategory).toBeDefined();
-      expect(smCategory!.status).toBe("warning");
-
-      const allMessages = smCategory!.items.map((i) => i.message).join(" ");
-      expect(allMessages).not.toMatch(/Bearer\s+/i);
-      expect(allMessages).not.toMatch(/sk-[a-zA-Z0-9]{20,}/);
-    } finally {
-      process.env.PATH = originalPath;
-    }
+    expect(dependencies.memoryBinaryAvailable).toHaveBeenCalledWith("supermemory");
+    const supermemoryCategory = result.memory.find((item) => item.category === "Supermemory");
+    expect(supermemoryCategory).toMatchObject({ status: "warning" });
+    const messages = supermemoryCategory!.items.map((item) => item.message).join(" ");
+    expect(messages).not.toMatch(/Bearer\s+/i);
+    expect(messages).not.toMatch(/sk-[a-zA-Z0-9]{20,}/);
   });
 
   // ── Pi MCP configured correctly ──────────────────────────────────────────
@@ -211,7 +211,7 @@ describe("runDoctorDiagnostics", () => {
     mockDetectSelectedRuntimes.mockReturnValue([]);
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     const piMcp = result.mcp.find((m) => m.category === "Pi MCP");
     expect(piMcp).toBeDefined();
@@ -231,7 +231,7 @@ describe("runDoctorDiagnostics", () => {
       ],
     });
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     const piMcp = result.mcp.find((m) => m.category === "Pi MCP");
     expect(piMcp).toBeDefined();
@@ -254,12 +254,18 @@ describe("runDoctorDiagnostics", () => {
     });
     mockReviewOpenCodeTools.mockReturnValue({ installedPackages: [], tools: [], toolStatuses: [] });
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
+    const dependencies = fabDependencies();
+    dependencies.readOpenCodeMcpSection.mockReturnValue({
+      supermemory: { type: "remote", url: "https://example.invalid/supermemory" },
+      "codebase-memory-mcp": { command: ["codebase-memory-mcp"] },
+      serena: { command: ["serena"] },
+    });
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(dependencies);
 
+    expect(dependencies.readOpenCodeMcpSection).toHaveBeenCalledTimes(1);
     const opencodeMcp = result.mcp.find((m) => m.category === "OpenCode MCP");
-    expect(opencodeMcp).toBeDefined();
-    expect(opencodeMcp!.category).toBe("OpenCode MCP");
+    expect(opencodeMcp).toMatchObject({ category: "OpenCode MCP", status: "ok" });
   });
 
   // ── Sub-check exception does not abort other checks (REQ-DIAG-007) ───────
@@ -276,7 +282,7 @@ describe("runDoctorDiagnostics", () => {
     });
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     // Pi runtime check should still be present
     const pi = result.runtimes.find((r) => r.runtimeId === "pi");
@@ -295,7 +301,7 @@ describe("runDoctorDiagnostics", () => {
     });
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     expect(result).toBeDefined();
     expect(result.runtimes).toHaveLength(0);
@@ -308,7 +314,7 @@ describe("runDoctorDiagnostics", () => {
     mockDetectSelectedRuntimes.mockReturnValue([]);
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     expect(typeof result).toBe("object");
     expect(result).not.toBeInstanceOf(String);
@@ -336,10 +342,46 @@ describe("runDoctorDiagnostics", () => {
       ],
     });
 
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics(fabDependencies());
 
     const serialized = JSON.stringify(result);
     expect(serialized).not.toMatch(/Bearer\s+eyJ/i);
     expect(serialized).not.toMatch(/sk-[a-zA-Z0-9]{20,}/);
+  });
+});
+
+
+describe("runDoctorDiagnostics dependency seam", () => {
+  test("uses exactly four deterministic diagnostic dependencies", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([]);
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
+    const dependencies = fabDependencies();
+    dependencies.memoryBinaryAvailable.mockImplementation((command) => command !== "supermemory");
+    dependencies.readOpenCodeMcpSection.mockReturnValue({
+      supermemory: { type: "remote", url: "https://example.invalid/supermemory" },
+      "codebase-memory-mcp": { command: ["codebase-memory-mcp"] },
+      serena: { command: ["serena"] },
+    });
+
+    const result = await runDoctorDiagnostics(dependencies);
+
+    expect(Object.keys(dependencies).sort()).toEqual([
+      "fetchReleaseDescriptor",
+      "memoryBinaryAvailable",
+      "readOpenCodeMcpSection",
+      "runDeckChecks",
+    ]);
+    expect(dependencies.runDeckChecks).toHaveBeenCalledTimes(1);
+    expect(dependencies.fetchReleaseDescriptor).toHaveBeenCalledTimes(1);
+    expect(dependencies.memoryBinaryAvailable.mock.calls.map(([command]) => command)).toEqual([
+      "engram",
+      "supermemory",
+      "serena",
+    ]);
+    expect(dependencies.readOpenCodeMcpSection).toHaveBeenCalledTimes(1);
+    expect(result.binary?.reason).toBe("Release descriptor not found");
+    expect(result.memory.find((item) => item.category === "Engram")?.status).toBe("ok");
+    expect(result.memory.find((item) => item.category === "Supermemory")?.status).toBe("warning");
+    expect(result.mcp.find((item) => item.category === "OpenCode MCP")?.status).toBe("ok");
   });
 });

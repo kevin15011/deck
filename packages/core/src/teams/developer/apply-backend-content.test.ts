@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   APPLY_BACKEND_AGENT_BODY,
   APPLY_BACKEND_SKILL_BODY,
+  APPLY_BACKEND_COMPACT_SKILL_BODY,
 } from "./apply-backend-content";
 
 // Import git-safety for rule presence assertion
@@ -295,3 +296,20 @@ describe("repair incident apply behavior", () => {
 });
 
 describe("backend repair fingerprint content", () => { test("requires existing runtime fingerprint shape", () => { expect(APPLY_BACKEND_SKILL_BODY).toContain("existing runtime failure fingerprint shape"); }); });
+
+
+describe("backend pre-QA functional validation", () => {
+  test("requires real backend behavior exercise without claiming independent QA", () => {
+    for (const body of [APPLY_BACKEND_SKILL_BODY, APPLY_BACKEND_COMPACT_SKILL_BODY]) {
+      expect(body).toContain("focused local proof");
+      expect(body).toContain("backend functional exercise");
+      expect(body).toContain("fix and retest");
+      expect(body).toContain("non-independent");
+      expect(body).toContain("conditional target");
+      expect(body).toContain("fresh independent QA");
+    }
+    expect(APPLY_BACKEND_SKILL_BODY).toContain("endpoint, service, persistence, integration, and error-path behavior");
+    expect(APPLY_BACKEND_SKILL_BODY).toContain("real trust boundaries");
+    expect(APPLY_BACKEND_COMPACT_SKILL_BODY).not.toContain("scheduled targeted, affected-area, and broad checks");
+  });
+});

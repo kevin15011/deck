@@ -1,0 +1,423 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: 2026-07-27T18:29:06.760Z
+    actor: deck-developer-explorer
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - Investigated the deterministic documentation failure and six process, environment, or shared-state failures blocking repository-wide BROAD.
+      - Recommended one coherent bounded change without weakening mandatory broad or touching the parent candidate.
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: 2026-07-27T18:37:47.811Z
+    actor: deck-developer-proposal
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - Drafted the eight-path repository BROAD baseline stabilization Proposal.
+      - Proposal completion is not approval; Spec and Design require explicit human approval.
+  - phase: proposal
+    status: approved
+    event: proposal.approved
+    artifact: proposal.md
+    timestamp: 2026-07-27T18:43:14.821Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:7a2483e6ce9ad2cdc93a3f8b9715b251
+    idempotency_key: sha256:68eb687551a7b2c6f6c2531fbc9add11df951b004235556ca755e1c9219c1505
+    transaction_id: registry-tx-750337fb-74b5-4ce6-90b9-5de80ac3af79
+    notes:
+      - "User explicitly approved the Proposal with the message: Procede."
+      - Approval authorizes parallel Spec and Design drafting only; implementation
+        remains unauthorized.
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: 2026-07-27T19:01:13.881Z
+    actor: deck-developer-design
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:26ee5944f288c4aef412cce1103124e8
+    idempotency_key: sha256:298f3c4661032a15e55d16725259d746082ec381fbcc301d7713e9de16ac16b8
+    transaction_id: registry-tx-157b75b0-9a5e-470a-8baf-e12f246fe6b7
+    notes:
+      - Defined the smallest durable architecture for all approved baseline
+        failure classes.
+      - Spec and Design reconciliation remains required before Tasks;
+        implementation remains unauthorized.
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: 2026-07-27T19:04:18.245Z
+    actor: deck-developer-spec
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:005a0d900df1619191ebfcea245755ad
+    idempotency_key: sha256:110d001a05445d353e5104f0addf3fe884624b79bd3205b73cedd97b063661f0
+    transaction_id: registry-tx-8aa31a62-9246-4d8e-927d-19be53d31acc
+    notes:
+      - Specified 34 requirements across 9 capability groups with 51 acceptance
+        scenarios.
+      - Spec and Design reconciliation remains required before Tasks;
+        implementation remains unauthorized.
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: 2026-07-27T19:32:02.858Z
+    actor: deck-developer-spec
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:2683358ea8b0c8e95f7b21bb168cf679
+    idempotency_key: sha256:584acc22397c0211403f18a1b1608cc48d304e785f460aef0147f43efb7171cd
+    transaction_id: registry-tx-e09dfe3a-3dff-4380-90e8-f6bc0cd431c9
+    notes:
+      - Corrected total scenario count from 51 to 50 and Parent capability count
+        from 5 to 4.
+      - No requirement, behavior, or scenario was added or removed; Spec/Design
+        reconciliation is unblocked.
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: 2026-07-27T19:36:34.732Z
+    actor: deck-developer-design
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:3da30a783dc912d8204ec1acc5b040ae
+    idempotency_key: sha256:7e373d5edeae3e84a95d84dd32c200536427a3c7abb4b8346f813ada548d811d
+    transaction_id: registry-tx-835a14a3-cfba-40af-81c0-069dba4bb197
+    notes:
+      - Corrected Spec coverage totals reconciled; no open Design decisions or
+        blockers remain.
+  - phase: design
+    status: approved
+    event: design.approved
+    artifact: design.md
+    timestamp: 2026-07-27T19:40:58.683Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:02f39fccc1b47fe9fb752f69745d3c93
+    idempotency_key: sha256:49515c105286abaf9a90c2bfbcf8ef12f1915426c9d0cf7650e5828a22219760
+    transaction_id: registry-tx-c59eae4e-1e24-4ae7-9392-c50d15f054f2
+    notes:
+      - "User explicitly approved Spec and Design with the message: Procede."
+      - Approval authorizes Tasks drafting only; Apply implementation remains
+        unauthorized.
+      - Approved Spec
+        sha256:d6bd774a2eb3dda41b7ff1e08c619b5edc12e000d8f6be4f85a78369245cde4c
+        and Design
+        sha256:569b3564dd56f18bd50282b503befb545b64c2e90017ed7ac1b8ca2095cad167.
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: 2026-07-27T19:49:47.672Z
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:187a060cb7d331f485fe567bf4b78f9c
+    idempotency_key: sha256:46e2747551e8fd742d5cbaca4a720ab19adf62475b7f6dd000f6262461436043
+    transaction_id: registry-tx-9ab5f8db-ad9a-4f8f-9d52-0c3f047b345e
+    notes:
+      - Created 15 atomic tasks across seven execution groups for the exact
+        eight-path implementation boundary.
+      - Doctor injection is limited to runDeckChecks and fetchReleaseDescriptor;
+        implementation remains unauthorized.
+  - phase: tasks
+    status: completed
+    event: preconditions.created
+    artifact: preconditions.md
+    timestamp: 2026-07-27T19:49:47.672Z
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:17e515aad2611e006897bc88eaea5ab9
+    idempotency_key: sha256:4f9074d21506c36126885dfe8cbe0c13e3d47bb5eb76dbbf2c835a8700aa8aa0
+    transaction_id: registry-tx-c123dd63-6a2f-40d5-9ea5-b4ead95538ee
+    notes:
+      - "External preconditions: None."
+      - This transition does not authorize Apply implementation, ledger edits,
+        parent changes, or test execution.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-28T02:19:43.183Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:5f01b1d079a81f3f838b9f25b711a184
+    idempotency_key: sha256:4be7cd59bafcca7289746ceac6f772d478fe6f5ea33ce8bd5b99c0d0ca3b3c4a
+    transaction_id: registry-tx-96ed4465-b751-49c8-a6e8-97a55a42190c
+    notes:
+      - Fresh Apply-local bun test --timeout 30000 exited 0 with 4014 pass and 0
+        fail across 222 files.
+      - The baseline ledger was the final Apply edit; independent targeted Verify
+        is required next.
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T02:38:09.970Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:7c4a5d2541487c68d8a6329c4514b03c
+    idempotency_key: sha256:1a99d2d34e734afcc100e749713a79c7e8e64616932736ce8869bedf6c3fe045
+    transaction_id: registry-tx-e9bb9185-fe69-44c9-9a5d-d68603c77845
+    notes:
+      - Targeted Verify ran all scheduled focused commands and rooted OpenSpec
+        validation with exit 0.
+      - Advancement blocked by authoritative Design/Tasks Doctor seam conflict and
+        REQ-DOC-003 unit-isolation mismatch.
+      - Advancement blocked by unavailable deterministic per-class RED evidence
+        required by T6.
+  - phase: tasks
+    status: completed
+    event: tasks.repaired
+    artifact: tasks.md
+    timestamp: 2026-07-28T02:51:57.643Z
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:74e7218ba08f51f2b1b8dd042d7b6895
+    idempotency_key: sha256:c86e10e8cc861a3135449c6b5f45c4e8a484fa3a564e69c1634c44e5f65fd5b2
+    transaction_id: registry-tx-614b54ba-2f4c-4aad-92f3-6dd6652e63ec
+    notes:
+      - Reconciled the Doctor task with the four approved dependency members and
+        preserved the exact repair boundary.
+      - Mapped F-VFY-TGT-001 through F-VFY-TGT-003 to fresh deterministic RED,
+        Apply repair, and fresh targeted Verify.
+  - phase: apply
+    status: completed
+    event: apply.general.fix_completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-28T03:06:30.094Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:c48871f39728cc0d7aaaeba4cae1871f
+    idempotency_key: sha256:becec29f05420a0c6eee5355699a207228b7ad9b6b13412041899e50149f8447
+    transaction_id: registry-tx-b2b2d7fc-7b21-4110-b336-266aaddcc5dd
+    notes:
+      - Resolved F-VFY-TGT-001 through F-VFY-TGT-003 with the exact four-member
+        Doctor dependency seam and fresh deterministic RED evidence.
+      - Fresh bun test --timeout 30000 exited 0 with 4014 pass and 0 fail across
+        222 files; fresh targeted Verify is required next.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T03:12:03.633Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:78c947f5bbdf0bcf7fad02b655211353
+    idempotency_key: sha256:a5153ed3db2d1720d81af74a5fc69098c31107e683ee1c9df7f00b8941576b3e
+    transaction_id: registry-tx-ce9f2d96-152f-4083-a8eb-d363919d26d8
+    notes:
+      - Fresh targeted Verify rerun passed all scheduled focused commands and
+        rooted OpenSpec validation.
+      - F-VFY-TGT-001, F-VFY-TGT-002, and F-VFY-TGT-003 are resolved by repaired
+        Tasks, four-member Doctor seam, deterministic unit fixtures, and RED/GREEN
+        evidence.
+      - Affected-area Verify remains the next required hard gate; final mandatory
+        BROAD is not waived.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T03:25:30.981Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:e485badeccd31a55a3f41f2f54cb1bdc
+    idempotency_key: sha256:aaac2307ad87ac35b1688a74e546ea3f38f0ce053dd9395350da269c2f262d8e
+    transaction_id: registry-tx-0399a695-27ca-4d28-89d2-95b0b46a1993
+    notes:
+      - Fresh affected-area Verify passed scheduled adapter-pi,
+        documentation/TUI/Binary/Doctor, and typecheck commands.
+      - Candidate, parent, excluded WIP, write hygiene, process cleanup, and
+        ledger truthfulness checks passed.
+      - Independent Review remains next; final mandatory BROAD Verify is not
+        waived.
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: 2026-07-28T03:48:46.882Z
+    actor: deck-developer-review
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:ba6dc52bd7d578ad0ae6e3fa7bd72169
+    idempotency_key: sha256:ce69a13eeac890e358bc1af174f850b479130931fb23ca151edaa6f772188e00
+    transaction_id: registry-tx-90f5478f-f4f1-48bb-88da-53ba8bf5f78d
+    notes:
+      - Review found five blocking candidate-related findings.
+      - Final mandatory BROAD is blocked pending bounded forward repair or formal
+        replan and fresh QA.
+      - No shared registry YAML was written by Review.
+  - phase: apply
+    status: completed
+    event: apply.general.fix_completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-28T04:11:27.256Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:7924dadafa0cda4814ccdf8f23924595
+    idempotency_key: sha256:0689e62e2cd4b064a4870979c85be2ef831c9b3d066eac8afedc271c661a7ba5
+    transaction_id: registry-tx-084d1f75-3113-4785-9270-b4b007c12d98
+    notes:
+      - Repaired F-REV-PI-001, F-REV-PI-002, F-REV-BIN-001, F-REV-BIN-002, and
+        F-REV-BIN-003 within the exact five-path boundary.
+      - Fresh bun test --timeout 30000 exited 0 with 4019 pass and 0 fail across
+        222 files; QA must restart at targeted Verify.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T04:16:55.362Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:2c4b41e5e96fcb5cde99df548fbbd677
+    idempotency_key: sha256:64bec26e5cdd7942e02f045339d270eab14c218e0ac6b7812299cf265f511373
+    transaction_id: registry-tx-87ec9e8f-1b5a-44ee-a556-d63284c40919
+    batch_digest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+    notes:
+      - Fresh independent TARGETED Verify passed after authorized five-finding
+        Review repair.
+      - Stage=targeted; report digest
+        sha256:3ca68f96fe90355601f3686b617945e0ec913f443fe9d42feb1726b69927e0bd;
+        report size 53911 bytes.
+      - No direct registry write was performed.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T04:31:21.348Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:563bd822b0fd0f53e8b169e30317571c
+    idempotency_key: sha256:9efc4899ed4570c2ad378824a68d7a7093703f8b0f33ece0c4d6381e4636c1d9
+    transaction_id: registry-tx-66b3eaec-4f91-4a11-96e3-c8e0da3e8227
+    batch_digest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+    notes:
+      - stage=affected_area
+      - fresh post-Review-repair affected-area Verify passed
+      - batch=batch:v1:db4ce8e870c3cb0d3ae3fec9ef34e371
+      - no direct registry write
+  - phase: review
+    status: failed
+    event: review.failed
+    artifact: review-report.md
+    timestamp: 2026-07-28T04:46:41.964Z
+    actor: deck-developer-review
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:e16e5329d5881f9449839c69e8699cef
+    idempotency_key: sha256:61e2f2a6ef2a12b0c1b7afcb886bb6d48945b2440318f3e5546d08ab81443df6
+    transaction_id: registry-tx-85ec1621-5d39-456e-85e0-3acec707ac4f
+    batch_digest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+    notes:
+      - candidateSubject=sha256:f89e50de15bcef6c6c59ddc586a0c580c8dd6c37613dbfdba79b640bd00328df
+      - candidateDiff=sha256:35662a58309b03e2dc0c4a80d9752e32477ccf1f35cf5503bf52e78d2e34348f;
+        bytes=90319
+      - failureManifest=sha256:b5c3c924f8a8c416e24c6466cf779ef279a695820c7d9d719eb2f4289c597a1f
+      - blockingFinding=F-REV-BIN-002
+      - next=bounded-forward-repair-then-targeted-affected-review
+  - phase: apply
+    status: completed
+    event: apply.general.fix_completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-28T05:02:49.097Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:124c3daac47b4bffad52a123d13cb5ea
+    idempotency_key: sha256:8133242b11c330b51dcc533a8061777acc5291554fab8dfa2dbc7ee183b3fc1a
+    transaction_id: registry-tx-90286483-fdca-4447-bde0-117ac96fd16f
+    batch_digest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+    notes:
+      - Replaced the disconnected outside sentinel with causal bounded
+        repository/runtime/environment containment inventory and a controlled
+        negative oracle.
+      - Fresh bun test --timeout 30000 exited 0 with 4020 pass and 0 fail across
+        222 files.
+      - Candidate subject
+        sha256:db1ddc6095f604298a6b7ce77208271fe9ff0f48290490047fd8d0d71b7effbd;
+        QA must restart at targeted Verify.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T05:19:25.874Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:47edc94cd6038b3f6e4bff18f552788b
+    idempotency_key: sha256:31ea322f7d8ba3e922146474e65cd13ec65d4b4b44d076570693001e9f1bbff9
+    transaction_id: registry-tx-dcd40c7a-68c6-4bae-be81-9159d139ff07
+    batch_digest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+    notes:
+      - stage=targeted
+      - F-REV-BIN-002=closed
+      - 34 requirements and 50 scenarios inspected at targeted depth
+      - no direct registry write
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T05:35:32.351Z
+    actor: verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:b7586a653923ca615a3d29831b6024ba
+    idempotency_key: sha256:1e640e404c1376fc7d2c4ff0e5d9e8468726e5fe8ab53519057678b8e6a94457
+    transaction_id: registry-tx-25eb1519-73fe-4fd0-ae11-95a99fdfa101
+    batch_digest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+    notes:
+      - Affected-area Verify passed after containment repair and fresh targeted
+        pass.
+      - Coordinator-owned registry write only; Verify did not write state.yaml or
+        events.yaml.
+  - phase: review
+    status: passed
+    event: review.passed
+    artifact: review-report.md
+    timestamp: 2026-07-28T05:47:46.706Z
+    actor: deck-developer-review
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:6c6bc712a38f069dd40335f266a1d5b5
+    idempotency_key: sha256:fe704368f7b423d9595da09aec13302d244d3ef8b17a90fabda481ffd0b91b45
+    transaction_id: registry-tx-743eac71-193f-4c0f-9a75-a9071c2f2031
+    batch_digest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+    notes:
+      - Five-axis T13 Review passed with zero blocking findings; A-REV-001 remains
+        optional and non-blocking.
+      - F-REV-BIN-002 is closed for the exact empty-descriptor upgrade scenario
+        after causal bounded containment inspection.
+      - Fresh mandatory T14 BROAD remains required; Review wrote no registry YAML.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-28T06:02:50.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:93cdfaae2bf3a5bab6237b15f30a5aa6
+    idempotency_key: sha256:39f88a272586496c91ba5a9a2cb1b827bec90ac816ee2d0650a1f40ca44d67ee
+    transaction_id: registry-tx-9e501804-23c3-4fbd-952b-34135cbc9e33
+    batch_digest: sha256:db4ce8e870c3cb0d3ae3fec9ef34e371a275b7e4f3dae04af3e25459b081c43a
+    notes:
+      - stage=broad
+      - T14 final mandatory BROAD passed
+      - "bun test --timeout 30000: 4020 pass / 0 fail"
+      - "bunx tsc --noEmit: exit 0"
+      - "OpenSpec validation: ok true, 0 errors, 0 warnings"
+  - phase: archive
+    status: archived
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: 2026-07-28T06:15:00.000Z
+    actor: deck-developer-archive
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:259087d2bb762372c926c457224a585b
+    idempotency_key: sha256:3b78a12b2be30ba992e85851ca641263e106704ad0fe44713bd442a6a1e29dd2
+    transaction_id: registry-tx-46cb4153-6fd7-4e6d-bede-9c4066de0882
+    notes:
+      - Canonical archive contains 12 preserved artifacts.
+      - Final BROAD passed 4020 tests with zero failures across 222 files; fresh
+        typecheck and OpenSpec validation passed.
+      - Parent remains unchanged and requires its own fresh independent
+        verification.
+      - A-REV-001 remains optional and non-blocking.

@@ -116,7 +116,7 @@ describe("rendering: renderOrchestratorInvariants", () => {
     it(`should render titles for ${surface} surface`, () => {
       const output = renderOrchestratorInvariants({ surface });
       expect(output).toContain("Execution Mode Gate");
-      expect(output).toContain("Pure Delegator");
+      expect(output).toContain("Coordinator Ownership");
       expect(output).toContain("SDD Initialization Gate");
       expect(output).toContain("SDD Triage Gate");
       expect(output).toContain("SDD Explorer-First Flow");
@@ -535,5 +535,67 @@ describe("ModificationAuthorization: renderApplyAuthorizationCard", () => {
     expect(output).toContain("Proposal: proposal.md");
     expect(output).toContain("Spec: spec.md");
     expect(output).toContain("Design: design.md");
+  });
+});
+
+describe("streamlined coordinator ownership invariants", () => {
+  it("renames INV-002 in place and preserves its identity, position, and complete ownership contract", async () => {
+    const exports = await import("./orchestrator-invariants");
+    expect("INV_002_PURE_DELEGATOR" in exports).toBe(false);
+    expect("INV_002_COORDINATOR_OWNERSHIP" in exports).toBe(true);
+    const ownership = exports.ORCHESTRATOR_INVARIANTS[1];
+    expect(ownership).toMatchObject({ id: "INV-002", title: "Coordinator Ownership", tier: "critical", surfaces: ["session", "agent", "skill", "manifest"] });
+    expect(ownership.requiredAction).toContain(
+      "bounded, mechanical, deterministic, authorized, non-destructive, and requires no specialist implementation or judgment",
+    );
+
+    for (const directOperation of [
+      "git status/diff/log inspection",
+      "exact staging and commit",
+      "deterministic artifact, digest, count, and existence checks",
+      "centralized intent reconciliation",
+      "synthesis",
+      "resolved-decision recording",
+    ]) {
+      expect(ownership.requiredAction).toContain(directOperation);
+    }
+
+    for (const specialistOwned of [
+      "behavior changes",
+      "specialist artifacts",
+      "broad or build execution",
+      "protected-risk",
+      "architecture",
+      "migration",
+      "security",
+      "data-loss",
+      "public-API judgment",
+      "Verify",
+      "Review",
+    ]) {
+      expect(ownership.requiredAction).toContain(specialistOwned);
+    }
+  });
+
+  it("documents INV-002 as bounded Coordinator Ownership without opposite pure-delegator claims", async () => {
+    const source = await Bun.file(new URL("./orchestrator-invariants.ts", import.meta.url)).text();
+    const exportOffset = source.indexOf("export const INV_002_COORDINATOR_OWNERSHIP");
+    const jsdocOffset = source.lastIndexOf("/**", exportOffset);
+    const jsdoc = source.slice(jsdocOffset, exportOffset);
+
+    expect(jsdoc).toContain("INV-002: Coordinator Ownership");
+    expect(jsdoc).toContain("bounded");
+    expect(jsdoc).not.toContain("Pure Delegator");
+    expect(jsdoc).not.toContain("never executes specialized agent work");
+    expect(jsdoc).not.toContain("always delegates");
+  });
+
+  it("keeps compact Automatic and ownership boundaries explicit", () => {
+    const automatic = COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.find(({ id }) => id === "INV-001")!.summary;
+    const ownership = COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.find(({ id }) => id === "INV-002")!.summary;
+    expect(automatic).toContain("no routine pause");
+    expect(automatic).toContain("target/product validation");
+    expect(ownership).toContain("bounded coordinator operations");
+    expect(ownership).toContain("implementation and judgment");
   });
 });

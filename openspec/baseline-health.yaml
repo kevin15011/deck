@@ -1,8 +1,8 @@
 # Baseline Health Ledger
 # Minimal fingerprint record for known repository gates.
 schema: baseline-health/v1
-updated: "2026-07-12"
-source: streamline-project-documentation Apply repair
+updated: "2026-07-28"
+source: stabilize-repository-broad-baseline Apply final containment repair
 
 # Focused commands retained from the existing verification ownership contract.
 focused_commands:
@@ -33,33 +33,25 @@ focused_commands:
 
 repo_wide_commands:
   - id: repo-bun-test
-    command: "bun test"
-    captured_at: "2026-07-12"
+    command: "bun test --timeout 30000"
+    captured_at: "2026-07-28T05:02:49Z"
     source_commands:
-      - "bun test apps/cli/src/__tests__/binary-smoke.test.tsx --test-name-pattern doctor runs and reports diagnostics"
-      - "bun test"
+      - "bun test --timeout 30000"
     expected:
-      status: known-failures
-      passed: 3296
-      failed: 1
-      fingerprints:
-        - file_path: apps/cli/src/__tests__/binary-smoke.test.tsx
-          suite: "Binary smoke tests"
-          test_name: "doctor runs and reports diagnostics"
-          error_signature: "bun-test-timeout-5000ms; killed 1 dangling process"
-          classification: known
-          reproduction: "Bun test-level timeout after 5000 ms"
+      status: pass
+      passed: 4020
+      failed: 0
     notes: |
-      Captured on 2026-07-12. The focused reproduction has 0 pass and 1 fail;
-      the repository-wide run has 3296 pass and 1 fail. This is the sole known
-      repository failure and must match its exact file, suite, test name, and timeout signature.
+      Apply-final-containment-repair-local repository-wide evidence completed with exit code 0,
+      4020 pass, and 0 fail across 222 files. The prior Binary smoke doctor timeout fingerprint
+      is no longer active and is classified as improved by comparison policy.
   - id: repo-typecheck
     command: "bunx tsc --noEmit"
-    captured_at: "2026-07-12"
+    captured_at: "2026-07-28T05:02:49Z"
     expected:
       status: pass
       error_count: 0
-    notes: "Current typecheck passes; obsolete failure inventories were removed."
+    notes: "Apply-final-containment-repair-local typecheck exited 0 with zero errors."
 
 verify_policy:
   focused_commands_must_pass: true
@@ -79,9 +71,8 @@ comparison:
     improved: "A recorded failure no longer appears in current execution."
 
 policy:
-  known_failures: "Only the recorded Binary smoke doctor timeout is known."
+  known_failures: "None active."
   regression_definitions: |
-    - Any additional test failure is a regression.
-    - A changed doctor file, suite, test name, or timeout signature is a regression.
+    - Any test failure is a regression.
     - Any typecheck error is a regression.
-  action: "Verify may pass with warnings only when the exact known fingerprint is reproduced and documented."
+  action: "Any new test failure or typecheck error is blocking and requires fresh evidence-backed reconciliation."

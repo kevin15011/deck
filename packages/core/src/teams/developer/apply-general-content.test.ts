@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   APPLY_GENERAL_AGENT_BODY,
   APPLY_GENERAL_SKILL_BODY,
+  APPLY_GENERAL_COMPACT_SKILL_BODY,
 } from "./apply-general-content";
 
 // Import git-safety for rule presence assertion
@@ -293,5 +294,21 @@ describe("repair incident apply behavior", () => {
     expect(APPLY_GENERAL_SKILL_BODY).toContain("untracked_build_output requires evidence that it remains untracked/ignored or was removed");
     expect(APPLY_GENERAL_SKILL_BODY).toContain("Redact runner session IDs, absolute user paths, tokens, credentials, and secrets");
     expect(APPLY_GENERAL_SKILL_BODY).toContain("targeted, affected_area, or broad_gate");
+  });
+});
+
+
+describe("pre-QA functional validation", () => {
+  test("separates local proof from actual behavior exercise and independent final QA", () => {
+    for (const body of [APPLY_GENERAL_SKILL_BODY, APPLY_GENERAL_COMPACT_SKILL_BODY]) {
+      expect(body).toContain("local proof");
+      expect(body).toContain("functional exercise");
+      expect(body).toContain("fix and retest");
+      expect(body).toContain("non-independent");
+      expect(body).toContain("conditional target");
+      expect(body).toContain("fresh Verify/Review");
+    }
+    expect(APPLY_GENERAL_SKILL_BODY).toContain("shared, config, script, CLI, or contract behavior");
+    expect(APPLY_GENERAL_COMPACT_SKILL_BODY).not.toContain("Run targeted, affected-area, and broad checks");
   });
 });

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   APPLY_FRONTEND_AGENT_BODY,
   APPLY_FRONTEND_SKILL_BODY,
+  APPLY_FRONTEND_COMPACT_SKILL_BODY,
 } from "./apply-frontend-content";
 
 // Import git-safety for rule presence assertion
@@ -393,3 +394,19 @@ describe("repair incident apply behavior", () => {
 });
 
 describe("frontend repair accessibility content", () => { test("preserves accessibility obligations", () => { expect(APPLY_FRONTEND_SKILL_BODY).toContain("preserve accessibility obligations"); expect(APPLY_FRONTEND_SKILL_BODY).toContain("keyboard interaction"); expect(APPLY_FRONTEND_SKILL_BODY).toContain("ARIA semantics"); }); });
+
+
+describe("frontend pre-QA functional validation", () => {
+  test("requires actual interaction exercise without claiming independent QA", () => {
+    for (const body of [APPLY_FRONTEND_SKILL_BODY, APPLY_FRONTEND_COMPACT_SKILL_BODY]) {
+      expect(body).toContain("focused local proof");
+      expect(body).toContain("frontend functional exercise");
+      expect(body).toContain("fix and retest");
+      expect(body).toContain("non-independent");
+      expect(body).toContain("conditional target/product validation");
+      expect(body).toContain("fresh Verify/Review");
+    }
+    expect(APPLY_FRONTEND_SKILL_BODY).toContain("keyboard, focus, loading, error, empty, responsive, and contract behavior");
+    expect(APPLY_FRONTEND_COMPACT_SKILL_BODY).not.toContain("Run scheduled component, affected-area, integration, build, and type checks");
+  });
+});

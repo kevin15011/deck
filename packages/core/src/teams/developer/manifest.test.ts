@@ -454,3 +454,14 @@ describe("DeveloperTeamManifest", () => {
     });
   });
 });
+
+
+describe("streamlined ownership manifest materialization", () => {
+  test("renders coordinator ownership and pre-QA semantics without pure-delegator language", () => {
+    const result = buildDeveloperTeamManifest({ team: { id: "developer-team", displayName: "Developer Team" } });
+    const rendered = JSON.stringify(result.manifest);
+    expect(rendered).toContain("Coordinator Ownership");
+    expect(rendered).toContain("functional exercise");
+    expect(rendered).not.toContain("Pure Delegator");
+  });
+});

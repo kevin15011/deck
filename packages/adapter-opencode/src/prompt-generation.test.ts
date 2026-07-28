@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 
 import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
+import {
+  ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1,
+  ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1,
+} from "../../core/src/teams/developer/orchestrator-content";
 import { buildCapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 import type { MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
 
@@ -701,6 +705,31 @@ describe("Developer Team language policy propagation to OpenCode prompts", () =>
         planned.content,
         `${planned.agent.id} prompt contains known leak`,
       ).not.toContain("herramienta");
+    }
+  });
+});
+
+
+describe("streamlined ownership prompt materialization", () => {
+  test("preserves compact coordinator and Apply candidate-validation semantics", () => {
+    const compactPlan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+    });
+    const legacyPlan = buildPromptGenerationPlan({
+      configDir: "/tmp/.config/opencode",
+      projectRoot: "/tmp/project",
+      promptProfile: "legacy",
+    });
+    const orchestrator = compactPlan.find(({ agent }) => agent.id === "deck-developer-orchestrator")!.content;
+    const legacyOrchestrator = legacyPlan.find(({ agent }) => agent.id === "deck-developer-orchestrator")!.content;
+
+    for (const materialized of [orchestrator, legacyOrchestrator]) {
+      expect(materialized).toContain(ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1);
+      expect(materialized).toContain(ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1);
+      expect(materialized).toContain("functional exercise");
+      expect(materialized).toContain("resolved decision");
+      expect(materialized).not.toContain("Pure Delegator");
     }
   });
 });
