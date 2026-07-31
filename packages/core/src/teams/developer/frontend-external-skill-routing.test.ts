@@ -58,7 +58,8 @@ describe("frontend external skill routing guidance", () => {
     ]) {
       expect(body).toContain("ui-skills-root");
       expect(body).toMatch(/router for UI/i);
-      expect(body).toContain("Do not modify or delegate modifying work until this classification is made");
+      expect(body).toContain("For each new desired outcome");
+      expect(body).toContain("begin without a separate restatement-confirmation ceremony");
       expectNoDefaultHeavyGuidance(body);
     }
   });

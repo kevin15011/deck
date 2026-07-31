@@ -6,6 +6,7 @@ import {
   createEvent,
   VALID_EVENT_TYPES,
 } from "./events";
+import { isKnownRegistryEventName } from "./validator";
 
 // ---------------------------------------------------------------------------
 // createEvent factory
@@ -138,5 +139,12 @@ describe("createEvent", () => {
     for (const type of VALID_EVENT_TYPES) {
       expect(type).not.toMatch(/engram|namedGraphTool|namedMemoryTool/i);
     }
+  });
+
+  test("recognizes canonical lifecycle terminal names while preserving legacy event support", () => {
+    expect(isKnownRegistryEventName("closed.incomplete")).toBe(true);
+    expect(isKnownRegistryEventName("closed.abandoned")).toBe(true);
+    expect(isKnownRegistryEventName("closed.superseded")).toBe(true);
+    expect(isKnownRegistryEventName("design.completed")).toBe(true);
   });
 });

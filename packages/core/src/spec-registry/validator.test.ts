@@ -468,6 +468,121 @@ provenance:
       })
     );
   });
+
+  test("closed phase accepts superseded with an honest closure reason", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "superseded-change"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "superseded-change", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: superseded-change
+currentPhase: closed
+status: superseded
+closure_reason: Replaced by successor-change
+artifacts: {}
+provenance:
+  - phase: closed
+    agent: deck
+    timestamp: "2026-07-30T00:00:00Z"
+`
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "superseded-change",
+    });
+
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "state.phase_status.invalid_closed" })
+    );
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ rule: "state.closure_reason.required" })
+    );
+  });
+
+  test("closure_reason is required for superseded status", async () => {
+    await fs.mkdir(path.join(tempDir, "openspec", "changes", "superseded-no-reason"));
+    await fs.writeFile(
+      path.join(tempDir, "openspec", "changes", "superseded-no-reason", "state.yaml"),
+      `schema: spec-registry-v1
+changeId: superseded-no-reason
+currentPhase: closed
+status: superseded
+artifacts: {}
+provenance:
+  - phase: closed
+    agent: deck
+    timestamp: "2026-07-30T00:00:00Z"
+`
+    );
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "superseded-no-reason",
+    });
+
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        rule: "state.closure_reason.required",
+        severity: "error",
+      })
+    );
+  });
+
+  test("warns when durable approval consumption does not match its receipt", async () => {
+    const changeDir = path.join(tempDir, "openspec", "changes", "approval-mismatch");
+    await fs.mkdir(changeDir);
+    await fs.writeFile(path.join(changeDir, "state.yaml"), `schema: spec-registry-v1
+changeId: approval-mismatch
+currentPhase: proposal
+status: completed
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+provenance:
+  - phase: proposal
+    agent: deck
+    model: model
+    timestamp: "2026-07-30T00:00:00Z"
+    registryWrite: non-deferred
+`);
+    await fs.writeFile(path.join(changeDir, "events.yaml"), `schema: spec-registry-events-v1
+events:
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-07-30T00:00:00Z"
+    actor: deck
+    approval_receipt:
+      schema: approval-receipt-v1
+      receiptId: approval-receipt:v1:fixture
+      digest: sha256:${"a".repeat(64)}
+      changeId: approval-mismatch
+      gate: proposal
+      subjectDigest: sha256:${"b".repeat(64)}
+      decision: approved
+      actor: user
+      timestamp: "2026-07-30T00:00:00Z"
+      transitionId: transition-1
+    approval_consumption:
+      receiptId: approval-receipt:v1:fixture
+      receiptDigest: sha256:${"a".repeat(64)}
+      transitionId: transition-other
+`);
+    await fs.writeFile(path.join(changeDir, "exploration.md"), "# Exploration");
+    await fs.writeFile(path.join(changeDir, "proposal.md"), "# Proposal");
+
+    const result = await validateOpenSpecRegistry({
+      rootDir: tempDir,
+      changeId: "approval-mismatch",
+    });
+
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      rule: "events.event.metadata.invalid",
+      field: "approval_receipt",
+      severity: "warning",
+    }));
+  });
 });
 
 // ---------------------------------------------------------------------------

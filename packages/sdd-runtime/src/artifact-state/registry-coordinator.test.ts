@@ -122,6 +122,21 @@ describe("central registry coordinator", () => {
     expect(await fs.readFile(join(value.directory, "events.yaml"), "utf8")).toBe(value.eventsSource);
   });
 
+  test("validates an intent chain from one base before committing any prefix", async () => {
+    const value = await fixture();
+    const coordinator = createRegistryCoordinatorV1({ mode: "centralized", store: value.store, createTransactionId: () => "tx-chain" });
+    const invalidSecond = reviseIntent(value.intent, {
+      idempotencyKey: sha("chain-invalid"),
+      artifact: { kind: "review-report", path: "does-not-exist.md" },
+      phase: "review",
+      event: { ...value.intent.event, name: "review.completed" },
+    });
+    const outcomes = await coordinator.commitAll([value.intent, invalidSecond]);
+    expect(outcomes.at(-1)?.code).toBe("invalid-evidence");
+    expect(await fs.readFile(join(value.directory, "state.yaml"), "utf8")).toBe(value.stateSource);
+    expect(await fs.readFile(join(value.directory, "events.yaml"), "utf8")).toBe(value.eventsSource);
+  });
+
   test("accepts bounded prose notes and rejects secret-bearing intent notes", async () => {
     const value = await fixture();
     expect(value.intent.provenance.note).toBe("Completed registry transition safely");
@@ -223,6 +238,35 @@ describe("registry pair transaction recovery", () => {
     await fs.writeFile(join(value.directory, "events.yaml"), legacy);
     expect(await value.store.commit(transaction)).toEqual({ code: "registry-intent-conflict", reason: "third-digest" });
     expect(await fs.readFile(join(value.directory, "events.yaml"), "utf8")).toBe(legacy);
+  });
+
+  test("rechecks every ordered chain artifact under the writer lock", async () => {
+    const value = await fixture();
+    const earlierPath = "earlier-report.md";
+    await fs.writeFile(join(value.directory, earlierPath), "stable\n");
+    const { applyRegistryIntentToDocumentsV1 } = await import("@deck/core/spec-registry");
+    const pair = parseRegistryDocumentPairV1({ stateSource: value.stateSource, eventsSource: value.eventsSource });
+    const applied = applyRegistryIntentToDocumentsV1(pair, value.intent, { transactionId: "tx-artifacts", artifactExists: true });
+    const transaction = buildRegistryPairTransactionV1({
+      transactionId: "tx-artifacts",
+      intentId: value.intent.intentId,
+      idempotencyKey: value.intent.idempotencyKey,
+      artifact: { path: value.intent.artifact.path, digest: value.intent.artifact.digest! },
+      artifacts: [
+        { path: earlierPath, digest: sha("stable\n") },
+        { path: value.intent.artifact.path, digest: value.intent.artifact.digest! },
+      ],
+      base: value.snapshot,
+      stateSource: applied.pair.state.source,
+      eventsSource: applied.pair.events.source,
+      stateEdits: applied.edits.state,
+      eventsEdits: applied.edits.events,
+    });
+    await fs.writeFile(join(value.directory, earlierPath), "changed\n");
+
+    expect(await value.store.commit(transaction)).toEqual({ code: "registry-recovery-required", reason: "artifact-mismatch" });
+    expect(await fs.readFile(join(value.directory, "state.yaml"), "utf8")).toBe(value.stateSource);
+    expect(await fs.readFile(join(value.directory, "events.yaml"), "utf8")).toBe(value.eventsSource);
   });
 
   test("detects a legacy write between pair renames without overwriting it", async () => {

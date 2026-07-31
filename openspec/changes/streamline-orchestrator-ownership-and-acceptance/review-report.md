@@ -880,3 +880,428 @@ The immutable role return carries one ordered helper-built and helper-parse-vali
 - **Adaptive context:** loaded and used only as advisory context. Official OpenSpec artifacts, registry files, source, tests, and fresh Verify evidence controlled the judgment.
 - **Blocker:** `R5-B01`.
 - **Next action:** coordinator must not advance to BROAD. Obtain explicit authorization for the bounded T3 source/test repair, then restart fresh TARGETED → AFFECTED_AREA → independent Review → mandatory BROAD for the resulting candidate.
+
+---
+
+## R6 / Fresh Final Independent Review After the Coordinated R5-B01 Repair
+
+### Decision
+
+**APPROVED.** The exact repaired predecessor candidate `streamline-orchestrator-ownership-and-acceptance` is approved by fresh independent engineering Review with zero blocking findings and zero non-blocking findings. `R5-B01` is closed. This approval releases mandatory BROAD as the next stage; it does not run, waive, or satisfy BROAD and does not authorize Archive, merge, release, push, or successor acceptance.
+
+Review inspected tests before implementation, treated every prior Review judgment above as historical evidence only, and made an independent judgment over the current source, composed surfaces, returned adapter plans, official OpenSpec artifacts, fresh cumulative Verify evidence, registry base, cross-change fixture coordination, exclusions, and archived broad-baseline dependency. Review ran no TARGETED, AFFECTED_AREA, or BROAD suite and implemented no fix.
+
+### Provenance and independence
+
+- Timestamp (UTC): `2026-07-29T03:27:00.460Z`.
+- Role / fresh instance: `deck-developer-review` / `deck-developer-review-opencode-r6-final-r5`; distinct from Apply, both current Verify instances, and every prior Review instance.
+- Runner / model: `opencode` / `openai/gpt-5.6-sol`.
+- Loaded skills: `deck-developer-review`, `using-agent-skills`, `code-review-and-quality`, and `security-and-hardening`. Serena instructions were loaded for read-only source navigation and diagnostics.
+- SkillDiscoveryContextV1: registry `.atl/skill-registry.md`, status `indeterminate`, reason `validate_command_returned_unexpected_interactive_menu`, active runner `opencode`, authority reminder `v1`; bounded active-runner direct discovery only. Review did not validate, generate, repair, refresh, or modify the registry or `.gitignore`.
+- Adaptive Supermemory context was loaded as advisory only. Official OpenSpec artifacts, registry files, source, tests, and fresh Verify evidence controlled the judgment.
+
+### Fail-closed candidate, dependency, and freshness binding
+
+The immediate pre-append guard reported no mismatch:
+
+| Binding | Accepted / observed value | Fresh Review result |
+|---|---|---|
+| Batch | `batch:v1:dddd2150b3a163a5719e29e9750e74be` / `sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9` | Exact binding present in Apply and Verify. |
+| Coordination decision | `sha256:dc3c07f61e17c68a2c72c9faeda5b8da927fa56fb42f79340b262180ee486cf9` | Exact binding present in Apply and Verify. |
+| HEAD | `aee3038df0a784b07ba9dd44aca026dca78bc857` | Independently recomputed; exact match. |
+| Canonical predecessor subject | `sha256:4ffb265c7b2f38ceff34ae3564646326409cebdb9756b083dbe97addcf3bcf43` | Independently recomputed from the exact sorted 17 paths using the accepted raw-byte `JSON.stringify({ head, files })` recipe; exact match. |
+| Exact predecessor binary diff | `sha256:f6eefc085d567a51e63369760a21bb60b124143213ec45b7c4f1d25465316c75` (`3176` bytes) | Independently recomputed over the same 17 paths; exact match. Current candidate modifications are exactly `orchestrator-content.ts`, `orchestrator-content.test.ts`, and `prompt-profile.test.ts`. |
+| Apply artifact | `sha256:2842a235872fbdc324a04bd4422b947ecba204b50af3363f8fc151549d0dca41` | Exact match. |
+| Cumulative Verify artifact | `sha256:90a4c87135256804ba294f61b5a66a499b9b5d41c3ac666c13b294a87e4314f5` | Exact match; contains fresh TARGETED generation `sha256:fd7c6e69e040438ace3a4136be8ad5d7fd4fdd4a52b90b40fb6d8f305b9e0a80` followed by fresh AFFECTED_AREA. |
+| Review report before this append | `sha256:4bd88a66c3a1c9fa13a377a2b6810b0f72d8ab9d7e911243919853fb5a6450a6` | Exact match; all history preserved verbatim. |
+| Registry base | state `sha256:6e40f66079d4b2964e5e186a228a56a7ddd7e470213b12a7a75bc61bcd8e291b`; events `sha256:a27b7269f07496f1cfbdcbeb9099ce1cb39d874c81103648df94d97fd5c10c03` | Exact match; `currentPhase: verify`, `status: passed`; Review wrote neither file. |
+
+The exact target range remains `packages/adapter-opencode/src/developer-team-install.test.ts` through `packages/core/src/teams/developer/user-phase-communication.test.ts`; no eighteenth predecessor target exists. Fresh scope classification found `23` tracked and `17` untracked non-candidate paths, but no generated-output path and no `runner-capability-standardization` path. Those unrelated paths were not absorbed into the predecessor subject or judged accepted.
+
+The excluded `opencode-package-install-running-binary-regression` WIP remained bound to state `sha256:bce99ddbe7ee632277e9a017b4fc322e08977b3e5002037944a404fd46c46771` and events `sha256:c8adfdfaa83d3d1ee98842e006afc186e5c355ac5b1a515dc15236969a2ab339`. The archived `stabilize-repository-broad-baseline` dependency remained bound to archive report `sha256:6a41baa2eb28828e1810df6fc3af67228b287eb8c4edf88dba1a086d9f3f86d9`, state `sha256:ed488bddbb257ac5f1ef385346d7e27029257ea6c0a113b9440aca2115695868`, and events `sha256:59b8fade5a3f7902411c29350be03143dcbc4bd1a9d41f4ea8b5aca18ae9d4f1`.
+
+### Tests-first inspection and bounded independent evidence
+
+Review inspected the repaired tests before the source correction:
+
+- `packages/core/src/teams/developer/orchestrator-content.test.ts:911-919` is a genuine six-surface negative oracle. It rejects the exact historical contradiction `fresh review before commit/push/PR unless trivial docs/text` on legacy/compact session, agent, and skill surfaces, and separately preserves the applicable legacy-agent lifecycle Review rule.
+- `orchestrator-content.test.ts:922-939` retains exact-once assertions for all four shared fragments on all six surfaces and byte equality for EII-SOA-007. The new oracle complements rather than replaces these positive composition checks.
+- `prompt-profile.test.ts:56-84` deterministically derives the complete legacy aggregate through `getAgentContent()` and `getTeamSessionInstructions()` and strictly compares byte length, lexical token count, and SHA-256. The repair changed only the three fixture constants.
+- `packages/adapter-opencode/src/developer-team-install.test.ts:1474-1496` and `prompt-generation.test.ts:713-734` consume returned install/prompt plan entries rather than direct core substitutes. They cover compact install output, explicit legacy prompt output, exact ownership and commit-only fragments, candidate validation, resolved decisions, final-QA wording, all three Apply roles, and the prohibited Pure Delegator outcome.
+- `packages/adapter-pi/src/registry-consumption.test.ts:32-110` preserves Pi's intentional Orchestrator profile-stub architecture while proving skill and team-session content is sourced from the core registry.
+- General, Backend, and Frontend Apply tests retain behavior-oriented legacy/compact assertions for local proof, real interface-appropriate functional exercise, fix/retest, conditional target validation, non-independent Apply evidence, and fresh final QA ownership.
+
+Bounded no-write probes then established independently:
+
+- every legacy/compact Orchestrator session, agent, and skill surface has old contradictory trigger count `0` and contains ownership, pre-QA, resolved-decision, and exact commit-only fragments exactly once;
+- EII-SOA-007 is exactly `1583` bytes and `sha256:f91412c450dedd406db416edec77726e496a2ddfce19e3caf02d071509dcce72` on every source surface;
+- the only Review/commit adjacency is coherent: non-commit-only completion, lifecycle acceptance/completion, merge/release/PR judgment, protected-risk judgment, non-mechanical work, and before-push flows retain fresh Review, while an exact commit-only snapshot does not itself trigger Verify or Review;
+- current legacy aggregate derivation is exactly `499232` bytes, `103005` lexical tokens, and `sha256:cb187210059b7281950927a3a96549745c4b69e7f65084d9753019026ee0cf28`;
+- in-memory OpenCode install plus compact/legacy prompt planners each returned `14` prompts, the install plan returned `14` skills, required fragments were present, the old trigger was absent, the isolated path remained absent, and Git status was byte-identical before/after;
+- the Pi no-write plan/profile probe preserved `14` agents, its intentional profile-reference agent behavior, exact core skill/session fragments, old-trigger absence, and unchanged Git status;
+- read-only diagnostics for all three repaired TypeScript files returned no errors or warnings.
+
+### Historical finding closure and R5-B01 judgment
+
+Historical blockers `R1-B01`, `R1-B02`, `R2-B01`, and `R4-B01` remain closed on current source and tests. The prior R3 approval and later R4/R5 judgments remain history only. Historical optional `R4-N01` is not revived: this repair creates no new material readability or maintenance reason to promote it.
+
+`R5-B01` is now closed:
+
+- **Requirement anchors:** `REQ-SOAA-CMT-02` forbids automatic Verify/Review launch from commit-only; `REQ-SOAA-CMP-02` forbids contradictory legacy/compact/expanded surfaces.
+- **Design/task anchors:** EII-SOA-009 and T3 require the legacy-agent delegation trigger to respect bounded commit-only mechanics and require conflicting concise guidance to be removed.
+- **Source anchor:** `packages/core/src/teams/developer/orchestrator-content.ts:603-630` now contains one coherent Review rule at line `607`, all four canonical fragments once, and the unchanged Git safety sentinel. The historical contradictory trigger is absent.
+- **Oracle anchor:** `orchestrator-content.test.ts:911-919` would fail if the historical trigger reappeared on any of the six surfaces and also fails if the required lifecycle Review rule disappears from the legacy agent.
+- **Acceptance impact:** the prior emitted-content contradiction is no longer reproducible. Commit-only snapshots remain truthful unverified snapshots when exact final-QA evidence does not bind, while mandatory Review remains intact for every accepted non-commit-only quality/risk boundary.
+
+### Exact shared-fixture coordination judgment
+
+The combined fixture coordination is explicit, path-local, and does not collapse candidate identities:
+
+- **Predecessor identity:** the exact 17-path subject remains `sha256:4ffb265c7b2f38ceff34ae3564646326409cebdb9756b083dbe97addcf3bcf43`; repaired source/test bytes remain `orchestrator-content.ts` `sha256:b5257b13260dbff55c260041db124c176e0573ae1fdc0f4b808c85d46509a7ce` and `orchestrator-content.test.ts` `sha256:f3d5ecfa639abb060a9bdee81d8a16db2bef22e0d8f0384fd0818af439171a8a`; the shared fixture is `prompt-profile.test.ts` `sha256:067a62ba039983c88f9bb840827611ff30bd0ba73119b4e245a91b09ce3d4452`.
+- **Successor identity:** the current path-sorted 25-file `project-init-skill-registry-and-session-baseline` T01-T10 manifest `{path,sha256,bytes}` independently recomputes to its own Apply-local subject `sha256:67088254bd107404bf13e3845c9ab967e4eb3a6ef28c26a3cc0488494e4f83af`. Those 25 paths remain outside the predecessor subject.
+- **Cause separation:** replacing the repaired Review rule once with the exact predecessor trigger reconstructs `498969` bytes, `102960` tokens, and `sha256:ab9007d123c5669b3c749b35423abce77616d7deb3f953da582ef75433213f8e`; the R5 repair contributes exactly `+263` bytes and `+45` tokens to the coordinated current aggregate.
+- **No successor acceptance:** successor T01-T10 remains an Apply-local partial candidate; T11-T13, successor independent QA, and successor completion remain gated/unclaimed. This Review neither reviews nor accepts the successor's 25-path implementation.
+- **No hidden or stale-evidence shortcut:** the coordination decision, both subject identities, the aggregate digest, and the single shared path are explicit. Any later successor prompt-byte modification invalidates this Review dependency even if the predecessor's 17-path digest remains unchanged; mandatory BROAD must bind to the same combined composition. The strict aggregate fixture and fresh recomputation make that dependency observable rather than silently reusable.
+
+### Engineering-axis assessment
+
+| Axis | Fresh judgment |
+|---|---|
+| Correctness / instruction precedence | **Approved.** Commit-only and lifecycle Review rules are non-contradictory; pre-QA candidate validation, resolved-decision absorption, Automatic behavior, final-QA order, and truthful snapshot semantics remain coherent. |
+| Architecture | **Approved.** Canonical core fragments remain runner-neutral and compose through existing registry/adapter boundaries. The repair is one localized source sentence plus focused tests/fixture; it adds no scheduler path, state, phase, abstraction, or dependency. |
+| Security / authorization / protected risk | **Approved.** Direct ownership remains bounded, mechanical, deterministic, explicitly authorized, non-destructive, and judgment-free. Protected-risk, architecture, migration, security, data-loss, public-API judgment, Verify, and Review remain specialist-owned. |
+| Git safety | **Approved.** Exact pathspec staging, unrelated-WIP stops, bounded secret/safety checks, no inferred amend/push/branch/release/archive action, and the canonical irreversible-loss/new-message/exact-command confirmation flow remain intact. |
+| Compatibility / materialization | **Approved.** Legacy/compact source parity, OpenCode returned install/prompt plans, and Pi profile/registry consumption preserve the required semantics without changing a public TypeScript API or directly editing generated output. |
+| Maintainability / test quality | **Approved.** The negative R5 oracle closes the exact contradiction gap; exact-fragment, strict fixture, adapter-returned-plan, Apply-role, and Pi tests provide complementary failure modes without snapshots, timing dependence, broad mocks, or bypass markers. |
+| Performance / scalability | **Approved.** The change performs fixed static string composition and deterministic assertions only; it introduces no unbounded loop, I/O path, scheduler branch, runtime dependency, or hot-path cost. Compact remains the default. |
+| Fixture / generated discipline | **Approved.** The fixture is deterministically derived and exact; changed generated paths are empty. The cross-change dependency is explicit and freshness-sensitive rather than hidden. |
+| Scope / rollback | **Approved.** No eighteenth predecessor path, protected target, dependency/lockfile, registry YAML, generated direct edit, or scope expansion exists. Rollback remains a normal auditable revert or forward fix with regeneration/revalidation; no history rewrite or destructive discard is required. |
+
+### Finding counts, optional scope, and FailureManifestV1
+
+- New blocking findings: `0`.
+- New non-blocking findings: `0`.
+- Related regressions: `0` open; `R5-B01` closed.
+- Unrelated baseline defects discovered by this bounded Review: `0`.
+- Required Spec/Design replans: `0`.
+- Optional new scope: none.
+
+```json
+null
+```
+
+### Registry coordination, mandatory BROAD, and blockers
+
+Review modified only this appended English section of `review-report.md`. It did not modify source, tests, Apply/Verify evidence, registry YAML, generated output, dependencies, global/user configuration, the successor candidate, excluded WIP, archived evidence, or `runner-capability-standardization`.
+
+The coordinator remains the only registry writer. One ordered helper-built and helper-parse-validated approval `RegistryIntentV1` is returned out of band with phase `review`, status `approved`, event `review.approved`, artifact `review-report` / `review-report.md`, this report's final digest, the unchanged supplied state/events base, the repair batch, and coordination decision. It is not embedded here to avoid a circular report hash.
+
+- Blockers: none for Review.
+- Next required action: the coordinator validates and atomically reconciles the approval intent against the unchanged registry base, then runs mandatory BROAD for this exact predecessor candidate and explicit combined-composition dependency. Any later relevant modification invalidates this Review and requires fresh evidence.
+
+---
+
+## R7 / Fresh Independent Final Review of the Coordinated Composite Candidate
+
+### Decision
+
+**APPROVED.** Fresh independent engineering Review approves predecessor `streamline-orchestrator-ownership-and-acceptance` on the full coordinated composite candidate after the supplied fresh TARGETED and AFFECTED_AREA passes. There are zero blocking findings and zero non-blocking findings. This judgment closes no mandatory BROAD gate: BROAD remains required, unrun for this repaired composite, and unwaived. This Review does not authorize Archive, merge, release, push, successor acceptance, or successor T11–T13.
+
+Review read the changed tests before implementation, independently inspected the actual predecessor and coordinated repair diffs, inspected the composed/runtime interfaces, and ran only bounded no-write probes. It did not rerun TARGETED, AFFECTED_AREA, or BROAD and did not implement a fix.
+
+### Provenance and independence
+
+- Timestamp (UTC): `2026-07-29T05:49:27.776Z`.
+- Role / fresh instance: `deck-developer-review` / `deck-developer-review-opencode-r7-coordinated-composite-20260729T054927Z`; distinct from every Apply, Verify, and historical Review instance.
+- Runner / model: `opencode` / `openai/gpt-5.6-sol`.
+- Loaded skills: `deck-developer-review`, `using-agent-skills`, `code-review-and-quality`, `security-and-hardening`, `performance-optimization`, `api-and-interface-design`, and `ci-cd-and-automation`. Serena instructions were loaded for read-only navigation.
+- SkillDiscoveryContextV1: registry `.atl/skill-registry.md`, status `indeterminate`, reason `validate_command_returned_unexpected_interactive_menu`, active runner `opencode`, authority reminder `v1`; bounded active-runner direct discovery only. Review did not validate, generate, refresh, repair, or modify the registry or `.gitignore`.
+- Adaptive Supermemory context was loaded as advisory only. Official OpenSpec artifacts, registry files, source, tests, Apply evidence, and fresh Verify evidence controlled the judgment.
+
+### Fail-closed bindings, target identity, and freshness
+
+Every delegated pre-judgment binding matched:
+
+| Binding | Fresh independent observation |
+|---|---|
+| Coordinated batch | `batch:v1:fae7fb3cf1c1746e974dd178567c3e08`; digest `sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60`; decision `sha256:2b3b08024f49a64c9ae0d0891633b1601df68422d28381ed6840382cd688fb53`. |
+| HEAD | Independently observed `aee3038df0a784b07ba9dd44aca026dca78bc857`. |
+| Predecessor identity | Recomputed from the exact JavaScript-default sorted 17-path allowlist using raw-byte `JSON.stringify({ head, files })`: `sha256:4ffb265c7b2f38ceff34ae3564646326409cebdb9756b083dbe97addcf3bcf43` (`2701` manifest bytes). First path is `packages/adapter-opencode/src/developer-team-install.test.ts`; last is `packages/core/src/teams/developer/user-phase-communication.test.ts`; no eighteenth path exists. |
+| Predecessor binary diff | Recomputed with `git diff --binary HEAD -- <17 sorted paths>`: `sha256:f6eefc085d567a51e63369760a21bb60b124143213ec45b7c4f1d25465316c75`, `3176` bytes. Only `orchestrator-content.ts`, `orchestrator-content.test.ts`, and `prompt-profile.test.ts` differ inside the predecessor allowlist. |
+| Coordinated repair identity | Recomputed exact seven-path `{path,sha256,bytes}` array: `sha256:98e49d652b1f78ab4adf96ac1fff0ff3cdedac56eccf4da3ca800877be61bbc6` (`1163` manifest bytes). No hidden eighth repair path exists. |
+| Composite verification subject | Supplied and current: `sha256:50cc070f53b18f6c152a4422fd5c6b82553be0c9184950b0e8d64f2cfbda8592`, with TARGETED evidence `sha256:e82abdde26491a365684bcb20d521051e9631c8c71c8d4a43a5fbb983bcb444f`. |
+| Apply artifacts | Predecessor `sha256:1e01edb38b46f97077e73d1f34f61b2f45e6900ce75cec023ae515e1dcf99c26`; successor dependency `sha256:b71e8c4e289ebc04d2a1d4a5cf28d4114f9de39cd08ae0fc649679d61acc1c07`. Both match current raw bytes. |
+| Fresh Verify chain | TARGETED generation `sha256:936e795546bd3b959d6ac332b58f26b46a26b7b5492f7ba5f7501b75dd23ef63`; final cumulative Verify through AFFECTED_AREA `sha256:ff4d5b5fc2d840b62b17382f8c652f8a9b3dabb2e39e824987893f7cf0c32e93`. TARGETED timestamp `2026-07-29T05:10:52.652Z`; AFFECTED_AREA timestamp `2026-07-29T05:27:04.158Z`; both use fresh `deck-developer-verify` identity distinct from this Review. |
+| Registry bases | Predecessor state `sha256:d3d2153aacb391f9aa1989bdb0a6a8cb0be136fd4dd0d9c3314a224b5083a71a` and events `sha256:90573ced98a579ae0aad20c61a9a7a797d97f037675965b57ce81ae7ea044200`, parsed as `verify/passed`; successor state `sha256:798a145a6e3cb22e1ec3debff66dbb11aae460ea4e96d3a2d783888863f51a42` and events `sha256:9b84b93ac66d3f69935565b7844a9fcb2522a0561a34b1b683a32b74d4f42e46`, parsed as `apply/completed`. Review wrote neither pair. |
+| Historical Review report | Pre-append digest `sha256:8beeb5abaa05d466248126ecb7fd5cc7a7be430cab0442c1c655690b752fd02a`; all prior sections remain verbatim. |
+
+The seven repair members also match their exact delegated bytes: build-info `sha256:dd18c1ee4ecd5081c7c5820952e0a28187e0e9e2fbc03ed691ee6f62c95c6946` (`379`), OpenCode generated JS `sha256:d9d45fd649db9eb0e6419a07ac87e60870f01fa92a0ab9d2d0fefc1052a50e42` (`276474`), Pi generated JS `sha256:f3053d804c32d005f4d819cc8f1cd062470275da12870b21e1d070cb53c5efc2` (`276523`), export oracles `sha256:69f6147f7a61f5065df4aff28134158fe79f77e0ccf2b5f4021ebf8194d9a1e4` and `sha256:0c7b9985f3cfa4b7c11ee114d35ac1a276e4bcbf5746e577217c44e99e9f6dc7`, release test `sha256:91efad35f0ab15905d8b71e83e0ceb093af5de07121e0242ead25bd761ede424`, and release source `sha256:85d7bfeebf8969f922434949c05c0838b5965e53cc396acbc2dd1080f920f5ab`.
+
+### Tests-first inspection
+
+- `orchestrator-content.test.ts:910-939` is a focused negative-plus-positive oracle: it rejects the historical contradictory trigger on all six legacy/compact session, agent, and skill surfaces, preserves the applicable lifecycle Review trigger, requires all four shared fragments exactly once, and locks exact EII-SOA-007 bytes.
+- `prepare-release.test.ts:243-291` separately proves stale help and checksum success, stale descriptor refusal with no output, and descriptor success only under the explicit `--skip-staleness-check` override. These assertions exercise mode ordering, not internal call order alone.
+- `batch-b-replacement.test.ts:84-96` and `batch-c-authoritative-matrix.test.ts:784-789` use exact sorted namespace equality. They reject both missing and extra runtime exports and preserve the exclusion of canonical internal helpers.
+- `index.test.ts:1-16` locks package-root callability of exactly the seven T02 value APIs; the session-preparation suite covers canonical digests, one-use authorization, replay/mismatch rejection, state completion, bounded parsing, and aggregation.
+- OpenCode/Pi reachability tests cover provider absence, caller-marker stripping, runner/session/operation mismatch, reservation before native delegation, unrelated-agent non-activation, session cleanup, and zero effect on rejected paths. Generated host-reachability tests and fresh no-write materialization evidence bind generated markers and bytes to canonical sources.
+- The tests are complementary and deterministic: strict namespace oracles, behavior probes, exact-byte sentinels, negative reachability, and profile fixtures fail for different regressions. No `.only`, `.skip`, or `.todo` weakening was added. Passing tests were treated as necessary evidence, not the basis of the engineering judgment.
+
+### Independent implementation and composed-behavior inspection
+
+#### R5-B01 and six-surface instruction precedence
+
+`orchestrator-content.ts:62-71` keeps the exact commit-only rule: a commit request authorizes only an unambiguous mechanical snapshot, does not itself launch Verify or Review, and remains an unverified snapshot when final independent QA does not bind. `ORCHESTRATOR_AGENT_BODY` now has one coherent Review rule for lifecycle acceptance/completion, merge/release/PR judgment, protected-risk judgment, non-mechanical work, and before push, while explicitly deferring commit-only to the exact rule. Bounded import probes observed the historical trigger zero times and all four canonical fragments exactly once on all six source surfaces. `R5-B01` therefore remains closed under `REQ-SOAA-CMT-02`, `REQ-SOAA-CMP-02`, EII-SOA-009, and T3.
+
+#### Release ordering
+
+`prepare-release.ts:699-729` parses arguments, returns help or checksum before any build-info staleness validation, and then validates staleness before either interactive or non-interactive descriptor construction. The existing explicit override remains visible and noisy. Fresh no-write CLI probes independently observed stale help exit `0`, stale checksum exit `0` with the exact `package.json` SHA-256, and stale descriptor exit `1` with no stdout descriptor. This is the smallest compatible ordering change and does not weaken descriptor fail-closed behavior.
+
+#### Package-root interface
+
+The `index.ts` diff adds no removed value export and exactly seven T02 value exports: `aggregateDeckPreparationHandoffV1`, `buildSessionPreparationDelegationDigestV1`, `consumeSessionPreparationAuthorizationV1`, `createSessionPreparationAuthorizationServiceV1`, `createSessionPreparationStateV1`, `parseDeckPreparationHandoffV1`, and `parseSessionPreparationRequestV1`. A fresh package self-reference probe observed exactly `111` runtime keys and each of the seven as a function. Both exact oracles retain equality against the complete namespace, so an accidental eighth runtime export remains a test failure. The additive type exports are the contract types for those seven authorized APIs; no CLI/TUI/project-init service or unrelated runtime surface was introduced.
+
+#### Canonical generated assets
+
+Build-info identifies generator `scripts/generate-build-info.ts`, version `0.2.4`, commit `aee3038df0a784b07ba9dd44aca026dca78bc857`, target `linux-x64`, and channel `stable`. OpenCode and Pi generated files retain generator-only headers and source markers matching current canonical TypeScript hashes `sha256:4f836c55e56a54d49292fb59479cf2493b8fab0e9374ce5bdbdd84f4d0b1b914` and `sha256:7f8e6593247584d6a910d38e90eb619b35c85874e629eb7dedc067f364d711e8`. Fresh TARGETED/AFFECTED_AREA temporary generation recorded byte equality to the current generated digests. Current sources, markers, generated bytes, and build-info fields still match; there is no hand-edit indicator or stale-source shortcut.
+
+### Cross-change coordination and stale-evidence judgment
+
+- **Predecessor identity is preserved:** the exact 17-path subject and binary diff remain independently reproducible and exclude all successor-only paths.
+- **Successor T01–T10 identity is preserved, not accepted:** all `25` exact T01–T10 implementation/test paths independently match the per-path hashes recorded in the bound successor Apply artifact. Their identity remains separate from the predecessor and from the seven-path repair subject.
+- **T11–T13 remain excluded:** the T11 invariant symbol is absent, both T12 runtime-control registrations are absent from `content-registry.ts`, and T13 remains an unexecuted successor closure task. This Review neither infers completion nor accepts those tasks.
+- **No hidden coupling:** the generated OpenCode/Pi markers bind T03/T04 canonical sources; the strict package-root oracles bind T02 runtime exports; the successor Apply artifact binds all 25 T01–T10 bytes; and the fresh AFFECTED_AREA pass exercised the genuinely affected Core, runtime, OpenCode, Pi, release, CLI, and Git-safety areas after the coordinated repair. No pre-repair stage result is reused as current evidence.
+- **No stale-evidence shortcut:** any change to the 17-path predecessor, seven repair members, 25 T01–T10 dependency paths, generated source markers, Apply/Verify artifacts, or registry bases invalidates this Review binding even if another subject remains unchanged.
+
+### Prior BROAD finding and historical optional scope
+
+The earlier `BROAD-REPO-TEST` finding `finding:v1:62f456be182bc35d848673777126cb15` remains preserved as historical failed evidence. Its concrete release-order, package-export, Review-content, and generated/materialization failures are no longer reproducible in the current focused, affected-area, and bounded functional evidence. That does **not** let Review declare the BROAD gate passed: only a fresh mandatory BROAD run over this repaired composite can close the current repository-wide gate. Review therefore releases BROAD as the next action without waiving or substituting for it.
+
+Historical blockers `R1-B01`, `R1-B02`, `R2-B01`, `R4-B01`, and `R5-B01` remain closed. Historical optional `R4-N01` is not revived because this composite introduces no new material readability or maintenance reason.
+
+### Engineering-axis assessment
+
+| Axis | Fresh judgment |
+|---|---|
+| Correctness / instruction precedence | **Approved.** Commit-only mechanics and mandatory lifecycle/protected-risk Review are coherent on composed surfaces; release modes and package-root exports behave as intended. |
+| Architecture / boundaries | **Approved.** Canonical core content, runtime contracts, adapter hooks, package-root exports, and generated assets retain their existing ownership boundaries. The repair adds no parallel service, phase, scheduler, or generalized abstraction. |
+| Authorization / Git safety | **Approved.** Exact authorization, one-use runtime reservation, caller-data stripping, blocked-target checks, exact path staging, non-destructive ownership, and the canonical irreversible-loss confirmation rule remain intact. |
+| Security / protected risk | **Approved.** Descriptor staleness still fails closed; generated provenance remains bound; protected findings cannot become warnings; no secret, network, installer, user-home, ledger-write, or direct centralized-registry path is introduced. |
+| Public-interface compatibility | **Approved.** Exactly seven authorized T02 runtime APIs are additive; strict complete-surface oracles reject accidental expansion; no prior runtime export is removed. |
+| Maintainability / test quality | **Approved.** Changes are localized, named contracts remain explicit, exact and behavioral oracles are complementary, and no dependency or avoidable abstraction is added. |
+| Performance / scalability | **Approved.** Release branching and namespace assertions are bounded; runtime authorization uses bounded maps/sets and constant-size cryptographic work. No new I/O fan-out, unbounded scan, retry loop, or hot-path dependency is introduced by the repair. |
+| Generated discipline | **Approved.** Generator markers, canonical source hashes, generated bytes, and build-info metadata align. Generated files remain derivatives rather than editable authorities. |
+| Scope / rollback | **Approved.** The predecessor 17-path identity, seven-path repair, successor T01–T10 dependency, T11–T13 exclusions, protected paths, and no-dependency boundary are explicit. Rollback is an auditable forward/revert change followed by regeneration and fresh QA; no destructive Git action is needed. |
+
+### Findings, optional scope, FailureManifestV1, and blockers
+
+- New blocking findings: `0`.
+- New non-blocking findings: `0`.
+- Related regressions: `0` open.
+- Unrelated baseline defects discovered by this bounded Review: `0`.
+- Required Spec/Design replans: `0`.
+- Optional new scope: none.
+- `FailureManifestV1`: `null`.
+- Review blockers: none.
+
+### Registry coordination and next action
+
+Review modified only this appended English section of `review-report.md`. It did not modify source, tests, Apply/Verify evidence, generated output, dependencies, registry YAML, global/user configuration, the successor candidate, excluded WIP, or `runner-capability-standardization`.
+
+The coordinator remains the only registry writer. One ordered helper-built and helper-parse-validated predecessor approval `RegistryIntentV1` is returned out of band with phase `review`, status `approved`, canonical event `review.approved`, artifact `review-report` / `openspec/changes/streamline-orchestrator-ownership-and-acceptance/review-report.md`, this report's final digest, the supplied current predecessor state/events base, coordinated batch/digest, and decision digest. It is not embedded here to avoid a circular report hash.
+
+- Next required action: validate and atomically reconcile that intent against the unchanged registry base, then run mandatory BROAD for this exact repaired composite. Any relevant byte, generated marker, artifact, dependency, report, or registry-base change invalidates this Review.
+- Artifact-path clarification: the canonical change-local RegistryIntent artifact path is `review-report.md`; the repository-relative location is `openspec/changes/streamline-orchestrator-ownership-and-acceptance/review-report.md`.
+
+---
+
+## R8 / Fresh Independent Final Review After Generated Build-Info Reconciliation
+
+### Decision
+
+**APPROVED.** Fresh independent engineering Review approves predecessor `streamline-orchestrator-ownership-and-acceptance` for the exact repaired composite candidate after the newly completed Apply repair and fresh TARGETED plus AFFECTED_AREA passes. This Review found zero blocking findings and zero non-blocking findings.
+
+Approval does not close, waive, or replace mandatory BROAD. The historical one-test BROAD failure remains open as failed stage evidence until a fresh mandatory BROAD run succeeds for the exact candidate and dependencies. This Review does not authorize Archive, merge, release, push, successor acceptance, or successor T11–T13.
+
+Review inspected tests before implementation, independently recomputed candidate identities, inspected current source and coordinated repair diffs, checked composed/public/generated boundaries, and used bounded read-only probes. It did not implement fixes, rerun TARGETED or AFFECTED_AREA, run BROAD or Archive, invoke graph/index tools, touch or clean `.codebase-memory/*`, or write registry YAML.
+
+### Provenance and independence
+
+- Timestamp (UTC): `2026-07-29T07:51:40.040Z`.
+- Role / fresh instance: `deck-developer-review` / `deck-developer-review-opencode-r8-post-build-info-reconciliation-20260729T075140Z`; distinct from Apply, both diagnostic Explorers, TARGETED, AFFECTED_AREA, every historical Review, and every historical Verify instance.
+- Runner / model: `opencode` / `openai/gpt-5.6-sol`.
+- Loaded skills: `deck-developer-review`, `using-agent-skills`, `code-review-and-quality`, and `security-and-hardening`. Serena instructions were loaded for read-only navigation.
+- SkillDiscoveryContextV1: registry `.atl/skill-registry.md`, status `indeterminate`, reason `validate_command_returned_unexpected_interactive_menu`, active runner `opencode`, authority reminder `v1`; bounded active-runner direct discovery only. Review did not validate, generate, refresh, repair, or modify the skill registry or `.gitignore`.
+- Adaptive context was unavailable/not loaded. Official OpenSpec artifacts, Spec Registry records, source, tests, generated bytes, Apply evidence, and fresh Verify evidence controlled this judgment.
+
+### Fail-closed bindings, complete target identity, and freshness
+
+Every delegated binding matched immediately before this append:
+
+| Binding | Fresh independent observation |
+|---|---|
+| Coordinated batch | `batch:v1:fae7fb3cf1c1746e974dd178567c3e08`; digest `sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60`; decision `sha256:2b3b08024f49a64c9ae0d0891633b1601df68422d28381ed6840382cd688fb53`. |
+| HEAD | `aee3038df0a784b07ba9dd44aca026dca78bc857`. |
+| Predecessor subject | Exact sorted `17`-path raw-byte manifest, first `packages/adapter-opencode/src/developer-team-install.test.ts`, last `packages/core/src/teams/developer/user-phase-communication.test.ts`: `sha256:4ffb265c7b2f38ceff34ae3564646326409cebdb9756b083dbe97addcf3bcf43`, `2701` manifest bytes. |
+| Predecessor binary diff | Exact `git diff --binary HEAD -- <17 sorted paths>`: `sha256:f6eefc085d567a51e63369760a21bb60b124143213ec45b7c4f1d25465316c75`, `3176` bytes. Only `orchestrator-content.ts`, `orchestrator-content.test.ts`, and `prompt-profile.test.ts` differ inside that allowlist. |
+| Coordinated repair | Exact sorted `7`-path `{path,sha256,bytes}` manifest: `sha256:98e49d652b1f78ab4adf96ac1fff0ff3cdedac56eccf4da3ca800877be61bbc6`, `1163` manifest bytes. No hidden eighth path exists. |
+| Composite subject | Delegated component binding remains `sha256:50cc070f53b18f6c152a4422fd5c6b82553be0c9184950b0e8d64f2cfbda8592`; Review separately recomputed both current components rather than absorbing unrelated successor paths. |
+| Build info | `apps/cli/src/runtime/build-info.generated.ts`: `sha256:dd18c1ee4ecd5081c7c5820952e0a28187e0e9e2fbc03ed691ee6f62c95c6946`, `379` bytes, version `0.2.4`, full HEAD, target `linux-x64`, channel `stable`. |
+| Apply / Verify generations | Repair Apply `apply-progress.md` `sha256:b2e01b8e951bb02bc34ce0853febc3e28291bd722661182c0c3b722984b1c6c3`; fresh cumulative Verify through AFFECTED_AREA `verify-report.md` `sha256:a02ad84e19690972d22f95275a5a3acd402765992150f0d90034f41558336521`. |
+| Historical Review preservation | This report matched pre-append digest `sha256:60754643b1e5642b7af0acbbf5cf70adaf5d88c9f5b99a9759de8994bb2a1133`; all prior Review generations remain verbatim above. |
+| Predecessor registry base | State `sha256:bd7137c4a58f349633aaeb23e2ca5c7ba6dff9c14796d0a23b11402ee326b4a7`; events `sha256:65be22d3502803a34f00c0b60dfb67c976dca29a9ae4c04ec32dacddff2e122a`; parsed phase/status `verify/passed`. |
+| Successor dependency | Apply artifact `sha256:b71e8c4e289ebc04d2a1d4a5cf28d4114f9de39cd08ae0fc649679d61acc1c07`; state `sha256:798a145a6e3cb22e1ec3debff66dbb11aae460ea4e96d3a2d783888863f51a42`; events `sha256:9b84b93ac66d3f69935565b7844a9fcb2522a0561a34b1b683a32b74d4f42e46`; parsed phase/status `apply/completed`. All `25` recorded T01–T10 implementation/test paths matched their recorded hashes and byte counts with zero mismatches. |
+| Worktree / protected scope | Exact porcelain status remained `50` lines, `sha256:30debed2b62c7fa7efa4e1802520805563c4c93b7342e54c1172e940309ecd91`; staged paths `0`; status hits `0` for `runner-capability-standardization`, `.atl/skill-registry.md`, `.gitignore`, and `packages/core/src/skills/external/content.generated.ts`. `.codebase-memory/` was ignored and excluded, not inspected as candidate content. |
+
+The seven repair members matched their delegated bytes: canonical build-info above; OpenCode generated JS `sha256:d9d45fd649db9eb0e6419a07ac87e60870f01fa92a0ab9d2d0fefc1052a50e42` (`276474`); Pi generated JS `sha256:f3053d804c32d005f4d819cc8f1cd062470275da12870b21e1d070cb53c5efc2` (`276523`); package-root export oracles `sha256:69f6147f7a61f5065df4aff28134158fe79f77e0ccf2b5f4021ebf8194d9a1e4` (`10734`) and `sha256:0c7b9985f3cfa4b7c11ee114d35ac1a276e4bcbf5746e577217c44e99e9f6dc7` (`58676`); release test `sha256:91efad35f0ab15905d8b71e83e0ceb093af5de07121e0242ead25bd761ede424` (`10474`); release source `sha256:85d7bfeebf8969f922434949c05c0838b5965e53cc396acbc2dd1080f920f5ab` (`26464`). OpenCode/Pi source markers match their canonical TypeScript hashes `4f836c55e56a54d49292fb59479cf2493b8fab0e9374ce5bdbdd84f4d0b1b914` and `7f8e6593247584d6a910d38e90eb619b35c85874e629eb7dedc067f364d711e8`.
+
+### Tests-first and implementation judgment
+
+- The predecessor regression test rejects the historical commit-only Review trigger on all six legacy/compact session, agent, and skill surfaces while retaining lifecycle/protected-risk Review. Exact shared-fragment composition and the deterministic legacy fixture continue to bind generated prompt behavior.
+- Current `ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1` authorizes only an unambiguous mechanical snapshot, requires exact staging and staged-diff inspection, preserves secret/protected-risk stops and destructive-Git confirmation, and labels a commit without binding QA as unverified. The repaired legacy agent Review rule no longer contradicts it.
+- Ownership remains qualitative and authority-preserving: bounded deterministic coordinator mechanics are direct; implementation, architecture, security, migration, protected-risk, Verify, Review, broad, and build judgment remain specialist-owned. Apply-local proof and real functional exercise remain non-independent and precede fresh TARGETED -> AFFECTED_AREA -> Review -> BROAD.
+- Release ordering now returns help and checksum modes before descriptor-only build-info staleness validation, while descriptor generation remains fail-closed unless the explicit noisy override is supplied. Tests cover stale help/checksum success, stale descriptor refusal without output, and explicit override behavior.
+- The two package-root tests use exact complete namespace equality, so the seven authorized additive T02 APIs are callable while missing or accidental extra exports fail. No removed public value export or new dependency was introduced.
+- Fresh TARGETED passed `664` predecessor tests, release/export/runtime/reachability/Git-safety probes, strict TypeScript, both affected OpenSpec validations, semantic/public-interface probes, and deterministic no-write generation. Fresh AFFECTED_AREA passed the full Core Developer Team, SDD runtime, OpenCode, Pi, release, CLI build-info/release/binary, Git-safety, strict TypeScript, generated/source-marker, and scope-integrity checks. Passing evidence informed but did not compel approval.
+
+### Build-harness short-commit reconciliation
+
+The short-commit mutation is safely reconciled for this candidate and does not conceal a source defect under the accepted build/release contract:
+
+1. `scripts/build-binaries.ts` invokes the build-info generator without `--commit`; `scripts/generate-build-info.ts` intentionally derives `git rev-parse --short HEAD` in that mode. The release workflow likewise uses that default for per-target binary metadata.
+2. `prepare-release.ts` explicitly treats equivalent short/full SHAs as the same commit, while release-descriptor generation supplies the full `GITHUB_SHA`. Short and full forms are therefore supported representations, not different source revisions.
+3. The repair did not hand-edit or disguise the derivative. It used the canonical generator with explicit frozen full HEAD, then proved byte-identical regeneration and fresh build-info/release behavior. The full-HEAD bytes now exactly restore the delegated seven-target and composite identities.
+4. This judgment is bounded to semantic short/full equivalence and the current exact bytes. A later BROAD/build mutation still requires fail-closed identity handling and cannot be silently ignored as approval evidence. Review does not pre-close that stage or authorize source/test changes.
+
+### Historical BROAD and incidental-cache dispositions
+
+- The latest historical BROAD advancement command remains failed: its first `bun test --timeout 30000` run recorded `4074 pass`, `1 fail`, and exit `1`. A later diagnostic rerun passed all `4075` tests, but correctly did not erase the first mandatory nonzero result or execute the remaining stopped BROAD gates. The finding therefore remains open until fresh mandatory BROAD; this Review neither closes nor reclassifies it.
+- `SAFE_INCIDENTAL_TOOL_CACHE` remains bounded to the ignored runner outputs `.codebase-memory/artifact.json` and `.codebase-memory/graph.db.zst`. They are neither candidate members nor release, build, test, prompt-materialization, registry, or provenance authorities. Their classification grants no general write allowance, no acceptance credit, and no permission to publish, clean, or absorb them. Review did not invoke graph/index tools or touch those paths.
+- Successor T01–T10 bytes remain a dependency only. `INV_003_SESSION_PREPARATION_GATE` is absent, both T12 runtime-control registrations are absent from `content-registry.ts`, and T13 remains unexecuted. This predecessor approval does not accept or advance the successor.
+
+### Engineering-axis assessment
+
+| Axis | Fresh judgment |
+|---|---|
+| Correctness / precedence | **Approved.** Commit-only, lifecycle Review, candidate-validation, release-mode, and public-export behavior remain coherent and covered by independent evidence. |
+| Architecture / ownership | **Approved.** Canonical Core content, runtime contracts, adapter hooks, generated derivatives, and centralized registry boundaries remain separated; no new phase, scheduler, service, or bureaucracy was introduced. |
+| Security / trust boundaries | **Approved.** Authorization is one-use and fail-closed, untrusted caller markers are stripped, protected risks cannot be laundered, descriptor staleness remains fail-closed, and no secret/network/install/user-home/ledger/registry-write path is added. |
+| Git safety / commit-only | **Approved.** Exact-path staging, unrelated-WIP preservation, non-destructive direct work, and the canonical exact-command/new-message discard safeguard remain explicit. Commit-only does not imply QA or readiness. |
+| Maintainability / compatibility | **Approved.** The repair is localized, reuses existing generators and complete-surface oracles, adds no dependency, preserves old exports, and keeps legacy/compact surfaces aligned. |
+| Performance / scalability | **Approved.** Changes add bounded string composition, constant-size metadata checks, and exact test oracles; no unbounded scan, retry, I/O fan-out, or hot-path dependency was introduced. |
+| Generated provenance | **Approved.** Generator headers, source hashes, canonical bytes, build-info metadata, and no-write regeneration evidence align. Generated outputs remain derivatives rather than editable authority. |
+| Scope / cross-change integrity | **Approved.** The 17-path predecessor, seven-path coordinated repair, 25-path successor dependency, T11–T13 exclusions, protected targets, unrelated WIP, and incidental cache remain explicitly separated. |
+
+### Findings, optional scope, FailureManifestV1, and blockers
+
+- New blocking findings: `0`.
+- New non-blocking findings: `0`.
+- Related regressions: `0` open from Review.
+- Unrelated baseline defects discovered by this bounded Review: `0`.
+- Required Spec/Design replans: `0`.
+- Optional new scope: none.
+- `FailureManifestV1`: `null`.
+- Review blockers: none.
+
+### Registry coordination and next action
+
+Review modified only this append to predecessor `review-report.md`. It did not modify source, tests, generated output, Apply/Verify evidence, registry YAML, successor artifacts, protected paths, ignored cache, or unrelated WIP.
+
+The coordinator remains the only registry writer. One ordered helper-built and helper-parse-validated predecessor approval `RegistryIntentV1` is returned out of band with phase `review`, status `approved`, event `review.approved`, artifact kind/path `review-report` / `review-report.md`, this report's final digest, the supplied current predecessor registry base, coordinated batch/digest, and decision digest. It is not embedded here because doing so would create a circular report hash.
+
+- Next required action: validate and atomically reconcile the returned approval intent against the unchanged registry base, then run mandatory BROAD for this exact candidate and dependencies. Historical BROAD remains open and Archive remains blocked until BROAD succeeds.
+- Any later relevant candidate, generated, dependency, evidence, report, or registry-base modification invalidates this Review and requires fresh stage evidence in the mandated order.
+
+## R9 / Fresh Independent Final Review After Clean TARGETED and AFFECTED_AREA Recovery
+
+### Decision
+
+**APPROVED.** Fresh independent engineering Review approves predecessor `streamline-orchestrator-ownership-and-acceptance` for the exact repaired composite candidate after the latest clean TARGETED and AFFECTED_AREA passes. This Review found zero new blocking findings and zero new non-blocking findings.
+
+Approval does not close, waive, supersede, or replace mandatory BROAD. Historical BROAD findings remain open until one complete mandatory BROAD pass succeeds for the exact bound candidate and dependencies. This Review does not authorize Archive, merge, release, push, successor acceptance, or successor T11–T13.
+
+Review inspected tests before implementation, independently recomputed candidate and generated identities, inspected the current source and repair diffs, assessed the canonical registry-event recovery and isolated-build recipe disposition, and ran only bounded read-only Review probes. It did not implement fixes, rerun TARGETED or AFFECTED_AREA, run BROAD or Archive, invoke graph/index tools, touch or clean `.codebase-memory/*`, or write registry YAML.
+
+### Provenance and independence
+
+- Timestamp (UTC): `2026-07-29T16:29:48.228Z`.
+- Role / runner / model: `deck-developer-review` / `opencode` / `openai/gpt-5.6-sol`.
+- Fresh instance: `deck-developer-review-opencode-r9-final-after-recovered-affected-20260729T162948Z`; distinct from Apply, Explorer, TARGETED, AFFECTED_AREA, BROAD, Archive, and every historical Review/Verify instance recorded above.
+- Loaded role/capability skills: `deck-developer-review`, `using-agent-skills`, `code-review-and-quality`, `security-and-hardening`, and `performance-optimization`. Serena was used only for read-only symbol navigation and diagnostics.
+- Adaptive Supermemory context was loaded as advisory only. Official OpenSpec artifacts, Spec Registry records, source, tests, generated bytes, Apply evidence, and the fresh Verify chain controlled this judgment.
+
+### Fail-closed bindings, target identity, and freshness
+
+Every delegated pre-judgment binding matched:
+
+| Binding | Fresh independent observation |
+|---|---|
+| Coordinated batch | `batch:v1:fae7fb3cf1c1746e974dd178567c3e08`; digest `sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60`; decision `sha256:2b3b08024f49a64c9ae0d0891633b1601df68422d28381ed6840382cd688fb53`. |
+| HEAD | `aee3038df0a784b07ba9dd44aca026dca78bc857`. |
+| Predecessor subject | Exact JavaScript-default sorted `17`-path raw-byte `JSON.stringify({ head, files })` manifest: `sha256:4ffb265c7b2f38ceff34ae3564646326409cebdb9756b083dbe97addcf3bcf43`, `2701` bytes. First path is `packages/adapter-opencode/src/developer-team-install.test.ts`; last is `packages/core/src/teams/developer/user-phase-communication.test.ts`; no eighteenth path exists. |
+| Predecessor binary diff | Exact `git diff --binary HEAD -- <17 sorted paths>`: `sha256:f6eefc085d567a51e63369760a21bb60b124143213ec45b7c4f1d25465316c75`, `3176` bytes. Only `orchestrator-content.ts`, `orchestrator-content.test.ts`, and `prompt-profile.test.ts` differ inside that allowlist. |
+| Coordinated repair | Exact path-sorted seven-member `{path,sha256,bytes}` manifest: `sha256:98e49d652b1f78ab4adf96ac1fff0ff3cdedac56eccf4da3ca800877be61bbc6`, `1163` bytes. No hidden eighth repair member exists. |
+| Composite subject | Delegated binding remains `sha256:50cc070f53b18f6c152a4422fd5c6b82553be0c9184950b0e8d64f2cfbda8592`; Review independently recomputed both current component subjects and did not absorb unrelated successor paths. |
+| Build info | `apps/cli/src/runtime/build-info.generated.ts`: `sha256:dd18c1ee4ecd5081c7c5820952e0a28187e0e9e2fbc03ed691ee6f62c95c6946`, `379` bytes, version `0.2.4`, full bound HEAD, date `2026-07-29`, target `linux-x64`, channel `stable`. |
+| Apply / fresh Verify | `apply-progress.md` `sha256:b2e01b8e951bb02bc34ce0853febc3e28291bd722661182c0c3b722984b1c6c3`; cumulative fresh Verify through AFFECTED_AREA `verify-report.md` `sha256:5b456ab420deb8f21961038c6c090770489379b3680d57a1ab29b90e5d6450a9`. The latest canonical AFFECTED_AREA timestamp is `2026-07-29T15:53:29.804Z`, strictly before this Review. |
+| Historical Review preservation | This report matched delegated pre-append digest `sha256:e3c88e58dc706631770897b932819d41133b4ee9ae579b20abb143eb8df3ee33`; all R1–R8 Review generations and their findings remain verbatim above. |
+| Current registry base | State `sha256:fc1d2b6bd829af169157a6473db748b8b4ec3470e897866999af2cb379e16f42`; events `sha256:31e622e28e6967638a03945705235b01645d57afe6d045fb18506f46310309a4`; parsed phase/status `verify/passed`. |
+| Worktree / protected scope | Pre-append porcelain contained `50` entries with digest `sha256:08fc57e47f389e9deec11530a13acae11760aa485b7e033ab78407dd8f6d7443`; protected hits were `0` for `runner-capability-standardization`, `.atl/skill-registry.md`, `.gitignore`, and `.codebase-memory`. Unrelated successor/WIP remained visible and excluded. |
+
+The seven repair members match their delegated bytes: build-info above; OpenCode generated JS `sha256:d9d45fd649db9eb0e6419a07ac87e60870f01fa92a0ab9d2d0fefc1052a50e42` (`276474`); Pi generated JS `sha256:f3053d804c32d005f4d819cc8f1cd062470275da12870b21e1d070cb53c5efc2` (`276523`); package-root export oracles `sha256:69f6147f7a61f5065df4aff28134158fe79f77e0ccf2b5f4021ebf8194d9a1e4` (`10734`) and `sha256:0c7b9985f3cfa4b7c11ee114d35ac1a276e4bcbf5746e577217c44e99e9f6dc7` (`58676`); release test `sha256:91efad35f0ab15905d8b71e83e0ceb093af5de07121e0242ead25bd761ede424` (`10474`); release source `sha256:85d7bfeebf8969f922434949c05c0838b5965e53cc396acbc2dd1080f920f5ab` (`26464`). OpenCode/Pi generated source markers exactly match current canonical TypeScript hashes `4f836c55e56a54d49292fb59479cf2493b8fab0e9374ce5bdbdd84f4d0b1b914` and `7f8e6593247584d6a910d38e90eb619b35c85874e629eb7dedc067f364d711e8`.
+
+The bounded rooted predecessor OpenSpec probe returned `ok: true`, `0` errors, and `0` warnings. `git diff --check` returned zero with empty output. These Review probes did not substitute for or rerun a Verify stage.
+
+### Tests-first and implementation judgment
+
+- `orchestrator-content.test.ts:902-1000` rejects the pure-delegator clauses and historical commit-only Review trigger across all six legacy/compact session, agent, and skill surfaces; requires all four shared fragments exactly once; locks the complete non-destructive ownership predicate and specialist boundary; preserves exact commit-only bytes; and orders functional exercise before final independent QA.
+- The canonical `INV-002` record retains ID, critical tier, surfaces, position, and invariant count while replacing only the superseded pure-delegator semantics. The shared ownership fragment requires every direct operation to be bounded, mechanical, deterministic, explicitly authorized, non-destructive, and free of specialist implementation/judgment. Ambiguity and protected risk still clarify, delegate, or stop.
+- General, Backend, and Frontend Apply content separates focused local proof from proportionate real-interface functional exercise, requires fix/retest, classifies conditional target validation, and labels all Apply evidence non-independent. Security/trust-boundary and accessibility obligations remain explicit rather than being traded for fewer checks.
+- The exact commit-only block preserves exact-path staging, unrelated-WIP isolation, bounded secret/safety checks, no amend/push/release/Archive inference, and the canonical new-message/exact-command destructive-Git confirmation rule. Commit-only remains an unverified snapshot unless current final evidence binds to the exact subject and dependencies.
+- OpenCode adapter tests exercise returned install and prompt-generation plans rather than bypassing the adapter boundary. Legacy/compact profile oracles, deterministic fixtures, and generated marker checks cover the composed and materialized surfaces without introducing an adapter policy branch.
+- Release handling returns help and checksum modes before descriptor-only staleness validation, while descriptor production remains fail-closed unless the explicit noisy override is supplied. Tests cover stale non-descriptor success, stale descriptor refusal without output, and explicit override behavior.
+- The two package-root tests use exact complete sorted namespace equality, so the seven coordinated additive APIs are callable while missing or accidental extra exports fail. No production dependency or generalized abstraction was added by the repair.
+- Latest fresh TARGETED and AFFECTED_AREA evidence passed focused predecessor semantics, Core Developer Team, SDD runtime, OpenCode, Pi, release/CLI, Git safety, strict TypeScript, deterministic generated/source checks, rooted OpenSpec validation, isolated release output, and `/tmp` binary compilation. Passing evidence informed but did not compel this Review judgment.
+
+### Canonical event recovery, isolated-build recipe, and historical evidence
+
+- The current registry stream uses canonical `verify.passed` for both newly reconciled TARGETED and AFFECTED_AREA events. The earlier strict AFFECTED_AREA failure remains preserved as `verify.failed`, with `registry_write: recovery-reconciled` and FailureManifest digest `sha256:a7384e4407bbe40da8412cf9975f35db643fb6d3cb842a3d8effe2de322592a6`; the recovery did not erase the failed attempt or claim candidate-byte repair.
+- Strict rooted validation now reports zero warnings, so the prior `verify.targeted.passed` name mismatch is no longer present in the current authoritative event surface. Fresh TARGETED and AFFECTED_AREA then ran in order against the recovered base; no stale pre-recovery pass was reused.
+- The prior BROAD isolated build used a read-only live `node_modules` symlink and failed to resolve the workspace package. The later user-authorized harness disposition records a validated snapshot-local Bun workspace-install recipe with no source, test, generated, dependency, or candidate-byte change. That recipe is diagnostic/harness input for the next BROAD only; Review did not execute it and does not convert it into build/package/binary pass evidence.
+- Historical BROAD findings `finding:v1:df81cf249411f3f664ea40615bd3a1af` (`BROAD-REPO-TEST`) and `finding:v1:e252f8fc4dac36b36256c9930b49dc50` (`BROAD-BUILD-PACKAGE-BINARY-ISOLATED`) remain preserved and open until one complete mandatory BROAD pass succeeds. A later diagnostic test pass, binary smoke, or validated recipe cannot erase an earlier mandatory nonzero result.
+- Historical Review blockers `R1-B01`, `R1-B02`, `R2-B01`, `R4-B01`, and `R5-B01` remain closed by their recorded forward repairs and fresh evidence. Historical readability nit `R4-N01` remains historical optional scope and is not revived or absorbed into this final Review.
+
+### Engineering-axis assessment
+
+| Axis | Fresh judgment |
+|---|---|
+| Correctness / precedence | **Approved.** Supersession, qualitative ownership, Apply candidate validation, commit-only semantics, release ordering, package exports, and evidence freshness remain coherent and covered at the relevant boundaries. |
+| Architecture / ownership | **Approved.** Policy remains in canonical Core content, adapters remain consumers, generated files remain derivatives, runtime convergence/registry schemas remain unchanged, and implementation/judgment/heavy execution/Verify/Review stay specialist-owned. |
+| Security / trust boundaries | **Approved.** Authorization remains fail-closed; protected-risk/security/migration/data-loss/public-API judgment cannot be laundered as mechanical work; secrets are not exposed; descriptor staleness remains fail-closed; no new network, installer, credential, user-home, or registry-write path is introduced. |
+| Git safety | **Approved.** Exact staging, staged-diff recheck, unrelated-WIP preservation, non-destructive ownership, and the irreversible-loss confirmation flow remain explicit. No discard, reset, restore, clean, branch, amend, commit, or push operation was performed by Review. |
+| Maintainability / test quality | **Approved.** Shared fragments provide one canonical semantic source, behavior and negative oracles are complementary, adapter tests cover actual plans, no dependency was added, and historical findings remain auditable rather than rewritten. |
+| Performance / scalability | **Approved.** Changes are bounded prompt composition, constant-size metadata checks, deterministic hashes, and test-only exact namespace assertions; no hot-path I/O fan-out, unbounded scan, retry loop, or new runtime scheduler/state was introduced. The compact profile retains its existing size floor. |
+| Compatibility / public interface | **Approved.** `INV-002` identity/order/surfaces remain stable, legacy and compact profiles stay aligned, existing registry artifacts remain readable, seven coordinated runtime APIs are additive, and no prior public value export is removed. |
+| Generated provenance | **Approved.** Canonical source hashes, generated headers, exact runner bytes, build-info fields, and deterministic fresh Verify evidence align. No generated target was hand-edited by Review. |
+| Scope / cross-change integrity | **Approved.** The 17-path predecessor, seven-path repair, successor dependency, T11–T13 exclusions, protected targets, historical artifacts, incidental cache, and unrelated WIP remain separated. |
+
+### Findings, optional scope, FailureManifestV1, and blockers
+
+- New blocking findings: `0`.
+- New non-blocking findings: `0`.
+- Related regressions open from this Review: `0`.
+- Unrelated baseline defects discovered by this bounded Review: `0`.
+- Required Spec/Design replans: `0`.
+- Optional new scope: none.
+- `FailureManifestV1`: `null`.
+- Review blockers: none.
+- Lifecycle blocker: mandatory BROAD has not completed successfully; Archive remains blocked.
+
+### Registry coordination and next action
+
+Review modified only this append to predecessor `review-report.md`. It did not modify source, tests, generated output, Apply/Verify evidence, registry YAML, successor artifacts, protected paths, ignored cache, or unrelated WIP.
+
+The coordinator remains the only registry writer. One ordered repository-helper-built and repository-helper-parse-validated predecessor approval `RegistryIntentV1` is returned out of band with phase `review`, status `approved`, event `review.approved`, artifact kind/path `review-report` / `review-report.md`, this report's final digest, the supplied current predecessor registry base, coordinated batch/digest, and decision digest. It is not embedded here because doing so would create a circular report hash.
+
+- Canonical action: `review.approved`.
+- Next required action after atomic reconciliation: run mandatory BROAD for this exact candidate and dependency set. Historical BROAD findings remain open until the complete BROAD pass succeeds.
+- Any later relevant candidate, generated, dependency, evidence, report, or registry-base modification invalidates this Review and requires fresh stage evidence in the mandated order.

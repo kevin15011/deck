@@ -173,3 +173,14 @@ events:
       - "R1 found four blocking issues: malformed config precedence, sanitizer/direct-exception secret leakage, multibyte bound overflow, and missing adversarial tests."
       - "The post-restart installation itself is valid and its fast duration is explained by intentional already-present skips."
       - "Broad and Archive are blocked pending explicit user authorization, bounded repair, fresh Verify, and fresh Review."
+  - phase: closed
+    status: incomplete
+    event: closed.incomplete
+    artifact: review-report.md
+    timestamp: "2026-07-26T05:23:52.734Z"
+    actor: human:user
+    registry_write: non-deferred
+    notes:
+      - "The user explicitly requested closure as incomplete and declined further repair."
+      - "R1-B01 through R1-B04 remain unresolved; broad verification and Archive were not performed."
+      - "All artifacts remain under openspec/changes/opencode-package-install-running-binary-regression/ for historical traceability."

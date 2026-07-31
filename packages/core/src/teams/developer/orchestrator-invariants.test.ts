@@ -353,30 +353,26 @@ describe("INV-006 SDD Explorer-First Flow", () => {
 describe("INV-004 SDD Triage Gate: strengthened condition and requiredAction", () => {
   const inv_004 = ORCHESTRATOR_INVARIANTS.find((inv) => inv.id === "INV-004")!;
 
-  it("condition should reference modification/delegation of any step that may modify", () => {
-    expect(inv_004.condition).toContain("taking/delegating any step that may modify");
+  it("condition distinguishes new outcomes from in-scope conversational deltas", () => {
+    expect(inv_004.condition).toContain("new desired outcome");
+    expect(inv_004.condition).toContain("conversational deltas reuse");
   });
 
-  it("condition should enumerate protected artifact types", () => {
-    expect(inv_004.condition).toContain("code, configuration, prompts, OpenSpec artifacts, or project files");
-  });
-
-  it("requiredAction should contain exact intake alignment taxonomy and restatement gate", () => {
+  it("requiredAction keeps triage but removes routine restatement and revision limits", () => {
     expect(inv_004.requiredAction).toContain("Direct, Specialist(s), Recommend SDD, or Run SDD");
     expect(inv_004.requiredAction).toContain("bounded read-only discovery");
-    expect(inv_004.requiredAction).toContain("restate the user's intent, assumptions, open questions, risks, and consequential choices");
-    expect(inv_004.requiredAction).toContain("Trivial direct edits are exempt");
-    expect(inv_004.requiredAction).toContain("explicit confirmation");
-    expect(inv_004.requiredAction).toContain("three user-requested revision cycles");
-    expect(inv_004.requiredAction).toContain("modification authorization remains a separate later gate");
-    expect(inv_004.requiredAction).toContain("record the classification and its reason");
+    expect(inv_004.requiredAction).toContain("without a separate restatement-confirmation ceremony");
+    expect(inv_004.requiredAction).toContain("\"move this up\"");
+    expect(inv_004.requiredAction).toContain("There is no arbitrary revision-cycle limit");
+    expect(inv_004.requiredAction).toContain("rerun only evidence invalidated by that delta");
+    expect(inv_004.requiredAction).not.toContain("three user-requested revision cycles");
   });
 
   it("invariant count remains six and compact INV-004 summary is exact", () => {
     expect(ORCHESTRATOR_INVARIANTS).toHaveLength(6);
     const compact = COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1.find((e) => e.id === "INV-004");
     expect(compact?.summary).toBe(
-      "Classify every request; for non-trivial work allow only bounded read-only discovery, then restate and obtain confirmation before substantial work. Trivial Direct edits are exempt; modification authorization remains separate.",
+      "Classify each new outcome, start clear reversible work without a separate confirmation ceremony, and treat in-scope feedback as a delta on the same candidate. Ask again only for material ambiguity, scope expansion, protected risk, irreversible action, or an actual conflict.",
     );
   });
 });
@@ -459,14 +455,15 @@ describe("ModificationAuthorization: renderDelegationGate", () => {
     expect(output).toContain("BLOCKED");
   });
 
-  it("should include INV-004 and INV-006 references", () => {
+  it("should apply INV-006 only after Run SDD is selected", () => {
     const auth: ModificationAuthorization = {
-      requestClassification: undefined as any,
+      requestClassification: "Direct",
       userAuthorizedModification: true,
     };
     const output = renderDelegationGate(auth);
-    expect(output).toContain("INV-004");
-    expect(output).toContain("INV-006");
+    expect(output).toContain("not required outside Run SDD");
+    expect(output).not.toContain("INV-006");
+    expect(output).not.toContain("BLOCKED");
   });
 });
 
@@ -597,5 +594,27 @@ describe("streamlined coordinator ownership invariants", () => {
     expect(automatic).toContain("target/product validation");
     expect(ownership).toContain("bounded coordinator operations");
     expect(ownership).toContain("implementation and judgment");
+  });
+});
+
+describe("leadership proportionality invariants", () => {
+  it("limits deferred parallelism to Spec + Design or in-stage independent checks", () => {
+    const invariant = ORCHESTRATOR_INVARIANTS.find((entry) => entry.id === "INV-005")!;
+    expect(invariant.condition).toContain("Spec+Design");
+    expect(invariant.condition).toContain("in-stage independent checks");
+    expect(invariant.condition).not.toContain("Verify+Review");
+  });
+
+  it("requires Explorer only after Run SDD has been selected, never for Direct or Specialist work", () => {
+    const invariant = ORCHESTRATOR_INVARIANTS.find((entry) => entry.id === "INV-006")!;
+    expect(invariant.condition).toContain("post-Explore Run SDD");
+    expect(invariant.requiredAction).toContain("Direct and Specialist work must not require Explorer");
+  });
+
+  it("supports unbounded in-scope product iteration without restarting intake", () => {
+    const invariant = ORCHESTRATOR_INVARIANTS.find((entry) => entry.id === "INV-004")!;
+    expect(invariant.requiredAction).toContain("continues the same working outcome");
+    expect(invariant.requiredAction).toContain("There is no arbitrary revision-cycle limit");
+    expect(invariant.requiredAction).toContain("mint any required internal one-use authorization without asking the user again");
   });
 });

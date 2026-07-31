@@ -22,10 +22,10 @@ import {
   transitionStagedVerificationV1,
 } from "../../../../sdd-runtime/src";
 
-// Refreshed for EII-SOA-007 through EII-SOA-010 composed legacy output.
-const LEGACY_BYTES = 481194;
-const LEGACY_LEXICAL_TOKENS = 100021;
-const LEGACY_SHA256 = "8c634904bf996eec9f6bd6e19b3db2cd72a4c3bdf55f96a614505a4402a48c03";
+// Refreshed for the proportional leadership and causal QA authority surfaces.
+const LEGACY_BYTES = 518742;
+const LEGACY_LEXICAL_TOKENS = 106475;
+const LEGACY_SHA256 = "b67ffd3d25efbc0b99ab3128032a0787ec96ca2b238354983c957f23452e3847";
 
 const CONTROL_PLANE_AGENT_IDS = [
   "deck-developer-orchestrator",

@@ -25,6 +25,23 @@ export interface RegistrySemanticIntentV1 {
     readonly note?: string;
   };
   readonly decisionDigest?: string;
+  readonly approvalReceipt?: {
+    readonly schema: "approval-receipt-v1";
+    readonly receiptId: string;
+    readonly digest: string;
+    readonly changeId: string;
+    readonly gate: string;
+    readonly subjectDigest: string;
+    readonly decision: "approved" | "rejected";
+    readonly actor: string;
+    readonly timestamp: string;
+    readonly transitionId: string;
+  };
+  readonly approvalConsumption?: {
+    readonly receiptId: string;
+    readonly receiptDigest: string;
+    readonly transitionId: string;
+  };
   readonly event: {
     readonly name: string;
     readonly actor: string;
@@ -149,6 +166,23 @@ function assertIntent(intent: RegistrySemanticIntentV1, pair: RegistryDocumentPa
     const prototype = Object.getPrototypeOf(source);
     return (prototype === Object.prototype || prototype === null) && Object.keys(source).every((key) => allowed.includes(key));
   };
+  const approvalReceipt = intent.approvalReceipt;
+  const approvalConsumption = intent.approvalConsumption;
+  const validApprovalReceipt = approvalReceipt === undefined || (
+    exact(approvalReceipt, ["schema", "receiptId", "digest", "changeId", "gate", "subjectDigest", "decision", "actor", "timestamp", "transitionId"]) &&
+    approvalReceipt.schema === "approval-receipt-v1" && nonEmpty(approvalReceipt.receiptId) &&
+    digest(approvalReceipt.digest) && approvalReceipt.changeId === intent.changeId &&
+    nonEmpty(approvalReceipt.gate) && digest(approvalReceipt.subjectDigest) &&
+    (approvalReceipt.decision === "approved" || approvalReceipt.decision === "rejected") &&
+    nonEmpty(approvalReceipt.actor) && nonEmpty(approvalReceipt.timestamp) && nonEmpty(approvalReceipt.transitionId)
+  );
+  const validApprovalConsumption = approvalConsumption === undefined || (
+    approvalReceipt !== undefined && approvalReceipt.decision === "approved" &&
+    exact(approvalConsumption, ["receiptId", "receiptDigest", "transitionId"]) &&
+    approvalConsumption.receiptId === approvalReceipt.receiptId &&
+    approvalConsumption.receiptDigest === approvalReceipt.digest &&
+    approvalConsumption.transitionId === approvalReceipt.transitionId
+  );
   if (intent.schema !== "registry-intent-v1" || intent.changeId !== pair.changeId || !options.artifactExists ||
     !nonEmpty(intent.intentId) || !digest(intent.idempotencyKey) || !nonEmpty(intent.phase) || !nonEmpty(intent.status) ||
     !nonEmpty(intent.artifact.kind) || !nonEmpty(intent.artifact.path) || !nonEmpty(intent.provenance.agent) ||
@@ -159,9 +193,10 @@ function assertIntent(intent: RegistrySemanticIntentV1, pair: RegistryDocumentPa
     !digest(intent.base.eventsDigest) || intent.batchDigest !== undefined && !digest(intent.batchDigest) ||
     intent.digest !== undefined && !digest(intent.digest) || intent.batchId !== undefined && !nonEmpty(intent.batchId) ||
     intent.decisionDigest !== undefined && !digest(intent.decisionDigest) ||
+    !validApprovalReceipt || !validApprovalConsumption ||
     intent.artifact.digest !== undefined && !digest(intent.artifact.digest) ||
     intent.provenance.note !== undefined && typeof intent.provenance.note !== "string" ||
-    !exact(intent, ["schema", "intentId", "digest", "idempotencyKey", "changeId", "batchId", "batchDigest", "base", "phase", "status", "artifact", "provenance", "event", "decisionDigest"]) ||
+    !exact(intent, ["schema", "intentId", "digest", "idempotencyKey", "changeId", "batchId", "batchDigest", "base", "phase", "status", "artifact", "provenance", "event", "decisionDigest", "approvalReceipt", "approvalConsumption"]) ||
     !exact(intent.base, ["stateDigest", "eventsDigest"]) || !exact(intent.artifact, ["kind", "path", "digest"]) ||
     !exact(intent.provenance, ["agent", "model", "timestamp", "note"]) ||
     !exact(intent.event, ["name", "actor", "timestamp", "notes"])) {
@@ -212,6 +247,8 @@ export function applyRegistryIntentToDocumentsV1(
     idempotencyKey: intent.idempotencyKey,
     transactionId: options.transactionId,
     ...(intent.batchDigest === undefined ? {} : { batchDigest: intent.batchDigest }),
+    ...(intent.approvalReceipt === undefined ? {} : { approvalReceipt: intent.approvalReceipt }),
+    ...(intent.approvalConsumption === undefined ? {} : { approvalConsumption: intent.approvalConsumption }),
   };
   const event = {
     phase: intent.phase,
@@ -225,6 +262,8 @@ export function applyRegistryIntentToDocumentsV1(
     idempotency_key: intent.idempotencyKey,
     transaction_id: options.transactionId,
     ...(intent.batchDigest === undefined ? {} : { batch_digest: intent.batchDigest }),
+    ...(intent.approvalReceipt === undefined ? {} : { approval_receipt: intent.approvalReceipt }),
+    ...(intent.approvalConsumption === undefined ? {} : { approval_consumption: intent.approvalConsumption }),
     notes: [...intent.event.notes],
   };
 
@@ -250,4 +289,46 @@ export function applyRegistryIntentToDocumentsV1(
     pair: next,
     edits: Object.freeze({ state: freezePatches(statePatches), events: freezePatches(eventsPatches) }),
   });
+}
+
+/** Simulates ordered intents against one base and emits one compact, replayable edit set. */
+export function applyRegistryIntentChainToDocumentsV1(
+  pair: RegistryDocumentPairV1,
+  intents: readonly RegistrySemanticIntentV1[],
+  options: RegistryIntentApplicationOptionsV1,
+): RegistryIntentApplicationV1 {
+  if (!intents.length) throw new RegistryDocumentMutationError("invalid-evidence");
+  const base = { stateDigest: pair.state.digest, eventsDigest: pair.events.digest };
+  let current = pair;
+  for (const intent of intents) {
+    if (intent.base.stateDigest !== base.stateDigest || intent.base.eventsDigest !== base.eventsDigest) {
+      throw new RegistryDocumentMutationError("registry-intent-conflict");
+    }
+    const rebased = { ...intent, base: { stateDigest: current.state.digest, eventsDigest: current.events.digest } };
+    const applied = applyRegistryIntentToDocumentsV1(current, rebased, options);
+    current = applied.pair;
+  }
+  return Object.freeze({
+    status: "applied",
+    pair: current,
+    edits: Object.freeze({ state: lineEdits(pair.state.source, current.state.source), events: lineEdits(pair.events.source, current.events.source) }),
+  });
+}
+
+function lineEdits(source: string, target: string): readonly RegistryDocumentEditV1[] {
+  if (source === target) return Object.freeze([]);
+  const sourceLines = source.match(/.*(?:\n|$)/g)?.filter((line) => line !== "") ?? [];
+  const targetLines = target.match(/.*(?:\n|$)/g)?.filter((line) => line !== "") ?? [];
+  if (sourceLines.length * targetLines.length > 1_000_000) throw new RegistryDocumentMutationError("invalid-evidence");
+  const table = Array.from({ length: sourceLines.length + 1 }, () => new Uint32Array(targetLines.length + 1));
+  for (let left = sourceLines.length - 1; left >= 0; left--) for (let right = targetLines.length - 1; right >= 0; right--) table[left]![right] = sourceLines[left] === targetLines[right] ? table[left + 1]![right + 1]! + 1 : Math.max(table[left + 1]![right]!, table[left]![right + 1]!);
+  const edits: RegistryDocumentEditV1[] = []; let left = 0, right = 0, offset = 0, start = 0, removed = "", added = "";
+  const flush = () => { if (removed || added) edits.push(Object.freeze({ start, end: start + removed.length, value: added })); removed = ""; added = ""; };
+  while (left < sourceLines.length || right < targetLines.length) {
+    if (left < sourceLines.length && right < targetLines.length && sourceLines[left] === targetLines[right]) { flush(); offset += sourceLines[left]!.length; left++; right++; continue; }
+    if (left >= sourceLines.length || right < targetLines.length && table[left]![right + 1]! >= table[left + 1]![right]!) { if (!removed && !added) start = offset; added += targetLines[right++]!; }
+    else { if (!removed && !added) start = offset; removed += sourceLines[left]!; offset += sourceLines[left++]!.length; }
+  }
+  flush();
+  return Object.freeze(edits);
 }

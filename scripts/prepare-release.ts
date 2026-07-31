@@ -700,13 +700,6 @@ export async function main(argv: readonly string[]): Promise<number> {
   try {
     const args = parseCliArgs(argv);
 
-    // REQ-RM-005: Validate build-info staleness before proceeding
-    if (!args.skipStalenessCheck) {
-      validateBuildInfoStaleness(args.commit);
-    } else {
-      console.error("⚠ Skipping REQ-RM-005 staleness check (--skip-staleness-check)");
-    }
-
     if (args.help) {
       process.stdout.write(HELP_TEXT);
       return 0;
@@ -716,6 +709,13 @@ export async function main(argv: readonly string[]): Promise<number> {
       const hash = computeSha256File(args.sha256File);
       process.stdout.write(`${hash}\n`);
       return 0;
+    }
+
+    // REQ-RM-005: Validate build-info staleness before producing a descriptor
+    if (!args.skipStalenessCheck) {
+      validateBuildInfoStaleness(args.commit);
+    } else {
+      console.error("⚠ Skipping REQ-RM-005 staleness check (--skip-staleness-check)");
     }
 
     const descriptor = args.nonInteractive

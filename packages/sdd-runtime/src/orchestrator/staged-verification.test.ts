@@ -6,6 +6,8 @@ import { buildStagedVerificationStateV1 } from "../contracts/verification-state"
 import {
   createStagedVerificationScheduleV1,
   transitionStagedVerificationV1,
+  validateBroadVerificationAcceptanceV1,
+  validateScopedVerificationAcceptanceV1,
   validateVerificationAcceptanceV1,
   validateVerificationDisciplineV1,
   type MandatoryBroadReasonV1,
@@ -43,6 +45,12 @@ function passAffected(state = passTargeted()) {
 }
 
 describe("staged verification scheduler", () => {
+  test("projects Verify-only scoped and BROAD acceptance without scheduling Review", () => {
+    const targeted = transitionStagedVerificationV1(schedule(), { stage: "targeted", status: "passed", evidence: [evidence("targeted-check")] }, policy()).state;
+    const affected = transitionStagedVerificationV1(targeted, { stage: "affected_area", status: "passed", evidence: [evidence("affected-check")] }, policy()).state;
+    expect(validateScopedVerificationAcceptanceV1(affected, policy()).code).toBe("advanced");
+    expect(validateBroadVerificationAcceptanceV1(affected, policy()).code).toBe("verification-evidence-required");
+  });
   test("advances targeted, affected-area, and broad in exact order", () => {
     const targeted = transitionStagedVerificationV1(schedule(), { stage: "targeted", status: "passed", evidence: [evidence("targeted-check")] }, policy());
     expect(targeted.code).toBe("advanced");

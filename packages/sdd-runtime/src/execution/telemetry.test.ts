@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import {
   assignExecutionCohort,
+  aggregateUserOutcomeTelemetryV1,
   aggregateRolloutTelemetryV1,
   createBoundedLocalTelemetrySink,
   createConfiguredTelemetrySinkV1,
@@ -12,6 +13,8 @@ import {
   probeRunnerExecutionCapabilities,
   recordBoundedBaseline,
   serializeSafeTelemetryEvent,
+  serializeUserOutcomeTelemetryEventV1,
+  serializeUserOutcomeTelemetryAggregateV1,
 } from "./telemetry";
 import { EXECUTION_V1_FIXTURES } from "../fixtures/execution-v1";
 
@@ -61,6 +64,103 @@ describe("safe execution telemetry baseline", () => {
     const serialized = serializeSafeTelemetryEvent(EXECUTION_V1_FIXTURES.secretSeededTelemetry);
     for (const secret of EXECUTION_V1_FIXTURES.secretSeeds) expect(serialized).not.toContain(secret);
     expect(JSON.parse(serialized)).toEqual(EXECUTION_V1_FIXTURES.safeTelemetryProjection);
+  });
+
+  test("records user outcomes as allowlisted counts without prompt, path, content, secret, or per-invocation completion duration", () => {
+    const serialized = serializeUserOutcomeTelemetryEventV1({
+      schema: "user-outcome-telemetry-v1",
+      event: "accepted-result",
+      count: 1,
+      rawPrompt: "PROMPT_SECRET_SHOULD_NOT_LEAK",
+      path: "/home/private/project",
+      content: "private implementation",
+      token: "SECRET_SHOULD_NOT_LEAK",
+      durationMs: 42,
+    });
+
+    expect(JSON.parse(serialized)).toEqual({
+      schema: "user-outcome-telemetry-v1",
+      event: "accepted-result",
+      count: 1,
+    });
+    expect(serialized).not.toMatch(/PROMPT|private|SECRET|duration/i);
+  });
+
+  test("accepts only the user-value event vocabulary", () => {
+    for (const event of ["first-useful-result", "accepted-result", "decision", "intervention", "repeated-approval", "retry", "phase-launch", "mode-handoff", "unplanned-expansion", "process-artifact-count"]) {
+      expect(() => serializeUserOutcomeTelemetryEventV1({ schema: "user-outcome-telemetry-v1", event, count: 1 })).not.toThrow();
+    }
+    expect(() => serializeUserOutcomeTelemetryEventV1({ schema: "user-outcome-telemetry-v1", event: "unknown", count: 1 })).toThrow("invalid-user-outcome-telemetry-event");
+  });
+
+  test("aggregates the complete user-value scorecard without retaining individual content or timings", () => {
+    const aggregate = aggregateUserOutcomeTelemetryV1([
+      {
+        timeToFirstUsefulResultMs: 100,
+        timeToAcceptedDeliveryMs: 500,
+        userInterventionCount: 1,
+        repairCycleCount: 2,
+        verificationRunCount: 3,
+        unnecessaryVerificationRerunCount: 1,
+        terminalChangeCount: 1,
+        honestClosureCount: 1,
+        productWorkUnitCount: 8,
+        processWorkUnitCount: 2,
+        directPathAvailableButMissedCount: 0,
+      },
+      {
+        timeToFirstUsefulResultMs: 200,
+        userInterventionCount: 0,
+        repairCycleCount: 0,
+        verificationRunCount: 1,
+        unnecessaryVerificationRerunCount: 0,
+        terminalChangeCount: 0,
+        honestClosureCount: 0,
+        productWorkUnitCount: 3,
+        processWorkUnitCount: 1,
+        directPathAvailableButMissedCount: 1,
+      },
+    ]);
+    expect(aggregate).toEqual({
+      schema: "user-outcome-telemetry-aggregate-v1",
+      eligibleExecutions: 2,
+      firstUsefulResultCount: 2,
+      firstUsefulResultTotalMs: 300,
+      acceptedDeliveryCount: 1,
+      acceptedDeliveryTotalMs: 500,
+      userInterventionCount: 1,
+      repairCycleCount: 2,
+      verificationRunCount: 4,
+      unnecessaryVerificationRerunCount: 1,
+      terminalChangeCount: 1,
+      honestClosureCount: 1,
+      productWorkUnitCount: 11,
+      processWorkUnitCount: 3,
+      directPathAvailableButMissedCount: 1,
+    });
+
+    const serialized = serializeUserOutcomeTelemetryAggregateV1({
+      ...aggregate,
+      prompt: "secret",
+      path: "/private",
+      individualTimings: [100, 200],
+    });
+    expect(JSON.parse(serialized)).toEqual(aggregate);
+    expect(serialized).not.toMatch(/secret|private|individual/i);
+  });
+
+  test("rejects impossible user-value aggregates", () => {
+    expect(() => aggregateUserOutcomeTelemetryV1([{
+      userInterventionCount: 0,
+      repairCycleCount: 0,
+      verificationRunCount: 1,
+      unnecessaryVerificationRerunCount: 2,
+      terminalChangeCount: 0,
+      honestClosureCount: 1,
+      productWorkUnitCount: 0,
+      processWorkUnitCount: 0,
+      directPathAvailableButMissedCount: 0,
+    }])).toThrow("invalid-user-outcome-telemetry-observation");
   });
 
   test("rejects telemetry values outside the runtime vocabulary", () => {

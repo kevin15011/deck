@@ -4,6 +4,8 @@ import {
   ORCHESTRATOR_AGENT_BODY,
   ORCHESTRATOR_COMPACT_AGENT_BODY,
   ORCHESTRATOR_COMPACT_SKILL_BODY,
+  ORCHESTRATOR_CONTINUOUS_DELIVERY_LOOP_V1,
+  ORCHESTRATOR_INTAKE_ALIGNMENT_V2,
   ORCHESTRATOR_PROMPT_GUIDA,
   ORCHESTRATOR_PROMPT_PRAGMATICA,
   ORCHESTRATOR_SKILL_BODY,
@@ -48,14 +50,15 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("delegate");
   });
 
-  test("contains delegation rules table with inline vs delegate thresholds", () => {
+  test("contains delegation guidance without numeric automatic stops", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Delegation Rules");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("4+");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Multi-file");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("advisory signals, never automatic stops");
   });
 
-  test("contains mandatory delegation triggers", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Mandatory Delegation Triggers");
+  test("contains cost-aware delegation signals", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Delegation Signals");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("Mandatory Delegation Triggers");
   });
 
   test("contains SDD dependency graph", () => {
@@ -75,7 +78,8 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Specialist(s)");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Recommend SDD");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Run SDD");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not ask Automatic vs Interactive unless triage says Run SDD");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Use Automatic mode unless the user explicitly requested phase-by-phase interaction");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("ask which execution mode");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Documentation-only requests are not automatically SDD");
   });
 
@@ -88,6 +92,8 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Parallel Specialist Launch");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Safe to parallelize");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Unsafe to parallelize");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("sharing a directory");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("only coordination information");
   });
 
   test("dependency graph starts with Explorer", () => {
@@ -109,12 +115,11 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
     }
   });
 
-  // INV-004 strengthened wording — all surfaces
-  test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {
-    // Key clause: taking/delegating any step that may modify + protected types + prohibition
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not modify or delegate modifying work until this classification is made");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not ask Automatic vs Interactive unless triage says Run SDD");
+  test("SDD triage starts clear work and reuses classification for conversational deltas", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("For each new desired outcome");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("begin without a separate restatement-confirmation ceremony");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("An in-scope conversational delta reuses the existing classification");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Use Automatic mode unless the user explicitly requested phase-by-phase interaction");
   });
 
   test("contains apply routing to general, backend, or frontend", () => {
@@ -200,6 +205,44 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT", () => {
   });
 });
 
+describe("continuous conversational development", () => {
+  const surfaces = [
+    ORCHESTRATOR_SYSTEM_PROMPT,
+    ORCHESTRATOR_SYSTEM_PROMPT_COMPACT,
+    ORCHESTRATOR_AGENT_BODY,
+    ORCHESTRATOR_COMPACT_AGENT_BODY,
+    ORCHESTRATOR_SKILL_BODY,
+    ORCHESTRATOR_COMPACT_SKILL_BODY,
+  ];
+
+  test("all canonical surfaces preserve one in-scope feedback loop", () => {
+    for (const surface of surfaces) {
+      expect(surface).toContain(ORCHESTRATOR_INTAKE_ALIGNMENT_V2);
+      expect(surface).toContain(ORCHESTRATOR_CONTINUOUS_DELIVERY_LOOP_V1);
+      expect(surface).toContain("move this up");
+      expect(surface).toContain("without restarting intake or the full lifecycle");
+      expect(surface).toContain("Recover and consume that receipt exactly once");
+      expect(surface).not.toContain("Permit at most three user-requested revision cycles");
+    }
+  });
+
+  test("parallelism is based on modifying effects rather than folders", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("disjoint or provably compatible modifying effects");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("sharing a directory");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("Specialists share files or the same directory");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).not.toContain("isolated worktrees are explicitly approved");
+  });
+
+  test("recovery selects semantic lifecycle state instead of treating every directory as active", () => {
+    for (const surface of [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_SKILL_BODY]) {
+      expect(surface).toContain("Do not treat every directory as active");
+      expect(surface).toContain("missing historical events");
+      expect(surface).not.toContain("recover the active change state");
+    }
+    expect(ORCHESTRATOR_COMPACT_SKILL_BODY).toContain("Do not infer activity from directory presence");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Deterministic authority boundary (T-RA-01, T-RA-02)
 // ---------------------------------------------------------------------------
@@ -258,13 +301,12 @@ describe("ORCHESTRATOR_AGENT_BODY", () => {
   });
 
   test("mentions SDD triage in agent body", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("Run SDD triage before asking for execution mode");
+    expect(ORCHESTRATOR_AGENT_BODY).toContain("Run SDD triage before selecting execution mode");
   });
 
-  // INV-004 strengthened wording — agent body
-  test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files");
-    expect(ORCHESTRATOR_AGENT_BODY).toContain("Do not modify or delegate modifying work until this classification is made");
+  test("agent body supports in-scope iteration without a repeated gate", () => {
+    expect(ORCHESTRATOR_AGENT_BODY).toContain("For each new desired outcome");
+    expect(ORCHESTRATOR_AGENT_BODY).toContain("continues the same working outcome");
   });
 
   test("does not contain placeholder comment", () => {
@@ -484,11 +526,10 @@ describe("ORCHESTRATOR_SKILL_BODY", () => {
     expect(ORCHESTRATOR_SKILL_BODY).toContain("advisory");
   });
 
-  // INV-004 strengthened wording — skill body aligns with SKILL.md
-  test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do not modify or delegate modifying work until this classification is made");
-    expect(ORCHESTRATOR_SKILL_BODY).toContain("Do not ask Automatic vs Interactive unless triage says Run SDD");
+  test("skill body aligns on new-outcome triage and conversational deltas", () => {
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("For each new desired outcome");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("An in-scope conversational delta reuses the existing classification");
+    expect(ORCHESTRATOR_SKILL_BODY).toContain("Use Automatic mode unless the user explicitly requested phase-by-phase interaction");
   });
 });
 
@@ -539,11 +580,10 @@ describe("Orchestrator Language Policy reinforcement", () => {
 });
 
 describe("ORCHESTRATOR_PROMPT_GUIDA", () => {
-  // INV-004 strengthened wording — guida variant matches strengthened system prompt
-  test("SDD triage gate prohibits modification before classification (INV-004 strengthened)", () => {
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files");
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("Do not modify or delegate modifying work until this classification is made");
-    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("Do not ask Automatic vs Interactive unless triage says Run SDD");
+  test("guida variant preserves dynamic triage", () => {
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("For each new desired outcome");
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("continues the same working outcome");
+    expect(ORCHESTRATOR_PROMPT_GUIDA).toContain("Use Automatic mode unless the user explicitly requested phase-by-phase interaction");
   });
 
   test("SDD triage gate lists all four categories", () => {
@@ -698,7 +738,8 @@ describe("Pre-Delegation Checklist and Automatic Mode (REQ-OA-004, REQ-OA-006)",
 
   test("system prompt contains semantic blocking wording for triage (INV-004)", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("triage classification is present");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Do not modify or delegate modifying work");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("new outcome has a recorded classification");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("in-scope conversational delta reuses");
   });
 
   test("system prompt contains semantic blocking wording for Explorer (INV-006)", () => {
@@ -906,6 +947,17 @@ describe("streamlined Orchestrator ownership and candidate validation", () => {
       expect(surface).not.toContain("never execute any specialist-capable task");
       expect(surface).not.toContain("never execute specialized agent work itself");
     }
+  });
+
+  test("rejects the contradictory commit-only Review trigger on all six surfaces", () => {
+    const contradictoryTrigger = "fresh review before commit/push/PR unless trivial docs/text";
+    const preservedReviewTrigger =
+      "fresh independent Review for lifecycle acceptance or completion, merge, release, or PR judgment, protected-risk judgment, and any non-mechanical operation";
+
+    for (const [surfaceName, surface] of surfaces) {
+      expect(surface, `${surfaceName} contradictory commit-only Review trigger`).not.toContain(contradictoryTrigger);
+    }
+    expect(ORCHESTRATOR_AGENT_BODY).toContain(preservedReviewTrigger);
   });
 
   test("composes every shared fragment exactly once in all six legacy and compact surfaces", async () => {

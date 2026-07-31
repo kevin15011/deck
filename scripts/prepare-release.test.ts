@@ -206,8 +206,14 @@ describe("prepare-release / end-to-end main()", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("emits valid spec-shaped release.json in non-interactive mode", async () => {
+  it("emits valid spec-shaped release.json when the explicit commit matches build metadata", async () => {
     const out = join(dir, "release.json");
+    const buildInfo = readFileSync(
+      join(process.cwd(), "apps/cli/src/runtime/build-info.generated.ts"),
+      "utf-8"
+    );
+    const buildInfoCommit = buildInfo.match(/commit:\s*"([^"]+)"/)?.[1];
+    expect(buildInfoCommit).toBeDefined();
     const code = await main([
       "--non-interactive",
       "--version",
@@ -218,6 +224,8 @@ describe("prepare-release / end-to-end main()", () => {
       "stable",
       "--out",
       out,
+      "--commit",
+      buildInfoCommit!,
     ]);
     expect(code).toBe(0);
     const text = readFileSync(out, "utf-8");
@@ -232,16 +240,55 @@ describe("prepare-release / end-to-end main()", () => {
     }
   });
 
-  it("prints --help and exits 0", async () => {
-    const code = await main(["--help"]);
+  it("prints --help and exits 0 even when build metadata is explicitly stale", async () => {
+    const code = await main(["--help", "--commit", "definitely-stale"]);
     expect(code).toBe(0);
   });
 
-  it("computes and prints SHA-256 with --sha256-file", async () => {
+  it("computes and prints SHA-256 even when build metadata is explicitly stale", async () => {
     const blob = join(dir, "blob.bin");
     writeFileSync(blob, "test blob");
-    const code = await main(["--sha256-file", blob]);
+    const code = await main(["--sha256-file", blob, "--commit", "definitely-stale"]);
     expect(code).toBe(0);
+  });
+
+  it("refuses a descriptor and writes no output when build metadata is explicitly stale", async () => {
+    const out = join(dir, "stale-release.json");
+    const code = await main([
+      "--non-interactive",
+      "--version",
+      "1.2.0",
+      "--tag",
+      "v1.2.0",
+      "--channel",
+      "stable",
+      "--out",
+      out,
+      "--commit",
+      "definitely-stale",
+    ]);
+    expect(code).toBe(1);
+    expect(() => readFileSync(out, "utf-8")).toThrow();
+  });
+
+  it("allows an explicitly stale descriptor only with --skip-staleness-check", async () => {
+    const out = join(dir, "override-release.json");
+    const code = await main([
+      "--non-interactive",
+      "--version",
+      "1.2.0",
+      "--tag",
+      "v1.2.0",
+      "--channel",
+      "stable",
+      "--out",
+      out,
+      "--commit",
+      "definitely-stale",
+      "--skip-staleness-check",
+    ]);
+    expect(code).toBe(0);
+    expect(ReleaseJsonSchema.safeParse(JSON.parse(readFileSync(out, "utf-8"))).success).toBe(true);
   });
 
   it("exits non-zero on invalid channel in non-interactive mode", async () => {

@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import {
   REVIEW_AGENT_BODY,
+  REVIEW_COMPACT_AGENT_BODY,
+  REVIEW_COMPACT_SKILL_BODY,
   REVIEW_SKILL_BODY,
 } from "./review-content";
+import { FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1 } from "./readiness-authority";
 
 // Import git-safety for rule presence assertion
 import { GIT_SAFETY_SENTINEL } from "./git-safety";
@@ -303,6 +306,65 @@ describe("Performance optimization canonical line", () => {
 
   test("SKILL_BODY preserves ## Rules heading", () => {
     expect(REVIEW_SKILL_BODY).toContain("## Rules");
+  });
+});
+
+describe("T09 independent warning judgment contract", () => {
+  const surfaces = [
+    REVIEW_AGENT_BODY,
+    REVIEW_SKILL_BODY,
+    REVIEW_COMPACT_AGENT_BODY,
+    REVIEW_COMPACT_SKILL_BODY,
+  ];
+
+  test("composes the exact finding-disposition authority once on every surface", () => {
+    for (const surface of surfaces) {
+      expect(surface.split(FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1).length - 1).toBe(1);
+    }
+  });
+
+  test("requires fresh independent judgment over every quality proof dimension", () => {
+    for (const surface of surfaces) {
+      expect(surface).toMatch(/independent/i);
+      expect(surface).toMatch(/warning.*blocker|blocker.*warning/is);
+    }
+    for (const clause of [
+      "causal isolation",
+      "protected risk",
+      "metric non-regression",
+      "Verify binding",
+      "warning durability",
+      "fresh identity",
+    ]) {
+      expect(REVIEW_SKILL_BODY).toContain(clause);
+    }
+  });
+
+  test("retains four-way scope classification and canonical intent statuses", () => {
+    for (const clause of [
+      "related regression",
+      "unrelated baseline defect",
+      "required Spec/Design replan",
+      "optional new scope",
+      "passed | passed_with_warnings | failed",
+    ]) {
+      expect(REVIEW_SKILL_BODY).toContain(clause);
+    }
+  });
+
+  test("rejects inherited, stale, or contradictory quality evidence without routine warning pause", () => {
+    expect(REVIEW_SKILL_BODY).toMatch(/matching fingerprint.*never compels approval/is);
+    expect(REVIEW_SKILL_BODY).toMatch(/stale.*contradictory.*blocking/is);
+    expect(REVIEW_SKILL_BODY).toMatch(/no routine user pause/i);
+    expect(REVIEW_COMPACT_SKILL_BODY).toMatch(/qualityDisposition|quality disposition/i);
+    expect(REVIEW_COMPACT_SKILL_BODY).toMatch(/immutable/i);
+    expect(REVIEW_SKILL_BODY).not.toContain("status \`{approved|approved_with_changes|changes_requested}\`");
+    expect(REVIEW_SKILL_BODY).not.toContain("APPROVE WITH CHANGES → return to Apply for minor fixes");
+  });
+
+  test("routes stable Review to BROAD without requiring final disposition", () => {
+    expect(REVIEW_SKILL_BODY).toMatch(/Do not require, create, or consume a final BROAD disposition/i);
+    expect(REVIEW_SKILL_BODY).toMatch(/proceed to scheduled BROAD/i);
   });
 });
 

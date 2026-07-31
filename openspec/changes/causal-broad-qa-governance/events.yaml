@@ -1,0 +1,16 @@
+schema: spec-registry-events-v1
+events:
+  - phase: closed
+    status: superseded
+    event: closed.superseded
+    artifact: exploration.md
+    timestamp: "2026-07-31T04:21:11Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - >-
+        Current-state reconciliation only: no unrecorded historical lifecycle
+        events were reconstructed.
+      - >-
+        The integrated implementation evidence is mapped in
+        docs/deck-team-effectiveness-issue-map.md.

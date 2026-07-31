@@ -1,0 +1,220 @@
+schema: spec-registry-v1
+changeId: project-init-skill-registry-and-session-baseline
+name: Project Init Skill Registry and Session Baseline
+currentPhase: closed
+status: superseded
+closure_reason: >-
+  The bounded Apply candidate was incorporated into the integrated DTE-001
+  through DTE-029 implementation before its remaining independent QA stages
+  ran. The earlier Apply evidence remains preserved and is not presented as
+  final acceptance.
+closed_at: "2026-07-31T04:21:11Z"
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+provenance:
+  - phase: explore
+    agent: deck-developer-explorer
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T19:21:50.820Z"
+    registryWrite: deferred-reconciled
+    note: "Exploration completed with a recommendation for one successor change containing ordered init-bootstrap and evidence-backed baseline-disposition workstreams; handoff to Proposal is unblocked."
+    intentId: registry-intent:v1:project-init-skill-registry-and-session-baseline:explore-completed
+    idempotencyKey: sha256:ac6671a7769180d947f54c4431d12f6f8d06f9f344731f44bc5db8b64396cc37
+    transactionId: registry-tx-ddfb7f54-e70e-4fa5-a241-23bdc061d51f
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T19:32:44.353Z"
+    registryWrite: deferred-reconciled
+    note: "Collaborative proposal draft completed; explicit human approval remains required before Spec and Design."
+    intentId: registry-intent:v1:5801e23e0db90c6cc6d1b56fe071f791
+    idempotencyKey: sha256:0c2eb4a6b60578b7dd53b5b9540fee566c305c9b562d84cd915f85eff3b8e721
+    transactionId: registry-tx-a76edb5d-52c6-4608-875c-5476dde52ecc
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T19:57:48.379Z"
+    registryWrite: deferred-reconciled
+    note: "Substantive Proposal revision incorporated the system-owner project-only capability boundary; explicit approval remains pending."
+    intentId: registry-intent:v1:25837dcb5b8c87860ce1f5726c156ae6
+    idempotencyKey: sha256:e2ab1e85d92d67fd39c82e7a4f47cc4bc0642d4ea8e851991f576bd106ab5aed
+    transactionId: registry-tx-767bdd56-5df6-4345-89d2-89ecf75faab7
+  - phase: proposal
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T20:08:49.962Z"
+    registryWrite: non-deferred
+    note: "Recorded explicit system-owner approval of the revised Proposal; Spec and Design may begin in parallel."
+    intentId: registry-intent:v1:2a21475313f43635780f6b15145b3fd3
+    idempotencyKey: sha256:2a21475313f43635780f6b15145b3fd3ad1e9251bb4b9b6bf33c5b33cbfb77df
+    transactionId: registry-tx-4deef9f3-99ae-4720-be34-bfbe8ec54b08
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/mimo-v2.5-pro
+    timestamp: "2026-07-28T20:13:26.882Z"
+    registryWrite: deferred-reconciled
+    note: "Spec completed with 30 requirements and 50 scenarios; parallel Design reconciliation remains required before Task. Timestamp normalized from the artifact write time during centralized reconciliation."
+    intentId: registry-intent:v1:b4f7a2c891e3d50678241fa09de38cb7
+    idempotencyKey: sha256:9e42a86955024e104b960b91fb6c8a17ce2ce3e0c114674c20b7e43e13e64f3a
+    transactionId: registry-tx-d7d617e0-79df-49f1-8501-d7ca9be47c36
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T20:50:44.794Z"
+    registryWrite: deferred-reconciled
+    note: "Independent Design completed; reconcile the parallel Spec before Task. Overlapping Apply remains gated by R5-B01 or authoritative no-overlap proof."
+    intentId: registry-intent:v1:b2f15b23e5a634423ea10818226601bc
+    idempotencyKey: sha256:5eb5fd5d7283da6bcd8b1a5800fa19311a7de361fd903f89e433d611219d0312
+    transactionId: registry-tx-d7d617e0-79df-49f1-8501-d7ca9be47c36
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/mimo-v2.5-pro
+    timestamp: "2026-07-28T20:59:42.455Z"
+    registryWrite: deferred-reconciled
+    note: "Spec reconciled with Design: 30 requirements, 55 scenarios, all six Design reconciliation items resolved, and all nine product questions closed. Timestamp normalized from the artifact write time."
+    intentId: registry-intent:v1:7e2f9a1b3c4d5e6f0a1b2c3d4e5f6a7b
+    idempotencyKey: sha256:d3a1f8e2b4c56789012345678abcdef01234567890abcdef0123456789abcdef0
+    transactionId: registry-tx-e0d2a258-ed26-419c-bfe8-0691e2ec56e2
+  - phase: design
+    agent: deck-developer-design-opencode-project-init-alignment-20260728-fresh-2
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T21:21:12.183Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh independent read-only Design alignment check found one blocking contract mismatch: REQ-011 uses skipped while Design uses unavailable for an enabled capability whose executable is missing. Task remains blocked pending user-resolved reconciliation."
+    intentId: registry-intent:v1:3d06a23697023a8f2704c130b29a714e
+    idempotencyKey: sha256:501b120a69c179e778b4c9f585c9b5e2cb880bc67265d7b71d7633e600465bb9
+    transactionId: registry-tx-dbe258ce-ba3f-4b58-93b7-70e40df8b4ba
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/mimo-v2.5-pro
+    timestamp: "2026-07-28T21:30:09.767Z"
+    registryWrite: deferred-reconciled
+    note: "DA-B01 resolved by system-owner decision: unavailable for enabled absent/unusable capabilities, partial overall result, and TUI next action; skipped is reserved for non-enabled, not-applicable, or dependency-blocked components."
+    intentId: registry-intent:v1:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
+    idempotencyKey: sha256:4c8a1e2f3d5b7a9c0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d
+    transactionId: registry-tx-319082ee-a40e-4cf2-a19a-10a538238ab3
+  - phase: design
+    agent: deck-developer-design-opencode-project-init-alignment-20260728-fresh-3
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T21:38:44.577Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh independent read-only Design alignment passed after the system-owner DA-B01 resolution; 30 requirements and 55 scenarios align with the unchanged Design and Task is unblocked."
+    intentId: registry-intent:v1:3ab46b5be9a6bc67a8de103b62cc3d8c
+    idempotencyKey: sha256:0fc79fdd49bcc5e61efa71dd7d88571fbedf99b5b6cefcdf00b38a875c3a1135
+    transactionId: registry-tx-852580ca-0ef9-4159-bd2c-be12644d9169
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T21:58:14.127Z"
+    registryWrite: deferred-reconciled
+    note: "Replacement Proposal superseded the CLI-centered scope with Orchestrator-triggered deck-init subagent preparation; the existing Spec and Design are stale and explicit reapproval is pending."
+    intentId: registry-intent:v1:082a0c3e690c6d52bd76f214ea0954dd
+    idempotencyKey: sha256:d430d3a7994230acc240da71b7ca6890729755909ec5c50f1f9074cf9052bf1f
+    transactionId: registry-tx-11b83efb-da4c-4f45-8d3b-cc922a475c24
+  - phase: proposal
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T22:03:00.229Z"
+    registryWrite: non-deferred
+    note: "Recorded explicit system-owner approval of the replacement Proposal; revised Spec and Design may begin in parallel."
+    intentId: registry-intent:v1:77ee47f6aa1815b4b53ebb8f59c777f3
+    idempotencyKey: sha256:77ee47f6aa1815b4b53ebb8f59c777f3657ae0c4e2922a4ecb4f6d9406af9817
+    transactionId: registry-tx-5e63b485-411e-4b9b-9899-947915b4c875
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/mimo-v2.5-pro
+    timestamp: "2026-07-28T22:08:17.021Z"
+    registryWrite: deferred-reconciled
+    note: "Revised Spec replaced CLI-centered scope with Orchestrator-triggered deck-init subagent delegation; 28 requirements and 48 scenarios require reconciliation with the parallel revised Design."
+    intentId: registry-intent:v1:project-init-skill-registry-and-session-baseline:spec-completed-replacement
+    idempotencyKey: sha256:2a7e6717f8edfe5798ca072df72d3ee10db3e79f781565d8900a6cba24ed2c05
+    transactionId: registry-tx-ea716b6c-67a9-46c5-bd2b-3e7c3639fdfc
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T22:31:11.938Z"
+    registryWrite: deferred-reconciled
+    note: "Revised Design replaced stale CLI architecture with Orchestrator-triggered existing deck-init preparation; parallel Spec reconciliation remains required before Tasks."
+    intentId: registry-intent:v1:9d1e60afcf70dd98f9af588b6b9a95eb
+    idempotencyKey: sha256:650394a4f7084e4b2c03fd736774e6e94ac3a2f872ad1d2233b7553dc463ce6b
+    transactionId: registry-tx-ea716b6c-67a9-46c5-bd2b-3e7c3639fdfc
+  - phase: spec
+    agent: deck-developer-spec
+    model: opencode-go/mimo-v2.5-pro
+    timestamp: "2026-07-28T23:26:12.293Z"
+    registryWrite: deferred-reconciled
+    note: "Spec reconciled with the revised Design: 28 requirements, 59 scenarios, all ten reconciliation items closed, and no CLI/TUI/shared-service behavior remains."
+    intentId: registry-intent:v1:project-init-skill-registry-and-session-baseline:spec-completed-reconciliation
+    idempotencyKey: sha256:9513dacae9deff5a0b94356bedc238eff4838a256d78a39779446cfaf9f4bbec
+    transactionId: registry-tx-21659705-211c-40c5-8f4f-f509f32f4787
+  - phase: design
+    agent: deck-developer-design-opencode-project-init-replacement-alignment-20260728-fresh-1
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T23:38:31.676Z"
+    registryWrite: deferred-reconciled
+    note: "Fresh independent read-only final alignment passed; the replacement Proposal, 28-requirement/59-scenario Spec, and revised Design are Task-ready."
+    intentId: registry-intent:v1:879a7501c47bf5ad2fc7d665d81a99ac
+    idempotencyKey: sha256:c670500c268b7d88fb2ab16ac66dc293dfa78f5edc2cd99e73e954cbcb0bd800
+    transactionId: registry-tx-dc2e826b-a7ee-4e83-b407-ca3c4cc346a7
+  - phase: design
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-28T23:43:24.185Z"
+    registryWrite: non-deferred
+    note: "Recorded explicit system-owner approval of the revised Spec and Design; Task authoring may begin."
+    intentId: registry-intent:v1:a003fa47bf7e8bb9988d0ef8a688b577
+    idempotencyKey: sha256:a003fa47bf7e8bb9988d0ef8a688b5776128db63e1a1baab183323f4d37d9e22
+    transactionId: registry-tx-2e0f0cb6-1907-4836-8161-97a7072e03bb
+  - phase: tasks
+    agent: deck-developer-task
+    model: minimax-coding-plan/MiniMax-M3
+    timestamp: "2026-07-28T23:50:00.000Z"
+    registryWrite: deferred-reconciled
+    note: "Task execution plan completed with 13 atomic tasks in 10 deterministic batches; Apply remains unauthorized and predecessor-overlapping paths remain gated."
+    intentId: registry-intent:v1:86d084e2f2cc94c5d248ea88e639b627
+    idempotencyKey: sha256:5ad549ead851572cabd4f856bca99f5fe52525a41f9bb20a287d2e38885ee750
+    transactionId: registry-tx-67d850ae-3f24-456a-b89c-2679abb2e5cf
+  - phase: tasks
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-29T00:00:44.598Z"
+    registryWrite: non-deferred
+    note: "Recorded explicit system-owner authorization to implement T01 through T10 only; T11 through T13 and all nine predecessor-overlapping paths remain excluded and gated."
+    intentId: registry-intent:v1:fd8ca1d758aca2574027b61b3688fa53
+    idempotencyKey: sha256:fd8ca1d758aca2574027b61b3688fa53129d2e392927fa8a72e103b636873fca
+    transactionId: registry-tx-45f447bf-99cd-4cee-a4d2-580dd3fcb7f3
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T04:12:01.972Z
+    registryWrite: non-deferred
+    note: Recorded cross-change authorization for T02-T04 compatibility repair evidence.
+    intentId: registry-intent:v1:6fcdc0822fd65a76229a1d95f95d3a02
+    idempotencyKey: sha256:559ff18f494671afce4529a37f150c66b619a7a657c107d871bdffe16ba0e481
+    transactionId: registry-tx-6fcdc082-2fd6-5a76-229a-1d95f95d3a02
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T04:47:00.000Z
+    registryWrite: non-deferred
+    note: Apply-local coordinated A/B/C candidate validation passed; independent QA remains required.
+    intentId: registry-intent:v1:28423f1fa01739665ff40ac15a2f7da9
+    idempotencyKey: sha256:86ee662a8c696e386030ce740f4b7482f4c437d02ea4ea5db24b893c1f682481
+    transactionId: registry-tx-28423f1f-a017-3966-5ff4-0ac15a2f7da9
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: closed
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-31T04:21:11Z"
+    registryWrite: non-deferred
+    note: >-
+      Closed the bounded Apply candidate as superseded after its valid work was
+      incorporated into the integrated Developer Team effectiveness outcome;
+      no unperformed QA phase was backfilled.

@@ -31,7 +31,7 @@ The registry is the operational authority for Deck's SDD workflow. All agents an
 | `apply_batches` | array | List of apply batch identifiers |
 | `apply_fixes` | array | List of apply fix identifiers |
 | `baseline_health` | string | Health status at baseline |
-| `closure_reason` | string | Reason for closure (required if status is `abandoned` or `incomplete`) |
+| `closure_reason` | string | Reason for closure (required if status is `abandoned`, `incomplete`, or `superseded`) |
 | `closed_at` | string | ISO timestamp when closed |
 | `exploration_context` | string | Exploration context: `sdd` (formal SDD Explorer stopped before Proposal) or `delegated` (Orchestrator-delegated Explorer with actionable diagnosis) — optional, warning-level |
 | `lifecycle_status` | string | Exploration lifecycle state: `diagnosed`, `deferred`, `closed-no-action`, `converted-to-change`, `converted-to-sdd`, or `keep-as-reference` — optional, warning-level |
@@ -69,13 +69,15 @@ Valid statuses:
 - `archived`
 - `abandoned`
 - `incomplete`
+- `parked`
+- `superseded`
 
 ### Phase/Status Consistency Rules
 
 | Phase | Required Status |
 |---|---|
 | `archive` | `archived` |
-| `closed` | `abandoned` or `incomplete` |
+| `closed` | `abandoned`, `incomplete`, or `superseded` |
 
 ### Artifact Keys
 
@@ -112,6 +114,8 @@ Optional:
 - `idempotencyKey` (string): Stable transition replay key (warning-first)
 - `transactionId` (string): Recoverable pair-transaction identity (warning-first)
 - `batchDigest` (string): Referenced execution batch digest, when present (warning-first)
+- `approvalReceipt` (object): Complete immutable `approval-receipt-v1` used by this transition
+- `approvalConsumption` (object): One-use receipt id, receipt digest, and transition id when the approval was consumed
 
 ---
 
@@ -141,6 +145,13 @@ Optional:
 - `idempotency_key` (string): Stable transition replay key (warning-first)
 - `transaction_id` (string): Recoverable pair-transaction identity (warning-first)
 - `batch_digest` (string): Referenced execution batch digest, when present (warning-first)
+- `approval_receipt` (object): Complete immutable `approval-receipt-v1`; its `changeId` must match this change
+- `approval_consumption` (object): One-use consumption record. It is valid only for an approved receipt and must repeat the same receipt id, digest, and transition id.
+
+Approval metadata is durable registry evidence. A handoff or phase restart consumes the
+recorded approval instead of asking the user again. A changed subject, gate, change id,
+or transition invalidates the receipt; a receipt consumed by another transition cannot
+be reused.
 
 ### Auxiliary Repair Lifecycle Events
 
@@ -259,10 +270,10 @@ The validator reports these as warnings, not errors, to preserve backward compat
 | `state.currentPhase.missing` | error | Missing currentPhase field |
 | `state.status.missing` | error | Missing status field |
 | `state.phase_status.invalid_archive` | error | archive phase requires archived status |
-| `state.phase_status.invalid_closed` | error | closed phase requires abandoned/incomplete status |
+| `state.phase_status.invalid_closed` | error | closed phase requires abandoned/incomplete/superseded status |
 | `state.artifacts.missing` | error | Missing artifacts map |
 | `state.provenance.missing` | error | Missing provenance array |
-| `state.closure_reason.required` | error | closure_reason required for abandoned/incomplete |
+| `state.closure_reason.required` | error | closure_reason required for abandoned/incomplete/superseded |
 | `events.yaml.missing` | error | events.yaml required when phase > explore |
 | `events.yaml.parse_error` | error | Invalid YAML in events.yaml |
 | `events.events.missing` | error | Missing events array |

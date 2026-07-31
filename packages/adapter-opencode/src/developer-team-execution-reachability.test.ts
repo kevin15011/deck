@@ -18,10 +18,62 @@ import { buildBlockingRepairProjectionV1 } from "../../sdd-runtime/src/contracts
 import { createExecutionConvergenceDossierV1 } from "../../sdd-runtime/src/contracts/execution-convergence";
 import type { ExecutionDossierV1 } from "../../sdd-runtime/src/contracts/execution-dossier";
 import type { DeterministicTargetedRepairAuthorityV1 } from "../../sdd-runtime/src/execution/execution-control-plane";
+import type { QaRunnerHostAuthorityV1 } from "../../sdd-runtime/src/execution/qa-runner-host-authority";
 import { applyOpenCodeDeveloperTeamInstall, buildOpenCodeDeveloperTeamInstallPlan } from "./developer-team-install";
 import { createOpenCodeDeveloperTeamExecutionBridgeV1 } from "./developer-team-execution-bridge";
 import { createOpenCodeDeveloperTeamExecutionPluginV1 } from "../assets/opencode/plugins/developer-team-execution";
 
+import { createHash } from "node:crypto";
+import {
+  buildSessionPreparationDelegationDigestV1,
+  createSessionPreparationAuthorizationServiceV1,
+  type SessionPreparationAuthorizationExpectationV1,
+} from "../../sdd-runtime/src/execution/session-preparation";
+
+function openCodePreparationAuthority(
+  sessionId: string,
+  invocationId: string,
+  activeRunnerId = "opencode",
+) {
+  const service = createSessionPreparationAuthorizationServiceV1();
+  const projectRootDigest = `sha256:${createHash("sha256").update("/project", "utf8").digest("hex")}` as `sha256:${string}`;
+  const sessionIdDigest = `sha256:${createHash("sha256").update(JSON.stringify(sessionId), "utf8").digest("hex")}` as `sha256:${string}`;
+  const allowedOperations = [{ component: "skill_registry", action: "refresh", target: ".atl/skill-registry.md" }] as const;
+  const needs = ["skill_registry"] as const;
+  const blockedTargets = ["openspec/changes/runner-capability-standardization"] as const;
+  const delegationDigest = buildSessionPreparationDelegationDigestV1({
+    sessionIdDigest,
+    invocationId,
+    agentId: "deck-init",
+    activeRunnerId,
+    projectRootDigest,
+    needs,
+    allowedOperations,
+    blockedTargets,
+  });
+  const issue = {
+    sessionId,
+    invocationId,
+    agentId: "deck-init",
+    activeRunnerId,
+    projectRootDigest,
+    delegationDigest,
+    needs,
+    allowedOperations,
+    blockedTargets,
+  } as const;
+  const expectation = {
+    ...issue,
+    component: "skill_registry",
+    action: "refresh",
+    target: ".atl/skill-registry.md",
+  } satisfies SessionPreparationAuthorizationExpectationV1;
+  return {
+    service,
+    expectation,
+    authorization: service.issue(issue),
+  };
+}
 let pluginModuleInstance = 0;
 
 function deterministicRepairAuthority(
@@ -633,7 +685,7 @@ test("D-REACH-25 OpenCode installed resolver returning non-object yields invalid
   expect(bridgeCalls).toBe(0);
 });
 
-test("D-REACH-26 OpenCode non-Apply role strips caller deckExecution, provider not called, zero bridge", async () => {
+test("D-REACH-26 OpenCode unrelated role strips caller deckExecution, provider not called, zero bridge", async () => {
   const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
   let bridgeCalls = 0;
   let resolverCalls = 0;
@@ -654,7 +706,7 @@ test("D-REACH-26 OpenCode non-Apply role strips caller deckExecution, provider n
     },
   });
   const hooks = await plugin();
-  const args: Record<string, unknown> = { subagent_type: "verify-general", deckExecution: fixture.event() };
+  const args: Record<string, unknown> = { subagent_type: "deck-developer-explorer", deckExecution: fixture.event() };
   let rejection: unknown;
   try {
     await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "non-apply", callID: "non-apply-call" }, { args });
@@ -667,7 +719,7 @@ test("D-REACH-26 OpenCode non-Apply role strips caller deckExecution, provider n
   expect(bridgeCalls).toBe(0);
 });
 
-test("D-REACH-27 OpenCode non-Apply role preserves zero bridge/effect even when caller provides deckExecution", async () => {
+test("D-REACH-27 OpenCode unrelated role preserves zero bridge/effect even when caller provides deckExecution", async () => {
   const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
   let bridgeCalls = 0;
   let resolverCalls = 0;
@@ -688,7 +740,7 @@ test("D-REACH-27 OpenCode non-Apply role preserves zero bridge/effect even when 
     },
   });
   const hooks = await plugin();
-  const args: Record<string, unknown> = { subagent_type: "review-general", deckExecution: fixture.event() };
+  const args: Record<string, unknown> = { subagent_type: "deck-developer-explorer", deckExecution: fixture.event() };
   let rejection: unknown;
   try {
     await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "non-apply-with-marker", callID: "non-apply-with-marker-call" }, { args });
@@ -1088,4 +1140,290 @@ test("D-REACH-38 OpenCode Proxy provider invocationAuthorization invalid-then-va
   expect(resolverCalls).toBe(0);
   expect(bridgeCalls).toBe(0);
   expect(fixture.delegationCount()).toBe(0);
+});
+
+
+test("T03 OpenCode reserves trusted preparation authority before one native deck-init delegation", async () => {
+  const authority = openCodePreparationAuthority("prep-session", "prep-call");
+  let providerCalls = 0;
+  let poisonCalls = 0;
+  (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
+    sessionPreparationAuthorizationService: authority.service,
+    resolveOpenCodeSessionPreparation: async () => {
+      providerCalls += 1;
+      return { authorization: authority.authorization, expectation: authority.expectation };
+    },
+  };
+  try {
+    const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
+    const args: Record<string, unknown> = {
+      subagent_type: "deck-init",
+      deckPreparation: { authorization: "caller-poison" },
+      install: () => { poisonCalls += 1; },
+      network: () => { poisonCalls += 1; },
+      git: () => { poisonCalls += 1; },
+    };
+    let nativeDelegations = 0;
+    await hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "prep-session", callID: "prep-call" },
+      { args },
+    );
+    nativeDelegations += 1;
+    expect(providerCalls).toBe(1);
+    expect(nativeDelegations).toBe(1);
+    expect(poisonCalls).toBe(0);
+    expect(args.deckPreparation).toEqual({
+      kind: "deck-preparation-authority-reference-v1",
+      authorizationId: authority.authorization.claims.authorizationId,
+      claimsDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+    });
+  } finally {
+    delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];
+  }
+});
+
+test("T03 OpenCode fails closed before delegation for replay and runner mismatch", async () => {
+  const replay = openCodePreparationAuthority("replay-session", "replay-call");
+  let resolution: { authorization: unknown; expectation: SessionPreparationAuthorizationExpectationV1 } = replay;
+  (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
+    sessionPreparationAuthorizationService: replay.service,
+    resolveOpenCodeSessionPreparation: async () => resolution,
+  };
+  try {
+    const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
+    const invoke = (sessionID: string, callID: string) => hooks["tool.execute.before"](
+      { tool: "delegate", sessionID, callID },
+      { args: { subagent_type: "deck-init" } },
+    );
+    await invoke("replay-session", "replay-call");
+    await expect(invoke("replay-session", "replay-call")).rejects.toThrow("modification-not-authorized:AUTHZ_REPLAYED");
+
+    const mismatch = openCodePreparationAuthority("mismatch-session", "mismatch-call", "pi");
+    resolution = { authorization: mismatch.authorization, expectation: mismatch.expectation };
+    (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
+      sessionPreparationAuthorizationService: mismatch.service,
+      resolveOpenCodeSessionPreparation: async () => resolution,
+    };
+    const mismatchHooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
+    await expect(mismatchHooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "mismatch-session", callID: "mismatch-call" },
+      { args: { subagent_type: "deck-init" } },
+    )).rejects.toThrow("modification-not-authorized:AUTHZ_RUNNER_MISMATCH");
+  } finally {
+    delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];
+  }
+});
+
+test("T03 OpenCode never resolves preparation for unrelated agents and clears closed sessions", async () => {
+  let providerCalls = 0;
+  const cleared: string[] = [];
+  (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
+    resolveOpenCodeSessionPreparation: async () => { providerCalls += 1; },
+    clearSessionPreparationSession: (sessionId: string) => { cleared.push(sessionId); },
+  };
+  try {
+    const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
+    await hooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "ordinary-session", callID: "ordinary-call" },
+      { args: { subagent_type: "deck-developer-apply-backend", deckPreparation: "caller-poison" } },
+    );
+    expect(providerCalls).toBe(0);
+    await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "ordinary-session" } } } });
+    expect(cleared).toEqual(["ordinary-session"]);
+  } finally {
+    delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];
+  }
+});
+
+
+test("T03 OpenCode rejects caller-only preparation metadata when the host provider is absent", async () => {
+  const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
+  const args: Record<string, unknown> = {
+    subagent_type: "deck-init",
+    deckPreparation: { authorization: "caller-only" },
+  };
+  await expect(hooks["tool.execute.before"](
+    { tool: "delegate", sessionID: "missing-provider-session", callID: "missing-provider-call" },
+    { args },
+  )).rejects.toThrow("modification-not-authorized:AUTHZ_PROVIDER_MISSING");
+  expect(args.deckPreparation).toBeUndefined();
+});
+
+test("D-REACH-39 OpenCode registers correlated QA hooks and strips caller QA authority", async () => {
+  const reference = Object.freeze({ token: "trusted-qa-reference" });
+  const prepared: unknown[] = [];
+  const consumed: Array<{ receivedReference: unknown; result: unknown }> = [];
+  const qaAuthority = {
+    prepare: async (request: unknown) => {
+      prepared.push(request);
+      return Object.freeze({
+        invocationId: "qa-call",
+        digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        reference,
+      }) as unknown as Awaited<ReturnType<QaRunnerHostAuthorityV1["prepare"]>>;
+    },
+    consume: async (receivedReference: unknown, result: unknown) => {
+      consumed.push({ receivedReference, result });
+      return { code: "accepted" } as never;
+    },
+    clearSession: () => undefined,
+  } satisfies QaRunnerHostAuthorityV1;
+  const createPlugin = await loadOpenCodePluginFactory();
+  const plugin = createPlugin({
+    invocationAuthorization: "invocation-required",
+    qaAuthority,
+  });
+  const hooks = await plugin();
+  const args: Record<string, unknown> = {
+    subagent_type: "deck-developer-verify",
+    deckQaInvocation: { invocationId: "caller-poison" },
+    deckQaResult: { status: "caller-poison" },
+  };
+  const input = { tool: "delegate", sessionID: "qa-session", callID: "qa-call" };
+
+  expect(hooks["tool.execute.before"]).toBeDefined();
+  expect(hooks["tool.execute.after"]).toBeDefined();
+  await hooks["tool.execute.before"](input, { args });
+
+  expect(prepared).toHaveLength(1);
+  expect(Object.isFrozen(prepared[0])).toBe(true);
+  expect(prepared[0]).toEqual({
+    runnerId: "opencode",
+    sessionId: "qa-session",
+    invocationId: "qa-call",
+    requestedRole: "verify",
+  });
+  expect(args.deckQaResult).toBeUndefined();
+  expect(args.deckQaInvocation).toEqual({
+    invocationId: "qa-call",
+    digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    reference,
+  });
+  expect(Object.isFrozen(args.deckQaInvocation)).toBe(true);
+
+  const result = {
+    invocationId: "control-plane-verify-invocation",
+    digest: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    outcome: "passed",
+  };
+  await hooks["tool.execute.after"](input, { args, result });
+  expect(consumed).toEqual([{ receivedReference: reference, result }]);
+});
+
+test("D-REACH-40 OpenCode consumes a QA result once and rejects missing or mismatched correlation", async () => {
+  let consumed = 0;
+  const digest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const qaAuthority = {
+    prepare: async (request: unknown) => {
+      const { invocationId } = request as { invocationId: string };
+      return Object.freeze({ invocationId, digest, reference: Object.freeze({ invocationId }) }) as unknown as Awaited<ReturnType<QaRunnerHostAuthorityV1["prepare"]>>;
+    },
+    consume: async () => { consumed += 1; return { code: "accepted" } as never; },
+    clearSession: () => undefined,
+  } satisfies QaRunnerHostAuthorityV1;
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    invocationAuthorization: "invocation-required",
+    qaAuthority,
+  });
+  const hooks = await plugin();
+  const args = { subagent_type: "deck-developer-review" };
+  const mismatchedInput = { tool: "delegate", sessionID: "qa-once-session", callID: "qa-mismatch" };
+  await hooks["tool.execute.before"](mismatchedInput, { args });
+
+  await expect(hooks["tool.execute.after"]({ ...mismatchedInput, callID: "qa-other-call" }, {
+    args,
+    result: { invocationId: "control-plane-review-invocation", digest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" },
+  })).rejects.toThrow("invalid-evidence");
+  expect(consumed).toBe(0);
+  await hooks["tool.execute.after"](mismatchedInput, {
+    args,
+    result: { invocationId: "control-plane-review-invocation", digest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" },
+  });
+  expect(consumed).toBe(1);
+  await expect(hooks["tool.execute.before"](mismatchedInput, { args })).rejects.toThrow("invalid-evidence");
+
+  const missingResultInput = { tool: "delegate", sessionID: "qa-once-session", callID: "qa-missing-result" };
+  await hooks["tool.execute.before"](missingResultInput, { args });
+  await expect(hooks["tool.execute.after"](missingResultInput, { args })).rejects.toThrow("invalid-evidence");
+  expect(consumed).toBe(1);
+
+  const input = { tool: "delegate", sessionID: "qa-once-session", callID: "qa-once" };
+  await hooks["tool.execute.before"](input, { args });
+  const result = { invocationId: "control-plane-review-once", digest };
+  await hooks["tool.execute.after"](input, { args, result });
+  expect(consumed).toBe(2);
+  await expect(hooks["tool.execute.after"](input, { args, result })).rejects.toThrow("invalid-evidence");
+  expect(consumed).toBe(2);
+});
+
+test("D-REACH-41 OpenCode invocation-required QA delegation fails closed without a provider", async () => {
+  const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1({ invocationAuthorization: "invocation-required" })();
+  await expect(hooks["tool.execute.before"](
+    { tool: "delegate", sessionID: "qa-missing", callID: "qa-missing-call" },
+    { args: { subagent_type: "deck-developer-review", deckQaInvocation: { caller: true }, deckQaResult: { caller: true } } },
+  )).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
+});
+
+test("D-REACH-42 OpenCode clears pending QA correlation and invokes session cleanup", async () => {
+  const cleared: string[] = [];
+  const digest = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+  const qaAuthority = {
+    prepare: async () => Object.freeze({ invocationId: "qa-cleanup-call", digest, reference: Object.freeze({ invocationId: "qa-cleanup-call" }) }) as unknown as Awaited<ReturnType<QaRunnerHostAuthorityV1["prepare"]>>,
+    consume: async () => ({ code: "accepted" } as never),
+    clearSession: (sessionId: unknown) => { cleared.push(sessionId as string); },
+  } satisfies QaRunnerHostAuthorityV1;
+  (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
+    invocationAuthorization: "invocation-required",
+    qaAuthority,
+  };
+  try {
+    const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
+    const input = { tool: "delegate", sessionID: "qa-cleanup", callID: "qa-cleanup-call" };
+    const args = { subagent_type: "verify-general" };
+    await hooks["tool.execute.before"](input, { args });
+    await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "qa-cleanup" } } } });
+    expect(cleared).toEqual(["qa-cleanup"]);
+    await expect(hooks["tool.execute.after"](input, {
+      args,
+      result: { invocationId: "control-plane-cleanup-invocation", digest },
+    })).rejects.toThrow("invalid-evidence");
+  } finally {
+    delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];
+  }
+});
+
+
+test("T03 OpenCode blocks missing and invalid provider claims before native delegation", async () => {
+  const missing = openCodePreparationAuthority("missing-claim-session", "missing-claim-call");
+  (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
+    sessionPreparationAuthorizationService: missing.service,
+    resolveOpenCodeSessionPreparation: async () => ({ authorization: undefined, expectation: missing.expectation }),
+  };
+  try {
+    const missingHooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
+    await expect(missingHooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "missing-claim-session", callID: "missing-claim-call" },
+      { args: { subagent_type: "deck-init" } },
+    )).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
+
+    const invalid = openCodePreparationAuthority("invalid-claim-session", "invalid-claim-call");
+    const invalidAuthorization = {
+      ...invalid.authorization,
+      proof: {
+        ...invalid.authorization.proof,
+        value: `${invalid.authorization.proof.value.startsWith("A") ? "B" : "A"}${invalid.authorization.proof.value.slice(1)}`,
+      },
+    };
+    (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
+      sessionPreparationAuthorizationService: invalid.service,
+      resolveOpenCodeSessionPreparation: async () => ({ authorization: invalidAuthorization, expectation: invalid.expectation }),
+    };
+    const invalidHooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
+    await expect(invalidHooks["tool.execute.before"](
+      { tool: "delegate", sessionID: "invalid-claim-session", callID: "invalid-claim-call" },
+      { args: { subagent_type: "deck-init" } },
+    )).rejects.toThrow("modification-not-authorized:AUTHZ_PROOF_INVALID");
+  } finally {
+    delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];
+  }
 });

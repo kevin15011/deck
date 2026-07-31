@@ -14,6 +14,39 @@ export type TelemetryPhaseV1 = "apply" | "verify" | "review";
 export type TelemetryRiskTierV1 = "low" | "medium" | "high" | "critical";
 export type TelemetryLaneV1 = "fast" | "guarded" | "full_sdd";
 
+export type UserOutcomeTelemetryEventNameV1 = "first-useful-result" | "accepted-result" | "decision" | "intervention" | "repeated-approval" | "retry" | "phase-launch" | "mode-handoff" | "unplanned-expansion" | "process-artifact-count";
+export type UserOutcomeTelemetryEventV1 = Readonly<{ schema: "user-outcome-telemetry-v1"; event: UserOutcomeTelemetryEventNameV1; count: number }>;
+export interface UserOutcomeMetricObservationV1 {
+  readonly timeToFirstUsefulResultMs?: number;
+  readonly timeToAcceptedDeliveryMs?: number;
+  readonly userInterventionCount: number;
+  readonly repairCycleCount: number;
+  readonly verificationRunCount: number;
+  readonly unnecessaryVerificationRerunCount: number;
+  readonly terminalChangeCount: number;
+  readonly honestClosureCount: number;
+  readonly productWorkUnitCount: number;
+  readonly processWorkUnitCount: number;
+  readonly directPathAvailableButMissedCount: number;
+}
+export interface UserOutcomeTelemetryAggregateV1 {
+  readonly schema: "user-outcome-telemetry-aggregate-v1";
+  readonly eligibleExecutions: number;
+  readonly firstUsefulResultCount: number;
+  readonly firstUsefulResultTotalMs: number;
+  readonly acceptedDeliveryCount: number;
+  readonly acceptedDeliveryTotalMs: number;
+  readonly userInterventionCount: number;
+  readonly repairCycleCount: number;
+  readonly verificationRunCount: number;
+  readonly unnecessaryVerificationRerunCount: number;
+  readonly terminalChangeCount: number;
+  readonly honestClosureCount: number;
+  readonly productWorkUnitCount: number;
+  readonly processWorkUnitCount: number;
+  readonly directPathAvailableButMissedCount: number;
+}
+
 type SafeExecutionTelemetryBaseV1 = Readonly<{
   schema: "safe-execution-telemetry-v1";
   runner: TelemetryRunnerV1;
@@ -134,6 +167,7 @@ const ROLLOUT_TELEMETRY_KEYS = [
 ] as const;
 
 const BASELINE_EVENTS = new Set(["baseline-recorded", "shadow-compared", "capability-probed"]);
+const USER_OUTCOME_EVENTS = new Set<UserOutcomeTelemetryEventNameV1>(["first-useful-result", "accepted-result", "decision", "intervention", "repeated-approval", "retry", "phase-launch", "mode-handoff", "unplanned-expansion", "process-artifact-count"]);
 const TELEMETRY_VALUES = Object.freeze({
   runner: new Set(["opencode", "pi"]),
   phase: new Set(["apply", "verify", "review"]),
@@ -211,6 +245,101 @@ export function serializeSafeTelemetryEvent(input: unknown): string {
   if (!isBaseTelemetryEvent(output) || !eventValid) {
     throw new Error("invalid-safe-telemetry-event");
   }
+  return JSON.stringify(output);
+}
+
+/** Aggregate-only user-value telemetry deliberately excludes prompt, path, content, secrets, and per-invocation duration. */
+export function serializeUserOutcomeTelemetryEventV1(input: unknown): string {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("invalid-user-outcome-telemetry-event");
+  const record = input as Record<string, unknown>;
+  const output = { schema: record.schema, event: record.event, count: record.count };
+  if (output.schema !== "user-outcome-telemetry-v1" || !USER_OUTCOME_EVENTS.has(output.event as UserOutcomeTelemetryEventNameV1) || !isNonNegativeInteger(output.count)) throw new Error("invalid-user-outcome-telemetry-event");
+  return JSON.stringify(output);
+}
+
+const USER_OUTCOME_AGGREGATE_KEYS = [
+  "schema",
+  "eligibleExecutions",
+  "firstUsefulResultCount",
+  "firstUsefulResultTotalMs",
+  "acceptedDeliveryCount",
+  "acceptedDeliveryTotalMs",
+  "userInterventionCount",
+  "repairCycleCount",
+  "verificationRunCount",
+  "unnecessaryVerificationRerunCount",
+  "terminalChangeCount",
+  "honestClosureCount",
+  "productWorkUnitCount",
+  "processWorkUnitCount",
+  "directPathAvailableButMissedCount",
+] as const;
+
+/** Builds aggregate user-value metrics without retaining prompts, paths, content, identities, or individual timings. */
+export function aggregateUserOutcomeTelemetryV1(
+  observations: readonly UserOutcomeMetricObservationV1[],
+): UserOutcomeTelemetryAggregateV1 {
+  if (!Array.isArray(observations)) throw new Error("invalid-user-outcome-telemetry-observation");
+  const aggregate = {
+    schema: "user-outcome-telemetry-aggregate-v1" as const,
+    eligibleExecutions: observations.length,
+    firstUsefulResultCount: 0,
+    firstUsefulResultTotalMs: 0,
+    acceptedDeliveryCount: 0,
+    acceptedDeliveryTotalMs: 0,
+    userInterventionCount: 0,
+    repairCycleCount: 0,
+    verificationRunCount: 0,
+    unnecessaryVerificationRerunCount: 0,
+    terminalChangeCount: 0,
+    honestClosureCount: 0,
+    productWorkUnitCount: 0,
+    processWorkUnitCount: 0,
+    directPathAvailableButMissedCount: 0,
+  };
+  for (const observation of observations) {
+    if (!observation || typeof observation !== "object") throw new Error("invalid-user-outcome-telemetry-observation");
+    for (const key of [
+      "userInterventionCount",
+      "repairCycleCount",
+      "verificationRunCount",
+      "unnecessaryVerificationRerunCount",
+      "terminalChangeCount",
+      "honestClosureCount",
+      "productWorkUnitCount",
+      "processWorkUnitCount",
+      "directPathAvailableButMissedCount",
+    ] as const) {
+      if (!isNonNegativeInteger(observation[key])) throw new Error("invalid-user-outcome-telemetry-observation");
+      aggregate[key] += observation[key];
+    }
+    if (observation.honestClosureCount > observation.terminalChangeCount) throw new Error("invalid-user-outcome-telemetry-observation");
+    if (observation.unnecessaryVerificationRerunCount > observation.verificationRunCount) throw new Error("invalid-user-outcome-telemetry-observation");
+    if (observation.timeToFirstUsefulResultMs !== undefined) {
+      if (!isNonNegativeNumber(observation.timeToFirstUsefulResultMs)) throw new Error("invalid-user-outcome-telemetry-observation");
+      aggregate.firstUsefulResultCount += 1;
+      aggregate.firstUsefulResultTotalMs += observation.timeToFirstUsefulResultMs;
+    }
+    if (observation.timeToAcceptedDeliveryMs !== undefined) {
+      if (!isNonNegativeNumber(observation.timeToAcceptedDeliveryMs)) throw new Error("invalid-user-outcome-telemetry-observation");
+      aggregate.acceptedDeliveryCount += 1;
+      aggregate.acceptedDeliveryTotalMs += observation.timeToAcceptedDeliveryMs;
+    }
+  }
+  return Object.freeze(aggregate);
+}
+
+export function serializeUserOutcomeTelemetryAggregateV1(input: unknown): string {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("invalid-user-outcome-telemetry-aggregate");
+  const record = input as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  for (const key of USER_OUTCOME_AGGREGATE_KEYS) output[key] = record[key];
+  if (
+    output.schema !== "user-outcome-telemetry-aggregate-v1"
+    || USER_OUTCOME_AGGREGATE_KEYS.slice(1).some((key) => !isNonNegativeNumber(output[key]))
+    || (output.honestClosureCount as number) > (output.terminalChangeCount as number)
+    || (output.unnecessaryVerificationRerunCount as number) > (output.verificationRunCount as number)
+  ) throw new Error("invalid-user-outcome-telemetry-aggregate");
   return JSON.stringify(output);
 }
 

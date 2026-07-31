@@ -1,8 +1,14 @@
 schema: spec-registry-v1
 changeId: streamline-orchestrator-ownership-and-acceptance
 name: Streamline Orchestrator ownership and post-Apply acceptance
-currentPhase: review
-status: failed
+currentPhase: closed
+status: superseded
+closure_reason: >-
+  The formal candidate remains honestly failed at its historical BROAD run.
+  Its scope was subsequently absorbed into the integrated DTE-001 through
+  DTE-029 implementation, so this older candidate is no longer authoritative
+  and must not remain active or compete with the delivered outcome.
+closed_at: "2026-07-31T04:21:11Z"
 artifacts:
   exploration: exploration.md
   proposal: proposal.md
@@ -356,3 +362,292 @@ provenance:
     idempotencyKey: sha256:f31edaf39b2a5acafcbdaf53dcce8e80208755b5860d3edc65cb4429dd5046c9
     transactionId: registry-tx-413603fd-bb96-4cd6-a56a-3fe51fba5ed6
     batchDigest: sha256:8c510cb6681770130b204c34d971f5153ce111e635fbe6c8b20fc668d78823ce
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T02:26:08.242Z
+    registryWrite: non-deferred
+    note: R5-B01 coordinated combined deterministic fixture refresh completed
+    intentId: registry-intent:v1:35c558d7c28c463fda9b50f73074c25b
+    idempotencyKey: sha256:44d398143880f4a53a4dc5bebf09e3e1fd4df38e3fb0d482a012b3d7a13a66dd
+    transactionId: registry-tx-35c558d7-c28c-463f-da9b-50f73074c25b
+    batchDigest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T02:50:00.000Z
+    registryWrite: non-deferred
+    note: Fresh independent TARGETED final-QA passed for R5-B01 repaired predecessor candidate.
+    intentId: registry-intent:v1:11b04e3ea426b988e0b093b40c5e0aed
+    idempotencyKey: sha256:30d77b3b5fd4be71a00df132aae119365aed0a765f0c6f9c3cbeb0770f04ffc7
+    transactionId: registry-tx-11b04e3e-a426-b988-e0b0-93b40c5e0aed
+    batchDigest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T03:03:11.000Z
+    registryWrite: non-deferred
+    note: fresh independent AFFECTED_AREA final-QA after coordinated R5-B01 TARGETED pass
+    intentId: registry-intent:v1:23688ea5c874f71f58233928895631e0
+    idempotencyKey: sha256:aa4e88482e7b0084ecd3c86f25e7ed3c2348167f88626d0de70dce86628340a6
+    transactionId: registry-tx-23688ea5-c874-f71f-5823-3928895631e0
+    batchDigest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+  - phase: review
+    agent: deck-developer-review-opencode-r6-final-r5
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T03:30:32.894Z
+    registryWrite: non-deferred
+    note: Fresh final independent Review after the coordinated R5-B01 repair; BROAD was not run.
+    intentId: registry-intent:v1:f449ec3691132eb025426a84bc49ac4e
+    idempotencyKey: sha256:3a173f424aa3476244b3b8378c911680841f621c4830b7355b772d73a2c2b264
+    transactionId: registry-tx-f449ec36-9113-2eb0-2542-6a84bc49ac4e
+    batchDigest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+  - phase: verify
+    agent: deck-developer-verify-opencode-final-broad-fresh-2026-07-29
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T03:46:36.520Z
+    registryWrite: non-deferred
+    note: Recovered failed BROAD RegistryIntentV1; no pass evidence or advancement.
+    intentId: registry-intent:v1:5bd3c4048dcceaad1554a98579b4ada9
+    idempotencyKey: sha256:7994d2d9efba7f22bafe022900c233c758fb72b831b5901826118ae103fbc864
+    transactionId: registry-tx-5bd3c404-8dcc-eaad-1554-a98579b4ada9
+    batchDigest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T04:12:01.972Z
+    registryWrite: non-deferred
+    note: Recorded explicit authorization for the coordinated BROAD repair batch.
+    intentId: registry-intent:v1:e026a4842e4f81303a36d8f5eda5f1f8
+    idempotencyKey: sha256:77fd8e75aab1bc2c76d87c6853d7382423f27a36a84218b7f77f273cd576dc61
+    transactionId: registry-tx-e026a484-2e4f-8130-3a36-d8f5eda5f1f8
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: apply
+    agent: deck-developer-apply-general
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T04:47:00.000Z
+    registryWrite: non-deferred
+    note: Apply-local coordinated A/B/C candidate validation passed; independent QA remains required.
+    intentId: registry-intent:v1:f66b84ea9a13903832171bc826c905f1
+    idempotencyKey: sha256:395dfbc283eb46eadf0440efb89474fac2d623e9a0cb4691e04cacb73bbf788a
+    transactionId: registry-tx-f66b84ea-9a13-9038-3217-1bc826c905f1
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T05:10:52.652Z
+    registryWrite: non-deferred
+    note: fresh TARGETED final-QA for predecessor 17-path candidate bound to coordinated A/B/C repair dependency
+    intentId: registry-intent:v1:ffa0155dcc6e673cf48744d620e63319
+    idempotencyKey: sha256:936e795546bd3b959d6ac332b58f26b46a26b7b5492f7ba5f7501b75dd23ef63
+    transactionId: registry-tx-ffa0155d-cc6e-673c-f487-44d620e63319
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T05:27:04.158Z
+    registryWrite: non-deferred
+    note: fresh independent AFFECTED_AREA final-QA only; no fixes, Review, Archive, or BROAD
+    intentId: registry-intent:v1:43879046cd12ecff11a7d1b8f79dd215
+    idempotencyKey: sha256:fed67e0982662482404cae90c6086ef2d63c8032825d563d926a559cb93bb080
+    transactionId: registry-tx-43879046-cd12-ecff-11a7-d1b8f79dd215
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: review
+    agent: deck-developer-review-opencode-r7-coordinated-composite-20260729T054927Z
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T05:49:27.776Z
+    registryWrite: non-deferred
+    note: Fresh independent final Review of the coordinated composite candidate; mandatory BROAD remains required.
+    intentId: registry-intent:v1:fb670c45d4b59ef27e87abda3eb003a9
+    idempotencyKey: sha256:60754643b1e5642b7af0acbbf5cf70adaf5d88c9f5b99a9759de8994bb2a1133
+    transactionId: registry-tx-fb670c45-d4b5-9ef2-7e87-abda3eb003a9
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify-opencode-broad-final-qa-fresh-20260729
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T06:11:45.458Z
+    registryWrite: non-deferred
+    note: BROAD final-QA failed on mandatory repository-wide test command.
+    intentId: registry-intent:v1:67ec89744e972bf9f674ac1f4d8398d0
+    idempotencyKey: sha256:bb636d63ec655c5e99d721c6c0267a206d996cb03ce75e4375972974132e6f5a
+    transactionId: registry-tx-67ec8974-4e97-2bf9-f674-ac1f4d8398d0
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: apply
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T06:28:25.183Z
+    registryWrite: non-deferred
+    note: Recorded explicit user authorization for BROAD failure diagnosis and bounded repair if required.
+    intentId: registry-intent:v1:0b76948fff748a7ff5c81c04e4e3d9e7
+    idempotencyKey: sha256:0b76948fff748a7ff5c81c04e4e3d9e731e1891f2a007621660c187d117af291
+    transactionId: registry-tx-0b76948f-ff74-8a7f-f5c8-1c04e4e3d9e7
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: apply
+    agent: deck-developer-apply-general-opencode-broad-binding-repair-finalize-20260729
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T06:50:56.868Z
+    registryWrite: non-deferred
+    note: Finalized generated build-info reconciliation after independent SAFE_INCIDENTAL_TOOL_CACHE classification; fresh final QA remains pending.
+    intentId: registry-intent:v1:bbb311fcb6da506c84782d4f937358cf
+    idempotencyKey: sha256:b2e01b8e951bb02bc34ce0853febc3e28291bd722661182c0c3b722984b1c6c3
+    transactionId: registry-tx-bbb311fc-b6da-506c-8478-2d4f937358cf
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify-opencode-targeted-finalqa-generated-binding-fresh-20260729-gpt55
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T07:19:00.000Z
+    registryWrite: non-deferred
+    note: TARGETED only; fresh independent final-QA passed after generated binding reconciliation.
+    intentId: registry-intent:v1:9556daa6df57933f90bcdcb38b0539df
+    idempotencyKey: sha256:cdeadbd15f7d3dc67ca6995b471944c93af683349d01f574e2c3570eae21fa5d
+    transactionId: registry-tx-9556daa6-df57-933f-90bc-dcb38b0539df
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T07:28:00.000Z
+    registryWrite: non-deferred
+    note: Fresh independent AFFECTED_AREA final-QA passed after newly passed TARGETED generation.
+    intentId: registry-intent:v1:80d40ecb86e469e766e7d17df7f35152
+    idempotencyKey: sha256:1d2bef365c0f5f7362618aabc51219f512cc2ce64ec95cfc5b037dc46907bbaf
+    transactionId: registry-tx-80d40ecb-86e4-69e7-66e7-d17df7f35152
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: review
+    agent: deck-developer-review-opencode-r8-post-build-info-reconciliation-20260729T075140Z
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T07:51:40.040Z
+    registryWrite: non-deferred
+    note: Fresh independent final Review approved the repaired composite; mandatory BROAD remains required and historical BROAD evidence remains open.
+    intentId: registry-intent:v1:b5d36e90e9d32d9e926e1b106c81a192
+    idempotencyKey: sha256:e3c88e58dc706631770897b932819d41133b4ee9ae579b20abb143eb8df3ee33
+    transactionId: registry-tx-b5d36e90-e9d3-2d9e-926e-1b106c81a192
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T08:15:00.000Z
+    registryWrite: non-deferred
+    note: Fresh mandatory BROAD stopped at isolated authoritative build/package/binary nonzero exit after full tests and strict TypeScript passed.
+    intentId: registry-intent:v1:8dc42702c774f7f7304e3637ea9d4a83
+    idempotencyKey: sha256:68a6559f38282f9d1344bc4768533fb4b6a2589a8eb0a4e5b7b6995c59fdf712
+    transactionId: registry-tx-8dc42702-c774-f7f7-304e-3637ea9d4a83
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T14:19:43.855Z
+    registryWrite: non-deferred
+    note: Recorded user authorization to correct only the isolated verification harness and repeat fresh final QA; candidate bytes remain unchanged.
+    intentId: registry-intent:v1:67b50c63cc035fae7a458974a5768bf2
+    idempotencyKey: sha256:67b50c63cc035fae7a458974a5768bf2b733838cc98c66e0f734215ac8ad936e
+    transactionId: registry-tx-67b50c63-cc03-5fae-7a45-8974a5768bf2
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T14:43:23.000Z
+    registryWrite: non-deferred
+    note: Fresh independent TARGETED retry passed after harness-only repair validation.
+    intentId: registry-intent:v1:0992413185d3a0d7d518aa33230b5322
+    idempotencyKey: sha256:d3f7ef537317328a0483749980739974a1f026162b6532058ce36cfd5c4dfa63
+    transactionId: registry-tx-09924131-85d3-a0d7-d518-aa33230b5322
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T15:12:15.426Z
+    registryWrite: recovery-reconciled
+    note: Corrected the coordinator-serialized TARGETED event name from invalid verify.targeted.passed to canonical verify.passed after strict validator detection; no phase judgment or candidate evidence changed.
+    intentId: registry-intent:v1:ad222a4feb9a7fd4315f5eee9911c7d2
+    idempotencyKey: sha256:ad222a4feb9a7fd4315f5eee9911c7d221491173ce4bcb6a58178fd1f35cb944
+    transactionId: registry-tx-ad222a4f-eb9a-7fd4-315f-5eee9911c7d2
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T15:05:00.000Z
+    registryWrite: recovery-reconciled
+    note: Reconciled the historical AFFECTED_AREA failure against the repaired registry base; the warning cause is corrected and fresh QA remains required.
+    intentId: registry-intent:v1:850edd0fced7d4bfb23f9edb4b989207
+    idempotencyKey: sha256:a0d955c43f1bceab63dda960814f8a28343adb7a53826d86cb565687d3d03fa9
+    transactionId: registry-tx-850edd0f-ced7-d4bf-b23f-9edb4b989207
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T15:18:51.750Z
+    registryWrite: non-deferred
+    note: Recorded the user's direction to finish immediately and restarted fresh final QA after deterministic registry recovery.
+    intentId: registry-intent:v1:60497c47e4014880689103b0ec632636
+    idempotencyKey: sha256:60497c47e4014880689103b0ec632636e10d69987b4516ea172884ef7557cb13
+    transactionId: registry-tx-60497c47-e401-4880-6891-03b0ec632636
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T15:42:06.886Z
+    registryWrite: non-deferred
+    note: Fresh TARGETED final-QA passed after deterministic registry recovery; return-contract timestamp was normalized before reconciliation.
+    intentId: registry-intent:v1:457b24b67311cc07d70a9e4ed1c06155
+    idempotencyKey: sha256:1e26366fa11e612a41109862326b15643af045fc2e77e94647a662ea28bb5fbc
+    transactionId: registry-tx-457b24b6-7311-cc07-d70a-9e4ed1c06155
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T15:53:29.804Z
+    registryWrite: non-deferred
+    note: Existing fresh AFFECTED_AREA verify.passed judgment; helper-built return-contract recovery only.
+    intentId: registry-intent:v1:8fa7d2d85137b97e683297fcd21fa9f7
+    idempotencyKey: sha256:5b456ab420deb8f21961038c6c090770489379b3680d57a1ab29b90e5d6450a9
+    transactionId: registry-tx-8fa7d2d8-5137-b97e-6832-97fcd21fa9f7
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: review
+    agent: deck-developer-review
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T16:29:48.228Z
+    registryWrite: non-deferred
+    note: Fresh independent final Review approved the clean recovered candidate with zero new findings; mandatory BROAD remains required.
+    intentId: registry-intent:v1:cebfd8445133002a42729d01c0598976
+    idempotencyKey: sha256:d91fc782941122a54c5fb894389c3d4f392a1ac0740b1b70eb3f929cc1894524
+    transactionId: registry-tx-cebfd844-5133-002a-4272-9d01c0598976
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T16:43:57.813Z
+    registryWrite: non-deferred
+    note: BROAD failed before candidate checks because an externally referenced temporary isolated-build recipe was unavailable; candidate bytes remained unchanged.
+    intentId: registry-intent:v1:68c2f7a0d1a49aaaf396efb5c8af5281
+    idempotencyKey: sha256:f5996eae8e4e0c154f5ce40cf10ecab5d7b0657643777f10acd9f5efcae3d174
+    transactionId: registry-tx-68c2f7a0-d1a4-9aaa-f396-efb5c8af5281
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: 2026-07-29T16:46:44.245Z
+    registryWrite: non-deferred
+    note: Absorbed the user's direction to close the change and authorized a BROAD-only retry with a self-contained isolated-build recipe reconstructed inside the same invocation.
+    intentId: registry-intent:v1:ebc1d0394fbb162af9296091f907ec78
+    idempotencyKey: sha256:ebc1d0394fbb162af9296091f907ec782132230ec3f7f89c7e75970db567ac26
+    transactionId: registry-tx-ebc1d039-4fbb-162a-f929-6091f907ec78
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: verify
+    agent: deck-developer-verify
+    model: openai/gpt-5.5
+    timestamp: 2026-07-29T17:08:47.085Z
+    registryWrite: non-deferred
+    note: BROAD final-QA failed on repository-wide OpenSpec validation after self-contained isolated recipe execution.
+    intentId: registry-intent:v1:b2ad5df69d7248c3f3ad506a814f5b52
+    idempotencyKey: sha256:0db9550fde58d9ce8b3fefc19df84f7963d2a02149fca7b9831a3ebee744aa90
+    transactionId: registry-tx-b2ad5df6-9d72-48c3-f3ad-506a814f5b52
+    batchDigest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+  - phase: closed
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-31T04:21:11Z"
+    registryWrite: non-deferred
+    note: >-
+      Preserved the failed historical candidate and closed it as superseded by
+      the integrated Developer Team effectiveness outcome; no acceptance event
+      was backfilled.

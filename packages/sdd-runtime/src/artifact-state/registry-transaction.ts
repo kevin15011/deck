@@ -89,6 +89,7 @@ export function buildRegistryPairTransactionV1(input: {
   readonly intentId: string;
   readonly idempotencyKey: string;
   readonly artifact: { readonly path: string; readonly digest: `sha256:${string}` };
+  readonly artifacts?: readonly { readonly path: string; readonly digest: `sha256:${string}` }[];
   readonly base: RegistryPairSnapshotV1;
   readonly stateSource: string;
   readonly eventsSource: string;
@@ -103,8 +104,11 @@ export function buildRegistryPairTransactionV1(input: {
     renderedState = applyRegistryDocumentEditsV1(input.base.stateSource, stateEdits, "state");
     renderedEvents = applyRegistryDocumentEditsV1(input.base.eventsSource, eventsEdits, "events");
   } catch { throw new Error("invalid-evidence"); }
+  const artifacts = input.artifacts ?? [input.artifact];
   if (!safeId(input.transactionId) || !safeId(input.intentId) || !safeId(input.idempotencyKey) || !changeId(input.base.changeId) ||
-    !artifactPath(input.artifact.path) || !digest(input.artifact.digest) ||
+    !artifactPath(input.artifact.path) || !digest(input.artifact.digest) || artifacts.length === 0 ||
+    artifacts.some((artifact) => !artifactPath(artifact.path) || !digest(artifact.digest)) ||
+    new Set(artifacts.map((artifact) => artifact.path)).size !== artifacts.length ||
     renderedState !== input.stateSource || renderedEvents !== input.eventsSource) throw new Error("invalid-evidence");
   return issueTransaction({
     schema: "registry-pair-transaction-v1",
@@ -114,6 +118,7 @@ export function buildRegistryPairTransactionV1(input: {
     idempotencyKey: input.idempotencyKey,
     status: "prepared",
     artifact: Object.freeze({ ...input.artifact }),
+    artifacts: Object.freeze(artifacts.map((artifact) => Object.freeze({ ...artifact }))),
     base: Object.freeze({ stateDigest: input.base.stateDigest, eventsDigest: input.base.eventsDigest }),
     next: Object.freeze({
       stateDigest: registryDocumentDigestV1(input.stateSource),
@@ -126,14 +131,18 @@ export function buildRegistryPairTransactionV1(input: {
 
 export function parseRegistryPairTransactionV1(value: unknown): RegistryPairCommitRequestV1 {
   const root = record(value);
-  if (!root || !exact(root, ["schema", "transactionId", "changeId", "intentId", "idempotencyKey", "status", "journalDigest", "artifact", "base", "next", "target", "fileMode"]) ||
+  const legacyKeys = ["schema", "transactionId", "changeId", "intentId", "idempotencyKey", "status", "journalDigest", "artifact", "base", "next", "target", "fileMode"];
+  const currentKeys = [...legacyKeys, "artifacts"];
+  if (!root || (!exact(root, legacyKeys) && !exact(root, currentKeys)) ||
     root.schema !== "registry-pair-transaction-v1" || !safeId(root.transactionId) || !changeId(root.changeId) ||
     !safeId(root.intentId) || !safeId(root.idempotencyKey) || !digest(root.journalDigest) ||
     (root.status !== "prepared" && root.status !== "committed")) {
     throw new Error("registry-recovery-required");
   }
   const artifact = record(root.artifact), base = record(root.base), next = record(root.next), target = record(root.target), fileMode = record(root.fileMode);
+  const artifacts = root.artifacts === undefined ? undefined : Array.isArray(root.artifacts) ? root.artifacts.map(record) : undefined;
   if (!artifact || !base || !next || !target || !fileMode || !exact(artifact, ["path", "digest"]) ||
+    (root.artifacts !== undefined && (!artifacts || artifacts.length === 0 || artifacts.some((entry) => !entry || !exact(entry, ["path", "digest"]) || !artifactPath(entry.path) || !digest(entry.digest)) || new Set(artifacts.map((entry) => entry!.path)).size !== artifacts.length)) ||
     !artifactPath(artifact.path) || !digest(artifact.digest) || !exact(base, ["stateDigest", "eventsDigest"]) ||
     !exact(next, ["stateDigest", "eventsDigest"]) || !exact(target, ["stateEdits", "eventsEdits"]) ||
     !exact(fileMode, ["state", "events"]) || !digest(base.stateDigest) || !digest(base.eventsDigest) ||
@@ -151,6 +160,7 @@ export function parseRegistryPairTransactionV1(value: unknown): RegistryPairComm
     idempotencyKey: root.idempotencyKey,
     status: root.status,
     artifact: Object.freeze({ path: artifact.path, digest: artifact.digest }),
+    ...(artifacts === undefined ? {} : { artifacts: Object.freeze(artifacts.map((entry) => Object.freeze({ path: entry!.path as string, digest: entry!.digest as `sha256:${string}` }))) }),
     base: Object.freeze({ stateDigest: base.stateDigest, eventsDigest: base.eventsDigest }),
     next: Object.freeze({ stateDigest: next.stateDigest, eventsDigest: next.eventsDigest }),
     target: Object.freeze({ stateEdits, eventsEdits }),

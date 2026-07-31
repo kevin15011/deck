@@ -509,3 +509,420 @@ events:
       - R5-B01 blocks mandatory BROAD; R4-B01 is closed.
       - Exact 17-path candidate remains bound to
         sha256:4f1913c37b377efdf19423c13fa4fc36f6b5ae2bb023ee1e490340141c812904.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-29T02:26:08.242Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:35c558d7c28c463fda9b50f73074c25b
+    idempotency_key: sha256:44d398143880f4a53a4dc5bebf09e3e1fd4df38e3fb0d482a012b3d7a13a66dd
+    transaction_id: registry-tx-35c558d7-c28c-463f-da9b-50f73074c25b
+    batch_digest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+    notes:
+      - R5-B01 remains closed
+      - Combined fixture refresh passed all required Apply-local checks
+      - Fresh independent TARGETED validation is next
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T02:50:00.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:11b04e3ea426b988e0b093b40c5e0aed
+    idempotency_key: sha256:30d77b3b5fd4be71a00df132aae119365aed0a765f0c6f9c3cbeb0770f04ffc7
+    transaction_id: registry-tx-11b04e3e-a426-b988-e0b0-93b40c5e0aed
+    batch_digest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+    notes:
+      - stage=TARGETED
+      - batch=batch:v1:dddd2150b3a163a5719e29e9750e74be
+      - decision=sha256:dc3c07f61e17c68a2c72c9faeda5b8da927fa56fb42f79340b262180ee486cf9
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T03:03:11.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:23688ea5c874f71f58233928895631e0
+    idempotency_key: sha256:aa4e88482e7b0084ecd3c86f25e7ed3c2348167f88626d0de70dce86628340a6
+    transaction_id: registry-tx-23688ea5-c874-f71f-5823-3928895631e0
+    batch_digest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+    notes:
+      - stage=AFFECTED_AREA
+      - targetedDigest=sha256:fd7c6e69e040438ace3a4136be8ad5d7fd4fdd4a52b90b40fb6d8f305b9e0a80
+      - subject=sha256:4ffb265c7b2f38ceff34ae3564646326409cebdb9756b083dbe97addcf3bcf43
+      - binaryDiff=sha256:f6eefc085d567a51e63369760a21bb60b124143213ec45b7c4f1d25465316c75
+      - next=independent Review then mandatory BROAD
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: 2026-07-29T03:30:32.894Z
+    actor: deck-developer-review-opencode-r6-final-r5
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:f449ec3691132eb025426a84bc49ac4e
+    idempotency_key: sha256:3a173f424aa3476244b3b8378c911680841f621c4830b7355b772d73a2c2b264
+    transaction_id: registry-tx-f449ec36-9113-2eb0-2542-6a84bc49ac4e
+    batch_digest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+    notes:
+      - Approved the exact repaired predecessor candidate with zero findings.
+      - R5-B01 is closed; successor T01-T10 identity is preserved but not accepted.
+      - Mandatory BROAD remains required and unrun.
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T03:46:36.520Z
+    actor: deck-developer-verify-opencode-final-broad-fresh-2026-07-29
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:5bd3c4048dcceaad1554a98579b4ada9
+    idempotency_key: sha256:7994d2d9efba7f22bafe022900c233c758fb72b831b5901826118ae103fbc864
+    transaction_id: registry-tx-5bd3c404-8dcc-eaad-1554-a98579b4ada9
+    batch_digest: sha256:dddd2150b3a163a5719e29e9750e74befbf9033e42e7dc78d1827519e17670b9
+    notes:
+      - BROAD-REPO-TEST command bun test --timeout 30000 exited 1.
+      - Original BROAD output: 4067 pass, 6 fail, 17015 expect() calls, 4073 tests across 226 files.
+      - Original combined output digest sha256:cf85c0a476e309b60d59c2f3064ee0a31601bf6700753418f91a86408f691aab.
+      - Archive remains blocked; this intent records failed Verify only.
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: 2026-07-29T04:12:01.972Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:e026a4842e4f81303a36d8f5eda5f1f8
+    idempotency_key: sha256:77fd8e75aab1bc2c76d87c6853d7382423f27a36a84218b7f77f273cd576dc61
+    transaction_id: registry-tx-e026a484-2e4f-8130-3a36-d8f5eda5f1f8
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - "User authorized the exact coordinated repair with the message: Procede."
+      - Repair addresses release-mode ordering, successor export oracles, and canonical runner-asset regeneration.
+      - No T09 repair, Git write, direct generated edit, T11-T13 implementation, or runner-capability-standardization scope is authorized.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-29T04:47:00.000Z
+    actor: deck-developer-apply-general
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:f66b84ea9a13903832171bc826c905f1
+    idempotency_key: sha256:395dfbc283eb46eadf0440efb89474fac2d623e9a0cb4691e04cacb73bbf788a
+    transaction_id: registry-tx-f66b84ea-9a13-9038-3217-1bc826c905f1
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - coordinated A/B/C repair candidate validated
+      - full repository candidate exercise 4075/4075 passed
+      - TARGETED, AFFECTED_AREA, Review, and BROAD remain unclaimed and require fresh independent execution
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T05:10:52.652Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:ffa0155dcc6e673cf48744d620e63319
+    idempotency_key: sha256:936e795546bd3b959d6ac332b58f26b46a26b7b5492f7ba5f7501b75dd23ef63
+    transaction_id: registry-tx-ffa0155d-cc6e-673c-f487-44d620e63319
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - TARGETED final-QA passed
+      - composite subject sha256:50cc070f53b18f6c152a4422fd5c6b82553be0c9184950b0e8d64f2cfbda8592
+      - verification evidence sha256:e82abdde26491a365684bcb20d521051e9631c8c71c8d4a43a5fbb983bcb444f
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T05:27:04.158Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:43879046cd12ecff11a7d1b8f79dd215
+    idempotency_key: sha256:fed67e0982662482404cae90c6086ef2d63c8032825d563d926a559cb93bb080
+    transaction_id: registry-tx-43879046-cd12-ecff-11a7-d1b8f79dd215
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - AFFECTED_AREA final-QA passed for coordinated composite candidate after fresh TARGETED pass.
+      - Bound to predecessor 17-path subject sha256:4ffb265c7b2f38ceff34ae3564646326409cebdb9756b083dbe97addcf3bcf43 and coordinated seven-target subject sha256:98e49d652b1f78ab4adf96ac1fff0ff3cdedac56eccf4da3ca800877be61bbc6.
+      - Independent Review and mandatory BROAD remain separate; no successor acceptance claimed.
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: 2026-07-29T05:49:27.776Z
+    actor: deck-developer-review-opencode-r7-coordinated-composite-20260729T054927Z
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:fb670c45d4b59ef27e87abda3eb003a9
+    idempotency_key: sha256:60754643b1e5642b7af0acbbf5cf70adaf5d88c9f5b99a9759de8994bb2a1133
+    transaction_id: registry-tx-fb670c45-d4b5-9ef2-7e87-abda3eb003a9
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - Approved predecessor coordinated composite with zero findings.
+      - R5-B01 remains closed; mandatory BROAD remains required and unwaived.
+      - Successor T01-T10 identity is preserved; T11-T13 and successor acceptance are not claimed.
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T06:11:45.458Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:67ec89744e972bf9f674ac1f4d8398d0
+    idempotency_key: sha256:bb636d63ec655c5e99d721c6c0267a206d996cb03ce75e4375972974132e6f5a
+    transaction_id: registry-tx-67ec8974-4e97-2bf9-f674-ac1f4d8398d0
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - BROAD-REPO-TEST exited 1; Archive remains blocked.
+      - FailureManifestV1 digest sha256:da6efe0eec179a8bd68996cf5633faf379f5b6e78b6d72b27fa7645c2135cbd5.
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: 2026-07-29T06:28:25.183Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:0b76948fff748a7ff5c81c04e4e3d9e7
+    idempotency_key: sha256:0b76948fff748a7ff5c81c04e4e3d9e731e1891f2a007621660c187d117af291
+    transaction_id: registry-tx-0b76948f-ff74-8a7f-f5c8-1c04e4e3d9e7
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - "User authorized diagnosis and repair with the message: procede."
+      - Repair is initially limited to canonical reconciliation of apps/cli/src/runtime/build-info.generated.ts; any source or test change requires evidence and exact re-scoping.
+      - All dependent TARGETED, AFFECTED_AREA, Review, and BROAD evidence is invalidated after the generated-output write.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: 2026-07-29T06:50:56.868Z
+    actor: deck-developer-apply-general-opencode-broad-binding-repair-finalize-20260729
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:bbb311fcb6da506c84782d4f937358cf
+    idempotency_key: sha256:b2e01b8e951bb02bc34ce0853febc3e28291bd722661182c0c3b722984b1c6c3
+    transaction_id: registry-tx-bbb311fc-b6da-506c-8478-2d4f937358cf
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - Independent explorer classified codebase-memory outputs SAFE_INCIDENTAL_TOOL_CACHE with no blockers.
+      - Generated build-info and coordinated candidate identities remain exact; generation and tests were not rerun during finalization.
+      - Fresh TARGETED, AFFECTED_AREA, independent Review, and BROAD remain required in order.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T07:19:00.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:9556daa6df57933f90bcdcb38b0539df
+    idempotency_key: sha256:cdeadbd15f7d3dc67ca6995b471944c93af683349d01f574e2c3570eae21fa5d
+    transaction_id: registry-tx-9556daa6-df57-933f-90bc-dcb38b0539df
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - Fresh independent TARGETED final-QA passed after user-authorized generated binding reconciliation.
+      - Historical BROAD failure remains historical and is not closed by this TARGETED result.
+      - Next required stage is AFFECTED_AREA; this event does not claim Review, BROAD, or Archive readiness.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T07:28:00.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:80d40ecb86e469e766e7d17df7f35152
+    idempotency_key: sha256:1d2bef365c0f5f7362618aabc51219f512cc2ce64ec95cfc5b037dc46907bbaf
+    transaction_id: registry-tx-80d40ecb-86e4-69e7-66e7-d17df7f35152
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - AFFECTED_AREA passed with fresh full affected suites, strict TypeScript, affected OpenSpec validations, generated/source-marker checks, and scope integrity checks.
+      - Historical BROAD failure remains historical and open; next stages are independent Review, then mandatory BROAD.
+      - Evidence root: /tmp/opencode/affected-finalqa-20260729-fresh2-1785310078809.
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: 2026-07-29T07:51:40.040Z
+    actor: deck-developer-review
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:b5d36e90e9d32d9e926e1b106c81a192
+    idempotency_key: sha256:e3c88e58dc706631770897b932819d41133b4ee9ae579b20abb143eb8df3ee33
+    transaction_id: registry-tx-b5d36e90-e9d3-2d9e-926e-1b106c81a192
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - Fresh independent final Review found zero blocking and zero non-blocking findings for the exact repaired predecessor composite.
+      - Generated build-info reconciliation is provenance-safe; SAFE_INCIDENTAL_TOOL_CACHE remains bounded and non-candidate.
+      - Mandatory BROAD remains required; this event does not close historical BROAD failure evidence or authorize Archive.
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T08:15:00.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:8dc42702c774f7f7304e3637ea9d4a83
+    idempotency_key: sha256:68a6559f38282f9d1344bc4768533fb4b6a2589a8eb0a4e5b7b6995c59fdf712
+    transaction_id: registry-tx-8dc42702-c774-f7f7-304e-3637ea9d4a83
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - BROAD final-QA failed fast on BROAD-BUILD-PACKAGE-BINARY-ISOLATED.
+      - FailureManifestV1 digest sha256:883679f5eaacda4990f9012525bf37ecaed427eb7957019432b98d8fe1f12a59.
+      - Archive is blocked; no source, test, generated candidate, or registry side-effect was attributed to the build command.
+  - phase: verify
+    status: in_progress
+    event: verify.started
+    artifact: verify-report.md
+    timestamp: 2026-07-29T14:19:43.855Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:67b50c63cc035fae7a458974a5768bf2
+    idempotency_key: sha256:67b50c63cc035fae7a458974a5768bf2b733838cc98c66e0f734215ac8ad936e
+    transaction_id: registry-tx-67b50c63-cc03-5fae-7a45-8974a5768bf2
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - "User authorized isolated-harness correction and fresh final QA with the message: Procede."
+      - Explorer validated a snapshot-local Bun workspace install recipe; no candidate source, test, generated output, or dependency bytes changed.
+      - Fresh TARGETED, AFFECTED_AREA, independent Review, and BROAD remain required in order.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T14:43:23.000Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:0992413185d3a0d7d518aa33230b5322
+    idempotency_key: sha256:d3f7ef537317328a0483749980739974a1f026162b6532058ce36cfd5c4dfa63
+    transaction_id: registry-tx-09924131-85d3-a0d7-d518-aa33230b5322
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - TARGETED retry passed after harness-only repair validation.
+      - Historical BROAD findings remain preserved and open.
+      - AFFECTED_AREA is next under the user's existing fresh-QA authorization.
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T15:05:00.000Z
+    actor: deck-developer-verify
+    registry_write: recovery-reconciled
+    intent_id: registry-intent:v1:850edd0fced7d4bfb23f9edb4b989207
+    idempotency_key: sha256:a0d955c43f1bceab63dda960814f8a28343adb7a53826d86cb565687d3d03fa9
+    transaction_id: registry-tx-850edd0f-ced7-d4bf-b23f-9edb4b989207
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - Historical AFFECTED_AREA failure is bound to FailureManifestV1 sha256:a7384e4407bbe40da8412cf9975f35db643fb6d3cb842a3d8effe2de322592a6.
+      - Its exact registry warning cause has been corrected; rooted validation now has zero errors and zero warnings.
+      - This event preserves the failed attempt only; fresh QA remains required.
+  - phase: verify
+    status: in_progress
+    event: verify.started
+    artifact: verify-report.md
+    timestamp: 2026-07-29T15:18:51.750Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:60497c47e4014880689103b0ec632636
+    idempotency_key: sha256:60497c47e4014880689103b0ec632636e10d69987b4516ea172884ef7557cb13
+    transaction_id: registry-tx-60497c47-e401-4880-6891-03b0ec632636
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - User directed the coordinator to finish immediately and avoid further routine pauses.
+      - Registry recovery is complete and rooted validation has zero warnings.
+      - Fresh TARGETED, AFFECTED_AREA, independent Review, and BROAD remain required in order.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T15:42:06.886Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:457b24b67311cc07d70a9e4ed1c06155
+    idempotency_key: sha256:1e26366fa11e612a41109862326b15643af045fc2e77e94647a662ea28bb5fbc
+    transaction_id: registry-tx-457b24b6-7311-cc07-d70a-9e4ed1c06155
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - Fresh TARGETED final-QA passed after deterministic registry recovery.
+      - Strict rooted validation returned zero errors and zero warnings.
+      - AFFECTED_AREA is next under the user's existing finish-now authorization.
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T15:53:29.804Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:8fa7d2d85137b97e683297fcd21fa9f7
+    idempotency_key: sha256:5b456ab420deb8f21961038c6c090770489379b3680d57a1ab29b90e5d6450a9
+    transaction_id: registry-tx-8fa7d2d8-5137-b97e-6832-97fcd21fa9f7
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - Fresh AFFECTED_AREA final-QA passed.
+      - Review is next.
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: 2026-07-29T16:29:48.228Z
+    actor: deck-developer-review
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:cebfd8445133002a42729d01c0598976
+    idempotency_key: sha256:d91fc782941122a54c5fb894389c3d4f392a1ac0740b1b70eb3f929cc1894524
+    transaction_id: registry-tx-cebfd844-5133-002a-4272-9d01c0598976
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - Fresh independent final Review found zero new blocking and zero new non-blocking findings.
+      - Canonical event recovery and generated provenance are acceptable for Review; mandatory BROAD remains next.
+      - Historical BROAD findings remain open until one complete mandatory BROAD pass succeeds.
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T16:43:57.813Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:68c2f7a0d1a49aaaf396efb5c8af5281
+    idempotency_key: sha256:f5996eae8e4e0c154f5ce40cf10ecab5d7b0657643777f10acd9f5efcae3d174
+    transaction_id: registry-tx-68c2f7a0-d1a4-9aaa-f396-efb5c8af5281
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - BROAD stopped because the delegated temporary isolated-build recipe path returned ENOENT.
+      - Strict rooted OpenSpec validation passed with zero errors and zero warnings before the blocker.
+      - Candidate bytes did not change; Archive remains blocked pending a complete BROAD pass.
+  - phase: verify
+    status: in_progress
+    event: verify.started
+    artifact: verify-report.md
+    timestamp: 2026-07-29T16:46:44.245Z
+    actor: user
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:ebc1d0394fbb162af9296091f907ec78
+    idempotency_key: sha256:ebc1d0394fbb162af9296091f907ec782132230ec3f7f89c7e75970db567ac26
+    transaction_id: registry-tx-ebc1d039-4fbb-162a-f929-6091f907ec78
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - User directed the coordinator to close the change without another routine pause.
+      - The retry is BROAD-only because candidate, TARGETED, AFFECTED_AREA, and Review evidence did not change.
+      - The isolated-build recipe must be reconstructed and executed within the same Verify invocation, with no external temporary-file dependency.
+  - phase: verify
+    status: failed
+    event: verify.failed
+    artifact: verify-report.md
+    timestamp: 2026-07-29T17:08:47.085Z
+    actor: deck-developer-verify
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:b2ad5df69d7248c3f3ad506a814f5b52
+    idempotency_key: sha256:0db9550fde58d9ce8b3fefc19df84f7963d2a02149fca7b9831a3ebee744aa90
+    transaction_id: registry-tx-b2ad5df6-9d72-48c3-f3ad-506a814f5b52
+    batch_digest: sha256:fae7fb3cf1c1746e974dd178567c3e081c19e35aba46f8da8d77409ca2bc4b60
+    notes:
+      - BROAD only; no fixes, no Archive, and no registry YAML writes by Verify.
+      - Self-contained isolated recipe succeeded through full tests, strict TypeScript, snapshot install, and two snapshot builds before fail-fast.
+      - BROAD-OPENSPEC-REPOSITORY exited 1 with ok:false, totalErrors:875, totalWarnings:732; FailureManifestV1 is preserved in verify-report.md.
+  - phase: closed
+    status: superseded
+    event: closed.superseded
+    artifact: verify-report.md
+    timestamp: "2026-07-31T04:21:11Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    notes:
+      - The failed historical BROAD result remains preserved and was not relabeled as accepted.
+      - The older candidate no longer competes with the integrated DTE-001 through DTE-029 outcome.
+      - No missing Verify, Review, or Archive event was reconstructed.

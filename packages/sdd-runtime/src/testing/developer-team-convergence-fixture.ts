@@ -9,22 +9,41 @@ import { parseRegistryDocumentPairV1 } from "@deck/core/spec-registry";
 import { createFileSystemRegistryStoreV1 } from "../artifact-state/filesystem-registry-store";
 import { createRegistryCoordinatorV1 } from "../artifact-state/registry-coordinator";
 import { buildApplyBatchContractV1 } from "../contracts/apply-batch";
+import { sha256Digest } from "../contracts/canonical";
 import { createExecutionDossierV1, reviseExecutionDossierV1, type ExecutionDossierV1 } from "../contracts/execution-dossier";
-import { buildFailureManifestV1, type FailureFindingInputV1 } from "../contracts/failure-manifest";
+import { buildFailureManifestV1, type FailureFindingInputV1, type FailureManifestV1 } from "../contracts/failure-manifest";
 import { buildRegistryIntentV1 } from "../contracts/registry-intent";
 import { buildStagedVerificationStateV1 } from "../contracts/verification-state";
+import { buildCandidateRefV1, buildQaAuthoritySnapshotV1 } from "../contracts/qa-authority";
+import { buildVerificationCheckResultV1, buildVerificationStageExecutionPlanV1, buildVerificationWaveExecutionReceiptsV1, joinVerificationStageExecutionV1, type VerificationStageExecutionJoinV1 } from "../contracts/verification-stage-execution";
 import { computeFailureDeltaV1 } from "../orchestrator/failure-delta";
+import { buildBroadCausalDispositionEnvelopeV1, buildReviewConvergenceResultV1 } from "../orchestrator/broad-causal-disposition";
+import { decideQualityReadinessV1 } from "../orchestrator/quality-readiness";
+import { createQaConvergenceAuthorityFixtureV1 } from "./qa-convergence-authority-fixture";
 import type { FreshnessPolicyInputV1 } from "../orchestrator/freshness-policy";
 import { createRunnerHostFixtureV1, type BridgeFactory, type RunnerId } from "./developer-team-runner-host-fixture";
 import {
+  bindExecutionPlanQaAuthorityV1,
+  commitExecutionRegistryIntentsV1,
   consumeExecutionRoleResultV1,
   planExecutionDecisionV1,
-  scheduleExecutionRoleInvocationV1,
+  scheduleExecutionRoleInvocationV1 as scheduleExecutionRoleInvocationRawV1,
   type ExecutionPlanV1,
   type ExecutionRoleInvocationV1,
+  type ExecutionRoleSchedulingInputV1,
 } from "../execution/execution-control-plane";
 
 const roots: string[] = [];
+
+function scheduleExecutionRoleInvocationV1(
+  plan: ExecutionPlanV1,
+  input: Omit<ExecutionRoleSchedulingInputV1, "currentCandidate">,
+) {
+  return scheduleExecutionRoleInvocationRawV1(plan, {
+    ...input,
+    ...(plan.qaExecutionAuthority === undefined ? {} : { currentCandidate: plan.qaExecutionAuthority.candidate }),
+  });
+}
 const sha = (value: string) => `sha256:${createHash("sha256").update(value).digest("hex")}` as const;
 const verificationPolicy = {
   lane: "guarded" as const,
@@ -44,8 +63,22 @@ function evidence(checkId: string, artifact = "verify-report.md") {
 function plan(
   dossier: ExecutionDossierV1,
   history: readonly ExecutionDossierV1[] = [],
+  lifecycle?: "targeted_pending" | "affected_pending" | "review_pending" | "broad_pending" | "registry_commit_pending",
+  acceptedReviewDigest?: `sha256:${string}`,
+  acceptedBroadDigest?: `sha256:${string}`,
+  acceptedEvidence?: {
+    readonly targetedJoinDigest: `sha256:${string}`;
+    readonly affectedAreaJoinDigest: `sha256:${string}`;
+    readonly broadJoinDigest: `sha256:${string}`;
+    readonly targetedRoleResultDigest: `sha256:${string}`;
+    readonly affectedAreaRoleResultDigest: `sha256:${string}`;
+    readonly reviewRoleResultDigest: `sha256:${string}`;
+    readonly broadRoleResultDigest: `sha256:${string}`;
+    readonly broadVerificationDigest: `sha256:${string}`;
+    readonly registryIntentDigests: readonly `sha256:${string}`[];
+  },
 ): ExecutionPlanV1 {
-  return planExecutionDecisionV1(
+  const executionPlan = planExecutionDecisionV1(
     "active",
     dossier,
     {
@@ -58,6 +91,69 @@ function plan(
     { kind: "none" },
     history,
   );
+  const candidate = buildCandidateRefV1({
+    generation: 1,
+    implementationDigest: sha(`implementation:${dossier.batch.digest}`),
+    treeDigest: sha(`tree:${dossier.batch.digest}`),
+    dependencySetDigest: sha(`dependencies:${dossier.batch.digest}`),
+    requirementsDigest: sha(`requirements:${dossier.batch.digest}`),
+    environmentDigest: sha("fixture-environment"),
+    checkPlanDigest: sha(`checks:${dossier.batch.digest}`),
+  });
+  const inferredLifecycle = lifecycle ?? (
+    dossier.verification.nextStage === "targeted" ? "targeted_pending" :
+      dossier.verification.nextStage === "affected_area" ? "affected_pending" :
+        dossier.verification.nextStage === "broad" ? "review_pending" : "registry_commit_pending"
+  );
+  const reviewConvergence = buildReviewConvergenceResultV1({
+    candidate,
+    checklistDigest: sha256Digest({ candidateCheckPlanDigest: candidate.checkPlanDigest, reviewCheckIds: ["architecture-review", "security-review"] }),
+    findingSetDigest: sha256Digest([]),
+    complete: true,
+    findings: [],
+  });
+  const reviewDigest = acceptedReviewDigest ?? reviewConvergence.digest;
+  const freshnessAuthority = inferredLifecycle === "targeted_pending"
+    ? freshness("verify-stage-1", "verify-repair")
+    : inferredLifecycle === "affected_pending"
+      ? freshness("verify-stage-2", "verify-stage-1")
+      : inferredLifecycle === "review_pending"
+        ? freshness("verify-review-proxy", "verify-stage-2", "review-final")
+        : freshness("verify-stage-3", "verify-stage-2");
+  const convergence = createQaConvergenceAuthorityFixtureV1({
+    baseDossier: dossier,
+    ...(history.length === 0 ? {} : { baseDossierHistory: history }),
+    lifecycle: inferredLifecycle,
+    implementationSubjectDigest: candidate.implementationDigest,
+    dependencySetDigest: candidate.dependencySetDigest,
+    ...(inferredLifecycle === "broad_pending" || inferredLifecycle === "registry_commit_pending" ? { reviewDigest } : {}),
+    ...(inferredLifecycle === "registry_commit_pending" ? { broadDigest: acceptedBroadDigest } : {}),
+    ...(acceptedEvidence === undefined ? {} : {
+      stageEvidenceDigests: {
+        targeted: acceptedEvidence.targetedJoinDigest,
+        affected_area: acceptedEvidence.affectedAreaJoinDigest,
+        broad: acceptedEvidence.broadJoinDigest,
+      },
+      roleResultEnvelopeDigests: {
+        targeted: acceptedEvidence.targetedRoleResultDigest,
+        affected_area: acceptedEvidence.affectedAreaRoleResultDigest,
+        review: acceptedEvidence.reviewRoleResultDigest,
+        broad: acceptedEvidence.broadRoleResultDigest,
+      },
+      stageVerificationDigests: { broad: acceptedEvidence.broadVerificationDigest },
+      registryIntentDigests: acceptedEvidence.registryIntentDigests,
+    }),
+  });
+  return bindExecutionPlanQaAuthorityV1(executionPlan, buildQaAuthoritySnapshotV1({
+    candidate,
+    changeId: dossier.batch.changeId,
+    convergence,
+    freshness: freshnessAuthority,
+    executionDossierDigest: dossier.digest,
+    stagedVerificationDigest: dossier.verification.digest,
+    protectedPolicyDigest: sha("fixture-protected-policy"),
+    registryBase: dossier.registryIntents[0]?.base ?? { stateDigest: sha("fixture-state"), eventsDigest: sha("fixture-events") },
+  }));
 }
 
 function freshness(
@@ -78,11 +174,112 @@ function freshness(
   };
 }
 
+function stagePlan(plan: ExecutionPlanV1) {
+  if (!plan.dossier || !plan.qaExecutionAuthority) throw new Error("QA plan required");
+  const actionStage = plan.qaExecutionAuthority.lifecycle === "targeted_pending"
+    ? "targeted" as const
+    : plan.qaExecutionAuthority.lifecycle === "affected_pending"
+      ? "affected_area" as const
+      : "broad" as const;
+  const stage = plan.dossier.verification.stages.find((entry) => entry.stage === actionStage);
+  if (!stage) throw new Error("verification stage required");
+  return buildVerificationStageExecutionPlanV1({
+    stage: actionStage,
+    qaAuthorityDigest: plan.qaExecutionAuthority.digest,
+    generation: plan.qaExecutionAuthority.generation,
+    implementationSubjectDigest: plan.qaExecutionAuthority.implementationSubjectDigest,
+    dependencySetDigest: plan.qaExecutionAuthority.dependencySetDigest,
+    checks: stage.checkIds.map((checkId) => ({
+      checkId,
+      capabilityDigest: sha(`capability:${checkId}`),
+      commandPlanDigest: sha(`command:${checkId}`),
+      effectProfile: { kind: "repository_read_only" as const },
+      dependencyCheckIds: [],
+      exclusiveResourceKeys: [],
+    })),
+  });
+}
+
+function reviewConvergence(invocation: ExecutionRoleInvocationV1) {
+  if (invocation.qaAuthority.kind !== "convergence") throw new Error("convergence authority required");
+  return buildReviewConvergenceResultV1({
+    candidate: invocation.qaAuthority.snapshot.candidate,
+    checklistDigest: invocation.qaAuthority.snapshot.reviewChecklistDigest,
+    findingSetDigest: sha256Digest([]),
+    complete: true,
+    findings: [],
+  });
+}
+
+function allGreenQualityDisposition(invocation: ExecutionRoleInvocationV1, manifestDigest = sha("fixture-empty-manifest")) {
+  const payload = {
+    schema: "quality-disposition-envelope-v1" as const,
+    batchId: invocation.batchId,
+    batchDigest: invocation.dependencies.batchDigest,
+    manifestDigest,
+    verificationDigest: invocation.dependencies.verificationDigest,
+    findingDispositionDigest: sha("fixture-empty-finding-disposition"),
+    baselineEvidenceDigests: [] as const,
+    mandatoryExecutionComplete: true as const,
+    status: "passed" as const,
+    warningFindingIds: [] as const,
+    blockingFindingIds: [] as const,
+    producerRole: "verify" as const,
+    producerInstanceId: invocation.agentInstanceId,
+    producedAt: "2026-07-16T12:00:00.000Z",
+  };
+  return { ...payload, digest: sha256Digest(payload) };
+}
+
 function passedResult(
   invocation: ExecutionRoleInvocationV1,
   registryIntents: readonly ReturnType<typeof buildRegistryIntentV1>[] = [],
+  failureManifest?: FailureManifestV1,
 ) {
-  return {
+  const verificationCheckResults = invocation.verificationPlan?.checks.map((check) => buildVerificationCheckResultV1(
+    invocation.verificationPlan!,
+    {
+      checkId: check.checkId,
+      producerIdentityDigest: sha(`producer:${invocation.agentInstanceId}:${check.checkId}`),
+      outcome: { kind: "completed", status: "passed", evidence: [evidence(check.checkId)] },
+    },
+  ));
+  const verificationWaveReceipts = verificationCheckResults === undefined
+    ? undefined
+    : buildVerificationWaveExecutionReceiptsV1(
+        invocation.verificationPlan!,
+        verificationCheckResults,
+        sha256Digest({ invocationId: invocation.invocationId, role: invocation.role, agentInstanceId: invocation.agentInstanceId }),
+      );
+  const reviewResult = invocation.role === "review" && invocation.mode === "active"
+    ? reviewConvergence(invocation)
+    : undefined;
+  const qualityDisposition = invocation.role === "verify" && invocation.stage === "broad" && invocation.mode === "active"
+    ? allGreenQualityDisposition(invocation, failureManifest?.digest)
+    : undefined;
+  const executionIdentityDigest = sha256Digest({ invocationId: invocation.invocationId, role: invocation.role, agentInstanceId: invocation.agentInstanceId });
+  const verificationJoin = qualityDisposition === undefined || verificationCheckResults === undefined || verificationWaveReceipts === undefined || failureManifest === undefined
+    ? undefined
+    : joinVerificationStageExecutionV1(invocation.verificationPlan!, verificationCheckResults, failureManifest.digest, verificationWaveReceipts, executionIdentityDigest);
+  const causalDisposition = qualityDisposition === undefined || invocation.qaAuthority.kind !== "convergence" || verificationJoin === undefined || verificationJoin.status === "incomplete" || failureManifest === undefined
+    ? undefined
+    : buildBroadCausalDispositionEnvelopeV1({
+        candidate: invocation.qaAuthority.snapshot.candidate,
+        binding: {
+          batchDigest: invocation.dependencies.batchDigest,
+          generation: invocation.qaAuthority.snapshot.generation,
+          implementationSubjectDigest: invocation.qaAuthority.snapshot.implementationSubjectDigest,
+          dependencySetDigest: invocation.qaAuthority.snapshot.dependencySetDigest,
+          broadStageJoinDigest: verificationJoin.digest,
+          broadManifestDigest: failureManifest.digest,
+          protectedPolicyDigest: invocation.qaAuthority.snapshot.protectedPolicyDigest,
+        },
+        review: reviewConvergence(invocation),
+        qualityDisposition,
+        broadFindingIds: [],
+        entries: [],
+      });
+  const payload = {
     schema: "execution-role-result-v1",
     invocationId: invocation.invocationId,
     role: invocation.role,
@@ -90,10 +287,16 @@ function passedResult(
     batchId: invocation.batchId,
     ...(invocation.stage === undefined ? {} : { stage: invocation.stage }),
     status: "passed",
-    evidence: invocation.checkIds.map((checkId) => evidence(
+    evidence: verificationCheckResults?.flatMap((result) => result.outcome.evidence) ?? invocation.checkIds.map((checkId) => evidence(
       checkId,
       invocation.role === "review" ? "review-report.md" : "verify-report.md",
     )),
+    ...(verificationCheckResults === undefined ? {} : { verificationCheckResults }),
+    ...(verificationWaveReceipts === undefined ? {} : { verificationWaveReceipts }),
+    ...(failureManifest === undefined ? {} : { failureManifest }),
+    ...(reviewResult === undefined ? {} : { reviewConvergence: reviewResult }),
+    ...(causalDisposition === undefined ? {} : { broadCausalDisposition: causalDisposition }),
+    ...(qualityDisposition === undefined ? {} : { qualityDisposition }),
     provenance: {
       role: invocation.role,
       agentInstanceId: invocation.agentInstanceId,
@@ -102,6 +305,7 @@ function passedResult(
     dependencies: invocation.dependencies,
     registryIntents,
   };
+  return { ...payload, digest: sha256Digest(payload) };
 }
 
 function causalInput(dossier: ExecutionDossierV1) {
@@ -241,7 +445,9 @@ export async function runDeveloperTeamConvergenceE2EV1(runnerId: RunnerId, facto
   ancestors.push(dossier);
   dossier = nextDossier;
 
-  const stages = ["targeted", "affected_area", "broad"] as const;
+  const stages = ["targeted", "affected_area"] as const;
+  const acceptedStageJoins: Partial<Record<(typeof stages)[number], Exclude<VerificationStageExecutionJoinV1, { status: "incomplete" }>>> = {};
+  const acceptedRoleResultDigests: Partial<Record<(typeof stages)[number], `sha256:${string}`>> = {};
   let priorVerify = "verify-repair";
   let currentPlan = plan(dossier, ancestors);
   for (let index = 0; index < stages.length; index += 1) {
@@ -252,6 +458,7 @@ export async function runDeveloperTeamConvergenceE2EV1(runnerId: RunnerId, facto
       role: "verify",
       agentInstanceId,
       freshness: freshness(agentInstanceId, priorVerify),
+      verificationPlan: stagePlan(currentPlan),
     });
     expect(scheduled.code).toBe("scheduled");
     if (!("invocation" in scheduled)) throw new Error("expected scheduled Verify invocation");
@@ -264,6 +471,9 @@ export async function runDeveloperTeamConvergenceE2EV1(runnerId: RunnerId, facto
     expect(consumed.code).toBe("accepted");
     if (consumed.code !== "accepted") throw new Error("expected accepted Verify result");
     if (!consumed.verification) throw new Error("expected advanced verification state");
+    if (!consumed.verificationJoin || consumed.verificationJoin.status === "incomplete") throw new Error("expected completed stage join");
+    acceptedStageJoins[stages[index]!] = consumed.verificationJoin;
+    acceptedRoleResultDigests[stages[index]!] = consumed.result.digest;
     nextDossier = reviseExecutionDossierV1(dossier, {
       verification: consumed.verification,
       causalContext: {
@@ -277,12 +487,12 @@ export async function runDeveloperTeamConvergenceE2EV1(runnerId: RunnerId, facto
     currentPlan = plan(dossier, ancestors);
   }
 
-  expect(currentPlan.decision?.action).toBe("complete");
+  expect(currentPlan.decision?.action).toBe("advance_verification");
+  expect(currentPlan.decision?.requiredVerificationStage).toBe("broad");
   const review = scheduleExecutionRoleInvocationV1(currentPlan, {
     role: "review",
     agentInstanceId: "review-final",
-    freshness: freshness(priorVerify, "verify-stage-2", "review-final"),
-    reviewCheckIds: ["architecture-review", "security-review"],
+    freshness: freshness("verify-review-proxy", priorVerify, "review-final"),
   });
   expect(review.code).toBe("scheduled");
   if (!("invocation" in review)) throw new Error("expected scheduled Review invocation");
@@ -329,15 +539,108 @@ export async function runDeveloperTeamConvergenceE2EV1(runnerId: RunnerId, facto
   if (reviewed.code !== "accepted") throw new Error("expected accepted Review result");
   expect(reviewed.registryIntents).toEqual([intent]);
 
+  currentPlan = plan(dossier, ancestors, "broad_pending", reviewed.result.reviewConvergence?.digest);
+  const broad = scheduleExecutionRoleInvocationV1(currentPlan, {
+    role: "verify",
+    agentInstanceId: "verify-stage-3",
+    freshness: freshness("verify-stage-3", priorVerify),
+    verificationPlan: stagePlan(currentPlan),
+  });
+  expect(broad.code).toBe("scheduled");
+  if (!("invocation" in broad)) throw new Error("expected scheduled BROAD invocation");
+  const broadManifest = buildFailureManifestV1({
+    schema: "failure-manifest-v1",
+    changeId: batch.changeId,
+    batch,
+    producerRole: "verify",
+    producerInstanceId: broad.invocation.agentInstanceId,
+    findings: [],
+    producedAt: "2026-07-16T12:00:00.000Z",
+  });
+  const broadened = consumeExecutionRoleResultV1(
+    currentPlan,
+    broad.invocation,
+    passedResult(broad.invocation, [], broadManifest),
+    verificationPolicy,
+  );
+  expect(broadened.code).toBe("accepted");
+  if (broadened.code !== "accepted" || !broadened.verification) throw new Error("expected completed BROAD verification");
+  if (!broadened.verificationJoin || broadened.verificationJoin.status === "incomplete") throw new Error("expected completed BROAD join");
+  nextDossier = reviseExecutionDossierV1(dossier, {
+    decision: currentPlan.decision,
+    verification: broadened.verification,
+    registryIntents: reviewed.registryIntents,
+    causalContext: { ...causalInput(dossier), priorDecisionDigests: [...dossier.causalContext.priorDecisionDigests, currentPlan.decision!.digest] },
+  }, ancestors);
+  ancestors.push(dossier);
+  dossier = nextDossier;
+  currentPlan = plan(
+    dossier,
+    ancestors,
+    "registry_commit_pending",
+    broadened.result.broadCausalDisposition?.reviewDigest,
+    broadened.result.broadCausalDisposition?.digest,
+    {
+      targetedJoinDigest: acceptedStageJoins.targeted!.digest,
+      affectedAreaJoinDigest: acceptedStageJoins.affected_area!.digest,
+      broadJoinDigest: broadened.verificationJoin.digest,
+      targetedRoleResultDigest: acceptedRoleResultDigests.targeted!,
+      affectedAreaRoleResultDigest: acceptedRoleResultDigests.affected_area!,
+      reviewRoleResultDigest: reviewed.result.digest,
+      broadRoleResultDigest: broadened.result.digest,
+      broadVerificationDigest: broadened.result.dependencies.verificationDigest,
+      registryIntentDigests: reviewed.registryIntents.map((entry) => entry.digest),
+    },
+  );
+  if (
+    !currentPlan.qaExecutionAuthority || !broadened.result.broadCausalDisposition || !broadened.result.qualityDisposition ||
+    !reviewed.result.reviewConvergence
+  ) throw new Error("expected quality readiness evidence");
+  const readinessInput = {
+    authority: currentPlan.qaExecutionAuthority,
+    currentCandidate: currentPlan.qaExecutionAuthority.candidate,
+    batch,
+    review: reviewed.result.reviewConvergence,
+    targetedJoin: acceptedStageJoins.targeted!,
+    affectedAreaJoin: acceptedStageJoins.affected_area!,
+    broadJoin: broadened.verificationJoin,
+    broadManifest,
+    qualityDisposition: broadened.result.qualityDisposition,
+    disposition: broadened.result.broadCausalDisposition,
+    roleResultDigests: {
+      targeted: acceptedRoleResultDigests.targeted!,
+      affectedArea: acceptedRoleResultDigests.affected_area!,
+      review: reviewed.result.digest,
+      broad: broadened.result.digest,
+    },
+    orderedIntents: reviewed.registryIntents,
+  };
+  const readiness = decideQualityReadinessV1(readinessInput);
+  expect(readiness.kind).toBe("registry_commit_ready");
+
   const coordinator = createRegistryCoordinatorV1({
     mode: "centralized",
     store: registry.store,
     createTransactionId: () => "registry-tx-eg8-e2e",
   });
-  expect((await coordinator.commitAll(reviewed.registryIntents)).map((outcome) => outcome.code)).toEqual(["committed"]);
+  expect((await commitExecutionRegistryIntentsV1(currentPlan, coordinator, readiness)).status).toBe("blocked");
+  expect((await commitExecutionRegistryIntentsV1(currentPlan, {
+    commit: async () => ({ code: "committed" }),
+    commitAll: async () => [],
+    commitAtomicChain: async () => ({
+      outcomes: reviewed.registryIntents.map((entry) => ({
+        code: "committed" as const,
+        intentId: entry.intentId,
+        transactionId: "forged-transaction",
+        stateDigest: sha("forged-state"),
+        eventsDigest: sha("forged-events"),
+      })),
+    }),
+  }, readinessInput)).status).toBe("blocked");
+  expect((await commitExecutionRegistryIntentsV1(currentPlan, coordinator, readinessInput)).status).toBe("committed");
   const stateAfterCommit = await fs.readFile(join(registry.directory, "state.yaml"), "utf8");
   const eventsAfterCommit = await fs.readFile(join(registry.directory, "events.yaml"), "utf8");
-  expect((await coordinator.commitAll(reviewed.registryIntents)).map((outcome) => outcome.code)).toEqual(["replayed"]);
+  expect((await commitExecutionRegistryIntentsV1(currentPlan, coordinator, readinessInput)).outcomes.map((outcome) => outcome.code)).toEqual(["replayed"]);
   expect(await fs.readFile(join(registry.directory, "state.yaml"), "utf8")).toBe(stateAfterCommit);
   expect(await fs.readFile(join(registry.directory, "events.yaml"), "utf8")).toBe(eventsAfterCommit);
 

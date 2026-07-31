@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import {
   VERIFY_AGENT_BODY,
+  VERIFY_COMPACT_AGENT_BODY,
+  VERIFY_COMPACT_SKILL_BODY,
   VERIFY_SKILL_BODY,
 } from "./verify-content";
+import { FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1 } from "./readiness-authority";
 
 // Import git-safety for rule presence assertion
 import { GIT_SAFETY_SENTINEL } from "./git-safety";
@@ -189,5 +192,64 @@ describe("staged repair verification content", () => {
     expect(VERIFY_SKILL_BODY).toContain("generated-artifact classification");
     expect(VERIFY_SKILL_BODY).toContain("next verification action");
     expect(VERIFY_SKILL_BODY).toContain("same fingerprint, new related fingerprint, pre-existing, out of scope, or blocker");
+  });
+});
+
+describe("T08 evidence-bound warning contract", () => {
+  const surfaces = [
+    VERIFY_AGENT_BODY,
+    VERIFY_SKILL_BODY,
+    VERIFY_COMPACT_AGENT_BODY,
+    VERIFY_COMPACT_SKILL_BODY,
+  ];
+
+  test("composes the exact finding-disposition authority once on every surface", () => {
+    for (const surface of surfaces) {
+      expect(surface.split(FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1).length - 1).toBe(1);
+    }
+  });
+
+  test("preserves mandatory execution, raw evidence, and evaluator-bound disposition", () => {
+    for (const surface of surfaces) {
+      expect(surface).toMatch(/mandatory/i);
+      expect(surface).toMatch(/raw/i);
+      expect(surface).toMatch(/qualityDisposition|quality disposition/i);
+      expect(surface).toMatch(/warning.*blocker|blocker.*warning/is);
+    }
+    expect(VERIFY_SKILL_BODY).toContain("FailureManifestV1");
+    expect(VERIFY_SKILL_BODY).toMatch(/mandatory BROAD/i);
+  });
+
+  test("limits Verify to its scheduled stage and reserves Review", () => {
+    expect(VERIFY_SKILL_BODY).toMatch(/only the scheduled Verify-stage obligation/i);
+    expect(VERIFY_SKILL_BODY).toMatch(/Never schedule, perform, or substitute independent Review/i);
+  });
+
+  test("states the closed proof thresholds, protected precedence, and status mapping", () => {
+    for (const clause of [
+      "2/2",
+      "exactly five",
+      "at least three",
+      "fourteen days",
+      "equivalent sanitized environments",
+      "causal",
+      "no worsening",
+      "protected risk",
+      "durable ledger",
+      "passed_with_warnings",
+    ]) {
+      expect(VERIFY_SKILL_BODY).toContain(clause);
+    }
+    expect(VERIFY_SKILL_BODY).toContain("stage completes and no blocker exists, it is `passed`");
+    expect(VERIFY_SKILL_BODY).toContain("stage-local result is `passed_with_warnings`");
+  });
+
+  test("requires immutable bound return and never repairs or pauses for a proven warning", () => {
+    expect(VERIFY_AGENT_BODY).toMatch(/immutable.*quality disposition/is);
+    expect(VERIFY_SKILL_BODY).toMatch(/candidate.*environment.*causal.*non-regression.*ledger/is);
+    expect(VERIFY_SKILL_BODY).toMatch(/no active-session repair.*no routine user pause/is);
+    expect(VERIFY_COMPACT_SKILL_BODY).toMatch(/mandatory BROAD/i);
+    expect(VERIFY_SKILL_BODY).not.toContain("PASS WITH WARNINGS → return to Apply agents for fixes");
+    expect(VERIFY_SKILL_BODY).not.toContain("Requirement partially satisfied");
   });
 });

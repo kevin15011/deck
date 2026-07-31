@@ -55,35 +55,43 @@ function plan(mode: "shadow" | "active") {
 }
 
 describe("execution registry coordinator port", () => {
-  test("commits active dossier intents in order through the coordinator boundary", async () => {
+  test("fails closed before the coordinator when active intents lack QA authority and readiness", async () => {
     const active = plan("active");
-    const received: unknown[] = [];
+    const received: unknown[][] = [];
     const outcome = await commitExecutionRegistryIntentsV1(active.value, {
-      commit: async (intent) => {
-        received.push(intent);
-        return { code: "committed", intentId: active.intent.intentId };
+      commit: async () => { throw new Error("single-intent commit is non-authoritative"); },
+      commitAll: async (intents) => {
+        received.push([...intents]);
+        return [{ code: "committed", intentId: active.intent.intentId }];
       },
+      commitAtomicChain: async () => { throw new Error("authority should block before atomic commit"); },
     });
-    expect(received).toEqual([active.intent]);
-    expect(outcome).toEqual({ status: "committed", outcomes: [{ intentId: active.intent.intentId, code: "committed" }] });
+    expect(received).toEqual([]);
+    expect(outcome).toEqual({ status: "blocked", outcomes: [] });
     expect(Object.isFrozen(outcome)).toBe(true);
     expect(Object.isFrozen(outcome.outcomes)).toBe(true);
   });
 
-  test("does not write shadow plans and blocks on safe coordinator failures", async () => {
+  test("does not write shadow plans and blocks authorityless active plans", async () => {
     const shadow = plan("shadow");
     let calls = 0;
-    expect(await commitExecutionRegistryIntentsV1(shadow.value, { commit: async () => { calls++; return { code: "committed" }; } }))
+    expect(await commitExecutionRegistryIntentsV1(shadow.value, {
+      commit: async () => { calls++; return { code: "committed" }; },
+      commitAll: async () => { calls++; return []; },
+      commitAtomicChain: async () => { calls++; return { outcomes: [] }; },
+    }))
       .toEqual({ status: "not-applicable", outcomes: [] });
     expect(calls).toBe(0);
 
     const active = plan("active");
     const blocked = await commitExecutionRegistryIntentsV1(active.value, {
       commit: async () => ({ code: "registry-intent-conflict", intentId: active.intent.intentId }),
+      commitAll: async () => [{ code: "registry-intent-conflict", intentId: active.intent.intentId }],
+      commitAtomicChain: async () => ({ outcomes: [{ code: "registry-intent-conflict", intentId: active.intent.intentId }] }),
     });
     expect(blocked).toEqual({
       status: "blocked",
-      outcomes: [{ intentId: active.intent.intentId, code: "registry-intent-conflict" }],
+      outcomes: [],
     });
   });
 });

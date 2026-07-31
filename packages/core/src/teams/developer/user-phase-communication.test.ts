@@ -78,11 +78,11 @@ import {
 } from "./review-content";
 
 /** Byte-verbatim blocks from Design (improve-user-phase-communication). */
-export const BV_INTAKE_ALIGNMENT = "For every non-trivial request, before any substantial work, classify the request as exactly one of Direct, Specialist(s), Recommend SDD, or Run SDD; record the classification and its reason in the delegation or phase return, and expose both to the user when consequential work begins. You may perform bounded read-only discovery only to resolve ambiguity. Then restate the user's intent, assumptions, open questions, risks, and consequential choices and obtain explicit confirmation that the restatement is correct. Trivial direct edits are exempt. Restatement confirmation does not authorize modification; modification authorization remains a separate later gate.\n\nIf the user revises the restatement, revise it and do not advance. Permit at most three user-requested revision cycles after the initial restatement; on a fourth revision request, stop and escalate the unresolved ambiguity rather than auto-confirming. If the user declines, record the decision and stop.";
+export const BV_INTAKE_ALIGNMENT = "For each new desired outcome, classify the request as exactly one of Direct, Specialist(s), Recommend SDD, or Run SDD and record a concise reason before modifying work. Use bounded read-only discovery when needed. If the user's instruction already makes the intended reversible change clear, begin without a separate restatement-confirmation ceremony; the instruction is the modification request within its stated scope. Restate and ask only when ambiguity would materially change the product, scope, protected risk, or irreversible effect.\n\nA follow-up such as \"move this up\", \"make it smaller\", \"try the other layout\", or \"fix that failure\" continues the same working outcome when it stays within the authorized goal, targets, risk, and reversibility. Preserve the current candidate and decisions, route only the delta, mint any required internal one-use authorization without asking the user again, and rerun only evidence invalidated by that delta. There is no arbitrary revision-cycle limit. Re-triage or ask the user only for a real product decision, meaningful scope expansion, protected risk, irreversible action, or actual write/authority conflict. User acceptance guides the product loop but never substitutes for proportionate engineering QA.";
 
-export const BV_INTAKE_COMPACT_SUMMARY = "Classify every request; for non-trivial work allow only bounded read-only discovery, then restate and obtain confirmation before substantial work. Trivial Direct edits are exempt; modification authorization remains separate.";
+export const BV_INTAKE_COMPACT_SUMMARY = "Classify each new outcome, start clear reversible work without a separate confirmation ceremony, and treat in-scope feedback as a delta on the same candidate. Ask again only for material ambiguity, scope expansion, protected risk, irreversible action, or an actual conflict.";
 
-export const BV_FAILURE_DECISION_GATE = "After Verify or Review reports a failure, do not auto-retry modification and do not auto-advance. First present what failed, why it matters, the next decision or action, and any rollback-relevant behavior to the user, then wait for the user's explicit decision; existing modification authorization remains a separate gate.";
+export const BV_FAILURE_DECISION_GATE = "After Verify or Review reports a failure, failure blocks advancement, not diagnosis or already-authorized bounded repair. Do not auto-advance. Pause for scope expansion, a product/requirements choice, protected risk, irreversible action, exhausted/no-progress budget, or an actual hard stop. Otherwise diagnose and perform the already-authorized bounded repair, then rerun the canonical validation; existing modification authorization remains separate.";
 
 export const BV_PERSONALITY_CONTENT_PRESERVING = "- **Content-preserving overlay**: Apply this style only after the phase summary's invariant decisions, blockers, approval requests, failures, open questions, risks, and required authorizations have been composed. Do not remove, weaken, hide, or reorder that content.";
 
@@ -155,10 +155,11 @@ describe("User Phase Communication contract", () => {
       expect(surface).toMatch(/Specialist\(s\)/);
       expect(surface).toMatch(/Recommend SDD/);
       expect(surface).toMatch(/Run SDD/);
-      expect(surface).toMatch(/[Tt]rivial/);
       expect(surface).toMatch(/bounded read-only discovery/);
-      expect(surface).toMatch(/three user-requested revision cycles|at most three/);
-      expect(surface).toMatch(/modification authorization remains a separate/);
+      expect(surface).toMatch(/without a separate restatement-confirmation ceremony/);
+      expect(surface).toMatch(/There is no arbitrary revision-cycle limit/);
+      expect(surface).toMatch(/rerun only evidence invalidated by that delta/);
+      expect(surface).not.toMatch(/at most three user-requested revision cycles|on a fourth revision request/);
     }
   });
 
@@ -403,6 +404,15 @@ describe("streamlined ownership user communication", () => {
       expect(body).toContain("functional exercise");
       expect(body).toContain("non-independent");
       expect(body).toContain("fresh");
+    }
+  });
+
+  test("makes failure block advancement without forcing a routine user pause before diagnosis or bounded authorized repair", () => {
+    const surfaces = [ORCHESTRATOR_SYSTEM_PROMPT, ORCHESTRATOR_SYSTEM_PROMPT_COMPACT, ORCHESTRATOR_SKILL_BODY, ORCHESTRATOR_COMPACT_SKILL_BODY];
+    for (const surface of surfaces) {
+      expect(surface).toMatch(/failure blocks advancement/i);
+      expect(surface).toMatch(/diagnosis or already-authorized bounded repair/i);
+      expect(surface).toMatch(/scope expansion.*product\/requirements choice.*protected risk.*irreversible action.*exhausted.*hard stop/i);
     }
   });
 });

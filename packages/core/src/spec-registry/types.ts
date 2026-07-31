@@ -26,8 +26,14 @@ export type ChangeStatus =
   | "verifying"
   | "reviewing"
   | "completed"
+  | "passed"
+  | "passed_with_warnings"
+  | "failed"
   | "archived"
-  | "abandoned";
+  | "abandoned"
+  | "incomplete"
+  | "parked"
+  | "superseded";
 
 export type ChangePhase =
   | "explore"
@@ -38,7 +44,8 @@ export type ChangePhase =
   | "apply"
   | "verify"
   | "review"
-  | "archive";
+  | "archive"
+  | "closed";
 
 // ---------------------------------------------------------------------------
 // Artifacts
@@ -143,8 +150,14 @@ export const VALID_CHANGE_STATUSES: readonly ChangeStatus[] = [
   "verifying",
   "reviewing",
   "completed",
+  "passed",
+  "passed_with_warnings",
+  "failed",
   "archived",
   "abandoned",
+  "incomplete",
+  "parked",
+  "superseded",
 ] as const;
 
 export const VALID_CHANGE_PHASES: readonly ChangePhase[] = [
@@ -157,6 +170,7 @@ export const VALID_CHANGE_PHASES: readonly ChangePhase[] = [
   "verify",
   "review",
   "archive",
+  "closed",
 ] as const;
 
 export const VALID_ARTIFACT_KINDS: readonly ArtifactKind[] = [

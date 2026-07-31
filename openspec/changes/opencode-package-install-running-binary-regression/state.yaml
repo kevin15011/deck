@@ -1,8 +1,10 @@
 schema: spec-registry-v1
 changeId: opencode-package-install-running-binary-regression
 name: OpenCode Package Install Running Binary Regression
-currentPhase: review
-status: failed
+currentPhase: closed
+status: incomplete
+closure_reason: "Closed at the user's request after implementation and V2 passed, but R1 requested changes for four blocking findings. The user explicitly declined further repair; broad verification and Archive were not performed. Implementation is preserved in commit 3b5b22d and lifecycle evidence in commit 5521726."
+closed_at: "2026-07-26T05:23:52.734Z"
 artifacts:
   exploration: exploration.md
   proposal: proposal.md
@@ -113,3 +115,9 @@ provenance:
     registryWrite: deferred-reconciled
     note: "R1 requested changes for four blocking correctness/security/test findings in config precedence, secret sanitization/direct exceptions, multibyte bounds, and missing adversarial coverage; broad and Archive are blocked."
     intentId: registry-intent:v1:review:opencode-package-install-running-binary-regression:r1:request-changes
+  - phase: closed
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-26T05:23:52.734Z"
+    registryWrite: non-deferred
+    note: "The user explicitly chose to close the change as incomplete without repairing R1 findings or running broad/Archive."

@@ -114,7 +114,9 @@ export type ValidatorStatus =
   | "approved"
   | "archived"
   | "abandoned"
-  | "incomplete";
+  | "incomplete"
+  | "parked"
+  | "superseded";
 
 export const VALIDATOR_STATUSES: readonly ValidatorStatus[] = [
   "in_progress",
@@ -126,6 +128,8 @@ export const VALIDATOR_STATUSES: readonly ValidatorStatus[] = [
   "archived",
   "abandoned",
   "incomplete",
+  "parked",
+  "superseded",
 ] as const;
 
 /**
@@ -141,6 +145,7 @@ export const ARCHIVE_REQUIRED_STATUSES: readonly ValidatorStatus[] = [
 export const CLOSED_REQUIRED_STATUSES: readonly ValidatorStatus[] = [
   "abandoned",
   "incomplete",
+  "superseded",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -205,6 +210,11 @@ export const KNOWN_EVENT_NAMES = new Set([
   "precondition_gate.passed",
   "precondition_gate.blocked",
   "exploration.lifecycle_decided",
+  "lifecycle.parked",
+  "lifecycle.reactivated",
+  "closed.incomplete",
+  "closed.abandoned",
+  "closed.superseded",
   ...REPAIR_LIFECYCLE_EVENTS,
 ] as const);
 

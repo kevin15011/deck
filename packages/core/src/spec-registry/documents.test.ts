@@ -88,6 +88,38 @@ describe("registry AST-preserving documents", () => {
     expect(replay.pair.events.source).toBe(first.pair.events.source);
   });
 
+  test("persists a durable approval and its one-use consumption across handoffs", () => {
+    const { pair, intent } = fixture();
+    const approvalReceipt = {
+      schema: "approval-receipt-v1" as const,
+      receiptId: "approval-receipt:v1:fixture",
+      digest: `sha256:${"c".repeat(64)}`,
+      changeId: "registry-fixture",
+      gate: "archive",
+      subjectDigest: `sha256:${"d".repeat(64)}`,
+      decision: "approved" as const,
+      actor: "user",
+      timestamp: "2026-07-16T00:30:00.000Z",
+      transitionId: "transition-1",
+    };
+    const approvalConsumption = {
+      receiptId: approvalReceipt.receiptId,
+      receiptDigest: approvalReceipt.digest,
+      transitionId: approvalReceipt.transitionId,
+    };
+    const result = applyRegistryIntentToDocumentsV1(pair, {
+      ...intent,
+      approvalReceipt,
+      approvalConsumption,
+    }, { transactionId: "tx-approved", artifactExists: true });
+
+    expect(result.pair.state.source).toContain("approvalReceipt:");
+    expect(result.pair.state.source).toContain("receiptId: approval-receipt:v1:fixture");
+    expect(result.pair.state.source).toContain("approvalConsumption:");
+    expect(result.pair.events.source).toContain("approval_receipt:");
+    expect(result.pair.events.source).toContain("approval_consumption:");
+  });
+
   test("rejects a non-identical intent reusing the transition key", () => {
     const { pair, intent } = fixture();
     const first = applyRegistryIntentToDocumentsV1(pair, intent, { transactionId: "tx-1", artifactExists: true });

@@ -213,6 +213,33 @@ export function validateVerificationAcceptanceV1(
   return result("complete", "VERIFY_ACCEPTED", state);
 }
 
+/** Verify-stage projections only; cross-role ordering remains convergence authority. */
+export function validateScopedVerificationAcceptanceV1(
+  stateValue: unknown,
+  policy: StagedVerificationPolicyV1,
+): StagedVerificationTransitionResultV1 {
+  let state: StagedVerificationStateV1;
+  try { state = parseStagedVerificationStateV1(stateValue); }
+  catch { return validateVerificationAcceptanceV1(stateValue, policy); }
+  const scoped = state.stages.slice(0, 2);
+  if (!policyIsValid(policy) || scoped.some((stage) => stage.status !== "passed" || !stageEvidenceComplete(stage, stage.evidence))) {
+    return result("verification-evidence-required", "VERIFY_SCOPED_STAGES_INCOMPLETE", state);
+  }
+  return result("advanced", "VERIFY_SCOPED_ACCEPTED", state);
+}
+
+export function validateBroadVerificationAcceptanceV1(
+  stateValue: unknown,
+  policy: StagedVerificationPolicyV1,
+): StagedVerificationTransitionResultV1 {
+  const acceptance = validateVerificationAcceptanceV1(stateValue, policy);
+  if (acceptance.code !== "complete") return acceptance;
+  const broad = acceptance.state.stages[2];
+  return broad.status === "passed"
+    ? result("complete", "VERIFY_BROAD_ACCEPTED", acceptance.state)
+    : result("verification-evidence-required", "VERIFY_BROAD_INCOMPLETE", acceptance.state);
+}
+
 export interface VerificationDisciplineEvidenceV1 {
   readonly behaviorChanged: boolean;
   readonly priorFailingTest?: SafeEvidenceRefV1;

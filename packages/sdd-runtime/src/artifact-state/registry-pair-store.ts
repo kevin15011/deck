@@ -23,6 +23,10 @@ export interface RegistryPairCommitRequestV1 {
     readonly path: string;
     readonly digest: `sha256:${string}`;
   };
+  readonly artifacts?: readonly {
+    readonly path: string;
+    readonly digest: `sha256:${string}`;
+  }[];
   readonly base: {
     readonly stateDigest: `sha256:${string}`;
     readonly eventsDigest: `sha256:${string}`;

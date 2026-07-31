@@ -18,6 +18,7 @@
  *    frontend implementation, testing, progress reporting, and persistence.
  */
 import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
+import { APPLY_CONTINUOUS_DELTA_RULE_V1 } from "./continuous-development";
 
 // ---------------------------------------------------------------------------
 // 1. Agent Body — written after frontmatter in the agent file
@@ -66,6 +67,8 @@ Responsibility contract:
 
 ${GIT_DISCARD_PROTECTION_RULE}
 
+${APPLY_CONTINUOUS_DELTA_RULE_V1}
+
 ## Project Context (auto-retrieved)
 
 <!-- Orchestrator will inject relevant project AI notes at runtime. -->
@@ -106,6 +109,8 @@ This is a defense-in-depth measure: the orchestrator must inject a real authoriz
 export const APPLY_FRONTEND_SKILL_BODY = `# Frontend Apply Skill
 
 > Implements UI/component/state/accessibility/frontend test tasks. Writes frontend code, runs frontend tests, reports progress, and updates apply-progress artifacts.
+
+${APPLY_CONTINUOUS_DELTA_RULE_V1}
 
 ## Purpose
 
@@ -334,6 +339,8 @@ export const APPLY_FRONTEND_COMPACT_AGENT_BODY = `# Frontend Apply Agent
 
 ${GIT_DISCARD_PROTECTION_RULE}
 
+${APPLY_CONTINUOUS_DELTA_RULE_V1}
+
 ## Modification Gate
 
 Proceed only when the Orchestrator delegation explicitly authorizes modifying work and identifies the assigned task or batch, allowed targets, blocked targets, and required checks. If that scope is absent or ambiguous, refuse modifications and return a blocked result. When the runner supplies one-use authorization, it must also validate; never invent or bypass it.
@@ -343,6 +350,8 @@ For Deck prompt or system-instruction work, execute the named Design EII without
 `;
 
 export const APPLY_FRONTEND_COMPACT_SKILL_BODY = `# Frontend Apply Skill
+
+${APPLY_CONTINUOUS_DELTA_RULE_V1}
 
 ## Execute the Authorized Batch
 

@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import {
   ARCHIVE_AGENT_BODY,
+  ARCHIVE_COMPACT_AGENT_BODY,
+  ARCHIVE_COMPACT_SKILL_BODY,
   ARCHIVE_SKILL_BODY,
 } from "./archive-content";
+import { FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1 } from "./readiness-authority";
 
 // Import git-safety for rule presence assertion
 import { GIT_SAFETY_SENTINEL } from "./git-safety";
@@ -155,5 +158,67 @@ describe("Git Safety Rule presence", () => {
 
   test("SKILL_BODY contains critical Git discard protection rule", () => {
     expect(ARCHIVE_SKILL_BODY).toContain(GIT_SAFETY_SENTINEL);
+  });
+});
+
+describe("T10 durable warning preservation contract", () => {
+  const surfaces = [
+    ARCHIVE_AGENT_BODY,
+    ARCHIVE_SKILL_BODY,
+    ARCHIVE_COMPACT_AGENT_BODY,
+    ARCHIVE_COMPACT_SKILL_BODY,
+  ];
+
+  test("composes the exact finding-disposition authority once on every surface", () => {
+    for (const surface of surfaces) {
+      expect(surface.split(FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1).length - 1).toBe(1);
+    }
+  });
+
+  test("requires current Verify, Review, and mandatory BROAD quality evidence", () => {
+    for (const surface of surfaces) {
+      expect(surface).toMatch(/Verify/i);
+      expect(surface).toMatch(/Review/i);
+      expect(surface).toMatch(/BROAD/i);
+      expect(surface).toMatch(/current|fresh/i);
+    }
+    expect(ARCHIVE_SKILL_BODY).toMatch(/missing.*stale.*conflicting.*block/is);
+  });
+
+  test("allows validated warnings only without blockers and retains canonical archived status", () => {
+    for (const surface of surfaces) {
+      expect(surface).toMatch(/validated warning/i);
+      expect(surface).toMatch(/no blocker|without blockers/i);
+    }
+    expect(ARCHIVE_SKILL_BODY).toMatch(/status.*`archived`/is);
+    expect(ARCHIVE_COMPACT_SKILL_BODY).toMatch(/archived.*RegistryIntentV1|RegistryIntentV1.*archived/is);
+  });
+
+  test("preserves evidence, attempts, rollback, residual risk, follow-ups, and append-only history", () => {
+    for (const clause of [
+      "warning",
+      "evidence",
+      "failed attempt",
+      "rollback",
+      "residual risk",
+      "follow-up",
+      "append-only",
+    ]) {
+      expect(ARCHIVE_SKILL_BODY).toMatch(new RegExp(clause, "i"));
+    }
+    expect(ARCHIVE_SKILL_BODY).toMatch(/no ledger write|must not write.*ledger/is);
+    expect(ARCHIVE_SKILL_BODY).toMatch(/never claims?.*global green/is);
+  });
+});
+
+describe("DTE-008 archive choreography", () => {
+  test("creates and verifies the report before transition or move and returns archive-only paths", () => {
+    const create = ARCHIVE_SKILL_BODY.indexOf("Write the archive report as `archive-report.md`");
+    const transition = ARCHIVE_SKILL_BODY.indexOf("Move the completed change to the archive");
+    expect(create).toBeGreaterThanOrEqual(0);
+    expect(create).toBeLessThan(transition);
+    expect(ARCHIVE_SKILL_BODY).toContain("Verify the archive report exists and has content before any registry transition or move");
+    expect(ARCHIVE_SKILL_BODY).toMatch(/Return archive paths only/i);
+    expect(ARCHIVE_SKILL_BODY).not.toContain("**Artifact Path**: `openspec/changes/{change-name}/archive-report.md`");
   });
 });

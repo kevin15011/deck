@@ -14,3 +14,4 @@ export * from "./yaml";
 export * from "./validator";
 export * from "./documents";
 export * from "./serializer";
+export * from "./lifecycle";

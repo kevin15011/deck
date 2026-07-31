@@ -32,8 +32,14 @@ describe("spec-registry types", () => {
       "verifying",
       "reviewing",
       "completed",
+      "passed",
+      "passed_with_warnings",
+      "failed",
       "archived",
       "abandoned",
+      "incomplete",
+      "parked",
+      "superseded",
     ];
     for (const s of statuses) {
       expect(VALID_CHANGE_STATUSES).toContain(s);
@@ -52,6 +58,7 @@ describe("spec-registry types", () => {
       "verify",
       "review",
       "archive",
+      "closed",
     ];
     for (const p of phases) {
       expect(VALID_CHANGE_PHASES).toContain(p);

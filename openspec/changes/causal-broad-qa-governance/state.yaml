@@ -1,0 +1,24 @@
+schema: spec-registry-v1
+changeId: causal-broad-qa-governance
+name: Causal BROAD QA Governance
+currentPhase: closed
+status: superseded
+closure_reason: >-
+  The narrower formal slice was absorbed into the integrated Developer Team
+  effectiveness implementation. Existing Proposal, Spec, and Design artifacts
+  remain unchanged; no missing historical phases or evidence were invented.
+closed_at: "2026-07-31T04:21:11Z"
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+provenance:
+  - phase: closed
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-07-31T04:21:11Z"
+    registryWrite: non-deferred
+    note: >-
+      Reconciled the observed legacy genesis and closed this narrower formal
+      slice as superseded by the integrated DTE-001 through DTE-029 outcome.

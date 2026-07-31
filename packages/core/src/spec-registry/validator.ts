@@ -20,6 +20,7 @@ import {
   PHASE_TO_INDEX,
   VALIDATOR_PHASES,
   VALIDATOR_STATUSES,
+  CLOSED_REQUIRED_STATUSES,
   VALID_EXPLORATION_CONTEXTS,
   VALID_LIFECYCLE_STATUSES,
   KNOWN_EVENT_NAMES,
@@ -49,6 +50,42 @@ const PHASE_EVENT_STATUSES = new Set([
 const APPLY_OWNER_EVENT_NAME_PATTERN = /^apply\.[a-z][a-z0-9-]*\.(started|completed|fix_completed)$/;
 const KNOWN_EVENT_NAME_SET: ReadonlySet<string> = KNOWN_EVENT_NAMES;
 const REPAIR_LIFECYCLE_EVENT_SET: ReadonlySet<string> = REPAIR_LIFECYCLE_EVENTS;
+const SHA256_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
+
+function registryRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function validApprovalMetadata(
+  receiptValue: unknown,
+  consumptionValue: unknown,
+  changeId: string,
+): boolean {
+  if (receiptValue === undefined && consumptionValue === undefined) return true;
+  const receipt = registryRecord(receiptValue);
+  if (!receipt ||
+    receipt.schema !== "approval-receipt-v1" ||
+    typeof receipt.receiptId !== "string" ||
+    !SHA256_DIGEST_PATTERN.test(String(receipt.digest)) ||
+    receipt.changeId !== changeId ||
+    typeof receipt.gate !== "string" ||
+    !SHA256_DIGEST_PATTERN.test(String(receipt.subjectDigest)) ||
+    (receipt.decision !== "approved" && receipt.decision !== "rejected") ||
+    typeof receipt.actor !== "string" ||
+    typeof receipt.timestamp !== "string" ||
+    typeof receipt.transitionId !== "string") {
+    return false;
+  }
+  if (consumptionValue === undefined) return true;
+  const consumption = registryRecord(consumptionValue);
+  return receipt.decision === "approved" &&
+    consumption !== undefined &&
+    consumption.receiptId === receipt.receiptId &&
+    consumption.receiptDigest === receipt.digest &&
+    consumption.transitionId === receipt.transitionId;
+}
 
 export function isKnownRegistryEventName(eventName: string): boolean {
   const [phase, status, extra] = eventName.split(".");
@@ -402,12 +439,12 @@ async function validateChange(
         changeIssues++;
       }
 
-      // Phase/status consistency: closed phase requires abandoned or incomplete
-      if (currentPhase === "closed" && status !== "abandoned" && status !== "incomplete") {
+      // Phase/status consistency: closed phase requires an honest terminal outcome.
+      if (currentPhase === "closed" && !CLOSED_REQUIRED_STATUSES.includes(status as ValidatorStatus)) {
         issues.push({
           severity: "error",
           rule: "state.phase_status.invalid_closed",
-          message: `Phase closed requires status abandoned or incomplete, got ${status}`,
+          message: `Phase closed requires status abandoned, incomplete, or superseded, got ${status}`,
           path: statePath,
           changeId,
           file: "state.yaml",
@@ -415,12 +452,12 @@ async function validateChange(
         changeIssues++;
       }
 
-      // closure_reason required when status is abandoned or incomplete
-      if ((status === "abandoned" || status === "incomplete") && !state.closure_reason) {
+      // Every non-success closure records why it ended.
+      if ((status === "abandoned" || status === "incomplete" || status === "superseded") && !state.closure_reason) {
         issues.push({
           severity: "error",
           rule: "state.closure_reason.required",
-          message: "closure_reason required when status is abandoned or incomplete",
+          message: "closure_reason required when status is abandoned, incomplete, or superseded",
           path: statePath,
           changeId,
           file: "state.yaml",
@@ -825,7 +862,7 @@ async function validateChange(
                 }
               }
 
-              for (const field of ["intent_id", "idempotency_key", "transaction_id", "batch_digest"] as const) {
+              for (const field of ["intent_id", "idempotency_key", "transaction_id", "batch_digest", "lifecycle_reason", "successor_change_id", "prior_state"] as const) {
                 if (event[field] !== undefined && (typeof event[field] !== "string" || event[field].length === 0)) {
                   issues.push({
                     severity: "warning",
@@ -838,6 +875,19 @@ async function validateChange(
                   });
                   warningIssues++;
                 }
+              }
+
+              if (!validApprovalMetadata(event.approval_receipt, event.approval_consumption, changeId)) {
+                issues.push({
+                  severity: "warning",
+                  rule: "events.event.metadata.invalid",
+                  message: "Approval receipt/consumption metadata is malformed or does not match this change",
+                  path: eventsPath,
+                  changeId,
+                  file: "events.yaml",
+                  field: "approval_receipt",
+                });
+                warningIssues++;
               }
 
               // Event name should match one of the known registry event naming patterns.

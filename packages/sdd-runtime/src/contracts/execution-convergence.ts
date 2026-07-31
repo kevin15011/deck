@@ -12,7 +12,7 @@ import {
   stringValue,
   type Sha256Digest,
 } from "./canonical";
-import type { ExecutionDossierV1 } from "./execution-dossier";
+import type { ExecutionDossierHistoryV1, ExecutionDossierV1 } from "./execution-dossier";
 import { parseExecutionDossierV1 } from "./execution-dossier";
 import type { BlockingRepairProjectionV1 } from "./blocking-repair-projection";
 
@@ -94,6 +94,7 @@ export interface ExecutionConvergenceDossierV1 {
 
 export interface ExecutionConvergenceDossierCreateInputV1 {
   baseDossier: ExecutionDossierV1;
+  baseDossierHistory?: ExecutionDossierHistoryV1;
   state: ExecutionConvergenceStateV1;
   dispositionDigest?: Sha256Digest;
   routingDecisionDigest?: Sha256Digest;
@@ -143,6 +144,8 @@ export interface ConvergenceResultRecordV1 {
   implementationSubjectDigest: Sha256Digest;
   dependencySetDigest: Sha256Digest;
   activeBlockingSetDigest: Sha256Digest;
+  roleResultEnvelopeDigest?: Sha256Digest;
+  verificationDigest?: Sha256Digest;
   digest: Sha256Digest;
 }
 
@@ -682,6 +685,8 @@ export function buildConvergenceResultRecordV1(
   assertDigest(input.implementationSubjectDigest, "result.implementationSubjectDigest");
   assertDigest(input.dependencySetDigest, "result.dependencySetDigest");
   assertDigest(input.activeBlockingSetDigest, "result.activeBlockingSetDigest");
+  if (input.roleResultEnvelopeDigest !== undefined) assertDigest(input.roleResultEnvelopeDigest, "result.roleResultEnvelopeDigest");
+  if (input.verificationDigest !== undefined) assertDigest(input.verificationDigest, "result.verificationDigest");
   const payload = cloneCanonical({
     schema: "convergence-result-record-v1" as const,
     stage: enumValue(
@@ -694,6 +699,8 @@ export function buildConvergenceResultRecordV1(
     implementationSubjectDigest: input.implementationSubjectDigest,
     dependencySetDigest: input.dependencySetDigest,
     activeBlockingSetDigest: input.activeBlockingSetDigest,
+    ...(input.roleResultEnvelopeDigest === undefined ? {} : { roleResultEnvelopeDigest: input.roleResultEnvelopeDigest }),
+    ...(input.verificationDigest === undefined ? {} : { verificationDigest: input.verificationDigest }),
   });
   return deepFreeze({ ...payload, digest: sha256Digest(payload) }) as ConvergenceResultRecordV1;
 }
@@ -896,6 +903,8 @@ function indexAuthorityRecords(records: ConvergenceAuthorityRecordSetV1): {
       implementationSubjectDigest: result.implementationSubjectDigest,
       dependencySetDigest: result.dependencySetDigest,
       activeBlockingSetDigest: result.activeBlockingSetDigest,
+      ...(result.roleResultEnvelopeDigest === undefined ? {} : { roleResultEnvelopeDigest: result.roleResultEnvelopeDigest }),
+      ...(result.verificationDigest === undefined ? {} : { verificationDigest: result.verificationDigest }),
     });
     if (recomputed.digest !== result.digest || resultByDigest.has(result.digest)) {
       throw new Error("invalid-evidence: illegal-transition");
@@ -1392,6 +1401,7 @@ export function createExecutionConvergenceDossierV1(
     input,
     [
       "baseDossier",
+      "baseDossierHistory",
       "state",
       "dispositionDigest",
       "routingDecisionDigest",
@@ -1403,13 +1413,7 @@ export function createExecutionConvergenceDossierV1(
     ],
     "convergence dossier create",
   );
-  // Validate base dossier is a well-formed V1 dossier (revision 1 may have no history)
-  const base = parseExecutionDossierV1(
-    input.baseDossier,
-    input.baseDossier.revision === 1 ? undefined : undefined,
-  );
-  // Note: parseExecutionDossierV1 for revision > 1 needs history; for create we accept already-validated dossiers
-  // by re-checking schema/digest lightly when revision > 1
+  const base = parseExecutionDossierV1(input.baseDossier, input.baseDossierHistory);
   if (base.schema !== "execution-dossier-v1") throw new Error("unsupported-contract-version");
 
   return issue(

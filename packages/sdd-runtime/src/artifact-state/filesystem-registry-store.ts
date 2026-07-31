@@ -265,9 +265,11 @@ export function createFileSystemRegistryStoreV1(options: FileSystemRegistryStore
       const transaction = await inspectJournal(changeId);
       if (!transaction || transaction.changeId !== changeId) return complete("registry-recovery-required", "journal-invalid");
       const snapshot = await rawRead(changeId);
-      const artifact = await inspectArtifact(changeId, transaction.artifact.path);
-      if (!artifact.exists || artifact.digest !== transaction.artifact.digest) {
-        return complete("registry-recovery-required", "artifact-mismatch");
+      for (const expectedArtifact of transaction.artifacts ?? [transaction.artifact]) {
+        const artifact = await inspectArtifact(changeId, expectedArtifact.path);
+        if (!artifact.exists || artifact.digest !== expectedArtifact.digest) {
+          return complete("registry-recovery-required", "artifact-mismatch");
+        }
       }
       const action = classifyRegistryRecoveryV1(snapshot, transaction);
       if (action === "conflict") return complete("registry-intent-conflict", "third-digest");
@@ -347,8 +349,10 @@ export function createFileSystemRegistryStoreV1(options: FileSystemRegistryStore
       if (parsed.status !== "prepared") return complete("registry-recovery-required", "journal-invalid");
       lock = await acquire(parsed.changeId, parsed.transactionId);
       const snapshot = await rawRead(parsed.changeId);
-      const artifact = await inspectArtifact(parsed.changeId, parsed.artifact.path);
-      if (!artifact.exists || artifact.digest !== parsed.artifact.digest) return complete("registry-recovery-required", "artifact-mismatch");
+      for (const expectedArtifact of parsed.artifacts ?? [parsed.artifact]) {
+        const artifact = await inspectArtifact(parsed.changeId, expectedArtifact.path);
+        if (!artifact.exists || artifact.digest !== expectedArtifact.digest) return complete("registry-recovery-required", "artifact-mismatch");
+      }
       const action = classifyRegistryRecoveryV1(snapshot, parsed);
       if (action === "finalize") return complete("replayed");
       if (action !== "roll-forward-both") return complete("registry-intent-conflict", "third-digest");

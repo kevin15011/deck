@@ -62,7 +62,7 @@ export interface InvariantVerificationResult {
  * Cache the answer for the session.
  *
  * Source: orchestrator-content.ts, lines 161-168 (Execution Mode)
- * "On the first change request in a session, ask which execution mode..."
+ * "When Run SDD is selected, use Automatic mode unless the user explicitly requested phase-by-phase interaction..."
  */
 export const INV_001_EXECUTION_MODE_GATE: OrchestratorInvariant = {
   id: "INV-001",
@@ -150,13 +150,13 @@ export const INV_004_SDD_TRIAGE_GATE: OrchestratorInvariant = {
     "orchestrator-content.ts (SDD Triage Gate / User Phase Communication)",
   ],
   condition:
-    "Before any substantial work on a non-trivial request — including asking for execution mode, launching SDD phases, or taking/delegating any step that may modify code, configuration, prompts, OpenSpec artifacts, or project files — after at most bounded read-only discovery to resolve ambiguity",
+    "For each new desired outcome before asking for execution mode or launching SDD phases; in-scope conversational deltas reuse the existing classification",
   requiredAction:
-    "For every non-trivial request, before any substantial work, classify the request as exactly one of Direct, Specialist(s), Recommend SDD, or Run SDD; record the classification and its reason in the delegation or phase return, and expose both to the user when consequential work begins. You may perform bounded read-only discovery only to resolve ambiguity. Then restate the user's intent, assumptions, open questions, risks, and consequential choices and obtain explicit confirmation that the restatement is correct. Trivial direct edits are exempt. Restatement confirmation does not authorize modification; modification authorization remains a separate later gate.\n\nIf the user revises the restatement, revise it and do not advance. Permit at most three user-requested revision cycles after the initial restatement; on a fourth revision request, stop and escalate the unresolved ambiguity rather than auto-confirming. If the user declines, record the decision and stop.",
+    "For each new desired outcome, classify the request as exactly one of Direct, Specialist(s), Recommend SDD, or Run SDD and record a concise reason before modifying work. Use bounded read-only discovery when needed. If the user's instruction already makes the intended reversible change clear, begin without a separate restatement-confirmation ceremony; the instruction is the modification request within its stated scope. Restate and ask only when ambiguity would materially change the product, scope, protected risk, or irreversible effect.\n\nA follow-up such as \"move this up\", \"make it smaller\", \"try the other layout\", or \"fix that failure\" continues the same working outcome when it stays within the authorized goal, targets, risk, and reversibility. Preserve the current candidate and decisions, route only the delta, mint any required internal one-use authorization without asking the user again, and rerun only evidence invalidated by that delta. There is no arbitrary revision-cycle limit. Re-triage or ask the user only for a real product decision, meaningful scope expansion, protected risk, irreversible action, or actual write/authority conflict. User acceptance guides the product loop but never substitutes for proportionate engineering QA.",
   rationale:
-    "SDD is a heavyweight pipeline. Non-trivial work must be classified, restated, and explicitly confirmed before substantial progress so owners retain control of intent, assumptions, open questions, risks, and consequential choices. Trivial direct edits remain exempt. Restatement confirmation is not modification authorization; modification authorization remains a separate later gate. At most three user-requested restatement revision cycles are permitted after the initial restatement; a fourth revision request escalates unresolved ambiguity rather than auto-confirming. Bypassing triage and modifying files directly undermines workflow safety.",
+    "Classification selects proportional process without turning clear user instructions or normal product iteration into repeated confirmation gates. Material ambiguity and protected or irreversible effects still require an explicit decision.",
   violationConsequence:
-    "Users experience unnecessary SDD pipeline overhead for simple requests, miss the full pipeline when it would benefit their work, or see substantial work begin without classification, restatement, recorded reason, explicit confirmation, or separate modification authorization. The orchestrator may modify or delegate work without proper classification.",
+    "The team either applies disproportionate process and makes the user manage routine iteration, or changes material product scope or protected behavior without the required decision.",
 };
 
 /**
@@ -176,7 +176,7 @@ export const INV_005_REGISTRY_DEFERRED_PARALLELISM: OrchestratorInvariant = {
     "orchestrator-content.ts:181-182 (Artifact Store: parallel phase batching)",
   ],
   condition:
-    "When launching parallel phase batches (Spec+Design or Verify+Review)",
+    "When launching parallel phase batches (Spec+Design or in-stage independent checks)",
   requiredAction:
     "Instruct each phase agent to run in registry-deferred mode: write only its phase artifact, report registry intent/status/event in the return contract, and do not write state.yaml or events.yaml. After all agents complete, serialize registry updates yourself.",
   rationale:
@@ -203,9 +203,9 @@ export const INV_006_SDD_EXPLORER_FIRST_FLOW: OrchestratorInvariant = {
     "orchestrator-content.ts:118-131 (Dependency Graph)",
     "orchestrator-content.ts:146-159 (SDD Triage Gate: Run SDD)",
   ],
-  condition: "When Run SDD is selected via triage",
+  condition: "For post-Explore Run SDD work after Run SDD is selected via triage",
   requiredAction:
-    "Execute Explorer as the first phase before Proposal. The full SDD flow order must be: Explorer → Proposal → Spec + Design → Tasks → Apply → targeted → affected_area → Review → broad → Archive. Do not skip any phase.",
+    "Execute Explorer as the first phase before Proposal for Run SDD. Direct and Specialist work must not require Explorer. Recommend SDD is advisory and must not pause progress; the Orchestrator selects Run SDD when current evidence requires it. The full SDD flow order must be: Explorer → Proposal → Spec + Design → Tasks → Apply → targeted → affected_area → Review → broad → Archive. Do not skip any required phase.",
   rationale:
     "Without Explorer-first, Proposal lacks codebase context and generates lower-quality proposals. The exploration phase provides critical architectural and constraint information that informed Proposal decisions require.",
   violationConsequence:
@@ -238,7 +238,7 @@ export const COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1: readonly CompactOrches
   { id: "INV-001", summary: "After Run SDD triage, Automatic has no routine pause after automated candidate validation; pause only for required target/product validation, approval, or a hard stop. Mode grants no authority and waives no QA." },
   { id: "INV-002", summary: "Directly own authorized bounded coordinator operations; specialists own implementation and judgment, heavy execution, Verify, and Review. Ambiguity or risk routes to clarify, delegate, or stop." },
   { id: "INV-003", summary: "Verify OpenSpec initialization before SDD and route initialization through deck-init." },
-  { id: "INV-004", summary: "Classify every request; for non-trivial work allow only bounded read-only discovery, then restate and obtain confirmation before substantial work. Trivial Direct edits are exempt; modification authorization remains separate." },
+  { id: "INV-004", summary: "Classify each new outcome, start clear reversible work without a separate confirmation ceremony, and treat in-scope feedback as a delta on the same candidate. Ask again only for material ambiguity, scope expansion, protected risk, irreversible action, or an actual conflict." },
   { id: "INV-005", summary: "Specialists return RegistryIntentV1 values; the central coordinator serializes shared registry writes." },
   { id: "INV-006", summary: "Preserve Explore -> Proposal -> Spec + Design -> Tasks -> Apply -> targeted -> affected_area -> Review -> broad -> Archive." },
   { id: "PERMANENT-AUTHORITY", summary: "Runtime authorization and exact Git safety gates precede every modifying effect; prompt text never grants authority." },
@@ -430,8 +430,11 @@ export function renderDelegationGate(auth: ModificationAuthorization): string {
     lines.push("- [ ] Triage must complete before modifying work (INV-004)");
   }
 
-  // INV-006: Explorer-first check
-  if (auth.explorerArtifact) {
+  // INV-006 applies only after Run SDD is selected.
+  const explorerRequired = auth.requestClassification === "Run SDD";
+  if (!explorerRequired) {
+    lines.push("- [x] Explorer-first evidence: not required outside Run SDD");
+  } else if (auth.explorerArtifact) {
     lines.push(`- [x] Explorer-first evidence: ${auth.explorerArtifact}`);
   } else {
     lines.push("- [ ] Explorer investigation required before modifying work (INV-006)");
@@ -451,7 +454,7 @@ export function renderDelegationGate(auth: ModificationAuthorization): string {
   }
 
   // If not all gates passed, add blocking message
-  const allPassed = auth.requestClassification && auth.explorerArtifact && auth.userAuthorizedModification;
+  const allPassed = auth.requestClassification && (!explorerRequired || auth.explorerArtifact) && auth.userAuthorizedModification;
   if (!allPassed) {
     lines.push("");
     lines.push("**BLOCKED**: Cannot proceed with modifying delegation until all gates are cleared.");
