@@ -73,12 +73,12 @@ export type TeamBundleInstallerFn = (
 
 /**
  * Generic MCP config writer — adapters provide their own.
- * Supports both token-based (Supermemory) and config-based (MCP servers like Context7) writing.
+ * Supports runner-owned OAuth, token-based auth, and local MCP server config.
  */
 export type McpConfigWriterFn = (options: {
   /** Server name (used by all types) */
   serverName: string;
-  /** Token for Supermemory remote MCP (type: remote with auth) */
+  /** Optional token for runners that use API-key authentication. */
   token?: string;
   /** MCP server type: local (npx command) or remote (URL) */
   type?: "local" | "remote";
@@ -93,7 +93,7 @@ export type McpConfigWriterFn = (options: {
 /**
  * Generic MCP config validator — adapters provide their own.
  */
-export type McpConfigValidatorFn = (options: { token: string; serverName?: string }) => { ok: boolean; diagnostics?: string[] };
+export type McpConfigValidatorFn = (options: { token?: string; serverName?: string }) => { ok: boolean; diagnostics?: string[] };
 
 /**
  * Dependencies for the action runner.
@@ -132,8 +132,10 @@ export function getRunnerReviewPlanRunBlockDiagnostics(
   const setup = state.adaptiveMemory.supermemory;
   const diagnostics: string[] = [];
   if (!setup?.configured) diagnostics.push("Supermemory setup is not configured for Review & Install.");
-  if (!setup?.hasToken) diagnostics.push("Supermemory token must be provided ephemerally for Review & Install.");
-  if (setup?.hasToken && !options.supermemoryToken?.trim()) diagnostics.push("Supermemory credential was marked ready but the ephemeral credential is no longer available; re-enter setup before Review & Install.");
+  if (state.runnerScope !== "opencode") {
+    if (!setup?.hasToken) diagnostics.push("Supermemory token must be provided ephemerally for Review & Install.");
+    if (setup?.hasToken && !options.supermemoryToken?.trim()) diagnostics.push("Supermemory credential was marked ready but the ephemeral credential is no longer available; re-enter setup before Review & Install.");
+  }
   diagnostics.push(...(setup?.diagnostics ?? []).filter(isBlockingSetupDiagnostic));
   return redactDiagnostics(diagnostics);
 }
@@ -969,13 +971,18 @@ async function writeMcpConfigAction(
     };
   }
 
-  // Default: Supermemory remote MCP (token-based)
+  // Default: Supermemory remote MCP. OpenCode owns OAuth credentials; Pi
+  // continues to use the explicit API-key handoff.
+  const nativeOAuth = dependencies.dashboardState?.runnerScope === "opencode";
   const token = dependencies.supermemoryToken;
-  if (!token?.trim()) {
+  if (!nativeOAuth && !token?.trim()) {
     return skippedResult(action, "Supermemory token is required for MCP config write.");
   }
 
-  const result = await writer({ token: token.trim(), serverName: "supermemory" });
+  const result = await writer({
+    serverName: "supermemory",
+    ...(nativeOAuth ? {} : { token: token!.trim() }),
+  });
   if (!result.ok) {
     return {
       actionId: action.id,
@@ -989,7 +996,9 @@ async function writeMcpConfigAction(
   return {
     actionId: action.id,
     status: "executed",
-    message: `Supermemory MCP config written successfully at ${result.path}.`,
+    message: nativeOAuth
+      ? `Supermemory OAuth-enabled MCP config written successfully at ${result.path}. Authenticate once through OpenCode /connect.`
+      : `Supermemory MCP config written successfully at ${result.path}.`,
     diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
     raw: redactRaw(result),
   };
@@ -1053,8 +1062,9 @@ function validateAction(
       return skippedResult(action, "MCP config validator not provided.");
     }
 
+    const nativeOAuth = dependencies.dashboardState?.runnerScope === "opencode";
     const token = dependencies.supermemoryToken;
-    if (!token?.trim()) {
+    if (!nativeOAuth && !token?.trim()) {
       const redactedDiagnostics = redactDiagnostics(action.diagnostics ?? []);
       return {
         actionId: action.id,
@@ -1064,7 +1074,10 @@ function validateAction(
       };
     }
 
-    const result = validator({ token: token.trim(), serverName: "supermemory" });
+    const result = validator({
+      serverName: "supermemory",
+      ...(nativeOAuth ? {} : { token: token!.trim() }),
+    });
     const redactedRaw = redactRaw(result);
     if (!result.ok) {
       return {

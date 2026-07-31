@@ -75,7 +75,9 @@ function isInternalAction(action: RunnerAction): boolean {
 function canRunPlanFromState(state: RunnerDashboardState): boolean {
   if (state.adaptiveMemory.provider !== "supermemory") return true;
   const setup = state.adaptiveMemory.supermemory;
-  return Boolean(setup?.configured && setup?.userId && setup?.hasToken);
+  return state.runnerScope === "opencode"
+    ? Boolean(setup?.configured)
+    : Boolean(setup?.configured && setup?.hasToken);
 }
 
 // ---------------------------------------------------------------------------

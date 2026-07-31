@@ -189,6 +189,24 @@ describe("Pi Runner dashboard reducer", () => {
     expect(ids.some((id) => id.includes("supermemory"))).toBe(true);
   });
 
+  test("OpenCode prepara Supermemory para OAuth nativo y vuelve al dashboard", () => {
+    let state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      screen: "adaptive-memory-detail",
+      backStack: ["dashboard"],
+    });
+
+    state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
+
+    expect(state.screen).toBe("dashboard");
+    expect(state.adaptiveMemory.provider).toBe("supermemory");
+    expect(state.adaptiveMemory.supermemory).toMatchObject({
+      configured: true,
+      hasToken: false,
+    });
+    expect(state.adaptiveMemory.status).toContain("OAuth");
+  });
+
   test("Developer Team se selecciona y deselecciona; el plan lo refleja", () => {
     let state = createDefaultPiRunnerDashboardState();
 

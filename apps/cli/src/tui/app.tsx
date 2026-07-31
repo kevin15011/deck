@@ -2379,11 +2379,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     const diagnostics: { message: string }[] = [];
     if (state.adaptiveMemory.provider === "supermemory") {
       const setup = state.adaptiveMemory.supermemory;
-      // Token-only: userId removed, project scoping via x-sm-project header
-      if (!setup?.configured || !setup.hasToken) {
-        diagnostics.push({ message: "Supermemory requires token to run Review/Install." });
-      } else if (!token.trim()) {
-        diagnostics.push({ message: "Supermemory requires re-entering the token before running Review/Install." });
+      if (!setup?.configured) {
+        diagnostics.push({ message: "Supermemory setup must be selected before Review/Install." });
+      } else if (state.runnerScope !== "opencode" && !setup.hasToken) {
+        diagnostics.push({ message: "Supermemory requires token to run Review/Install on Pi." });
+      } else if (state.runnerScope !== "opencode" && !token.trim()) {
+        diagnostics.push({ message: "Supermemory requires re-entering the token before running Review/Install on Pi." });
       }
     }
     return diagnostics;

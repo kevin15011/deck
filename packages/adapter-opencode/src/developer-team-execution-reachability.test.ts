@@ -1249,7 +1249,7 @@ test("T03 OpenCode rejects caller-only preparation metadata when the host provid
   expect(args.deckPreparation).toBeUndefined();
 });
 
-test("D-REACH-39 OpenCode registers correlated QA hooks and strips caller QA authority", async () => {
+test("D-REACH-39 OpenCode registers correlated QA hooks for the native task tool and strips caller QA authority", async () => {
   const reference = Object.freeze({ token: "trusted-qa-reference" });
   const prepared: unknown[] = [];
   const consumed: Array<{ receivedReference: unknown; result: unknown }> = [];
@@ -1279,7 +1279,7 @@ test("D-REACH-39 OpenCode registers correlated QA hooks and strips caller QA aut
     deckQaInvocation: { invocationId: "caller-poison" },
     deckQaResult: { status: "caller-poison" },
   };
-  const input = { tool: "delegate", sessionID: "qa-session", callID: "qa-call" };
+  const input = { tool: "task", sessionID: "qa-session", callID: "qa-call" };
 
   expect(hooks["tool.execute.before"]).toBeDefined();
   expect(hooks["tool.execute.after"]).toBeDefined();

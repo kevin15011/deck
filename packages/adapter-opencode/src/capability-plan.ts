@@ -342,8 +342,7 @@ function addAdaptiveMemoryActions(
 
   const supermemory = state.adaptiveMemory?.supermemory;
   const configured = Boolean(supermemory?.configured);
-  const hasToken = Boolean(supermemory?.hasToken);
-  const supermemoryReady = configured && hasToken;
+  const supermemoryReady = configured;
 
   groups.configWrites.push({
     id: "adaptive-memory.supermemory.deck-config",
@@ -352,16 +351,16 @@ function addAdaptiveMemoryActions(
     description: "Records Supermemory as the selected Adaptive Memory provider without storing tokens in .deck/config.json.",
     status: configured ? "ready" : "pending",
     required: true,
-    diagnostics: ["Supermemory tokens must be handed off through MCP config, not Deck config."],
+    diagnostics: ["OpenCode owns Supermemory OAuth credentials outside Deck and project configuration."],
   });
   groups.configWrites.push({
     id: "adaptive-memory.supermemory.opencode-mcp-config",
     kind: "write-mcp-config",
     title: "Configure Supermemory OpenCode MCP",
     description: "Writes Supermemory MCP server config to OpenCode's opencode.json.",
-    status: hasToken ? "ready" : "pending",
+    status: configured ? "ready" : "pending",
     required: true,
-    diagnostics: ["Credential value must be redacted and never persisted in Deck config."],
+    diagnostics: ["Native OAuth is completed once through OpenCode /connect; no API key is persisted by Deck."],
   });
   groups.validations.push({
     id: "adaptive-memory.supermemory.validate",
@@ -375,8 +374,8 @@ function addAdaptiveMemoryActions(
     code: "SUPERMEMORY_CONFIGURATION_REQUIRED",
     severity: supermemoryReady ? "info" : "warning",
     message: supermemoryReady
-      ? "Supermemory uses config/validation/provider handoff only; no package install action is generated."
-      : "Supermemory requires token configuration before provider injection; no package install action is generated.",
+      ? "Supermemory uses OpenCode native OAuth; no API key or package install action is generated."
+      : "Supermemory must be selected before Deck can install its OAuth-enabled OpenCode MCP entry.",
     actionId: "adaptive-memory.supermemory.deck-config",
   });
 }

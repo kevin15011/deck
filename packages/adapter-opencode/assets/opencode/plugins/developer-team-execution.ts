@@ -64,6 +64,12 @@ function qaPendingKey(sessionId: string, callId: string): string {
   return JSON.stringify([sessionId, callId]);
 }
 
+function isDelegationTool(tool: string | undefined): boolean {
+  // OpenCode exposes subagent delegation as `task`; older releases and test
+  // hosts used `delegate`. Treat both as the same trusted runner boundary.
+  return tool === "task" || tool === "delegate";
+}
+
 function qaInvocationResponse(value: unknown, callId: string): Readonly<{
   invocationId: string;
   digest: `sha256:${string}`;
@@ -179,7 +185,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
         delete args.deckQaResult;
         const requestedRole = qaRole(args);
         if (requestedRole) {
-          if (input.tool !== "delegate" || !input.sessionID || !input.callID) throw new Error("invalid-evidence");
+          if (!isDelegationTool(input.tool) || !input.sessionID || !input.callID) throw new Error("invalid-evidence");
           if (!modeIsValid) throw new Error("invalid-evidence");
           if (!qaAuthority) {
             if (mode === "invocation-required") throw new Error("modification-not-authorized:AUTHZ_MISSING");
@@ -207,7 +213,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
         }
         const role = args.subagent_type ?? args.agent ?? args.role;
         if (role === "deck-init") {
-          if (input.tool !== "delegate" || !input.callID) throw new Error("invalid-evidence");
+          if (!isDelegationTool(input.tool) || !input.callID) throw new Error("invalid-evidence");
           if (!preparationAuthorizationService) throw new Error("modification-not-authorized:AUTHZ_PROVIDER_MISSING");
           if (!resolveSessionPreparation) throw new Error("modification-not-authorized:AUTHZ_MISSING");
           let resolved: ReturnType<typeof preparationResolution>;
@@ -287,7 +293,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
           delete args.deckQaInvocation;
           delete args.deckQaResult;
         }
-        if (input.tool !== "delegate" || !input.sessionID || !input.callID) return;
+        if (!isDelegationTool(input.tool) || !input.sessionID || !input.callID) return;
         const key = qaPendingKey(input.sessionID, input.callID);
         const pending = pendingQa.get(key);
         if (!pending) {

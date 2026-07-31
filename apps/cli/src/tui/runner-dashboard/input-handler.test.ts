@@ -68,6 +68,19 @@ describe("Pi Runner dashboard input mapping", () => {
     });
   });
 
+  test("OpenCode selecciona Supermemory con OAuth nativo sin pedir API key", () => {
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      screen: "adaptive-memory-detail",
+      cursor: 2,
+    });
+
+    expect(getPiRunnerDashboardContinueEffect(state, { inventory })).toEqual({
+      type: "dispatch",
+      action: { type: "select-adaptive-memory", provider: "supermemory" },
+    });
+  });
+
   test("Developer Team detail model config/back y Review blocked/unblocked mapean acciones críticas", () => {
     expect(getPiRunnerDashboardContinueEffect(createDefaultPiRunnerDashboardState({ screen: "teams-detail", cursor: 1 }), { inventory })).toEqual({
       type: "dispatch",

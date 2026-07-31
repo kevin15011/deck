@@ -32,6 +32,8 @@ describe("writeSupermemoryOpenCodeMcpConfig - x-sm-project REQUIRED (Repair 2026
       // Read back the config and verify x-sm-project is present
       const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
       expect(config.mcp.supermemory.headers["x-sm-project"]).toBeDefined();
+      expect(config.mcp.supermemory.headers.Authorization).toBeUndefined();
+      expect(config.mcp.supermemory.oauth).toBeUndefined();
       // REQ-R26: NO legacy p: prefix
       expect(config.mcp.supermemory.headers["x-sm-project"]).not.toMatch(/^p:/);
     } finally {
@@ -63,7 +65,7 @@ describe("writeSupermemoryOpenCodeMcpConfig - x-sm-project REQUIRED (Repair 2026
 });
 
 describe("validateSupermemoryOpenCodeMcpConfig - URL validation", () => {
-  test("accepts new MCP v4 URL with proper auth", () => {
+  test("accepts new MCP v4 URL with native OAuth configuration", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -73,7 +75,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - URL validation", () => {
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              Authorization: "Bearer {env:SUPERMEMORY_API_KEY}",
+              "x-sm-project": "sm_project_test",
             },
           },
         },
@@ -161,8 +163,8 @@ describe("validateSupermemoryOpenCodeMcpConfig - URL validation", () => {
   });
 });
 
-describe("validateSupermemoryOpenCodeMcpConfig - Auth header validation", () => {
-  test("accepts Bearer with env var interpolation", () => {
+describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () => {
+  test("accepts OAuth discovery with no persisted credential", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -171,9 +173,8 @@ describe("validateSupermemoryOpenCodeMcpConfig - Auth header validation", () => 
           supermemory: {
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
-            oauth: false,
             headers: {
-              Authorization: "Bearer {env:SUPERMEMORY_API_KEY}",
+              "x-sm-project": "sm_project_test",
             },
           },
         },
@@ -197,7 +198,6 @@ describe("validateSupermemoryOpenCodeMcpConfig - Auth header validation", () => 
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              Authorization: "Bearer {env:SUPERMEMORY_API_KEY}",
               "x-sm-project": "my-repo",
             },
           },
@@ -232,7 +232,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - Auth header validation", () => 
     }
   });
 
-  test("rejects empty Authorization header (must be valid env interpolation)", () => {
+  test("rejects persisted Authorization header", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -242,7 +242,8 @@ describe("validateSupermemoryOpenCodeMcpConfig - Auth header validation", () => 
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              Authorization: "",
+              Authorization: "Bearer {env:SUPERMEMORY_API_KEY}",
+              "x-sm-project": "sm_project_test",
             },
           },
         },
@@ -251,6 +252,31 @@ describe("validateSupermemoryOpenCodeMcpConfig - Auth header validation", () => 
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir });
       expect(result.ok).toBe(false);
       expect(result.diagnostics[0]).toContain("Authorization");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("rejects oauth false because it disables OpenCode native authentication", () => {
+    const dir = createTempDir();
+    try {
+      const configPath = join(dir, "opencode.json");
+      writeFileSync(configPath, JSON.stringify({
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: SUPERMEMORY_MCP_URL,
+            oauth: false,
+            headers: {
+              "x-sm-project": "sm_project_test",
+            },
+          },
+        },
+      }), "utf-8");
+
+      const result = validateSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir });
+      expect(result.ok).toBe(false);
+      expect(result.diagnostics[0]).toContain("oauth: false");
     } finally {
       cleanup(dir);
     }
@@ -268,7 +294,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - Server name handling", () => {
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              Authorization: "Bearer {env:SUPERMEMORY_API_KEY}",
+              "x-sm-project": "sm_project_test",
             },
           },
         },
@@ -292,7 +318,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - Server name handling", () => {
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              Authorization: "Bearer {env:SUPERMEMORY_API_KEY}",
+              "x-sm-project": "sm_project_test",
             },
           },
         },
@@ -325,9 +351,9 @@ describe("validateSupermemoryOpenCodeMcpConfig - Security", () => {
       }), "utf-8");
 
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir });
-      // Should be rejected because it doesn't match the env interpolation pattern
+      // OAuth credentials must never be persisted in project configuration.
       expect(result.ok).toBe(false);
-      expect(result.diagnostics[0]).toContain("{env:SUPERMEMORY_API_KEY}");
+      expect(result.diagnostics[0]).toContain("OAuth");
     } finally {
       cleanup(dir);
     }

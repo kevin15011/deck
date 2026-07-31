@@ -1216,11 +1216,11 @@ class OpenCodeRunnerAdapterImpl {
   // -------------------------------------------------------------------------
 
   async writeMcpConfig(input: RunnerMcpConfigInput): Promise<RunnerMcpConfigResult> {
-    // Supermemory uses a specialized writer that handles env var interpolation
-    if (input.serverName === "supermemory" && input.token) {
+    // Supermemory uses OpenCode's native OAuth discovery. The legacy token
+    // input remains accepted by the shared runner contract but is not persisted.
+    if (input.serverName === "supermemory") {
       const { writeSupermemoryOpenCodeMcpConfig } = require("./opencode-mcp-config");
       const result = writeSupermemoryOpenCodeMcpConfig({
-        token: input.token,
         serverName: input.serverName,
       });
       const diagnosticsList: string[] = [];

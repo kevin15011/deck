@@ -91,7 +91,7 @@ export function getDashboardContinueEffect(
     const provider = providers[state.cursor];
     if (!provider) return { type: "dispatch", action: { type: "go-dashboard" } };
     const action: RunnerDashboardAction = { type: "select-adaptive-memory", provider };
-    return provider === "supermemory"
+    return provider === "supermemory" && state.runnerScope !== "opencode"
       ? { type: "select-supermemory-and-open-setup", action }
       : { type: "dispatch", action };
   }

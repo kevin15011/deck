@@ -352,6 +352,60 @@ expect(setup.ok).toBe(true);
   });
 });
 
+describe("OpenCode dashboard action runner Supermemory OAuth", () => {
+  test("no exige ni persiste API key al escribir y validar la configuración MCP", async () => {
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      adaptiveMemory: {
+        provider: "supermemory",
+        supermemory: { configured: true, hasToken: false, diagnostics: [] },
+      },
+    });
+    expect(getPiRunnerReviewPlanRunBlockDiagnostics(state)).toEqual([]);
+
+    let writerInput: { serverName: string; token?: string } | undefined;
+    const writeResult = await runPiRunnerAction(
+      {
+        id: "adaptive-memory.supermemory.opencode-mcp-config",
+        kind: "write-mcp-config",
+        title: "Write Supermemory OpenCode MCP config",
+        status: "ready",
+      },
+      {
+        dashboardState: state,
+        writeMcpConfig: async (input) => {
+          writerInput = input;
+          return { ok: true, path: "/tmp/opencode.json", diagnostics: [] };
+        },
+      },
+    );
+
+    expect(writerInput).toEqual({ serverName: "supermemory" });
+    expect(writeResult).toMatchObject({ status: "executed" });
+    expect(writeResult.message).toContain("OAuth-enabled");
+
+    let validatorInput: { serverName?: string; token?: string } | undefined;
+    const validateResult = await runPiRunnerAction(
+      {
+        id: "adaptive-memory.supermemory.validate",
+        kind: "validate",
+        title: "Validate Supermemory OpenCode MCP config",
+        status: "ready",
+      },
+      {
+        dashboardState: state,
+        validateMcpConfig: (input) => {
+          validatorInput = input;
+          return { ok: true, diagnostics: [] };
+        },
+      },
+    );
+
+    expect(validatorInput).toEqual({ serverName: "supermemory" });
+    expect(validateResult).toMatchObject({ status: "executed" });
+  });
+});
+
 
 describe("Pi Runner dashboard action runner Developer Team model preservation", () => {
   function frontmatterFor(plan: DeveloperTeamInstallPlan, agentId: string): string {

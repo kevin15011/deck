@@ -15,23 +15,22 @@ export type OpenCodeMcpConfigValidationResult = {
 /**
  * Validates the Supermemory MCP server entry in OpenCode's opencode.json.
  *
- * OpenCode MCP format (remote) with Bearer token via env var interpolation:
+ * OpenCode MCP format (remote) with native OAuth discovery:
  *   {
  *     "mcp": {
  *       "supermemory": {
  *         "type": "remote",
  *         "url": "https://mcp.supermemory.ai/mcp",
- *         "oauth": false,
  *         "headers": {
- *           "Authorization": "Bearer {env:SUPERMEMORY_API_KEY}"
+ *           "x-sm-project": "sm_project_example"
  *         }
  *       }
  *     }
  *   }
  *
- * The validator checks structure only — it confirms the entry exists and
- * contains a non-empty bearer token reference pattern ({env:SUPERMEMORY_API_KEY}).
- * It does NOT resolve the env var at runtime.
+ * OpenCode owns OAuth credentials outside project configuration. Deck only
+ * installs the endpoint and project scope; the runner discovers authentication
+ * and prompts once through `/connect` or `opencode mcp auth supermemory`.
  *
  * @param options.configPath - Override the default opencode.json path.
  * @param options.serverName - Override the MCP server entry name (default: "supermemory").
@@ -131,35 +130,41 @@ export function validateSupermemoryOpenCodeMcpConfig(
     };
   }
 
+  if ((serverEntry as Record<string, unknown>).oauth === false) {
+    return {
+      ok: false,
+      path: configPath,
+      serverName,
+      diagnostics: [`OpenCode MCP server '${serverName}' must leave OAuth enabled; remove 'oauth: false' and authenticate through OpenCode.`],
+    };
+  }
+
   const headers = (serverEntry as Record<string, unknown>).headers;
   if (!isPlainRecord(headers)) {
     return {
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' must have a headers object; Supermemory tools were not injected.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' must have a headers object containing 'x-sm-project'; Supermemory tools were not injected.`],
     };
   }
 
-  const authHeader = headers.Authorization;
-  if (typeof authHeader !== "string" || !authHeader.trim()) {
+  if (Object.prototype.hasOwnProperty.call(headers, "Authorization")) {
     return {
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' has missing or empty Authorization header; Supermemory tools were not injected.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' must not persist an Authorization header; OpenCode manages Supermemory OAuth credentials outside opencode.json.`],
     };
   }
 
-  // Check for Bearer token with {env:SUPERMEMORY_API_KEY} interpolation pattern.
-  // The validator checks structure, not runtime env var resolution.
-  const hasBearerEnvRef = /^Bearer\s+\{env:SUPERMEMORY_API_KEY\}$/i.test(authHeader.trim());
-  if (!hasBearerEnvRef) {
+  const projectHeader = headers["x-sm-project"];
+  if (typeof projectHeader !== "string" || !projectHeader.trim()) {
     return {
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' Authorization header must use '{env:SUPERMEMORY_API_KEY}' interpolation; Supermemory tools were not injected.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' must include a non-empty 'x-sm-project' header; Supermemory tools were not injected.`],
     };
   }
 
@@ -275,13 +280,14 @@ function deriveSmProjectIdentifier(cwd?: string): { projectId: string; derived: 
  *
  * CONTRACT (Repair 2026-05-29):
  * - x-sm-project header is REQUIRED (derived from git remote or fallback to directory)
- * - User identity comes from token (not userId)
+ * - User identity comes from OpenCode-managed OAuth
  * - No manual container tags
  * - NO legacy p: prefix in x-sm-project (use sm_project_ prefix)
  */
 export function writeSupermemoryOpenCodeMcpConfig(
   options: {
-    token: string;
+    /** @deprecated OpenCode uses native OAuth; accepted only for caller compatibility and never persisted. */
+    token?: string;
     serverName?: string;
     configPath?: string;
     homeDir?: string;
@@ -295,14 +301,7 @@ export function writeSupermemoryOpenCodeMcpConfig(
   const homeDir = options.homeDir ?? process.env.HOME ?? "/home/user";
   const configPath = options.configPath ?? join(homeDir, ".config", "opencode", "opencode.json");
   const serverName = (options.serverName ?? SUPERMEMORY_MCP_SERVER_NAME).trim() || SUPERMEMORY_MCP_SERVER_NAME;
-  const token = options.token.trim();
-
   const diagnostics: string[] = [];
-
-  if (!token) {
-    diagnostics.push("Supermemory token is required.");
-    return { ok: false, path: configPath, serverName, diagnostics };
-  }
 
   // REQ-R26: Determine x-sm-project value
   let smProjectHeader: string;
@@ -335,9 +334,7 @@ export function writeSupermemoryOpenCodeMcpConfig(
   mcpSection[serverName] = {
     type: "remote",
     url: SUPERMEMORY_MCP_URL,
-    oauth: false,
     headers: {
-      Authorization: `Bearer {env:SUPERMEMORY_API_KEY}`,
       "x-sm-project": smProjectHeader,
     },
     enabled: true,
@@ -347,15 +344,8 @@ export function writeSupermemoryOpenCodeMcpConfig(
 
   try {
     writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
-    diagnostics.push(`Supermemory MCP server '${serverName}' configured in OpenCode at ${configPath}.`);
-
-    // Also write the env var export to shell configs (.zshrc, .bashrc) for cross-platform compatibility.
-    const shellResult = appendSupermemoryEnvToShellConfig({ token });
-    if (shellResult.ok) {
-      shellResult.shellConfigs.forEach((msg) => diagnostics.push(msg));
-    } else {
-      diagnostics.push("Warning: Could not update shell config files. You may need to manually set SUPERMEMORY_API_KEY.");
-    }
+    diagnostics.push(`Supermemory MCP server '${serverName}' configured for native OpenCode OAuth at ${configPath}.`);
+    diagnostics.push(`Authenticate once with '/connect' or 'opencode mcp auth ${serverName}'; OpenCode stores OAuth credentials outside this config.`);
 
     return { ok: true, path: configPath, serverName, diagnostics };
   } catch (error) {

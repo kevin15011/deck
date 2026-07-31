@@ -165,14 +165,24 @@ function selectAdaptiveMemoryProvider(
   if (provider === state.adaptiveMemory.provider) return state;
 
   if (provider === "supermemory") {
-    return invalidatePlan({
+    const nativeOAuth = state.runnerScope === "opencode";
+    const next = invalidatePlan({
       ...state,
       adaptiveMemory: {
         provider,
-        supermemory: createEmptySupermemorySetup(),
-        status: "Supermemory selected; configure non-secret identity and provide token through MCP handoff.",
+        supermemory: nativeOAuth
+          ? {
+              configured: true,
+              hasToken: false,
+              diagnostics: ["OpenCode will authenticate Supermemory through native OAuth on first connection."],
+            }
+          : createEmptySupermemorySetup(),
+        status: nativeOAuth
+          ? "Supermemory selected; OpenCode will request OAuth once through /connect."
+          : "Supermemory selected; provide an API key for the Pi MCP handoff.",
       },
     });
+    return nativeOAuth ? navigate(next, "dashboard") : next;
   }
 
   // After selecting a non-supermemory provider, go back to dashboard
