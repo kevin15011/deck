@@ -9,6 +9,22 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-08-03
+
+### Added
+
+- Runner-aware skill discovery now maintains a bounded, safe project registry and integrates its setup and diagnostics across OpenCode and Pi.
+
+### Changed
+
+- Developer Team orchestration now selects proportionate workflows, keeps routine recovery moving, distinguishes causal regressions from unrelated baseline debt, reuses only fresh evidence, consolidates Review findings, and preserves durable approvals and honest lifecycle outcomes.
+- Conversational follow-up changes can continue as focused deltas without restarting the full delivery workflow, while independent Verify and Review safeguards remain intact.
+
+### Fixed
+
+- OpenCode now uses native OAuth for Supermemory without persisting an API key, while Pi retains its explicit API-key handoff.
+- OpenCode QA delegation recognizes the native `task` tool as well as the legacy `delegate` name, preventing resumed sessions from failing with `invalid-evidence` before Verify or Review starts.
+
 ## [0.2.4] - 2026-07-22
 
 ### Changed
@@ -32,6 +48,7 @@ All notable release changes to Deck are recorded here. Current release procedure
 - OpenCode model selection now uses the model inventory resolved by the active runner.
 - Streamlined project documentation and strengthened contributor, architecture, release, and documentation-governance guidance.
 
-[Unreleased]: https://github.com/kevin15011/deck/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/kevin15011/deck/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/kevin15011/deck/releases/tag/v0.2.5
 [0.2.4]: https://github.com/kevin15011/deck/releases/tag/v0.2.4
 [0.2.3]: https://github.com/kevin15011/deck/releases/tag/v0.2.3

@@ -25,11 +25,12 @@ describe("ORCHESTRATOR_SYSTEM_PROMPT (re-exported from @deck/core)", () => {
   test("contains delegation rules table with inline vs delegate thresholds", () => {
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Delegation Rules");
     expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("4+");
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Multi-file");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("multiple files");
   });
 
-  test("contains mandatory delegation triggers", () => {
-    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Mandatory Delegation Triggers");
+  test("contains explicit delegation and conflict signals", () => {
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Delegation Signals");
+    expect(ORCHESTRATOR_SYSTEM_PROMPT).toContain("Before push or PR");
   });
 
   test("contains SDD dependency graph", () => {
