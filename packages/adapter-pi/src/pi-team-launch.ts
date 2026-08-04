@@ -46,7 +46,7 @@ export type BuildPiTeamLaunchPlanOptions = {
   piCommand?: string;
 };
 
-const DEVELOPER_ORCHESTRATOR_AGENT_ID = "deck-developer-orchestrator";
+const DEVELOPER_ORCHESTRATOR_AGENT_ID = "deck-lead";
 
 // --- Helpers ---
 

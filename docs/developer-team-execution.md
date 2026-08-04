@@ -1,6 +1,6 @@
 # Operating Developer Team Execution
 
-Developer Team installs dedicated compact agent and skill bodies for all 14 catalog roles by default. Runtime effect controls still ship behind additive observe/shadow gates; missing rollout evidence keeps those automatic effects non-authoritative without reverting prompt content to legacy.
+Developer Team installs seven adaptive roles plus the standalone Onboard and Archive skills. Runtime effect controls remain authoritative for protected writes, while Lead chooses the smallest safe route and activates Quality only for material or protected risk, uncertain evidence, release readiness, or explicit request.
 
 > **Audience:** Contributors and maintainers changing or operating Developer Team execution.
 > **Authority:** explanatory methodology; active OpenSpec requirements and runtime source remain authoritative.
@@ -13,7 +13,7 @@ Developer Team installs dedicated compact agent and skill bodies for all 14 cata
 3. Aggregate comparable baseline and candidate observations by lane and risk tier.
 4. Call `evaluateRolloutGateV1()` for exactly the next step: `0 -> 5 -> 25 -> 50 -> 100`.
 5. Expand only when the decision is `eligible`. A `rollout-paused` result leaves the current cohort authoritative.
-6. Install dedicated compact agent and skill bodies for all 14 roles in every OpenCode and Pi Developer Team installation. Legacy profile APIs and old receipts remain readable compatibility surfaces, not production selection gates.
+6. Install exactly seven agent/skill pairs plus Onboard and Archive lifecycle skills in every OpenCode and Pi installation. Legacy IDs remain readable migration/history surfaces, never active aliases.
 
 ## Runtime boundaries
 

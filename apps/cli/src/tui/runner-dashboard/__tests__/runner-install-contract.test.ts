@@ -7,6 +7,7 @@
 import { describe, expect, test, beforeEach, vi } from "bun:test";
 import { runRunnerReviewPlan, type RunnerActionRunnerDependencies } from "../action-runner";
 import type { RunnerReviewPlan, RunnerAction, ActionKind, CapabilityId, ToolId, PackageId, ImplementationId, RunnerActionStatus } from "../state";
+import { createDefaultRunnerDashboardState } from "../state";
 
 // Helper to create RunnerAction with required status field
 function createTestAction(
@@ -29,6 +30,126 @@ function createTestAction(
 }
 
 describe("runRunnerReviewPlan contract tests", () => {
+  test("keeps Serena authorization, stage ordering, readiness handoff, and fail-closed writes equivalent for Pi and OpenCode", async () => {
+    for (const runner of ["pi", "opencode"] as const) {
+      const operation = { runner, operationId: `${runner}-contract-operation`, explicitlySelected: true };
+      const authorization = {
+        kind: "interactive-tui-explicit-selection" as const,
+        runner,
+        operationId: operation.operationId,
+      };
+      const executable = `/fixtures/${runner}/tools/serena/bin/serena`;
+      const readiness = {
+        capabilityId: "serena" as const,
+        state: "ready" as const,
+        resolvedExecutablePath: executable,
+        source: "installed-deck-tool" as const,
+        probe: "serena-help" as const,
+        fingerprint: `${runner}-fingerprint`,
+      };
+      const plan = createMinimalPlan({
+        automaticInstalls: [createTestAction(
+          "capability.serena.install",
+          runner === "pi" ? "install-pi-package" : "install-opencode-plugin",
+          "Install Serena",
+          "serena",
+          "serena",
+          "serena-agent",
+        )],
+        configWrites: [createTestAction(
+          "capability.serena.mcp-config",
+          runner === "pi" ? "write-pi-mcp-config" : "write-mcp-config",
+          "Configure Serena MCP",
+          "serena",
+          "serena",
+          "serena-agent",
+        )],
+      });
+      const stages: string[] = [];
+      const calls: string[] = [];
+      const writes: unknown[] = [];
+      const state = createDefaultRunnerDashboardState({
+        runnerScope: runner,
+        operationId: operation.operationId,
+        currentOperation: operation,
+        explicitlySelectedCapabilities: { serena: true },
+        selectedCapabilities: { serena: true },
+        plan,
+        planGeneratedForRevision: 0,
+      });
+
+      const results = await runRunnerReviewPlan(plan, {
+        dashboardState: state,
+        runnerId: runner,
+        runnerCommand: runner,
+        currentOperation: operation,
+        serenaAuthorization: authorization,
+        onSerenaStage: (stage) => stages.push(stage),
+        installPackages: async (_command, packages, _onResult, context) => {
+          calls.push(`install:${context?.runnerId}:${context?.operationId}`);
+          context?.onSerenaStage?.("installing-serena");
+          context?.onSerenaStage?.("validating-serena");
+          return [{
+            id: packages[0]!.id,
+            outcome: "executed" as const,
+            success: true,
+            message: "Serena installed and validated.",
+            serenaBootstrapOutcome: "installed" as const,
+            serenaReadiness: readiness,
+          }];
+        },
+        writeMcpConfig: async (options, context) => {
+          calls.push(`config:${context?.runnerId}:${context?.operationId}`);
+          writes.push({ options, context });
+          return { ok: true, path: `/fixtures/${runner}/mcp.json`, diagnostics: [] };
+        },
+      });
+
+      expect(calls).toEqual([
+        `install:${runner}:${operation.operationId}`,
+        `config:${runner}:${operation.operationId}`,
+      ]);
+      expect(stages).toEqual(["preparing-uv", "installing-serena", "validating-serena", "configuring-mcp"]);
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toMatchObject({
+        options: {
+          serverName: "serena",
+          command: [executable, "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+        },
+      });
+      expect(JSON.stringify(results)).not.toContain(executable);
+      expect(results.find((result) => result.actionId === "capability.serena.mcp-config")?.status).toBe("executed");
+    }
+  });
+
+  test("rejects default-only or runner-mismatched Serena operations without any writer call", async () => {
+    const writes: string[] = [];
+    const plan = createMinimalPlan({
+      automaticInstalls: [createTestAction("capability.serena.install", "install-pi-package", "Install Serena", "serena", "serena", "serena-agent")],
+      configWrites: [createTestAction("capability.serena.mcp-config", "write-pi-mcp-config", "Configure Serena MCP", "serena")],
+    });
+    const operation = { runner: "opencode" as const, operationId: "opencode-contract-operation", explicitlySelected: true };
+
+    const results = await runRunnerReviewPlan(plan, {
+      runnerId: "pi",
+      currentOperation: operation,
+      serenaAuthorization: {
+        kind: "interactive-tui-explicit-selection",
+        runner: "opencode",
+        operationId: operation.operationId,
+      },
+      installPackages: async () => [{ id: "serena", outcome: "executed" as const, success: true, message: "must not run" }],
+      writeMcpConfig: async () => {
+        writes.push("write");
+        return { ok: true, path: "/fixtures/mcp.json", diagnostics: [] };
+      },
+    });
+
+    expect(writes).toEqual([]);
+    expect(results.some((result) => result.status === "failed")).toBe(true);
+    expect(results.find((result) => result.actionId === "capability.serena.mcp-config")?.status).toBe("failed");
+  });
+
   // Test install failure prevents MCP config write (REQ-MCP-001)
   describe("Install failure gates MCP config (REQ-MCP-001)", () => {
     test("skips MCP config when install failed for same capability", async () => {
@@ -45,6 +166,13 @@ describe("runRunnerReviewPlan contract tests", () => {
 
       const dependencies: RunnerActionRunnerDependencies = {
         runnerCommand: "opencode",
+        runnerId: "opencode",
+        currentOperation: { runner: "opencode", operationId: "contract-success", explicitlySelected: true },
+        serenaAuthorization: {
+          kind: "interactive-tui-explicit-selection",
+          runner: "opencode",
+          operationId: "contract-success",
+        },
         installPackages: mockInstallPackages,
         writeMcpConfig: async () => ({ ok: true, path: "/tmp/mcp.json", diagnostics: [] }),
       };
@@ -60,7 +188,21 @@ describe("runRunnerReviewPlan contract tests", () => {
     });
 
     test("allows MCP config when install succeeded", async () => {
-      const mockInstallPackages = vi.fn(async (_command: string | undefined, packages: Array<{ id: string }>) => [{ id: packages[0]?.id, outcome: "executed" as const, success: true, message: "Installed" }]);
+      const mockInstallPackages = vi.fn(async (_command: string | undefined, packages: Array<{ id: string }>) => [{
+        id: packages[0]?.id,
+        outcome: "executed" as const,
+        success: true,
+        message: "Installed",
+        serenaBootstrapOutcome: "installed" as const,
+        serenaReadiness: {
+          capabilityId: "serena" as const,
+          state: "ready" as const,
+          resolvedExecutablePath: "/fixtures/deck-data/tools/serena/bin/serena",
+          source: "installed-deck-tool" as const,
+          probe: "serena-help" as const,
+          fingerprint: "contract-fingerprint",
+        },
+      }]);
 
       const plan = createMinimalPlan({
         automaticInstalls: [
@@ -73,6 +215,13 @@ describe("runRunnerReviewPlan contract tests", () => {
 
       const dependencies: RunnerActionRunnerDependencies = {
         runnerCommand: "opencode",
+        runnerId: "opencode",
+        currentOperation: { runner: "opencode", operationId: "contract-success", explicitlySelected: true },
+        serenaAuthorization: {
+          kind: "interactive-tui-explicit-selection",
+          runner: "opencode",
+          operationId: "contract-success",
+        },
         installPackages: mockInstallPackages,
         writeMcpConfig: async () => ({ ok: true, path: "/tmp/mcp.json", diagnostics: [] }),
       };
@@ -82,7 +231,7 @@ describe("runRunnerReviewPlan contract tests", () => {
       // Find the MCP config action result
       const mcpResult = results.find((r) => r.actionId === "capability.serena.mcp-config");
 
-      // MCP config should succeed because install succeeded
+       // MCP config should succeed because install succeeded
       expect(mcpResult?.status).toBe("executed");
     });
   });
@@ -94,11 +243,11 @@ describe("runRunnerReviewPlan contract tests", () => {
       const plan = createMinimalPlan({
         automaticInstalls: [],
         configWrites: [
-          createTestAction("capability.serena.mcp-config", "write-mcp-config", "Write MCP config", "serena"),
+          createTestAction("capability.codebase-memory-mcp.mcp-config", "write-mcp-config", "Write MCP config", "codebase-memory-mcp"),
         ],
       });
 
-      // Don't provide PATH with serena binary - simulate binary not found
+       // Don't provide PATH with codebase-memory binary - simulate binary not found
       const originalPath = process.env.PATH;
       process.env.PATH = "/nonexistent"; // Empty PATH without serena
 
@@ -113,9 +262,9 @@ describe("runRunnerReviewPlan contract tests", () => {
       process.env.PATH = originalPath;
 
       // Find the MCP config action result
-      const mcpResult = results.find((r) => r.actionId === "capability.serena.mcp-config");
+      const mcpResult = results.find((r) => r.actionId === "capability.codebase-memory-mcp.mcp-config");
 
-      // MCP config should fail because binary not found on PATH
+       // MCP config should fail because binary not found on PATH
       expect(mcpResult?.status).toBe("failed");
       expect(mcpResult?.message).toContain("not found on PATH");
     });
@@ -205,7 +354,7 @@ describe("runRunnerReviewPlan contract tests", () => {
 
       const plan = createMinimalPlan({
         automaticInstalls: [
-          createTestAction("capability.serena.install", "install-opencode-plugin", "Install Serena", "serena", "serena", "oraios/serena"),
+          createTestAction("capability.context7.install", "install-opencode-plugin", "Install Context7", "context7", "context7", "@upstash/context7-mcp"),
         ],
         configWrites: [],
       });
@@ -217,7 +366,7 @@ describe("runRunnerReviewPlan contract tests", () => {
 
       const results = await runRunnerReviewPlan(plan, dependencies);
 
-      const installResult = results.find((r) => r.actionId === "capability.serena.install");
+       const installResult = results.find((r) => r.actionId === "capability.context7.install");
       expect(installResult?.status).toBe("failed");
       expect(installResult?.message).toContain("no result");
     });

@@ -1,0 +1,167 @@
+schema: spec-registry-v1
+changeId: auto-bootstrap-serena-prerequisites
+name: Auto-bootstrap Serena prerequisites
+currentPhase: tasks
+status: completed
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+provenance:
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T20:05:14.000Z"
+    registryWrite: non-deferred
+    note: "Proposal draft created before registry bootstrap."
+  - phase: spec
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T20:05:14.000Z"
+    registryWrite: non-deferred
+    note: "Recorded user approval and started parallel Spec and Design."
+    intentId: registry-intent:v1:23403c129c5e1079609c250c4c550a22
+    idempotencyKey: sha256:86cb2a2349343fc4ee154ddbabff888b23b1a56aefba6fdbc3834e7b773942b9
+    transactionId: registry-transaction:v1:proposal-approved-to-spec-design
+    approvalReceipt:
+      schema: approval-receipt-v1
+      receiptId: approval-receipt:v1:d2d9aba2093cd2e685505f305351bbcc
+      digest: sha256:d2d9aba2093cd2e685505f305351bbcce96c6d1f987fbc44324bb264a3c8213b
+      changeId: auto-bootstrap-serena-prerequisites
+      gate: proposal-approval
+      subjectDigest: sha256:a4afa8e8145200fc7d7d7cad509d2880ce76d02006a76bc8fbb2a8d72f1c28de
+      decision: approved
+      actor: user
+      timestamp: "2026-08-03T20:05:14.000Z"
+      transitionId: proposal-approved-to-spec-design
+    approvalConsumption:
+      receiptId: approval-receipt:v1:d2d9aba2093cd2e685505f305351bbcc
+      receiptDigest: sha256:d2d9aba2093cd2e685505f305351bbcce96c6d1f987fbc44324bb264a3c8213b
+      transitionId: proposal-approved-to-spec-design
+  - phase: spec
+    agent: deck-developer-spec
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T20:19:17.297Z"
+    registryWrite: non-deferred
+    note: "Completed 13 requirements and 18 scenarios."
+    intentId: registry-intent:v1:78675f052fd452dafd2e7fa83460dbd1
+    idempotencyKey: sha256:85a6009c20f55a0d4bbe258f8d49cfe91cabb6f0ebe9887ba976fe4f860d2341
+    transactionId: registry-transaction:v1:spec-completed
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-03T20:19:48.615Z"
+    registryWrite: non-deferred
+    note: "Completed high-risk design; Apply is blocked pending independently approved uv trust material."
+    intentId: registry-intent:v1:0c453cbbf707e1b817b6d3776b7b6e85
+    idempotencyKey: sha256:7f574a630c821e76a549b1eee941577f598ac6c10bd21a836c5ca694686b3e08
+    transactionId: registry-transaction:v1:design-completed
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T20:39:38.962Z"
+    registryWrite: non-deferred
+    note: "Created 19-task plan and security preconditions; Apply remains blocked."
+    intentId: registry-intent:v1:b5a7c513cfefeda3f93d351c4ee5d817
+    idempotencyKey: sha256:2284f9912c0996e877e69522853b3df1ea86e1544ab8e6300eebd3e3a8352152
+    transactionId: registry-transaction:v1:tasks-completed
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-03T21:09:05.897Z"
+    registryWrite: non-deferred
+    note: "Repaired archive topology after independent security review; Apply remains blocked."
+    intentId: registry-intent:v1:329553aa2ea83864e585ef598afe58c2
+    idempotencyKey: sha256:1ff3f5e102eab633f9cc50ed7e06ff7542bda4a86e8f316d89ecf6a3b50ca6a1
+    transactionId: registry-transaction:v1:design-topology-repair
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T21:09:37.953Z"
+    registryWrite: non-deferred
+    note: "Repaired T01 archive topology plan; Apply remains blocked."
+    intentId: registry-intent:v1:4ffaed8c55227f92258ac311ded63f71
+    idempotencyKey: sha256:fbc2d4cb04389d57775972c22e64ee3428983703efda9084b2a1598d90f173a5
+    transactionId: registry-transaction:v1:tasks-topology-repair
+  - phase: proposal
+    agent: deck-developer-proposal
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T21:22:28.021Z"
+    registryWrite: non-deferred
+    note: "Revised proposal records the user-selected official uv installer approach and awaits approval."
+    intentId: registry-intent:v1:e9b84bff5e34746bb30cfbf161b5fa51
+    idempotencyKey: sha256:7b72682a9c98b8307ee70799d3e3c77f09420a7c36b223287e1fed07ec9fefb6
+    transactionId: registry-transaction:v1:proposal-official-uv-revision
+  - phase: spec
+    agent: deck-developer-orchestrator
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T21:24:20.913Z"
+    registryWrite: non-deferred
+    note: "Recorded approval of revised official uv installer proposal and started Spec/Design reconciliation."
+    intentId: registry-intent:v1:98bcea6486636b254efd8b950e4ab5b3
+    idempotencyKey: sha256:8cd757f0120a41faaca1fd2d6caeb87c563c6355c6ddc6ad81d90a706cdf5daf
+    transactionId: registry-transaction:v1:revised-proposal-approved-to-spec-design
+    approvalReceipt:
+      schema: approval-receipt-v1
+      receiptId: approval-receipt:v1:fc1e64c49f4e91034a7145624ff4b0d2
+      digest: sha256:fc1e64c49f4e91034a7145624ff4b0d241ebbb03ede2bec2270cf4b31cf825fd
+      changeId: auto-bootstrap-serena-prerequisites
+      gate: revised-proposal-approval
+      subjectDigest: sha256:d4cc905b11ca6604f2760b3ab11abafa466a8815258f53f0979f4bb8481e8184
+      decision: approved
+      actor: user
+      timestamp: "2026-08-03T21:24:20.913Z"
+      transitionId: revised-proposal-approved-to-spec-design
+    approvalConsumption:
+      receiptId: approval-receipt:v1:fc1e64c49f4e91034a7145624ff4b0d2
+      receiptDigest: sha256:fc1e64c49f4e91034a7145624ff4b0d241ebbb03ede2bec2270cf4b31cf825fd
+      transitionId: revised-proposal-approved-to-spec-design
+  - phase: spec
+    agent: deck-developer-spec
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T21:30:00.335Z"
+    registryWrite: non-deferred
+    note: "Reconciled specification to approved official uv installer approach."
+    intentId: registry-intent:v1:e88f38696afdc73720780d13e229c6c8
+    idempotencyKey: sha256:8b51e6670361bde107df8716eb563e8dd87d8a71a42e1ac35de11daab57f0ca8
+    transactionId: registry-transaction:v1:spec-official-uv-reconciliation
+  - phase: design
+    agent: deck-developer-design
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-03T21:36:23.317Z"
+    registryWrite: non-deferred
+    note: "Reconciled Design to controlled official uv installer scope."
+    intentId: registry-intent:v1:6a956d014685b20fe79931af28d81e81
+    idempotencyKey: sha256:b15f1eb0e2d184763a51f26a583c8873b5cf8a1bcfcb13b12bc286b25cea1e0f
+    transactionId: registry-transaction:v1:design-official-uv-reconciliation
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T22:00:07.965Z"
+    registryWrite: non-deferred
+    note: "Reconciled 21-task plan and preconditions to approved official uv installer scope."
+    intentId: registry-intent:v1:d89ddf1bcdafbb70faf13e35fb3740c6
+    idempotencyKey: sha256:d5340e2a666e03654c37d5184d1cc3f0e7208ef6155748c1d1155d4107c01e92
+    transactionId: registry-transaction:v1:tasks-official-uv-reconciliation
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-03T22:33:50.232Z"
+    registryWrite: non-deferred
+    note: "Resolved stale app.tsx ownership precondition after related change closure."
+    intentId: registry-intent:v1:5116a1069b5972891594f97d320a5e7d
+    idempotencyKey: sha256:f720c5db3d02894207a9c7f7a87e5636e2ea078014d2d675731341e76228899f
+    transactionId: registry-transaction:v1:tasks-app-ownership-resolution
+  - phase: tasks
+    agent: deck-developer-task
+    model: openai/gpt-5.6-terra
+    timestamp: "2026-08-04T00:43:08.286Z"
+    registryWrite: non-deferred
+    note: "Recorded verified absolute Bun test runner and resolved P-ENV-001."
+    intentId: registry-intent:v1:78943d8507a1f557284fd6d63a3661d7
+    idempotencyKey: sha256:02434523b9763953935077f161ac07602af950bd21b02ff40880a5a9c22a3200
+    transactionId: registry-transaction:v1:preconditions-bun-ready

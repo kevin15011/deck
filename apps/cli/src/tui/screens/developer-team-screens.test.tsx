@@ -8,8 +8,8 @@ import {
   NoProvidersScreen,
 } from "./developer-team-screens";
 
-const orchestratorAssignments = { "deck-developer-orchestrator": "anthropic/claude-sonnet-4" };
-const orchestratorThinking = { "deck-developer-orchestrator": "medium" as const };
+const orchestratorAssignments = { "deck-lead": "anthropic/claude-sonnet-4" };
+const orchestratorThinking = { "deck-lead": "medium" as const };
 
 describe("Developer Team screens dashboard context regression", () => {
   test("Home Configure models no muestra contexto del dashboard ni cambia opciones", () => {
@@ -22,7 +22,7 @@ describe("Developer Team screens dashboard context regression", () => {
     );
 
     expect(output).toContain("Select an agent to configure");
-    expect(output).toContain("Orchestrator Agent");
+    expect(output).toContain("Lead");
     expect(output).toContain("anthropic/claude-sonnet-4 · thinking medium");
     expect(output).toContain("Finish configuration");
     expect(output).not.toContain("Dashboard context");
@@ -55,12 +55,12 @@ describe("Developer Team screens dashboard context regression", () => {
 
   test("dashboard context es aditivo: frontmatter de modelo/thinking coincide con ruta Home", () => {
     const modelAssignments: DeveloperTeamModelAssignments = {
-      "deck-developer-orchestrator": "openai-codex/gpt-5.5",
-      "deck-developer-apply-backend": "opencode-go/kimi-k2.6",
+      "deck-lead": "openai-codex/gpt-5.5",
+      "deck-apply-deep": "opencode-go/kimi-k2.6",
     };
     const thinkingAssignments: DeveloperTeamThinkingAssignments = {
-      "deck-developer-orchestrator": "high",
-      "deck-developer-apply-backend": "high",
+      "deck-lead": "high",
+      "deck-apply-deep": "high",
     };
 
     const homePlan = buildDeveloperTeamInstallPlan("/tmp/project", { modelAssignments, thinkingAssignments });
@@ -69,12 +69,12 @@ describe("Developer Team screens dashboard context regression", () => {
     const homeAgents = Object.fromEntries(homePlan.agents.map((agent) => [agent.agent.id, agent.content]));
     const dashboardAgents = Object.fromEntries(dashboardPlan.agents.map((agent) => [agent.agent.id, agent.content]));
 
-    expect(dashboardAgents["deck-developer-orchestrator"]).toBe(homeAgents["deck-developer-orchestrator"]);
-    expect(dashboardAgents["deck-developer-orchestrator"]).toContain("model: openai-codex/gpt-5.5");
-    expect(dashboardAgents["deck-developer-orchestrator"]).toContain("thinking: high");
-    expect(dashboardAgents["deck-developer-apply-backend"]).toBe(homeAgents["deck-developer-apply-backend"]);
-    expect(dashboardAgents["deck-developer-apply-backend"]).toContain("model: opencode-go/kimi-k2.6");
-    expect(dashboardAgents["deck-developer-apply-backend"]).not.toContain("thinking:");
+    expect(dashboardAgents["deck-lead"]).toBe(homeAgents["deck-lead"]);
+    expect(dashboardAgents["deck-lead"]).toContain("model: openai-codex/gpt-5.5");
+    expect(dashboardAgents["deck-lead"]).toContain("thinking: high");
+    expect(dashboardAgents["deck-apply-deep"]).toBe(homeAgents["deck-apply-deep"]);
+    expect(dashboardAgents["deck-apply-deep"]).toContain("model: opencode-go/kimi-k2.6");
+    expect(dashboardAgents["deck-apply-deep"]).not.toContain("thinking:");
   });
 
   test("DeveloperTeamReviewScreen preserva Home install/skip y solo agrega contexto cuando viene del dashboard", () => {

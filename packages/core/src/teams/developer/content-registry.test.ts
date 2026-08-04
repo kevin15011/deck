@@ -470,21 +470,17 @@ describe("getAgentContent with capabilityInstructions", () => {
 describe("code-economy injection", () => {
   // Target agents for code-economy injection per Spec/Design
   const CODE_ECONOMY_TARGET_AGENTS = [
-    "deck-developer-task",
-    "deck-developer-apply-general",
-    "deck-developer-apply-backend",
-    "deck-developer-apply-frontend",
-    "deck-developer-review",
+    "deck-architect",
+    "deck-apply-fast",
+    "deck-apply-deep",
+    "deck-quality",
   ] as const;
 
   // Non-target agents that should NOT receive code-economy
   const NON_TARGET_AGENTS = [
-    "deck-developer-explorer",
-    "deck-developer-proposal",
-    "deck-developer-spec",
-    "deck-developer-design",
-    "deck-developer-verify",
-    "deck-developer-archive",
+    "deck-lead",
+    "deck-investigate",
+    "deck-setup",
   ] as const;
 
   test("code-economy injects into target agents", () => {
@@ -621,7 +617,7 @@ describe("getTeamSessionInstructions with capabilityInstructions", () => {
   test("existing output unchanged when no bundle provided", () => {
     const instructions = getTeamSessionInstructions("developer-team");
     expect(instructions).toBeDefined();
-    expect(instructions).toContain("# Deck Developer Team");
+    expect(instructions).toContain("# Lead (deck-lead)");
     expect(instructions).not.toContain("## Package Instructions");
   });
 
@@ -719,23 +715,21 @@ describe("getAgentContentResult", () => {
   });
 
   test("returns ok: false with suggestions for typo in agent ID", () => {
-    // "orchstrator" is a typo of "orchestrator"
-    const result = getAgentContentResult("deck-developer-orchstrator");
+    const result = getAgentContentResult("deck-led");
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.agentId).toBe("deck-developer-orchstrator");
-      expect(result.error.suggestions).toContain("deck-developer-orchestrator");
+      expect(result.error.agentId).toBe("deck-led");
+      expect(result.error.suggestions).toContain("deck-lead");
       // Not in catalog, so fallbackAvailable is false
       expect(result.error.fallbackAvailable).toBe(false);
     }
   });
 
   test("returns ok: false with suggestions for prefix-matchable typo", () => {
-    // "deck-developer-orch" could suggest "deck-developer-orchestrator"
-    const result = getAgentContentResult("deck-developer-orch");
+    const result = getAgentContentResult("deck-app");
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.suggestions).toContain("deck-developer-orchestrator");
+      expect(result.error.suggestions).toContain("deck-apply-fast");
     }
   });
 
@@ -776,7 +770,7 @@ describe("getAgentContentResult", () => {
 
   test("suggestions are limited to maximum 3", () => {
     // Query that might match multiple agents
-    const result = getAgentContentResult("deck-developer-");
+    const result = getAgentContentResult("deck-");
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.suggestions.length).toBeLessThanOrEqual(3);
@@ -784,12 +778,12 @@ describe("getAgentContentResult", () => {
   });
 
   test("suggestions are sorted by relevance (prefix matches first)", () => {
-    const result = getAgentContentResult("deck-developer-");
+    const result = getAgentContentResult("deck-");
     expect(result.ok).toBe(false);
     if (!result.ok) {
       const suggestions = result.error.suggestions;
       // Prefix matches should appear first
-      const prefixMatches = suggestions.filter((id) => id.startsWith("deck-developer-"));
+      const prefixMatches = suggestions.filter((id) => id.startsWith("deck-"));
       expect(prefixMatches.length).toBeGreaterThan(0);
     }
   });
@@ -965,9 +959,9 @@ describe("Developer Team language policy composition", () => {
 // ---------------------------------------------------------------------------
 
 describe("orchestrator invariant injection", () => {
-  test("default session instructions contain compact invariants at start", () => {
+  test("default session instructions contain the adaptive contract at start", () => {
     const instructions = getTeamSessionInstructions("developer-team")!;
-    const invariantsIdx = instructions.indexOf("## Compact Orchestrator Invariants");
+    const invariantsIdx = instructions.indexOf("## Adaptive Developer Team Contract");
 
     expect(invariantsIdx).toBe(0); // Invariants at start of session instructions
   });
@@ -1030,9 +1024,9 @@ describe("orchestrator invariant injection", () => {
     expect(headerMatches).toHaveLength(1);
   });
 
-  test("invariant section appears before context-authority guidance", () => {
+  test("adaptive contract appears before context-authority guidance", () => {
     const instructions = getTeamSessionInstructions("developer-team")!;
-    const invariantsIdx = instructions.indexOf("## Compact Orchestrator Invariants");
+    const invariantsIdx = instructions.indexOf("## Adaptive Developer Team Contract");
     const authorityIdx = instructions.indexOf("## Context Authority");
 
     expect(invariantsIdx).toBe(0); // Invariants at start
@@ -1049,19 +1043,21 @@ describe("getTeamSessionInstructions with personality", () => {
   test("guia personality returns expanded teaching-tone variant", () => {
     const guiaInstructions = getTeamSessionInstructions("developer-team", { personality: "guia" });
     expect(guiaInstructions).toBeDefined();
-    expect(guiaInstructions).toContain("Communication Style — Guia");
+    expect(guiaInstructions).toContain("## Communication Style");
+    expect(guiaInstructions).toContain("teach through concrete product consequences");
     // Core present in composition
-    expect(guiaInstructions).toContain("# Deck Developer Team");
+    expect(guiaInstructions).toContain("# Lead (deck-lead)");
   });
 
   test("pragmatica personality returns compact coordinator behavior", () => {
     const pragmaticaInstructions = getTeamSessionInstructions("developer-team", { personality: "pragmatica" });
     expect(pragmaticaInstructions).toBeDefined();
-    expect(pragmaticaInstructions).toContain("# Deck Developer Team");
-    expect(pragmaticaInstructions).toContain("## Triage and Flow");
-    expect(pragmaticaInstructions).toContain("Delegate each phase to its registered specialist");
+    expect(pragmaticaInstructions).toContain("# Lead (deck-lead)");
+    expect(pragmaticaInstructions).toContain("## Route selection");
+    expect(pragmaticaInstructions).toContain("Quality is not a universal gate");
     // Layer present
-    expect(pragmaticaInstructions).toContain("Communication Style — Pragmatica");
+    expect(pragmaticaInstructions).toContain("## Communication Style");
+    expect(pragmaticaInstructions).toContain("outcome-first");
   });
 
   test("default (no personality) returns pragmatica variant — backward compatibility", () => {
@@ -1084,9 +1080,14 @@ describe("getTeamSessionInstructions with personality", () => {
 // ---------------------------------------------------------------------------
 
 describe("shared skill discovery composition", () => {
-  const specialistAgentIds = DEVELOPER_AGENT_IDS.filter(
-    (id) => id !== "deck-developer-orchestrator",
-  );
+  const specialistAgentIds = [
+    "deck-investigate",
+    "deck-architect",
+    "deck-apply-fast",
+    "deck-apply-deep",
+    "deck-quality",
+    "deck-setup",
+  ] as const;
 
   test("composes the specialist contract exactly once for every specialist in both profiles", () => {
     for (const promptProfile of ["legacy", "compact"] as const) {
@@ -1104,7 +1105,7 @@ describe("shared skill discovery composition", () => {
 
   test("places specialist discovery content before capability bundles without injecting registry data", () => {
     const bundle = buildCapabilityInstructionBundle(["codebase-memory"]);
-    const content = getAgentContent("deck-developer-apply-general", {
+    const content = getAgentContent("deck-apply-fast", {
       promptProfile: "compact",
       capabilityInstructions: bundle,
     })!;

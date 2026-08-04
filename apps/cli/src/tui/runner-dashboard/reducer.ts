@@ -12,6 +12,7 @@ import {
   type CapabilityStatus,
   type RunnerDashboardScreen,
   type RunnerDashboardState,
+  type RunnerOperationIdentity,
   type RunnerReviewPlan,
   type SupermemorySetupState,
 } from "./state";
@@ -35,6 +36,10 @@ export type RunnerDashboardAction =
   | { type: "set-team-selected"; teamId: string; selected: boolean }
   | { type: "toggle-package-instruction"; packageId: CapabilityId }
   | { type: "set-package-instruction"; packageId: CapabilityId; enabled: boolean }
+  | { type: "set-runner"; runnerScope: RunnerDashboardState["runnerScope"]; operationId?: string }
+  | { type: "set-runner-scope"; runnerScope: RunnerDashboardState["runnerScope"]; operationId?: string }
+  | { type: "new-operation"; runnerScope?: Exclude<RunnerDashboardState["runnerScope"], "all">; operationId: string }
+  | { type: "start-operation"; runnerScope?: Exclude<RunnerDashboardState["runnerScope"], "all">; operationId: string }
   | { type: "enter-review"; inventory: unknown }
   | { type: "regenerate-plan"; inventory: unknown }
   | { type: "start-install" }
@@ -75,9 +80,9 @@ export function reduceRunnerDashboard(
     case "cursor-down-with-limit":
       return withClampedCursor({ ...state, cursor: state.cursor + 1 }, action.packageCount);
     case "toggle-capability":
-      return setCapability(state, action.capabilityId, !state.selectedCapabilities[action.capabilityId]);
+      return setCapability(state, action.capabilityId, !state.selectedCapabilities[action.capabilityId], true);
     case "set-capability":
-      return setCapability(state, action.capabilityId, action.selected);
+      return setCapability(state, action.capabilityId, action.selected, false);
     case "set-capability-statuses":
       return invalidatePlan({
         ...state,
@@ -98,6 +103,12 @@ export function reduceRunnerDashboard(
       return setPackageInstruction(state, action.packageId, !state.packageInstructions[action.packageId]);
     case "set-package-instruction":
       return setPackageInstruction(state, action.packageId, action.enabled);
+    case "set-runner":
+    case "set-runner-scope":
+      return beginRunnerOperation(state, action.runnerScope, action.operationId);
+    case "new-operation":
+    case "start-operation":
+      return beginRunnerOperation(state, action.runnerScope ?? state.runnerScope, action.operationId);
     case "enter-review":
       return enterReview(state, action.inventory, planBuilder);
     case "regenerate-plan":
@@ -107,7 +118,12 @@ export function reduceRunnerDashboard(
     case "complete":
       return navigate(state, "complete");
     case "reset":
-      return createDefaultRunnerDashboardState(action.state);
+      return {
+        ...createDefaultRunnerDashboardState(action.state),
+        explicitlySelectedCapabilities: {},
+        operationId: undefined,
+        currentOperation: undefined,
+      };
     default:
       return state;
   }
@@ -146,8 +162,29 @@ function setCapability(
   state: RunnerDashboardState,
   capabilityId: CapabilityId,
   selected: boolean,
+  fromUserToggle: boolean,
 ): RunnerDashboardState {
-  if (Boolean(state.selectedCapabilities[capabilityId]) === selected) return state;
+  const currentSelected = Boolean(state.selectedCapabilities[capabilityId]);
+  const currentExplicit = Boolean(state.explicitlySelectedCapabilities[capabilityId]);
+  const explicitlySelectedCapabilities = { ...state.explicitlySelectedCapabilities };
+  let currentOperation = state.currentOperation;
+
+  if (capabilityId === "serena") {
+    if (!selected) {
+      delete explicitlySelectedCapabilities.serena;
+      if (currentOperation) currentOperation = { ...currentOperation, explicitlySelected: false };
+    } else if (fromUserToggle && isCurrentOperation(state)) {
+      explicitlySelectedCapabilities.serena = true;
+      currentOperation = {
+        ...getCurrentOperation(state)!,
+        explicitlySelected: true,
+      };
+    }
+  }
+
+  const explicitChanged = currentExplicit !== Boolean(explicitlySelectedCapabilities[capabilityId])
+    || currentOperation !== state.currentOperation;
+  if (currentSelected === selected && !explicitChanged) return state;
 
   return invalidatePlan({
     ...state,
@@ -155,6 +192,54 @@ function setCapability(
       ...state.selectedCapabilities,
       [capabilityId]: selected,
     },
+    explicitlySelectedCapabilities,
+    currentOperation,
+  });
+}
+
+function getCurrentOperation(state: RunnerDashboardState): RunnerOperationIdentity | undefined {
+  if (state.currentOperation) return state.currentOperation;
+  if (
+    (state.runnerScope === "pi" || state.runnerScope === "opencode")
+    && typeof state.operationId === "string"
+    && state.operationId.length > 0
+  ) {
+    return {
+      runner: state.runnerScope,
+      operationId: state.operationId,
+      explicitlySelected: false,
+    };
+  }
+  return undefined;
+}
+
+function isCurrentOperation(state: RunnerDashboardState): boolean {
+  const operation = getCurrentOperation(state);
+  return Boolean(
+    operation
+    && (state.runnerScope === "pi" || state.runnerScope === "opencode")
+    && operation.runner === state.runnerScope
+    && operation.operationId.length > 0,
+  );
+}
+
+function beginRunnerOperation(
+  state: RunnerDashboardState,
+  runnerScope: RunnerDashboardState["runnerScope"],
+  operationId?: string,
+): RunnerDashboardState {
+  const currentOperation = runnerScope === "pi" || runnerScope === "opencode"
+    ? operationId
+      ? { runner: runnerScope, operationId, explicitlySelected: false }
+      : undefined
+    : undefined;
+
+  return invalidatePlan({
+    ...state,
+    runnerScope,
+    operationId,
+    currentOperation,
+    explicitlySelectedCapabilities: {},
   });
 }
 

@@ -206,13 +206,13 @@ artifacts:
   proposal: proposal.md
 provenance:
   - phase: explore
-    agent: deck-developer-explorer
+    agent: deck-investigate
     model: opencode-go/kimi-k2.6
     timestamp: "2026-06-12"
     registryWrite: non-deferred
     note: "Initial exploration"
   - phase: proposal
-    agent: deck-developer-proposal
+    agent: deck-architect
     model: openai/gpt-5.5
     timestamp: "2026-06-12"
     registryWrite: non-deferred
@@ -229,7 +229,7 @@ events:
     event: explore.completed
     artifact: exploration.md
     timestamp: "2026-06-12"
-    actor: deck-developer-explorer
+    actor: deck-investigate
     notes:
       - "Completed exploration phase"
   - phase: proposal
@@ -237,7 +237,7 @@ events:
     event: proposal.completed
     artifact: proposal.md
     timestamp: "2026-06-12"
-    actor: deck-developer-proposal
+    actor: deck-architect
     registry_write: non-deferred
     notes:
       - "Completed proposal phase"

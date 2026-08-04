@@ -12,10 +12,10 @@ function createTempDir(prefix = "deck-test-"): string {
 function writeOrchestratorAssignment(projectRoot: string, model = "openai-codex/gpt-5.5", thinking: string | undefined = "medium") {
   mkdirSync(join(projectRoot, ".pi", "agents"), { recursive: true });
   writeFileSync(
-    join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"),
+    join(projectRoot, ".pi", "agents", "deck-lead.md"),
     [
       "---",
-      "name: deck-developer-orchestrator",
+      "name: deck-lead",
       `model: ${model}`,
       ...(thinking ? [`thinking: ${thinking}`] : []),
       "---",
@@ -97,8 +97,8 @@ describe("runPiLaunch", () => {
       );
 
       expect(result.status).toBe("ready");
-      expect(prompt).toContain("# Deck Developer Team Coordinator");
-      expect(prompt).toContain("Runtime-Enforced Team Contract");
+      expect(prompt).toContain("# Lead (deck-lead)");
+      expect(prompt).toContain("Adaptive Developer Team Contract");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -281,7 +281,7 @@ describe("runPiLaunch", () => {
       expect(systemPromptContent).toContain("## Adaptive Memory (provider-injected)");
 
       // Agent files should be materialized with Adaptive Memory section and tool bindings
-      const orchestratorPath = path.join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md");
+      const orchestratorPath = path.join(projectRoot, ".pi", "agents", "deck-lead.md");
       expect(fs.existsSync(orchestratorPath)).toBe(true);
       const orchestratorContent = fs.readFileSync(orchestratorPath, "utf-8");
       expect(orchestratorContent).toContain("## Adaptive Memory (provider-injected)");
@@ -291,7 +291,7 @@ describe("runPiLaunch", () => {
       expect(orchestratorContent).toContain("memory_write");
 
       // Skill files should be materialized with Adaptive Memory section
-      const skillPath = path.join(projectRoot, ".pi", "skills", "deck-developer-orchestrator", "SKILL.md");
+      const skillPath = path.join(projectRoot, ".pi", "skills", "deck-lead", "SKILL.md");
       expect(fs.existsSync(skillPath)).toBe(true);
       const skillContent = fs.readFileSync(skillPath, "utf-8");
       expect(skillContent).toContain("## Adaptive Memory (provider-injected)");
@@ -345,7 +345,7 @@ describe("runPiLaunch", () => {
         expect(result.plan.args).toContain("medium");
       }
 
-      const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md");
+      const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-lead.md");
       const orchestratorContent = readFileSync(orchestratorPath, "utf-8");
       expect(orchestratorContent).toContain("model: openai-codex/gpt-5.5");
       expect(orchestratorContent).toContain("thinking: medium");
@@ -386,7 +386,7 @@ describe("runPiLaunch", () => {
         expect(result.plan.args).not.toContain("high");
       }
 
-      const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md");
+      const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-lead.md");
       const orchestratorContent = readFileSync(orchestratorPath, "utf-8");
       expect(orchestratorContent).toContain("model: opencode-go/kimi-k2.6");
       expect(orchestratorContent).not.toContain("thinking:");
@@ -423,7 +423,7 @@ describe("runPiLaunch", () => {
         expect(result.plan.args).not.toContain("--thinking");
       }
 
-      const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md");
+      const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-lead.md");
       const orchestratorContent = readFileSync(orchestratorPath, "utf-8");
       expect(orchestratorContent).toContain("model: custom/no-reasoning");
       expect(orchestratorContent).not.toContain("thinking:");

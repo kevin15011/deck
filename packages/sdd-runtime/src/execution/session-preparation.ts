@@ -49,7 +49,7 @@ export type SessionPreparationOperationV1 =
 export interface SessionPreparationDelegationV1 {
   readonly sessionIdDigest: Sha256Digest;
   readonly invocationId: string;
-  readonly agentId: "deck-init";
+  readonly agentId: "deck-setup";
   readonly activeRunnerId: string;
   readonly projectRootDigest: Sha256Digest;
   readonly needs: readonly SessionPreparationNeedV1[];
@@ -266,11 +266,11 @@ function parseBlockedTargets(value: unknown): readonly string[] {
 function parseDelegation(value: SessionPreparationDelegationV1): SessionPreparationDelegationV1 {
   assertDigest(value.sessionIdDigest, "delegation.sessionIdDigest");
   assertDigest(value.projectRootDigest, "delegation.projectRootDigest");
-  if (value.agentId !== "deck-init") throw new Error("invalid-evidence: delegation.agentId");
+  if (value.agentId !== "deck-setup") throw new Error("invalid-evidence: delegation.agentId");
   return deepFreeze({
     sessionIdDigest: value.sessionIdDigest,
     invocationId: boundedString(value.invocationId, "delegation.invocationId"),
-    agentId: "deck-init",
+    agentId: "deck-setup",
     activeRunnerId: boundedString(value.activeRunnerId, "delegation.activeRunnerId"),
     projectRootDigest: value.projectRootDigest,
     needs: parseNeeds(value.needs),

@@ -63,8 +63,8 @@ describe("opencode / cross-cutting runner inventory behavior", () => {
         }),
       });
 
-      expect(config.modelAssignments["deck-developer-orchestrator"]).toBe("retired/model");
-      expect(config.thinkingAssignments["deck-developer-orchestrator"]).toBe("custom-legacy-token");
+      expect(config.modelAssignments["deck-lead"]).toBe("retired/model");
+      expect(config.thinkingAssignments["deck-lead"]).toBe("custom-legacy-token");
     });
   });
 });

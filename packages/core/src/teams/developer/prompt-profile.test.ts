@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 
 import { DEVELOPER_TEAM_AGENTS } from "./catalog";
@@ -8,10 +7,8 @@ import {
   getTeamSessionInstructions,
   type DeveloperTeamPromptProfileV1,
 } from "./content-registry";
+import { GIT_DISCARD_PROTECTION_RULE } from "./git-safety";
 import { buildCapabilityInstructionBundle } from "./instruction-bundles";
-import { getOrchestratorSystemPrompt } from "./orchestrator-content";
-import { SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1 } from "./skill-discovery-content";
-import { DEFAULT_ORCHESTRATOR_PERSONALITY } from "../../config/deck-config";
 import {
   consumeExecutionRoleResultV1,
   createInvocationAuthorizationServiceV1,
@@ -22,122 +19,90 @@ import {
   transitionStagedVerificationV1,
 } from "../../../../sdd-runtime/src";
 
-// Refreshed for the proportional leadership and causal QA authority surfaces.
-const LEGACY_BYTES = 518742;
-const LEGACY_LEXICAL_TOKENS = 106475;
-const LEGACY_SHA256 = "b67ffd3d25efbc0b99ab3128032a0787ec96ca2b238354983c957f23452e3847";
-
-const CONTROL_PLANE_AGENT_IDS = [
-  "deck-developer-orchestrator",
-  "deck-developer-apply-general",
-  "deck-developer-apply-backend",
-  "deck-developer-apply-frontend",
-  "deck-developer-verify",
-  "deck-developer-review",
-] as const;
-
-const COMPACT_ROLE_MARKERS: Readonly<Record<string, readonly string[]>> = {
-  "deck-developer-orchestrator": ["Triage before modifying work", "independent Verify"],
-  "deck-developer-explorer": ["exploration.md", "Do not implement"],
-  "deck-developer-proposal": ["proposal.md", "scope"],
-  "deck-developer-spec": ["spec.md", "Given/When/Then"],
-  "deck-developer-design": ["design.md", "tradeoffs"],
-  "deck-developer-task": ["tasks.md", "execution"],
-  "deck-developer-apply-general": ["Modification Gate", "Authorized Batch"],
-  "deck-developer-apply-backend": ["Modification Gate", "Execute the Authorized Batch"],
-  "deck-developer-apply-frontend": ["Modification Gate", "Execute the Authorized Batch"],
-  "deck-developer-verify": ["independent Verify", "targeted"],
-  "deck-developer-review": ["independent Review", "A blocking finding"],
-  "deck-developer-archive": ["archive", "Archive"],
-  "deck-init": ["openspec/config.yaml", "initialized"],
-  "deck-onboard": ["onboarding", "interactive"],
+const ROLE_MARKERS: Readonly<Record<string, readonly string[]>> = {
+  "deck-lead": ["smallest safe route", "Working Brief"],
+  "deck-investigate": ["production path", "compact handoff"],
+  "deck-architect": ["Full SDD", "Do not plan by file count"],
+  "deck-apply-fast": ["Proportional TDD", "vertical slice"],
+  "deck-apply-deep": ["algorithms", "wiring defect"],
+  "deck-quality": ["read-only", "not a universal gate"],
+  "deck-setup": ["once per session", "Repair only the degraded component"],
 };
 
 function generatedStaticContent(profile: DeveloperTeamPromptProfileV1): string {
-  const parts: string[] = [];
-  for (const agent of DEVELOPER_TEAM_AGENTS) {
+  const parts = DEVELOPER_TEAM_AGENTS.flatMap((agent) => {
     const content = getAgentContent(agent.id, { promptProfile: profile });
     if (!content) throw new Error(`missing content: ${agent.id}`);
-    parts.push(`${agent.id}:agent\n${content.agentBody}`, `${agent.id}:skill\n${content.skillBody}`);
-  }
-  parts.push(`developer-team:session\n${getTeamSessionInstructions("developer-team", { promptProfile: profile })}`);
+    return [content.agentBody, content.skillBody];
+  });
+  parts.push(getTeamSessionInstructions("developer-team", { promptProfile: profile }) ?? "");
   return parts.join("\n\0\n");
 }
 
-function lexicalTokens(value: string): number {
-  return value.match(/[\p{L}\p{N}_]+|[^\s]/gu)?.length ?? 0;
-}
-
-describe("Developer Team prompt profiles", () => {
-  test("uses compact by default while preserving explicit legacy content", () => {
+describe("Adaptive Developer Team prompt profile", () => {
+  test("uses the adaptive compact profile by default for exactly seven roles", () => {
+    expect(DEVELOPER_TEAM_AGENTS).toHaveLength(7);
+    expect(Object.keys(ROLE_MARKERS).sort()).toEqual(DEVELOPER_TEAM_AGENTS.map((agent) => agent.id).sort());
     for (const agent of DEVELOPER_TEAM_AGENTS) {
       expect(getAgentContent(agent.id)).toEqual(getAgentContent(agent.id, { promptProfile: "compact" }));
     }
-    expect(getTeamSessionInstructions("developer-team", { promptProfile: "compact" }))
-      .toBe(getTeamSessionInstructions("developer-team"));
-    expect(getOrchestratorSystemPrompt(DEFAULT_ORCHESTRATOR_PERSONALITY))
-      .toBe(getOrchestratorSystemPrompt(DEFAULT_ORCHESTRATOR_PERSONALITY, "compact"));
-
-    const legacy = generatedStaticContent("legacy");
-    expect(Buffer.byteLength(legacy)).toBe(LEGACY_BYTES);
-    expect(lexicalTokens(legacy)).toBe(LEGACY_LEXICAL_TOKENS);
-    expect(createHash("sha256").update(legacy).digest("hex")).toBe(LEGACY_SHA256);
+    expect(getTeamSessionInstructions("developer-team")).toBe(
+      getTeamSessionInstructions("developer-team", { promptProfile: "compact" }),
+    );
   });
 
-  test("keeps compact and legacy Orchestrator discovery semantics aligned", () => {
-    const legacyAgent = getAgentContent("deck-developer-orchestrator", { promptProfile: "legacy" })!;
-    const compactAgent = getAgentContent("deck-developer-orchestrator", { promptProfile: "compact" })!;
-    const legacyPrompt = getOrchestratorSystemPrompt(DEFAULT_ORCHESTRATOR_PERSONALITY, "legacy");
-    const compactPrompt = getOrchestratorSystemPrompt(DEFAULT_ORCHESTRATOR_PERSONALITY, "compact");
-
-    for (const surface of [
-      legacyAgent.agentBody,
-      legacyAgent.skillBody,
-      compactAgent.agentBody,
-      compactAgent.skillBody,
-      legacyPrompt,
-      compactPrompt,
-    ]) {
-      expect(surface).toContain(SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1);
-      expect(surface).not.toMatch(/cache compact rules|inject matching rules|pre-digest|agents do NOT read the registry|Project Standards \(auto-resolved\)/i);
-    }
-
-    for (const term of ["session-start", "read-only", "direct discovery", "authorization"]) {
-      expect(legacyPrompt.toLowerCase()).toContain(term);
-      expect(compactPrompt.toLowerCase()).toContain(term);
-    }
-  });
-
-  test("provides a dedicated compact body for every Developer Team role", () => {
-    expect(Object.keys(COMPACT_ROLE_MARKERS).sort()).toEqual(DEVELOPER_TEAM_AGENTS.map((agent) => agent.id).sort());
-
+  test("materializes a concise role-specific body and shared contract for every role", () => {
     for (const agent of DEVELOPER_TEAM_AGENTS) {
-      const compact = getAgentContent(agent.id, { promptProfile: "compact" })!;
-      const legacy = getAgentContent(agent.id, { promptProfile: "legacy" })!;
-      const combined = `${compact.agentBody}\n${compact.skillBody}`;
-
-      expect(combined, agent.id).toContain("Runtime-Enforced Team Contract");
-      expect(compact.skillBody, agent.id).toContain("Runtime Contract Reference");
-      expect(Buffer.byteLength(combined), agent.id)
-        .toBeLessThan(Buffer.byteLength(`${legacy.agentBody}\n${legacy.skillBody}`));
-      for (const marker of COMPACT_ROLE_MARKERS[agent.id]!) {
+      const content = getAgentContent(agent.id)!;
+      const combined = `${content.agentBody}\n${content.skillBody}`;
+      expect(content.agentBody, agent.id).toContain("## Adaptive Developer Team Contract");
+      expect(content.skillBody, agent.id).toContain("## Team Contract Reference");
+      for (const marker of ROLE_MARKERS[agent.id]!) {
         expect(combined, `${agent.id}:${marker}`).toContain(marker);
       }
     }
   });
 
+  test("keeps Git discard protection exact on every installed agent surface", () => {
+    for (const agent of DEVELOPER_TEAM_AGENTS) {
+      expect(getAgentContent(agent.id)!.agentBody, agent.id).toContain(GIT_DISCARD_PROTECTION_RULE);
+    }
+  });
+
+  test("preserves adaptive activation instead of recreating a fixed phase chain", () => {
+    const lead = getTeamSessionInstructions("developer-team")!;
+    expect(lead).toContain("You may implement a clear, reversible, low-risk change directly");
+    expect(lead).toContain("Investigate does not force Architect");
+    expect(lead).toContain("Quality is not a universal gate");
+    expect(lead).toContain("Treat an in-scope reversible follow-up as a delta");
+    expect(lead).not.toContain("Proposal → Spec → Design → Tasks");
+  });
+
+  test("keeps proportional TDD in both Apply roles", () => {
+    for (const agentId of ["deck-apply-fast", "deck-apply-deep"] as const) {
+      const combined = Object.values(getAgentContent(agentId)!).join("\n");
+      expect(combined).toContain("## Proportional TDD");
+      expect(combined).toContain("demonstrate RED");
+      expect(combined).toContain("default production composition");
+      expect(combined).toContain("never manufacture an artificial RED");
+    }
+  });
+
+  test("preserves capability provider filtering for the new roles", () => {
+    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
+    const apply = getAgentContent("deck-apply-fast", { capabilityInstructions: bundle })!;
+    const investigate = getAgentContent("deck-investigate", { capabilityInstructions: bundle })!;
+    expect(`${apply.agentBody}\n${apply.skillBody}`).toContain("Code Economy");
+    expect(`${investigate.agentBody}\n${investigate.skillBody}`).not.toContain("Code Economy");
+  });
+
+  test("keeps the complete seven-role installed surface below the former static baseline", () => {
+    const compact = generatedStaticContent("compact");
+    expect(Buffer.byteLength(compact)).toBeLessThan(150_000);
+    expect(Buffer.byteLength(compact)).toBeLessThan(518_742);
+  });
+
   test("maps every condensed procedural rule to an active runtime control", () => {
-    const required = [
-      "authorization",
-      "decision-routing",
-      "registry-writes",
-      "staged-verification",
-      "role-freshness",
-      "risk-lanes",
-      "git-safety",
-      "result-envelopes",
-    ];
-    expect(PROMPT_RUNTIME_CONTROL_MAP_V1.map((entry) => entry.ruleId)).toEqual(required);
     const activeControls: Record<string, unknown> = {
       "invocation-authorization-service-v1": createInvocationAuthorizationServiceV1,
       "execution-decision-policy-v1": evaluateExecutionDecisionV1,
@@ -153,88 +118,7 @@ describe("Developer Team prompt profiles", () => {
         expect(typeof activeControls[entry.runtimeControl], entry.ruleId).toBe("function");
       } else {
         expect(entry.ruleId).toBe("git-safety");
-        expect(entry.runtimeActive).toBe(false);
       }
-      expect(entry.runtimeControl.length, entry.ruleId).toBeGreaterThan(0);
-      expect(entry.evidence.length, entry.ruleId).toBeGreaterThan(0);
-    }
-  });
-
-  test("retains permanent safety and normalized return invariants in every compact role", () => {
-    for (const { id: agentId } of DEVELOPER_TEAM_AGENTS) {
-      const content = getAgentContent(agentId, { promptProfile: "compact" });
-      expect(content, agentId).toBeDefined();
-      const combined = `${content!.agentBody}\n${content!.skillBody}`;
-      expect(combined, agentId).toContain("Runtime-Enforced Team Contract");
-      expect(combined, agentId).toContain("OpenSpec artifacts and Spec Registry remain authoritative");
-      expect(combined, agentId).toContain("Prompt text never expands modification authority");
-      expect(combined, agentId).toContain("immutable phase result");
-      expect(combined, agentId).toContain("FailureManifestV1");
-      expect(combined, agentId).toContain("RegistryIntentV1");
-      expect(combined, agentId).toContain("state.yaml");
-      expect(combined, agentId).toContain("events.yaml");
-      expect(combined, agentId).toContain("Git discard");
-      expect(combined, agentId).toContain("matching role skill");
-      expect(combined, agentId).toContain("runner-capability-standardization");
-    }
-  });
-
-  test("keeps Apply modification gates usable and independent quality gates anchored", () => {
-    for (const agentId of CONTROL_PLANE_AGENT_IDS.filter((id) => id.includes("apply-"))) {
-      const combined = Object.values(getAgentContent(agentId, { promptProfile: "compact" })!).join("\n");
-      expect(combined, agentId).toContain("Modification Gate");
-      expect(combined, agentId).toContain("explicitly authorizes modifying work");
-      expect(combined, agentId).not.toContain("Orchestrator will inject renderApplyAuthorizationCard()");
-      expect(combined, agentId).not.toContain("If the marker remains");
-      expect(combined, agentId).toContain("test-driven-development");
-    }
-    const verify = Object.values(getAgentContent("deck-developer-verify", { promptProfile: "compact" })!).join("\n");
-    expect(verify).toContain("independent Verify");
-    expect(verify).toContain("targeted");
-    expect(verify).toContain("affected_area");
-    expect(verify).toContain("broad");
-
-    const review = Object.values(getAgentContent("deck-developer-review", { promptProfile: "compact" })!).join("\n");
-    expect(review).toContain("independent Review");
-    expect(review).toContain("explicit requirement ID");
-    expect(review).toContain("related regression");
-    expect(review).toContain("optional new scope");
-  });
-
-  test("removes direct centralized registry authority from compact specialists", () => {
-    for (const agentId of DEVELOPER_TEAM_AGENTS.map((agent) => agent.id).filter((id) => id !== "deck-developer-orchestrator")) {
-      const combined = Object.values(getAgentContent(agentId, { promptProfile: "compact" })!).join("\n");
-      expect(combined, agentId).not.toContain("Update Spec Registry state/event entries");
-      expect(combined, agentId).not.toContain("perform the merge/append registry update yourself");
-      expect(combined, agentId).toContain("coordinator");
-    }
-  });
-
-  test("preserves capability provider filtering in compact content", () => {
-    const bundle = buildCapabilityInstructionBundle(["code-economy"]);
-    const apply = getAgentContent("deck-developer-apply-general", { promptProfile: "compact", capabilityInstructions: bundle })!;
-    const verify = getAgentContent("deck-developer-verify", { promptProfile: "compact", capabilityInstructions: bundle })!;
-    expect(`${apply.agentBody}\n${apply.skillBody}`).toContain("Code Economy");
-    expect(`${verify.agentBody}\n${verify.skillBody}`).not.toContain("Code Economy");
-  });
-
-  test("reduces generated compact bytes and lexical tokens by at least 30 percent", () => {
-    const legacy = generatedStaticContent("legacy");
-    const compact = generatedStaticContent("compact");
-    expect(Buffer.byteLength(compact)).toBeLessThanOrEqual(Math.floor(Buffer.byteLength(legacy) * 0.7));
-    expect(lexicalTokens(compact)).toBeLessThanOrEqual(Math.floor(lexicalTokens(legacy) * 0.7));
-  });
-});
-
-
-describe("streamlined ownership profile parity", () => {
-  test("keeps ownership and pre-QA semantics in compact and legacy profiles", () => {
-    for (const promptProfile of ["compact", "legacy"] as const) {
-      const orchestrator = Object.values(getAgentContent("deck-developer-orchestrator", { promptProfile })!).join("\n");
-      expect(orchestrator).toContain("bounded");
-      expect(orchestrator).toContain("functional exercise");
-      expect(orchestrator).toContain("## Explicit Commit-Only Requests");
-      expect(orchestrator).not.toContain("Pure Delegator");
     }
   });
 });

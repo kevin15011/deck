@@ -180,7 +180,7 @@ export {
 // Spec Registry — OpenSpec types, path helpers, and event model
 export * from "./spec-registry";
 
-// Bootstrap skills — deck-init and deck-onboard
+// Standalone lifecycle skills — deck-onboard and deck-archive
 export * from "./skills/bootstrap";
 
 // Runner Capability / Parity Registry (Batch A - Core foundation)
@@ -190,3 +190,6 @@ export * from "./shared-binary-usability";
 
 // Runner Install Preflight Types (Batch B - Install quality)
 export * from "./runner-install-preflight";
+
+// Runner-neutral Serena prerequisite bootstrap and evidence-gated contracts.
+export * from "./serena-bootstrap";

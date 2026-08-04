@@ -2,7 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { stripVTControlCharacters } from "node:util";
 import { MenuList } from "../components/menu-list";
-import type { RunnerActionRunResult } from "../runner-dashboard/action-runner";
+import type { RunnerActionRunResult, RunnerSerenaOutcome, RunnerSerenaStage } from "../runner-dashboard/action-runner";
 import {
   getAdaptiveMemorySummary,
   getDashboardSectionSummaries,
@@ -22,6 +22,9 @@ type RunnerDashboardScreensProps = {
   canRunPlan?: boolean;
   runBlockDiagnostics?: DashboardRunDiagnostic[];
   capabilityResolver?: CapabilityResolver;
+  serenaStages?: readonly RunnerSerenaStage[];
+  serenaOutcome?: RunnerSerenaOutcome;
+  cancellationRequested?: boolean;
 };
 
 /**
@@ -30,7 +33,7 @@ type RunnerDashboardScreensProps = {
  * Works with any runner (Pi, OpenCode, etc.) via the capabilityResolver.
  * Dashboard sections: Packages, Adaptive Memory, Teams, Review & Install.
  */
-export function RunnerDashboardScreens({ state, installResults = [], completionStatus, canRunPlan, runBlockDiagnostics = [], capabilityResolver }: RunnerDashboardScreensProps) {
+export function RunnerDashboardScreens({ state, installResults = [], completionStatus, canRunPlan, runBlockDiagnostics = [], capabilityResolver, serenaStages = [], serenaOutcome, cancellationRequested = false }: RunnerDashboardScreensProps) {
   switch (state.screen) {
     case "packages-detail":
       return <PackagesDetail state={state} resolver={capabilityResolver} />;
@@ -43,7 +46,7 @@ export function RunnerDashboardScreens({ state, installResults = [], completionS
     case "review-plan":
       return <ReviewPlanScreen state={state} canRunPlan={canRunPlan} runBlockDiagnostics={runBlockDiagnostics} />;
     case "install-progress":
-      return <InstallProgressScreen state={state} results={installResults} />;
+      return <InstallProgressScreen state={state} results={installResults} serenaStages={serenaStages} serenaOutcome={serenaOutcome} cancellationRequested={cancellationRequested} />;
     case "complete":
       return <DashboardCompleteScreen results={installResults} completionStatus={completionStatus} runnerScope={state.runnerScope} />;
     case "dashboard":
@@ -262,7 +265,8 @@ const DASHBOARD_CAUSE_SCALAR_LIMIT = 240;
 const DASHBOARD_CAUSE_BYTE_LIMIT = 320;
 
 function dashboardActionMessage(result: RunnerActionRunResult): string {
-  return sanitizeDashboardText(result.message) || "Action completed.";
+  const sanitized = sanitizeDashboardText(result.message) || "Action completed.";
+  return truncateDashboardUtf8(truncateDashboardScalars(sanitized, DASHBOARD_CAUSE_SCALAR_LIMIT), DASHBOARD_CAUSE_BYTE_LIMIT);
 }
 
 function dashboardActionSymbol(status: RunnerActionRunResult["status"]): string {
@@ -308,6 +312,7 @@ function sanitizeDashboardText(value: unknown): string {
   text = text
     .replace(new RegExp(`((?:${keys})\\s*[:=]\\s*)[^\\s,;]+`, "giu"), "$1[REDACTED]")
     .replace(/\bBearer\s+[^\s,;]+/giu, "Bearer [REDACTED]")
+    .replace(/\braw\b/giu, "[REDACTED]")
     .replace(/\b[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[REDACTED]")
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[REDACTED]")
     .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, "[REDACTED]")
@@ -368,15 +373,69 @@ function truncateDashboardUtf8(value: string, maxBytes: number): string {
   return `${prefix}${suffix}`;
 }
 
-function InstallProgressScreen({ state, results }: { state: RunnerDashboardState; results: RunnerActionRunResult[] }) {
+const SERENA_STAGE_LABELS: Readonly<Record<RunnerSerenaStage, string>> = {
+  "preparing-uv": "Preparing uv",
+  "installing-serena": "Installing Serena",
+  "validating-serena": "Validating Serena",
+  "configuring-mcp": "Configuring MCP",
+};
+
+const SERENA_STAGE_ORDER: readonly RunnerSerenaStage[] = [
+  "preparing-uv",
+  "installing-serena",
+  "validating-serena",
+  "configuring-mcp",
+];
+
+function serenaOutcomeFromResults(results: readonly RunnerActionRunResult[]): RunnerSerenaOutcome | undefined {
+  return [...results].reverse().find((result) => result.serenaOutcome)?.serenaOutcome;
+}
+
+function serenaStagesFromResults(results: readonly RunnerActionRunResult[]): RunnerSerenaStage[] {
+  return results
+    .map((result) => result.serenaStage)
+    .filter((stage): stage is RunnerSerenaStage => Boolean(stage));
+}
+
+function outcomeLabel(outcome: RunnerSerenaOutcome): string {
+  return outcome.charAt(0).toUpperCase() + outcome.slice(1);
+}
+
+function InstallProgressScreen({
+  state,
+  results,
+  serenaStages,
+  serenaOutcome,
+  cancellationRequested,
+}: {
+  state: RunnerDashboardState;
+  results: RunnerActionRunResult[];
+  serenaStages: readonly RunnerSerenaStage[];
+  serenaOutcome?: RunnerSerenaOutcome;
+  cancellationRequested: boolean;
+}) {
   const executed = results.filter((r) => r.status === "executed");
   const failed = results.filter((r) => r.status === "failed");
   const skipped = results.filter((r) => r.status === "skipped");
+  const observedStages = new Set([...serenaStages, ...serenaStagesFromResults(results)]);
+  const orderedStages = SERENA_STAGE_ORDER.filter((stage) => observedStages.has(stage));
+  const observedOutcome = serenaOutcome ?? serenaOutcomeFromResults(results);
 
   return (
     <Box flexDirection="column">
       <Text bold>Install Progress</Text>
       <Text dimColor>{executed.length} executed, {failed.length} failed, {skipped.length} skipped.</Text>
+      {orderedStages.length > 0 && (
+        <Box marginTop={1} flexDirection="column" aria-label="Serena installation stages">
+          {orderedStages.map((stage) => <Text key={stage}>• {SERENA_STAGE_LABELS[stage]}</Text>)}
+        </Box>
+      )}
+      {cancellationRequested && (
+        <Text color="yellow">Cancellation requested; waiting for the active command to stop.</Text>
+      )}
+      {observedOutcome && (
+        <Text>Status: Serena {outcomeLabel(observedOutcome)}.</Text>
+      )}
       {results.length > 0 && (
         <Box marginTop={1} flexDirection="column">
           {results.slice(-5).map((r, i) => {
@@ -402,10 +461,15 @@ function InstallProgressScreen({ state, results }: { state: RunnerDashboardState
 
 function DashboardCompleteScreen({ results, completionStatus, runnerScope }: { results: RunnerActionRunResult[]; completionStatus?: string; runnerScope?: string }) {
   const failed = results.filter((r) => r.status === "failed");
+  const stoppedSerena = serenaOutcomeFromResults(results);
   const label = runnerScope === "opencode" ? "OpenCode" : "Pi";
   return (
     <Box flexDirection="column">
-      <Text bold color="green">{label} Runner setup complete</Text>
+      <Text bold color={failed.length > 0 || stoppedSerena === "cancelled" || stoppedSerena === "partial" ? "yellow" : "green"}>
+        {failed.length > 0 || stoppedSerena === "cancelled" || stoppedSerena === "partial"
+          ? `${label} Runner setup stopped before completion`
+          : `${label} Runner setup complete`}
+      </Text>
       {completionStatus && <Text dimColor>{completionStatus}</Text>}
       {failed.length > 0 && (
         <Box marginTop={1} flexDirection="column">

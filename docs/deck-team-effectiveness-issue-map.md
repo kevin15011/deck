@@ -10,11 +10,11 @@ Deck should operate as an effective engineering team, not as a rigid workflow en
 
 **Deck is a team, not a flow.**
 
-The Orchestrator is the team lead. It should understand intent, select the smallest useful process, coordinate specialists, remove routine blockers, preserve quality, and help the team finish. It should not behave like a phase checklist that transfers every ambiguity or internal failure back to the user.
+The Lead is the team lead. It should understand intent, select the smallest useful process, coordinate specialists, remove routine blockers, preserve quality, and help the team finish. It should not behave like a phase checklist that transfers every ambiguity or internal failure back to the user.
 
 Deck should provide stronger quality and engineering discipline than a general Plan or Build agent while remaining similarly direct for ordinary work.
 
-Every phase, delegation, artifact, and approval must earn its cost. The Orchestrator should prefer the most direct path that preserves the required quality and safety.
+Every phase, delegation, artifact, and approval must earn its cost. The Lead should prefer the most direct path that preserves the required quality and safety.
 
 ## Desired behavior
 
@@ -34,7 +34,7 @@ Every phase, delegation, artifact, and approval must earn its cost. The Orchestr
 
 ## Leadership proportionality test
 
-Before adding a phase, delegation, artifact, approval, or repair cycle, the Orchestrator should answer:
+Before adding a phase, delegation, artifact, approval, or repair cycle, the Lead should answer:
 
 1. What uncertainty will this resolve?
 2. What decision will this enable?
@@ -42,7 +42,7 @@ Before adding a phase, delegation, artifact, approval, or repair cycle, the Orch
 4. Is its expected benefit greater than its coordination cost?
 5. Is there a more direct way to achieve the result with the same required quality and safety?
 
-If the work does not provide enough value, the Orchestrator should skip it, combine it with existing work, or downshift to a lighter operating mode. This judgment must never weaken the explicit invariants for security, authorization, secrets, data loss, destructive operations, registry recovery, true write conflicts, or Git discard operations.
+If the work does not provide enough value, the Lead should skip it, combine it with existing work, or downshift to a lighter operating mode. This judgment must never weaken the explicit invariants for security, authorization, secrets, data loss, destructive operations, registry recovery, true write conflicts, or Git discard operations.
 
 ## Observed impact
 
@@ -97,7 +97,7 @@ One documentation session produced 16,964 words of OpenSpec process before the r
 | DTE-013 | P1 | Current prompt WIP risks a `qualityDisposition` dependency cycle | Review may require disposition while disposition requires Review | Prompt/runtime |
 | DTE-014 | P1 | Global validation failures automatically expand repair scope | A focused change turns into repository cleanup | QA/orchestration |
 | DTE-015 | P1 | Process depth is not justified against expected value | Coordination and artifact cost can exceed the uncertainty or risk being reduced | Triage/prompt |
-| DTE-016 | P1 | The Orchestrator behaves as a gatekeeper more than a lead | The user coordinates the team and resolves internal process failures | Role design |
+| DTE-016 | P1 | The Lead behaves as a gatekeeper more than a lead | The user coordinates the team and resolves internal process failures | Role design |
 | DTE-017 | P2 | Multiple active changes are treated as exceptional | New sessions inherit unrelated historical state | Session model |
 | DTE-018 | P2 | Non-success lifecycle outcomes are incomplete | Parking, supersession, abandonment, and incomplete closure are not operationally coherent | Registry/runtime |
 | DTE-019 | P2 | Safe parallelism is underused or inconsistently defined | Latency grows without a corresponding quality benefit | Scheduling |
@@ -121,8 +121,8 @@ reachability. No prompt statement by itself is considered sufficient evidence.
 | Findings | Implemented boundary | Primary evidence |
 |---|---|---|
 | DTE-001, DTE-002, DTE-017, DTE-018, DTE-021, DTE-029 | Semantic active/parked/terminal selection, honest non-success closure, successor lifecycle intents, and observed-byte legacy genesis without fabricated events | `packages/core/src/spec-registry/lifecycle.ts`, `packages/sdd-runtime/src/contracts/session-change-selection.ts`, `registry-lifecycle-intent.ts`, `legacy-genesis.ts`, and lifecycle/validator tests |
-| DTE-003, DTE-019 | Coordination is based on attributable modifying effects, stale bases, generated-output conflicts, and recovery state rather than directory or filename overlap | `packages/sdd-runtime/src/orchestrator/coordination-assessment.ts` and Orchestrator parallelism tests |
-| DTE-004, DTE-006, DTE-014, DTE-015, DTE-016 | The Orchestrator chooses the smallest safe process, repairs routine governance and QA failures internally, keeps authorization bounded, and asks the user only for consequential decisions | `developer-team-leadership.ts`, `process-posture.ts`, `governance-recovery.ts`, and the canonical Orchestrator/Apply prompt surfaces |
+| DTE-003, DTE-019 | Coordination is based on attributable modifying effects, stale bases, generated-output conflicts, and recovery state rather than directory or filename overlap | `packages/sdd-runtime/src/orchestrator/coordination-assessment.ts` and Lead parallelism tests |
+| DTE-004, DTE-006, DTE-014, DTE-015, DTE-016 | The Lead chooses the smallest safe process, repairs routine governance and QA failures internally, keeps authorization bounded, and asks the user only for consequential decisions | `developer-team-leadership.ts`, `process-posture.ts`, `governance-recovery.ts`, and the canonical Lead/Apply prompt surfaces |
 | DTE-005, DTE-007, DTE-009, DTE-011, DTE-012, DTE-013, DTE-023, DTE-024, DTE-026, DTE-027 | One candidate-bound `targeted → affected_area → Review → broad` authority, causal BROAD disposition, atomic registry chains, impact invalidation, consolidated Review, and protected-requirement snapshots | QA authority/convergence contracts, quality readiness, verification-stage executor, execution control plane, registry coordinator, OpenCode/Pi reachability tests, and cross-layer authoritative matrices |
 | DTE-008 | Archive consumes current accepted evidence and creates its report without circular pre-existence requirements | Archive prompt contract and `archive-content.test.ts` |
 | DTE-010, DTE-025 | Explorer-first applies only after Run SDD is selected; critical assumptions receive candidate-bound preflight before large Apply work | INV-006, `qa-authority.ts`, and `developer-team-leadership.ts` |
@@ -166,7 +166,7 @@ pre-QA evidence; no missing lifecycle events were invented.
 
 ### 1. Make every process step earn its cost
 
-Use the leadership proportionality test before adding work. Process depth should follow uncertainty, risk, reversibility, and coordination value. The Orchestrator must be able to skip, combine, escalate, or downshift phases as evidence changes.
+Use the leadership proportionality test before adding work. Process depth should follow uncertainty, risk, reversibility, and coordination value. The Lead must be able to skip, combine, escalate, or downshift phases as evidence changes.
 
 ### 2. Make lifecycle semantic
 
@@ -176,9 +176,9 @@ Determine whether a change is active, parked, terminal, or malformed from author
 
 Allow multiple changes by default. Stop only for proven incompatible modifying effects, stale bases, unattributed dirty target bytes, protected generated-output conflicts, or registry recovery conflicts.
 
-### 4. Restore Orchestrator leadership
+### 4. Restore Lead ownership
 
-The Orchestrator should choose the smallest process that preserves required quality. It should resolve routine coordination internally, delegate with judgment, and ask the user only for product decisions, meaningful tradeoffs, scope expansion, protected risk, or irreversible actions.
+The Lead should choose the smallest process that preserves required quality. It should resolve routine coordination internally, delegate with judgment, and ask the user only for product decisions, meaningful tradeoffs, scope expansion, protected risk, or irreversible actions.
 
 ### 5. Make quality proportional, causal, and impact-aware
 
@@ -220,7 +220,7 @@ Add parity scenarios across prompts, scheduler, convergence, registry, Review, B
 
 | Order | Outcome |
 |---|---|
-| 1 | The Orchestrator applies the proportionality test and can change process depth during execution |
+| 1 | The Lead applies the proportionality test and can change process depth during execution |
 | 2 | New sessions can start independently and terminal changes no longer hold scope |
 | 3 | Changes can close incomplete or abandoned without claiming acceptance |
 | 4 | Advisory overlap is separated from real write conflicts |
@@ -268,4 +268,4 @@ The July 2026 external audit covered:
 - `esprit-projects/commons-components`
 - `prueba-sdd`
 
-The evidence confirms that the main opportunities are project-independent. Future audits should test whether the issue frequencies improve after changes to Orchestrator leadership, lifecycle, QA causality, evidence freshness, and compatibility. Project-specific incidents should remain evidence for general capabilities rather than becoming hardcoded workflow rules.
+The evidence confirms that the main opportunities are project-independent. Future audits should test whether the issue frequencies improve after changes to Lead ownership, lifecycle, QA causality, evidence freshness, and compatibility. Project-specific incidents should remain evidence for general capabilities rather than becoming hardcoded workflow rules.

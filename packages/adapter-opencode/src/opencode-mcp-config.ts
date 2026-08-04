@@ -1,6 +1,12 @@
-import { existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync, appendFileSync, renameSync, unlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { execSync } from "node:child_process";
+import {
+  SERENA_MCP_ARGS,
+  validateSerenaReadinessEvidence,
+  type SerenaReadinessEvidence,
+  type SerenaMcpWriteStatus,
+} from "@deck/core";
 
 export const SUPERMEMORY_MCP_SERVER_NAME = "supermemory";
 export const SUPERMEMORY_MCP_URL = "https://mcp.supermemory.ai/mcp";
@@ -377,13 +383,40 @@ export type WriteOpenCodeMcpConfigOptions = {
   configPath?: string;
   /** Home directory for default path resolution */
   homeDir?: string;
+  /** Serena-only validated readiness handoff. Generic MCP callers do not use this. */
+  serenaReadiness?: SerenaReadinessEvidence;
+  /** Serena-only Deck-owned root used for containment validation. */
+  ownedRoot?: string;
+  /** Serena-only injectable atomic file boundary. */
+  fileSystem?: OpenCodeMcpConfigFileSystem;
 };
 
 export type WriteOpenCodeMcpConfigResult = {
   ok: boolean;
   path: string;
   serverName: string;
+  code?: string;
   diagnostics: string[];
+  status?: SerenaMcpWriteStatus;
+};
+
+export type OpenCodeMcpConfigFileSystem = {
+  exists: (path: string) => boolean;
+  readFile: (path: string) => string;
+  writeFile: (path: string, content: string) => void;
+  rename: (from: string, to: string) => void;
+  unlink?: (path: string) => void;
+  temporaryPath?: (configPath: string) => string;
+};
+
+export type WriteSerenaOpenCodeMcpConfigOptions = {
+  configPath?: string;
+  homeDir?: string;
+  serverName?: string;
+  ownedRoot: string;
+  readiness: SerenaReadinessEvidence;
+  command: readonly string[];
+  fileSystem?: OpenCodeMcpConfigFileSystem;
 };
 
 /**
@@ -426,6 +459,17 @@ export function writeOpenCodeMcpConfig(
   if (!serverName) {
     diagnostics.push("MCP server name is required.");
     return { ok: false, path: configPath, serverName: options.serverName, diagnostics };
+  }
+
+  if (serverName === "serena") {
+    return writeSerenaOpenCodeMcpConfigInternal({
+      configPath,
+      serverName,
+      ownedRoot: options.ownedRoot,
+      readiness: options.serenaReadiness,
+      command: options.command,
+      fileSystem: options.fileSystem,
+    });
   }
 
   if (options.type === "local" && !options.command) {
@@ -497,4 +541,146 @@ export function writeOpenCodeMcpConfig(
     diagnostics.push(`Failed to write opencode.json: ${error instanceof Error ? error.message : String(error)}`);
     return { ok: false, path: configPath, serverName, diagnostics };
   }
+}
+
+/**
+ * Atomically creates or updates only the Serena entry in OpenCode's MCP map.
+ * The validated resolved executable is serialized verbatim; a bare `serena`
+ * token is never accepted by this boundary.
+ */
+export function writeSerenaOpenCodeMcpConfig(
+  options: WriteSerenaOpenCodeMcpConfigOptions,
+): WriteOpenCodeMcpConfigResult {
+  const homeDir = options.homeDir ?? process.env.HOME ?? "/home/user";
+  const configPath = options.configPath ?? join(homeDir, ".config", "opencode", "opencode.json");
+  const serverName = (options.serverName ?? "serena").trim();
+  return writeSerenaOpenCodeMcpConfigInternal({
+    configPath,
+    serverName,
+    ownedRoot: options.ownedRoot,
+    readiness: options.readiness,
+    command: options.command,
+    fileSystem: options.fileSystem,
+  });
+}
+
+function writeSerenaOpenCodeMcpConfigInternal(options: {
+  configPath: string;
+  serverName: string;
+  ownedRoot?: string;
+  readiness?: SerenaReadinessEvidence;
+  command?: readonly string[];
+  fileSystem?: OpenCodeMcpConfigFileSystem;
+}): WriteOpenCodeMcpConfigResult {
+  const fail = (code: string, message: string): WriteOpenCodeMcpConfigResult => ({
+    ok: false,
+    path: options.configPath,
+    serverName: options.serverName,
+    code,
+    diagnostics: [message],
+  });
+
+  if (options.serverName !== "serena") return fail("invalid-server", "Serena writer requires server name 'serena'.");
+  if (!options.ownedRoot || !options.readiness || !Array.isArray(options.command)) {
+    return fail("invalid-readiness-evidence", "Serena configuration requires validated readiness evidence and an exact command array.");
+  }
+  if (!isSafeOwnedRoot(options.ownedRoot)) return fail("root-invalid", "Serena configuration requires a contained Deck-owned root.");
+
+  const evidence = validateSerenaReadinessEvidence(options.readiness, options.ownedRoot);
+  if (!evidence.valid) return fail(evidence.code, evidence.diagnostic.message);
+
+  const command = [...options.command];
+  if (
+    command.length !== SERENA_MCP_ARGS.length + 1
+    || command[0] !== evidence.evidence.resolvedExecutablePath
+    || command.slice(1).some((arg, index) => arg !== SERENA_MCP_ARGS[index])
+  ) {
+    return fail("invalid-command", "Serena configuration requires the resolved executable and fixed MCP arguments.");
+  }
+
+  const fileSystem = options.fileSystem ?? defaultOpenCodeMcpConfigFileSystem();
+  let existed = false;
+  let config: Record<string, unknown> = {};
+  try {
+    existed = fileSystem.exists(options.configPath);
+    if (existed) {
+      const parsed: unknown = JSON.parse(fileSystem.readFile(options.configPath));
+      if (!isPlainRecord(parsed)) return fail("malformed-config", "OpenCode MCP config must be a JSON object.");
+      config = parsed;
+    }
+  } catch {
+    return fail("malformed-config", "OpenCode MCP config could not be read or parsed.");
+  }
+
+  let mcp: Record<string, unknown> = {};
+  if (Object.prototype.hasOwnProperty.call(config, "mcp")) {
+    if (!isPlainRecord(config.mcp)) return fail("malformed-config", "OpenCode MCP config must contain an object 'mcp' map.");
+    mcp = config.mcp;
+  }
+
+  const existing = mcp.serena;
+  if (isKnownGoodSerenaEntry(existing, command)) {
+    return {
+      ok: true,
+      path: options.configPath,
+      serverName: options.serverName,
+      status: "unchanged",
+      diagnostics: [],
+    };
+  }
+
+  const nextConfig: Record<string, unknown> = {
+    ...config,
+    mcp: {
+      ...mcp,
+      serena: {
+        type: "local",
+        command,
+        enabled: true,
+      },
+    },
+  };
+  const tempPath = fileSystem.temporaryPath?.(options.configPath) ?? `${options.configPath}.deck-serena.tmp`;
+  if (resolve(dirname(tempPath)) !== resolve(dirname(options.configPath))) {
+    return fail("temporary-path-invalid", "Serena configuration temporary storage must share the config directory.");
+  }
+
+  try {
+    fileSystem.writeFile(tempPath, JSON.stringify(nextConfig, null, 2));
+    fileSystem.rename(tempPath, options.configPath);
+  } catch {
+    try { fileSystem.unlink?.(tempPath); } catch { /* preserve the known-good config */ }
+    return fail("config-write-failed", "Serena MCP configuration was not changed.");
+  }
+
+  return {
+    ok: true,
+    path: options.configPath,
+    serverName: options.serverName,
+    status: existed ? "updated" : "created",
+    diagnostics: [],
+  };
+}
+
+function defaultOpenCodeMcpConfigFileSystem(): OpenCodeMcpConfigFileSystem {
+  return {
+    exists: existsSync,
+    readFile: (path) => readFileSync(path, "utf8"),
+    writeFile: (path, content) => writeFileSync(path, content, "utf8"),
+    rename: renameSync,
+    unlink: unlinkSync,
+  };
+}
+
+function isKnownGoodSerenaEntry(value: unknown, command: readonly string[]): boolean {
+  if (!isPlainRecord(value)) return false;
+  if (value.type !== "local" || value.enabled === false) return false;
+  return Array.isArray(value.command)
+    && value.command.length === command.length
+    && value.command.every((part, index) => part === command[index]);
+}
+
+function isSafeOwnedRoot(root: string): boolean {
+  if (!root.startsWith("/") || root === "/" || root.includes("\0") || root.split("/").some((part) => part === "..")) return false;
+  return !new Set(["/bin", "/sbin", "/usr", "/opt", "/etc", "/var", "/root"]).has(root.replace(/\/$/u, ""));
 }

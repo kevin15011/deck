@@ -1,8 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { createHash } from "node:crypto";
 
-import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
+import {
+  DEVELOPER_TEAM_AGENTS,
+  DEVELOPER_TEAM_LEGACY_AGENT_IDS,
+} from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import {
   buildCapabilityInstructionBundle,
@@ -38,7 +41,9 @@ function verifyInvariantPresence(
 
   const hasCompactReference = /^## Runtime Contract Reference$/m.test(content)
     && content.includes("Runtime-Enforced Team Contract remains binding");
-  if (hasCompactReference) {
+  const hasAdaptiveReference = /^## Team Contract Reference$/m.test(content)
+    && content.includes("Adaptive Developer Team Contract remains binding");
+  if (hasCompactReference || hasAdaptiveReference) {
     return { pass: true, missing: [] };
   }
 
@@ -70,6 +75,7 @@ import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import { readDeckConfig } from "@deck/core/config/deck-config";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
 import type { CapabilityInstructionBundle } from "@deck/core";
+import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
 
 import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
 import { buildCommandGenerationPlan, applyCommandGeneration } from "./command-generation";
@@ -154,6 +160,8 @@ export type OpenCodeDeveloperTeamApplyResult = {
   changedCount: number;
   unchangedCount: number;
   fileResults: OpenCodeBundleApplyResult[];
+  /** Exact legacy Deck-managed paths moved outside runner discovery. */
+  legacyFilesRetired: string[];
 };
 
 export type OpenCodeBundleVerifyResult = {
@@ -401,7 +409,7 @@ function resolveSerenaToolsForAgent(
     return {};
   }
 
-  const isApplyAgent = policy.targetAgents.includes(agentId as "deck-developer-apply-backend" | "deck-developer-apply-frontend" | "deck-developer-apply-general");
+  const isApplyAgent = policy.targetAgents.includes(agentId as "deck-apply-fast" | "deck-apply-deep");
   const readOnly = policy.readOnlyTools ?? [];
   const write = policy.writeTools ?? [];
 
@@ -429,10 +437,12 @@ function buildAgentEntry(
     changedAgentIds?: readonly string[];
   },
 ): AgentEntry {
-  const isOrchestrator = agent.id === "deck-developer-orchestrator";
+  const isOrchestrator = agent.id === "deck-lead";
   const isChanged = options?.changedAgentIds?.includes(agent.id) ?? false;
+  const hasPersistedModel = Object.prototype.hasOwnProperty.call(options?.configModelOverrides ?? {}, agent.id);
+  const hasPersistedReasoning = Object.prototype.hasOwnProperty.call(options?.reasoningEffortOverrides ?? {}, agent.id);
   const serenaTools = resolveSerenaToolsForAgent(agent.id, toolPolicyBundle);
-  const modelConfig = isChanged ? resolveModelConfig(
+  const modelConfig = isChanged || hasPersistedModel ? resolveModelConfig(
     agent.id,
     options?.cliModelOverride,
     options?.configModelOverrides,
@@ -449,16 +459,17 @@ function buildAgentEntry(
     prompt: promptReference,
     tools,
   };
-  // Assignment fields are intentionally emitted only for explicit changes.
-  // Unchanged agents merge only non-assignment metadata and therefore retain their
-  // exact persisted model/variant/reasoningEffort fields.
-  if (isChanged) {
+  // Exact persisted assignments are re-emitted so legacy IDs can migrate onto the
+  // seven-role inventory. An explicit change may additionally clear the variant.
+  if (isChanged || hasPersistedModel) {
     const model = options?.configModelOverrides?.[agent.id] ?? modelConfig?.model;
     if (model) entry.model = model;
+  }
+  if (hasPersistedReasoning || isChanged) {
     entry.variant = options?.reasoningEffortOverrides?.[agent.id] ?? "";
   }
   if (isOrchestrator) {
-    const subagents = DEVELOPER_TEAM_AGENTS.filter((candidate) => candidate.id !== "deck-developer-orchestrator");
+    const subagents = DEVELOPER_TEAM_AGENTS.filter((candidate) => candidate.id !== "deck-lead");
     entry.permission = { task: { "*": "deny", ...Object.fromEntries(subagents.map((candidate) => [candidate.id, "allow"])) } };
     entry.hidden = false;
   } else {
@@ -604,7 +615,16 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   });
 
   // Build standalone skill package files (verbatim, no generated frontmatter).
-  const standaloneSkills = buildStandaloneSkillFiles(skillsDir, options?.standaloneSkills ?? []);
+  const standaloneSkills = [
+    ...buildStandaloneSkillFiles(skillsDir, options?.standaloneSkills ?? []),
+    ...getBootstrapSkillFiles().map((skill): OpenCodePlannedStandaloneSkillFile => ({
+      skillId: skill.skillId,
+      packagePath: "SKILL.md",
+      relativePath: `skills/${skill.skillId}/SKILL.md`,
+      absolutePath: join(skillsDir, skill.skillId, "SKILL.md"),
+      content: skill.content,
+    })),
+  ];
 
   // Prompt generation plan - pass memoryBundle for provider-specific adaptive memory injection
   // This ensures provider isolation and OpenSpec authority are maintained
@@ -650,6 +670,82 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
 // Apply
 // ---------------------------------------------------------------------------
 
+function getOpenCodeLegacyActivePaths(plan: OpenCodeDeveloperTeamInstallPlan): string[] {
+  const configDir = dirname(plan.skillsDir);
+  const retainedSkillIds = new Set(getBootstrapSkillFiles().map((skill) => skill.skillId));
+  return DEVELOPER_TEAM_LEGACY_AGENT_IDS.flatMap((agentId) => [
+    join(configDir, "agents", `${agentId}.md`),
+    join(configDir, "prompts", "deck-developer", `${agentId}.md`),
+    ...(retainedSkillIds.has(agentId) ? [] : [join(configDir, "skills", agentId, "SKILL.md")]),
+  ]);
+}
+
+function assertOpenCodeCandidateFiles(
+  plan: OpenCodeDeveloperTeamInstallPlan,
+  exists: typeof existsSync,
+  readFile: typeof readFileSync,
+): void {
+  const expected = [
+    ...plan.skills,
+    ...plan.standaloneSkills,
+    ...plan.promptGenerationPlan,
+    ...(plan.executionPlugin ? [plan.executionPlugin] : []),
+  ];
+  for (const planned of expected) {
+    if (!exists(planned.absolutePath) || readFile(planned.absolutePath, "utf-8") !== planned.content) {
+      throw new Error(`Developer Team candidate verification failed for ${planned.absolutePath}.`);
+    }
+  }
+  const configPath = join(dirname(plan.skillsDir), "opencode.json");
+  const config = JSON.parse(readFile(configPath, "utf-8")) as OpenCodeConfig;
+  for (const agent of DEVELOPER_TEAM_AGENTS) {
+    if (!config.agent?.[agent.id]) {
+      throw new Error(`Developer Team candidate configuration is missing ${agent.id}.`);
+    }
+  }
+  for (const legacyId of DEVELOPER_TEAM_LEGACY_AGENT_IDS) {
+    if (config.agent?.[legacyId]) {
+      throw new Error(`Legacy Developer Team configuration remains active for ${legacyId}.`);
+    }
+  }
+}
+
+function retireOpenCodeLegacyFiles(
+  plan: OpenCodeDeveloperTeamInstallPlan,
+  options: {
+    exists: typeof existsSync;
+    readFile: typeof readFileSync;
+    writeFile: typeof writeFileSync;
+    mkdir: typeof mkdirSync;
+    unlink: typeof unlinkSync;
+  },
+): string[] {
+  const configDir = dirname(plan.skillsDir);
+  const quarantineRoot = join(configDir, "deck-backups", "developer-team-v2");
+  const retired: string[] = [];
+
+  for (const sourcePath of getOpenCodeLegacyActivePaths(plan)) {
+    if (!options.exists(sourcePath)) continue;
+    const content = options.readFile(sourcePath, "utf-8");
+    const relativePath = relative(configDir, sourcePath);
+    let destinationPath = join(quarantineRoot, relativePath);
+    if (options.exists(destinationPath) && options.readFile(destinationPath, "utf-8") !== content) {
+      destinationPath = `${destinationPath}.${simpleHash(content)}`;
+    }
+    options.mkdir(dirname(destinationPath), { recursive: true });
+    if (!options.exists(destinationPath)) {
+      options.writeFile(destinationPath, content, "utf-8");
+    }
+    if (options.readFile(destinationPath, "utf-8") !== content) {
+      throw new Error(`Legacy Developer Team quarantine verification failed for ${sourcePath}.`);
+    }
+    options.unlink(sourcePath);
+    retired.push(sourcePath);
+  }
+
+  return retired;
+}
+
 export function applyOpenCodeDeveloperTeamInstall(
   plan: OpenCodeDeveloperTeamInstallPlan,
   options?: {
@@ -666,8 +762,12 @@ export function applyOpenCodeDeveloperTeamInstall(
   const exists = options?.exists ?? existsSync;
   const mkdir = options?.mkdir ?? mkdirSync;
   const unlink = options?.unlink ?? unlinkSync;
-  const configDir = options?.configDir ?? join(process.env.HOME ?? "/home/user", ".config", "opencode");
+  const configDir = options?.configDir ?? dirname(plan.skillsDir);
   const opencodeConfigPath = join(configDir, "opencode.json");
+  const fileBackup = backupDeveloperTeamFiles(plan, { exists, readFile });
+  const previousConfig = exists(opencodeConfigPath) ? readFile(opencodeConfigPath, "utf-8") : null;
+
+  try {
 
   // 1. Config merge (agents + mermaid plugin)
   const mermaidPlugins = INTERNAL_OPENCODE_PACKAGE_IDS.filter(() => plan.mermaidPluginStatus === "missing");
@@ -677,6 +777,7 @@ export function applyOpenCodeDeveloperTeamInstall(
     const mergeResult = mergeAndWrite({
       configPath: opencodeConfigPath,
       agentEntries: plan.agentEntries,
+      agentKeysToRemove: DEVELOPER_TEAM_LEGACY_AGENT_IDS,
       pluginsToAdd: mermaidPlugins,
       readFile,
       writeFile,
@@ -778,11 +879,30 @@ export function applyOpenCodeDeveloperTeamInstall(
     }
   }
 
-  // 6. Compute aggregate counts
+  // 6. Verify the promoted candidate before retiring exact legacy paths.
+  assertOpenCodeCandidateFiles(plan, exists, readFile);
+  const legacyFilesRetired = retireOpenCodeLegacyFiles(plan, {
+    exists,
+    readFile,
+    writeFile,
+    mkdir,
+    unlink,
+  });
+
+  // 7. Compute aggregate counts
   const changedCount = results.filter((r) => r.status !== "unchanged").length + (configMergeResult && configMergeResult.status !== "unchanged" ? 1 : 0);
   const unchangedCount = results.filter((r) => r.status === "unchanged").length + (configMergeResult && configMergeResult.status === "unchanged" ? 1 : 0);
 
-  return { results, configMergeResult, changedCount, unchangedCount, fileResults: results };
+  return { results, configMergeResult, changedCount, unchangedCount, fileResults: results, legacyFilesRetired };
+  } catch (error) {
+    rollbackDeveloperTeamFiles(fileBackup, { writeFile, unlink });
+    if (previousConfig === null) {
+      try { unlink(opencodeConfigPath); } catch { /* config was never promoted or already removed */ }
+    } else {
+      writeFile(opencodeConfigPath, previousConfig, "utf-8");
+    }
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -815,22 +935,11 @@ export function verifyOpenCodeDeveloperTeamInstall(
       issues.push("Missing disable-model-invocation in frontmatter.");
     }
 
-    // deck-onboard is user-invocable: true, others are user-invocable: false
-    if (planned.agent.skillId === "deck-onboard") {
-      if (!content.includes("user-invocable: true")) {
-        issues.push("Missing user-invocable in frontmatter.");
-      }
-      // deck-onboard should NOT have delegate_only
-      if (content.includes("delegate_only: true")) {
-        issues.push("Unexpected delegate_only in deck-onboard (should be user-invocable, not delegated).");
-      }
-    } else {
-      if (!content.includes("user-invocable: false")) {
-        issues.push("Missing user-invocable in frontmatter.");
-      }
-      if (!content.includes("delegate_only: true")) {
-        issues.push("Missing delegate_only in metadata.");
-      }
+    if (!content.includes("user-invocable: false")) {
+      issues.push("Missing user-invocable in frontmatter.");
+    }
+    if (!content.includes("delegate_only: true")) {
+      issues.push("Missing delegate_only in metadata.");
     }
 
     const registryContent = getAgentContent(planned.agent.id, {
@@ -860,7 +969,7 @@ export function verifyOpenCodeDeveloperTeamInstall(
 
     // Task 6: Verify orchestrator invariant presence
     // Only verify for orchestrator skill, not other agents
-    if (planned.agent.id === "deck-developer-orchestrator") {
+    if (planned.agent.id === "deck-lead") {
       const surface: OrchestratorInvariantSurface = "skill";
       const invariantCheck = verifyInvariantPresence(content, surface);
       if (!invariantCheck.pass) {
@@ -892,9 +1001,34 @@ export function verifyOpenCodeDeveloperTeamInstall(
     return [{ agentId: "developer-team-execution", valid: content === plan.executionPlugin.content, issues: content === plan.executionPlugin.content ? [] : ["Content mismatch for developer-team execution plugin."] }];
   })() : [];
 
+  const promptResults: OpenCodeBundleVerifyResult[] = plan.promptGenerationPlan.map((planned) => {
+    if (!exists(planned.absolutePath)) return { agentId: planned.agent.id, valid: false, issues: ["Prompt file does not exist."] };
+    const content = readFile(planned.absolutePath, "utf-8");
+    return { agentId: planned.agent.id, valid: content === planned.content, issues: content === planned.content ? [] : ["Prompt content mismatch."] };
+  });
+  const legacyResults: OpenCodeBundleVerifyResult[] = getOpenCodeLegacyActivePaths(plan)
+    .filter((absolutePath) => exists(absolutePath))
+    .map((absolutePath) => ({ agentId: "legacy-inventory", valid: false, issues: [`Legacy active path remains: ${absolutePath}`] }));
+  const configResults: OpenCodeBundleVerifyResult[] = (() => {
+    const configPath = join(dirname(plan.skillsDir), "opencode.json");
+    if (!exists(configPath)) return [{ agentId: "opencode-config", valid: false, issues: ["opencode.json does not exist."] }];
+    try {
+      const config = JSON.parse(readFile(configPath, "utf-8")) as OpenCodeConfig;
+      const missing = DEVELOPER_TEAM_AGENTS.filter((agent) => !config.agent?.[agent.id]).map((agent) => agent.id);
+      const activeLegacy = DEVELOPER_TEAM_LEGACY_AGENT_IDS.filter((agentId) => Boolean(config.agent?.[agentId]));
+      const issues = [
+        ...missing.map((agentId) => `Missing agent configuration: ${agentId}`),
+        ...activeLegacy.map((agentId) => `Legacy agent configuration remains active: ${agentId}`),
+      ];
+      return [{ agentId: "opencode-config", valid: issues.length === 0, issues }];
+    } catch {
+      return [{ agentId: "opencode-config", valid: false, issues: ["opencode.json is invalid JSON."] }];
+    }
+  })();
+
   return {
-    valid: skillResults.every((r) => r.valid) && standaloneResults.every((r) => r.valid) && pluginResults.every((r) => r.valid),
-    agentResults: [],
+    valid: skillResults.every((r) => r.valid) && standaloneResults.every((r) => r.valid) && pluginResults.every((r) => r.valid) && promptResults.every((r) => r.valid) && legacyResults.length === 0 && configResults.every((r) => r.valid),
+    agentResults: [...promptResults, ...legacyResults, ...configResults],
     skillResults: [...skillResults, ...standaloneResults],
     pluginResults,
   };
@@ -1023,6 +1157,14 @@ export function backupDeveloperTeamFiles(
       absolutePath: plan.executionPlugin.absolutePath,
       previousContent: exists(plan.executionPlugin.absolutePath) ? readFile(plan.executionPlugin.absolutePath, "utf-8") : null,
     }] : []),
+    ...plan.promptGenerationPlan.map((planned) => ({
+      absolutePath: planned.absolutePath,
+      previousContent: exists(planned.absolutePath) ? readFile(planned.absolutePath, "utf-8") : null,
+    })),
+    ...getOpenCodeLegacyActivePaths(plan).map((absolutePath) => ({
+      absolutePath,
+      previousContent: exists(absolutePath) ? readFile(absolutePath, "utf-8") : null,
+    })),
   ];
 
   return { entries };

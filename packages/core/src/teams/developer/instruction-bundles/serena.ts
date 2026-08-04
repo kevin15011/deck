@@ -53,7 +53,7 @@ function getSerenaToolPolicy(): CapabilityToolPolicy {
       "delete_memory",
       "rename_memory",
     ],
-    targetAgents: ["deck-developer-apply-backend", "deck-developer-apply-frontend", "deck-developer-apply-general"],
+    targetAgents: ["deck-apply-fast", "deck-apply-deep"],
     readOnlyTools,
     writeTools,
   };
@@ -79,7 +79,7 @@ export function buildSerenaInstructionBundle(): CapabilityInstructionBundle {
   const applyAgentFragment: CapabilityInstructionFragment = {
     packageId: "serena",
     surface: "agent",
-    agentIds: ["deck-developer-apply-backend", "deck-developer-apply-frontend", "deck-developer-apply-general"],
+    agentIds: ["deck-apply-fast", "deck-apply-deep"],
     markdown: `## Serena Package — Symbolic Editing
 
 Serena provides LSP-powered symbolic retrieval and editing for code. Use it for real-time symbol search, refactoring, and diagnostics.
@@ -206,14 +206,10 @@ When Serena tools are unavailable (no LSP, no MCP server), fall back to codebase
     // No agentIds = applies to all agents, BUT we need to filter write-capable via skillIds
     // The read-only fragment applies to non-apply skills
     skillIds: [
-      "deck-developer-explorer-skill",
-      "deck-developer-proposal-skill",
-      "deck-developer-spec-skill",
-      "deck-developer-design-skill",
-      "deck-developer-task-skill",
-      "deck-developer-verify-skill",
-      "deck-developer-review-skill",
-      "deck-developer-archive-skill",
+      "deck-investigate-skill",
+      "deck-architect-skill",
+      "deck-quality-skill",
+      "deck-setup-skill",
     ],
     markdown: `## Serena Package (Read-only)
 
@@ -242,9 +238,8 @@ When Serena unavailable (no LSP), use codebase-memory or grep/glob.`,
     surface: "skill",
     // Apply-only skill IDs
     skillIds: [
-      "deck-developer-apply-backend-skill",
-      "deck-developer-apply-frontend-skill",
-      "deck-developer-apply-general-skill",
+      "deck-apply-fast-skill",
+      "deck-apply-deep-skill",
     ],
     markdown: `## Serena Package (Full)
 
@@ -285,7 +280,7 @@ When Serena unavailable (no LSP), use codebase-memory or grep/glob.`,
 
 ### Apply Delegation (editing/refactoring)
 
-When delegating to apply agents (\`deck-developer-apply-backend\`, \`deck-developer-apply-frontend\`, \`deck-developer-apply-general\`) for tasks involving symbolic editing or refactoring:
+When delegating to apply agents (\`deck-apply-fast\`, \`deck-apply-deep\`) for tasks involving symbolic editing or refactoring:
 - Require the use of Serena edit tools (\`serena_replace_symbol_body\`, \`serena_rename_symbol\`, \`serena_insert_after_symbol\`, \`serena_insert_before_symbol\`) as first preference.
 - If the agent cannot use them, require explicit report: "Serena edit tools unavailable; fallback used: [tool]."
 

@@ -8,6 +8,7 @@ import { OPENCODE_INSTALLABLE_TOOLS } from "./installation-plan";
 import type { OpenCodeRunnerCapabilityInventory } from "./capability-inventory";
 import type { OpenCodeToolsReview } from "./required-tools";
 import type { CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
+import type { SerenaOperationIdentity } from "@deck/core";
 import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
 import { appendFileSync } from "node:fs";
 import { resolveRunnerParity, type ParityReport } from "@deck/core/runner-capability-parity";
@@ -59,6 +60,12 @@ export type OpenCodeRunnerReviewPlan = {
 
 export type BuildOpenCodeRunnerReviewPlanState = {
   runnerScope?: string;
+  operationId?: string;
+  explicitlySelectedCapabilities?: Readonly<Record<string, boolean>>;
+  /** Current-operation identity; unlike ordinary selection it is never persisted. */
+  currentOperation?: SerenaOperationIdentity;
+  /** Native alias accepted by focused adapter callers. */
+  operation?: SerenaOperationIdentity;
   selectedCapabilities?: Partial<Record<string, boolean>>;
   adaptiveMemory?: {
     provider?: AdaptiveMemoryProviderChoice;
@@ -144,6 +151,16 @@ function addCapabilityActions(
     const entry = inventory[capabilityId];
     const capability = getUserFacingOpenCodeCapability(capabilityId);
     if (!capability) continue;
+
+    // Serena is the only capability with a current-operation authorization
+    // gate.  Defaults, inventory, and persisted package instructions do not
+    // authorize this branch.
+    if (capabilityId === "serena") {
+      if (!hasCurrentSerenaSelection(state) || !entry) continue;
+      addSerenaActions(groups, entry.status, entry.installed);
+      continue;
+    }
+
     if (!entry || entry.status === "ready") continue;
 
     const tool = OPENCODE_INSTALLABLE_TOOLS.find((t) => t.id === capabilityId);
@@ -289,36 +306,6 @@ function addCapabilityActions(
       continue;
     }
 
-    // python-tool: Python-based tools like serena that need uv/pipx for installation
-    // This handles the case where serena is selected but not installed
-    if (capability.installKind === "python-tool" && tool && entry.status === "missing") {
-      groups.automaticInstalls.push({
-        id: `capability.${capabilityId}.install`,
-        kind: "install-opencode-plugin",
-        title: `Install ${capability.label}`,
-        description: capability.description,
-        capabilityId,
-        toolId: tool.id,
-        source: tool.module,
-        status: "ready",
-      });
-      // Also generate MCP config write action (will verify serena exists before writing)
-      const mcpConfig = getMcpServerConfig(capabilityId, capability.source);
-      if (mcpConfig) {
-        groups.automaticInstalls.push({
-          id: `capability.${capabilityId}.mcp-config`,
-          kind: "write-mcp-config",
-          title: `Configure ${capability.label} MCP`,
-          description: `Writes ${capability.label} MCP server config (requires ${tool.id} in PATH).`,
-          capabilityId,
-          toolId: capability.toolId,
-          source: capability.source,
-          status: "ready",
-        });
-      }
-      continue;
-    }
-
     const action = capability.installKind === "pending"
       ? buildPendingSourceAction(capabilityId, entry.status, entry.source)
       : buildManualExternalAction(capabilityId, tool?.module);
@@ -420,7 +407,7 @@ function addValidationActions(groups: OpenCodeRunnerReviewPlan["groups"]): void 
  *
  * Package instruction injection is toggled per-runner via .deck/config.json's `packageInstructions`
  * field. When a runner scope has at least one instruction enabled, we persist that config so it
- * survives across `deck-init` runs.
+ * survives across `deck-setup` readiness repair runs.
  *
  * This writes to .deck/config.json's `packageInstructions` field, NOT the same config key used by
  * internal-runner packages. They are independent.
@@ -502,7 +489,7 @@ function addCapabilityDiagnostic(
  * Returns MCP server configuration for a given capability.
  * Returns null if the capability doesn't have a known MCP server config.
  */
-function getMcpServerConfig(capabilityId: string, source: string | undefined): { type: "local" | "remote"; command?: string[]; url?: string; headers?: Record<string, string> } | null {
+function getMcpServerConfig(capabilityId: string, _source: string | undefined): { type: "local" | "remote"; command?: string[]; url?: string; headers?: Record<string, string> } | null {
   switch (capabilityId) {
     case "context7":
       return {
@@ -514,14 +501,62 @@ function getMcpServerConfig(capabilityId: string, source: string | undefined): {
         type: "local",
         command: ["context-mode"],
       };
-    case "serena":
-      return {
-        type: "local",
-        command: ["serena", "start-mcp-server", "--context", "ide", "--project-from-cwd"],
-      };
     default:
       return null;
   }
+}
+
+function hasCurrentSerenaSelection(state: BuildOpenCodeRunnerReviewPlanState): boolean {
+  if (state.runnerScope !== "opencode") return false;
+  if (state.selectedCapabilities?.serena !== true) return false;
+  if (state.explicitlySelectedCapabilities?.serena !== true) return false;
+  if (
+    typeof state.operationId !== "string"
+    || state.operationId.length === 0
+    || state.operationId.length > 200
+    || /[\u0000-\u001f\u007f-\u009f]/u.test(state.operationId)
+  ) return false;
+
+  const operation = state.currentOperation ?? state.operation;
+  if (!operation) return true;
+  return operation.runner === "opencode"
+    && operation.operationId === state.operationId
+    && operation.explicitlySelected === true;
+}
+
+function addSerenaActions(
+  groups: OpenCodeRunnerReviewPlan["groups"],
+  status: string,
+  _installed: boolean,
+): void {
+  if (status !== "missing" && status !== "ready") return;
+
+  const tool = OPENCODE_INSTALLABLE_TOOLS.find((candidate) => candidate.id === "serena");
+  if (!tool) return;
+
+  const installActionId = "capability.serena.install";
+  groups.automaticInstalls.push({
+    id: installActionId,
+    kind: "install-opencode-plugin",
+    title: status === "ready" ? "Validate Serena readiness" : "Install Serena",
+    description: "Resolve or install Serena through the controlled current-operation bootstrap flow.",
+    capabilityId: "serena",
+    toolId: tool.id,
+    source: "serena-agent",
+    status: "ready",
+  });
+
+  groups.configWrites.push({
+    id: "capability.serena.mcp-config",
+    kind: "write-mcp-config",
+    title: "Configure Serena MCP",
+    description: "Configure Serena from fresh resolved executable evidence after installation or reuse.",
+    capabilityId: "serena",
+    toolId: tool.id,
+    source: "serena-agent",
+    status: "ready",
+    dependencies: [installActionId],
+  });
 }
 
 function getUnresolvedTeamCapabilities(inventory: OpenCodeRunnerCapabilityInventory): OpenCodeCapabilityId[] {

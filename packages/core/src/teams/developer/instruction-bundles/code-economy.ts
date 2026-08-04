@@ -21,22 +21,20 @@ import type {
  * Target agents for code-economy injection.
  */
 const TARGET_AGENT_IDS = [
-  "deck-developer-task",
-  "deck-developer-apply-general",
-  "deck-developer-apply-backend",
-  "deck-developer-apply-frontend",
-  "deck-developer-review",
+  "deck-architect",
+  "deck-apply-fast",
+  "deck-apply-deep",
+  "deck-quality",
 ] as const;
 
 /**
  * Target skill IDs for code-economy injection.
  */
 const TARGET_SKILL_IDS = [
-  "deck-developer-task-skill",
-  "deck-developer-apply-general-skill",
-  "deck-developer-apply-backend-skill",
-  "deck-developer-apply-frontend-skill",
-  "deck-developer-review-skill",
+  "deck-architect-skill",
+  "deck-apply-fast-skill",
+  "deck-apply-deep-skill",
+  "deck-quality-skill",
 ] as const;
 
 /**

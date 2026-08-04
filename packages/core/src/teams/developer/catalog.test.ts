@@ -1,28 +1,28 @@
 import { describe, expect, test } from "bun:test";
 
-import { getDeveloperTeamCatalog } from "./catalog";
+import {
+  DEVELOPER_TEAM_LEGACY_AGENT_IDS,
+  getDeveloperTeamCatalog,
+  resolveLegacyDeveloperTeamAgentId,
+} from "./catalog";
 
 describe("Developer Team catalog (canonical)", () => {
-  test("includes all 14 agents with unique team-scoped IDs", () => {
+  test("includes exactly the seven approved agents with unique IDs", () => {
     const catalog = getDeveloperTeamCatalog();
 
-    expect(catalog).toHaveLength(14);
+    expect(catalog).toHaveLength(7);
 
     const ids = catalog.map((a) => a.id);
     const uniqueIds = new Set(ids);
-    expect(uniqueIds.size).toBe(14);
+    expect(uniqueIds.size).toBe(7);
   });
 
-  test("all IDs are team-scoped or are deck-init/deck-onboard", () => {
+  test("all canonical IDs are short Deck IDs without the developer namespace", () => {
     const catalog = getDeveloperTeamCatalog();
 
     for (const agent of catalog) {
-      // deck-developer-* agents must have team-scoped prefix
-      if (agent.id.startsWith("deck-developer-")) {
-        expect(agent.id).toMatch(/^deck-developer-/);
-      }
-      // deck-init and deck-onboard are standalone skills, not team-scoped
-      expect(agent.id).toMatch(/^deck-(developer-|init|onboard)/);
+      expect(agent.id).toMatch(/^deck-[a-z-]+$/);
+      expect(agent.id).not.toContain("developer");
       expect(agent.name).toBe(agent.id);
       expect(agent.skillId).toBe(agent.id);
     }
@@ -33,20 +33,13 @@ describe("Developer Team catalog (canonical)", () => {
     const ids = catalog.map((a) => a.id);
 
     expect(ids).toEqual([
-      "deck-developer-orchestrator",
-      "deck-developer-explorer",
-      "deck-developer-proposal",
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-apply-backend",
-      "deck-developer-apply-frontend",
-      "deck-developer-verify",
-      "deck-developer-review",
-      "deck-developer-archive",
-      "deck-init",
-      "deck-onboard",
+      "deck-lead",
+      "deck-investigate",
+      "deck-architect",
+      "deck-apply-fast",
+      "deck-apply-deep",
+      "deck-quality",
+      "deck-setup",
     ]);
   });
 
@@ -60,5 +53,16 @@ describe("Developer Team catalog (canonical)", () => {
       expect(agent.description).toBeTruthy();
       expect(agent.skillId).toBe(agent.id);
     }
+  });
+
+  test("interprets legacy IDs without adding them to the desired inventory", () => {
+    expect(resolveLegacyDeveloperTeamAgentId("deck-developer-orchestrator")).toBe("deck-lead");
+    expect(resolveLegacyDeveloperTeamAgentId("deck-developer-design")).toBe("deck-architect");
+    expect(resolveLegacyDeveloperTeamAgentId("deck-developer-apply-backend")).toBe("deck-apply-deep");
+    expect(resolveLegacyDeveloperTeamAgentId("deck-init")).toBe("deck-setup");
+    expect(resolveLegacyDeveloperTeamAgentId("unknown")).toBeUndefined();
+
+    const desired = new Set(getDeveloperTeamCatalog().map((agent) => agent.id));
+    expect(DEVELOPER_TEAM_LEGACY_AGENT_IDS.every((id) => !desired.has(id))).toBe(true);
   });
 });

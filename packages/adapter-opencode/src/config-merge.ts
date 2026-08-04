@@ -33,6 +33,7 @@ export class ConfigMergeError extends Error {
 export type MergeOptions = {
   configPath: string;
   agentEntries: Record<string, AgentEntry>;
+  agentKeysToRemove?: readonly string[];
   pluginsToAdd?: string[];
   readFile?: (path: string, encoding: "utf-8") => string;
   writeFile?: (path: string, content: string) => void;
@@ -112,6 +113,7 @@ export function mergeConfig(
   existing: OpenCodeConfig,
   agentEntries: Record<string, AgentEntry>,
   pluginsToAdd: string[] = [],
+  agentKeysToRemove: readonly string[] = [],
 ): OpenCodeConfig {
   // Deep clone to avoid mutation
   const merged: OpenCodeConfig = JSON.parse(JSON.stringify(existing));
@@ -121,7 +123,7 @@ export function mergeConfig(
     merged.agent = {};
   }
 
-  // Inject agent entries under deck-developer-* keys only (replace-by-key)
+  // Inject desired Deck agent entries by exact key (replace-by-key).
   for (const [key, entry] of Object.entries(agentEntries)) {
     const previous = merged.agent[key] ?? ({} as AgentEntry);
     const next: AgentEntry = { ...previous, ...entry };
@@ -132,6 +134,11 @@ export function mergeConfig(
       if (entry.variant === "") delete next.variant;
     }
     merged.agent[key] = next;
+  }
+
+  // Retire only exact Deck-owned legacy keys. Unknown/user-owned entries remain.
+  for (const key of agentKeysToRemove) {
+    delete merged.agent[key];
   }
 
   // Ensure plugin array exists
@@ -226,7 +233,7 @@ export function rollbackConfig(backupPath: string, configPath: string): void {
 // ---------------------------------------------------------------------------
 
 export function mergeAndWrite(options: MergeOptions): MergeResult {
-  const { configPath, agentEntries, pluginsToAdd = [] } = options;
+  const { configPath, agentEntries, agentKeysToRemove = [], pluginsToAdd = [] } = options;
   const readFile = options.readFile ?? defaultReadFile;
   const writeFile = options.writeFile ?? defaultWriteFile;
   const renameFile = options.renameFile ?? defaultRenameFile;
@@ -242,7 +249,7 @@ export function mergeAndWrite(options: MergeOptions): MergeResult {
   const backupPath = backupConfig(configPath, writeFile, options.now);
 
   // 3. Merge
-  const merged = mergeConfig(existing, agentEntries, pluginsToAdd);
+  const merged = mergeConfig(existing, agentEntries, pluginsToAdd, agentKeysToRemove);
 
   // 4. Check if content actually changed
   const newContent = JSON.stringify(merged, null, 2);

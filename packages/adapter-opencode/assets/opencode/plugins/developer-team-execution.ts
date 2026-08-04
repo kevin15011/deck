@@ -15,12 +15,8 @@ import {
   type SessionPreparationAuthorizationServiceV1,
 } from "@deck/sdd-runtime";
 const APPLY_AGENTS = new Set([
-  "apply-general",
-  "apply-backend",
-  "apply-frontend",
-  "deck-developer-apply-general",
-  "deck-developer-apply-backend",
-  "deck-developer-apply-frontend",
+  "deck-apply-fast",
+  "deck-apply-deep",
 ]);
 type OpenCodePluginInput = { sessionID: string; messageID?: string; callID?: string; tool?: string };
 type OpenCodePluginOutput = { message?: unknown; parts?: unknown[]; args?: Record<string, unknown>; result?: unknown };
@@ -55,8 +51,7 @@ function applyAgent(args: Record<string, unknown>): boolean {
 
 function qaRole(args: Record<string, unknown>): "verify" | "review" | undefined {
   const role = args.subagent_type ?? args.agent ?? args.role;
-  if (role === "verify-general" || role === "deck-developer-verify") return "verify";
-  if (role === "review-general" || role === "deck-developer-review") return "review";
+  if (role === "deck-quality") return args.quality_stage === "review" ? "review" : "verify";
   return undefined;
 }
 
@@ -212,7 +207,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
           return;
         }
         const role = args.subagent_type ?? args.agent ?? args.role;
-        if (role === "deck-init") {
+        if (role === "deck-setup") {
           if (!isDelegationTool(input.tool) || !input.callID) throw new Error("invalid-evidence");
           if (!preparationAuthorizationService) throw new Error("modification-not-authorized:AUTHZ_PROVIDER_MISSING");
           if (!resolveSessionPreparation) throw new Error("modification-not-authorized:AUTHZ_MISSING");
@@ -229,7 +224,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
               ...resolved.expectation,
               sessionId: input.sessionID,
               invocationId: input.callID,
-              agentId: "deck-init",
+              agentId: "deck-setup",
               activeRunnerId: "opencode",
             },
           );

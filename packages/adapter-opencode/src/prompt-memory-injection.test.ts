@@ -190,7 +190,7 @@ test("prompt usa automatic scoping (token + x-sm-project)", () => {
 			});
 
 			// O prompt do orquestador deve conter a jerarquia
-			const orchestrator = plan.find((p) => p.agent.id === "deck-developer-orchestrator");
+			const orchestrator = plan.find((p) => p.agent.id === "deck-lead");
 			expect(orchestrator).toBeDefined();
 
 			// Verificar que se incluye la sección de Adaptive Memory y su política

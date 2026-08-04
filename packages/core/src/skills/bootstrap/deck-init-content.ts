@@ -109,3 +109,16 @@ Preparation is not an SDD phase and creates no phase status, OpenSpec change art
 ];
 
 export const deckInitSkillContent = deckInitSkillContentLines.join("\n");
+
+/**
+ * Canonical Setup content reuses the proven preparation contract while the
+ * legacy deck-init material remains available only for migration/compatibility.
+ */
+export const deckSetupSkillContent = deckInitSkillContent
+  .replaceAll("deck-init", "deck-setup")
+  .replace("# deck-setup Skill", "# Setup (deck-setup)");
+
+export const deckSetupAgentContent = deckSetupSkillContent.replace(
+  /^---\n[\s\S]*?\n---\n\n/,
+  "",
+);

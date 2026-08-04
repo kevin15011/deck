@@ -43,6 +43,92 @@ function actionText(plan: PiRunnerReviewPlan): string {
 }
 
 describe("buildPiRunnerReviewPlan", () => {
+  test("keeps Serena inert when it is only ordinarily selected", () => {
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    const plan = buildPiRunnerReviewPlan(
+      baseState({ selectedCapabilities: { serena: true }, runtime: { toolsReview } }),
+      inventory,
+    );
+
+    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "serena")).toBe(false);
+    expect(plan.groups.configWrites.some((action) => action.capabilityId === "serena")).toBe(false);
+  });
+
+  test("emits named Serena install and config actions only for the matching current Pi operation", () => {
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        selectedCapabilities: { serena: true },
+        explicitlySelectedCapabilities: { serena: true },
+        operationId: "pi-operation-1",
+        currentOperation: {
+          runner: "pi",
+          operationId: "pi-operation-1",
+          explicitlySelected: true,
+        },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    expect(plan.groups.automaticInstalls).toContainEqual(
+      expect.objectContaining({
+        id: "capability.serena.install",
+        capabilityId: "serena",
+        source: "serena-agent",
+      }),
+    );
+    expect(plan.groups.configWrites).toContainEqual(
+      expect.objectContaining({
+        id: "capability.serena.mcp-config",
+        capabilityId: "serena",
+        kind: "write-pi-mcp-config",
+      }),
+    );
+
+    const stalePlan = buildPiRunnerReviewPlan(
+      baseState({
+        selectedCapabilities: { serena: true },
+        explicitlySelectedCapabilities: { serena: true },
+        operationId: "pi-operation-1",
+        currentOperation: {
+          runner: "pi",
+          operationId: "pi-operation-2",
+          explicitlySelected: true,
+        },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+    expect(stalePlan.groups.automaticInstalls.some((action) => action.capabilityId === "serena")).toBe(false);
+    expect(stalePlan.groups.configWrites.some((action) => action.capabilityId === "serena")).toBe(false);
+  });
+
+  test("rejects a runner-mismatched current operation without affecting unrelated capabilities", () => {
+    const toolsReview = review(["sub-agents", "MCP packages"]);
+    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
+    const plan = buildPiRunnerReviewPlan(
+      baseState({
+        selectedCapabilities: { serena: true, context7: true },
+        explicitlySelectedCapabilities: { serena: true },
+        operationId: "pi-operation-1",
+        currentOperation: {
+          runner: "opencode",
+          operationId: "pi-operation-1",
+          explicitlySelected: true,
+        },
+        runtime: { toolsReview },
+      }),
+      inventory,
+    );
+
+    expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "serena")).toBe(false);
+    expect(plan.groups.configWrites.some((action) => action.capabilityId === "serena")).toBe(false);
+    expect(plan.groups.configWrites.some((action) => action.capabilityId === "context7")).toBe(true);
+  });
+
   test("Adaptive Memory none generates no Engram or Supermemory actions", () => {
     const inventory = buildPiRunnerCapabilityInventory(review(["sub-agents", "MCP packages"]), undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(baseState(), inventory);
@@ -101,6 +187,9 @@ describe("buildPiRunnerReviewPlan", () => {
       baseState({
         // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
         selectedCapabilities: { "context-mode": true, rtk: true, "codebase-memory-mcp": true, "pi-hud": true, serena: true },
+        explicitlySelectedCapabilities: { serena: true },
+        operationId: "pi-operation-1",
+        currentOperation: { runner: "pi", operationId: "pi-operation-1", explicitlySelected: true },
         runtime: { toolsReview },
       }),
       inventory,
@@ -112,7 +201,7 @@ describe("buildPiRunnerReviewPlan", () => {
     expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "codebase-memory-mcp")).toBe(true);
     // pi-hud still pending-source (not installable) - makes plan not ready
     expect(plan.groups.manualSteps.some((action) => action.capabilityId === "pi-hud" && action.status === "pending")).toBe(true);
-    // serena is python-tool - goes to automaticInstalls when missing
+    // Serena is a Core-managed capability and remains an automatic install when explicitly authorized.
     expect(plan.groups.automaticInstalls.some((action) => action.capabilityId === "serena")).toBe(true);
     // Plan not ready because pi-hud is pending
     expect(plan.ready).toBe(false);
@@ -180,6 +269,9 @@ describe("Repair #22: MCP config writes for selected capabilities", () => {
           "serena": true,
           "context7": true,
         },
+        explicitlySelectedCapabilities: { serena: true },
+        operationId: "pi-operation-1",
+        currentOperation: { runner: "pi", operationId: "pi-operation-1", explicitlySelected: true },
         adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true } },
         runtime: { toolsReview },
       }),

@@ -20,8 +20,10 @@ import {
 // ---------------------------------------------------------------------------
 
 import { chmodSync } from "node:fs";
-import { createPiRunnerAdapter, createPiSkillDiscoveryProvider } from "./runner-adapter";
+import { createPiRunnerAdapter, createPiSkillDiscoveryProvider, isPiSerenaActionAuthorized } from "./runner-adapter";
+import { buildPiRunnerReviewPlan } from "./capability-plan";
 import type { OpaqueSkillInventoryResultV1 } from "@deck/core";
+import type { SerenaReadinessEvidence } from "@deck/core";
 import { discoverSkillsFromProvider } from "../../core/src/skill-discovery/discovery";
 
 describe("Pi active-runner skill discovery provider", () => {
@@ -226,10 +228,10 @@ describe("Repair #21: Path canonicalization for Pi agents directory", () => {
         agentsDir: agentsDir, // Explicit path - should NOT append .pi/agents
       });
 
-      expect(assignments.modelAssignments["deck-developer-orchestrator"]).toBe("openai-codex/gpt-5.5");
-      expect(assignments.modelAssignments["deck-developer-explorer"]).toBe("opencode-go/kimi-k2.6");
-      expect(assignments.thinkingAssignments["deck-developer-orchestrator"]).toBe("high");
-      expect(assignments.thinkingAssignments["deck-developer-explorer"]).toBe("off");
+      expect(assignments.modelAssignments["deck-lead"]).toBe("openai-codex/gpt-5.5");
+      expect(assignments.modelAssignments["deck-investigate"]).toBe("opencode-go/kimi-k2.6");
+      expect(assignments.thinkingAssignments["deck-lead"]).toBe("high");
+      expect(assignments.thinkingAssignments["deck-investigate"]).toBe("off");
     } finally {
       cleanup(home);
     }
@@ -254,7 +256,7 @@ describe("Repair #21: Path canonicalization for Pi agents directory", () => {
         agentsDir: agentsDir,
       });
 
-      expect(modelAssignments["deck-developer-orchestrator"]).toBe("anthropic/claude-sonnet-4");
+      expect(modelAssignments["deck-lead"]).toBe("anthropic/claude-sonnet-4");
 
       // Also test thinking assignments
       const thinkingAssignments = readDeveloperTeamThinkingAssignments(home, {
@@ -263,7 +265,7 @@ describe("Repair #21: Path canonicalization for Pi agents directory", () => {
         agentsDir: agentsDir,
       });
 
-      expect(thinkingAssignments["deck-developer-orchestrator"]).toBe("medium");
+      expect(thinkingAssignments["deck-lead"]).toBe("medium");
     } finally {
       cleanup(home);
     }
@@ -324,5 +326,333 @@ describe("Repair #21: MCP config write handler structure", () => {
     expect(content).toContain("writeSerenaMcpConfig");
     expect(content).toContain("writeContext7McpConfig");
     expect(content).toContain("writeSupermemoryPiMcpConfig");
+  });
+});
+
+describe("Pi Serena action authorization", () => {
+  const authorization = {
+    kind: "interactive-tui-explicit-selection" as const,
+    runner: "pi" as const,
+    operationId: "pi-operation-1",
+  };
+  const operation = {
+    runner: "pi" as const,
+    operationId: "pi-operation-1",
+    explicitlySelected: true as const,
+  };
+
+  test("allows only a named Serena action for the matching explicit Pi operation", () => {
+    const action = { kind: "write-pi-mcp-config", capabilityId: "serena" };
+    const context = { runnerId: "pi", serenaAuthorization: authorization, currentOperation: operation };
+
+    expect(isPiSerenaActionAuthorized(action, context)).toBe(true);
+    expect(isPiSerenaActionAuthorized({ ...action, capabilityId: "context7" }, context)).toBe(false);
+    expect(isPiSerenaActionAuthorized({ ...action, kind: "write-deck-config" }, context)).toBe(false);
+    expect(isPiSerenaActionAuthorized(action, { ...context, operationId: "stale-operation" })).toBe(false);
+    expect(isPiSerenaActionAuthorized(action, { ...context, currentOperation: { ...operation, explicitlySelected: false } })).toBe(false);
+  });
+
+  test("does not expose readiness evidence or authorize an unselected operation", () => {
+    const readiness: SerenaReadinessEvidence = {
+      capabilityId: "serena",
+      state: "ready",
+      resolvedExecutablePath: "/fixtures/deck-data/tools/serena/bin/serena",
+      source: "existing-deck-tool",
+      probe: "serena-help",
+      fingerprint: "fingerprint-1",
+    };
+
+    expect(isPiSerenaActionAuthorized(
+      { kind: "write-pi-mcp-config", capabilityId: "serena" },
+      {
+        runnerId: "pi",
+        serenaReadiness: readiness,
+        serenaAuthorization: authorization,
+        currentOperation: { ...operation, explicitlySelected: false },
+      },
+    )).toBe(false);
+  });
+
+  test("routes unrelated named actions through their own writer and keeps write-deck-config inert", async () => {
+    const namedCalls: string[] = [];
+    let serenaWriterCalls = 0;
+    const adapter = createPiRunnerAdapter({
+      writeNamedMcpConfig: async (capabilityId) => {
+        namedCalls.push(capabilityId);
+        return {
+          ok: true,
+          action: "created",
+          path: "/fixtures/pi/mcp.json",
+          serverName: capabilityId,
+          diagnostics: [],
+        };
+      },
+      writeSerenaMcpConfig: async () => {
+        serenaWriterCalls += 1;
+        return {
+          ok: true,
+          action: "created",
+          path: "/fixtures/pi/mcp.json",
+          serverName: "serena",
+          diagnostics: [],
+        };
+      },
+    });
+    const context = {
+      projectRoot: "/fixtures/project",
+      runnerId: "pi",
+      environmentId: "pi-development",
+      serenaAuthorization: authorization,
+      currentOperation: operation,
+    };
+
+    await expect(adapter.runAction({
+      id: "capability.context7.mcp-config",
+      kind: "write-pi-mcp-config",
+      title: "Configure Context7 MCP",
+      capabilityId: "context7",
+      status: "ready",
+    }, context)).resolves.toMatchObject({ status: "executed" });
+    await expect(adapter.runAction({
+      id: "package-instructions.pi.deck-config",
+      kind: "write-deck-config",
+      title: "Write package instruction configuration",
+      status: "ready",
+    }, context)).resolves.toMatchObject({ status: "informational" });
+
+    expect(namedCalls).toEqual(["context7"]);
+    expect(serenaWriterCalls).toBe(0);
+  });
+});
+
+describe("Pi Serena adapter projection", () => {
+  test("projects an injected Serena installer result without requiring the Pi command", async () => {
+    const installerCalls: unknown[] = [];
+    const adapter = createPiRunnerAdapter({
+      installTools: (async (...args: unknown[]) => {
+        installerCalls.push(args);
+        return [{
+          tool: "Serena",
+          success: true,
+          actionKind: "install-pi-package",
+          status: "installed",
+          installKind: "shared-binary-plus-mcp",
+          serenaReadiness: {
+            capabilityId: "serena",
+            state: "ready",
+            resolvedExecutablePath: "/fixtures/deck-data/tools/serena/bin/serena",
+            source: "installed-deck-tool",
+            probe: "serena-help",
+            fingerprint: "fingerprint-1",
+          },
+        }];
+      }) as any,
+    });
+
+    const result = await adapter.runAction(
+      {
+        id: "capability.serena.install",
+        kind: "install-pi-package",
+        title: "Install Serena",
+        capabilityId: "serena",
+        toolId: "serena",
+        source: "serena-agent",
+        status: "ready",
+      },
+      {
+        projectRoot: "/fixtures/project",
+        runnerId: "pi",
+        environmentId: "pi-development",
+        serenaAuthorization: {
+          kind: "interactive-tui-explicit-selection",
+          runner: "pi",
+          operationId: "pi-operation-1",
+        },
+        currentOperation: {
+          runner: "pi",
+          operationId: "pi-operation-1",
+          explicitlySelected: true,
+        },
+      },
+    );
+
+    expect(result.status).toBe("executed");
+    expect(installerCalls).toHaveLength(1);
+  });
+
+  test("exercises plan to installer result to revalidated named Serena writer with only injected effects", async () => {
+    const configPath = "/fixtures/pi/mcp.json";
+    const files = new Map<string, string>();
+    const fileSystem = {
+      existsSync: (path: string) => files.has(path),
+      readFileSync: (path: string) => files.get(path) ?? "",
+      mkdirSync: () => {},
+      writeFileSync: (path: string, content: string) => files.set(path, content),
+      renameSync: (from: string, to: string) => {
+        files.set(to, files.get(from) ?? "");
+        files.delete(from);
+      },
+      rmSync: (path: string) => files.delete(path),
+    };
+    const readiness = {
+      capabilityId: "serena" as const,
+      state: "ready" as const,
+      resolvedExecutablePath: "/fixtures/deck-data/tools/serena/bin/serena",
+      source: "installed-deck-tool" as const,
+      probe: "serena-help" as const,
+      fingerprint: "fingerprint-functional-1",
+    };
+    let revalidationCalls = 0;
+    const operation = {
+      runner: "pi" as const,
+      operationId: "pi-operation-functional",
+      explicitlySelected: true as const,
+    };
+    const authorization = {
+      kind: "interactive-tui-explicit-selection" as const,
+      runner: "pi" as const,
+      operationId: operation.operationId,
+    };
+    const adapter = createPiRunnerAdapter({
+      serenaOwnedRoot: "/fixtures/deck-data/tools/serena",
+      serenaRevalidator: async (evidence) => {
+        revalidationCalls += 1;
+        return { valid: true as const, evidence };
+      },
+      installTools: async () => [{
+        tool: "Serena",
+        success: true,
+        actionKind: "install-pi-package",
+        status: "installed",
+        installKind: "shared-binary-plus-mcp",
+        serenaReadiness: readiness,
+      }] as any,
+    });
+    const plan = buildPiRunnerReviewPlan(
+      {
+        runnerScope: "pi",
+        selectedCapabilities: { serena: true },
+        explicitlySelectedCapabilities: { serena: true },
+        operationId: operation.operationId,
+        currentOperation: operation,
+      },
+      {
+        serena: {
+          capabilityId: "serena",
+          status: "missing",
+          runnerScope: "pi",
+          installed: false,
+          diagnostics: [],
+        },
+      },
+    );
+    const installAction = plan.groups.automaticInstalls.find((action) => action.capabilityId === "serena");
+    const configAction = plan.groups.configWrites.find((action) => action.capabilityId === "serena");
+    expect(installAction).toBeDefined();
+    expect(configAction).toBeDefined();
+
+    const context = {
+      projectRoot: "/fixtures/project",
+      runnerId: "pi",
+      environmentId: "pi-development",
+      serenaAuthorization: authorization,
+      currentOperation: operation,
+      piMcpConfigPath: configPath,
+      piMcpFileSystem: fileSystem,
+    };
+    await expect(adapter.runAction(installAction!, context as any)).resolves.toMatchObject({ status: "executed" });
+    await expect(adapter.runAction(configAction!, context as any)).resolves.toMatchObject({ status: "executed" });
+
+    expect(revalidationCalls).toBe(1);
+    expect(JSON.parse(files.get(configPath)!)).toEqual({
+      mcpServers: {
+        serena: {
+          command: readiness.resolvedExecutablePath,
+          args: ["start-mcp-server", "--context", "ide", "--project-from-cwd"],
+        },
+      },
+    });
+  });
+
+  test("never calls the Serena writer for missing, invalid, stale, or non-success bootstrap evidence", async () => {
+    let writerCalls = 0;
+    const adapter = createPiRunnerAdapter({
+      serenaOwnedRoot: "/fixtures/deck-data/tools/serena",
+      serenaRevalidator: async (evidence) => ({ valid: true as const, evidence }),
+      writeSerenaMcpConfig: async () => {
+        writerCalls += 1;
+        return {
+          ok: true,
+          action: "created",
+          path: "/fixtures/pi/mcp.json",
+          serverName: "serena",
+          diagnostics: [],
+        };
+      },
+    });
+    const action = {
+      id: "capability.serena.mcp-config",
+      kind: "write-pi-mcp-config",
+      title: "Configure Serena MCP",
+      capabilityId: "serena",
+      status: "ready" as const,
+    };
+    const context = {
+      projectRoot: "/fixtures/project",
+      runnerId: "pi",
+      environmentId: "pi-development",
+      serenaAuthorization: {
+        kind: "interactive-tui-explicit-selection" as const,
+        runner: "pi" as const,
+        operationId: "pi-operation-1",
+      },
+      currentOperation: {
+        runner: "pi" as const,
+        operationId: "pi-operation-1",
+        explicitlySelected: true as const,
+      },
+    };
+
+    await adapter.runAction(action, context);
+    await adapter.runAction(action, {
+      ...context,
+      serenaReadiness: {
+        capabilityId: "serena",
+        state: "ready",
+        resolvedExecutablePath: "relative/serena",
+        source: "existing-deck-tool",
+        probe: "serena-help",
+        fingerprint: "fingerprint-invalid",
+      },
+    } as any);
+    await adapter.runAction(action, {
+      ...context,
+      serenaReadiness: {
+        capabilityId: "serena",
+        state: "ready",
+        resolvedExecutablePath: "/fixtures/deck-data/tools/serena/bin/serena",
+        source: "existing-deck-tool",
+        probe: "serena-help",
+        fingerprint: "fingerprint-stale",
+      },
+      serenaRevalidator: async (evidence: SerenaReadinessEvidence) => ({
+        valid: true as const,
+        evidence: { ...evidence, fingerprint: "fingerprint-changed" },
+      }),
+    } as any);
+    await adapter.runAction(action, {
+      ...context,
+      serenaBootstrapOutcome: "failed",
+      serenaReadiness: {
+        capabilityId: "serena",
+        state: "ready",
+        resolvedExecutablePath: "/fixtures/deck-data/tools/serena/bin/serena",
+        source: "existing-deck-tool",
+        probe: "serena-help",
+        fingerprint: "fingerprint-failed",
+      },
+    } as any);
+
+    expect(writerCalls).toBe(0);
   });
 });

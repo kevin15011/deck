@@ -277,7 +277,7 @@ describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinking
       exists: () => true,
       readFile: () => content,
     });
-    expect(result.thinkingAssignments["deck-developer-orchestrator"]).toBe("runner-token");
+    expect(result.thinkingAssignments["deck-lead"]).toBe("runner-token");
     expect(content).toContain('"reasoningEffort":"high"');
   });
   test("returns effectiveThinkingAssignments as undefined when model is unsupported", () => {
@@ -297,10 +297,10 @@ describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinking
     const result = readOpenCodeDeveloperTeamModelConfigAssignments("/fake/path", mockConfig);
 
     // The raw thinkingAssignments should be present (preserved for debugging)
-    expect(result.thinkingAssignments["deck-developer-orchestrator"]).toBe("high");
+    expect(result.thinkingAssignments["deck-lead"]).toBe("high");
     // effectiveThinkingAssignments should be undefined for unsupported model
     expect(result.effectiveThinkingAssignments).toBeDefined();
-    expect(result.effectiveThinkingAssignments?.["deck-developer-orchestrator"]).toBeUndefined();
+    expect(result.effectiveThinkingAssignments?.["deck-lead"]).toBeUndefined();
   });
 
   test("returns effectiveThinkingAssignments when model is supported", () => {
@@ -318,7 +318,21 @@ describe("readOpenCodeDeveloperTeamModelConfigAssignments with effectiveThinking
 
     const result = readOpenCodeDeveloperTeamModelConfigAssignments("/fake/path", mockConfig);
 
-    expect(result.thinkingAssignments["deck-developer-orchestrator"]).toBe("high");
-    expect(result.effectiveThinkingAssignments?.["deck-developer-orchestrator"]).toBe("high");
+    expect(result.thinkingAssignments["deck-lead"]).toBe("high");
+    expect(result.effectiveThinkingAssignments?.["deck-lead"]).toBe("high");
+  });
+
+  test("leaves a merged role unconfigured when legacy assignments disagree", () => {
+    const result = readOpenCodeDeveloperTeamModelConfigAssignments("/fake/path", {
+      exists: () => true,
+      readFile: () => JSON.stringify({
+        agent: {
+          "deck-developer-apply-backend": { model: "openai/gpt-5.5" },
+          "deck-developer-apply-frontend": { model: "anthropic/claude-sonnet-4" },
+        },
+      }),
+    });
+
+    expect(result.modelAssignments["deck-apply-deep"]).toBeUndefined();
   });
 });

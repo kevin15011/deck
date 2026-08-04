@@ -12,6 +12,17 @@ import {
 } from "./capability-catalog";
 
 describe("PI_RUNNER_CAPABILITY_CATALOG", () => {
+  test("identifies Serena by the serena-agent source without generic Python/default metadata", () => {
+    const serena = PI_RUNNER_CAPABILITY_CATALOG.serena;
+
+    expect(serena.source).toBe("serena-agent");
+    expect(serena.installKind).toBe("shared-binary-plus-mcp");
+    expect(serena.description.toLowerCase()).not.toContain("python tool");
+    expect(JSON.stringify(serena).toLowerCase()).not.toContain("preselected");
+    expect(JSON.stringify(serena).toLowerCase()).not.toContain("default");
+    expect(JSON.stringify(serena).toLowerCase()).not.toContain("persisted");
+  });
+
   test("contains only user-facing capability entries — excludes runner-mermaid (internal)", () => {
     // REQ-DASH-001: runner-mermaid must not appear as a user-facing capability
     // Only codebase-memory-mcp (not codebase-memory) is exposed in Pi TUI for OpenCode parity

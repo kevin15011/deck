@@ -60,6 +60,73 @@ function allActionIds(plan: PiRunnerReviewPlan | undefined): string[] {
 }
 
 describe("Pi Runner dashboard reducer", () => {
+  test("keeps Serena explicit authorization separate from defaults and config state", () => {
+    const state = createDefaultPiRunnerDashboardState({
+      operationId: "pi-operation-1",
+      currentOperation: { runner: "pi", operationId: "pi-operation-1", explicitlySelected: false },
+      selectedCapabilities: { serena: true },
+      packageInstructions: { serena: true },
+      capabilityStatuses: { serena: "ready" },
+    });
+
+    expect(state.selectedCapabilities.serena).toBe(true);
+    expect(state.explicitlySelectedCapabilities.serena).toBeUndefined();
+
+    const selected = reduce(state, { type: "toggle-capability", capabilityId: "serena" });
+    expect(selected.selectedCapabilities.serena).toBe(false);
+    expect(selected.explicitlySelectedCapabilities.serena).toBeUndefined();
+
+    const reselected = reduce(selected, { type: "toggle-capability", capabilityId: "serena" });
+    expect(reselected.selectedCapabilities.serena).toBe(true);
+    expect(reselected.explicitlySelectedCapabilities.serena).toBe(true);
+    expect(reselected.currentOperation).toEqual({ runner: "pi", operationId: "pi-operation-1", explicitlySelected: true });
+  });
+
+  test("does not treat a state/config projection as an explicit Serena selection", () => {
+    const state = createDefaultPiRunnerDashboardState({
+      operationId: "pi-operation-1",
+      currentOperation: { runner: "pi", operationId: "pi-operation-1", explicitlySelected: false },
+      selectedCapabilities: { serena: true },
+      packageInstructions: { serena: true },
+    });
+
+    const projected = reduce(state, { type: "set-capability", capabilityId: "serena", selected: true });
+
+    expect(projected.explicitlySelectedCapabilities.serena).toBeUndefined();
+    expect(projected.currentOperation?.explicitlySelected).toBe(false);
+  });
+
+  test("runner changes and new operations clear ephemeral Serena authorization and stale plans", () => {
+    const plan: PiRunnerReviewPlan = {
+      groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
+      diagnostics: [],
+      ready: true,
+    };
+    let state = createDefaultPiRunnerDashboardState({
+      operationId: "pi-operation-1",
+      currentOperation: { runner: "pi", operationId: "pi-operation-1", explicitlySelected: true },
+      explicitlySelectedCapabilities: { serena: true },
+      selectedCapabilities: { serena: true },
+      plan,
+      planGeneratedForRevision: 0,
+    });
+
+    state = reduce(state, { type: "set-runner", runnerScope: "opencode", operationId: "opencode-operation-1" });
+    expect(state.runnerScope).toBe("opencode");
+    expect(state.explicitlySelectedCapabilities).toEqual({});
+    expect(state.currentOperation).toEqual({ runner: "opencode", operationId: "opencode-operation-1", explicitlySelected: false });
+    expect(state.plan).toBeUndefined();
+
+    state = reduce(state, { type: "set-capability", capabilityId: "serena", selected: false });
+    state = reduce(state, { type: "toggle-capability", capabilityId: "serena" });
+    expect(state.explicitlySelectedCapabilities.serena).toBe(true);
+
+    state = reduce(state, { type: "new-operation", runnerScope: "opencode", operationId: "opencode-operation-2" });
+    expect(state.explicitlySelectedCapabilities).toEqual({});
+    expect(state.currentOperation).toEqual({ runner: "opencode", operationId: "opencode-operation-2", explicitlySelected: false });
+    expect(state.plan).toBeUndefined();
+  });
+
   test("navega dashboard → sección → dashboard conservando selecciones y back stack", () => {
     let state = createDefaultPiRunnerDashboardState();
 
@@ -113,7 +180,10 @@ describe("Pi Runner dashboard reducer", () => {
   });
 
   test("togglea RTK, context-mode, codebase-memory-mcp, serena y pi-hud", () => {
-    let state = createDefaultPiRunnerDashboardState();
+    let state = createDefaultPiRunnerDashboardState({
+      operationId: "pi-operation-toggle",
+      currentOperation: { runner: "pi", operationId: "pi-operation-toggle", explicitlySelected: false },
+    });
 
     state = reduce(state, { type: "toggle-capability", capabilityId: "rtk" });
     state = reduce(state, { type: "toggle-capability", capabilityId: "context-mode" });
@@ -125,7 +195,7 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.selectedCapabilities.rtk).toBe(false);
     expect(state.selectedCapabilities["context-mode"]).toBe(false);
     expect(state.selectedCapabilities["codebase-memory-mcp"]).toBe(false);
-    expect(state.selectedCapabilities.serena).toBe(false);
+    expect(state.selectedCapabilities.serena).toBe(true);
     expect(state.selectedCapabilities["pi-hud"]).toBe(true);
 
     // Toggle back on
@@ -133,7 +203,7 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.selectedCapabilities.rtk).toBe(true);
 
     state = reduce(state, { type: "toggle-capability", capabilityId: "serena" });
-    expect(state.selectedCapabilities.serena).toBe(true);
+    expect(state.selectedCapabilities.serena).toBe(false);
   });
 
   test("Adaptive Memory inicia en None y no agrega acciones de memoria", () => {

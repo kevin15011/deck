@@ -28,13 +28,13 @@ function countOccurrences(value: string, needle: string): number {
 }
 
 describe("buildTeamSystemPrompt", () => {
-  test("builds the compact Developer Team coordinator prompt by default", () => {
+  test("builds the adaptive Developer Team Lead prompt by default", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
 
-    expect(content).toContain("# Deck Developer Team Coordinator");
-    expect(content).toContain("Runtime-Enforced Team Contract");
-    expect(content).toContain("## Triage and Flow");
-    expect(content).toContain("## Hard Stops");
+    expect(content).toContain("# Lead (deck-lead)");
+    expect(content).toContain("Adaptive Developer Team Contract");
+    expect(content).toContain("## Route selection");
+    expect(content).toContain("## Conversational deltas");
   });
 
   test("materializes the Pi runtime context before adaptive memory", () => {
@@ -86,33 +86,33 @@ describe("buildTeamSystemPrompt", () => {
       promptProfileActivation: { ...compactPromptActivation, status: "rollout-paused" },
     });
 
-    expect(compact.content).toContain("# Deck Developer Team Coordinator");
-    expect(compact.content).toContain("Runtime-Enforced Team Contract");
+    expect(compact.content).toContain("# Lead (deck-lead)");
+    expect(compact.content).toContain("Adaptive Developer Team Contract");
     expect(eligible.content).toBe(compact.content);
     expect(paused.content).toBe(compact.content);
   });
 
-  test("contains deterministic flow and authority rules", () => {
+  test("contains proportional routing and authority rules", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
 
-    expect(content).toContain("Automatic versus Interactive");
-    expect(content).toContain("Runtime Authority Order");
-    expect(content).toContain("deterministic decision policy");
-    expect(content).not.toContain("Follow the team's established workflow");
+    expect(content).toContain("Choose the smallest route");
+    expect(content).toContain("Modifying work requires the user's request and the active runner's authority");
+    expect(content).toContain("Do not use file count as a routing signal");
+    expect(content).not.toContain("Delegate each phase");
   });
 
-  test("contains Deck-specific specialist routing", () => {
+  test("contains adaptive specialist routing", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
-    expect(content).toContain("Delegate each phase to its registered specialist");
-    expect(content).toContain("Apply");
-    expect(content).toContain("Verify");
-    expect(content).toContain("Review");
+    expect(content).toContain("Apply Fast");
+    expect(content).toContain("Apply Deep");
+    expect(content).toContain("Investigate");
+    expect(content).toContain("Quality is not a universal gate");
   });
 
   test("keeps official context authoritative", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
-    expect(content).toContain("OpenSpec artifacts and Spec Registry remain authoritative");
-    expect(content).toContain("adaptive context is advisory");
+    expect(content).toContain("OpenSpec artifacts and Spec Registry entries are authoritative");
+    expect(content).toContain("adaptive memory is advisory");
   });
 
   test("throws for unknown team", () => {
@@ -280,7 +280,7 @@ describe("materializeTeamProfile", () => {
 
       const content = readFileSync(systemPromptPath, "utf-8");
       expect(content).toContain("Developer Team");
-      expect(content).toContain("Runtime-Enforced Team Contract");
+      expect(content).toContain("Adaptive Developer Team Contract");
       expect(content).toContain("- active_runner_id: pi");
       expect(content).toContain("deck skill-registry refresh --runner pi");
       expect(content).not.toContain("--runner opencode");

@@ -1,7 +1,7 @@
 /**
  * Prompt file generation for OpenCode Developer Team.
  *
- * Generates prompt files in `~/.config/opencode/prompts/deck-developer/`.
+ * Generates prompt files in `~/.config/opencode/prompts/deck-team/`.
  * Prompts include the canonical system prompt from @deck/core so all runners
  * share the same orchestrator philosophy, delegation rules, and SDD workflow.
  * The adapter only formats for OpenCode's agent-prompt file convention.
@@ -254,9 +254,8 @@ function buildProviderAdaptiveMemorySection(
 
 // Apply agent IDs - these receive authorization card injection at runtime
 const APPLY_AGENT_IDS = [
-  "deck-developer-apply-general",
-  "deck-developer-apply-backend",
-  "deck-developer-apply-frontend",
+  "deck-apply-fast",
+  "deck-apply-deep",
 ] as const;
 
 /**
@@ -288,7 +287,7 @@ function buildPromptContent(
     throw new Error(`No content found for agent ${agent.id} in core registry.`);
   }
 
-  const isOrchestrator = agent.id === "deck-developer-orchestrator";
+  const isOrchestrator = agent.id === "deck-lead";
   let baseContent = isOrchestrator
     ? (getTeamSessionInstructions("developer-team", {
       capabilityInstructions,
@@ -308,7 +307,7 @@ function buildPromptContent(
   }
 
   // Determine surface for memory injection
-  const memorySurface = agent.id === "deck-developer-orchestrator" ? "session" : "agent";
+  const memorySurface = agent.id === "deck-lead" ? "session" : "agent";
   const providerMemoryContent = buildProviderAdaptiveMemorySection(memoryBundle, memorySurface, explicitProvider);
 
   // Prepend the Skill Loading Gate
@@ -414,7 +413,7 @@ export function buildPromptGenerationPlan(
   // Note: buildAdaptiveMemoryInstructionBundle returns CapabilityInstructionBundle, not MemoryInjectionBundle.
   const effectiveCapabilityInstructions = capabilityInstructions ?? (explicitProvider ? buildAdaptiveMemoryInstructionBundle() : undefined);
 
-  const promptsDir = join(configDir, "prompts", "deck-developer");
+  const promptsDir = join(configDir, "prompts", "deck-team");
 
   return DEVELOPER_TEAM_AGENTS.map((agent): PlannedPromptFile => {
     const skillPath = join(configDir, "skills", agent.skillId, "SKILL.md");
@@ -460,7 +459,7 @@ export function applyPromptGeneration(
  * Build the OpenCode `{file:/absolute/path}` prompt reference for an agent.
  */
 export function buildPromptReference(configDir: string, agentId: string): string {
-  const promptPath = join(configDir, "prompts", "deck-developer", `${agentId}.md`);
+  const promptPath = join(configDir, "prompts", "deck-team", `${agentId}.md`);
   return `{file:${promptPath}}`;
 }
 

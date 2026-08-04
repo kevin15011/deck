@@ -58,6 +58,14 @@ import type {
   SkillDiscoverySourceProviderV1,
   SkillDiscoverySourceSetV1,
   SkillLocatorResolutionV1,
+  SerenaBootstrapAuthorization,
+  SerenaBootstrapEffects,
+  SerenaMcpWriter,
+  SerenaMcpWriteResult,
+  SerenaMcpWriterInput,
+  SerenaOperationIdentity,
+  SerenaReadinessEvidence,
+  SerenaReadinessRevalidator,
 } from "@deck/core";
 
 import {
@@ -65,6 +73,13 @@ import {
   SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
   SKILL_DISCOVERY_SOURCE_SCHEMA,
   SKILL_DISCOVERY_V1_BOUNDS,
+  SERENA_MCP_ARGS,
+  createDefaultSerenaBootstrapEffects,
+  createSerenaReadinessRevalidator,
+  resolveSerenaOwnedRoot,
+  runEvidenceGatedSerenaWriter,
+  validateSerenaOperationAuthorization,
+  validateSerenaReadinessEvidence,
 } from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 
@@ -99,7 +114,11 @@ import {
   type OpenCodeDeveloperTeamInstallPlan,
   type OpenCodeDeveloperTeamApplyResult,
 } from "./developer-team-install";
-import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
+import {
+  writeOpenCodeMcpConfig,
+  writeSerenaOpenCodeMcpConfig,
+  type OpenCodeMcpConfigFileSystem,
+} from "./opencode-mcp-config";
 import { getUserFacingOpenCodeCapability, OPENCODE_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
 import type { CapabilityCatalogEntry } from "@deck/core";
 import { discoverModelInventory } from "./model-inventory";
@@ -107,7 +126,12 @@ import { LastKnownGoodStore, ModelInventoryCache, buildDiscoveryFingerprint, bui
 import { nodeOpenCodeCommandRunner, OPENCODE_DISCOVERY_TIMEOUT_MS, type ModelDiscoveryFileSystem, type OpenCodeCommandRunner } from "./opencode-models-cli";
 import { collectOpenCodeDiscoveryContext } from "./model-discovery-context";
 import type { RunnerModelInventory, RunnerModelEntry } from "@deck/core";
-import { installOpenCodeTools, type OpenCodeToolInstallResultExact } from "./install-tools";
+import {
+  installOpenCodeTools,
+  type InstallOpenCodeToolsOptions,
+  type OpenCodeToolInstallResultExact,
+  type SerenaBootstrapRunner,
+} from "./install-tools";
 
 // ---------------------------------------------------------------------------
 // Adapter factory
@@ -139,6 +163,17 @@ export type OpenCodeRunnerAdapterOptions = {
   installTools?: typeof installOpenCodeTools;
   /** Optional evidence context provider shared by preflight and effect-time rechecks. */
   evidenceContext?: (context: RunnerActionContext) => OpenCodeEvidenceContext;
+  /** Injected Core Serena bootstrap seam; production composition supplies the effects. */
+  serenaBootstrap?: SerenaBootstrapRunner;
+  serenaBootstrapEffects?: SerenaBootstrapEffects;
+  /** Immediate same-path/fingerprint revalidation before the OpenCode writer. */
+  serenaRevalidator?: SerenaReadinessRevalidator;
+  /** Adapter-owned writer seam; tests must inject this instead of a home writer. */
+  serenaMcpWriter?: SerenaMcpWriter;
+  serenaMcpFileSystem?: OpenCodeMcpConfigFileSystem;
+  serenaOwnedRoot?: string;
+  serenaConfigPath?: string;
+  serenaStage?: InstallOpenCodeToolsOptions["onStage"];
 };
 
 export type DiscoveryTimers = { setTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout>; clearTimeout(timer: ReturnType<typeof setTimeout>): void };
@@ -627,12 +662,32 @@ class OpenCodeRunnerAdapterImpl {
   #toolsReview?: OpenCodeRunnerAdapterOptions["toolsReview"];
   #installTools: typeof installOpenCodeTools;
   #evidenceContext?: OpenCodeRunnerAdapterOptions["evidenceContext"];
+  #serenaBootstrap?: SerenaBootstrapRunner;
+  #serenaBootstrapEffects: SerenaBootstrapEffects;
+  #serenaRevalidator?: SerenaReadinessRevalidator;
+  #serenaMcpWriter?: SerenaMcpWriter;
+  #serenaMcpFileSystem?: OpenCodeMcpConfigFileSystem;
+  #serenaOwnedRoot?: string;
+  #serenaOwnedRootIsExplicit: boolean;
+  #serenaConfigPath?: string;
+  #serenaStage?: InstallOpenCodeToolsOptions["onStage"];
+  #serenaEvidenceByOperation = new Map<string, { authorization: SerenaBootstrapAuthorization; operation: SerenaOperationIdentity; evidence: SerenaReadinessEvidence }>();
 
   constructor(options?: OpenCodeRunnerAdapterOptions) {
     this.#developerTeamConfigDir = options?.developerTeamConfigDir;
     this.#toolsReview = options?.toolsReview;
     this.#installTools = options?.installTools ?? installOpenCodeTools;
     this.#evidenceContext = options?.evidenceContext;
+    this.#serenaBootstrap = options?.serenaBootstrap;
+    this.#serenaBootstrapEffects = options?.serenaBootstrapEffects ?? createDefaultSerenaBootstrapEffects();
+    this.#serenaRevalidator = options?.serenaRevalidator;
+    this.#serenaMcpWriter = options?.serenaMcpWriter;
+    this.#serenaMcpFileSystem = options?.serenaMcpFileSystem;
+    this.#serenaOwnedRoot = options?.serenaOwnedRoot;
+    this.#serenaOwnedRootIsExplicit = options !== undefined
+      && Object.prototype.hasOwnProperty.call(options, "serenaOwnedRoot");
+    this.#serenaConfigPath = options?.serenaConfigPath;
+    this.#serenaStage = options?.serenaStage;
     this.#inventoryDiscovery = options?.inventoryDiscovery
       ?? createDefaultOpenCodeInventoryDiscovery(options?.productionDiscoveryDependencies);
     const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
@@ -800,6 +855,15 @@ class OpenCodeRunnerAdapterImpl {
 
     const openCodeState: OpenCodeReviewPlanState = {
       runnerScope: state.runnerId,
+      operationId: state.operationId,
+      explicitlySelectedCapabilities: state.explicitlySelectedCapabilities,
+      currentOperation: state.operationId
+        ? {
+            runner: "opencode",
+            operationId: state.operationId,
+            explicitlySelected: state.explicitlySelectedCapabilities?.serena === true,
+          }
+        : undefined,
       selectedCapabilities: state.selectedCapabilities,
       adaptiveMemory: state.adaptiveMemory.provider !== "none" ? {
         provider: state.adaptiveMemory.provider,
@@ -863,14 +927,18 @@ class OpenCodeRunnerAdapterImpl {
   }
 
   buildInstallationPlan(state: DashboardState): InstallationPlan {
-    const toolsReview = reviewOpenCodeTools();
+    const toolsReview = typeof this.#toolsReview === "function"
+      ? this.#toolsReview({ projectRoot: process.cwd(), runnerId: this.runnerId, environmentId: state.environmentId })
+      : this.#toolsReview ?? reviewOpenCodeTools();
 
     // Determine selected tool IDs based on packageInstructions or defaults
     const runnerScope = state.runnerId;
     const packageInstructions = state.packageInstructions;
 
     // Map package instructions to selected tool IDs
-    let selectedToolIds: string[] = OPENCODE_INSTALLABLE_TOOLS.map((t) => t.id);
+    let selectedToolIds: string[] = OPENCODE_INSTALLABLE_TOOLS
+      .filter((tool) => tool.id !== "serena")
+      .map((tool) => tool.id);
 
     // If we have package instructions, use those to determine selection
     if (packageInstructions && typeof packageInstructions === "object") {
@@ -878,9 +946,12 @@ class OpenCodeRunnerAdapterImpl {
       if (opencodeInstructions) {
         selectedToolIds = Object.entries(opencodeInstructions)
           .filter(([, enabled]) => enabled)
-          .map(([id]) => id);
+          .map(([id]) => id)
+          .filter((id) => id !== "serena");
       }
     }
+
+    if (hasExplicitSerenaDashboardSelection(state)) selectedToolIds.push("serena");
 
     const plan = buildOpenCodeInstallationPlan({ tools: toolsReview.tools, selectedToolIds });
 
@@ -901,6 +972,10 @@ class OpenCodeRunnerAdapterImpl {
   async runAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
     switch (action.kind) {
       case "install-opencode-plugin": {
+        if (isSerenaAction(action)) {
+          return this.runSerenaInstallAction(action, context);
+        }
+
         const toolId = action.toolId ?? action.capabilityId;
         const toolsReview = this.getToolsReview(context);
         const plan = buildOpenCodeInstallationPlan({
@@ -970,6 +1045,13 @@ class OpenCodeRunnerAdapterImpl {
           };
         }
 
+        if (capabilityId === "serena") {
+          if (action.toolId !== undefined && action.toolId !== "serena") {
+            return failedSerenaAction(action.id, "Serena configuration action identity is invalid.");
+          }
+          return this.runSerenaMcpConfigAction(action, context);
+        }
+
         const result = await this.writeMcpConfigFromCapability(capabilityId, action.source);
         return {
           actionId: action.id,
@@ -1019,6 +1101,199 @@ class OpenCodeRunnerAdapterImpl {
     }
   }
 
+  private getSerenaOperationContext(context: RunnerActionContext):
+    | { valid: true; authorization: SerenaBootstrapAuthorization; operation: SerenaOperationIdentity }
+    | { valid: false; message: string } {
+    if (context.runnerId !== "opencode") {
+      return { valid: false, message: "Serena is not authorized for this runner operation." };
+    }
+    const operation = context.currentOperation ?? context.operation;
+    if (!operation) {
+      return { valid: false, message: "Serena requires a current install operation." };
+    }
+    const authorization = validateSerenaOperationAuthorization(context.serenaAuthorization, operation);
+    if (!authorization.valid || authorization.authorization.runner !== "opencode") {
+      return { valid: false, message: "Serena requires explicit selection in the current OpenCode install operation." };
+    }
+    return { valid: true, authorization: authorization.authorization, operation };
+  }
+
+  private serenaOperationKey(operation: SerenaOperationIdentity): string {
+    return `${operation.runner}\u0000${operation.operationId}`;
+  }
+
+  private async ensureSerenaRuntime(signal?: AbortSignal): Promise<boolean> {
+    if (!isSafeSerenaRoot(this.#serenaOwnedRoot)) {
+      if (this.#serenaOwnedRootIsExplicit) return false;
+      const resolvedRoot = await resolveSerenaOwnedRoot(
+        this.#serenaBootstrapEffects,
+        signal ?? new AbortController().signal,
+      );
+      if (!isSafeSerenaRoot(resolvedRoot)) return false;
+      this.#serenaOwnedRoot = resolvedRoot;
+    }
+    this.#serenaRevalidator ??= createSerenaReadinessRevalidator(
+      this.#serenaOwnedRoot,
+      this.#serenaBootstrapEffects,
+    );
+    return true;
+  }
+
+  private async runSerenaInstallAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
+    const operationContext = this.getSerenaOperationContext(context);
+    if (!operationContext.valid) return failedSerenaAction(action.id, operationContext.message);
+    if (context.signal?.aborted) return cancelledSerenaAction(action.id);
+    if (!await this.ensureSerenaRuntime(context.signal)) return failedSerenaAction(action.id, "Serena Deck-owned root is unavailable; setup was not started.");
+
+    const tool = OPENCODE_INSTALLABLE_TOOLS.find((candidate) => candidate.id === "serena");
+    if (!tool) return failedSerenaAction(action.id, "Serena installation metadata is unavailable.");
+
+    let results: OpenCodeToolInstallResultExact[];
+    try {
+      results = await this.#installTools(
+        "opencode",
+        [tool],
+        () => {},
+        undefined,
+        {
+          projectRoot: context.projectRoot,
+          signal: context.signal,
+          evidenceContext: this.getEvidenceContext(context),
+          serenaAuthorization: operationContext.authorization,
+          serenaOperation: operationContext.operation,
+          currentOperation: operationContext.operation,
+          serenaBootstrap: this.#serenaBootstrap,
+          serenaEffects: this.#serenaBootstrapEffects,
+          onStage: this.#serenaStage,
+        },
+      );
+    } catch {
+      this.#serenaEvidenceByOperation.delete(this.serenaOperationKey(operationContext.operation));
+      return failedSerenaAction(action.id, "Serena setup failed before readiness could be established.");
+    }
+
+    const result = results[0];
+    if (!result) {
+      this.#serenaEvidenceByOperation.delete(this.serenaOperationKey(operationContext.operation));
+      return failedSerenaAction(action.id, "Serena setup returned no result.");
+    }
+
+    if (
+      (result.outcome === "already-present" || result.outcome === "executed")
+      && result.success
+      && ((result.outcome === "already-present" && result.serenaBootstrapOutcome === "reused")
+        || (result.outcome === "executed" && result.serenaBootstrapOutcome === "installed"))
+      && result.serenaReadiness
+    ) {
+      const evidence = validateSerenaReadinessEvidence(result.serenaReadiness, this.#serenaOwnedRoot);
+      if (evidence.valid) {
+        this.#serenaEvidenceByOperation.set(this.serenaOperationKey(operationContext.operation), {
+          authorization: operationContext.authorization,
+          operation: operationContext.operation,
+          evidence: evidence.evidence,
+        });
+      } else {
+        this.#serenaEvidenceByOperation.delete(this.serenaOperationKey(operationContext.operation));
+        return failedSerenaAction(action.id, "Serena setup returned invalid readiness evidence.");
+      }
+    } else {
+      this.#serenaEvidenceByOperation.delete(this.serenaOperationKey(operationContext.operation));
+    }
+
+    return projectOpenCodeInstallResult(action, result);
+  }
+
+  private async runSerenaMcpConfigAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
+    const operationContext = this.getSerenaOperationContext(context);
+    if (!operationContext.valid) return failedSerenaAction(action.id, operationContext.message);
+    if (context.signal?.aborted) return cancelledSerenaAction(action.id);
+    if (!await this.ensureSerenaRuntime(context.signal)) return failedSerenaAction(action.id, "Serena Deck-owned root is unavailable; configuration was not changed.");
+
+    const retained = this.#serenaEvidenceByOperation.get(this.serenaOperationKey(operationContext.operation));
+    const contextualEvidence = context.serenaReadiness
+      ? validateSerenaReadinessEvidence(context.serenaReadiness, this.#serenaOwnedRoot)
+      : undefined;
+    const contextualHandoff = contextualEvidence && contextualEvidence.valid
+      ? {
+          authorization: operationContext.authorization,
+          operation: operationContext.operation,
+          evidence: contextualEvidence.evidence,
+        }
+      : undefined;
+    const handoff = retained ?? contextualHandoff;
+    if (!handoff) return failedSerenaAction(action.id, "Serena readiness evidence is unavailable; configuration was not changed.");
+    if (!this.#serenaRevalidator) return failedSerenaAction(action.id, "Serena readiness could not be revalidated; configuration was not changed.");
+
+    const revalidate: SerenaReadinessRevalidator = async (evidence) => {
+      if (context.signal?.aborted) {
+        return {
+          valid: false as const,
+          code: "stale-readiness-evidence" as const,
+          diagnostic: { code: "cancelled", message: "Serena configuration was cancelled." },
+        };
+      }
+      const refreshed = await this.#serenaRevalidator!(evidence);
+      if (context.signal?.aborted) {
+        return {
+          valid: false as const,
+          code: "stale-readiness-evidence" as const,
+          diagnostic: { code: "cancelled", message: "Serena configuration was cancelled." },
+        };
+      }
+      return refreshed;
+    };
+
+    const writer = this.#serenaMcpWriter ?? ((input: SerenaMcpWriterInput) => this.writeDefaultSerenaMcpConfig(input));
+    const result = await runEvidenceGatedSerenaWriter(
+      {
+        authorization: handoff.authorization,
+        operation: handoff.operation,
+        readiness: handoff.evidence,
+        command: handoff.evidence.resolvedExecutablePath,
+        args: [...SERENA_MCP_ARGS],
+        revalidate,
+      },
+      writer,
+      this.#serenaOwnedRoot,
+    );
+
+    if (!result.ok) return failedSerenaAction(action.id, "Serena MCP configuration was not changed.");
+    return {
+      actionId: action.id,
+      status: "executed",
+      message: result.status === "unchanged"
+        ? "Serena MCP configuration is unchanged."
+        : `Serena MCP configuration ${result.status}.`,
+      diagnostics: [],
+    };
+  }
+
+  private writeDefaultSerenaMcpConfig(input: SerenaMcpWriterInput): SerenaMcpWriteResult {
+    const ownedRoot = this.#serenaOwnedRoot;
+    if (!isSafeSerenaRoot(ownedRoot)) {
+      return {
+        ok: false,
+        code: "root-invalid",
+        diagnostic: { code: "root-invalid", message: "Serena MCP configuration requires a Deck-owned root." },
+      };
+    }
+    const result = writeSerenaOpenCodeMcpConfig({
+      configPath: this.#serenaConfigPath,
+      ownedRoot,
+      readiness: input.readiness,
+      command: [input.command, ...input.args],
+      fileSystem: this.#serenaMcpFileSystem,
+    });
+    if (!result.ok || !result.status) {
+      return {
+        ok: false,
+        code: "config-write-failed",
+        diagnostic: { code: "config-write-failed", message: "Serena MCP configuration was not changed." },
+      };
+    }
+    return { ok: true, status: result.status };
+  }
+
   private async writeMcpConfigFromCapability(capabilityId: string, source?: string): Promise<{ ok: boolean; diagnostics: string[] }> {
     try {
       switch (capabilityId) {
@@ -1050,23 +1325,6 @@ class OpenCodeRunnerAdapterImpl {
         case "supermemory": {
           // Supermemory is handled separately via adaptive memory flow
           return { ok: true, diagnostics: ["Supermemory MCP config handled by adaptive memory provider."] };
-        }
-        case "serena": {
-          // Serena MCP config - verify serena command exists before writing config
-          // This prevents broken OpenCode startup from invalid MCP config
-          const { commandExistsInPath } = await import("./install-tools");
-          const serenaExists = commandExistsInPath("serena");
-          if (!serenaExists) {
-            return {
-              ok: false,
-              diagnostics: ["Serena command not found in PATH. Install serena via 'uv tool install serena' or 'pipx install serena' first."],
-            };
-          }
-          return writeOpenCodeMcpConfig({
-            serverName: "serena",
-            type: "local",
-            command: ["serena", "start-mcp-server", "--context", "ide", "--project-from-cwd"],
-          });
         }
         default: {
           if (source) {
@@ -1216,6 +1474,14 @@ class OpenCodeRunnerAdapterImpl {
   // -------------------------------------------------------------------------
 
   async writeMcpConfig(input: RunnerMcpConfigInput): Promise<RunnerMcpConfigResult> {
+    if (input.serverName === "serena") {
+      return {
+        ok: false,
+        path: this.#serenaConfigPath ?? "",
+        diagnostics: ["Serena configuration requires the current-operation evidence-gated action."],
+      };
+    }
+
     // Supermemory uses OpenCode's native OAuth discovery. The legacy token
     // input remains accepted by the shared runner contract but is not persisted.
     if (input.serverName === "supermemory") {
@@ -1249,6 +1515,7 @@ class OpenCodeRunnerAdapterImpl {
     return {
       ok: result.ok,
       path: result.path,
+      status: result.status,
       diagnostics: diagnosticsList,
     };
   }
@@ -1509,6 +1776,43 @@ function projectOpenCodeInstallResult(
     message: result.message,
     diagnostics,
     raw,
+  };
+}
+
+function isSerenaAction(action: RunnerAction): boolean {
+  return action.capabilityId === "serena" && (action.toolId === undefined || action.toolId === "serena");
+}
+
+function hasExplicitSerenaDashboardSelection(state: DashboardState): boolean {
+  return state.runnerId === "opencode"
+    && state.selectedCapabilities.serena === true
+    && state.explicitlySelectedCapabilities?.serena === true
+    && typeof state.operationId === "string"
+    && state.operationId.length > 0
+    && state.operationId.length <= 200
+    && !/[\u0000-\u001f\u007f-\u009f]/u.test(state.operationId);
+}
+
+function isSafeSerenaRoot(root: string | undefined): root is string {
+  if (!root || !root.startsWith("/") || root === "/" || root.includes("\0") || root.split("/").some((part) => part === "..")) return false;
+  return !new Set(["/bin", "/sbin", "/usr", "/opt", "/etc", "/var", "/root"]).has(root.replace(/\/$/u, ""));
+}
+
+function failedSerenaAction(actionId: string, message: string): RunnerActionRunResult {
+  return {
+    actionId,
+    status: "failed",
+    message,
+    diagnostics: ["Serena configuration and installation are fail-closed until current-operation evidence is valid."],
+  };
+}
+
+function cancelledSerenaAction(actionId: string): RunnerActionRunResult {
+  return {
+    actionId,
+    status: "skipped",
+    message: "Serena setup was cancelled; configuration was not changed.",
+    diagnostics: [],
   };
 }
 

@@ -11,6 +11,18 @@ import {
   type OpenCodeInstalledEvidenceReason,
   type ResolveOpenCodeInstalledEvidence,
 } from "./required-tools";
+import {
+  bootstrapSerena,
+  validateSerenaBootstrapResult,
+  validateSerenaOperationAuthorization,
+  type SerenaBootstrapEffects,
+  type SerenaBootstrapResult,
+  type SerenaBootstrapStage,
+  type SerenaBootstrapAuthorization,
+  type SerenaOperationIdentity,
+  type SerenaReadinessEvidence,
+  type SerenaBootstrapRequest,
+} from "@deck/core";
 
 const MAX_SCRIPT_BYTES = 1024 * 1024;
 const MAX_CAPTURE_BYTES = 65_536;
@@ -56,6 +68,10 @@ type OpenCodeToolInstallResultBase = {
   cause?: string;
   diagnostic?: OpenCodeInstallDiagnostic;
   raw?: OpenCodeRawInstallDiagnostic;
+  /** Private handoff for the evidence-gated Serena config action. */
+  serenaReadiness?: SerenaReadinessEvidence;
+  /** Core outcome retained for cancellation/partial projection tests and routing. */
+  serenaBootstrapOutcome?: SerenaBootstrapResult["outcome"];
 };
 
 export type OpenCodeToolInstallResultExact =
@@ -79,6 +95,10 @@ export type OpenCodeToolInstallResult = OpenCodeToolInstallResultExact | {
 
 export type DownloadOpenCodeScript = (url: string, signal?: AbortSignal) => Promise<string>;
 export type RunOpenCodeShellScript = (script: string, tool: InstallableOpenCodeTool, signal?: AbortSignal) => Promise<InstallCommandResult>;
+export type SerenaBootstrapRunner = (
+  request: SerenaBootstrapRequest,
+  effects?: SerenaBootstrapEffects,
+) => Promise<SerenaBootstrapResult>;
 
 export type InstallOpenCodeToolsOptions = {
   commandExists?: (command: string) => boolean;
@@ -91,6 +111,22 @@ export type InstallOpenCodeToolsOptions = {
   signal?: AbortSignal;
   projectRoot?: string;
   homeDirectory?: string;
+  /** Current-operation authorization required by the Core Serena service. */
+  serenaAuthorization?: SerenaBootstrapAuthorization;
+  /** Ergonomic alias for callers projecting the Core request directly. */
+  authorization?: SerenaBootstrapAuthorization;
+  /** Current operation identity; it is never inferred from ordinary selection. */
+  serenaOperation?: SerenaOperationIdentity;
+  currentOperation?: SerenaOperationIdentity;
+  operation?: SerenaOperationIdentity;
+  /** Injected Core runner and effects; production callers may supply the service seam. */
+  serenaBootstrap?: SerenaBootstrapRunner;
+  bootstrapSerena?: SerenaBootstrapRunner;
+  serenaBootstrapService?: { bootstrapSerena: SerenaBootstrapRunner };
+  serenaEffects?: SerenaBootstrapEffects;
+  effects?: SerenaBootstrapEffects;
+  onStage?: (stage: SerenaBootstrapStage) => void;
+  stageCallback?: (stage: SerenaBootstrapStage) => void;
 };
 
 const singleFlights = new Map<string, Promise<OpenCodeToolInstallResultExact>>();
@@ -125,7 +161,6 @@ export async function installOpenCodeTools(
   const seenToolIds = new Set<string>();
   const resolver = options.resolveEvidence ?? options.evidenceResolver ?? (options.evidenceContext ? resolveOpenCodeInstalledEvidence : undefined);
   const context = options.evidenceContext;
-  const commandExists = options.commandExists ?? commandExistsInPath;
   const projectRoot = options.projectRoot ?? context?.projectRoot ?? process.cwd();
   const homeDirectory = options.homeDirectory ?? context?.homeDirectory ?? process.env.HOME ?? "";
 
@@ -164,7 +199,7 @@ export async function installOpenCodeTools(
       continue;
     }
 
-    const work = executeTool(tool, runInstallCommand, commandExists, resolver, context, options);
+    const work = executeTool(tool, runInstallCommand, resolver, context, options);
     singleFlights.set(key, work);
     try {
       emit(await work);
@@ -179,11 +214,14 @@ export async function installOpenCodeTools(
 async function executeTool(
   tool: InstallableOpenCodeTool,
   runInstallCommand: RunInstallCommand,
-  commandExists: (command: string) => boolean,
   resolver: ResolveOpenCodeInstalledEvidence | undefined,
   context: OpenCodeEvidenceContext | undefined,
   options: InstallOpenCodeToolsOptions,
 ): Promise<OpenCodeToolInstallResultExact> {
+  if (tool.id === "serena" || tool.installKind === "serena-agent") {
+    return executeSerenaTool(tool, options);
+  }
+
   if (resolver && context) {
     const initial = safeResolve(resolver, tool.id, context);
     if (!initial) return evidenceFailure(tool, "evidence", "evidence-resolution-failed");
@@ -198,15 +236,146 @@ async function executeTool(
     if (tool.installKind === "shell-script" || tool.installKind === "shell-script-plus-mcp") {
       return await executeShellTool(tool, runInstallCommand, resolver, context, options);
     }
-    if (tool.installKind === "python-tool") {
-      return await executePythonTool(tool, runInstallCommand, commandExists, resolver, context, options);
-    }
     if (tool.installKind === "opencode-plugin") {
       return await executePluginTool(tool, runInstallCommand, resolver, context, options);
     }
     return await executeCommandTool(tool, runInstallCommand, resolver, context, options);
   } catch (error) {
     return failureFromText(tool, "install", "installer-exception", 1, "", error instanceof Error ? error.message : String(error), true, context);
+  }
+}
+
+async function executeSerenaTool(
+  tool: InstallableOpenCodeTool,
+  options: InstallOpenCodeToolsOptions,
+): Promise<OpenCodeToolInstallResultExact> {
+  const operation = options.currentOperation ?? options.serenaOperation ?? options.operation;
+  const authorization = validateSerenaOperationAuthorization(options.serenaAuthorization ?? options.authorization, operation);
+  if (!authorization.valid || !operation || operation.runner !== "opencode") {
+    return serenaFailure(tool, "preparing-uv", "authorization-invalid", "Serena requires explicit selection in the current OpenCode install operation.");
+  }
+
+  if (options.signal?.aborted) {
+    return serenaCancelled(tool, "preparing-uv", false);
+  }
+
+  const runner = options.serenaBootstrapService?.bootstrapSerena
+    ?? options.serenaBootstrap
+    ?? options.bootstrapSerena
+    ?? bootstrapSerena;
+  const effects = options.serenaEffects ?? options.effects;
+  let result: SerenaBootstrapResult;
+  try {
+    result = await runner({
+      authorization: authorization.authorization,
+      runner: operation.runner,
+      operationId: operation.operationId,
+      operation,
+      currentOperation: operation,
+      signal: options.signal,
+      onStage: options.onStage ?? options.stageCallback,
+      effects,
+    }, effects);
+  } catch {
+    return serenaFailure(tool, "installing-serena", "bootstrap-failed", "Serena setup failed before readiness could be established.");
+  }
+
+  if (result.outcome === "reused" || result.outcome === "installed") {
+    const validated = validateSerenaBootstrapResult(result);
+    if (!validated.valid) {
+      return serenaFailure(tool, "validating-serena", "invalid-readiness-evidence", "Serena setup completed without valid readiness evidence.");
+    }
+    const successful = validated.result;
+    if (successful.outcome === "reused") {
+      return {
+        toolId: tool.id,
+        tool: tool.name,
+        outcome: "already-present",
+        success: true,
+        installerInvoked: false,
+        message: "Serena is ready and was reused.",
+        serenaBootstrapOutcome: "reused",
+        serenaReadiness: successful.evidence,
+      };
+    }
+    return {
+      toolId: tool.id,
+      tool: tool.name,
+      outcome: "executed",
+      success: true,
+      installerInvoked: true,
+      message: "Serena was installed and validated.",
+      serenaBootstrapOutcome: "installed",
+      serenaReadiness: successful.evidence,
+    };
+  }
+
+  if (result.outcome === "cancelled") {
+    return serenaCancelled(tool, result.stage, result.mutationStarted);
+  }
+  if (result.outcome === "partial") {
+    return serenaFailure(tool, result.stage, result.code, "Serena setup stopped before termination was confirmed.", true, "partial");
+  }
+  if (result.outcome === "failed") {
+    return serenaFailure(tool, result.stage, result.code, result.diagnostic.message, result.stage !== "preparing-uv");
+  }
+  return serenaFailure(tool, "validating-serena", "bootstrap-invalid", "Serena setup returned an unsupported outcome.");
+}
+
+function serenaCancelled(
+  tool: InstallableOpenCodeTool,
+  stage: SerenaBootstrapStage,
+  _mutationStarted: boolean,
+): OpenCodeToolInstallResultExact {
+  return {
+    toolId: tool.id,
+    tool: tool.name,
+    outcome: "skipped",
+    success: false,
+    installerInvoked: false,
+    message: "Serena setup was cancelled; configuration was not changed.",
+    serenaBootstrapOutcome: "cancelled",
+    diagnostic: {
+      stage: mapSerenaStage(stage),
+      code: "cancelled",
+      lines: ["Serena setup was cancelled before configuration."],
+    },
+  };
+}
+
+function serenaFailure(
+  tool: InstallableOpenCodeTool,
+  stage: SerenaBootstrapStage,
+  code: string,
+  _message: string,
+  installerInvoked = false,
+  bootstrapOutcome: "failed" | "partial" = "failed",
+): OpenCodeToolInstallResultExact {
+  const safeStage = mapSerenaStage(stage);
+  const safeCode = /^[a-z0-9-]{1,64}$/.test(code) ? code : "unknown";
+  const safeMessage = `Serena setup failed before configuration. Diagnostic: ${safeStage}/${safeCode}.`;
+  return {
+    toolId: tool.id,
+    tool: tool.name,
+    outcome: "failed",
+    success: false,
+    installerInvoked,
+    message: "Serena setup failed.",
+    cause: safeMessage,
+    serenaBootstrapOutcome: bootstrapOutcome,
+    diagnostic: {
+      stage: safeStage,
+      code: safeCode,
+      lines: [safeMessage],
+    },
+  };
+}
+
+function mapSerenaStage(stage: SerenaBootstrapStage): OpenCodeRawInstallDiagnostic["stage"] {
+  switch (stage) {
+    case "preparing-uv": return "evidence";
+    case "installing-serena": return "install";
+    case "validating-serena": return "post-install";
   }
 }
 
@@ -280,33 +449,6 @@ async function executePluginTool(
     if (fallback.exitCode !== 0) return failureFromCommand(tool, "install", "installer-failed", fallback, true, context);
   }
   return completeMutation(tool, resolver, context, "executed");
-}
-
-async function executePythonTool(
-  tool: InstallableOpenCodeTool,
-  runInstallCommand: RunInstallCommand,
-  commandExists: (command: string) => boolean,
-  resolver: ResolveOpenCodeInstalledEvidence | undefined,
-  context: OpenCodeEvidenceContext | undefined,
-  options: InstallOpenCodeToolsOptions,
-): Promise<OpenCodeToolInstallResultExact> {
-  if (!commandExists("python3")) return createInstallResult(tool, "skipped", false, "Skipped: Python3 is not installed. Serena requires Python.");
-  if (commandExists("serena")) return createInstallResult(tool, "already-present", false, "Serena found in PATH. MCP configuration will be enabled.");
-
-  const installer = commandExists("uv") ? "uv" : commandExists("pipx") ? "pipx" : undefined;
-  if (!installer) return createInstallResult(tool, "skipped", false, "Skipped: Python3 exists but neither 'uv' nor 'pipx' is installed.");
-  const args = installer === "uv" ? ["tool", "install", "serena"] : ["install", "serena"];
-  const result = await runInstallCommand(installer, args);
-  if (result.exitCode !== 0) return failureFromCommand(tool, "install", "installer-failed", result, true, context);
-  if (!resolver && !commandExists("serena")) {
-    const failure = failureFromText(tool, "post-install", "post-evidence-failed", 0, result.stdout, "Serena installation completed but the executable was not found in PATH.", true, context);
-    return { ...failure, message: "Serena installation succeeded but 'serena' not found in PATH." };
-  }
-  const completed = await completeMutation(tool, resolver, context, "executed");
-  if (completed.outcome === "executed") {
-    return { ...completed, message: `Serena installed via ${installer} and verified.` };
-  }
-  return completed;
 }
 
 async function runPostInstall(
@@ -425,6 +567,8 @@ function cloneSafeResult(result: OpenCodeToolInstallResultExact): OpenCodeToolIn
     message: result.message,
     ...(result.cause ? { cause: result.cause } : {}),
     ...(diagnostic ? { diagnostic } : {}),
+    ...(result.serenaBootstrapOutcome ? { serenaBootstrapOutcome: result.serenaBootstrapOutcome } : {}),
+    ...(result.serenaReadiness ? { serenaReadiness: result.serenaReadiness } : {}),
   } as OpenCodeToolInstallResultExact;
 }
 

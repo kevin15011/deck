@@ -165,19 +165,14 @@ const FULL_CAPABILITY_CATALOG: Record<CapabilityId, CapabilityToolMapping | Inte
   serena: {
     capabilityId: "serena",
     label: "Serena",
-    description: "Serena symbolic editing capability. First-class Deck capability. Python tool with MCP integration.",
+    description: "Serena symbolic editing capability with managed MCP integration.",
     section: "runner-capabilities",
     runnerScope: "pi",
     requirementLevel: "configurable",
     toolId: "serena",
-    source: "serena (python tool)",
-    installKind: "python-tool",
+    source: "serena-agent",
+    installKind: "shared-binary-plus-mcp",
     detector: { commands: ["serena"] },
-    /**
-     * Preselected by default (serena: true in state.ts).
-     * REQ-PI-002: Serena is mandatory for Pi parity.
-     * Changed to "configurable" to appear in TUI package list.
-     */
   },
   context7: {
     capabilityId: "context7",

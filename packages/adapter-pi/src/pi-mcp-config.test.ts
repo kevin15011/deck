@@ -13,10 +13,13 @@ import {
   redactPiMcpConfigDiagnosticText,
   writeCodebaseMemoryMcpConfig,
   writeContextModeMcpConfig,
+  writeEvidenceGatedSerenaMcpConfig,
   writeGatedLocalMcpConfig,
   writeLocalMcpConfig,
+  writeSerenaMcpConfig,
   writeSupermemoryPiMcpConfig,
 } from "./pi-mcp-config";
+import type { SerenaReadinessEvidence } from "@deck/core";
 
 const SENTINEL_TOKEN = "sm_test_DO_NOT_LEAK_123456789";
 
@@ -35,6 +38,179 @@ function readJson(path: string): any {
 function allDiagnosticsText(value: unknown): string {
   return JSON.stringify(value);
 }
+
+const SERENA_ROOT = "/fixtures/deck-data/tools/serena";
+const SERENA_PATH = `${SERENA_ROOT}/bin/serena`;
+const SERENA_ARGS = ["start-mcp-server", "--context", "ide", "--project-from-cwd"] as const;
+const SERENA_AUTHORIZATION = {
+  kind: "interactive-tui-explicit-selection" as const,
+  runner: "pi" as const,
+  operationId: "pi-operation-1",
+};
+const SERENA_OPERATION = {
+  runner: "pi" as const,
+  operationId: "pi-operation-1",
+  explicitlySelected: true as const,
+};
+const SERENA_EVIDENCE = {
+  capabilityId: "serena" as const,
+  state: "ready" as const,
+  resolvedExecutablePath: SERENA_PATH,
+  source: "installed-deck-tool" as const,
+  probe: "serena-help" as const,
+  fingerprint: "serena-fingerprint-1",
+};
+
+function memoryFileSystem(initial: Record<string, string> = {}) {
+  const files = new Map(Object.entries(initial));
+  const calls: string[] = [];
+  const fileSystem = {
+    existsSync: (path: string) => files.has(path),
+    readFileSync: (path: string) => {
+      calls.push(`read:${path}`);
+      const content = files.get(path);
+      if (content === undefined) throw new Error("missing fixture");
+      return content;
+    },
+    mkdirSync: (path: string) => {
+      calls.push(`mkdir:${path}`);
+    },
+    writeFileSync: (path: string, content: string) => {
+      calls.push(`write:${path}`);
+      files.set(path, content);
+    },
+    renameSync: (from: string, to: string) => {
+      calls.push(`rename:${from}:${to}`);
+      const content = files.get(from);
+      if (content === undefined) throw new Error("missing temporary fixture");
+      files.delete(from);
+      files.set(to, content);
+    },
+    rmSync: (path: string) => {
+      calls.push(`remove:${path}`);
+      files.delete(path);
+    },
+  };
+  return { files, calls, fileSystem };
+}
+
+function serenaWriterOptions(fileSystem: ReturnType<typeof memoryFileSystem>["fileSystem"], configPath = "/fixtures/pi/mcp.json") {
+  return {
+    authorization: SERENA_AUTHORIZATION,
+    operation: SERENA_OPERATION,
+    readiness: SERENA_EVIDENCE,
+    command: SERENA_PATH,
+    args: SERENA_ARGS,
+    ownedRoot: SERENA_ROOT,
+    configPath,
+    fileSystem,
+    revalidate: async (evidence: SerenaReadinessEvidence) => ({ valid: true as const, evidence }),
+  };
+}
+
+describe("Pi Serena MCP config writer", () => {
+  test("creates the exact absolute-path command and four fixed arguments atomically", async () => {
+    const fixture = memoryFileSystem();
+    const result = await writeEvidenceGatedSerenaMcpConfig(serenaWriterOptions(fixture.fileSystem));
+
+    expect(result).toMatchObject({ ok: true, action: "created", serverName: "serena" });
+    expect(JSON.parse(fixture.files.get("/fixtures/pi/mcp.json")!)).toEqual({
+      mcpServers: {
+        serena: {
+          command: SERENA_PATH,
+          args: [...SERENA_ARGS],
+        },
+      },
+    });
+    expect(fixture.calls.some((call) => call.startsWith("write:"))).toBe(true);
+    expect(fixture.calls.some((call) => call.startsWith("rename:"))).toBe(true);
+  });
+
+  test("returns unchanged without a write for equivalent known-good Serena config", async () => {
+    const configPath = "/fixtures/pi/mcp.json";
+    const fixture = memoryFileSystem({
+      [configPath]: JSON.stringify({
+        mcpServers: { serena: { command: SERENA_PATH, args: [...SERENA_ARGS] } },
+        unrelated: { keep: true },
+      }),
+    });
+
+    const result = await writeEvidenceGatedSerenaMcpConfig(serenaWriterOptions(fixture.fileSystem, configPath));
+
+    expect(result).toMatchObject({ ok: true, action: "unchanged" });
+    expect(fixture.calls.some((call) => call.startsWith("write:"))).toBe(false);
+    expect(fixture.calls.some((call) => call.startsWith("rename:"))).toBe(false);
+  });
+
+  test("updates a legacy bare Serena entry while preserving unrelated config", async () => {
+    const configPath = "/fixtures/pi/mcp.json";
+    const original = {
+      mcpServers: {
+        serena: { command: "serena", legacy: true },
+        filesystem: { command: "npx", args: ["filesystem"] },
+      },
+      topLevel: "preserved",
+    };
+    const fixture = memoryFileSystem({ [configPath]: JSON.stringify(original) });
+
+    const result = await writeEvidenceGatedSerenaMcpConfig(serenaWriterOptions(fixture.fileSystem, configPath));
+    const written = JSON.parse(fixture.files.get(configPath)!);
+
+    expect(result).toMatchObject({ ok: true, action: "updated" });
+    expect(written.topLevel).toBe("preserved");
+    expect(written.mcpServers.filesystem).toEqual(original.mcpServers.filesystem);
+    expect(written.mcpServers.serena).toEqual({ command: SERENA_PATH, args: [...SERENA_ARGS], legacy: true });
+  });
+
+  test("preserves malformed config and rejects unsafe command or exact-argument drift", async () => {
+    const malformedPath = "/fixtures/pi/malformed.json";
+    const malformed = memoryFileSystem({ [malformedPath]: "{not-json" });
+    const malformedResult = await writeEvidenceGatedSerenaMcpConfig(serenaWriterOptions(malformed.fileSystem, malformedPath));
+    expect(malformedResult).toMatchObject({ ok: false, action: "failed" });
+    expect(malformed.files.get(malformedPath)).toBe("{not-json");
+    expect(malformed.calls.some((call) => call.startsWith("write:"))).toBe(false);
+
+    const unsafe = await writeEvidenceGatedSerenaMcpConfig({
+      ...serenaWriterOptions(memoryFileSystem().fileSystem),
+      command: "../serena",
+    });
+    expect(unsafe).toMatchObject({ ok: false, action: "failed" });
+
+    const outsideRoot = await writeEvidenceGatedSerenaMcpConfig({
+      ...serenaWriterOptions(memoryFileSystem().fileSystem),
+      readiness: { ...SERENA_EVIDENCE, resolvedExecutablePath: "/outside/bin/serena" },
+      command: "/outside/bin/serena",
+      ownedRoot: SERENA_ROOT,
+    });
+    expect(outsideRoot).toMatchObject({ ok: false, action: "failed" });
+
+    const wrongArgs = await writeEvidenceGatedSerenaMcpConfig({
+      ...serenaWriterOptions(memoryFileSystem().fileSystem),
+      args: ["serena"] as unknown as typeof SERENA_ARGS,
+    });
+    expect(wrongArgs).toMatchObject({ ok: false, action: "failed" });
+  });
+
+  test("does not call the writer when immediate same-path/fingerprint revalidation is stale", async () => {
+    const fixture = memoryFileSystem();
+    const result = await writeEvidenceGatedSerenaMcpConfig({
+      ...serenaWriterOptions(fixture.fileSystem),
+      revalidate: async (evidence) => ({
+        valid: true as const,
+        evidence: { ...evidence, fingerprint: "changed-fingerprint" },
+      }),
+    });
+
+    expect(result).toMatchObject({ ok: false, action: "failed" });
+    expect(fixture.calls.some((call) => call.startsWith("write:"))).toBe(false);
+    expect(fixture.calls.some((call) => call.startsWith("rename:"))).toBe(false);
+  });
+
+  test("legacy compatibility calls cannot claim success or write Serena", () => {
+    const result = writeSerenaMcpConfig();
+    expect(result).toMatchObject({ ok: false, action: "failed" });
+  });
+});
 
 describe("Pi global MCP config writer", () => {
   test("resolves default Pi MCP config path under the provided home directory", () => {

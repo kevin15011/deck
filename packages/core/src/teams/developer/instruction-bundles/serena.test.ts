@@ -156,9 +156,7 @@ describe("getSerenaToolPolicy", () => {
   });
 
   test("target agents are the apply agents", () => {
-    expect(policy.targetAgents).toContain("deck-developer-apply-backend");
-    expect(policy.targetAgents).toContain("deck-developer-apply-frontend");
-    expect(policy.targetAgents).toContain("deck-developer-apply-general");
+    expect(policy.targetAgents).toEqual(["deck-apply-fast", "deck-apply-deep"]);
   });
 
   test("contains fallback reporting text in bundle", () => {

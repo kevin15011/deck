@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
+import { migrateLegacyDeveloperTeamAssignments } from "@deck/core/teams/developer/model-migration";
 import { getModelCatalog, type DeveloperTeamDefaultModelAssignment } from "@deck/core";
 import {
   resolveReasoningEffortSupport,
@@ -280,8 +281,8 @@ export function readOpenCodeDeveloperTeamModelConfigAssignments(
   const readFile = options?.readFile ?? readFileSync;
 
   const configPath = join(configDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
-  const modelAssignments: Record<string, string> = {};
-  const thinkingAssignments: Record<string, string> = {};
+  let modelAssignments: Record<string, string> = {};
+  let thinkingAssignments: Record<string, string> = {};
   const effectiveThinkingAssignments: Record<string, string> = {};
 
   if (!exists(configPath)) {
@@ -294,19 +295,28 @@ export function readOpenCodeDeveloperTeamModelConfigAssignments(
     };
 
     const agentConfig = config.agent ?? {};
-    const catalog = getModelCatalog();
-    for (const agent of DEVELOPER_TEAM_AGENTS) {
-      const entry = agentConfig[agent.id];
+    const rawModelAssignments: Record<string, string> = {};
+    const rawThinkingAssignments: Record<string, string> = {};
+    for (const [agentId, entry] of Object.entries(agentConfig)) {
       if (entry?.model) {
-        modelAssignments[agent.id] = entry.model;
+        rawModelAssignments[agentId] = entry.model;
 
         const rawVariant = entry.variant || entry.reasoningEffort;
         if (rawVariant) {
-          thinkingAssignments[agent.id] = rawVariant;
-          if (resolveReasoningEffortSupport({ modelId: entry.model, catalog }).supportsReasoning) {
-            effectiveThinkingAssignments[agent.id] = rawVariant;
-          }
+          rawThinkingAssignments[agentId] = rawVariant;
         }
+      }
+    }
+
+    modelAssignments = { ...migrateLegacyDeveloperTeamAssignments(rawModelAssignments).assignments };
+    thinkingAssignments = { ...migrateLegacyDeveloperTeamAssignments(rawThinkingAssignments).assignments };
+
+    const catalog = getModelCatalog();
+    for (const agent of DEVELOPER_TEAM_AGENTS) {
+      const model = modelAssignments[agent.id];
+      const thinking = thinkingAssignments[agent.id];
+      if (model && thinking && resolveReasoningEffortSupport({ modelId: model, catalog }).supportsReasoning) {
+        effectiveThinkingAssignments[agent.id] = thinking;
       }
     }
   } catch {

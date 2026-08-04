@@ -113,11 +113,11 @@ describe("DeveloperTeamManifest", () => {
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
         modelAssignments: [
-          { agentId: "deck-developer-orchestrator", modelId: "custom/model", reasoning: "high" },
+          { agentId: "deck-lead", modelId: "custom/model", reasoning: "high" },
         ],
       });
 
-      const orchestrator = result.manifest.agents.find((a) => a.agentId === "deck-developer-orchestrator");
+      const orchestrator = result.manifest.agents.find((a) => a.agentId === "deck-lead");
       expect(orchestrator?.model).toBe("custom/model");
       expect(orchestrator?.reasoning).toBe("high");
     });
@@ -228,7 +228,7 @@ describe("DeveloperTeamManifest", () => {
             {
               surface: "agent",
               markdown: "## Memory instructions for agents",
-              agentIds: ["deck-developer-orchestrator"],
+              agentIds: ["deck-lead"],
             },
           ],
           toolBindings: [],
@@ -254,8 +254,8 @@ describe("DeveloperTeamManifest", () => {
       const manifest: DeveloperTeamManifest = {
         team: { id: "developer-team", displayName: "Developer Team" },
         agents: [
-          { agentId: "deck-developer-orchestrator", displayName: "Orchestrator", instruction: "test", model: "test/model" },
-          { agentId: "deck-developer-explorer", displayName: "Explorer", instruction: "test" }, // no model
+          { agentId: "deck-lead", displayName: "Orchestrator", instruction: "test", model: "test/model" },
+          { agentId: "deck-investigate", displayName: "Explorer", instruction: "test" }, // no model
         ],
         skills: [],
         memoryDiagnostics: [],
@@ -297,7 +297,7 @@ describe("DeveloperTeamManifest", () => {
       });
 
       // Explorer agent should not have package instruction sections
-      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-investigate");
       expect(explorer!.instruction).not.toContain("## Package Instructions");
     });
 
@@ -309,7 +309,7 @@ describe("DeveloperTeamManifest", () => {
       });
 
       // Explorer agent should have package instruction section
-      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-investigate");
       expect(explorer!.instruction).toContain("## Package Instructions (configured)");
       expect(explorer!.instruction).toContain("Codebase Memory");
     });
@@ -322,7 +322,7 @@ describe("DeveloperTeamManifest", () => {
       });
 
       // Explorer skill should have package instruction section
-      const explorerSkill = result.manifest.skills.find((s) => s.agentId === "deck-developer-explorer");
+      const explorerSkill = result.manifest.skills.find((s) => s.agentId === "deck-investigate");
       expect(explorerSkill!.body).toContain("## Package Instructions (configured)");
       expect(explorerSkill!.body).toContain("Codebase Memory");
     });
@@ -334,7 +334,7 @@ describe("DeveloperTeamManifest", () => {
         capabilityInstructions: bundle,
       });
 
-      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-investigate");
       expect(explorer!.instruction).toContain("Codebase Memory");
       expect(explorer!.instruction).toContain("Context Mode");
     });
@@ -351,7 +351,7 @@ describe("DeveloperTeamManifest", () => {
       });
 
       // Both should be present (they coexist independently)
-      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-investigate");
       expect(explorer!.memoryBundle).toBeDefined();
       expect(explorer!.instruction).toContain("## Package Instructions");
     });
@@ -364,7 +364,7 @@ describe("DeveloperTeamManifest", () => {
       });
 
       // With empty bundle, no instructions should be injected
-      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-developer-explorer");
+      const explorer = result.manifest.agents.find((a) => a.agentId === "deck-investigate");
       expect(explorer!.instruction).not.toContain("## Package Instructions");
     });
 
@@ -386,35 +386,31 @@ describe("DeveloperTeamManifest", () => {
   // ---------------------------------------------------------------------------
 
   describe("buildDeveloperTeamManifest with orchestrator invariants", () => {
-    test("orchestrator agent instruction contains compact invariant section", () => {
+    test("Lead instruction contains the adaptive team contract", () => {
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
       });
 
       const orchestrator = result.manifest.agents.find(
-        (a) => a.agentId === "deck-developer-orchestrator",
+        (a) => a.agentId === "deck-lead",
       );
       expect(orchestrator).toBeDefined();
-      expect(orchestrator!.instruction).toContain("## Compact Orchestrator Invariants");
-      expect(orchestrator!.instruction).toContain("INV-001");
-      expect(orchestrator!.instruction).toContain("INV-002");
-      expect(orchestrator!.instruction).toContain("INV-003");
-      expect(orchestrator!.instruction).toContain("INV-004");
-      expect(orchestrator!.instruction).toContain("INV-005");
-      expect(orchestrator!.instruction).toContain("INV-006");
+      expect(orchestrator!.instruction).toContain("## Adaptive Developer Team Contract");
+      expect(orchestrator!.instruction).toContain("smallest route");
+      expect(orchestrator!.instruction).toContain("OpenSpec is official persistence");
     });
 
-    test("orchestrator skill references the compact runtime contract", () => {
+    test("Lead skill references the adaptive team contract", () => {
       const result = buildDeveloperTeamManifest({
         team: { id: "developer-team", displayName: "Developer Team" },
       });
 
       const orchestratorSkill = result.manifest.skills.find(
-        (s) => s.agentId === "deck-developer-orchestrator",
+        (s) => s.agentId === "deck-lead",
       );
       expect(orchestratorSkill).toBeDefined();
-      expect(orchestratorSkill!.body).toContain("## Runtime Contract Reference");
-      expect(orchestratorSkill!.body).toContain("Runtime-Enforced Team Contract remains binding");
+      expect(orchestratorSkill!.body).toContain("## Team Contract Reference");
+      expect(orchestratorSkill!.body).toContain("Adaptive Developer Team Contract remains binding");
     });
 
     test("non-orchestrator agents do NOT contain invariant section", () => {
@@ -423,7 +419,7 @@ describe("DeveloperTeamManifest", () => {
       });
 
       const nonOrchestrators = result.manifest.agents.filter(
-        (a) => a.agentId !== "deck-developer-orchestrator",
+        (a) => a.agentId !== "deck-lead",
       );
       for (const agent of nonOrchestrators) {
         expect(agent.instruction, `${agent.agentId} should NOT contain invariants`).not.toContain(
@@ -439,14 +435,14 @@ describe("DeveloperTeamManifest", () => {
 
       // All invariant text should be runner-neutral
       const orchestrator = result.manifest.agents.find(
-        (a) => a.agentId === "deck-developer-orchestrator",
+        (a) => a.agentId === "deck-lead",
       )!;
       expect(orchestrator.instruction).not.toContain("Pi");
       expect(orchestrator.instruction).not.toContain("OpenCode");
       expect(orchestrator.instruction).not.toContain("opencode");
 
       const orchestratorSkill = result.manifest.skills.find(
-        (s) => s.agentId === "deck-developer-orchestrator",
+        (s) => s.agentId === "deck-lead",
       )!;
       expect(orchestratorSkill.body).not.toContain("Pi");
       expect(orchestratorSkill.body).not.toContain("OpenCode");
@@ -456,12 +452,12 @@ describe("DeveloperTeamManifest", () => {
 });
 
 
-describe("streamlined ownership manifest materialization", () => {
-  test("renders coordinator ownership and pre-QA semantics without pure-delegator language", () => {
+describe("adaptive ownership manifest materialization", () => {
+  test("renders direct ownership, proportional TDD, and conditional Quality", () => {
     const result = buildDeveloperTeamManifest({ team: { id: "developer-team", displayName: "Developer Team" } });
     const rendered = JSON.stringify(result.manifest);
-    expect(rendered).toContain("Coordinator Ownership");
-    expect(rendered).toContain("functional exercise");
-    expect(rendered).not.toContain("Pure Delegator");
+    expect(rendered).toContain("smallest safe route");
+    expect(rendered).toContain("Proportional TDD");
+    expect(rendered).toContain("Quality is not a universal gate");
   });
 });

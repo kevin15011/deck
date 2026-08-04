@@ -45,4 +45,20 @@ describe("buildOpenCodeInstallationPlan", () => {
 
     expect(plan).toEqual([]);
   });
+
+  test("uses serena-agent as Serena's installable source identity", () => {
+    const plan = buildOpenCodeInstallationPlan({
+      tools: [{ name: "Serena", installed: false }],
+      selectedToolIds: ["serena"],
+    });
+
+    expect(plan).toEqual([{
+      id: "serena",
+      name: "Serena",
+      module: "serena-agent",
+      required: false,
+      installKind: "serena-agent",
+      capabilityId: "serena",
+    }]);
+  });
 });

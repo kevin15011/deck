@@ -32,7 +32,7 @@ function piPreparationAuthority(
   const delegationDigest = buildSessionPreparationDelegationDigestV1({
     sessionIdDigest,
     invocationId,
-    agentId: "deck-init",
+    agentId: "deck-setup",
     activeRunnerId,
     projectRootDigest,
     needs,
@@ -42,7 +42,7 @@ function piPreparationAuthority(
   const issue = {
     sessionId,
     invocationId,
-    agentId: "deck-init",
+    agentId: "deck-setup",
     activeRunnerId,
     projectRootDigest,
     delegationDigest,
@@ -112,7 +112,7 @@ async function runPiHostFixture(
   });
   extension({ on: (event, handler) => handlers.set(event, handler) });
   await handlers.get("input")?.({ text: "Apply the authorized batch." }, {});
-  const input: Record<string, unknown> = { agent: "deck-developer-apply-general" };
+  const input: Record<string, unknown> = { agent: "deck-apply-fast" };
   const hookResult = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "pi-execution-1", input }, {});
   return { fixture, bridgeCalls, bridgeResult, resolverCalls, hookResult, input };
 }
@@ -183,7 +183,7 @@ test("Pi static-compatible hook ignores agent context and preserves legacy deleg
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-execution-1",
-    input: { agent: "deck-developer-apply-general", deckExecution: fixture.event() },
+    input: { agent: "deck-apply-fast", deckExecution: fixture.event() },
   }, {});
   expect(hookResult).toBeUndefined();
   expect(fixture.delegationCount()).toBe(0);
@@ -194,7 +194,7 @@ test("Pi static-compatible hook preserves legacy delegation when its provider fa
   const createExtension = await loadPiExtensionFactory();
   createExtension({ resolveExecutionEvent: async () => { throw new Error("SECRET_PROVIDER_SENTINEL"); } })({ on: (event, handler) => handlers.set(event, handler) });
   await handlers.get("input")?.({ text: "Provider error" }, {});
-  const hookResult = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "provider-error", input: { agent: "deck-developer-apply-general" } }, {});
+  const hookResult = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "provider-error", input: { agent: "deck-apply-fast" } }, {});
   expect(hookResult).toBeUndefined();
   expect(String(hookResult)).not.toContain("SECRET_PROVIDER_SENTINEL");
 });
@@ -218,7 +218,7 @@ test("D-REACH-22-Pi extension captures resolver at init; late global installatio
   });
   const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
   extension({ on: (event, handler) => handlers.set(event, handler) });
-  const input: Record<string, unknown> = { agent: "deck-developer-apply-general" };
+  const input: Record<string, unknown> = { agent: "deck-apply-fast" };
   const first = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "pi-late-global-1", input }, {});
   expect(first).toEqual({ block: true, reason: "modification-not-authorized:AUTHZ_MISSING" });
   (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL] = {
@@ -244,7 +244,7 @@ test("D-REACH-23-Pi extension captures mode at init; post-init options mutation 
   options.invocationAuthorization = "invocation-required";
   const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
   extension({ on: (event, handler) => handlers.set(event, handler) });
-  const input: Record<string, unknown> = { agent: "deck-developer-apply-general" };
+  const input: Record<string, unknown> = { agent: "deck-apply-fast" };
   const hookResult = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "pi-mutable-options", input }, {});
   expect(hookResult).toBeUndefined();
 });
@@ -271,7 +271,7 @@ test("D-REACH-24-Pi installed resolver returning null yields invalid-evidence in
   });
   const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
   extension({ on: (event, handler) => handlers.set(event, handler) });
-  const input: Record<string, unknown> = { agent: "deck-developer-apply-general" };
+  const input: Record<string, unknown> = { agent: "deck-apply-fast" };
   const hookResult = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "pi-null-resolver", input }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(resolverCalls).toBe(1);
@@ -300,7 +300,7 @@ test("D-REACH-25-Pi installed resolver returning non-object yields invalid-evide
   });
   const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
   extension({ on: (event, handler) => handlers.set(event, handler) });
-  const input: Record<string, unknown> = { agent: "deck-developer-apply-general" };
+  const input: Record<string, unknown> = { agent: "deck-apply-fast" };
   const hookResult = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "pi-non-object-resolver", input }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(resolverCalls).toBe(1);
@@ -329,7 +329,7 @@ test("D-REACH-26-Pi Verify role strips caller deckExecution and blocks without a
   });
   const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
   extension({ on: (event, handler) => handlers.set(event, handler) });
-  const input: Record<string, unknown> = { agent: "verify-general", deckExecution: fixture.event() };
+  const input: Record<string, unknown> = { agent: "deck-quality", deckExecution: fixture.event() };
   const hookResult = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "pi-non-apply", input }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(input.deckExecution).toBeUndefined();
@@ -359,7 +359,7 @@ test("D-REACH-27-Pi Review role strips caller deckExecution and blocks without a
   });
   const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
   extension({ on: (event, handler) => handlers.set(event, handler) });
-  const input: Record<string, unknown> = { agent: "review-general", deckExecution: fixture.event() };
+  const input: Record<string, unknown> = { agent: "deck-quality", deckExecution: fixture.event() };
   const hookResult = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "pi-non-apply-with-marker", input }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(input.deckExecution).toBeUndefined();
@@ -375,7 +375,7 @@ test("Pi invocation-required hook blocks when the trusted provider is absent", a
   expect(await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "required-missing-provider",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {})).toEqual({ block: true, reason: "modification-not-authorized:AUTHZ_MISSING" });
 });
 
@@ -390,7 +390,7 @@ test("Pi invocation-required hook redacts trusted-provider failures", async () =
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "required-provider-error",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(JSON.stringify(hookResult)).not.toContain("SECRET_PROVIDER_SENTINEL");
@@ -399,7 +399,7 @@ test("Pi invocation-required hook redacts trusted-provider failures", async () =
 test("D-REACH-18 Pi caller-only deckExecution with no provider fails closed in invocation-required", async () => {
   const fixture = createRunnerHostFixtureV1("pi", createPiDeveloperTeamExecutionBridgeV1);
   const input: Record<string, unknown> = {
-    agent: "deck-developer-apply-general",
+    agent: "deck-apply-fast",
     deckExecution: fixture.event(),
   };
   let bridgeCalls = 0;
@@ -431,7 +431,7 @@ test("D-REACH-18 Pi caller-only deckExecution with no provider fails closed in i
 test("D-REACH-19 Pi caller-only deckExecution with no provider preserves legacy in static-compatible", async () => {
   const fixture = createRunnerHostFixtureV1("pi", createPiDeveloperTeamExecutionBridgeV1);
   const input: Record<string, unknown> = {
-    agent: "deck-developer-apply-general",
+    agent: "deck-apply-fast",
     deckExecution: fixture.event(),
   };
   let bridgeCalls = 0;
@@ -464,7 +464,7 @@ test("D-REACH-20 Pi provider authority wins over conflicting caller deckExecutio
   const fixture = createRunnerHostFixtureV1("pi", createPiDeveloperTeamExecutionBridgeV1);
   const providerEvent = fixture.event();
   const input: Record<string, unknown> = {
-    agent: "deck-developer-apply-general",
+    agent: "deck-apply-fast",
     deckExecution: fixture.event({ mode: "legacy" }),
   };
   let bridgeCalls = 0;
@@ -519,7 +519,7 @@ test("D-REACH-21 Pi caller marker cannot activate a provider-supplied V1 active 
     toolName: "subagent",
     toolCallId: "marker-execution",
     input: {
-      agent: "deck-developer-apply-general",
+      agent: "deck-apply-fast",
       deckExecution: {
         deterministicRepairAuthority: {
           schema: "deterministic-targeted-repair-authority-v1",
@@ -557,7 +557,7 @@ test("D-REACH-28 Pi invalid invocationAuthorization string yields invalid-eviden
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-invalid-mode",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(resolverCalls).toBe(0);
@@ -590,7 +590,7 @@ test("D-REACH-29 Pi null invocationAuthorization yields invalid-evidence with ze
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-null-mode",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(resolverCalls).toBe(0);
@@ -623,7 +623,7 @@ test("D-REACH-30 Pi object invocationAuthorization yields invalid-evidence with 
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-object-mode",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(resolverCalls).toBe(0);
@@ -656,7 +656,7 @@ test("D-REACH-31 Pi empty string invocationAuthorization yields invalid-evidence
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-empty-mode",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(resolverCalls).toBe(0);
@@ -679,7 +679,7 @@ test("D-REACH-32 Pi post-init mutation of invalid invocationAuthorization does n
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-post-mutate",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(fixture.delegationCount()).toBe(0);
@@ -709,7 +709,7 @@ test("D-REACH-33 Pi late global provider does not bypass invalid invocationAutho
     const hookResult = await handlers.get("tool_call")?.({
       toolName: "subagent",
       toolCallId: "pi-late-global-invalid",
-      input: { agent: "deck-developer-apply-general" },
+      input: { agent: "deck-apply-fast" },
     }, {});
     expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   } finally {
@@ -743,7 +743,7 @@ test("D-REACH-34 Pi installed resolver with missing receipt yields invalid-evide
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-missing-receipt",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(resolverCalls).toBe(1);
@@ -776,7 +776,7 @@ test("D-REACH-35 Pi installed resolver with missing receipt yields invalid-evide
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-missing-receipt-shadow",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(resolverCalls).toBe(1);
@@ -804,7 +804,7 @@ test("D-REACH-36 Pi absent resolver in invocation-required remains AUTHZ_MISSING
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-absent-resolver",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "modification-not-authorized:AUTHZ_MISSING" });
   expect(bridgeCalls).toBe(0);
@@ -845,7 +845,7 @@ test("D-REACH-37 Pi getter invocationAuthorization invalid-then-valid fails inva
   const hookResult = await handlers.get("tool_call")?.({
     toolName: "subagent",
     toolCallId: "pi-getter-mode",
-    input: { agent: "deck-developer-apply-general" },
+    input: { agent: "deck-apply-fast" },
   }, {});
   expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   expect(modeReads).toBe(1);
@@ -895,7 +895,7 @@ test("D-REACH-38 Pi Proxy provider invocationAuthorization invalid-then-valid fa
     const hookResult = await handlers.get("tool_call")?.({
       toolName: "subagent",
       toolCallId: "pi-proxy-provider-mode",
-      input: { agent: "deck-developer-apply-general" },
+      input: { agent: "deck-apply-fast" },
     }, {});
     expect(hookResult).toEqual({ block: true, reason: "invalid-evidence" });
   } finally {
@@ -908,7 +908,7 @@ test("D-REACH-38 Pi Proxy provider invocationAuthorization invalid-then-valid fa
 });
 
 
-test("T04 Pi reserves trusted preparation authority before one native deck-init delegation", async () => {
+test("T04 Pi reserves trusted preparation authority before one native deck-setup delegation", async () => {
   const authority = piPreparationAuthority("prep-session", "prep-call");
   let providerCalls = 0;
   let poisonCalls = 0;
@@ -923,7 +923,7 @@ test("T04 Pi reserves trusted preparation authority before one native deck-init 
     const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
     createPiDeveloperTeamExecutionExtensionV1()({ on: (event, handler) => handlers.set(event, handler) });
     const input: Record<string, unknown> = {
-      agent: "deck-init",
+      agent: "deck-setup",
       deckPreparation: { authorization: "caller-poison" },
       install: () => { poisonCalls += 1; },
       network: () => { poisonCalls += 1; },
@@ -958,7 +958,7 @@ test("T04 Pi fails closed before delegation for replay and runner mismatch", asy
     const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
     createPiDeveloperTeamExecutionExtensionV1()({ on: (event, handler) => handlers.set(event, handler) });
     const invoke = () => handlers.get("tool_call")?.(
-      { toolName: "subagent", toolCallId: "replay-call", input: { agent: "deck-init" } },
+      { toolName: "subagent", toolCallId: "replay-call", input: { agent: "deck-setup" } },
       { sessionManager: { getSessionId: () => "replay-session" } },
     );
     expect(await invoke()).toBeUndefined();
@@ -973,7 +973,7 @@ test("T04 Pi fails closed before delegation for replay and runner mismatch", asy
     const mismatchHandlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
     createPiDeveloperTeamExecutionExtensionV1()({ on: (event, handler) => mismatchHandlers.set(event, handler) });
     expect(await mismatchHandlers.get("tool_call")?.(
-      { toolName: "subagent", toolCallId: "mismatch-call", input: { agent: "deck-init" } },
+      { toolName: "subagent", toolCallId: "mismatch-call", input: { agent: "deck-setup" } },
       { sessionManager: { getSessionId: () => "mismatch-session" } },
     )).toEqual({ block: true, reason: "modification-not-authorized:AUTHZ_RUNNER_MISMATCH" });
   } finally {
@@ -992,7 +992,7 @@ test("T04 Pi never resolves preparation for unrelated agents and clears shutdown
     const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
     createPiDeveloperTeamExecutionExtensionV1()({ on: (event, handler) => handlers.set(event, handler) });
     await handlers.get("tool_call")?.(
-      { toolName: "subagent", toolCallId: "ordinary-call", input: { agent: "deck-developer-apply-backend", deckPreparation: "caller-poison" } },
+      { toolName: "subagent", toolCallId: "ordinary-call", input: { agent: "deck-apply-deep", deckPreparation: "caller-poison" } },
       { sessionManager: { getSessionId: () => "ordinary-session" } },
     );
     expect(providerCalls).toBe(0);
@@ -1011,7 +1011,7 @@ test("T04 Pi rejects caller-only preparation metadata when the host provider is 
   const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
   createPiDeveloperTeamExecutionExtensionV1()({ on: (event, handler) => handlers.set(event, handler) });
   const input: Record<string, unknown> = {
-    agent: "deck-init",
+    agent: "deck-setup",
     deckPreparation: { authorization: "caller-only" },
   };
   expect(await handlers.get("tool_call")?.(
@@ -1033,7 +1033,7 @@ test("T04 Pi blocks missing and invalid provider claims before native delegation
     const missingHandlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
     createPiDeveloperTeamExecutionExtensionV1()({ on: (event, handler) => missingHandlers.set(event, handler) });
     expect(await missingHandlers.get("tool_call")?.(
-      { toolName: "subagent", toolCallId: "missing-claim-call", input: { agent: "deck-init" } },
+      { toolName: "subagent", toolCallId: "missing-claim-call", input: { agent: "deck-setup" } },
       context("missing-claim-session"),
     )).toEqual({ block: true, reason: "modification-not-authorized:AUTHZ_MISSING" });
 
@@ -1052,7 +1052,7 @@ test("T04 Pi blocks missing and invalid provider claims before native delegation
     const invalidHandlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
     createPiDeveloperTeamExecutionExtensionV1()({ on: (event, handler) => invalidHandlers.set(event, handler) });
     expect(await invalidHandlers.get("tool_call")?.(
-      { toolName: "subagent", toolCallId: "invalid-claim-call", input: { agent: "deck-init" } },
+      { toolName: "subagent", toolCallId: "invalid-claim-call", input: { agent: "deck-setup" } },
       context("invalid-claim-session"),
     )).toEqual({ block: true, reason: "modification-not-authorized:AUTHZ_PROOF_INVALID" });
   } finally {
@@ -1095,7 +1095,7 @@ test("QA-REACH-01 Pi registers QA hooks, strips caller fields, and injects a cor
 
     expect(handlers.has("tool_result")).toBe(true);
     const input: Record<string, unknown> = {
-      agent: "verify-general",
+      agent: "deck-quality",
       deckQaInvocation: { caller: "poison" },
       deckQaResult: { caller: "poison" },
     };
@@ -1124,7 +1124,7 @@ test("QA-REACH-02 Pi blocks Verify and Review QA delegation without a trusted pr
   createPiDeveloperTeamExecutionExtensionV1({ invocationAuthorization: "invocation-required" })({
     on: (event, handler) => handlers.set(event, handler),
   });
-  for (const agent of ["verify-general", "deck-developer-verify", "review-general", "deck-developer-review"]) {
+  for (const agent of ["deck-quality", "deck-quality", "deck-quality", "deck-quality"]) {
     const input: Record<string, unknown> = { agent, deckQaInvocation: "caller-poison", deckQaResult: "caller-poison" };
     expect(await handlers.get("tool_call")?.(
       { toolName: "subagent", toolCallId: `qa-missing-${agent}`, input },
@@ -1138,7 +1138,7 @@ test("QA-REACH-02 Pi blocks Verify and Review QA delegation without a trusted pr
   createPiDeveloperTeamExecutionExtensionV1({ invocationAuthorization: "static-compatible" })({
     on: (event, handler) => staticHandlers.set(event, handler),
   });
-  const staticInput: Record<string, unknown> = { agent: "deck-developer-review", deckQaInvocation: "caller-poison", deckQaResult: "caller-poison" };
+  const staticInput: Record<string, unknown> = { agent: "deck-quality", deckQaInvocation: "caller-poison", deckQaResult: "caller-poison" };
   expect(await staticHandlers.get("tool_call")?.(
     { toolName: "subagent", toolCallId: "qa-static-no-authority", input: staticInput },
     { sessionManager: { getSessionId: () => "qa-static-session" } },
@@ -1173,7 +1173,7 @@ test("QA-REACH-03 Pi consumes a matching QA result once and rejects mismatched o
   })({ on: (event, handler) => handlers.set(event, handler) });
   const context = { sessionManager: { getSessionId: () => "qa-review-session" } };
   await handlers.get("tool_call")?.(
-    { toolName: "subagent", toolCallId: "qa-review-call", input: { agent: "review-general" } },
+    { toolName: "subagent", toolCallId: "qa-review-call", input: { agent: "deck-quality", quality_stage: "review" } },
     context,
   );
   expect(requests).toEqual([{
@@ -1223,13 +1223,13 @@ test("QA-REACH-04 Pi clears pending QA invocations and host QA state on session 
   })({ on: (event, handler) => handlers.set(event, handler) });
   const context = { sessionManager: { getSessionId: () => "qa-shutdown-session" } };
   await handlers.get("tool_call")?.(
-    { toolName: "subagent", toolCallId: "qa-shutdown-call", input: { agent: "deck-developer-verify" } },
+    { toolName: "subagent", toolCallId: "qa-shutdown-call", input: { agent: "deck-quality" } },
     context,
   );
   await handlers.get("session_shutdown")?.({ type: "session_shutdown" }, context);
   expect(cleared).toEqual(["qa-shutdown-session"]);
   expect(await handlers.get("tool_result")?.(
-    { toolName: "subagent", toolCallId: "qa-shutdown-call", input: { agent: "deck-developer-verify" }, result: { status: "done" } },
+    { toolName: "subagent", toolCallId: "qa-shutdown-call", input: { agent: "deck-quality" }, result: { status: "done" } },
     context,
   )).toEqual({ block: true, reason: "invalid-evidence" });
   expect(consumed).toBe(0);

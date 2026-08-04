@@ -16,7 +16,7 @@ export type InstallableOpenCodeTool = {
   name: string;
   module: string;
   required: boolean;
-  installKind: "opencode-plugin" | "external" | "mcp-server" | "npm-package" | "npm-package-plus-mcp" | "shell-script" | "shell-script-plus-mcp" | "python-tool";
+  installKind: "opencode-plugin" | "external" | "mcp-server" | "npm-package" | "npm-package-plus-mcp" | "shell-script" | "shell-script-plus-mcp" | "serena-agent";
   /** Canonical capability ID from Core registry - used for registry validation and parity reporting */
   capabilityId?: CanonicalCapabilityId;
   /** For shell-script: curl URL to pipe to shell */
@@ -50,9 +50,9 @@ export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [
   {
     id: "serena",
     name: "Serena",
-    module: "oraios/serena",
+    module: "serena-agent",
     required: false,
-    installKind: "python-tool",
+    installKind: "serena-agent",
     capabilityId: "serena",
   },
 ];

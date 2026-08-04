@@ -125,7 +125,7 @@ Here are concrete scenarios showing when to save, what topic key to use, and wha
 5. **Session-close summary**
    - *Trigger*: Ending a session after completing implementation work
    - *Suggested topic key*: session/2026-05-23-deck-refactor
-   - *Example content*: **Goal**: Refactor deck-developer-* skills for parallel execution. **Accomplished**: Split orchestrator into discrete waves, implemented Task 1-2 (memoryBundle type + instruction bundle). **Next Steps**: Backend wave 1 (Tasks 3, 4, 6). **Relevant Files**: packages/adapter-opencode/src/developer-team-install.ts, packages/core/src/teams/developer/instruction-bundles/adaptive-memory.ts.
+   - *Example content*: **Goal**: Improve Developer Team execution. **Accomplished**: Implemented one vertical candidate and its focused evidence. **Next Steps**: Verify the affected production composition. **Relevant Files**: packages/adapter-opencode/src/developer-team-install.ts, packages/core/src/teams/developer/instruction-bundles/adaptive-memory.ts.
 
 ### Suggested Topic Keys
 

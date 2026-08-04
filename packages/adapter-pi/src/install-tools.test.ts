@@ -3,11 +3,42 @@ import { readFileSync } from "node:fs";
 
 import { installPiTools } from "./install-tools";
 import type { InstallablePiTool } from "./installation-plan";
+import type { SerenaBootstrapRequest, SerenaBootstrapResult } from "@deck/core";
 import {
   installInternalRunnerPackages,
   type InternalRunnerInstallResult,
 } from "./install-tools";
 import type { InternalRunnerPackageInstallAction } from "./internal-runner-packages";
+
+const SERENA_TOOL: InstallablePiTool = {
+  id: "serena",
+  name: "Serena",
+  source: "serena-agent",
+  required: false,
+  installKind: "shared-binary-plus-mcp",
+  capabilityId: "serena",
+};
+
+const SERENA_AUTHORIZATION = {
+  kind: "interactive-tui-explicit-selection" as const,
+  runner: "pi" as const,
+  operationId: "pi-operation-1",
+};
+
+const SERENA_OPERATION = {
+  runner: "pi" as const,
+  operationId: "pi-operation-1",
+  explicitlySelected: true as const,
+};
+
+const SERENA_EVIDENCE = {
+  capabilityId: "serena" as const,
+  state: "ready" as const,
+  resolvedExecutablePath: "/fixtures/deck-data/tools/serena/bin/serena",
+  source: "installed-deck-tool" as const,
+  probe: "serena-help" as const,
+  fingerprint: "serena-fingerprint-1",
+};
 
 // ---------------------------------------------------------------------------
 // Repair #18: Tests for installKind dispatch (shared-binary, python-tool, etc.)
@@ -57,39 +88,60 @@ describe("installPiTools with installKind dispatch", () => {
     expect(results).toEqual([expect.objectContaining({ status: "reused", success: true, installKind: "shared-binary-plus-mcp" })]);
   });
 
-  test("python-tool: returns reused when serena binary is ready", async () => {
+  test("Serena delegates to the Core bootstrap and carries typed readiness evidence", async () => {
+    const requests: SerenaBootstrapRequest[] = [];
     const results = await installPiTools(
-      "pi",
-      [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
+      undefined,
+      [SERENA_TOOL],
       () => {},
       {
-        checkSharedBinaryUsability: async (command) => ({ status: "ready", command, resolvedPath: "/fixture/serena", version: "1.0.0" }),
+        bootstrapSerena: async (request) => {
+          requests.push(request);
+          return { outcome: "installed", evidence: SERENA_EVIDENCE };
+        },
+        serenaAuthorization: SERENA_AUTHORIZATION,
+        serenaOperation: SERENA_OPERATION,
       },
     );
 
-    expect(results).toEqual([expect.objectContaining({ status: "reused", success: true, installKind: "python-tool" })]);
+    expect(results).toEqual([
+      expect.objectContaining({
+        status: "installed",
+        success: true,
+        installKind: "shared-binary-plus-mcp",
+        serenaReadiness: SERENA_EVIDENCE,
+      }),
+    ]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      authorization: SERENA_AUTHORIZATION,
+      operation: SERENA_OPERATION,
+      currentOperation: SERENA_OPERATION,
+    });
   });
 
-  test("python-tool: returns manual-verified after exact uv/pipx failures", async () => {
-    const commands: string[][] = [];
+  test("Serena rejects missing or mismatched current-operation authorization without legacy manual success", async () => {
+    const bootstrapCalls: SerenaBootstrapRequest[] = [];
+    const commandCalls: string[][] = [];
     const results = await installPiTools(
-      "pi",
-      [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
+      undefined,
+      [SERENA_TOOL],
       () => {},
       {
-        runInstallCommand: async (command, args) => {
-          commands.push([command, ...args]);
-          return { exitCode: 1, stdout: "", stderr: "command not found" };
+        bootstrapSerena: async (request) => {
+          bootstrapCalls.push(request);
+          return { outcome: "installed", evidence: SERENA_EVIDENCE };
         },
-        checkSharedBinaryUsability: async (command) => ({ status: "missing", command }),
+        runInstallCommand: async (command, args) => {
+          commandCalls.push([command, ...args]);
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
       },
     );
 
-    expect(commands).toEqual([
-      ["uv", "tool", "install", "serena"],
-      ["pipx", "install", "serena"],
-    ]);
-    expect(results).toEqual([expect.objectContaining({ status: "manual-verified", success: true })]);
+    expect(results[0]).toMatchObject({ status: "blocked", success: false });
+    expect(bootstrapCalls).toHaveLength(0);
+    expect(commandCalls).toHaveLength(0);
   });
 
   test("npm-package-plus-mcp: installs context7 via npx", async () => {
@@ -228,54 +280,35 @@ describe("installPiTools with installKind dispatch", () => {
     expect(results).toEqual([expect.objectContaining({ status: "blocked", success: false, message: "fixture unusable" })]);
   });
 
-  test("falls back from uv to pipx and reports the exact successful Serena outcome", async () => {
-    const commands: string[][] = [];
-    const probes = [
-      { status: "missing" as const, command: "serena" },
-      { status: "ready" as const, command: "serena", resolvedPath: "/fixture/serena", version: "2.0.0" },
-    ];
-    const results = await installPiTools(
-      "pi",
-      [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
-      () => {},
+  test("maps failed, cancelled, and partial Core outcomes without readiness evidence", async () => {
+    const outcomes: SerenaBootstrapResult[] = [
       {
-        runInstallCommand: async (command, args) => {
-          commands.push([command, ...args]);
-          return { exitCode: command === "uv" ? 1 : 0, stdout: "", stderr: "" };
-        },
-        checkSharedBinaryUsability: async () => probes.shift()!,
+        outcome: "failed",
+        stage: "validating-serena",
+        code: "serena-not-ready",
+        diagnostic: { code: "serena-not-ready", message: "Serena is not ready." },
       },
-    );
-
-    expect(commands).toEqual([
-      ["uv", "tool", "install", "serena"],
-      ["pipx", "install", "serena"],
-    ]);
-    expect(results).toEqual([expect.objectContaining({ status: "installed", success: true, message: "Installed serena via pipx (2.0.0)" })]);
-  });
-
-  test("fails closed when Serena remains explicitly unusable after an injected uv install", async () => {
-    const statuses = [
-      { status: "missing" as const, command: "serena" },
-      { status: "unusable" as const, command: "serena", resolvedPath: "/fixture/serena", reason: "fixture healthcheck failed" },
+      { outcome: "cancelled", stage: "installing-serena", mutationStarted: true },
+      { outcome: "partial", stage: "installing-serena", code: "termination-unknown" },
     ];
-    const commands: string[][] = [];
 
-    const results = await installPiTools(
-      "pi",
-      [{ id: "serena", name: "Serena", source: "serena (python tool)", required: false, installKind: "python-tool" }],
-      () => {},
-      {
-        runInstallCommand: async (command, args) => {
-          commands.push([command, ...args]);
-          return { exitCode: 0, stdout: "", stderr: "" };
+    for (const outcome of outcomes) {
+      const [result] = await installPiTools(
+        undefined,
+        [SERENA_TOOL],
+        () => {},
+        {
+          bootstrapSerena: async () => outcome,
+          serenaAuthorization: SERENA_AUTHORIZATION,
+          serenaOperation: SERENA_OPERATION,
         },
-        checkSharedBinaryUsability: async () => statuses.shift()!,
-      },
-    );
+      );
 
-    expect(commands).toEqual([["uv", "tool", "install", "serena"]]);
-    expect(results[0]).toMatchObject({ status: "blocked", success: false, message: "fixture healthcheck failed" });
+      expect(result.success).toBe(false);
+      expect(result.serenaReadiness).toBeUndefined();
+      expect(result.status).toBe(outcome.outcome === "failed" ? "failed" : outcome.outcome);
+      expect(result.message).not.toContain("/fixtures");
+    }
   });
 });
 

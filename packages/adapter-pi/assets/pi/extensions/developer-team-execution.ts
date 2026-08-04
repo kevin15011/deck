@@ -15,12 +15,8 @@ import {
   type SessionPreparationAuthorizationServiceV1,
 } from "@deck/sdd-runtime";
 const APPLY_AGENTS = new Set([
-  "apply-general",
-  "apply-backend",
-  "apply-frontend",
-  "deck-developer-apply-general",
-  "deck-developer-apply-backend",
-  "deck-developer-apply-frontend",
+  "deck-apply-fast",
+  "deck-apply-deep",
 ]);
 type PiExtensionApi = { on(event: string, handler: (event: any, context: any) => Promise<unknown>): void };
 type PiQaInvocationV1 = Readonly<{ invocationId: string; digest: `sha256:${string}`; reference: unknown }>;
@@ -59,8 +55,7 @@ function applyAgent(input: Record<string, unknown>): boolean {
 
 function qaRole(input: Record<string, unknown>): "verify" | "review" | undefined {
   const role = input.subagent_type ?? input.agent ?? input.role;
-  if (role === "verify-general" || role === "deck-developer-verify") return "verify";
-  if (role === "review-general" || role === "deck-developer-review") return "review";
+  if (role === "deck-quality") return input.quality_stage === "review" ? "review" : "verify";
   return undefined;
 }
 
@@ -173,7 +168,7 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
       delete input.deckQaInvocation;
       delete input.deckQaResult;
       const role = input.subagent_type ?? input.agent ?? input.role;
-      if (role === "deck-init") {
+      if (role === "deck-setup") {
         const sessionId = context?.sessionManager?.getSessionId?.();
         if (event.toolName !== "subagent" || typeof event.toolCallId !== "string" || typeof sessionId !== "string" || sessionId.length === 0) {
           return { block: true, reason: "invalid-evidence" };
@@ -201,7 +196,7 @@ export function createPiDeveloperTeamExecutionExtensionV1(options: PiDeveloperTe
             ...resolved.expectation,
             sessionId,
             invocationId: event.toolCallId,
-            agentId: "deck-init",
+            agentId: "deck-setup",
             activeRunnerId: "pi",
           },
         );

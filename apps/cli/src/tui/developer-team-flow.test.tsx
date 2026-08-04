@@ -61,9 +61,9 @@ describe("Developer Team TUI screens", () => {
       );
 
       expect(output).toContain("/tmp/my-project/.pi/agents");
-      expect(output).toContain("Orchestrator Agent");
-      expect(output).toContain("Archive Agent");
-      expect(output).toContain("deck-developer-orchestrator.md");
+      expect(output).toContain("Lead");
+      expect(output).toContain("Setup");
+      expect(output).toContain("deck-lead.md");
     });
 
     test("renders install and skip options", () => {
@@ -238,11 +238,11 @@ describe("Developer Team TUI screens", () => {
   describe("AgentModelAssignmentScreen", () => {
     test("renders reasoning selection with progress", () => {
       const output = renderToString(
-        <AgentModelAssignmentScreen cursor={0} agentIndex={0} totalAgents={12} modelId="anthropic/claude-opus-4" defaultThinking="low" />,
+        <AgentModelAssignmentScreen cursor={0} agentIndex={0} totalAgents={7} modelId="anthropic/claude-opus-4" defaultThinking="low" />,
       );
 
-      expect(output).toContain("Select reasoning for Orchestrator Agent");
-      expect(output).toContain("1/12");
+      expect(output).toContain("Select reasoning for Lead");
+      expect(output).toContain("1/7");
       expect(output).toContain("anthropic/claude-opus-4");
       expect(output).toContain("thinking off");
       expect(output).toContain("thinking low");
@@ -251,11 +251,11 @@ describe("Developer Team TUI screens", () => {
 
     test("renders skip option for last agent", () => {
       const output = renderToString(
-        <AgentModelAssignmentScreen cursor={0} agentIndex={11} totalAgents={12} modelId="openai/gpt-4o" defaultThinking="low" />,
+        <AgentModelAssignmentScreen cursor={0} agentIndex={6} totalAgents={7} modelId="openai/gpt-4o" defaultThinking="low" />,
       );
 
-      expect(output).toContain("Select reasoning for Archive Agent");
-      expect(output).toContain("12/12");
+      expect(output).toContain("Select reasoning for Setup");
+      expect(output).toContain("7/7");
     });
 
     test("does not render thinking options when unsupported", () => {
@@ -280,8 +280,8 @@ describe("Developer Team TUI screens", () => {
       const output = renderToString(
         <AgentModelConfigListScreen
           cursor={0}
-          modelAssignments={{ "deck-developer-orchestrator": "openai-codex/gpt-5.5" }}
-          thinkingAssignments={{ "deck-developer-orchestrator": "high" }}
+          modelAssignments={{ "deck-lead": "openai-codex/gpt-5.5" }}
+          thinkingAssignments={{ "deck-lead": "high" }}
         />,
       );
 
@@ -417,7 +417,7 @@ describe("Developer Team TUI screens", () => {
 
   describe("DeveloperTeamInstallingScreen", () => {
     test("renders progress when step props are provided", () => {
-      const output = renderToString(<DeveloperTeamInstallingScreen currentStep={5} totalSteps={12} currentItem="deck-developer-verify" />);
+      const output = renderToString(<DeveloperTeamInstallingScreen currentStep={5} totalSteps={12} currentItem="deck-quality" />);
 
       expect(output).toContain("Installing Developer Team");
       expect(output).toContain("(5/12)");
@@ -439,7 +439,7 @@ describe("Developer Team TUI screens", () => {
 
     test("renders two personality options with correct labels", () => {
       const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
+        <ScreenFrame title="Choose Lead personality" help="help">
           <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
         </ScreenFrame>,
       );
@@ -450,7 +450,7 @@ describe("Developer Team TUI screens", () => {
 
     test("renders hints for both options", () => {
       const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
+        <ScreenFrame title="Choose Lead personality" help="help">
           <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
         </ScreenFrame>,
       );
@@ -461,7 +461,7 @@ describe("Developer Team TUI screens", () => {
 
     test("shows cursor indicator on the focused option", () => {
       const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
+        <ScreenFrame title="Choose Lead personality" help="help">
           <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
         </ScreenFrame>,
       );
@@ -475,7 +475,7 @@ describe("Developer Team TUI screens", () => {
 
     test("shows cursor on Pragmática when cursor=1 (default position)", () => {
       const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
+        <ScreenFrame title="Choose Lead personality" help="help">
           <PersonalitySelectionScreen cursor={1} selected="pragmatica" />
         </ScreenFrame>,
       );
@@ -489,7 +489,7 @@ describe("Developer Team TUI screens", () => {
 
     test("shows cursor on Ahorro extremo when cursor=2", () => {
       const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
+        <ScreenFrame title="Choose Lead personality" help="help">
           <PersonalitySelectionScreen cursor={2} selected="pragmatica" />
         </ScreenFrame>,
       );
@@ -501,20 +501,20 @@ describe("Developer Team TUI screens", () => {
       expect(cursorBeforeAhorro).toBeLessThan(ahorroIdx);
     });
 
-    test("renders the description text about orchestrator verbosity", () => {
+    test("renders the description text about Lead verbosity", () => {
       const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
+        <ScreenFrame title="Choose Lead personality" help="help">
           <PersonalitySelectionScreen cursor={0} selected="pragmatica" />
         </ScreenFrame>,
       );
 
-      expect(output).toContain("Controls how verbose the orchestrator is when communicating");
-      expect(output).toContain("decisions and rationale.");
+      expect(output).toContain("Controls how verbose Lead is when communicating");
+      expect(output).toContain("rationale.");
     });
 
     test("renders with different selected personalities", () => {
       const outputGuia = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
+        <ScreenFrame title="Choose Lead personality" help="help">
           <PersonalitySelectionScreen cursor={0} selected="guia" />
         </ScreenFrame>,
       );
@@ -532,7 +532,7 @@ describe("Developer Team TUI screens", () => {
 
     test("renders Guia as selected", () => {
       const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
+        <ScreenFrame title="Choose Lead personality" help="help">
           <PersonalitySelectionScreen cursor={0} selected="guia" />
         </ScreenFrame>,
       );
@@ -541,7 +541,7 @@ describe("Developer Team TUI screens", () => {
 
     test("renders Pragmatica as selected", () => {
       const output = renderToString(
-        <ScreenFrame title="Choose orchestrator personality" help="help">
+        <ScreenFrame title="Choose Lead personality" help="help">
           <PersonalitySelectionScreen cursor={1} selected="pragmatica" />
         </ScreenFrame>,
       );

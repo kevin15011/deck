@@ -106,8 +106,8 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         expect(diagnosticText).not.toContain(SENTINEL_TOKEN);
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
         expect(systemPrompt).toContain("Supermemory MCP Adaptive Memory");
-        expect(existsSync(join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"))).toBe(true);
-        const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"), "utf-8");
+        expect(existsSync(join(projectRoot, ".pi", "agents", "deck-lead.md"))).toBe(true);
+        const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8");
         expect(orchestrator).toContain("Supermemory MCP Adaptive Memory");
         expect(orchestrator).toContain("supermemory.memory");
         expect(orchestrator).not.toContain(SENTINEL_TOKEN);
@@ -135,7 +135,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
       expect(first.status).toBe("ready");
-      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"), "utf-8")).toContain("supermemory.memory");
+      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8")).toContain("supermemory.memory");
 
       const second = await runPiLaunch({
         teamId: "developer-team",
@@ -188,7 +188,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         expect(systemPrompt).toContain("Engram Memory");
         expect(systemPrompt).not.toContain("Supermemory MCP Adaptive Memory");
 
-        const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"), "utf-8");
+        const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8");
         expect(orchestrator).toContain("memory_search");
         expect(orchestrator).not.toContain("search_docs");
       }
@@ -216,7 +216,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         expect(result.memoryDiagnostics).toHaveLength(0);
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
         expect(systemPrompt).not.toContain("Adaptive Memory (provider-injected)");
-        expect(existsSync(join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md"))).toBe(false);
+        expect(existsSync(join(projectRoot, ".pi", "agents", "deck-lead.md"))).toBe(false);
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -247,7 +247,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
 
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
         expect(systemPrompt).not.toContain("Supermemory MCP Adaptive Memory");
-        const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-developer-orchestrator.md");
+        const orchestratorPath = join(projectRoot, ".pi", "agents", "deck-lead.md");
         expect(existsSync(orchestratorPath)).toBe(true);
         const orchestrator = readFileSync(orchestratorPath, "utf-8");
         expect(orchestrator).not.toContain("Supermemory MCP Adaptive Memory");

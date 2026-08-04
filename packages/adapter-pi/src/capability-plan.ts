@@ -20,7 +20,13 @@ import {
 } from "./internal-runner-packages";
 import type { PiRunnerCapabilityInventory } from "./capability-inventory";
 import type { PiRequiredToolsReview } from "./required-tools";
-import { resolveRunnerParity, getParityGaps, type ParityReport, type ParityRuntimeHints } from "@deck/core";
+import {
+  resolveRunnerParity,
+  getParityGaps,
+  type ParityReport,
+  type ParityRuntimeHints,
+  type SerenaOperationIdentity,
+} from "@deck/core";
 
 export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
 export type PiRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
@@ -68,6 +74,10 @@ export type PiRunnerReviewPlan = {
 type BuildPiRunnerReviewPlanState = {
   runnerScope?: RunnerScope;
   selectedCapabilities?: Partial<Record<CapabilityId, boolean>>;
+  /** Ephemeral current-operation provenance; defaults never populate this map. */
+  explicitlySelectedCapabilities?: Partial<Record<CapabilityId, boolean>>;
+  operationId?: string;
+  currentOperation?: SerenaOperationIdentity;
   adaptiveMemory?: {
     provider?: AdaptiveMemoryProviderChoice;
     supermemory?: { configured?: boolean; hasToken?: boolean; userId?: string; teamId?: string; organizationId?: string };
@@ -202,9 +212,11 @@ function addCapabilityActions(
   runnerScope: RunnerScope,
 ): void {
   const selectedCapabilities = state.selectedCapabilities ?? {};
+  const serenaAuthorized = isPiSerenaSelectionAuthorized(state, runnerScope);
 
   for (const [capabilityId, selected] of Object.entries(selectedCapabilities) as [CapabilityId, boolean][]) {
     if (!selected) continue;
+    if (capabilityId === "serena" && !serenaAuthorized) continue;
     const entry = inventory[capabilityId];
     const capability = getUserFacingCapability(capabilityId);
     if (!capability) continue;
@@ -264,6 +276,29 @@ function addCapabilityActions(
     groups.manualSteps.push(action);
     addCapabilityDiagnostic(diagnostics, capabilityId, entry.status, action.id, entry.diagnostics?.join(" ") ?? "");
   }
+}
+
+function isPiSerenaSelectionAuthorized(
+  state: BuildPiRunnerReviewPlanState,
+  runnerScope: RunnerScope,
+): boolean {
+  if (runnerScope !== "pi" || state.explicitlySelectedCapabilities?.serena !== true) return false;
+
+  const operation = state.currentOperation ?? (
+    typeof state.operationId === "string" && state.operationId.length > 0
+      ? {
+          runner: "pi" as const,
+          operationId: state.operationId,
+          explicitlySelected: true as const,
+        }
+      : undefined
+  );
+
+  return operation?.runner === "pi"
+    && operation.explicitlySelected === true
+    && typeof operation.operationId === "string"
+    && operation.operationId.length > 0
+    && (state.operationId === undefined || operation.operationId === state.operationId);
 }
 
 /**

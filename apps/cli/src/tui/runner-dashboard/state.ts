@@ -104,12 +104,28 @@ export function loadRunnerPackageInstructionsFromConfig(
 
 export type RunnerScope = "pi" | "opencode" | "all";
 
+/**
+ * Ephemeral identity for one interactive Review & Install operation.
+ * This is never derived from persisted config, inventory, or preferences.
+ */
+export type RunnerOperationIdentity = {
+  runner: Exclude<RunnerScope, "all">;
+  operationId: string;
+  explicitlySelected: boolean;
+};
+
+export type RunnerDashboardOperation = RunnerOperationIdentity;
+
 export type RunnerDashboardState = {
   screen: RunnerDashboardScreen;
   backStack: RunnerDashboardScreen[];
   cursor: number;
   runnerScope: RunnerScope;
   selectedCapabilities: Partial<Record<CapabilityId, boolean>>;
+  /** Current-operation provenance; never persisted or populated from config. */
+  explicitlySelectedCapabilities: Partial<Record<CapabilityId, boolean>>;
+  operationId?: string;
+  currentOperation?: RunnerOperationIdentity;
   capabilityStatuses: Partial<Record<CapabilityId, CapabilityStatus>>;
   adaptiveMemory: {
     provider: AdaptiveMemoryProviderChoice;
@@ -213,9 +229,12 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
     "codebase-memory-mcp": true,
     "codebase-memory": true,
     rtk: true,
-    serena: true,
+    serena: false,
     context7: true,
   },
+  explicitlySelectedCapabilities: {},
+  operationId: undefined,
+  currentOperation: undefined,
   capabilityStatuses: {},
   adaptiveMemory: {
     provider: "none",
@@ -245,6 +264,12 @@ export function createDefaultRunnerDashboardState(
       ...DEFAULT_RUNNER_DASHBOARD_STATE.selectedCapabilities,
       ...overrides.selectedCapabilities,
     },
+    explicitlySelectedCapabilities: {
+      ...DEFAULT_RUNNER_DASHBOARD_STATE.explicitlySelectedCapabilities,
+      ...overrides.explicitlySelectedCapabilities,
+    },
+    operationId: overrides.operationId,
+    currentOperation: overrides.currentOperation,
     capabilityStatuses: {
       ...DEFAULT_RUNNER_DASHBOARD_STATE.capabilityStatuses,
       ...overrides.capabilityStatuses,

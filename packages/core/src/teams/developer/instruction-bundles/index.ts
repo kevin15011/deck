@@ -56,9 +56,8 @@ export type CapabilityInstructionCompositionContext = {
  * These are the apply agents that receive symbolic editing tools when package is selected.
  */
 export type CapabilityToolPolicyTargetAgents = readonly [
-  "deck-developer-apply-backend",
-  "deck-developer-apply-frontend",
-  "deck-developer-apply-general",
+  "deck-apply-fast",
+  "deck-apply-deep",
 ];
 
 /**

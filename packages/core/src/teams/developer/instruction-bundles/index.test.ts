@@ -319,9 +319,7 @@ describe("buildCapabilityToolPolicyBundle", () => {
     const bundle = buildCapabilityToolPolicyBundle(["serena"]);
     const policy = bundle.policies.serena!;
 
-    expect(policy.targetAgents).toContain("deck-developer-apply-backend");
-    expect(policy.targetAgents).toContain("deck-developer-apply-frontend");
-    expect(policy.targetAgents).toContain("deck-developer-apply-general");
+    expect(policy.targetAgents).toEqual(["deck-apply-fast", "deck-apply-deep"]);
   });
 
   test("deduplicates packages", () => {

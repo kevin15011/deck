@@ -2,9 +2,28 @@ import type { TechnicalActionKind } from "./capability-catalog";
 import type { InstallablePiTool } from "./installation-plan";
 import type { InternalRunnerPackageInstallAction } from "./internal-runner-packages";
 import { spawn as nodeSpawn } from "node:child_process";
-import { checkSharedBinaryUsability, type SharedBinaryUsabilityResult } from "@deck/core";
+import {
+  bootstrapSerena,
+  isSuccessfulSerenaBootstrapResult,
+  validateSerenaOperationAuthorization,
+  checkSharedBinaryUsability,
+  type SerenaBootstrapAuthorization,
+  type SerenaBootstrapEffects,
+  type SerenaBootstrapRequest,
+  type SerenaBootstrapResult,
+  type SerenaOperationIdentity,
+  type SerenaReadinessEvidence,
+} from "@deck/core";
 
-export type PiToolInstallResultStatus = "installed" | "manual" | "failed" | "reused" | "blocked" | "manual-verified";
+export type PiToolInstallResultStatus =
+  | "installed"
+  | "manual"
+  | "failed"
+  | "reused"
+  | "blocked"
+  | "cancelled"
+  | "partial"
+  | "manual-verified";
 
 export type PiToolInstallResult = {
   tool: string;
@@ -18,6 +37,12 @@ export type PiToolInstallResult = {
   installKind?: string;
   /** Exit code if a command was run */
   exitCode?: number;
+  /** Fresh Core-owned readiness evidence for a successful Serena result. */
+  serenaReadiness?: SerenaReadinessEvidence;
+  /** Core outcome retained for cancellation/partial handoff. */
+  serenaBootstrapOutcome?: SerenaBootstrapResult["outcome"];
+  /** Fixed stage associated with a Serena outcome, when applicable. */
+  serenaStage?: "preparing-uv" | "installing-serena" | "validating-serena";
 };
 
 /**
@@ -45,7 +70,7 @@ type RunInstallCommand = (command: string, args: string[]) => Promise<InstallCom
  * 
  * Dispatches to:
  * - shared-binary, shared-binary-plus-mcp: check/reuse via checkSharedBinaryUsability
- * - python-tool: use installSerena (uv/pipx)
+ * - managed Serena: delegate to Core's controlled bootstrap
  * - npm-package-plus-mcp: use npx -y @upstash/context7-mcp
  * - pi-package: use pi install <source>
  * - external, manual: return manual status
@@ -56,6 +81,14 @@ type PiToolInstallDependencies = Readonly<{
   runInstallCommand: RunInstallCommand;
   checkSharedBinaryUsability: SharedBinaryUsabilityProbe;
   sharedBinaryUsabilityTimeoutMs: number;
+  bootstrapSerena: (request: SerenaBootstrapRequest) => Promise<SerenaBootstrapResult>;
+  serenaAuthorization?: SerenaBootstrapAuthorization;
+  serenaOperation?: SerenaOperationIdentity;
+  currentOperation?: SerenaOperationIdentity;
+  serenaBootstrapEffects?: SerenaBootstrapEffects;
+  serenaSignal?: AbortSignal;
+  onSerenaStage?: (stage: "preparing-uv" | "installing-serena" | "validating-serena") => void;
+  existingSerenaExecutablePath?: string;
 }>;
 
 type PiToolInstallDependencyOverrides = Partial<PiToolInstallDependencies>;
@@ -64,6 +97,7 @@ const defaultPiToolInstallDependencies: PiToolInstallDependencies = {
   runInstallCommand: runDefaultInstallCommand,
   checkSharedBinaryUsability,
   sharedBinaryUsabilityTimeoutMs: 5_000,
+  bootstrapSerena: (request) => bootstrapSerena(request),
 };
 
 function resolvePiToolInstallDependencies(
@@ -76,6 +110,14 @@ function resolvePiToolInstallDependencies(
     runInstallCommand: input?.runInstallCommand ?? defaultPiToolInstallDependencies.runInstallCommand,
     checkSharedBinaryUsability: input?.checkSharedBinaryUsability ?? defaultPiToolInstallDependencies.checkSharedBinaryUsability,
     sharedBinaryUsabilityTimeoutMs: input?.sharedBinaryUsabilityTimeoutMs ?? defaultPiToolInstallDependencies.sharedBinaryUsabilityTimeoutMs,
+    bootstrapSerena: input?.bootstrapSerena ?? defaultPiToolInstallDependencies.bootstrapSerena,
+    serenaAuthorization: input?.serenaAuthorization,
+    serenaOperation: input?.serenaOperation,
+    currentOperation: input?.currentOperation,
+    serenaBootstrapEffects: input?.serenaBootstrapEffects,
+    serenaSignal: input?.serenaSignal,
+    onSerenaStage: input?.onSerenaStage,
+    existingSerenaExecutablePath: input?.existingSerenaExecutablePath,
   };
 }
 
@@ -114,7 +156,7 @@ export async function installPiTools(
  * Dispatch installation based on installKind.
  * Each installKind has specific handling:
  * - shared-binary/shared-binary-plus-mcp: check existing binary, reuse if ready
- * - python-tool: try uv/pipx, fallback to manual-verified
+ * - managed Serena: use the Core bootstrap projection
  * - npm-package-plus-mcp: run npx -y @upstash/context7-mcp
  * - pi-package: run pi install <source>
  * - external/manual: return manual status
@@ -125,6 +167,12 @@ async function dispatchInstallByKind(
   dependencies: PiToolInstallDependencies,
 ): Promise<PiToolInstallResult> {
   const { id: toolId, name, source, installKind } = tool;
+
+  // Serena is the only Pi capability projected into Core's controlled bootstrap.
+  // It must never fall through to the legacy command/manual paths.
+  if (toolId === "serena" || tool.capabilityId === "serena") {
+    return installSerenaProjection(tool, dependencies);
+  }
 
   if (installKind === "external" || installKind === "manual") {
     return {
@@ -171,25 +219,6 @@ async function dispatchInstallByKind(
         actionKind: "install-pi-package",
         status: statusMap[sharedResult.status],
         message: sharedResult.message,
-        installKind,
-      };
-    }
-
-    case "python-tool": {
-      const serenaResult = await installSerenaWithDependencies(dependencies);
-      const statusMap: Record<SharedBinaryInstallResult["status"], PiToolInstallResultStatus> = {
-        reused: "reused",
-        installed: "installed",
-        "manual-verified": "manual-verified",
-        blocked: "blocked",
-        missing: "failed",
-      };
-      return {
-        tool: name,
-        success: serenaResult.status === "reused" || serenaResult.status === "installed" || serenaResult.status === "manual-verified",
-        actionKind: "install-pi-package",
-        status: statusMap[serenaResult.status],
-        message: serenaResult.message,
         installKind,
       };
     }
@@ -353,84 +382,120 @@ export async function installSharedBinary(
   );
 }
 
-/**
- * Install Serena as a Python tool.
- * 
- * Tries:
- * 1. uv tool install serena
- * 2. pipx install serena
- * 
- * If prerequisites (uv/pipx) are not available, returns manual-verified status
- * with instructions.
- */
-async function installSerenaWithDependencies(
+async function installSerenaProjection(
+  tool: InstallablePiTool,
   dependencies: PiToolInstallDependencies,
-): Promise<SharedBinaryInstallResult> {
-  const probeOptions = {
-    healthcheckArgs: ["--version", "--help"] as [string, string],
-    timeoutMs: dependencies.sharedBinaryUsabilityTimeoutMs,
-  };
-  const probe = () => dependencies.checkSharedBinaryUsability("serena", probeOptions);
-  const initial = await probe();
+): Promise<PiToolInstallResult> {
+  const operation = dependencies.currentOperation ?? dependencies.serenaOperation;
+  const authorization = validateSerenaOperationAuthorization(
+    dependencies.serenaAuthorization,
+    operation,
+  );
 
-  if (initial.status === "ready") {
+  if (!authorization.valid || !operation || operation.runner !== "pi") {
     return {
-      capabilityId: "serena",
-      command: "serena",
-      status: "reused",
-      version: initial.version,
-      message: `Reusing existing serena (${initial.version ?? "unknown version"})`,
-    };
-  }
-  if (initial.status === "unusable") {
-    return {
-      capabilityId: "serena",
-      command: "serena",
+      tool: tool.name,
+      success: false,
+      actionKind: "install-pi-package",
       status: "blocked",
-      message: initial.reason ?? "serena exists but failed healthcheck",
+      message: "Serena setup requires explicit selection in the current Pi operation.",
+      installKind: tool.installKind,
+      serenaBootstrapOutcome: "failed",
+      serenaStage: "preparing-uv",
     };
   }
 
-  for (const [installer, args] of [
-    ["uv", ["tool", "install", "serena"]],
-    ["pipx", ["install", "serena"]],
-  ] as const) {
-    try {
-      const result = await dependencies.runInstallCommand(installer, [...args]);
-      if (result.exitCode !== 0) continue;
-      const postInstall = await probe();
-      if (postInstall.status === "ready") {
-        return {
-          capabilityId: "serena",
-          command: "serena",
-          status: "installed",
-          version: postInstall.version,
-          message: `Installed serena via ${installer} (${postInstall.version ?? "unknown version"})`,
-        };
-      }
-      if (postInstall.status === "unusable") {
-        return {
-          capabilityId: "serena",
-          command: "serena",
-          status: "blocked",
-          message: postInstall.reason ?? "serena exists but failed healthcheck",
-        };
-      }
-    } catch {
-      // Try the next supported installer.
-    }
+  const request: SerenaBootstrapRequest = {
+    authorization: authorization.authorization,
+    runner: "pi",
+    operationId: operation.operationId,
+    operation,
+    currentOperation: operation,
+    existingSerenaExecutablePath: dependencies.existingSerenaExecutablePath,
+    signal: dependencies.serenaSignal,
+    onStage: dependencies.onSerenaStage,
+    effects: dependencies.serenaBootstrapEffects,
+  };
+
+  let result: SerenaBootstrapResult;
+  try {
+    result = await dependencies.bootstrapSerena(request);
+  } catch {
+    return {
+      tool: tool.name,
+      success: false,
+      actionKind: "install-pi-package",
+      status: "failed",
+      message: "Serena setup failed (bootstrap-exception).",
+      installKind: tool.installKind,
+      serenaBootstrapOutcome: "failed",
+      serenaStage: "preparing-uv",
+    };
+  }
+
+  if (isSuccessfulSerenaBootstrapResult(result)) {
+    return {
+      tool: tool.name,
+      success: true,
+      actionKind: "install-pi-package",
+      status: result.outcome,
+      message: result.outcome === "reused" ? "Serena is ready and was reused." : "Serena was installed and is ready.",
+      installKind: tool.installKind,
+      serenaReadiness: result.evidence,
+      serenaBootstrapOutcome: result.outcome,
+      serenaStage: "validating-serena",
+    };
+  }
+
+  if (result.outcome === "cancelled") {
+    return {
+      tool: tool.name,
+      success: false,
+      actionKind: "install-pi-package",
+      status: "cancelled",
+      message: "Serena setup was cancelled.",
+      installKind: tool.installKind,
+      serenaBootstrapOutcome: result.outcome,
+      serenaStage: result.stage,
+    };
+  }
+
+  if (result.outcome === "partial") {
+    return {
+      tool: tool.name,
+      success: false,
+      actionKind: "install-pi-package",
+      status: "partial",
+      message: "Serena setup stopped before termination was confirmed.",
+      installKind: tool.installKind,
+      serenaBootstrapOutcome: result.outcome,
+      serenaStage: result.stage,
+    };
   }
 
   return {
-    capabilityId: "serena",
-    command: "serena",
-    status: "manual-verified",
-    message: "Serena requires manual installation: run 'uv tool install serena' or 'pipx install serena'",
+    tool: tool.name,
+    success: false,
+    actionKind: "install-pi-package",
+    status: "failed",
+    message: `Serena setup failed (${result.code}).`,
+    installKind: tool.installKind,
+    serenaBootstrapOutcome: result.outcome,
+    serenaStage: result.stage,
   };
 }
 
+/**
+ * Compatibility entry point retained as a non-mutating wrapper. Serena setup
+ * is authorized only through the current-operation projection above.
+ */
 export async function installSerena(): Promise<SharedBinaryInstallResult> {
-  return installSerenaWithDependencies(defaultPiToolInstallDependencies);
+  return {
+    capabilityId: "serena",
+    command: "serena-agent",
+    status: "blocked",
+    message: "Serena setup requires explicit selection in the current Pi operation.",
+  };
 }
 
 /**

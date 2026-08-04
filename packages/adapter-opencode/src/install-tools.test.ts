@@ -1,8 +1,20 @@
 import { describe, expect, test } from "bun:test";
 
-import { installOpenCodeTools, commandExistsInPath, type InstallCommandResult } from "./install-tools";
+import { installOpenCodeTools, type InstallCommandResult } from "./install-tools";
 import type { InstallableOpenCodeTool } from "./installation-plan";
 import type { OpenCodeEvidenceContext, OpenCodeInstalledEvidence } from "./required-tools";
+import {
+  SERENA_HELP_ARGS,
+  SERENA_INSTALL_ARGS,
+  SERENA_UV_INSTALLER_URL,
+  bootstrapSerena,
+  type SerenaBootstrapEffects,
+  type SerenaPathInspection,
+  type SerenaProbeResult,
+  type SerenaProcessHandle,
+  type SerenaProcessResult,
+  type SerenaProcessSpec,
+} from "@deck/core";
 
 function evidenceContext(): OpenCodeEvidenceContext {
   return {
@@ -73,119 +85,192 @@ describe("installOpenCodeTools", () => {
     expect(result.message).toContain("MCP server configured via write-mcp-config action");
   });
 
-  describe("python-tool (serena)", () => {
-    test("skips serena when python3 is missing", async () => {
-      const mockCommandExists = (cmd: string): boolean => {
-        return cmd === "uv" || cmd === "pipx";
+  describe("serena-agent Core projection", () => {
+    const ROOT = "/fixtures/deck-data";
+    const SERENA_ROOT = `${ROOT}/tools/serena`;
+    const UV_PATH = `${SERENA_ROOT}/uv/uv`;
+    const SERENA_PATH = `${SERENA_ROOT}/bin/serena`;
+    const authorization = {
+      kind: "interactive-tui-explicit-selection" as const,
+      runner: "opencode" as const,
+      operationId: "operation-1",
+    };
+    const operation = {
+      runner: "opencode" as const,
+      operationId: "operation-1",
+      explicitlySelected: true,
+    };
+
+    function readyInspection(path: string, fingerprint: string): SerenaPathInspection {
+      return { state: "ready", resolvedPath: path, fingerprint };
+    }
+
+    function makeCoreEffects(): { effects: SerenaBootstrapEffects; calls: { fetches: unknown[]; processes: SerenaProcessSpec[]; probes: unknown[] } } {
+      const calls = { fetches: [] as unknown[], processes: [] as SerenaProcessSpec[], probes: [] as unknown[] };
+      const inspections = new Map<string, SerenaPathInspection[]>();
+      const probes: SerenaProbeResult[] = [];
+      const processResults: SerenaProcessResult[] = [];
+      const effects: SerenaBootstrapEffects = {
+        resolveDeckDataRoot: () => ROOT,
+        canonicalizePath: (path) => path,
+        isUserOwnedPath: () => true,
+        ensureDirectory: () => undefined,
+        inspectPath: (path) => inspections.get(path)?.shift() ?? { state: "missing" },
+        fetchInstaller: (request) => {
+          calls.fetches.push(request);
+          return { status: 200, body: new Uint8Array([35, 32, 117, 118]) };
+        },
+        spawn: (spec) => {
+          calls.processes.push(spec);
+          const result = processResults.shift() ?? { state: "exited", exitCode: 0, termination: "known" };
+          const handle: SerenaProcessHandle = { wait: async () => result, terminate: () => undefined };
+          return handle;
+        },
+        probeExecutable: (request) => {
+          calls.probes.push(request);
+          return probes.shift() ?? { state: "ready", fingerprint: "default" };
+        },
       };
+      inspections.set(SERENA_PATH, [
+        { state: "missing" },
+        readyInspection(SERENA_PATH, "serena-fingerprint"),
+      ]);
+      inspections.set(UV_PATH, [
+        { state: "missing" },
+        readyInspection(UV_PATH, "uv-fingerprint"),
+      ]);
+      probes.push(
+        { state: "ready", fingerprint: "uv-fingerprint" },
+        { state: "ready", fingerprint: "serena-fingerprint" },
+      );
+      return { effects, calls };
+    }
+
+    function serenaTool(): InstallableOpenCodeTool {
+      return {
+        id: "serena",
+        name: "Serena",
+        module: "serena-agent",
+        required: false,
+        installKind: "serena-agent",
+      } as InstallableOpenCodeTool;
+    }
+
+    test("delegates Serena to Core and carries typed readiness evidence", async () => {
+      const { effects, calls } = makeCoreEffects();
+      let commandExistsCalls = 0;
+      const stages: string[] = [];
+      const [result] = await installOpenCodeTools(
+        "opencode",
+        [serenaTool()],
+        () => {},
+        async () => { throw new Error("legacy installer must not run"); },
+        {
+          commandExists: () => { commandExistsCalls++; return true; },
+          serenaAuthorization: authorization,
+          serenaOperation: operation,
+          serenaBootstrap: bootstrapSerena,
+          serenaEffects: effects,
+          onStage: (stage) => stages.push(stage),
+          projectRoot: "/project",
+        },
+      );
+
+      expect(result).toMatchObject({
+        outcome: "executed",
+        success: true,
+        installerInvoked: true,
+        serenaBootstrapOutcome: "installed",
+        serenaReadiness: {
+          resolvedExecutablePath: SERENA_PATH,
+          fingerprint: "serena-fingerprint",
+        },
+      });
+      expect(calls.fetches).toHaveLength(1);
+      expect(calls.fetches[0]).toMatchObject({ url: SERENA_UV_INSTALLER_URL, method: "GET", redirect: "manual" });
+      expect(calls.processes.map((process) => [process.executable, [...process.args]])).toEqual([
+        ["/bin/sh", []],
+        [UV_PATH, [...SERENA_INSTALL_ARGS]],
+      ]);
+      expect(calls.processes[1]?.env).not.toHaveProperty("HOME");
+      expect(calls.processes[1]?.env).not.toHaveProperty("PATH_EXTRA");
+      expect(calls.probes[0]).toMatchObject({ args: ["--version"], shell: false });
+      expect(calls.probes[1]).toMatchObject({ args: [...SERENA_HELP_ARGS], shell: false });
+      expect(commandExistsCalls).toBe(0);
+      expect(stages).toEqual(["validating-serena", "preparing-uv", "installing-serena", "validating-serena"]);
+    });
+
+    test("reuses Core readiness without a bootstrap or legacy PATH gate", async () => {
+      const { effects, calls } = makeCoreEffects();
+      const serenaPath = `${SERENA_ROOT}/bin/serena`;
+      (effects.inspectPath as (path: string) => SerenaPathInspection) = (path) => path === serenaPath
+        ? readyInspection(serenaPath, "existing-fingerprint")
+        : { state: "missing" };
+      (effects.probeExecutable as (request: unknown) => SerenaProbeResult) = () => ({ state: "ready", fingerprint: "existing-fingerprint" });
+      let commandExistsCalls = 0;
 
       const [result] = await installOpenCodeTools(
         "opencode",
-        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
+        [serenaTool()],
         () => {},
-        async () => ({ exitCode: 0, stdout: "", stderr: "" }),
-        { commandExists: mockCommandExists },
+        async () => { throw new Error("legacy installer must not run"); },
+        {
+          commandExists: () => { commandExistsCalls++; return true; },
+          serenaAuthorization: authorization,
+          serenaOperation: operation,
+          serenaBootstrap: bootstrapSerena,
+          serenaEffects: effects,
+        },
       );
 
-      expect(result.success).toBe(false);
-      expect(result.message).toContain("Python3 is not installed");
+      expect(result).toMatchObject({ outcome: "already-present", success: true, installerInvoked: false, serenaBootstrapOutcome: "reused" });
+      expect(calls.fetches).toHaveLength(0);
+      expect(calls.processes).toHaveLength(0);
+      expect(commandExistsCalls).toBe(0);
     });
 
-    test("succeeds when serena already exists in PATH", async () => {
-      const mockCommandExists = (cmd: string): boolean => {
-        return cmd === "python3" || cmd === "serena";
-      };
-
+    test("fails closed before any Core effect without current-operation authorization", async () => {
+      const { effects, calls } = makeCoreEffects();
       const [result] = await installOpenCodeTools(
         "opencode",
-        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
+        [serenaTool()],
         () => {},
-        async () => ({ exitCode: 0, stdout: "", stderr: "" }),
-        { commandExists: mockCommandExists },
+        async () => { throw new Error("legacy installer must not run"); },
+        { serenaBootstrap: bootstrapSerena, serenaEffects: effects },
       );
 
-      expect(result.success).toBe(true);
-      expect(result.message).toContain("Serena found in PATH");
+      expect(result?.outcome).toBe("failed");
+      expect(result?.success).toBe(false);
+      expect(result?.serenaReadiness).toBeUndefined();
+      expect(calls.fetches).toHaveLength(0);
+      expect(calls.processes).toHaveLength(0);
     });
 
-    test("installs via uv and verifies success", async () => {
-      let callCount = 0;
-      const mockCommandExists = (cmd: string): boolean => {
-        if (cmd === "python3" || cmd === "uv") return true;
-        if (cmd === "serena") {
-          callCount++;
-          return callCount > 1;
+    test("does not project failed, cancelled, or partial Core outcomes as readiness", async () => {
+      for (const outcome of [
+        { outcome: "failed", stage: "validating-serena", code: "serena-not-ready", diagnostic: { code: "serena-not-ready", message: "not ready" } },
+        { outcome: "cancelled", stage: "installing-serena", mutationStarted: true },
+        { outcome: "partial", stage: "installing-serena", code: "termination-unknown" },
+      ] as const) {
+        const [result] = await installOpenCodeTools(
+          "opencode",
+          [serenaTool()],
+          () => {},
+          async () => { throw new Error("legacy installer must not run"); },
+          {
+            serenaAuthorization: authorization,
+            serenaOperation: operation,
+            serenaBootstrap: async () => outcome as never,
+          },
+        );
+
+        expect(result?.success).toBe(false);
+        expect(result?.serenaReadiness).toBeUndefined();
+        expect(result?.serenaBootstrapOutcome).toBe(outcome.outcome);
+        if (outcome.outcome === "failed") {
+          expect(result?.cause).toContain("post-install/serena-not-ready");
         }
-        return false;
-      };
-
-      const [result] = await installOpenCodeTools(
-        "opencode",
-        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
-        () => {},
-        async () => ({ exitCode: 0, stdout: "Installed serena", stderr: "" }),
-        { commandExists: mockCommandExists },
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.message).toContain("installed via uv");
-    });
-
-    test("fails when uv install succeeds but serena not in PATH", async () => {
-      const mockCommandExists = (cmd: string): boolean => {
-        return cmd === "python3" || cmd === "uv";
-      };
-
-      const [result] = await installOpenCodeTools(
-        "opencode",
-        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
-        () => {},
-        async () => ({ exitCode: 0, stdout: "Installed serena", stderr: "" }),
-        { commandExists: mockCommandExists },
-      );
-
-      expect(result.success).toBe(false);
-      expect(result.message).toContain("not found in PATH");
-    });
-
-    test("skips when neither uv nor pipx exists", async () => {
-      const mockCommandExists = (cmd: string): boolean => {
-        return cmd === "python3";
-      };
-
-      const [result] = await installOpenCodeTools(
-        "opencode",
-        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
-        () => {},
-        async () => ({ exitCode: 0, stdout: "", stderr: "" }),
-        { commandExists: mockCommandExists },
-      );
-
-      expect(result.success).toBe(false);
-      expect(result.message).toContain("neither");
-    });
-
-    test("installs via pipx when uv not available", async () => {
-      let callCount = 0;
-      const mockCommandExists = (cmd: string): boolean => {
-        if (cmd === "python3" || cmd === "pipx") return true;
-        if (cmd === "serena") {
-          callCount++;
-          return callCount > 1;
-        }
-        return false;
-      };
-
-      const [result] = await installOpenCodeTools(
-        "opencode",
-        [{ id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "python-tool" }],
-        () => {},
-        async () => ({ exitCode: 0, stdout: "Installed serena", stderr: "" }),
-        { commandExists: mockCommandExists },
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.message).toContain("installed via pipx");
+      }
     });
   });
 
@@ -330,12 +415,12 @@ describe("installOpenCodeTools", () => {
 
   test("continues with unrelated packages after one package fails", async () => {
     const calls: string[] = [];
-    let serenaChecks = 0;
+    let context7Checks = 0;
     const results = await installOpenCodeTools(
       "opencode",
       [
         { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },
-        { id: "serena", name: "Serena", module: "oraios/serena", required: false, installKind: "npm-package" },
+        { id: "context7", name: "Context7", module: "@upstash/context7-mcp", required: false, installKind: "npm-package" },
       ],
       () => {},
       async (command) => {
@@ -344,7 +429,7 @@ describe("installOpenCodeTools", () => {
           ? { exitCode: 1, stdout: "", stderr: "first package failed" }
           : successfulCommand();
       },
-      { evidenceContext: evidenceContext(), resolveEvidence: (toolId) => state(toolId, toolId === "serena" && ++serenaChecks > 1 ? "usable" : "absent") },
+      { evidenceContext: evidenceContext(), resolveEvidence: (toolId) => state(toolId, toolId === "context7" && ++context7Checks > 1 ? "usable" : "absent") },
     );
 
     expect(results.map((result) => result.outcome)).toEqual(["failed", "executed"]);

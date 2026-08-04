@@ -37,10 +37,10 @@ describe("page based TUI screens", () => {
 
   test("CompleteScreen distinguishes agent and skill results", () => {
     const results: AgentApplyResult[] = [
-      { agentId: "deck-developer-orchestrator", kind: "agent", status: "created" },
-      { agentId: "deck-developer-orchestrator", kind: "skill", status: "created" },
-      { agentId: "deck-developer-verify", kind: "agent", status: "unchanged" },
-      { agentId: "deck-developer-verify", kind: "skill", status: "updated" },
+      { agentId: "deck-lead", kind: "agent", status: "created" },
+      { agentId: "deck-lead", kind: "skill", status: "created" },
+      { agentId: "deck-quality", kind: "agent", status: "unchanged" },
+      { agentId: "deck-quality", kind: "skill", status: "updated" },
     ];
 
     const output = renderToString(
@@ -50,8 +50,8 @@ describe("page based TUI screens", () => {
     );
 
     // Both agent and skill rows for the same agentId should appear
-    expect(output).toContain("deck-developer-orchestrator");
-    expect(output).toContain("deck-developer-verify");
+    expect(output).toContain("deck-lead");
+    expect(output).toContain("deck-quality");
 
     // Rows must distinguish agent vs skill
     expect(output).toContain("agent");

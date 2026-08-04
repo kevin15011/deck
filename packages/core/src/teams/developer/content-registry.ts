@@ -67,6 +67,11 @@ import {
   type CapabilityInstructionCompositionContext,
 } from "./instruction-bundles/index";
 import { getDeveloperTeamCatalog } from "./catalog";
+import {
+  ADAPTIVE_AGENT_CONTENT,
+  ADAPTIVE_TEAM_RUNTIME_CONTRACT,
+  getAdaptiveLeadSystemPrompt,
+} from "./adaptive-team-content";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,6 +131,7 @@ export type ContentRegistryResultOptions = {
 // ---------------------------------------------------------------------------
 
 const REAL_CONTENT: Record<string, { agentBody: string; skillBody: string }> = {
+  ...ADAPTIVE_AGENT_CONTENT,
   "deck-developer-orchestrator": {
     agentBody: ORCHESTRATOR_AGENT_BODY,
     // Visual explanations are composed into the Orchestrator skill only.
@@ -188,6 +194,7 @@ const REAL_CONTENT: Record<string, { agentBody: string; skillBody: string }> = {
 };
 
 const COMPACT_CONTENT: Readonly<Record<string, AgentContent>> = Object.freeze({
+  ...ADAPTIVE_AGENT_CONTENT,
   "deck-developer-orchestrator": Object.freeze({
     agentBody: ORCHESTRATOR_COMPACT_AGENT_BODY,
     skillBody: `${ORCHESTRATOR_COMPACT_SKILL_BODY.trimEnd()}\n\n${VISUAL_EXPLANATIONS_SKILL_FRAGMENT}\n`,
@@ -358,7 +365,7 @@ function withSpecialistSkillDiscoveryContract(
   agentId: string,
 ): AgentContent {
   const isDeveloperTeamSpecialist =
-    agentId !== "deck-developer-orchestrator" &&
+    agentId !== "deck-lead" &&
     DEVELOPER_TEAM_AGENTS.some((agent) => agent.id === agentId);
   if (!isDeveloperTeamSpecialist || content.agentBody.includes(SPECIALIST_SKILL_DISCOVERY_CONTRACT_V1)) {
     return content;
@@ -388,6 +395,12 @@ function withOrchestratorInvariants(
 }
 
 function withCompactRuntimeContract(content: AgentContent, agentId: string): AgentContent {
+  if (DEVELOPER_TEAM_AGENTS.some((agent) => agent.id === agentId)) {
+    return {
+      agentBody: `${ADAPTIVE_TEAM_RUNTIME_CONTRACT}\n\n${content.agentBody.trimStart()}`,
+      skillBody: `## Team Contract Reference\n\nThe agent-level Adaptive Developer Team Contract remains binding for this skill.\n\n${content.skillBody.trimStart()}`,
+    };
+  }
   const orchestratorInvariants = agentId === "deck-developer-orchestrator"
     ? `${renderCompactOrchestratorInvariantsV1()}\n\n`
     : "";
@@ -688,11 +701,13 @@ export function getTeamSessionInstructions(
   if (teamId === "developer-team") {
     const personality = options?.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
     const promptProfile = options?.promptProfile ?? "compact";
-    const orchestratorPrompt = getOrchestratorSystemPrompt(personality, promptProfile);
+    const orchestratorPrompt = promptProfile === "compact"
+      ? getAdaptiveLeadSystemPrompt(personality)
+      : getOrchestratorSystemPrompt(personality, promptProfile);
 
     // Compose order: (1) invariant block, (2) existing orchestrator content, (3) context-authority guidance, (4) language policy, (5) optional active-runner discovery context, (6) capability instructions
     const withInvariants = promptProfile === "compact"
-      ? `${renderCompactOrchestratorInvariantsV1()}\n\n${DEVELOPER_TEAM_COMPACT_RUNTIME_CONTRACT}\n\n${orchestratorPrompt}`
+      ? `${ADAPTIVE_TEAM_RUNTIME_CONTRACT}\n\n${orchestratorPrompt}`
       : prependOrchestratorInvariants(orchestratorPrompt, "session");
     const base = appendContextAuthorityGuidance(withInvariants);
     const baseWithLanguagePolicy = appendDeveloperTeamLanguagePolicy(base);

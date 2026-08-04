@@ -11,10 +11,6 @@ import {
   verifyOpenCodeDeveloperTeamInstall,
 } from "./developer-team-install";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
-import {
-  ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1,
-  ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1,
-} from "../../core/src/teams/developer/orchestrator-content";
 import { getStandaloneSkill, STANDALONE_SKILLS } from "@deck/core/skills/external";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { createOpenCodeRunnerAdapter } from "./runner-adapter";
@@ -131,9 +127,9 @@ const compactPromptActivation = {
 };
 
 describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
-  test("generates 14 agent entries for opencode.json", () => {
+  test("generates the seven desired agent entries for opencode.json", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    expect(Object.keys(plan.agentEntries)).toHaveLength(14);
+    expect(Object.keys(plan.agentEntries)).toHaveLength(7);
   });
 
   test("installs compact content by default regardless of obsolete rollout receipts", () => {
@@ -144,12 +140,12 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     const paused = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       promptProfileActivation: { ...compactPromptActivation, status: "rollout-paused" },
     });
-    const expected = getAgentContent("deck-developer-apply-general", { promptProfile: "compact" })!;
+    const expected = getAgentContent("deck-apply-fast", { promptProfile: "compact" })!;
     const compactPrompt = compact.promptGenerationPlan.find(
-      (planned) => planned.agent.id === "deck-developer-apply-general",
+      (planned) => planned.agent.id === "deck-apply-fast",
     )!;
     const compactSkill = compact.skills.find(
-      (planned) => planned.agent.id === "deck-developer-apply-general",
+      (planned) => planned.agent.id === "deck-apply-fast",
     )!;
 
     expect(compact.promptProfile).toBe("compact");
@@ -162,14 +158,14 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
 
   test("orchestrator has mode: primary", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    expect(plan.agentEntries["deck-developer-orchestrator"].mode).toBe("primary");
+    expect(plan.agentEntries["deck-lead"].mode).toBe("primary");
   });
 
   test("subagents have mode: subagent and hidden: true", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
     // Filter out orchestrator (primary mode)
     const subagentIds = Object.keys(plan.agentEntries).filter(
-      (id) => id !== "deck-developer-orchestrator",
+      (id) => id !== "deck-lead",
     );
     for (const id of subagentIds) {
       expect(plan.agentEntries[id].mode).toBe("subagent");
@@ -179,22 +175,22 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
 
   test("orchestrator has permission.task deny-by-default + allowlist", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    const perm = plan.agentEntries["deck-developer-orchestrator"].permission?.task;
+    const perm = plan.agentEntries["deck-lead"].permission?.task;
     expect(perm).toBeDefined();
     expect(perm!["*"]).toBe("deny");
-    expect(perm!["deck-developer-explorer"]).toBe("allow");
-    expect(perm!["deck-developer-proposal"]).toBe("allow");
+    expect(perm!["deck-investigate"]).toBe("allow");
+    expect(perm!["deck-architect"]).toBe("allow");
   });
 
   test("subagents have correct tool whitelist", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    const explorer = plan.agentEntries["deck-developer-explorer"];
+    const explorer = plan.agentEntries["deck-investigate"];
     expect(explorer.tools).toEqual({ bash: true, edit: true, read: true, write: true });
   });
 
   test("orchestrator has delegation tools", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    const tools = plan.agentEntries["deck-developer-orchestrator"].tools;
+    const tools = plan.agentEntries["deck-lead"].tools;
     expect(tools!.delegate).toBe(true);
     expect(tools!.delegation_list).toBe(true);
     expect(tools!.delegation_read).toBe(true);
@@ -212,70 +208,70 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
   test("no reasoningEffort without explicit config", () => {
     // REQ-MC-005: No hardcoded defaults
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    expect(plan.agentEntries["deck-developer-orchestrator"].reasoningEffort).toBeUndefined();
+    expect(plan.agentEntries["deck-lead"].reasoningEffort).toBeUndefined();
   });
 
   test("explicit model override from config flows to agent entries", () => {
     // REQ-MC-005: Explicit config override takes precedence
     const configOverrides = {
-      "deck-developer-orchestrator": "anthropic/claude-sonnet-4-20250514",
+      "deck-lead": "anthropic/claude-sonnet-4-20250514",
     };
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configModelOverrides: configOverrides,
-      changedAgentIds: ["deck-developer-orchestrator"],
+      changedAgentIds: ["deck-lead"],
     });
 
-    expect(plan.agentEntries["deck-developer-orchestrator"].model).toBe("anthropic/claude-sonnet-4-20250514");
+    expect(plan.agentEntries["deck-lead"].model).toBe("anthropic/claude-sonnet-4-20250514");
     // Other agents should not have model
-    expect(plan.agentEntries["deck-developer-explorer"].model).toBeUndefined();
+    expect(plan.agentEntries["deck-investigate"].model).toBeUndefined();
   });
 
   test("changed OpenCode model and variant overrides use the native variant field", () => {
     // REQ-MC-005: Explicit reasoning override works when model is also set
-    const configOverrides = { "deck-developer-orchestrator": "anthropic/claude-sonnet-4" };
-    const reasoningOverrides = { "deck-developer-orchestrator": "high" as const };
+    const configOverrides = { "deck-lead": "anthropic/claude-sonnet-4" };
+    const reasoningOverrides = { "deck-lead": "high" as const };
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configModelOverrides: configOverrides,
       reasoningEffortOverrides: reasoningOverrides,
-      changedAgentIds: ["deck-developer-orchestrator"],
+      changedAgentIds: ["deck-lead"],
     });
 
-    expect(plan.agentEntries["deck-developer-orchestrator"].model).toBe("anthropic/claude-sonnet-4");
-    expect(plan.agentEntries["deck-developer-orchestrator"].variant).toBe("high");
-    expect(plan.agentEntries["deck-developer-orchestrator"].reasoningEffort).toBeUndefined();
+    expect(plan.agentEntries["deck-lead"].model).toBe("anthropic/claude-sonnet-4");
+    expect(plan.agentEntries["deck-lead"].variant).toBe("high");
+    expect(plan.agentEntries["deck-lead"].reasoningEffort).toBeUndefined();
     // Other agents should not have reasoningEffort
-    expect(plan.agentEntries["deck-developer-explorer"].reasoningEffort).toBeUndefined();
+    expect(plan.agentEntries["deck-investigate"].reasoningEffort).toBeUndefined();
   });
 
   test("multiple explicit model overrides for different agents", () => {
     const configOverrides = {
-      "deck-developer-orchestrator": "anthropic/claude-sonnet-4-20250514",
-      "deck-developer-apply-backend": "openai/gpt-4o",
+      "deck-lead": "anthropic/claude-sonnet-4-20250514",
+      "deck-apply-deep": "openai/gpt-4o",
     };
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configModelOverrides: configOverrides,
-      changedAgentIds: ["deck-developer-orchestrator", "deck-developer-apply-backend"],
+      changedAgentIds: ["deck-lead", "deck-apply-deep"],
     });
 
-    expect(plan.agentEntries["deck-developer-orchestrator"].model).toBe("anthropic/claude-sonnet-4-20250514");
-    expect(plan.agentEntries["deck-developer-apply-backend"].model).toBe("openai/gpt-4o");
-    expect(plan.agentEntries["deck-developer-explorer"].model).toBeUndefined();
+    expect(plan.agentEntries["deck-lead"].model).toBe("anthropic/claude-sonnet-4-20250514");
+    expect(plan.agentEntries["deck-apply-deep"].model).toBe("openai/gpt-4o");
+    expect(plan.agentEntries["deck-investigate"].model).toBeUndefined();
   });
 
   test("explicit model and reasoning overrides coexist", () => {
     const configOverrides = {
-      "deck-developer-orchestrator": "anthropic/claude-sonnet-4",
+      "deck-lead": "anthropic/claude-sonnet-4",
     };
     const reasoningOverrides = {
-      "deck-developer-orchestrator": "high" as const,
+      "deck-lead": "high" as const,
     };
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configModelOverrides: configOverrides,
       reasoningEffortOverrides: reasoningOverrides,
-      changedAgentIds: ["deck-developer-orchestrator"],
+      changedAgentIds: ["deck-lead"],
     });
 
-    const orchestrator = plan.agentEntries["deck-developer-orchestrator"];
+    const orchestrator = plan.agentEntries["deck-lead"];
     expect(orchestrator.model).toBe("anthropic/claude-sonnet-4");
     expect(orchestrator.variant).toBe("high");
     expect(orchestrator.reasoningEffort).toBeUndefined();
@@ -283,7 +279,7 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
 
 
   test("writes a changed OpenCode assignment with native variant only", () => {
-    const agentId = "deck-developer-orchestrator";
+    const agentId = "deck-lead";
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configModelOverrides: { [agentId]: "anthropic/claude-sonnet-4" },
       reasoningEffortOverrides: { [agentId]: "custom-fast" },
@@ -299,7 +295,7 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
 
   test("persists a runner-only non-canonical variant as the exact native key", () => {
     const projectRoot = createTempProject();
-    const agentId = "deck-developer-orchestrator";
+    const agentId = "deck-lead";
     try {
       const configDir = createTempConfigDir(projectRoot);
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
@@ -329,9 +325,9 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     }
   });
 
-  test("generates prompt generation plan with 14 files", () => {
+  test("generates one prompt for each of the seven agents", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    expect(plan.promptGenerationPlan).toHaveLength(14);
+    expect(plan.promptGenerationPlan).toHaveLength(7);
   });
 
   test("does not generate OpenCode sdd-* command files", () => {
@@ -340,19 +336,13 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     expect(plan.commandGenerationPlan.some((p) => p.commandId.startsWith("sdd-"))).toBe(false);
   });
 
-  test("generates skill files for all 14 agents", () => {
+  test("generates paired skills for all seven agents", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    expect(plan.skills).toHaveLength(14);
+    expect(plan.skills).toHaveLength(7);
     for (const skill of plan.skills) {
       expect(skill.content).toContain("disable-model-invocation: true");
-      // deck-onboard is user-invocable, others are not
-      if (skill.agent.id === "deck-onboard") {
-        expect(skill.content).toContain("user-invocable: true");
-        expect(skill.content).not.toContain("delegate_only: true");
-      } else {
-        expect(skill.content).toContain("user-invocable: false");
-        expect(skill.content).toContain("delegate_only: true");
-      }
+      expect(skill.content).toContain("user-invocable: false");
+      expect(skill.content).toContain("delegate_only: true");
     }
   });
 
@@ -368,7 +358,9 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     });
 
     const plannedSkillIds = new Set(plan.standaloneSkills.map((skill) => skill.skillId));
-    expect(plannedSkillIds.size).toBe(29);
+    expect(plannedSkillIds.size).toBe(31);
+    expect(plannedSkillIds.has("deck-onboard")).toBe(true);
+    expect(plannedSkillIds.has("deck-archive")).toBe(true);
     for (const { skillId } of STANDALONE_SKILLS) {
       expect(plannedSkillIds.has(skillId)).toBe(true);
       expect(plan.standaloneSkills).toContainEqual(expect.objectContaining({
@@ -401,9 +393,9 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
 
   test("skill content comes from core registry", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestratorSkill.content).toContain("Coordinate One Authoritative Flow");
-    expect(orchestratorSkill.content).toContain("Visual Explanations");
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-lead")!;
+    expect(orchestratorSkill.content).toContain("# Lead Skill");
+    expect(orchestratorSkill.content).toContain("select the smallest safe route");
   });
 });
 
@@ -415,7 +407,7 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
       const result = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
 
-      const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
+      const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-lead")!;
       expect(existsSync(orchestratorSkill.absolutePath)).toBe(true);
       const content = readFileSync(orchestratorSkill.absolutePath, "utf-8");
       expect(content).toContain("disable-model-invocation: true");
@@ -426,7 +418,7 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
     }
   });
 
-  test("writes prompt files to configDir/prompts/deck-developer/", () => {
+  test("writes prompt files to configDir/prompts/deck-team/", () => {
     const projectRoot = createTempProject();
     try {
       const configDir = join(projectRoot, ".config", "opencode");
@@ -511,8 +503,8 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
       expect(existsSync(configPath)).toBe(true);
       const config = JSON.parse(readFileSync(configPath, "utf-8"));
       expect(config.agent).toBeDefined();
-      expect(config.agent["deck-developer-orchestrator"]).toBeDefined();
-      expect(config.agent["deck-developer-orchestrator"].mode).toBe("primary");
+      expect(config.agent["deck-lead"]).toBeDefined();
+      expect(config.agent["deck-lead"].mode).toBe("primary");
     } finally {
       cleanup(projectRoot);
     }
@@ -546,8 +538,16 @@ describe("applyOpenCodeDeveloperTeamInstall", () => {
       const configPath = join(configDir, "opencode.json");
       const config = JSON.parse(readFileSync(configPath, "utf-8"));
       const keys = Object.keys(config.agent ?? {});
-      expect(keys.filter((k) => k.startsWith("deck-developer-"))).toHaveLength(12);
-      expect(keys.filter((k) => k === "deck-init" || k === "deck-onboard")).toHaveLength(2);
+      expect(keys).toEqual(expect.arrayContaining([
+        "deck-lead",
+        "deck-investigate",
+        "deck-architect",
+        "deck-apply-fast",
+        "deck-apply-deep",
+        "deck-quality",
+        "deck-setup",
+      ]));
+      expect(keys).toHaveLength(7);
     } finally {
       cleanup(projectRoot);
     }
@@ -711,7 +711,9 @@ describe("backupDeveloperTeamFiles", () => {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
       applyOpenCodeDeveloperTeamInstall(plan, { configDir });
       const backup = backupDeveloperTeamFiles(plan);
-      expect(backup.entries.every((e) => e.previousContent !== null)).toBe(true);
+      for (const planned of [...plan.skills, ...plan.standaloneSkills, ...plan.promptGenerationPlan]) {
+        expect(backup.entries.find((entry) => entry.absolutePath === planned.absolutePath)?.previousContent).not.toBeNull();
+      }
     } finally {
       cleanup(projectRoot);
     }
@@ -751,6 +753,92 @@ describe("rollbackDeveloperTeamFiles", () => {
       rollbackDeveloperTeamFiles(backup);
       const content = readFileSync(plan.skills[0].absolutePath, "utf-8");
       expect(content).not.toBe("CORRUPTED");
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+});
+
+describe("legacy Developer Team upgrade", () => {
+  test("promotes seven roles, preserves user agents, and quarantines exact legacy files", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const legacySkill = join(configDir, "skills", "deck-developer-explorer", "SKILL.md");
+      const legacyPrompt = join(configDir, "prompts", "deck-developer", "deck-developer-explorer.md");
+      mkdirSync(join(legacySkill, ".."), { recursive: true });
+      mkdirSync(join(legacyPrompt, ".."), { recursive: true });
+      writeFileSync(legacySkill, "legacy skill", "utf-8");
+      writeFileSync(legacyPrompt, "legacy prompt", "utf-8");
+      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
+        agent: {
+          "deck-developer-explorer": { mode: "subagent", model: "legacy/model" },
+          "user-agent": { mode: "subagent", prompt: "user-owned" },
+        },
+      }), "utf-8");
+
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      const result = applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      const config = JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8"));
+
+      expect(Object.keys(plan.agentEntries)).toHaveLength(7);
+      expect(config.agent["deck-developer-explorer"]).toBeUndefined();
+      expect(config.agent["user-agent"]).toEqual({ mode: "subagent", prompt: "user-owned" });
+      expect(existsSync(legacySkill)).toBe(false);
+      expect(existsSync(legacyPrompt)).toBe(false);
+      expect(readFileSync(join(configDir, "deck-backups", "developer-team-v2", "skills", "deck-developer-explorer", "SKILL.md"), "utf-8")).toBe("legacy skill");
+      expect(readFileSync(join(configDir, "deck-backups", "developer-team-v2", "prompts", "deck-developer", "deck-developer-explorer.md"), "utf-8")).toBe("legacy prompt");
+      expect(result.legacyFilesRetired).toEqual(expect.arrayContaining([legacySkill, legacyPrompt]));
+      expect(verifyOpenCodeDeveloperTeamInstall(plan).valid).toBe(true);
+
+      expect(applyOpenCodeDeveloperTeamInstall(plan, { configDir }).legacyFilesRetired).toEqual([]);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("file rollback restores legacy discovery paths and removes newly promoted files", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const legacySkill = join(configDir, "skills", "deck-init", "SKILL.md");
+      mkdirSync(join(legacySkill, ".."), { recursive: true });
+      writeFileSync(legacySkill, "legacy init", "utf-8");
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      const backup = backupDeveloperTeamFiles(plan);
+
+      applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+      rollbackDeveloperTeamFiles(backup);
+
+      expect(readFileSync(legacySkill, "utf-8")).toBe("legacy init");
+      expect(existsSync(plan.skills[0].absolutePath)).toBe(false);
+      expect(existsSync(plan.promptGenerationPlan[0].absolutePath)).toBe(false);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("an intermediate write failure restores config and active files", () => {
+    const projectRoot = createTempProject();
+    try {
+      const configDir = createTempConfigDir(projectRoot);
+      const configPath = join(configDir, "opencode.json");
+      const previousConfig = JSON.stringify({ agent: { "deck-developer-explorer": { description: "legacy", mode: "subagent", prompt: "legacy" } } });
+      writeFileSync(configPath, previousConfig, "utf-8");
+      const legacySkill = join(configDir, "skills", "deck-developer-explorer", "SKILL.md");
+      mkdirSync(join(legacySkill, ".."), { recursive: true });
+      writeFileSync(legacySkill, "legacy", "utf-8");
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
+      const failedPath = plan.skills[0].absolutePath;
+      const failingWrite = ((path: Parameters<typeof writeFileSync>[0], data: Parameters<typeof writeFileSync>[1], option?: unknown) => {
+        if (String(path) === failedPath) throw new Error("injected write failure");
+        return writeFileSync(path, data, option as never);
+      }) as typeof writeFileSync;
+
+      expect(() => applyOpenCodeDeveloperTeamInstall(plan, { configDir, writeFile: failingWrite })).toThrow("injected write failure");
+      expect(readFileSync(configPath, "utf-8")).toBe(previousConfig);
+      expect(readFileSync(legacySkill, "utf-8")).toBe("legacy");
+      expect(existsSync(failedPath)).toBe(false);
     } finally {
       cleanup(projectRoot);
     }
@@ -892,11 +980,11 @@ describe("orchestratorPersonality in buildOpenCodeDeveloperTeamInstallPlan", () 
     });
 
     // Verify personality option was consumed and content was generated
-    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestratorSkill.content).toContain("# Orchestrator Skill");
-    expect(orchestratorSkill.content).toContain("## Coordinate One Authoritative Flow");
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-lead")!;
+    expect(orchestratorSkill.content).toContain("# Lead Skill");
+    expect(orchestratorSkill.content).toContain("## Route selection");
     // Verify agent entries also received personality-aware content
-    const orchestratorEntry = plan.agentEntries["deck-developer-orchestrator"];
+    const orchestratorEntry = plan.agentEntries["deck-lead"];
     expect(orchestratorEntry).toBeDefined();
     expect(orchestratorEntry.mode).toBe("primary");
     // Verify the resolved personality is captured on the plan
@@ -911,9 +999,9 @@ describe("orchestratorPersonality in buildOpenCodeDeveloperTeamInstallPlan", () 
     });
 
     // Should still generate valid content (falls back to pragmatica)
-    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!;
-    expect(orchestratorSkill.content).toContain("# Orchestrator Skill");
-    expect(orchestratorSkill.content).toContain("## Coordinate One Authoritative Flow");
+    const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-lead")!;
+    expect(orchestratorSkill.content).toContain("# Lead Skill");
+    expect(orchestratorSkill.content).toContain("## Route selection");
     // Verify fallback to pragmatica is captured on the plan
     expect(plan.personality).toBe("pragmatica");
   });
@@ -936,7 +1024,7 @@ describe("Task 2 — stale overwrite, byte idempotency, all-skills sync", () => 
 
       // Get orchestrator skill and corrupt it manually
       const orchestratorSkill = plan.skills.find(
-        (s) => s.agent.id === "deck-developer-orchestrator",
+        (s) => s.agent.id === "deck-lead",
       )!;
       writeFileSync(
         orchestratorSkill.absolutePath,
@@ -953,7 +1041,7 @@ describe("Task 2 — stale overwrite, byte idempotency, all-skills sync", () => 
 
       // Should report status 'updated' for the stale skill
       const skillResult = secondResult.fileResults.find(
-        (r) => r.agentId === "deck-developer-orchestrator",
+        (r) => r.agentId === "deck-lead",
       );
       expect(skillResult?.status).toBe("updated");
     } finally {
@@ -1000,9 +1088,9 @@ describe("Task 2 — stale overwrite, byte idempotency, all-skills sync", () => 
 
       // Corrupt multiple skills (but not all)
       const skillsToCorrupt = [
-        plan.skills.find((s) => s.agent.id === "deck-developer-orchestrator")!,
-        plan.skills.find((s) => s.agent.id === "deck-developer-explorer")!,
-        plan.skills.find((s) => s.agent.id === "deck-developer-spec")!,
+        plan.skills.find((s) => s.agent.id === "deck-lead")!,
+        plan.skills.find((s) => s.agent.id === "deck-investigate")!,
+        plan.skills.find((s) => s.agent.id === "deck-architect")!,
       ];
       for (const skill of skillsToCorrupt) {
         writeFileSync(skill.absolutePath, "CORRUPTION " + skill.agent.skillId, "utf-8");
@@ -1020,9 +1108,9 @@ describe("Task 2 — stale overwrite, byte idempotency, all-skills sync", () => 
       // Check an uncorrupted skill remained unchanged
       const uncorruptedSkill = plan.skills.find(
         (s) =>
-          s.agent.id !== "deck-developer-orchestrator" &&
-          s.agent.id !== "deck-developer-explorer" &&
-          s.agent.id !== "deck-developer-spec",
+          s.agent.id !== "deck-lead" &&
+          s.agent.id !== "deck-investigate" &&
+          s.agent.id !== "deck-architect",
       )!;
       const uncorruptedResult = secondResult.fileResults.find(
         (r) => r.agentId === uncorruptedSkill.agent.id,
@@ -1073,7 +1161,7 @@ describe("Task 2 — stale overwrite, byte idempotency, all-skills sync", () => 
 
       // Track which skills should update
       const staleSkills = [
-        plan.skills.find((s) => s.agent.id === "deck-developer-proposal")!,
+        plan.skills.find((s) => s.agent.id === "deck-architect")!,
       ];
       for (const skill of staleSkills) {
         writeFileSync(skill.absolutePath, "STALE", "utf-8");
@@ -1118,13 +1206,13 @@ describe("Task 3 — drift detection between prompt and skill", () => {
 
       // Find the orchestrator prompt
       const orchestratorPrompt = plan.promptGenerationPlan.find(
-        (p) => p.agent.id === "deck-developer-orchestrator",
+        (p) => p.agent.id === "deck-lead",
       )!;
       const promptContent = readFileSync(orchestratorPrompt.absolutePath, "utf-8");
 
       // Find the orchestrator skill absolutePath from plan
       const orchestratorSkill = plan.skills.find(
-        (s) => s.agent.id === "deck-developer-orchestrator",
+        (s) => s.agent.id === "deck-lead",
       )!;
 
       // Verify prompt references the skill path
@@ -1168,15 +1256,15 @@ describe("Task 3 — drift detection between prompt and skill", () => {
 
       // Get installed orchestrator skill
       const orchestratorSkill = plan.skills.find(
-        (s) => s.agent.id === "deck-developer-orchestrator",
+        (s) => s.agent.id === "deck-lead",
       )!;
       const content = readFileSync(orchestratorSkill.absolutePath, "utf-8");
 
       // Verify critical fragments (presence check, not exact match per REQ-VAL-003)
-      expect(content).toMatch(/# .*Orchestrator.*Skill/);
-      expect(content).toContain("## Runtime Contract Reference");
-      expect(content).toContain("## Coordinate One Authoritative Flow");
-      expect(content).toContain("Visual Explanations");
+      expect(content).toContain("# Lead Skill");
+      expect(content).toContain("## Team Contract Reference");
+      expect(content).toContain("## Conversational deltas");
+      expect(content).toContain("## OpenSpec persistence");
     } finally {
       cleanup(projectRoot);
     }
@@ -1189,13 +1277,13 @@ describe("Task 3 — drift detection between prompt and skill", () => {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
 
       expect(plan.promptProfile).toBe("compact");
-      expect(plan.promptGenerationPlan).toHaveLength(14);
-      expect(plan.skills).toHaveLength(14);
+      expect(plan.promptGenerationPlan).toHaveLength(7);
+      expect(plan.skills).toHaveLength(7);
       for (const prompt of plan.promptGenerationPlan) {
-        expect(prompt.content, prompt.agent.id).toContain("Runtime-Enforced Team Contract");
+        expect(prompt.content, prompt.agent.id).toContain("Adaptive Developer Team Contract");
       }
       for (const skill of plan.skills) {
-        expect(skill.content, skill.agent.id).toContain("## Runtime Contract Reference");
+        expect(skill.content, skill.agent.id).toContain("## Team Contract Reference");
       }
     } finally {
       cleanup(projectRoot);
@@ -1259,16 +1347,14 @@ describe("orchestrator invariant verification in verifyOpenCodeDeveloperTeamInst
 
       // The compact skill references the canonical contract; the prompt carries the invariant IDs.
       const orchestratorSkill = plan.skills.find(
-        (s) => s.agent.id === "deck-developer-orchestrator",
+        (s) => s.agent.id === "deck-lead",
       )!;
-      expect(orchestratorSkill.content).toContain("## Runtime Contract Reference");
+      expect(orchestratorSkill.content).toContain("## Team Contract Reference");
       const orchestratorPrompt = plan.promptGenerationPlan.find(
-        (entry) => entry.agent.id === "deck-developer-orchestrator",
+        (entry) => entry.agent.id === "deck-lead",
       )!;
-      expect(orchestratorPrompt.content).toContain("## Compact Orchestrator Invariants");
-      for (const id of ["INV-001", "INV-002", "INV-003", "INV-004", "INV-005"]) {
-        expect(orchestratorPrompt.content).toContain(id);
-      }
+      expect(orchestratorPrompt.content).toContain("## Route selection");
+      expect(orchestratorPrompt.content).toContain("Quality is not a universal gate");
     } finally {
       cleanup(projectRoot);
     }
@@ -1285,7 +1371,7 @@ describe("orchestrator invariant verification in verifyOpenCodeDeveloperTeamInst
 
       // Should have skill results for orchestrator
       const orchResult = verifyResult.skillResults.find(
-        (r) => r.agentId === "deck-developer-orchestrator",
+        (r) => r.agentId === "deck-lead",
       );
       expect(orchResult).toBeDefined();
 
@@ -1305,15 +1391,15 @@ describe("orchestrator invariant verification in verifyOpenCodeDeveloperTeamInst
 
       // Read the actual file from disk to verify what was actually written
       const orchestratorSkill = plan.skills.find(
-        (s) => s.agent.id === "deck-developer-orchestrator",
+        (s) => s.agent.id === "deck-lead",
       )!;
       const diskContent = readFileSync(orchestratorSkill.absolutePath, "utf-8");
 
       // Disk content must match planned content
       expect(diskContent).toBe(orchestratorSkill.content);
 
-      expect(diskContent).toContain("## Runtime Contract Reference");
-      expect(diskContent).toContain("Runtime-Enforced Team Contract remains binding");
+      expect(diskContent).toContain("## Team Contract Reference");
+      expect(diskContent).toContain("Adaptive Developer Team Contract remains binding");
     } finally {
       cleanup(projectRoot);
     }
@@ -1332,7 +1418,7 @@ describe("dynamic tool resolution", () => {
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
 
       // Apply agent has basic tools
-      const applyBackendEntry = plan.agentEntries["deck-developer-apply-backend"];
+      const applyBackendEntry = plan.agentEntries["deck-apply-deep"];
       expect(applyBackendEntry.tools).toEqual({
         bash: true,
         edit: true,
@@ -1359,7 +1445,7 @@ describe("dynamic tool resolution", () => {
       });
 
       // Apply agents should have base + serena tools
-      const applyBackendEntry = plan.agentEntries["deck-developer-apply-backend"];
+      const applyBackendEntry = plan.agentEntries["deck-apply-deep"];
       if (!applyBackendEntry || !applyBackendEntry.tools) throw new Error("applyBackendEntry or tools is undefined");
       expect(applyBackendEntry.tools.find_symbol).toBe(true);
       expect(applyBackendEntry.tools.replace_symbol_body).toBe(true);
@@ -1388,7 +1474,7 @@ describe("dynamic tool resolution", () => {
       });
 
       // Explorer should have read-only serena tools (not write tools)
-      const explorerEntry = plan.agentEntries["deck-developer-explorer"];
+      const explorerEntry = plan.agentEntries["deck-investigate"];
       if (!explorerEntry || !explorerEntry.tools) throw new Error("explorerEntry or tools is undefined");
       // Read-only tools: find_symbol, find_referencing_symbols, get_diagnostics_for_file
       expect(explorerEntry.tools.find_symbol).toBe(true);
@@ -1413,7 +1499,7 @@ describe("dynamic tool resolution", () => {
       const configDir = createTempConfigDir(projectRoot);
       const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, { configDir });
 
-      const orchestratorEntry = plan.agentEntries["deck-developer-orchestrator"];
+      const orchestratorEntry = plan.agentEntries["deck-lead"];
       if (!orchestratorEntry || !orchestratorEntry.tools) throw new Error("orchestratorEntry or tools is undefined");
       expect(orchestratorEntry.tools.delegate).toBe(true);
       expect(orchestratorEntry.tools.delegation_list).toBe(true);
@@ -1458,40 +1544,38 @@ describe("adapter plan binding isolation", () => {
       const inventory = { state: "ready" as const, source: "live" as const, discoveredAt: 1, fingerprint: "fixture", inventory: { providers: [{ id: "openai", displayName: "openai", source: "runner-resolved" as const }], modelsByProvider: { openai: [{ id: "openai/exact", providerId: "openai", modelId: "exact", displayName: "exact", variants: [], metadataSource: "runner" as const, source: "runner-resolved" as const }, { id: "openai/zero", providerId: "openai", modelId: "zero", displayName: "zero", variants: [], metadataSource: "runner" as const, source: "runner-resolved" as const }] } } };
       const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir, inventoryDiscovery: async () => inventory }) as any;
       await adapter.getModelInventory({ projectRoot: root });
-      const changedAgentIds = ["deck-developer-orchestrator"];
-      const planA = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, modelAssignments: { "deck-developer-orchestrator": "openai/exact" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
-      const planB = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, modelAssignments: { "deck-developer-orchestrator": "openai/zero" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
+      const changedAgentIds = ["deck-lead"];
+      const planA = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, modelAssignments: { "deck-lead": "openai/exact" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
+      const planB = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, modelAssignments: { "deck-lead": "openai/zero" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, plan: planB });
-      expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-developer-orchestrator"].model).toBe("openai/zero");
-      expect(readFileSync(join(configDir, "prompts", "deck-developer", "deck-developer-orchestrator.md"), "utf-8")).toContain("Runtime-Enforced Team Contract");
+      expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-lead"].model).toBe("openai/zero");
+      expect(readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf-8")).toContain("Adaptive Developer Team Contract");
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, plan: planA });
-      expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-developer-orchestrator"].model).toBe("openai/exact");
+      expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-lead"].model).toBe("openai/exact");
     } finally { cleanup(root); }
   });
 });
 
 
-describe("streamlined ownership installed-content semantics", () => {
-  test("exposes compact pre-QA and exact commit-only guidance through core install content", () => {
+describe("adaptive ownership installed-content semantics", () => {
+  test("exposes direct work, proportional persistence, and conditional Quality", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       configDir: "/tmp/.config/opencode",
     });
-    const orchestratorSkill = plan.skills.find(({ agent }) => agent.id === "deck-developer-orchestrator")!.content;
-    const orchestratorPrompt = plan.promptGenerationPlan.find(({ agent }) => agent.id === "deck-developer-orchestrator")!.content;
+    const orchestratorSkill = plan.skills.find(({ agent }) => agent.id === "deck-lead")!.content;
+    const orchestratorPrompt = plan.promptGenerationPlan.find(({ agent }) => agent.id === "deck-lead")!.content;
 
     for (const materialized of [orchestratorSkill, orchestratorPrompt]) {
-      expect(materialized).toContain(ORCHESTRATOR_OWNERSHIP_BOUNDARY_V1);
-      expect(materialized).toContain(ORCHESTRATOR_EXPLICIT_COMMIT_ONLY_RULE_V1);
-      expect(materialized).toContain("functional exercise");
-      expect(materialized).toContain("fresh final independent QA");
-      expect(materialized).not.toContain("Pure Delegator");
+      expect(materialized).toContain("smallest safe route");
+      expect(materialized).toContain("Working Brief");
+      expect(materialized).toContain("Quality is not a universal gate");
+      expect(materialized).toContain("implement a clear, reversible, low-risk change directly");
     }
 
-    for (const agentId of ["deck-developer-apply-general", "deck-developer-apply-backend", "deck-developer-apply-frontend"] as const) {
+    for (const agentId of ["deck-apply-fast", "deck-apply-deep"] as const) {
       const apply = plan.skills.find(({ agent }) => agent.id === agentId)!.content;
-      expect(apply).toContain("functional exercise");
-      expect(apply).toContain("non-independent");
-      expect(apply).toMatch(/conditional target(?:\/product)? validation/);
+      expect(apply).toContain("TDD");
+      expect(apply).toContain("vertical slice");
     }
   });
 });

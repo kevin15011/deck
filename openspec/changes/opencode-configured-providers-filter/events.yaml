@@ -26,3 +26,14 @@
     tests pass. Zero typecheck/diagnostics in touched files. Backend filtering
     (auth.json reader + configured-provider filter) remains for Backend/General
     Apply.
+- event: change.closed
+  phase: closed
+  status: abandoned
+  artifact: archive-report.md
+  timestamp: 2026-08-03T22:27:19.000Z
+  agent: deck-developer-orchestrator
+  summary: >-
+    Closed as abandoned with explicit user authorization. The change remained stale in
+    Apply since 2026-06-21; its frontend-only MenuList work is preserved as historical
+    evidence, while backend configured-provider filtering and the env field-name
+    correction remain incomplete. See archive-report.md.

@@ -9,6 +9,7 @@ import { buildDashboardSupermemorySetupUpdate } from "../app";
 import type { NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import {
   getPiRunnerReviewPlanRunBlockDiagnostics,
+  runRunnerReviewPlan,
   runPiRunnerAction,
   runPiRunnerReviewPlan,
 } from "./action-runner";
@@ -46,6 +47,16 @@ const supermemoryPlan: PiRunnerReviewPlan = {
       },
     ],
   },
+};
+
+const SERENA_ROOT = "/fixtures/deck-data/tools/serena";
+const SERENA_EVIDENCE = {
+  capabilityId: "serena" as const,
+  state: "ready" as const,
+  resolvedExecutablePath: `${SERENA_ROOT}/bin/serena`,
+  source: "installed-deck-tool" as const,
+  probe: "serena-help" as const,
+  fingerprint: "serena-fingerprint",
 };
 
 describe("Pi Runner dashboard action runner Supermemory safety", () => {
@@ -352,6 +363,169 @@ expect(setup.ok).toBe(true);
   });
 });
 
+describe("Serena action-runner evidence and cancellation gates", () => {
+  function serenaPlan() : PiRunnerReviewPlan {
+    return {
+      ready: true,
+      diagnostics: [],
+      groups: {
+        automaticInstalls: [{
+          id: "capability.serena.install",
+          kind: "install-pi-package",
+          title: "Install Serena",
+          capabilityId: "serena",
+          toolId: "serena",
+          source: "serena-agent",
+          status: "ready",
+        }],
+        manualSteps: [],
+        configWrites: [{
+          id: "capability.serena.mcp-config",
+          kind: "write-pi-mcp-config",
+          title: "Configure Serena MCP",
+          capabilityId: "serena",
+          toolId: "serena",
+          source: "serena-agent",
+          status: "ready",
+        }],
+        teamApplications: [],
+        validations: [],
+      },
+    };
+  }
+
+  test("passes one explicit operation context through install and config without exposing readiness paths", async () => {
+    const plan = serenaPlan();
+    const operation = { runner: "pi" as const, operationId: "pi-serena-operation", explicitlySelected: true };
+    const authorization = {
+      kind: "interactive-tui-explicit-selection" as const,
+      runner: "pi" as const,
+      operationId: operation.operationId,
+    };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "pi",
+      operationId: operation.operationId,
+      currentOperation: operation,
+      explicitlySelectedCapabilities: { serena: true },
+      selectedCapabilities: { serena: true },
+      plan,
+      planGeneratedForRevision: 0,
+    });
+    const calls: string[] = [];
+    const writerInputs: unknown[] = [];
+
+    const results = await runRunnerReviewPlan(plan, {
+      dashboardState: state,
+      runnerId: "pi",
+      currentOperation: operation,
+      serenaAuthorization: authorization,
+      installPackages: async (_command, packages, _onResult, context) => {
+        calls.push(`install:${context?.currentOperation?.operationId}`);
+        return [{
+          id: packages[0]!.id,
+          outcome: "executed" as const,
+          success: true,
+          message: "Serena installed and validated.",
+          serenaBootstrapOutcome: "installed" as const,
+          serenaReadiness: SERENA_EVIDENCE,
+        }];
+      },
+      writeMcpConfig: async (options, context) => {
+        calls.push(`config:${context?.currentOperation?.operationId}`);
+        writerInputs.push({ options, context });
+        return { ok: true, path: "/fixtures/pi/mcp.json", diagnostics: [] };
+      },
+    });
+
+    expect(calls).toEqual(["install:pi-serena-operation", "config:pi-serena-operation"]);
+    expect(writerInputs[0]).toMatchObject({
+      options: {
+        serverName: "serena",
+        command: [SERENA_EVIDENCE.resolvedExecutablePath, "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+      },
+    });
+    expect(JSON.stringify(results)).not.toContain(SERENA_ROOT);
+    expect(results.find((result) => result.actionId === "capability.serena.mcp-config")?.status).toBe("executed");
+  });
+
+  test("skips the Serena writer for failed, cancelled, partial, stale, and malformed outcomes", async () => {
+    const scenarios = [
+      { label: "failed", outcome: "failed" as const, status: "failed" as const },
+      { label: "cancelled", outcome: "cancelled" as const, status: "skipped" as const },
+      { label: "partial", outcome: "partial" as const, status: "failed" as const },
+    ];
+    for (const scenario of scenarios) {
+      const plan = serenaPlan();
+      const operation = { runner: "opencode" as const, operationId: `op-${scenario.label}`, explicitlySelected: true };
+      const writes: string[] = [];
+      const results = await runRunnerReviewPlan(plan, {
+        dashboardState: createDefaultPiRunnerDashboardState({
+          runnerScope: "opencode",
+          operationId: operation.operationId,
+          currentOperation: operation,
+          explicitlySelectedCapabilities: { serena: true },
+          selectedCapabilities: { serena: true },
+          plan,
+          planGeneratedForRevision: 0,
+        }),
+        runnerId: "opencode",
+        currentOperation: operation,
+        serenaAuthorization: {
+          kind: "interactive-tui-explicit-selection",
+          runner: "opencode",
+          operationId: operation.operationId,
+        },
+        installPackages: async (_command, packages) => [{
+          id: packages[0]!.id,
+          outcome: scenario.status === "skipped" ? "skipped" : "failed",
+          success: false,
+          message: `Serena ${scenario.label}.`,
+          serenaBootstrapOutcome: scenario.outcome,
+        }],
+        writeMcpConfig: async () => {
+          writes.push(scenario.label);
+          return { ok: true, path: "/fixtures/mcp.json", diagnostics: [] };
+        },
+      });
+
+      expect(writes, scenario.label).toEqual([]);
+      expect(results.find((result) => result.actionId === "capability.serena.mcp-config")?.status, scenario.label).toBe("skipped");
+    }
+
+    const staleWrites: string[] = [];
+    const malformedResults = await runRunnerReviewPlan(serenaPlan(), {
+      dashboardState: createDefaultPiRunnerDashboardState({
+        runnerScope: "pi",
+        operationId: "stale-operation",
+        currentOperation: { runner: "pi", operationId: "stale-operation", explicitlySelected: true },
+        explicitlySelectedCapabilities: { serena: true },
+        selectedCapabilities: { serena: true },
+      }),
+      runnerId: "pi",
+      currentOperation: { runner: "pi", operationId: "different-operation", explicitlySelected: true },
+      serenaAuthorization: {
+        kind: "interactive-tui-explicit-selection",
+        runner: "pi",
+        operationId: "different-operation",
+      },
+      installPackages: async () => [{
+        id: "serena",
+        outcome: "executed" as const,
+        success: true,
+        message: "malformed evidence",
+        serenaBootstrapOutcome: "installed" as const,
+        serenaReadiness: { ...SERENA_EVIDENCE, resolvedExecutablePath: "relative/serena" },
+      }],
+      writeMcpConfig: async () => {
+        staleWrites.push("write");
+        return { ok: true, path: "/fixtures/mcp.json", diagnostics: [] };
+      },
+    });
+    expect(staleWrites).toEqual([]);
+    expect(malformedResults.some((result) => result.status === "failed")).toBe(true);
+  });
+});
+
 describe("OpenCode dashboard action runner Supermemory OAuth", () => {
   test("no exige ni persiste API key al escribir y validar la configuración MCP", async () => {
     const state = createDefaultPiRunnerDashboardState({
@@ -416,12 +590,12 @@ describe("Pi Runner dashboard action runner Developer Team model preservation", 
 
   test("apply-team-bundle usa assignments del dashboard y preserva frontmatter observable de Configure Models", async () => {
     const modelAssignments: DeveloperTeamModelAssignments = {
-      "deck-developer-orchestrator": "openai-codex/gpt-5.5",
-      "deck-developer-apply-backend": "opencode-go/kimi-k2.6",
+      "deck-lead": "openai-codex/gpt-5.5",
+      "deck-apply-deep": "opencode-go/kimi-k2.6",
     };
     const thinkingAssignments: DeveloperTeamThinkingAssignments = {
-      "deck-developer-orchestrator": "high",
-      "deck-developer-apply-backend": "high",
+      "deck-lead": "high",
+      "deck-apply-deep": "high",
     };
     const dashboardState = createDefaultPiRunnerDashboardState({
       teams: {
@@ -459,16 +633,16 @@ describe("Pi Runner dashboard action runner Developer Team model preservation", 
 
     expect(result).toMatchObject({ actionId: "teams.developer-team.apply", status: "executed" });
     expect(dashboardPlan).toBeDefined();
-    expect(frontmatterFor(dashboardPlan!, "deck-developer-orchestrator")).toBe(
-      frontmatterFor(homeConfigureModelsPlan, "deck-developer-orchestrator"),
+    expect(frontmatterFor(dashboardPlan!, "deck-lead")).toBe(
+      frontmatterFor(homeConfigureModelsPlan, "deck-lead"),
     );
-    expect(frontmatterFor(dashboardPlan!, "deck-developer-apply-backend")).toBe(
-      frontmatterFor(homeConfigureModelsPlan, "deck-developer-apply-backend"),
+    expect(frontmatterFor(dashboardPlan!, "deck-apply-deep")).toBe(
+      frontmatterFor(homeConfigureModelsPlan, "deck-apply-deep"),
     );
-    expect(frontmatterFor(dashboardPlan!, "deck-developer-orchestrator")).toContain("model: openai-codex/gpt-5.5");
-    expect(frontmatterFor(dashboardPlan!, "deck-developer-orchestrator")).toContain("thinking: high");
-    expect(frontmatterFor(dashboardPlan!, "deck-developer-apply-backend")).toContain("model: opencode-go/kimi-k2.6");
-    expect(frontmatterFor(dashboardPlan!, "deck-developer-apply-backend")).not.toContain("thinking:");
+    expect(frontmatterFor(dashboardPlan!, "deck-lead")).toContain("model: openai-codex/gpt-5.5");
+    expect(frontmatterFor(dashboardPlan!, "deck-lead")).toContain("thinking: high");
+    expect(frontmatterFor(dashboardPlan!, "deck-apply-deep")).toContain("model: opencode-go/kimi-k2.6");
+    expect(frontmatterFor(dashboardPlan!, "deck-apply-deep")).not.toContain("thinking:");
   });
 });
 

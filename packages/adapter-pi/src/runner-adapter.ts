@@ -32,7 +32,17 @@ import {
 import { PI_THINKING_LEVELS, supportsThinkingForModel, getDefaultThinkingForModel, resolveThinkingForModel } from "./model-config";
 import { getPiRunnerCapability, PI_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
 import { getOptionalPiTools } from "./installation-plan";
-import { writeSupermemoryPiMcpConfig, writeContextModeMcpConfig, writeCodebaseMemoryMcpConfig, writeSerenaMcpConfig, writeContext7McpConfig, defaultPiMcpConfigPath } from "./pi-mcp-config";
+import {
+  writeSupermemoryPiMcpConfig,
+  writeContextModeMcpConfig,
+  writeCodebaseMemoryMcpConfig,
+  writeSerenaMcpConfig,
+  writeContext7McpConfig,
+  defaultPiMcpConfigPath,
+  type PiMcpConfigFileSystem,
+  type PiMcpConfigWriteResult,
+  type WriteSerenaMcpConfigOptions,
+} from "./pi-mcp-config";
 import { mergeSettingsPackages } from "./settings-merge";
 import type { InternalRunnerPackageInstallAction } from "./internal-runner-packages";
 import type { RequiredToolStatus } from "./required-tools";
@@ -71,9 +81,16 @@ import type {
   SkillDiscoverySourceProviderV1,
   OpaqueSkillInventoryResultV1,
   SkillLocatorResolutionV1,
+  SerenaBootstrapAuthorization,
+  SerenaOperationIdentity,
+  SerenaReadinessEvidence,
+  SerenaReadinessRevalidator,
 } from "@deck/core";
 import {
   getModelCatalog as getCoreModelCatalog,
+  runEvidenceGatedSerenaWriter,
+  SERENA_MCP_ARGS,
+  validateSerenaOperationAuthorization,
   SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
   SKILL_DISCOVERY_SOURCE_SCHEMA,
 } from "@deck/core";
@@ -91,6 +108,27 @@ export type PiRunnerAdapterOptions = {
   readonly homeDirectory?: string;
   /** Optional runner-exposed inventory supplied by Pi itself. */
   readonly opaqueInventory?: () => Promise<OpaqueSkillInventoryResultV1>;
+  /** Deterministic Serena installer projection seam. */
+  readonly installTools?: typeof installPiTools;
+  /** Injected Core effects for Serena bootstrap tests. */
+  readonly serenaBootstrapEffects?: import("@deck/core").SerenaBootstrapEffects;
+  /** Optional default revalidator used by the named Serena config action. */
+  readonly serenaRevalidator?: SerenaReadinessRevalidator;
+  /** Optional canonical Deck-owned Serena root for writer validation. */
+  readonly serenaOwnedRoot?: string;
+  /** Injected Serena writer seam; production uses the evidence-gated Pi writer. */
+  readonly writeSerenaMcpConfig?: (options: WriteSerenaMcpConfigOptions) => PiMcpConfigWriteResult | Promise<PiMcpConfigWriteResult>;
+  /** Named non-Serena writer seam for hermetic adapter tests. */
+  readonly writeNamedMcpConfig?: (capabilityId: string, context: RunnerActionContext) => Promise<PiMcpConfigWriteResult> | PiMcpConfigWriteResult;
+};
+
+type PiSerenaActionContextExtensions = {
+  readonly serenaRevalidator?: SerenaReadinessRevalidator;
+  readonly serenaOwnedRoot?: string;
+  readonly serenaBootstrapOutcome?: "reused" | "installed" | "failed" | "cancelled" | "partial";
+  readonly piMcpConfigPath?: string;
+  readonly homeDirectory?: string;
+  readonly piMcpFileSystem?: PiMcpConfigFileSystem;
 };
 
 type PiFilesystemSourceDefinition = {
@@ -415,6 +453,28 @@ export function createPiRunnerAdapter(options: PiRunnerAdapterOptions = {}): Run
   return new PiRunnerAdapterImpl(options);
 }
 
+/**
+ * Pure gate shared by Pi Serena install/config action dispatch. It deliberately
+ * accepts a narrow structural context so tests and future orchestration can
+ * validate a handcrafted action without reaching any external boundary.
+ */
+export function isPiSerenaActionAuthorized(
+  action: Pick<RunnerAction, "kind" | "capabilityId">,
+  context: Pick<RunnerActionContext, "runnerId" | "operationId" | "operation" | "currentOperation" | "serenaAuthorization" | "serenaReadiness">,
+): boolean {
+  if (
+    context.runnerId !== PI_RUNNER_ID
+    || action.capabilityId !== "serena"
+    || action.kind !== "install-pi-package" && action.kind !== "write-pi-mcp-config"
+  ) {
+    return false;
+  }
+
+  const operation = context.currentOperation ?? context.operation;
+  if (!operation || context.operationId !== undefined && context.operationId !== operation.operationId) return false;
+  return validateSerenaOperationAuthorization(context.serenaAuthorization, operation).valid;
+}
+
 // ---------------------------------------------------------------------------
 // PiRunnerAdapter implementation
 // ---------------------------------------------------------------------------
@@ -426,6 +486,13 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
 
   // Store last native plan for backup/restore/verify operations
   #lastNativePlan: PiDeveloperTeamInstallPlan | null = null;
+  #installTools: typeof installPiTools;
+  #serenaBootstrapEffects?: import("@deck/core").SerenaBootstrapEffects;
+  #serenaRevalidator?: SerenaReadinessRevalidator;
+  #serenaOwnedRoot?: string;
+  #writeSerenaMcpConfig: (options: WriteSerenaMcpConfigOptions) => PiMcpConfigWriteResult | Promise<PiMcpConfigWriteResult>;
+  #writeNamedMcpConfig: (capabilityId: string, context: RunnerActionContext) => Promise<PiMcpConfigWriteResult> | PiMcpConfigWriteResult;
+  #serenaReadinessByOperation = new Map<string, SerenaReadinessEvidence>();
 
   // -------------------------------------------------------------------------
   // Runtime detection
@@ -435,6 +502,12 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
 
   constructor(options: PiRunnerAdapterOptions = {}) {
     this.skillDiscovery = createPiSkillDiscoveryProvider(options);
+    this.#installTools = options.installTools ?? installPiTools;
+    this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
+    this.#serenaRevalidator = options.serenaRevalidator;
+    this.#serenaOwnedRoot = options.serenaOwnedRoot;
+    this.#writeSerenaMcpConfig = options.writeSerenaMcpConfig ?? writeSerenaMcpConfig;
+    this.#writeNamedMcpConfig = options.writeNamedMcpConfig ?? writeNamedPiMcpConfig;
   }
 
   async detectRuntimes(input?: RuntimeDetectionInput): Promise<readonly RuntimeStatus[]> {
@@ -501,6 +574,15 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       {
         runnerScope,
         selectedCapabilities: state.selectedCapabilities as Record<string, boolean>,
+        explicitlySelectedCapabilities: state.explicitlySelectedCapabilities as Record<string, boolean> | undefined,
+        operationId: state.operationId,
+        currentOperation: state.operationId
+          ? {
+              runner: "pi",
+              operationId: state.operationId,
+              explicitlySelected: state.explicitlySelectedCapabilities?.serena === true,
+            }
+          : undefined,
         adaptiveMemory: state.adaptiveMemory as { provider?: "none" | "engram" | "supermemory"; supermemory?: { configured?: boolean; hasToken?: boolean; userId?: string; teamId?: string; organizationId?: string } },
         teams: {} as Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>,
         runtime: { toolsReview: review },
@@ -570,47 +652,77 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         name: action.title,
         source: action.source ?? catalogTool?.source ?? "",
         required: action.required ?? false,
-        // Use installKind from catalog, not hardcoded. This ensures:
-        // - shared-binary-plus-mcp (context-mode, codebase-memory-mcp)
-        // - shared-binary (rtk)
-        // - python-tool (serena)
-        // - npm-package-plus-mcp (context7)
-        // are handled correctly instead of being treated as pi-package
+        // Use installKind from catalog, not hardcoded, so non-Serena Pi tools
+        // retain their existing dispatch behavior.
         installKind: catalogTool?.installKind ?? "pi-package",
         capabilityId: catalogTool?.capabilityId,
       };
 
-      const results = await installPiTools(context.runnerCommand ?? "pi", [installableTool], () => {});
-      const result = results[0];
-
-      // After package install, merge settings to replace stale packages
-      const homeDir = process.env.HOME ?? "/home/kevinlb";
-      const settingsPath = `${homeDir}/.pi/agent/settings.json`;
-      const fs = require("node:fs");
-      
-      // Get current settings
-      let currentPackages: string[] = [];
-      try {
-        if (fs.existsSync(settingsPath)) {
-          const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-          currentPackages = settings.packages || [];
-        }
-      } catch {
-        // Ignore read errors
+      const isSerena = action.capabilityId === "serena" || toolId === "serena";
+      if (isSerena && !isPiSerenaActionAuthorized(action, context)) {
+        return blockedSerenaActionResult(action, "Serena setup requires explicit selection in the current Pi operation.");
       }
 
-      // Merge and replace stale packages
-      const mergeResult = mergeSettingsPackages({
-        settingsPath: fs.existsSync(settingsPath) ? settingsPath : undefined,
-        existingPackages: currentPackages,
-        readFile: (path) => fs.readFileSync(path, "utf-8"),
-        writeFile: (path, content) => fs.writeFileSync(path, content),
-      });
+      const operation = context.currentOperation ?? context.operation;
+      const results = await this.#installTools(
+        isSerena ? context.runnerCommand : context.runnerCommand ?? "pi",
+        [installableTool],
+        () => {},
+        isSerena
+          ? {
+              serenaAuthorization: context.serenaAuthorization,
+              serenaOperation: operation,
+              currentOperation: operation,
+              serenaBootstrapEffects: this.#serenaBootstrapEffects,
+              serenaSignal: context.signal,
+            }
+          : undefined,
+      );
+      const result = results[0];
+      if (!result) {
+        return {
+          actionId: action.id,
+          status: "failed",
+          message: "Pi installation returned no result.",
+          diagnostics: ["Pi installation returned no result."],
+        };
+      }
+
+      if (isSerena && result.serenaReadiness && operation) {
+        this.#serenaReadinessByOperation.set(operation.operationId, result.serenaReadiness);
+      }
+
+      // Serena is Core-managed and does not participate in Pi package settings
+      // migration. Preserve the existing merge behavior for every other tool.
+      const mergeDiagnostics: string[] = [];
+      if (!isSerena) {
+        const homeDir = process.env.HOME ?? "/home/kevinlb";
+        const settingsPath = `${homeDir}/.pi/agent/settings.json`;
+        const fs = require("node:fs");
+
+        let currentPackages: string[] = [];
+        try {
+          if (fs.existsSync(settingsPath)) {
+            const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+            currentPackages = settings.packages || [];
+          }
+        } catch {
+          // Ignore read errors
+        }
+
+        const mergeResult = mergeSettingsPackages({
+          settingsPath: fs.existsSync(settingsPath) ? settingsPath : undefined,
+          existingPackages: currentPackages,
+          readFile: (path) => fs.readFileSync(path, "utf-8"),
+          writeFile: (path, content) => fs.writeFileSync(path, content),
+        });
+        mergeDiagnostics.push(...mergeResult.diagnostics);
+      }
 
       const allDiagnostics = [
-        ...(result.status === "failed" ? [result.message ?? "Install failed."] : []),
+        ...(["failed", "blocked", "cancelled", "partial"].includes(result.status) ? [result.message ?? "Install failed."] : []),
         ...(result.installKind ? [`[installKind=${result.installKind}]`] : []),
-        ...mergeResult.diagnostics,
+        ...mergeDiagnostics,
       ];
 
       // Map installPiTools result status to action-runner status
@@ -623,6 +735,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         "manual": "informational",
         "failed": "failed",
         "blocked": "failed",
+        "cancelled": "failed",
+        "partial": "failed",
       };
 
       return {
@@ -653,67 +767,111 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       };
     }
 
-    // Handle config writes
-    if (action.kind === "write-deck-config" || action.kind === "write-pi-mcp-config") {
-      // Write all required MCP configurations for Pi capabilities
-      const diagnostics: string[] = [];
-      const homeDir = process.env.HOME ?? "/home/kevinlb";
-      const mcpConfigPath = defaultPiMcpConfigPath(homeDir);
-
-      // Write context-mode MCP config (gated with healthcheck)
-      try {
-        const cmResult = await writeContextModeMcpConfig({ configPath: mcpConfigPath, homeDir });
-        const status = cmResult.ok ? "written" : "skipped";
-        diagnostics.push(`context-mode: ${status}`);
-      } catch (e) {
-        diagnostics.push("context-mode: error");
-      }
-
-      // Write codebase-memory-mcp MCP config (gated with healthcheck)
-      try {
-        const cbmResult = await writeCodebaseMemoryMcpConfig({ configPath: mcpConfigPath, homeDir });
-        const status = cbmResult.ok ? "written" : "skipped";
-        diagnostics.push(`codebase-memory-mcp: ${status}`);
-      } catch (e) {
-        diagnostics.push("codebase-memory-mcp: error");
-      }
-
-      // Write serena MCP config
-      try {
-        const serenaResult = writeSerenaMcpConfig({ configPath: mcpConfigPath, homeDir });
-        const status = serenaResult.ok ? "written" : "skipped";
-        diagnostics.push(`serena: ${status}`);
-      } catch (e) {
-        diagnostics.push("serena: error");
-      }
-
-      // Write context7 MCP config
-      try {
-        const c7Result = writeContext7McpConfig({ configPath: mcpConfigPath, homeDir });
-        const status = c7Result.ok ? "written" : "skipped";
-        diagnostics.push(`context7: ${status}`);
-      } catch (e) {
-        diagnostics.push("context7: error");
-      }
-
-      // Also write/update supermemory config if user has token (optional - won't fail if no token)
-      try {
-        const supermemoryToken = process.env.SUPERMEMORY_API_KEY;
-        if (supermemoryToken) {
-          const smResult = writeSupermemoryPiMcpConfig({ token: supermemoryToken, configPath: mcpConfigPath, homeDir });
-          diagnostics.push(smResult.ok ? "supermemory: updated" : "supermemory: unchanged");
-        } else {
-          diagnostics.push("supermemory: no-token");
-        }
-      } catch (e) {
-        diagnostics.push("supermemory: error");
-      }
-
+    // Deck-config actions are not MCP actions. In particular, they cannot
+    // become an incidental Serena configuration path.
+    if (action.kind === "write-deck-config") {
       return {
         actionId: action.id,
-        status: "executed",
-        message: "MCP configs processed",
-        diagnostics,
+        status: "informational",
+        message: "Deck config write is handled by the dashboard state owner.",
+        diagnostics: [],
+      };
+    }
+
+    if (action.kind === "write-pi-mcp-config") {
+      const capabilityId = action.capabilityId;
+      if (capabilityId === "serena") {
+        if (!isPiSerenaActionAuthorized(action, context)) {
+          return blockedSerenaActionResult(action, "Serena MCP configuration requires explicit selection in the current Pi operation.");
+        }
+
+        const operation = context.currentOperation ?? context.operation;
+        const operationId = operation?.operationId;
+        const actionContext = context as RunnerActionContext & PiSerenaActionContextExtensions;
+        if (
+          actionContext.serenaBootstrapOutcome !== undefined
+          && actionContext.serenaBootstrapOutcome !== "reused"
+          && actionContext.serenaBootstrapOutcome !== "installed"
+        ) {
+          return blockedSerenaActionResult(action, "Serena readiness did not complete successfully before MCP configuration.");
+        }
+        const readiness = context.serenaReadiness
+          ?? (operationId ? this.#serenaReadinessByOperation.get(operationId) : undefined);
+        const revalidate = actionContext.serenaRevalidator ?? this.#serenaRevalidator;
+        if (!readiness || !revalidate || !operation || !context.serenaAuthorization) {
+          return blockedSerenaActionResult(action, "Serena readiness evidence is required before MCP configuration.");
+        }
+
+        const ownedRoot = actionContext.serenaOwnedRoot
+          ?? this.#serenaOwnedRoot
+          ?? inferSerenaOwnedRoot(readiness.resolvedExecutablePath);
+        if (!ownedRoot) {
+          return blockedSerenaActionResult(action, "Serena executable containment could not be established before MCP configuration.");
+        }
+
+        let gatedResult: Awaited<ReturnType<typeof runEvidenceGatedSerenaWriter>>;
+        try {
+          gatedResult = await runEvidenceGatedSerenaWriter(
+            {
+              authorization: context.serenaAuthorization,
+              operation,
+              readiness,
+              command: readiness.resolvedExecutablePath,
+              args: SERENA_MCP_ARGS,
+              revalidate,
+            },
+            async (validatedInput) => {
+              const result = await this.#writeSerenaMcpConfig({
+                authorization: validatedInput.authorization,
+                operation: validatedInput.operation,
+                readiness: validatedInput.readiness,
+                command: validatedInput.command,
+                args: validatedInput.args,
+                ownedRoot,
+                configPath: actionContext.piMcpConfigPath,
+                homeDir: actionContext.homeDirectory,
+                fileSystem: actionContext.piMcpFileSystem,
+              });
+              return result.ok
+                ? { ok: true, status: result.action as "created" | "updated" | "unchanged" }
+                : {
+                    ok: false,
+                    code: result.diagnostics[0]?.code ?? "writer-failed",
+                    diagnostic: {
+                      code: result.diagnostics[0]?.code ?? "writer-failed",
+                      message: result.diagnostics[0]?.message ?? "Serena MCP configuration was not changed.",
+                    },
+                  };
+            },
+            ownedRoot,
+          );
+        } catch {
+          return blockedSerenaActionResult(action, "Serena MCP configuration was not changed.");
+        }
+
+        return {
+          actionId: action.id,
+          status: gatedResult.ok ? "executed" : "failed",
+          message: gatedResult.ok ? `Serena MCP configuration ${gatedResult.status}.` : "Serena MCP configuration was not changed.",
+          diagnostics: gatedResult.ok ? [] : ["Serena MCP configuration was not changed."],
+        };
+      }
+
+      if (!capabilityId) {
+        return {
+          actionId: action.id,
+          status: "failed",
+          message: "Named Pi MCP capability is required.",
+          diagnostics: ["Named Pi MCP capability is required."],
+        };
+      }
+
+      const result = await this.#writeNamedMcpConfig(capabilityId, context);
+      return {
+        actionId: action.id,
+        status: result.ok ? "executed" : "failed",
+        message: result.ok ? `MCP configuration ${result.action} for ${capabilityId}.` : "MCP configuration was not changed.",
+        diagnostics: result.ok ? [] : ["MCP configuration was not changed."],
       };
     }
 
@@ -1013,6 +1171,60 @@ export function getPiRunnerAdapter(): RunnerAdapter {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+function blockedSerenaActionResult(action: RunnerAction, message: string): RunnerActionRunResult {
+  return {
+    actionId: action.id,
+    status: "failed",
+    message,
+    diagnostics: [message],
+  };
+}
+
+function inferSerenaOwnedRoot(executablePath: string): string | undefined {
+  return executablePath.endsWith("/bin/serena")
+    ? executablePath.slice(0, -"/bin/serena".length)
+    : undefined;
+}
+
+async function writeNamedPiMcpConfig(
+  capabilityId: string,
+  context: RunnerActionContext,
+): Promise<PiMcpConfigWriteResult> {
+  const actionContext = context as RunnerActionContext & PiSerenaActionContextExtensions;
+  const homeDir = actionContext.homeDirectory ?? process.env.HOME ?? "/home/kevinlb";
+  const configPath = actionContext.piMcpConfigPath ?? defaultPiMcpConfigPath(homeDir);
+
+  switch (capabilityId) {
+    case "context-mode":
+      return writeContextModeMcpConfig({ configPath, homeDir });
+    case "codebase-memory-mcp":
+      return writeCodebaseMemoryMcpConfig({ configPath, homeDir });
+    case "context7":
+      return writeContext7McpConfig({ configPath, homeDir });
+    case "supermemory": {
+      const token = context.supermemoryToken ?? process.env.SUPERMEMORY_API_KEY;
+      if (!token) {
+        return {
+          ok: false,
+          action: "failed",
+          path: configPath,
+          serverName: capabilityId,
+          diagnostics: [],
+        };
+      }
+      return writeSupermemoryPiMcpConfig({ token, configPath, homeDir });
+    }
+    default:
+      return {
+        ok: false,
+        action: "failed",
+        path: configPath,
+        serverName: capabilityId,
+        diagnostics: [],
+      };
+  }
+}
 
 function toRuntimeStatus(preflight: PiPreflightResult): RuntimeStatus {
   return {

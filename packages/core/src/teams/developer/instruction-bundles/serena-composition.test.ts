@@ -53,7 +53,7 @@ describe("Serena non-apply skill scoping", () => {
   test("non-apply skill receives read-only only", () => {
     const skillContext: CapabilityInstructionCompositionContext = {
       surface: "skill",
-      skillId: "deck-developer-explorer-skill",
+      skillId: "deck-investigate-skill",
     };
     const result = composeCapabilityInstructions(
       "# Explorer Skill",
@@ -74,7 +74,7 @@ describe("Serena non-apply skill scoping", () => {
   test("apply skill receives full guidance", () => {
     const skillContext: CapabilityInstructionCompositionContext = {
       surface: "skill",
-      skillId: "deck-developer-apply-backend-skill",
+      skillId: "deck-apply-deep-skill",
     };
     const result = composeCapabilityInstructions(
       "# Apply Backend Skill",

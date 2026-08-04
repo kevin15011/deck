@@ -184,6 +184,61 @@ describe("T6 identified package outcomes and inline causes", () => {
   });
 });
 
+describe("Serena fixed-stage render contract", () => {
+  test("renders the quiet Serena stages in order and a bounded terminal outcome for both runners", () => {
+    for (const runnerScope of ["pi", "opencode"] as const) {
+      const state = createDefaultRunnerDashboardState({ runnerScope, screen: "install-progress" });
+      const output = renderToString(
+        <RunnerDashboardScreens
+          state={state}
+          serenaStages={["preparing-uv", "installing-serena", "validating-serena", "configuring-mcp"]}
+          serenaOutcome="installed"
+          installResults={[createActionResult(
+            "capability.serena.mcp-config",
+            "executed",
+            "Serena MCP configuration created.",
+            { serenaOutcome: "installed", serenaStage: "configuring-mcp" },
+          )]}
+        />,
+      );
+
+      expect(output).toContain("Preparing uv");
+      expect(output).toContain("Installing Serena");
+      expect(output).toContain("Validating Serena");
+      expect(output).toContain("Configuring MCP");
+      expect(output.indexOf("Preparing uv")).toBeLessThan(output.indexOf("Installing Serena"));
+      expect(output.indexOf("Installing Serena")).toBeLessThan(output.indexOf("Validating Serena"));
+      expect(output.indexOf("Validating Serena")).toBeLessThan(output.indexOf("Configuring MCP"));
+      expect(output).toContain("Status: Serena Installed.");
+    }
+  });
+
+  test("renders cancellation and partial outcomes without implying MCP success or exposing private data", () => {
+    const state = createDefaultRunnerDashboardState({ runnerScope: "pi", screen: "install-progress" });
+    const hostilePath = "/home/private/.deck/tools/serena token=secret";
+    const output = renderToString(
+      <RunnerDashboardScreens
+        state={state}
+        serenaStages={["installing-serena"]}
+        serenaOutcome="partial"
+        cancellationRequested
+        installResults={[createActionResult(
+          "capability.serena.install",
+          "failed",
+          "Serena setup stopped before termination was confirmed.",
+          { serenaOutcome: "partial", serenaStage: "installing-serena", cause: `raw ${hostilePath}` },
+        )]}
+      />,
+    );
+
+    expect(output).toContain("Cancellation requested; waiting for the active command to stop.");
+    expect(output).toContain("Status: Serena Partial.");
+    expect(output).not.toContain(hostilePath);
+    expect(output).not.toContain("raw");
+    expect(output).not.toContain("Configuring MCP");
+  });
+});
+
 function createMinimalPlan(overrides?: Partial<RunnerReviewPlan>): RunnerReviewPlan {
   return {
     groups: {

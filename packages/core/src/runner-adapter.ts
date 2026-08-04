@@ -23,6 +23,36 @@ import type {
 import type { AdaptiveMemoryProvider } from "./memory/adaptive-memory";
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles";
 import type { SkillDiscoverySourceProviderV1 } from "./skill-discovery/contracts";
+import type {
+  SerenaBootstrapAuthorization,
+  SerenaMcpWriteStatus,
+  SerenaOperationIdentity,
+  SerenaReadinessEvidence,
+  SerenaReadinessRevalidator,
+} from "./serena-bootstrap";
+
+export {
+  isSerenaReadinessEvidence,
+  isSuccessfulSerenaBootstrapResult,
+  revalidateSerenaReadiness,
+  runEvidenceGatedSerenaWriter,
+  validateSerenaOperationAuthorization,
+  validateSerenaBootstrapResult,
+  validateSerenaMcpWriterInput,
+  validateSerenaReadinessEvidence,
+} from "./serena-bootstrap";
+export type {
+  SerenaBootstrapAuthorization,
+  SerenaMcpWriteResult,
+  SerenaMcpWriteStatus,
+  SerenaMcpWriter,
+  SerenaMcpWriterInput,
+  SerenaMcpWriterValidationResult,
+  SerenaOperationIdentity,
+  SerenaReadinessEvidence,
+  SerenaReadinessRevalidator,
+  SerenaReadinessValidationResult,
+} from "./serena-bootstrap";
 
 // ---------------------------------------------------------------------------
 // Aliases for ergonomic use in adapter consumers
@@ -247,6 +277,9 @@ export type DashboardState = {
   runnerId: RunnerId;
   environmentId: RunnerEnvironmentId;
   selectedCapabilities: Record<string, boolean>;
+  /** Ephemeral current-operation provenance; it is never persisted by Core. */
+  explicitlySelectedCapabilities?: Readonly<Record<string, boolean>>;
+  operationId?: string;
   packageInstructions: Record<string, boolean>;
   adaptiveMemory: {
     provider: "none" | "engram" | "supermemory";
@@ -296,6 +329,13 @@ export type RunnerActionContext = {
   projectRoot: string;
   runnerId: RunnerId;
   environmentId: RunnerEnvironmentId;
+  /** Optional current operation identity and one-use Serena authorization. */
+  operation?: SerenaOperationIdentity;
+  currentOperation?: SerenaOperationIdentity;
+  operationId?: string;
+  serenaAuthorization?: SerenaBootstrapAuthorization;
+  serenaReadiness?: SerenaReadinessEvidence;
+  signal?: AbortSignal;
   runnerCommand?: string;
   dashboardState?: DashboardState;
   supermemoryToken?: string;
@@ -348,6 +388,9 @@ export type RunnerMcpConfigInput = {
   token?: string;
   type?: "local" | "remote";
   command?: readonly string[];
+  /** Additive readiness handoff for evidence-gated Serena writers. */
+  serenaReadiness?: SerenaReadinessEvidence;
+  serenaRevalidator?: SerenaReadinessRevalidator;
   url?: string;
   headers?: Record<string, string>;
 };
@@ -355,6 +398,8 @@ export type RunnerMcpConfigInput = {
 export type RunnerMcpConfigResult = {
   ok: boolean;
   path: string;
+  /** Serena writers report idempotent mutation semantics when available. */
+  status?: SerenaMcpWriteStatus;
   diagnostics?: string[];
 };
 

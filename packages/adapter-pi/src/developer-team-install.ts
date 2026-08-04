@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { dirname, join, relative } from "node:path";
 import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
-import { ORCHESTRATOR_AGENT_BODY, ORCHESTRATOR_COMPACT_AGENT_BODY } from "@deck/core/teams/developer/orchestrator-content";
 import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
+import { DEVELOPER_TEAM_LEGACY_AGENT_IDS } from "@deck/core/teams/developer/catalog";
+import { migrateLegacyDeveloperTeamAssignments } from "@deck/core/teams/developer/model-migration";
 import {
   buildCapabilityInstructionBundle,
   getEnabledPackageInstructionIds,
@@ -51,7 +53,9 @@ function verifyInvariantPresence(
 
   const hasCompactReference = /^## Runtime Contract Reference$/m.test(content)
     && content.includes("Runtime-Enforced Team Contract remains binding");
-  if (hasCompactReference) {
+  const hasAdaptiveReference = /^## Team Contract Reference$/m.test(content)
+    && content.includes("Adaptive Developer Team Contract remains binding");
+  if (hasCompactReference || hasAdaptiveReference) {
     return { pass: true, missing: [] };
   }
 
@@ -117,7 +121,7 @@ export type PlannedStandaloneSkillFile = {
   content: string;
 };
 
-/** SDD bootstrap skill file (deck-init, deck-onboard) */
+/** Standalone lifecycle skill file (deck-onboard, deck-archive). */
 export type PlannedSDDSkillFile = {
   skillId: string;
   relativePath: string;
@@ -132,7 +136,7 @@ export type DeveloperTeamInstallPlan = {
   agents: PlannedAgentFile[];
   skills: PlannedSkillFile[];
   standaloneSkills: PlannedStandaloneSkillFile[];
-  /** SDD bootstrap skill files (deck-init, deck-onboard) */
+  /** Standalone lifecycle skill files (deck-onboard, deck-archive). */
   sddSkillFiles: PlannedSDDSkillFile[];
   memoryDiagnostics: MemoryDiagnostic[];
   /** Memory injection bundle computed from memoryInjection/memoryProvider options. */
@@ -206,7 +210,7 @@ const LEGACY_SDD_AGENT_FILES = [
 
 /**
  * Remove legacy SDD agent files from the agents directory.
- * These are the old `sdd-*` files that were replaced by `deck-developer-*` agents.
+ * These are old Deck-managed `sdd-*` files replaced by the adaptive team.
  * Also removes nested SKILL.md/SKILL.md patterns in skills directory.
  * Returns list of removed file paths.
  */
@@ -238,16 +242,6 @@ export function cleanupLegacySddAgentFiles(
           removed.push(filePath);
         } catch {
           // File might be already deleted or permission issue - continue
-        }
-      }
-      // Wildcard cleanup: any sdd-*.md not in explicit list (handles arbitrary legacy files)
-      if (file.startsWith("sdd-") && file.endsWith(".md") && !LEGACY_SDD_AGENT_FILES.includes(baseName)) {
-        const filePath = join(agentsDir, file);
-        try {
-          unlink(filePath);
-          removed.push(filePath);
-        } catch {
-          // Continue even if deletion fails
         }
       }
     }
@@ -335,6 +329,8 @@ export type DeveloperTeamApplyResult = {
   profileDir: string;
   /** Whether the profile was created/updated or was unchanged */
   profileStatus: "created" | "updated" | "unchanged";
+  /** Exact former Developer Team files moved outside Pi discovery. */
+  legacyTeamFilesRetired: string[];
 };
 
 export type BundleVerifyResult = {
@@ -581,7 +577,7 @@ export function buildDeveloperTeamInstallPlan(
   const sddSkillIds = new Set(getBootstrapSkillFiles().map((s) => s.skillId));
 
   // Filter out SDD bootstrap skills from agent skills to avoid duplication
-  // SDD bootstrap skills (deck-init, deck-onboard) will be written from sddSkillFiles
+  // Lifecycle skills (deck-onboard, deck-archive) are written from sddSkillFiles.
   const skills: PlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.filter((agent) => !sddSkillIds.has(agent.skillId)).map((agent) => {
     const relativePath = `.pi/skills/${agent.skillId}/SKILL.md`;
     const absolutePath = join(projectRoot, relativePath);
@@ -599,8 +595,7 @@ export function buildDeveloperTeamInstallPlan(
   // Build standalone skill package files (verbatim, no generated frontmatter).
   const standaloneSkills = buildStandaloneSkillFiles(projectRoot, options?.standaloneSkills ?? []);
 
-// Build SDD bootstrap skill files (deck-init, deck-onboard)
-  // Map: "deck-init/SKILL.md" -> ".pi/skills/deck-init/SKILL.md"
+  // Build standalone lifecycle skill files.
   const sddSkillFiles: PlannedSDDSkillFile[] = getBootstrapSkillFiles().map((skill) => ({
     skillId: skill.skillId,
     relativePath: `.pi/skills/${skill.skillId}/SKILL.md`,
@@ -650,16 +645,20 @@ export function readDeveloperTeamModelConfigAssignments(
 ): DeveloperTeamModelConfigAssignments {
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;
-  const modelAssignments: DeveloperTeamModelAssignments = {};
-  const thinkingAssignments: DeveloperTeamThinkingAssignments = {};
+  const rawModelAssignments: DeveloperTeamModelAssignments = {};
+  const rawThinkingAssignments: DeveloperTeamThinkingAssignments = {};
 
   // Determine the agents directory:
   // - If explicitly provided via options.agentsDir, use that (Pi explicit path)
   // - Otherwise, derive from projectRoot by appending /.pi/agents (OpenCode style)
   const agentsDir = options?.agentsDir ?? join(projectRoot, ".pi", "agents");
 
-  for (const agent of DEVELOPER_TEAM_AGENTS) {
-    const absolutePath = join(agentsDir, `${agent.id}.md`);
+  const persistedAgentIds = [
+    ...DEVELOPER_TEAM_AGENTS.map((agent) => agent.id),
+    ...DEVELOPER_TEAM_LEGACY_AGENT_IDS,
+  ];
+  for (const agentId of persistedAgentIds) {
+    const absolutePath = join(agentsDir, `${agentId}.md`);
     if (!exists(absolutePath)) continue;
 
     const content = readFile(absolutePath, "utf-8");
@@ -668,11 +667,14 @@ export function readDeveloperTeamModelConfigAssignments(
 
     const model = readFrontmatterValue(frontmatter, "model");
     const thinking = parsePiThinkingLevel(readFrontmatterValue(frontmatter, "thinking"));
-    if (model) modelAssignments[agent.id] = model;
-    if (thinking) thinkingAssignments[agent.id] = thinking;
+    if (model) rawModelAssignments[agentId] = model;
+    if (thinking) rawThinkingAssignments[agentId] = thinking;
   }
 
-  return { modelAssignments, thinkingAssignments };
+  return {
+    modelAssignments: { ...migrateLegacyDeveloperTeamAssignments(rawModelAssignments).assignments },
+    thinkingAssignments: { ...migrateLegacyDeveloperTeamAssignments(rawThinkingAssignments).assignments },
+  };
 }
 
 function readFrontmatter(content: string): string | undefined {
@@ -691,22 +693,92 @@ function readFrontmatterValue(frontmatter: string, key: string): string | undefi
 
 // --- Apply ---
 
+function getPiLegacyActivePaths(plan: DeveloperTeamInstallPlan): string[] {
+  const retainedSkillIds = new Set(getBootstrapSkillFiles().map((skill) => skill.skillId));
+  return [
+    ...DEVELOPER_TEAM_LEGACY_AGENT_IDS.flatMap((agentId) => [
+      join(plan.agentsDir, `${agentId}.md`),
+      ...(retainedSkillIds.has(agentId) ? [] : [join(plan.skillsDir, agentId, "SKILL.md")]),
+    ]),
+    ...LEGACY_SDD_AGENT_FILES.map((agentId) => join(plan.agentsDir, `${agentId}.md`)),
+  ];
+}
+
+function assertPiCandidateFiles(
+  plan: DeveloperTeamInstallPlan,
+  exists: typeof existsSync,
+  readFile: typeof readFileSync,
+): void {
+  for (const planned of [...plan.agents, ...plan.skills, ...plan.standaloneSkills, ...plan.sddSkillFiles]) {
+    if (!exists(planned.absolutePath) || readFile(planned.absolutePath, "utf-8") !== planned.content) {
+      throw new Error(`Developer Team candidate verification failed for ${planned.absolutePath}.`);
+    }
+  }
+  const profileDir = buildTeamProfileDir(plan.projectRoot, "developer-team");
+  for (const requiredPath of [
+    join(profileDir, "system-prompt.md"),
+    join(profileDir, "extensions", "developer-team-execution.js"),
+  ]) {
+    if (!exists(requiredPath)) {
+      throw new Error(`Developer Team profile verification failed for ${requiredPath}.`);
+    }
+  }
+}
+
+function retirePiLegacyFiles(
+  plan: DeveloperTeamInstallPlan,
+  options: {
+    exists: typeof existsSync;
+    readFile: typeof readFileSync;
+    writeFile: typeof writeFileSync;
+    mkdir: typeof mkdirSync;
+    unlink: typeof unlinkSync;
+  },
+): string[] {
+  const quarantineRoot = join(plan.projectRoot, ".deck", "backups", "developer-team-v2");
+  const retired: string[] = [];
+
+  for (const sourcePath of getPiLegacyActivePaths(plan)) {
+    if (!options.exists(sourcePath)) continue;
+    const content = options.readFile(sourcePath, "utf-8");
+    let destinationPath = join(quarantineRoot, relative(plan.projectRoot, sourcePath));
+    if (options.exists(destinationPath) && options.readFile(destinationPath, "utf-8") !== content) {
+      const hash = createHash("sha256").update(content).digest("hex").slice(0, 16);
+      destinationPath = `${destinationPath}.${hash}`;
+    }
+    options.mkdir(dirname(destinationPath), { recursive: true });
+    if (!options.exists(destinationPath)) {
+      options.writeFile(destinationPath, content, "utf-8");
+    }
+    if (options.readFile(destinationPath, "utf-8") !== content) {
+      throw new Error(`Legacy Developer Team quarantine verification failed for ${sourcePath}.`);
+    }
+    options.unlink(sourcePath);
+    retired.push(sourcePath);
+  }
+
+  return retired;
+}
+
 export function applyDeveloperTeamInstall(
   plan: DeveloperTeamInstallPlan,
-  options?: { writeFile?: typeof writeFileSync; exists?: typeof existsSync; mkdir?: typeof mkdirSync; readFile?: typeof readFileSync; readdirSync?: typeof import("node:fs").readdirSync },
+  options?: { writeFile?: typeof writeFileSync; exists?: typeof existsSync; mkdir?: typeof mkdirSync; readFile?: typeof readFileSync; unlink?: typeof unlinkSync; readdirSync?: typeof import("node:fs").readdirSync },
 ): DeveloperTeamApplyResult {
   const writeFile = options?.writeFile ?? writeFileSync;
   const exists = options?.exists ?? existsSync;
   const mkdir = options?.mkdir ?? mkdirSync;
   const readFile = options?.readFile ?? readFileSync;
+  const unlink = options?.unlink ?? unlinkSync;
+  const fileBackup = backupDeveloperTeamFiles(plan, { exists, readFile });
+
+  try {
 
   if (!exists(plan.agentsDir)) {
     mkdir(plan.agentsDir, { recursive: true });
   }
 
-  // Cleanup legacy SDD agent files (sdd-apply.md, sdd-design.md, etc.)
-  // These were replaced by deck-developer-* agents
-  const legacyFilesRemoved = cleanupLegacySddAgentFiles(plan.agentsDir, options);
+  // Legacy inventory is retired only after the new candidate is complete.
+  const legacyFilesRemoved: string[] = [];
 
   if (!exists(plan.skillsDir)) {
     mkdir(plan.skillsDir, { recursive: true });
@@ -767,7 +839,7 @@ export function applyDeveloperTeamInstall(
     return { agentId: planned.skillId, kind: "skill" as const, status: "created" as const, absolutePath: planned.absolutePath };
   });
 
-  // Write SDD bootstrap skill files (deck-init, deck-onboard) with idempotency
+  // Write standalone lifecycle skill files with idempotency.
   const sddSkillResults: BundleApplyResult[] = plan.sddSkillFiles.map((planned) => {
     // Ensure directory exists before writing
     const skillDir = join(planned.absolutePath, "..");
@@ -792,8 +864,9 @@ export function applyDeveloperTeamInstall(
   const changedCount = allResults.filter((r) => r.status === "created" || r.status === "updated").length;
   const unchangedCount = allResults.filter((r) => r.status === "unchanged").length;
 
-  // Cleanup nested SKILL.md/SKILL.md patterns in skills directory
-  const nestedSkillDirsRemoved = cleanupNestedSkillDirectories(plan.skillsDir, options);
+  // Defer legacy malformed-directory cleanup until every fallible candidate,
+  // profile, verification, and retirement step has succeeded.
+  let nestedSkillDirsRemoved: string[] = [];
 
   // Materialize team profile (system-prompt.md) - required for orchestrator stub reference
   const profileDir = buildTeamProfileDir(plan.projectRoot, "developer-team");
@@ -823,6 +896,17 @@ export function applyDeveloperTeamInstall(
     profileStatus = existingProfileContent !== newProfileContent ? "updated" : "unchanged";
   }
 
+  assertPiCandidateFiles(plan, exists, readFile);
+  const legacyTeamFilesRetired = retirePiLegacyFiles(plan, {
+    exists,
+    readFile,
+    writeFile,
+    mkdir,
+    unlink,
+  });
+  legacyFilesRemoved.push(...legacyTeamFilesRetired.filter((path) => dirname(path) === plan.agentsDir && path.split("/").pop()?.startsWith("sdd-")));
+  nestedSkillDirsRemoved = cleanupNestedSkillDirectories(plan.skillsDir, options);
+
   const fileResults: FileInstallResult[] = allResults.map((r) => ({
     kind: r.kind,
     agentId: r.agentId,
@@ -830,7 +914,11 @@ export function applyDeveloperTeamInstall(
     absolutePath: r.absolutePath!,
   }));
 
-  return { results: allResults, changedCount, unchangedCount, fileResults, legacyFilesRemoved, nestedSkillDirsRemoved, profileDir, profileStatus };
+  return { results: allResults, changedCount, unchangedCount, fileResults, legacyFilesRemoved, nestedSkillDirsRemoved, profileDir, profileStatus, legacyTeamFilesRetired };
+  } catch (error) {
+    rollbackDeveloperTeamFiles(fileBackup, { writeFile, unlink });
+    throw error;
+  }
 }
 
 // --- Verify ---
@@ -851,6 +939,10 @@ export function verifyDeveloperTeamInstall(
 
     const content = readFile(planned.absolutePath, "utf-8");
 
+    if (content !== planned.content) {
+      issues.push(`Content mismatch for agent ${planned.agent.id}; installed file differs from planned content.`);
+    }
+
     if (!content.includes(`name: ${planned.agent.name}`)) {
       issues.push(`Frontmatter name mismatch: expected "name: ${planned.agent.name}".`);
     }
@@ -863,7 +955,7 @@ export function verifyDeveloperTeamInstall(
 
     // Task 7: Verify orchestrator invariant presence for agent surface
     // Only verify for orchestrator agent
-    if ( planned.agent.id === "deck-developer-orchestrator") {
+    if (planned.agent.id === "deck-lead") {
       const invariantCheck = verifyInvariantPresence(content, "agent");
       if (!invariantCheck.pass) {
         for (const missingId of invariantCheck.missing) {
@@ -884,6 +976,10 @@ export function verifyDeveloperTeamInstall(
 
     const content = readFile(planned.absolutePath, "utf-8");
 
+    if (content !== planned.content) {
+      issues.push(`Content mismatch for skill ${planned.agent.skillId}; installed file differs from planned content.`);
+    }
+
     if (!content.includes(`description:`)) {
       issues.push("Missing description field in frontmatter.");
     } else if (!content.includes(JSON.stringify(planned.agent.description))) {
@@ -900,7 +996,7 @@ export function verifyDeveloperTeamInstall(
 
     // Task 7: Verify orchestrator invariant presence for skill surface
     // Only verify for orchestrator skill
-    if ( planned.agent.id === "deck-developer-orchestrator") {
+    if (planned.agent.id === "deck-lead") {
       const invariantCheck = verifyInvariantPresence(content, "skill");
       if (!invariantCheck.pass) {
         for (const missingId of invariantCheck.missing) {
@@ -941,10 +1037,14 @@ export function verifyDeveloperTeamInstall(
     return { agentId: planned.skillId, valid: issues.length === 0, issues };
   });
 
+  const legacyResults: BundleVerifyResult[] = getPiLegacyActivePaths(plan)
+    .filter((absolutePath) => exists(absolutePath))
+    .map((absolutePath) => ({ agentId: "legacy-inventory", valid: false, issues: [`Legacy active path remains: ${absolutePath}`] }));
+
   return {
-    valid: agentResults.every((r) => r.valid) && skillResults.every((r) => r.valid) && standaloneSkillResults.every((r) => r.valid) && sddSkillResults.every((r) => r.valid),
-    agentResults,
-    skillResults: [...skillResults, ...standaloneSkillResults],
+    valid: agentResults.every((r) => r.valid) && skillResults.every((r) => r.valid) && standaloneSkillResults.every((r) => r.valid) && sddSkillResults.every((r) => r.valid) && legacyResults.length === 0,
+    agentResults: [...agentResults, ...legacyResults],
+    skillResults: [...skillResults, ...standaloneSkillResults, ...sddSkillResults],
   };
 }
 
@@ -967,7 +1067,16 @@ export function backupDeveloperTeamFiles(
   const exists = options?.exists ?? existsSync;
   const readFile = options?.readFile ?? readFileSync;
 
-  const allFiles = [...plan.agents, ...plan.skills, ...plan.standaloneSkills, ...plan.sddSkillFiles];
+  const profileDir = buildTeamProfileDir(plan.projectRoot, "developer-team");
+  const allFiles = [
+    ...plan.agents,
+    ...plan.skills,
+    ...plan.standaloneSkills,
+    ...plan.sddSkillFiles,
+    ...getPiLegacyActivePaths(plan).map((absolutePath) => ({ absolutePath })),
+    { absolutePath: join(profileDir, "system-prompt.md") },
+    { absolutePath: join(profileDir, "extensions", "developer-team-execution.js") },
+  ];
 
   const entries: FileBackupEntry[] = allFiles.map((planned) => {
     if (exists(planned.absolutePath)) {
@@ -1046,28 +1155,18 @@ function buildSkillFileContent(
 
 function buildBootstrapSkillFileContent(
   skill: { skillId: string; content: string },
-  capabilityInstructions: CapabilityInstructionBundle | undefined,
-  personality: import("@deck/core/config/deck-config").OrchestratorPersonality,
-  promptProfile: DeveloperTeamPromptProfileV1,
+  _capabilityInstructions: CapabilityInstructionBundle | undefined,
+  _personality: import("@deck/core/config/deck-config").OrchestratorPersonality,
+  _promptProfile: DeveloperTeamPromptProfileV1,
 ): string {
-  const agent = DEVELOPER_TEAM_AGENTS.find((candidate) => candidate.skillId === skill.skillId);
   const frontmatterEnd = skill.content.indexOf("\n---", 3);
-  if (!agent || frontmatterEnd < 0) {
+  if (frontmatterEnd < 0) {
     throw new Error(`Invalid bootstrap skill content for ${skill.skillId}.`);
   }
-  const content = getAgentContent(
-    agent.id,
-    capabilityInstructions
-      ? { capabilityInstructions, personality, promptProfile }
-      : { personality, promptProfile },
-  );
-  if (!content) {
-    throw new Error(`No content found for agent ${agent.id} in core registry.`);
-  }
-  return `${skill.content.slice(0, frontmatterEnd + 4)}\n\n${content.skillBody.trim()}\n`;
+  return skill.content.endsWith("\n") ? skill.content : `${skill.content}\n`;
 }
 
-const DEVELOPER_ORCHESTRATOR_AGENT_ID = "deck-developer-orchestrator";
+const DEVELOPER_ORCHESTRATOR_AGENT_ID = "deck-lead";
 
 function buildAgentFileContent(
   agent: DeveloperTeamAgent,
@@ -1094,7 +1193,7 @@ function buildAgentFileContent(
   if (isOrchestrator) {
     return buildOrchestratorStub(
       agent,
-      promptProfile === "compact" ? ORCHESTRATOR_COMPACT_AGENT_BODY : ORCHESTRATOR_AGENT_BODY,
+      content.agentBody,
       model,
       thinking,
       memoryBundle,
@@ -1133,7 +1232,7 @@ function buildAgentFileContent(
 }
 
 /**
- * Builds an orchestrator stub that includes all required sections for observability.
+ * Builds the lightweight Lead stub used by Pi.
  * The actual session prompt lives in .deck/pi/profiles/<team>/system-prompt.md
  * and is passed via --system-prompt flag in pi-team-launch.ts.
  * This stub preserves the observable sections (invariants, capability instructions, memory)
@@ -1172,12 +1271,11 @@ function buildOrchestratorStub(
     "---",
   ];
 
-  // Reference to Orchestrator Invariants in profile (REQ-PROMPT-002 compliance)
-  const invariantReference = [
-    "## Orchestrator Behavior",
+  const profileReference = [
+    "## Team Profile",
     "",
-    "See `.deck/pi/profiles/<team>/system-prompt.md` for behavior guidelines.",
-    "These define execution mode, delegation, SDD initialization/triage, and registry-deferred parallelism.",
+    "The binding adaptive team contract lives in `.deck/pi/profiles/<team>/system-prompt.md`",
+    "and is passed through `--system-prompt` when the team launches.",
   ];
 
   // Build capability instructions section if provided
@@ -1208,20 +1306,17 @@ function buildOrchestratorStub(
   }
 
   const stubBody = [
-    "# Orchestrator Agent",
+    "# Deck Lead",
     "",
-    "This agent operates with session context loaded from the team profile.",
-    "The complete session prompt is defined in `.deck/pi/profiles/<team>/system-prompt.md`",
-    "and passed via the `--system-prompt` flag at launch time.",
-    "",
-    ...invariantReference,
+    ...profileReference,
     ...capabilityLines,
     ...memoryLines,
     "## Role",
     "",
-    "- **Delegator**: Routes work to specialized agents (Apply, Review, Explore, etc.)",
-    "- **Coordinator**: Manages task flow and orchestrates multi-agent workflows",
-    "- **Quality Gate**: Ensures all changes pass review before completion",
+    "- Own the user's outcome and keep decisions understandable in both directions.",
+    "- Choose the smallest safe route: direct delta, focused delegation, Working Brief, or Full SDD.",
+    "- Implement clear low-risk changes directly when delegation would cost more than the work.",
+    "- Use Quality for protected or material risk, uncertain evidence, release readiness, or explicit user request.",
     "",
     "## Tools",
     "",
@@ -1229,8 +1324,7 @@ function buildOrchestratorStub(
     "",
     "## Notes",
     "",
-    "- System prompt is sourced from profile, not embedded here",
-    "- Profile path: `.deck/pi/profiles/<team>/system-prompt.md`",
+    "- The profile is authoritative; this stub only keeps the role discoverable.",
     "",
   ].join("\n");
 

@@ -80,7 +80,7 @@ context: |
 
   test("real project config (openspec/config.yaml)", () => {
     // This tests against the actual openspec/config.yaml in the deck project
-    const result = readOpenSpecInitState("/home/kevinlb/deck");
+    const result = readOpenSpecInitState(process.cwd());
 
     // Real config has initialized: true (deck project has been initialized)
     expect(result.initialized).toBe(true);

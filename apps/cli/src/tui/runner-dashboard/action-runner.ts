@@ -10,6 +10,13 @@ import { resolve as pathResolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
+import {
+  validateSerenaOperationAuthorization,
+  validateSerenaReadinessEvidence,
+  type SerenaBootstrapAuthorization,
+  type SerenaOperationIdentity,
+  type SerenaReadinessEvidence,
+} from "@deck/core";
 import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "@deck/core";
 // Canonical server name for codebase-memory MCP — defined locally to avoid adapter dependency in the runner
@@ -29,7 +36,48 @@ export type RunnerActionRunResult = {
   packageOutcome?: RunnerPackageInstallOutcome;
   cause?: string;
   raw?: unknown;
+  /** Serena-only typed UI outcome; readiness evidence never crosses this boundary. */
+  serenaOutcome?: RunnerSerenaOutcome;
+  /** Serena-only fixed progress stage. */
+  serenaStage?: RunnerSerenaStage;
 };
+
+export type RunnerSerenaStage =
+  | "preparing-uv"
+  | "installing-serena"
+  | "validating-serena"
+  | "configuring-mcp";
+
+export type RunnerSerenaOutcome = "reused" | "installed" | "failed" | "cancelled" | "partial";
+
+export type RunnerSerenaActionContext = Readonly<{
+  projectRoot: string;
+  runnerId: "pi" | "opencode";
+  environmentId: string;
+  operationId: string;
+  operation: SerenaOperationIdentity;
+  currentOperation: SerenaOperationIdentity;
+  serenaAuthorization: SerenaBootstrapAuthorization;
+  signal?: AbortSignal;
+  serenaReadiness?: SerenaReadinessEvidence;
+  onSerenaStage?: (stage: RunnerSerenaStage) => void;
+  /** Adapter-specific optional gates are passed through without being serialized. */
+  serenaRevalidator?: unknown;
+  serenaOwnedRoot?: string;
+}>;
+
+export type RunnerSerenaExecutionState = {
+  attempted: boolean;
+  succeeded: boolean;
+  outcome?: RunnerSerenaOutcome;
+  stage?: RunnerSerenaStage;
+  readiness?: SerenaReadinessEvidence;
+};
+
+export type RunnerActionExecutor = (
+  action: RunnerAction,
+  context: RunnerSerenaActionContext,
+) => Promise<RunnerActionRunResult>;
 
 export type RunnerPackageInstallOutcome = "already-present" | "executed" | "failed" | "skipped";
 
@@ -48,6 +96,10 @@ export type RunnerPackageInstallResult = {
   installerInvoked?: boolean;
   cause?: string;
   diagnostic?: RunnerPackageInstallDiagnostic;
+  /** Private Serena handoff consumed only inside the current operation. */
+  serenaReadiness?: SerenaReadinessEvidence;
+  serenaBootstrapOutcome?: RunnerSerenaOutcome;
+  serenaStage?: Exclude<RunnerSerenaStage, "configuring-mcp">;
 };
 
 /**
@@ -57,6 +109,7 @@ export type PackageInstallerFn = (
   runnerCommand: string | undefined,
   packages: Array<{ id: string; name: string; source: string }>,
   onResult: (result: RunnerPackageInstallResult) => void,
+  context?: RunnerSerenaActionContext,
 ) => Promise<RunnerPackageInstallResult[]>;
 
 /**
@@ -88,7 +141,7 @@ export type McpConfigWriterFn = (options: {
   url?: string;
   /** For remote MCP servers: optional headers */
   headers?: Record<string, string>;
-}) => Promise<{ ok: boolean; path: string; diagnostics?: string[] }>;
+}, context?: RunnerSerenaActionContext) => Promise<{ ok: boolean; path: string; diagnostics?: string[] }>;
 
 /**
  * Generic MCP config validator — adapters provide their own.
@@ -113,6 +166,23 @@ export type RunnerActionRunnerDependencies = {
   writeDeckConfig?: typeof writeDeckConfig;
   onActionResult?: (result: RunnerActionRunResult) => void;
   onInstallResult?: (result: RunnerPackageInstallResult) => void;
+  /** Current-operation Serena authorization and the single operation signal. */
+  runnerId?: "pi" | "opencode";
+  operationId?: string;
+  currentOperation?: SerenaOperationIdentity;
+  serenaAuthorization?: SerenaBootstrapAuthorization;
+  signal?: AbortSignal;
+  onSerenaStage?: (stage: RunnerSerenaStage) => void;
+  /** Optional native adapter action seam used for runner-specific Serena gates. */
+  runnerAction?: RunnerActionExecutor;
+  runnerAdapter?: {
+    runAction: (action: RunnerAction, context: RunnerSerenaActionContext) => Promise<unknown>;
+  };
+  serenaRevalidator?: unknown;
+  serenaOwnedRoot?: string;
+  /** Evidence is retained only for the current plan; it is never rendered. */
+  serenaExecutionState?: RunnerSerenaExecutionState;
+  serenaPlanValid?: boolean;
   // Backward-compatible aliases for Pi-specific tests
   piCommand?: string;
   writeSupermemoryPiMcpConfig?: McpConfigWriterFn;
@@ -191,6 +261,20 @@ function validatePackageInstallResult(
   }
   if (candidate.cause !== undefined && typeof candidate.cause !== "string") return { reason: "invalid package cause" };
   if (typeof candidate.message !== "string") return { reason: "missing package message" };
+  if (
+    candidate.serenaBootstrapOutcome !== undefined
+    && (id !== "serena" || !["reused", "installed", "failed", "cancelled", "partial"].includes(String(candidate.serenaBootstrapOutcome)))
+  ) {
+    return { reason: "invalid Serena outcome" };
+  }
+  if (candidate.serenaStage !== undefined && !["preparing-uv", "installing-serena", "validating-serena"].includes(String(candidate.serenaStage))) {
+    return { reason: "invalid Serena stage" };
+  }
+  if (candidate.serenaReadiness !== undefined) {
+    if (id !== "serena" || !validateSerenaReadinessEvidence(candidate.serenaReadiness).valid) {
+      return { reason: "invalid Serena readiness evidence" };
+    }
+  }
 
   const diagnostic = candidate.diagnostic;
   if (diagnostic !== undefined) {
@@ -209,7 +293,10 @@ function validatePackageInstallResult(
       success: candidate.success,
       message: candidate.message,
       ...(typeof candidate.installerInvoked === "boolean" ? { installerInvoked: candidate.installerInvoked } : {}),
-      ...(typeof candidate.cause === "string" ? { cause: candidate.cause } : {}),
+       ...(typeof candidate.cause === "string" ? { cause: candidate.cause } : {}),
+       ...(typeof candidate.serenaBootstrapOutcome === "string" ? { serenaBootstrapOutcome: candidate.serenaBootstrapOutcome as RunnerSerenaOutcome } : {}),
+       ...(typeof candidate.serenaStage === "string" ? { serenaStage: candidate.serenaStage as Exclude<RunnerSerenaStage, "configuring-mcp"> } : {}),
+       ...(candidate.serenaReadiness ? { serenaReadiness: candidate.serenaReadiness as SerenaReadinessEvidence } : {}),
       ...(diagnostic ? {
         diagnostic: {
           stage: (diagnostic as Record<string, unknown>).stage as string,
@@ -312,6 +399,10 @@ function projectPackageInstallResults(
     message,
     diagnostics: safeDiagnostics,
     ...(cause ? { cause } : {}),
+    ...(action.capabilityId === "serena" ? {
+      serenaOutcome: first.serenaBootstrapOutcome ?? inferSerenaOutcome(outcome, status === "failed" ? "failed" : outcome === "skipped" ? "cancelled" : "installed"),
+      ...(first.serenaStage ? { serenaStage: first.serenaStage } : {}),
+    } : {}),
     raw,
   };
 }
@@ -441,8 +532,267 @@ function truncateActionUtf8(value: string, maxBytes: number): string {
 
 function isUnsatisfiedInstallResult(action: RunnerAction, result: RunnerActionRunResult): boolean {
   if (!action.id.startsWith("capability.")) return false;
+  if (action.capabilityId === "serena") {
+    return result.status === "failed"
+      || result.serenaOutcome === "failed"
+      || result.serenaOutcome === "cancelled"
+      || result.serenaOutcome === "partial"
+      || result.status === "skipped" && result.packageOutcome !== "already-present";
+  }
   if (result.status === "failed") return true;
   return result.status === "skipped" && result.packageOutcome !== "already-present";
+}
+
+function hasSerenaAction(plan: RunnerReviewPlan): boolean {
+  return Object.values(plan.groups).flat().some((action) => action.capabilityId === "serena");
+}
+
+function serenaActionKind(action: RunnerAction): "install" | "config" | undefined {
+  if (action.capabilityId !== "serena") return undefined;
+  if (action.kind === "write-mcp-config" || action.kind === "write-pi-mcp-config") return "config";
+  if (action.kind === "install-opencode-plugin" || action.kind === "install-pi-package" || action.kind === "install") return "install";
+  return undefined;
+}
+
+function getSerenaActionContext(
+  dependencies: RunnerActionRunnerDependencies,
+): { context: RunnerSerenaActionContext } | { error: string } {
+  if (dependencies.serenaPlanValid === false) return { error: "Serena plan is stale or no longer matches the current operation." };
+  const state = dependencies.dashboardState;
+  const runner = dependencies.runnerId ?? (state?.runnerScope === "pi" || state?.runnerScope === "opencode" ? state.runnerScope : undefined);
+  const operation = dependencies.currentOperation ?? state?.currentOperation;
+  const operationId = dependencies.operationId ?? state?.operationId ?? operation?.operationId;
+
+  if (runner !== "pi" && runner !== "opencode") return { error: "Serena requires a selected runner operation." };
+  if (!operation || operation.runner !== runner || operation.operationId !== operationId || operation.explicitlySelected !== true) {
+    return { error: "Serena requires explicit selection in the current runner operation." };
+  }
+  if (state && state.explicitlySelectedCapabilities.serena !== true) {
+    return { error: "Serena requires current-operation explicit selection." };
+  }
+
+  const authorization = validateSerenaOperationAuthorization(dependencies.serenaAuthorization, operation);
+  if (!authorization.valid || authorization.authorization.runner !== runner) {
+    return { error: "Serena operation authorization is missing or stale." };
+  }
+
+  return {
+    context: {
+      projectRoot: dependencies.projectRoot ?? "",
+      runnerId: runner,
+      environmentId: runner === "pi" ? "pi-development" : "opencode-development",
+      operationId: operation.operationId,
+      operation,
+      currentOperation: operation,
+      serenaAuthorization: authorization.authorization,
+      signal: dependencies.signal,
+      onSerenaStage: dependencies.onSerenaStage,
+      serenaRevalidator: dependencies.serenaRevalidator,
+      serenaOwnedRoot: dependencies.serenaOwnedRoot,
+    },
+  };
+}
+
+function inferSerenaOutcome(value: unknown, fallback: RunnerSerenaOutcome): RunnerSerenaOutcome {
+  if (value === "reused" || value === "installed" || value === "failed" || value === "cancelled" || value === "partial") return value;
+  if (value === "already-present") return "reused";
+  if (value === "executed") return "installed";
+  return fallback;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function inferSerenaStage(value: unknown, fallback: RunnerSerenaStage): RunnerSerenaStage {
+  return value === "preparing-uv" || value === "installing-serena" || value === "validating-serena" || value === "configuring-mcp"
+    ? value
+    : fallback;
+}
+
+function safeSerenaResult(
+  action: RunnerAction,
+  value: unknown,
+  defaultOutcome: RunnerSerenaOutcome,
+  defaultStage: RunnerSerenaStage,
+): RunnerActionRunResult {
+  if (!value || typeof value !== "object") {
+    return {
+      actionId: action.id,
+      status: "failed",
+      message: "Serena setup returned no safe result; configuration was not changed.",
+      diagnostics: ["Serena setup failed before configuration."],
+      serenaOutcome: "failed",
+      serenaStage: defaultStage,
+    };
+  }
+  const candidate = value as Record<string, unknown>;
+  const status = candidate.status === "executed" || candidate.status === "informational" || candidate.status === "skipped" || candidate.status === "failed"
+    ? candidate.status
+    : "failed";
+  const outcome = inferSerenaOutcome(candidate.serenaOutcome ?? candidate.outcome ?? (isObjectRecord(candidate.raw) ? candidate.raw.outcome : undefined), defaultOutcome);
+  const stage = inferSerenaStage(candidate.serenaStage ?? candidate.stage, defaultStage);
+  const message = sanitizeActionText(candidate.message) || "Serena setup completed.";
+  const diagnostics = boundTuiDiagnostics(Array.isArray(candidate.diagnostics) ? candidate.diagnostics : []);
+  return {
+    actionId: action.id,
+    status,
+    message,
+    diagnostics,
+    serenaOutcome: outcome,
+    serenaStage: stage,
+  };
+}
+
+function serenaBlockedResult(action: RunnerAction, message: string, stage: RunnerSerenaStage = "preparing-uv"): RunnerActionRunResult {
+  return {
+    actionId: action.id,
+    status: "failed",
+    message: sanitizeActionText(message) || "Serena setup was blocked; configuration was not changed.",
+    diagnostics: ["Serena setup is fail-closed until current-operation evidence is valid."],
+    serenaOutcome: "failed",
+    serenaStage: stage,
+  };
+}
+
+function serenaCancelledResult(action: RunnerAction, stage: RunnerSerenaStage = "preparing-uv"): RunnerActionRunResult {
+  return {
+    actionId: action.id,
+    status: "skipped",
+    message: "Serena setup was cancelled; configuration was not changed.",
+    diagnostics: [],
+    serenaOutcome: "cancelled",
+    serenaStage: stage,
+  };
+}
+
+function planIsCurrentForSerena(plan: RunnerReviewPlan, state: RunnerDashboardState | undefined): boolean {
+  if (!state) return true;
+  if (!state.plan) return false;
+  return state.plan === plan && state.planGeneratedForRevision === state.planRevision;
+}
+
+async function runSerenaAction(
+  action: RunnerAction,
+  dependencies: RunnerActionRunnerDependencies,
+): Promise<RunnerActionRunResult> {
+  const actionKind = serenaActionKind(action);
+  if (!actionKind) return serenaBlockedResult(action, "Serena action kind is not supported.");
+
+  const operationContext = getSerenaActionContext(dependencies);
+  if ("error" in operationContext) return serenaBlockedResult(action, operationContext.error);
+  if (dependencies.signal?.aborted) return serenaCancelledResult(action);
+
+  const executionState = dependencies.serenaExecutionState;
+  if (!executionState) {
+    return serenaBlockedResult(action, "Serena operation evidence is unavailable; configuration was not changed.");
+  }
+
+  if (actionKind === "config") {
+    if (!executionState.attempted || !executionState.succeeded || !["reused", "installed"].includes(executionState.outcome ?? "")) {
+      return {
+        actionId: action.id,
+        status: "skipped",
+        message: "Skipped Serena MCP configuration because Serena install failed or readiness was not confirmed.",
+        diagnostics: ["Serena MCP configuration was not changed."],
+        serenaOutcome: executionState.outcome ?? "failed",
+        serenaStage: executionState.stage ?? "validating-serena",
+      };
+    }
+    if (!dependencies.runnerAction && !dependencies.runnerAdapter && !executionState.readiness) {
+      return serenaBlockedResult(action, "Serena readiness evidence is unavailable; configuration was not changed.", "validating-serena");
+    }
+
+    dependencies.onSerenaStage?.("configuring-mcp");
+    const context: RunnerSerenaActionContext = {
+      ...operationContext.context,
+      serenaReadiness: executionState.readiness,
+      onSerenaStage: dependencies.onSerenaStage,
+    };
+
+    const nativeExecutor = dependencies.runnerAction ?? dependencies.runnerAdapter?.runAction;
+    if (nativeExecutor) {
+      try {
+        const nativeResult = await nativeExecutor(action, context);
+        const result = safeSerenaResult(action, nativeResult, "installed", "configuring-mcp");
+        executionState.stage = "configuring-mcp";
+        return result;
+      } catch {
+        return serenaBlockedResult(action, "Serena MCP configuration was not changed.", "configuring-mcp");
+      }
+    }
+
+    const writer = dependencies.writeMcpConfig;
+    const readiness = executionState.readiness;
+    if (!writer || !readiness || !validateSerenaReadinessEvidence(readiness).valid) {
+      return serenaBlockedResult(action, "Serena readiness evidence is unavailable; configuration was not changed.", "validating-serena");
+    }
+
+    try {
+      const result = await writer({
+        serverName: "serena",
+        type: "local",
+        command: [readiness.resolvedExecutablePath, "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+      }, context);
+      if (!result.ok) {
+        return {
+          actionId: action.id,
+          status: "failed",
+          message: "Serena MCP configuration was not changed.",
+          diagnostics: boundTuiDiagnostics(result.diagnostics ?? []),
+          serenaOutcome: "failed",
+          serenaStage: "configuring-mcp",
+        };
+      }
+      executionState.stage = "configuring-mcp";
+      return {
+        actionId: action.id,
+        status: "executed",
+        message: result.diagnostics?.[0] ? sanitizeActionText(result.diagnostics[0]) : "Serena MCP configuration updated.",
+        diagnostics: [],
+        serenaOutcome: executionState.outcome,
+        serenaStage: "configuring-mcp",
+      };
+    } catch {
+      return serenaBlockedResult(action, "Serena MCP configuration was not changed.", "configuring-mcp");
+    }
+  }
+
+  executionState.attempted = true;
+  dependencies.onSerenaStage?.("preparing-uv");
+
+  const nativeExecutor = dependencies.runnerAction ?? dependencies.runnerAdapter?.runAction;
+  let result: RunnerActionRunResult;
+  if (nativeExecutor) {
+    try {
+      const nativeValue = await nativeExecutor(action, operationContext.context);
+      if (isObjectRecord(nativeValue) && nativeValue.serenaReadiness && validateSerenaReadinessEvidence(nativeValue.serenaReadiness).valid) {
+        executionState.readiness = nativeValue.serenaReadiness as SerenaReadinessEvidence;
+      }
+      result = safeSerenaResult(action, nativeValue, "failed", "preparing-uv");
+    } catch {
+      result = serenaBlockedResult(action, "Serena setup failed before readiness could be established.");
+    }
+  } else {
+    result = await runPackageInstall(action, dependencies);
+  }
+
+  const outcome = result.serenaOutcome ?? (
+    result.status === "executed"
+      ? result.packageOutcome === "already-present" ? "reused" : "installed"
+      : result.status === "skipped"
+        ? /cancel/i.test(result.message) ? "cancelled" : "failed"
+        : "failed"
+  );
+  executionState.outcome = outcome;
+  executionState.stage = result.serenaStage ?? executionState.stage ?? "validating-serena";
+  executionState.succeeded = outcome === "reused" || outcome === "installed";
+  if (!executionState.succeeded) executionState.readiness = undefined;
+  return {
+    ...result,
+    serenaOutcome: outcome,
+    serenaStage: executionState.stage,
+  };
 }
 
 export async function runRunnerReviewPlan(
@@ -470,8 +820,17 @@ export async function runRunnerReviewPlan(
   const results: RunnerActionRunResult[] = [];
   const unsatisfiedInstallCapabilities = new Set<string>();
   const satisfiedInstallCapabilities = new Set<string>();
+  const serenaExecutionState = dependencies.serenaExecutionState ?? {
+    attempted: false,
+    succeeded: false,
+  } satisfies RunnerSerenaExecutionState;
+  const planDependencies: RunnerActionRunnerDependencies = {
+    ...dependencies,
+    serenaExecutionState,
+    serenaPlanValid: planIsCurrentForSerena(plan, dependencies.dashboardState),
+  };
 
-  const runAndRecord = async (action: RunnerAction, deps: RunnerActionRunnerDependencies = dependencies) => {
+  const runAndRecord = async (action: RunnerAction, deps: RunnerActionRunnerDependencies = planDependencies) => {
     const result = await runRunnerAction(action, deps);
     results.push(result);
     dependencies.onActionResult?.(result);
@@ -479,9 +838,11 @@ export async function runRunnerReviewPlan(
   };
 
   for (const action of [...plan.groups.automaticInstalls, ...plan.groups.manualSteps]) {
+    if (dependencies.signal?.aborted) return results;
     log(`runRunnerReviewPlan: install/manual ${action.id} kind=${action.kind} status=${action.status}`);
     const result = await runAndRecord(action);
     log(`runRunnerReviewPlan: install/manual ${action.id} result=${result.status} msg=${result.message?.substring(0, 100)}`);
+    if (dependencies.signal?.aborted) return results;
 
     if (isUnsatisfiedInstallResult(action, result)) {
       const parts = action.id.split(".");
@@ -494,11 +855,26 @@ export async function runRunnerReviewPlan(
 
   log(`runRunnerReviewPlan: processing ${plan.groups.configWrites.length} configWrites`);
   for (const action of plan.groups.configWrites) {
+    if (dependencies.signal?.aborted) return results;
+    if (action.capabilityId === "serena" && serenaActionKind(action) === "config" && !serenaExecutionState.attempted) {
+      const runner = planDependencies.runnerId ?? planDependencies.dashboardState?.runnerScope;
+      const installAction: RunnerAction = {
+        id: "capability.serena.install",
+        kind: runner === "pi" ? "install-pi-package" : "install-opencode-plugin",
+        title: "Validate Serena readiness",
+        capabilityId: "serena",
+        toolId: "serena",
+        source: "serena-agent",
+        status: "ready",
+      };
+      await runAndRecord(installAction);
+    }
+
     if (action.kind === "write-mcp-config" || action.kind === "write-pi-mcp-config") {
       log(`runRunnerReviewPlan: configWrite action ${action.id} kind=${action.kind} capabilityId=${action.capabilityId}`);
       const capabilityPrefix = action.id.replace(".mcp-config", "");
 
-      if (unsatisfiedInstallCapabilities.has(capabilityPrefix)) {
+      if (action.capabilityId !== "serena" && unsatisfiedInstallCapabilities.has(capabilityPrefix)) {
         const skippedResult: RunnerActionRunResult = {
           actionId: action.id,
           status: "skipped",
@@ -512,7 +888,7 @@ export async function runRunnerReviewPlan(
       }
 
       const capabilityId = action.capabilityId as string | undefined;
-      if (capabilityId && capabilityId !== "context7") {
+      if (capabilityId && capabilityId !== "context7" && capabilityId !== "serena") {
         const executableName = capabilityId === "serena" ? "serena"
           : capabilityId === "rtk" ? "rtk"
           : capabilityId === "codebase-memory-mcp" ? "codebase-memory-mcp"
@@ -551,12 +927,14 @@ export async function runRunnerReviewPlan(
   };
 
   for (const action of plan.groups.teamApplications) {
+    if (dependencies.signal?.aborted) return results;
     log(`runRunnerReviewPlan: team ${action.id} kind=${action.kind}`);
     await runAndRecord(action, teamDependencies);
     log(`runRunnerReviewPlan: team ${action.id} done`);
   }
 
   for (const action of plan.groups.validations) {
+    if (dependencies.signal?.aborted) return results;
     log(`runRunnerReviewPlan: validation ${action.id} kind=${action.kind}`);
     await runAndRecord(action);
     log(`runRunnerReviewPlan: validation ${action.id} done`);
@@ -572,8 +950,29 @@ export async function runRunnerAction(
 ): Promise<RunnerActionRunResult> {
   log(`runRunnerAction: ${action.id} kind=${action.kind} status=${action.status}`);
 
+  if (dependencies.signal?.aborted) {
+    return {
+      actionId: action.id,
+      status: "skipped",
+      message: "Action cancelled before execution; no external effect was started.",
+      diagnostics: [],
+      ...(action.capabilityId === "serena" ? {
+        serenaOutcome: "cancelled" as const,
+        serenaStage: "preparing-uv" as const,
+      } : {}),
+    };
+  }
+
   if (action.status === "blocked" || action.status === "pending" || action.kind === "pending-source" || action.kind === "noop") {
     return informationalResult(action, action.status === "blocked" ? "Blocked action requires follow-up before execution." : "Pending/no-op action recorded without execution.");
+  }
+
+  if (action.capabilityId === "serena") {
+    try {
+      return await runSerenaAction(action, dependencies);
+    } catch {
+      return serenaBlockedResult(action, "Serena setup failed before configuration could be changed.");
+    }
   }
 
   if (action.kind === "manual-external-install") {
@@ -619,6 +1018,8 @@ function sanitizePackageCallbackResult(value: RunnerPackageInstallResult): Runne
     message: sanitizeActionText(value.message) || "Package install completed.",
     ...(typeof value.installerInvoked === "boolean" ? { installerInvoked: value.installerInvoked } : {}),
     ...(value.cause ? { cause: boundTuiCause([value.cause]) } : {}),
+    ...(value.serenaBootstrapOutcome ? { serenaBootstrapOutcome: value.serenaBootstrapOutcome } : {}),
+    ...(value.serenaStage ? { serenaStage: value.serenaStage } : {}),
     ...(diagnostic ? {
       diagnostic: {
         stage: sanitizeActionText(diagnostic.stage),
@@ -639,7 +1040,7 @@ async function runPackageInstall(
     return await runInternalPackageInstall(action, dependencies);
   }
 
-  if (!dependencies.runnerCommand) {
+  if (!dependencies.runnerCommand && action.capabilityId !== "serena") {
     return skippedResult(action, "Runner command is required to install packages; run preflight or provide dependencies.runnerCommand before installation.");
   }
 
@@ -651,11 +1052,29 @@ async function runPackageInstall(
   }
 
   const packages = [{ id: packageId, name: packageName, source: action.source ?? "" }];
+  const serenaContext = action.capabilityId === "serena"
+    ? (() => {
+        const context = getSerenaActionContext(dependencies);
+        return "context" in context ? context.context : undefined;
+      })()
+    : undefined;
   const installResults = await runner(
     dependencies.runnerCommand,
     packages,
     (result) => dependencies.onInstallResult?.(sanitizePackageCallbackResult(result)),
+    serenaContext,
   );
+
+  if (action.capabilityId === "serena" && dependencies.serenaExecutionState) {
+    const candidate = installResults.find((result) => result?.id === packageId);
+    if (candidate?.serenaReadiness && validateSerenaReadinessEvidence(candidate.serenaReadiness).valid) {
+      dependencies.serenaExecutionState.readiness = candidate.serenaReadiness;
+    } else if (candidate?.serenaReadiness !== undefined) {
+      dependencies.serenaExecutionState.readiness = undefined;
+    }
+    if (candidate?.serenaBootstrapOutcome) dependencies.serenaExecutionState.outcome = candidate.serenaBootstrapOutcome;
+    if (candidate?.serenaStage) dependencies.serenaExecutionState.stage = candidate.serenaStage;
+  }
 
   return projectPackageInstallResults(action, packages, installResults);
 }

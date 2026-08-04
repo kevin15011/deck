@@ -83,15 +83,15 @@ describe("production prompt activation", () => {
         dryRun: true,
       });
       const prompt = readFileSync(
-        join(configDir, "prompts", "deck-developer", "deck-developer-apply-general.md"),
+        join(configDir, "prompts", "deck-team", "deck-apply-fast.md"),
         "utf8",
       );
 
       expect(result.status).toBe("ready");
-      expect(prompt).toContain("# General Apply Agent");
-      expect(prompt).toContain("Runtime-Enforced Team Contract");
-      expect(prompt).toContain("RegistryIntentV1");
-      expect(prompt).toContain("## Modification Gate");
+      expect(prompt).toContain("# Apply Fast (deck-apply-fast)");
+      expect(prompt).toContain("Adaptive Developer Team Contract");
+      expect(prompt).toContain("## Proportional TDD");
+      expect(prompt).toContain("Modifying work requires the user's request and the active runner's authority");
       expect(prompt).not.toContain("Orchestrator will inject renderApplyAuthorizationCard()");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

@@ -17,7 +17,7 @@ export type OpenCodeCapabilityInstallKind =
   | "npm-package-plus-mcp" // npm global package + MCP server configuration
   | "shell-script" // Binary installed via shell script (curl -fsSL <url> | sh)
   | "shell-script-plus-mcp" // Shell script + MCP server configuration (e.g., rtk)
-  | "python-tool"; // Python tool installed via uv or pipx (e.g., serena)
+  | "serena-agent"; // Serena package installed through the Core-controlled uv flow
 
 /** Canonical capability ID from Core registry - maps to runner-capability-registry.ts */
 export type CanonicalCapabilityId =
@@ -32,7 +32,7 @@ export type CanonicalCapabilityId =
   | "supermemory-tool-bindings"
   | "pi-orchestrator-prompt-persistence"
   | "opencode-primary-orchestrator"
-  | "deck-init";
+  | "deck-setup";
 
 export type OpenCodeCapabilityToolMapping = {
   capabilityId: OpenCodeCapabilityId;
@@ -100,12 +100,12 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
     capabilityId: "serena",
     canonicalCapabilityId: "serena",
     label: "Serena",
-    description: "Semantic code retrieval, editing and refactoring via LSP. Python tool installed via uv/pipx.",
+    description: "Semantic code retrieval, editing and refactoring through Serena.",
     runnerScope: "all",
     requirementLevel: "configurable",
     toolId: "serena",
-    source: "oraios/serena",
-    installKind: "python-tool",
+    source: "serena-agent",
+    installKind: "serena-agent",
     detector: { commands: ["serena"], mcpServerNames: ["serena"] },
   },
   context7: {

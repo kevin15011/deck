@@ -234,7 +234,9 @@ describe("verify reuse of built plan", () => {
     expect(result).toBeDefined();
     const standaloneFiles = result!.files.filter((file) => file.kind === "standalone-skill");
     const standaloneSkillIds = new Set(standaloneFiles.map((file) => file.skillId));
-    expect(standaloneSkillIds.size).toBe(29);
+    expect(standaloneSkillIds.size).toBe(31);
+    expect(standaloneSkillIds).toContain("deck-onboard");
+    expect(standaloneSkillIds).toContain("deck-archive");
     expect(standaloneSkillIds.has("frontend-design")).toBe(true);
     expect(standaloneSkillIds.has("web-quality-audit")).toBe(true);
     expect(standaloneFiles).toContainEqual(expect.objectContaining({

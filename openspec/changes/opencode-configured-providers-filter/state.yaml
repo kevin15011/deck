@@ -1,6 +1,21 @@
-phase: apply
-status: in_progress
+phase: closed
+status: abandoned
 artifact: apply-progress.md
+closure_reason: >-
+  Stale incomplete Apply: backend configured-provider filtering and the env field-name
+  correction were never implemented; no attributable source work-in-progress remains;
+  user authorized abandoned closure.
+closed_at: "2026-08-03"
+artifacts:
+  exploration: exploration.md
+  apply_progress: apply-progress.md
+  archive_report: archive-report.md
+closure_provenance:
+  agent: deck-developer-orchestrator
+  model: openai/gpt-5.6-terra
+  timestamp: "2026-08-03T22:27:19.000Z"
+  disposition: abandoned
+  report: archive-report.md
 provenance:
   agent: deck-developer-apply-frontend
   model: alibaba-token-plan/glm-5.2

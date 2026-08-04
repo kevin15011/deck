@@ -49,7 +49,7 @@ function authorizationHarness(seed = 0) {
   const delegationDigest = buildSessionPreparationDelegationDigestV1({
     sessionIdDigest: sha256Digest(request.sessionId),
     invocationId: request.invocationId,
-    agentId: "deck-init",
+    agentId: "deck-setup",
     activeRunnerId: request.activeRunnerId,
     projectRootDigest: request.projectRootDigest,
     needs: ["openspec", "skill_registry"],
@@ -59,7 +59,7 @@ function authorizationHarness(seed = 0) {
   const issue: SessionPreparationAuthorizationIssueInputV1 = {
     sessionId: request.sessionId,
     invocationId: request.invocationId,
-    agentId: "deck-init",
+    agentId: "deck-setup",
     activeRunnerId: request.activeRunnerId,
     projectRootDigest: request.projectRootDigest,
     delegationDigest,
@@ -184,7 +184,7 @@ describe("trusted one-use preparation authorization", () => {
     const cases: [string, (value: SessionPreparationAuthorizationExpectationV1) => SessionPreparationAuthorizationExpectationV1, SessionPreparationAuthorizationRejectionCodeV1][] = [
       ["session", (value) => ({ ...value, sessionId: "session-2" }), "AUTHZ_SESSION_MISMATCH"],
       ["invocation", (value) => ({ ...value, invocationId: "invocation-2" }), "AUTHZ_INVOCATION_MISMATCH"],
-      ["role", (value) => ({ ...value, agentId: "not-deck-init" as "deck-init" }), "AUTHZ_AGENT_MISMATCH"],
+      ["role", (value) => ({ ...value, agentId: "not-deck-setup" as "deck-setup" }), "AUTHZ_AGENT_MISMATCH"],
       ["runner", (value) => ({ ...value, activeRunnerId: "pi" }), "AUTHZ_RUNNER_MISMATCH"],
       ["root", (value) => ({ ...value, projectRootDigest: digest("4") }), "AUTHZ_ROOT_MISMATCH"],
       ["delegation", (value) => ({ ...value, delegationDigest: digest("5") }), "AUTHZ_DELEGATION_MISMATCH"],

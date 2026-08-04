@@ -265,7 +265,7 @@ describe("T14: Model-aware effort picker screen logic (REQ-EFFORT-001, REQ-TUI-0
     );
 
     expect(output).toContain("2/5");
-    expect(output).toContain("Explorer Agent");
+    expect(output).toContain("Investigate");
   });
 });
 
@@ -617,13 +617,13 @@ describe("OpenCode TUI discovery states (Group 3)", () => {
         cursor={0}
         runtime="opencode"
         modelAssignments={{
-          "deck-developer-orchestrator": "retired/model",
-          "deck-developer-proposal": "plugin/model",
+          "deck-lead": "retired/model",
+          "deck-architect": "plugin/model",
         }}
-        thinkingAssignments={{ "deck-developer-proposal": "old-variant" }}
+        thinkingAssignments={{ "deck-architect": "old-variant" }}
         assignmentStates={{
-          "deck-developer-orchestrator": "model-unavailable",
-          "deck-developer-proposal": "variant-unavailable",
+          "deck-lead": "model-unavailable",
+          "deck-architect": "variant-unavailable",
         }}
       />,
     );

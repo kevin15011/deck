@@ -111,7 +111,7 @@ export const INV_002_COORDINATOR_OWNERSHIP: OrchestratorInvariant = {
  * INV-003: SDD Initialization Gate
  *
  * Check openspec/config.yaml initialized state before SDD work.
- * Delegate to deck-init when required.
+ * Delegate to deck-setup when required.
  *
  * Source: orchestrator-content.ts, lines 133-144 (SDD Initialization Gate)
  */
@@ -126,7 +126,7 @@ export const INV_003_SDD_INITIALIZATION_GATE: OrchestratorInvariant = {
   condition:
     "Before processing any SDD work, check whether the project has been initialized",
   requiredAction:
-    "Read openspec/config.yaml and check the initialized field. If initialized: false or file does not exist, delegate to deck-init before any other work. Re-check the flag after deck-init completes.",
+    "Read the cached once-per-session readiness result. If a component requires repair, delegate only that component to deck-setup and verify its postcondition before dependent work.",
   rationale:
     "SDD assumes an initialized OpenSpec workspace. Running SDD on an uninitialized project causes artifacts to be placed incorrectly or fail silently.",
   violationConsequence:
@@ -237,7 +237,7 @@ export interface CompactOrchestratorInvariantSummaryV1 {
 export const COMPACT_ORCHESTRATOR_INVARIANT_SUMMARIES_V1: readonly CompactOrchestratorInvariantSummaryV1[] = Object.freeze([
   { id: "INV-001", summary: "After Run SDD triage, Automatic has no routine pause after automated candidate validation; pause only for required target/product validation, approval, or a hard stop. Mode grants no authority and waives no QA." },
   { id: "INV-002", summary: "Directly own authorized bounded coordinator operations; specialists own implementation and judgment, heavy execution, Verify, and Review. Ambiguity or risk routes to clarify, delegate, or stop." },
-  { id: "INV-003", summary: "Verify OpenSpec initialization before SDD and route initialization through deck-init." },
+  { id: "INV-003", summary: "Use once-per-session readiness and route only degraded components through deck-setup." },
   { id: "INV-004", summary: "Classify each new outcome, start clear reversible work without a separate confirmation ceremony, and treat in-scope feedback as a delta on the same candidate. Ask again only for material ambiguity, scope expansion, protected risk, irreversible action, or an actual conflict." },
   { id: "INV-005", summary: "Specialists return RegistryIntentV1 values; the central coordinator serializes shared registry writes." },
   { id: "INV-006", summary: "Preserve Explore -> Proposal -> Spec + Design -> Tasks -> Apply -> targeted -> affected_area -> Review -> broad -> Archive." },

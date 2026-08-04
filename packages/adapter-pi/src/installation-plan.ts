@@ -60,9 +60,9 @@ export const PI_INSTALLABLE_TOOLS: InstallablePiTool[] = [
   {
     id: "serena",
     name: "Serena",
-    source: "serena (python tool)",
+    source: "serena-agent",
     required: false,
-    installKind: "python-tool",
+    installKind: "shared-binary-plus-mcp",
     capabilityId: "serena",
   },
   {

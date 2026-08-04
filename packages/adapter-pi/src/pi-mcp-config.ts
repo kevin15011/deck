@@ -1,6 +1,15 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import {
+  runEvidenceGatedSerenaWriter,
+  validateSerenaMcpWriterInput,
+  type SerenaBootstrapAuthorization,
+  type SerenaMcpWriterInput,
+  type SerenaOperationIdentity,
+  type SerenaReadinessEvidence,
+  type SerenaReadinessRevalidator,
+} from "@deck/core";
 
 export const SUPERMEMORY_MCP_SERVER_NAME = "supermemory";
 export const SUPERMEMORY_MCP_URL = "https://supermemory-new.stlmcp.com";
@@ -35,6 +44,25 @@ export type PiMcpConfigWriteResult = {
   path: string;
   serverName: string;
   diagnostics: PiMcpConfigDiagnostic[];
+};
+
+/** File boundary used by the Serena writer; tests provide an in-memory fake. */
+export type PiMcpConfigFileSystem = Readonly<{
+  existsSync: (path: string) => boolean;
+  readFileSync: (path: string, encoding?: string) => string;
+  mkdirSync: (path: string, options?: { recursive?: boolean; mode?: number }) => void;
+  writeFileSync: (path: string, content: string, options?: { encoding?: string; mode?: number } | string) => void;
+  renameSync: (from: string, to: string) => void;
+  rmSync: (path: string, options?: { force?: boolean }) => void;
+}>;
+
+const defaultPiMcpConfigFileSystem: PiMcpConfigFileSystem = {
+  existsSync,
+  readFileSync: (path, encoding = "utf-8") => readFileSync(path, encoding as BufferEncoding),
+  mkdirSync: (path, options) => { mkdirSync(path, options); },
+  writeFileSync: (path, content, options) => { writeFileSync(path, content, options as any); },
+  renameSync,
+  rmSync: (path, options) => { rmSync(path, options); },
 };
 
 export type WriteSupermemoryPiMcpConfigOptions = {
@@ -788,22 +816,219 @@ export function writeContext7McpConfig(options?: {
   });
 }
 
-/**
- * Write Serena MCP config.
- * REQ-PI-002: Serena is mandatory for Pi parity.
- */
-export function writeSerenaMcpConfig(options?: {
-  serverName?: string;
+export type WriteSerenaMcpConfigOptions = Readonly<{
+  authorization?: SerenaBootstrapAuthorization;
+  operation?: SerenaOperationIdentity;
+  readiness?: SerenaReadinessEvidence;
+  command?: string;
+  args?: readonly string[];
+  revalidate?: SerenaReadinessRevalidator;
+  /** Canonical Deck-owned `<data-root>/tools/serena` root. */
+  ownedRoot?: string;
   configPath?: string;
   homeDir?: string;
-}): PiMcpConfigWriteResult {
-  return writeLocalMcpConfig({
-    command: "serena",
-    serverName: options?.serverName ?? SERENA_MCP_SERVER_NAME,
-    transport: "process",
-    configPath: options?.configPath,
-    homeDir: options?.homeDir,
+  fileSystem?: PiMcpConfigFileSystem;
+}>;
+
+/**
+ * Write only the evidence-authorized Serena Pi MCP entry.
+ *
+ * This synchronous function performs shape/path validation and the atomic
+ * merge. Immediate same-path/fingerprint validation belongs to
+ * `writeEvidenceGatedSerenaMcpConfig`, which is the adapter execution path.
+ * A call without typed authorization/evidence is deliberately non-mutating.
+ */
+export function writeSerenaMcpConfig(
+  options?: WriteSerenaMcpConfigOptions,
+): PiMcpConfigWriteResult {
+  const configPath = options?.configPath ?? defaultPiMcpConfigPath(options?.homeDir);
+  const ownedRoot = resolveSerenaOwnedRoot(options);
+  if (!ownedRoot) {
+    return failedSerenaResult(configPath, "PI_MCP_CONFIG_CONFLICT", "Serena executable containment could not be established; no changes were written.");
+  }
+  const input = toSerenaWriterInput(options);
+  const validation = validateSerenaMcpWriterInput(input, ownedRoot);
+  if (!validation.valid) {
+    return failedSerenaResult(configPath, validation.code, validation.diagnostic.message);
+  }
+
+  return writeValidatedSerenaMcpConfig({
+    input: validation.input,
+    configPath,
+    fileSystem: options?.fileSystem ?? defaultPiMcpConfigFileSystem,
   });
+}
+
+/** Run Core's immediate evidence gate, then perform the Pi atomic merge. */
+export async function writeEvidenceGatedSerenaMcpConfig(
+  options?: WriteSerenaMcpConfigOptions,
+): Promise<PiMcpConfigWriteResult> {
+  const configPath = options?.configPath ?? defaultPiMcpConfigPath(options?.homeDir);
+  const ownedRoot = resolveSerenaOwnedRoot(options);
+  if (!ownedRoot) {
+    return failedSerenaResult(configPath, "PI_MCP_CONFIG_CONFLICT", "Serena executable containment could not be established; no changes were written.");
+  }
+  const input = toSerenaWriterInput(options);
+  const gated = await runEvidenceGatedSerenaWriter(
+    input,
+    async (validatedInput) => {
+      const result = writeValidatedSerenaMcpConfig({
+        input: validatedInput,
+        configPath,
+        fileSystem: options?.fileSystem ?? defaultPiMcpConfigFileSystem,
+      });
+      return result.ok
+        ? { ok: true, status: result.action as "created" | "updated" | "unchanged" }
+        : {
+            ok: false,
+            code: result.diagnostics[0]?.code ?? "writer-failed",
+            diagnostic: {
+              code: result.diagnostics[0]?.code ?? "writer-failed",
+              message: result.diagnostics[0]?.message ?? "Serena configuration was not changed.",
+            },
+          };
+    },
+    ownedRoot,
+  );
+
+  if (gated.ok) {
+    return {
+      ok: true,
+      action: gated.status,
+      path: configPath,
+      serverName: SERENA_MCP_SERVER_NAME,
+      diagnostics: (gated.diagnostics ?? []).map((diagnostic) => ({
+        code: "PI_MCP_CONFIG_UNCHANGED" as const,
+        severity: "info" as const,
+        message: diagnostic.message,
+        path: configPath,
+        serverName: SERENA_MCP_SERVER_NAME,
+      })),
+    };
+  }
+
+  return failedSerenaResult(configPath, gated.code, gated.diagnostic.message);
+}
+
+function toSerenaWriterInput(options?: WriteSerenaMcpConfigOptions): SerenaMcpWriterInput {
+  return {
+    authorization: options?.authorization as SerenaBootstrapAuthorization,
+    operation: options?.operation as SerenaOperationIdentity,
+    readiness: options?.readiness as SerenaReadinessEvidence,
+    command: options?.command as string,
+    args: options?.args as readonly string[],
+    revalidate: options?.revalidate as SerenaReadinessRevalidator,
+  };
+}
+
+function resolveSerenaOwnedRoot(options?: WriteSerenaMcpConfigOptions): string | undefined {
+  if (options?.ownedRoot !== undefined) return options.ownedRoot;
+  const executablePath = options?.readiness?.resolvedExecutablePath;
+  if (!executablePath || !executablePath.endsWith("/bin/serena")) return undefined;
+  return executablePath.slice(0, -"/bin/serena".length);
+}
+
+function writeValidatedSerenaMcpConfig(input: {
+  input: SerenaMcpWriterInput;
+  configPath: string;
+  fileSystem: PiMcpConfigFileSystem;
+}): PiMcpConfigWriteResult {
+  const { configPath, fileSystem } = input;
+  const existed = fileSystem.existsSync(configPath);
+  let config: JsonRecord = {};
+
+  if (existed) {
+    let raw: string;
+    try {
+      raw = fileSystem.readFileSync(configPath, "utf-8");
+    } catch {
+      return failedSerenaResult(configPath, "PI_MCP_CONFIG_WRITE_FAILED", "Unable to read existing Pi MCP config; no changes were written.");
+    }
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isPlainRecord(parsed)) {
+        return failedSerenaResult(configPath, "PI_MCP_CONFIG_MALFORMED", "Pi MCP config must be a JSON object; no changes were written.");
+      }
+      config = parsed;
+    } catch {
+      return failedSerenaResult(configPath, "PI_MCP_CONFIG_MALFORMED", "Pi MCP config contains malformed JSON; no changes were written.");
+    }
+  }
+
+  const existingServers = config.mcpServers;
+  if (existingServers !== undefined && !isPlainRecord(existingServers)) {
+    return failedSerenaResult(configPath, "PI_MCP_CONFIG_MALFORMED", "Pi MCP config `mcpServers` must be an object; no changes were written.");
+  }
+
+  const servers = existingServers === undefined ? {} : { ...(existingServers as JsonRecord) };
+  const existingServer = servers[SERENA_MCP_SERVER_NAME];
+  if (existingServer !== undefined && !isPlainRecord(existingServer)) {
+    return failedSerenaResult(configPath, "PI_MCP_CONFIG_CONFLICT", "Existing Serena MCP entry is not an object; no changes were written.");
+  }
+
+  const nextConfig: JsonRecord = {
+    ...config,
+    mcpServers: {
+      ...servers,
+      [SERENA_MCP_SERVER_NAME]: {
+        ...((existingServer as JsonRecord | undefined) ?? {}),
+        command: input.input.command,
+        args: [...input.input.args],
+      },
+    },
+  };
+
+  if (stableStringify(config) === stableStringify(nextConfig)) {
+    return {
+      ok: true,
+      action: "unchanged",
+      path: configPath,
+      serverName: SERENA_MCP_SERVER_NAME,
+      diagnostics: [infoDiagnostic("PI_MCP_CONFIG_UNCHANGED", "Serena Pi MCP server entry is already configured.", configPath, SERENA_MCP_SERVER_NAME)],
+    };
+  }
+
+  try {
+    fileSystem.mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
+    const temporaryPath = `${configPath}.deck-serena.tmp`;
+    try {
+      fileSystem.writeFileSync(temporaryPath, `${JSON.stringify(nextConfig, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+      fileSystem.renameSync(temporaryPath, configPath);
+    } catch {
+      try { fileSystem.rmSync(temporaryPath, { force: true }); } catch { /* preserve the original config */ }
+      return failedSerenaResult(configPath, "PI_MCP_CONFIG_WRITE_FAILED", "Unable to atomically write Serena Pi MCP config; no changes were written.");
+    }
+  } catch {
+    return failedSerenaResult(configPath, "PI_MCP_CONFIG_WRITE_FAILED", "Unable to prepare Serena Pi MCP config; no changes were written.");
+  }
+
+  return {
+    ok: true,
+    action: existed ? "updated" : "created",
+    path: configPath,
+    serverName: SERENA_MCP_SERVER_NAME,
+    diagnostics: [infoDiagnostic(
+      existed ? "PI_MCP_CONFIG_UPDATED" : "PI_MCP_CONFIG_CREATED",
+      existed ? "Updated Serena Pi MCP server entry." : "Created Serena Pi MCP server entry.",
+      configPath,
+      SERENA_MCP_SERVER_NAME,
+    )],
+  };
+}
+
+function failedSerenaResult(
+  configPath: string,
+  code: string,
+  message: string,
+): PiMcpConfigWriteResult {
+  const diagnosticCode: PiMcpConfigDiagnostic["code"] = code === "PI_MCP_CONFIG_MALFORMED"
+    ? "PI_MCP_CONFIG_MALFORMED"
+    : code === "PI_MCP_CONFIG_CONFLICT"
+      ? "PI_MCP_CONFIG_CONFLICT"
+      : "PI_MCP_CONFIG_WRITE_FAILED";
+  return failedResult(configPath, SERENA_MCP_SERVER_NAME, [
+    errorDiagnostic(diagnosticCode, message, configPath, SERENA_MCP_SERVER_NAME),
+  ]);
 }
 
 /**

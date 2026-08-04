@@ -1,140 +1,97 @@
 /**
- * Canonical Developer Team agent definitions.
+ * Canonical, runner-neutral Developer Team inventory.
  *
- * Runtime-neutral: these definitions describe WHAT agents exist in the
- * Developer Team, their roles, and their IDs. Runtime adapters
- * consume these to materialize runtime-specific files.
- *
- * IDs are team-scoped to prevent collisions across multiple teams:
- *   deck-developer-orchestrator, deck-developer-explorer, etc.
+ * The seven entries below are the desired state installed by every runner.
+ * Legacy IDs are kept separately for history/model migration and MUST NOT be
+ * materialized as aliases.
  */
 
 export type DeveloperTeamAgent = {
-  /** File-safe, team-scoped ID, e.g. "deck-developer-orchestrator" */
   id: string;
-  /** Agent name (same as id for deterministic pairing) */
   name: string;
-  /** Human-readable display name, e.g. "Orchestrator Agent" */
   displayName: string;
-  /** Short description for agent/skill frontmatter */
   description: string;
-  /** Matching skill ID — mirrors agent ID for deterministic pairing */
   skillId: string;
 };
 
-export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = [
+export const DEVELOPER_TEAM_AGENTS: readonly DeveloperTeamAgent[] = Object.freeze([
   {
-    id: "deck-developer-orchestrator",
-    name: "deck-developer-orchestrator",
-    displayName: "Orchestrator Agent",
-    description:
-      "Coordinates the Developer Team, delegates work, enforces workflow safety, and synthesizes results.",
-    skillId: "deck-developer-orchestrator",
+    id: "deck-lead",
+    name: "deck-lead",
+    displayName: "Lead",
+    description: "Owns the user outcome, selects the smallest safe route, coordinates specialists, and can implement clear low-risk deltas directly.",
+    skillId: "deck-lead",
   },
   {
-    id: "deck-developer-explorer",
-    name: "deck-developer-explorer",
-    displayName: "Explorer Agent",
-    description:
-      "Investigates code, architecture, constraints, risks, and approaches before commitment.",
-    skillId: "deck-developer-explorer",
+    id: "deck-investigate",
+    name: "deck-investigate",
+    displayName: "Investigate",
+    description: "Traces unfamiliar code and production composition, locates causes and risks, and returns a compact evidence-backed handoff.",
+    skillId: "deck-investigate",
   },
   {
-    id: "deck-developer-proposal",
-    name: "deck-developer-proposal",
-    displayName: "Proposal Agent",
-    description:
-      "Turns an idea into a formal change proposal with intent, scope, approach, risks, and rollback.",
-    skillId: "deck-developer-proposal",
+    id: "deck-architect",
+    name: "deck-architect",
+    displayName: "Architect",
+    description: "Plans proportionally from a compact Working Brief through Full SDD only when durable design decisions justify the cost.",
+    skillId: "deck-architect",
   },
   {
-    id: "deck-developer-spec",
-    name: "deck-developer-spec",
-    displayName: "Spec Agent",
-    description: "Defines formal requirements and acceptance scenarios.",
-    skillId: "deck-developer-spec",
+    id: "deck-apply-fast",
+    name: "deck-apply-fast",
+    displayName: "Apply Fast",
+    description: "Implements clear, routine, localized, or pattern-based changes as a complete vertical slice with proportional tests.",
+    skillId: "deck-apply-fast",
   },
   {
-    id: "deck-developer-design",
-    name: "deck-developer-design",
-    displayName: "Design Agent",
-    description:
-      "Defines technical architecture, tradeoffs, file impact, and implementation approach.",
-    skillId: "deck-developer-design",
+    id: "deck-apply-deep",
+    name: "deck-apply-deep",
+    displayName: "Apply Deep",
+    description: "Implements algorithmic, concurrent, performance-sensitive, protocol, migration, or difficult debugging work requiring deep reasoning.",
+    skillId: "deck-apply-deep",
   },
   {
-    id: "deck-developer-task",
-    name: "deck-developer-task",
-    displayName: "Task Agent",
-    description:
-      "Converts Spec and Design into atomic, routed implementation tasks.",
-    skillId: "deck-developer-task",
+    id: "deck-quality",
+    name: "deck-quality",
+    displayName: "Quality",
+    description: "Independently verifies behavior, architecture, regression risk, security, and protected boundaries without modifying the candidate.",
+    skillId: "deck-quality",
   },
   {
-    id: "deck-developer-apply-general",
-    name: "deck-developer-apply-general",
-    displayName: "General Apply Agent",
-    description:
-      "Implements small, shared, cross-cutting, config, script, or general tasks.",
-    skillId: "deck-developer-apply-general",
+    id: "deck-setup",
+    name: "deck-setup",
+    displayName: "Setup",
+    description: "Repairs only missing, stale, invalid, or indeterminate project-readiness components discovered by the once-per-session preflight.",
+    skillId: "deck-setup",
   },
-  {
-    id: "deck-developer-apply-backend",
-    name: "deck-developer-apply-backend",
-    displayName: "Backend Apply Agent",
-    description:
-      "Implements backend/API/service/database/auth/server-side tasks.",
-    skillId: "deck-developer-apply-backend",
-  },
-  {
-    id: "deck-developer-apply-frontend",
-    name: "deck-developer-apply-frontend",
-    displayName: "Frontend Apply Agent",
-    description:
-      "Implements UI/component/state/accessibility/frontend test tasks.",
-    skillId: "deck-developer-apply-frontend",
-  },
-  {
-    id: "deck-developer-verify",
-    name: "deck-developer-verify",
-    displayName: "Verify Agent",
-    description:
-      "Checks compliance with specs, tasks, tests, build/typecheck, and basic design coherence.",
-    skillId: "deck-developer-verify",
-  },
-  {
-    id: "deck-developer-review",
-    name: "deck-developer-review",
-    displayName: "Review Agent",
-    description:
-      "Reviews engineering quality: architecture, security, scalability, maintainability.",
-    skillId: "deck-developer-review",
-  },
-  {
-    id: "deck-developer-archive",
-    name: "deck-developer-archive",
-    displayName: "Archive Agent",
-    description:
-      "Closes the change, preserves traceability, and updates project AI notes when useful.",
-    skillId: "deck-developer-archive",
-  },
-  {
-    id: "deck-init",
-    name: "deck-init",
-    displayName: "Init Agent",
-    description:
-      "Trigger: deck init, initialize deck, startsdd. Initialize SDD context, index codebase, bootstrap openspec.",
-    skillId: "deck-init",
-  },
-  {
-    id: "deck-onboard",
-    name: "deck-onboard",
-    displayName: "Onboard Agent",
-    description:
-      "Trigger: deck onboard, start sdd, learn sdd. Interactive SDD walkthrough using Deck's developer team.",
-    skillId: "deck-onboard",
-  },
-] as const;
+]);
+
+export const LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP = Object.freeze({
+  "deck-developer-orchestrator": "deck-lead",
+  "deck-developer-explorer": "deck-investigate",
+  "deck-developer-proposal": "deck-architect",
+  "deck-developer-spec": "deck-architect",
+  "deck-developer-design": "deck-architect",
+  "deck-developer-task": "deck-architect",
+  "deck-developer-apply-general": "deck-apply-fast",
+  "deck-developer-apply-backend": "deck-apply-deep",
+  "deck-developer-apply-frontend": "deck-apply-deep",
+  "deck-developer-verify": "deck-quality",
+  "deck-developer-review": "deck-quality",
+  "deck-developer-archive": "deck-lead",
+  "deck-init": "deck-setup",
+  "deck-onboard": "deck-lead",
+} as const satisfies Record<string, string>);
+
+export const DEVELOPER_TEAM_LEGACY_AGENT_IDS = Object.freeze(
+  Object.keys(LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP),
+);
+
+export function resolveLegacyDeveloperTeamAgentId(agentId: string): string | undefined {
+  return LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP[
+    agentId as keyof typeof LEGACY_DEVELOPER_TEAM_AGENT_ID_MAP
+  ];
+}
 
 export function getDeveloperTeamCatalog(): readonly DeveloperTeamAgent[] {
   return DEVELOPER_TEAM_AGENTS;

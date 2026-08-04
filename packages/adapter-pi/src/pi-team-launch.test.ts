@@ -100,28 +100,21 @@ describe("buildPiTeamLaunchPlan", () => {
     // The plan should have an agentIds field referencing the canonical catalog
     // with team-scoped IDs
     expect(plan.agentIds).toEqual([
-      "deck-developer-orchestrator",
-      "deck-developer-explorer",
-      "deck-developer-proposal",
-      "deck-developer-spec",
-      "deck-developer-design",
-      "deck-developer-task",
-      "deck-developer-apply-general",
-      "deck-developer-apply-backend",
-      "deck-developer-apply-frontend",
-      "deck-developer-verify",
-      "deck-developer-review",
-      "deck-developer-archive",
-      "deck-init",
-      "deck-onboard",
+      "deck-lead",
+      "deck-investigate",
+      "deck-architect",
+      "deck-apply-fast",
+      "deck-apply-deep",
+      "deck-quality",
+      "deck-setup",
     ]);
   });
 
   test("adds orchestrator model and thinking launch flags from installed agent frontmatter", () => {
     const projectRoot = createTempProject();
     try {
-      writeAgent(projectRoot, "deck-developer-orchestrator", [
-        "name: deck-developer-orchestrator",
+      writeAgent(projectRoot, "deck-lead", [
+        "name: deck-lead",
         "model: openai-codex/gpt-5.5",
         "thinking: high",
       ]);
@@ -140,8 +133,8 @@ describe("buildPiTeamLaunchPlan", () => {
   test("keeps Kimi orchestrator model without thinking launch flag", () => {
     const projectRoot = createTempProject();
     try {
-      writeAgent(projectRoot, "deck-developer-orchestrator", [
-        "name: deck-developer-orchestrator",
+      writeAgent(projectRoot, "deck-lead", [
+        "name: deck-lead",
         "model: opencode-go/kimi-k2.6",
       ]);
 
@@ -159,8 +152,8 @@ describe("buildPiTeamLaunchPlan", () => {
   test("omits Kimi orchestrator thinking even when frontmatter requested it", () => {
     const projectRoot = createTempProject();
     try {
-      writeAgent(projectRoot, "deck-developer-orchestrator", [
-        "name: deck-developer-orchestrator",
+      writeAgent(projectRoot, "deck-lead", [
+        "name: deck-lead",
         "model: opencode-go/kimi-k2.6",
         "thinking: high",
       ]);

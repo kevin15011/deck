@@ -89,6 +89,10 @@ import type {
   RunnerModelInventory,
   RunnerModelInventoryResult,
   RunnerVariantKey,
+  RunnerAction,
+  RunnerAdapter,
+  SerenaBootstrapAuthorization,
+  SerenaOperationIdentity,
 } from "@deck/core";
 
 import {
@@ -118,7 +122,14 @@ import {
   SupermemorySetupScreen,
   type SupermemorySetupValues,
 } from "./screens/developer-team-screens";
-import { runRunnerReviewPlan, type RunnerActionRunResult, type RunnerActionRunnerDependencies, type RunnerPackageInstallResult } from "./runner-dashboard/action-runner";
+import {
+  runRunnerReviewPlan,
+  type RunnerActionRunResult,
+  type RunnerPackageInstallResult,
+  type RunnerSerenaActionContext,
+  type RunnerSerenaOutcome,
+  type RunnerSerenaStage,
+} from "./runner-dashboard/action-runner";
 import {
   getDashboardContinueEffect,
   getDashboardToggleAction,
@@ -183,6 +194,45 @@ type Screen =
   | "complete";
 
 const HELP = "j/k or ↑/↓: navigate • space: toggle • enter: continue • esc: back • q: quit";
+
+function nextRunnerOperation(
+  runner: Exclude<RunnerDashboardState["runnerScope"], "all">,
+  sequence: number,
+): SerenaOperationIdentity {
+  return {
+    runner,
+    operationId: `${runner}-review-install-${sequence}`,
+    explicitlySelected: false,
+  };
+}
+
+export async function runSerenaAdapterAction(
+  adapter: Pick<RunnerAdapter, "runAction">,
+  action: RunnerAction,
+  context: RunnerSerenaActionContext,
+  dashboardState: RunnerDashboardState,
+  runnerCommand?: string,
+): Promise<RunnerActionRunResult> {
+  const result = await adapter.runAction(action, {
+    projectRoot: context.projectRoot,
+    runnerId: context.runnerId,
+    environmentId: context.environmentId,
+    operation: context.operation,
+    currentOperation: context.currentOperation,
+    operationId: context.operationId,
+    serenaAuthorization: context.serenaAuthorization,
+    serenaReadiness: context.serenaReadiness,
+    signal: context.signal,
+    runnerCommand,
+    dashboardState,
+    ...(context.serenaRevalidator ? { serenaRevalidator: context.serenaRevalidator } : {}),
+    ...(context.serenaOwnedRoot ? { serenaOwnedRoot: context.serenaOwnedRoot } : {}),
+  } as any);
+  return {
+    ...result,
+    diagnostics: [...result.diagnostics],
+  };
+}
 
 type MemoryProviderChoice = AdaptiveMemoryActiveProvider;
 
@@ -586,6 +636,13 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [dashboardInventory, setDashboardInventory] = useState<PiRunnerFullCapabilityInventory>({});
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardActionResults, setDashboardActionResults] = useState<RunnerActionRunResult[]>([]);
+  const [dashboardSerenaStages, setDashboardSerenaStages] = useState<RunnerSerenaStage[]>([]);
+  const [dashboardSerenaOutcome, setDashboardSerenaOutcome] = useState<RunnerSerenaOutcome | undefined>(undefined);
+  const [dashboardCancellationRequested, setDashboardCancellationRequested] = useState(false);
+  const dashboardOperationSequenceRef = useRef(0);
+  const dashboardAbortControllerRef = useRef<AbortController | null>(null);
+  const dashboardInstallActiveRef = useRef(false);
+  const dashboardExitRequestedRef = useRef(false);
 
   // Configure packages standalone flow
   const [configurePackagesRunner, setConfigurePackagesRunner] = useState<"pi" | "opencode" | null>(null);
@@ -727,6 +784,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           {
             runnerId: state.runnerScope as any,
             selectedCapabilities: state.selectedCapabilities as Record<string, boolean>,
+            explicitlySelectedCapabilities: state.explicitlySelectedCapabilities as Record<string, boolean>,
+            operationId: state.operationId,
             adaptiveMemory: state.adaptiveMemory as any,
             teams: state.teams as any,
             runtime: { toolsReview: state.runtime.toolsReview as any },
@@ -860,8 +919,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         setDashboardInventory(inventory);
         // Use resolvedProjectRoot from state, which can be null - fall back to default config
         const piConfig = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
+        dashboardOperationSequenceRef.current += 1;
+        const operation = nextRunnerOperation("pi", dashboardOperationSequenceRef.current);
         setDashboardState(createDefaultRunnerDashboardState({
           runtime: { runnerCommand: detectedPi.command, preflight, toolsReview: review },
+          operationId: operation.operationId,
+          currentOperation: operation,
           capabilityStatuses: Object.fromEntries(
             Object.entries(inventory)
               .filter(([key]) => key !== '_internal')
@@ -870,6 +933,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           packageInstructions: loadRunnerPackageInstructionsFromConfig(piConfig, "pi"),
         }));
         setDashboardActionResults([]);
+        setDashboardSerenaStages([]);
+        setDashboardSerenaOutcome(undefined);
+        setDashboardCancellationRequested(false);
         resetCursor("pi-runner-dashboard");
       }
     }
@@ -909,9 +975,13 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         setDashboardInventory(inventory as any);
         // Use resolvedProjectRoot from state, which can be null - fall back to default config
         const opencodeConfig = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
+        dashboardOperationSequenceRef.current += 1;
+        const operation = nextRunnerOperation("opencode", dashboardOperationSequenceRef.current);
         setDashboardState(createDefaultRunnerDashboardState({
           runtime: { runnerCommand: detectedOpenCode.command, preflight, toolsReview: review as any },
           runnerScope: "opencode",
+          operationId: operation.operationId,
+          currentOperation: operation,
           capabilityStatuses: Object.fromEntries(
             Object.entries(inventory)
               .filter(([key]) => key !== '_internal')
@@ -927,6 +997,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           packageInstructions: loadRunnerPackageInstructionsFromConfig(opencodeConfig, "opencode"),
         }));
         setDashboardActionResults([]);
+        setDashboardSerenaStages([]);
+        setDashboardSerenaOutcome(undefined);
+        setDashboardCancellationRequested(false);
         resetCursor("pi-runner-dashboard");
       }
     }
@@ -967,6 +1040,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     log(`useEffect[install-progress]: STARTING. screen=${screen} dashboardScreen=${dashboardState.screen} hasPlan=${!!dashboardState.plan}`);
 
     let cancelled = false;
+    const controller = new AbortController();
+    dashboardAbortControllerRef.current = controller;
+    dashboardInstallActiveRef.current = true;
+    setDashboardCancellationRequested(false);
+    setDashboardSerenaStages([]);
+    setDashboardSerenaOutcome(undefined);
 
     async function runDashboardInstall() {
       log(`runDashboardInstall: starting`);
@@ -977,12 +1056,97 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       // Use stored project root, not the function
       const projectRoot = localResolvedProjectRoot ?? process.cwd();
       const environmentId = adapter.environmentIds[0];
+      const currentOperation = dashboardState.currentOperation as SerenaOperationIdentity | undefined;
+      const serenaAuthorization: SerenaBootstrapAuthorization | undefined = currentOperation?.explicitlySelected
+        ? {
+            kind: "interactive-tui-explicit-selection",
+            runner: currentOperation.runner,
+            operationId: currentOperation.operationId,
+          }
+        : undefined;
       // Log the plan action counts before execution
       const planGroups = dashboardState.plan?.groups;
       log(`runDashboardInstall: PLAN counts - automaticInstalls=${planGroups?.automaticInstalls?.length ?? 0}, manualSteps=${planGroups?.manualSteps?.length ?? 0}, configWrites=${planGroups?.configWrites?.length ?? 0}, teamApplications=${planGroups?.teamApplications?.length ?? 0}, validations=${planGroups?.validations?.length ?? 0}`);
       
       log(`runDashboardInstall: calling runRunnerReviewPlan`);
       const executionStart = Date.now();
+      const runSerenaAction = async (action: import("@deck/core").RunnerAction, context: RunnerSerenaActionContext) => {
+        if (action.kind === "install-pi-package" || action.kind === "install") {
+          if (adapter.runnerId === "pi") {
+            const piTool = {
+              id: "serena",
+              name: action.title,
+              source: action.source ?? "serena-agent",
+              required: action.required ?? false,
+              installKind: "serena-agent",
+              capabilityId: "serena",
+            } as any;
+            const installResults = await installPiTools(
+              dashboardState.runtime.runnerCommand,
+              [piTool],
+              () => {},
+              {
+                serenaAuthorization: context.serenaAuthorization,
+                serenaOperation: context.operation,
+                currentOperation: context.currentOperation,
+                serenaSignal: context.signal,
+                onSerenaStage: context.onSerenaStage,
+                ...(context.serenaRevalidator ? { serenaRevalidator: context.serenaRevalidator } : {}),
+                ...(context.serenaOwnedRoot ? { serenaOwnedRoot: context.serenaOwnedRoot } : {}),
+              } as any,
+            );
+            const result = installResults[0];
+            if (!result) {
+              return {
+                actionId: action.id,
+                status: "failed" as const,
+                message: "Serena setup returned no result.",
+                diagnostics: ["Serena setup returned no result."],
+                serenaOutcome: "failed" as const,
+                serenaStage: "validating-serena" as const,
+              };
+            }
+            const status = result.status === "installed" || result.status === "reused"
+              ? "executed"
+              : result.status === "cancelled"
+                ? "skipped"
+                : "failed";
+            return {
+              actionId: action.id,
+              status: status as RunnerActionRunResult["status"],
+              message: result.message ?? "Serena setup completed.",
+              diagnostics: [],
+              serenaOutcome: result.serenaBootstrapOutcome ?? (result.status === "reused" ? "reused" : result.status === "installed" ? "installed" : result.status === "cancelled" ? "cancelled" : "failed"),
+              serenaStage: result.serenaStage ?? "validating-serena",
+              serenaReadiness: result.serenaReadiness,
+            } as RunnerActionRunResult & { serenaReadiness?: unknown };
+          }
+
+          // Keep installation/reuse and MCP configuration on the same adapter
+          // instance. The adapter retains current-operation readiness privately;
+          // bypassing it here split the production flow and could leave a legacy
+          // bare `serena` command untouched even though setup appeared complete.
+          return runSerenaAdapterAction(
+            adapter,
+            action,
+            context,
+            dashboardState,
+            dashboardState.runtime.runnerCommand,
+          );
+        }
+
+        // Preserve the adapter's raw identified outcome. In particular,
+        // `already-present` is Serena reuse, not cancellation; the shared
+        // action runner projects that outcome and then allows the evidence-
+        // gated MCP action to consume the adapter's retained readiness.
+        return runSerenaAdapterAction(
+          adapter,
+          action,
+          context,
+          dashboardState,
+          dashboardState.runtime.runnerCommand,
+        );
+      };
       const results = await runRunnerReviewPlan(dashboardState.plan!, {
         projectRoot: projectRoot,
         runnerCommand: dashboardState.runtime.runnerCommand,
@@ -1012,10 +1176,20 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           return results;
         },
         dashboardState,
+        runnerId: adapter.runnerId as "pi" | "opencode",
+        operationId: currentOperation?.operationId,
+        currentOperation,
+        serenaAuthorization,
+        signal: controller.signal,
+        onSerenaStage: (stage: RunnerSerenaStage) => {
+          if (cancelled || controller.signal.aborted) return;
+          setDashboardSerenaStages((current) => current.includes(stage) ? current : [...current, stage]);
+        },
+        runnerAction: runSerenaAction,
         supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
         memoryProvider: resolvedMemoryProvider,
         resolvedMemoryProvider,
-        writeMcpConfig: async (options: { serverName: string; token?: string; type?: "local" | "remote"; command?: string[]; url?: string; headers?: Record<string, string> }) => {
+        writeMcpConfig: async (options: { serverName: string; token?: string; type?: "local" | "remote"; command?: string[]; url?: string; headers?: Record<string, string> }, serenaContext?: RunnerSerenaActionContext) => {
           // For Pi runner, use the adapter's runAction for write-pi-mcp-config to write ALL MCP configs
           if (dashboardState.runnerScope === "pi" && (options.serverName === "context-mode" || options.serverName === "codebase-memory-mcp" || options.serverName === "serena" || options.serverName === "context7" || options.serverName === "codebase-memory")) {
             const action = {
@@ -1032,7 +1206,19 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
               capabilityId: action.capabilityId,
               status: "ready" as const,
             };
-            const actionResult = await adapter.runAction(piAction as any, { runnerCommand: "pi" } as any);
+            const actionResult = await adapter.runAction(piAction as any, {
+              projectRoot,
+              runnerId: serenaContext?.runnerId ?? adapter.runnerId,
+              environmentId: serenaContext?.environmentId ?? environmentId,
+              operation: serenaContext?.operation,
+              currentOperation: serenaContext?.currentOperation,
+              operationId: serenaContext?.operationId,
+              serenaAuthorization: serenaContext?.serenaAuthorization,
+              serenaReadiness: serenaContext?.serenaReadiness,
+              signal: serenaContext?.signal ?? controller.signal,
+              runnerCommand: dashboardState.runtime.runnerCommand,
+              dashboardState,
+            } as any);
             return {
               ok: actionResult.status === "executed",
               path: `${process.env.HOME ?? "/home/kevinlb"}/.pi/agent/mcp.json`,
@@ -1236,6 +1422,14 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
       if (!cancelled) {
         setDashboardActionResults(results);
+        const terminalSerenaResult = [...results].reverse().find((result) => result.serenaOutcome);
+        if (terminalSerenaResult?.serenaOutcome) setDashboardSerenaOutcome(terminalSerenaResult.serenaOutcome);
+        const resultStages = results
+          .map((result) => result.serenaStage)
+          .filter((stage): stage is RunnerSerenaStage => Boolean(stage));
+        if (resultStages.length > 0) {
+          setDashboardSerenaStages((current) => [...new Set([...current, ...resultStages])]);
+        }
         setDashboardCompletionStatus(getDashboardCompletionStatus());
         clearDashboardSupermemoryEphemeralState();
         setDashboardState((current) => reduceRunnerDashboard(current, { type: "complete" }, dashboardPlanBuilder));
@@ -1243,14 +1437,23 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       }
     }
 
-    void runDashboardInstall().catch((err) => {
+    const installPromise = runDashboardInstall().catch((err) => {
       const msg = `[runDashboardInstall] FAILED: ${err instanceof Error ? err.stack : String(err)}`;
       log(msg);
       console.error(msg);
+    }).finally(() => {
+      dashboardInstallActiveRef.current = false;
+      dashboardAbortControllerRef.current = null;
+      if (dashboardExitRequestedRef.current) {
+        dashboardExitRequestedRef.current = false;
+        exit();
+      }
     });
+    void installPromise;
 
     return () => {
       cancelled = true;
+      controller.abort();
       clearDashboardSupermemoryEphemeralState();
     };
   }, [dashboardState.screen, dashboardState.plan, dashboardState.runtime.runnerCommand, screen, supermemorySetup.token, selectedEnvironments, installedOpenCode?.command, openCodePreflight]);
@@ -2133,12 +2336,23 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     debug(`handleDashboardInput ENTER: input="${input}" key=${JSON.stringify(key)} screen=${dashboardState.screen}`);
     if (input === "q") {
       log("handleDashboardInput: q pressed → exit");
+      if (dashboardInstallActiveRef.current) {
+        dashboardExitRequestedRef.current = true;
+        setDashboardCancellationRequested(true);
+        dashboardAbortControllerRef.current?.abort();
+        return;
+      }
       clearDashboardSupermemoryEphemeralState();
       exit();
       return;
     }
     if (key.escape) {
       log("handleDashboardInput: escape pressed");
+      if (dashboardInstallActiveRef.current) {
+        setDashboardCancellationRequested(true);
+        dashboardAbortControllerRef.current?.abort();
+        return;
+      }
       if (dashboardState.screen === "dashboard") {
         clearDashboardSupermemoryEphemeralState();
         resetCursor("environment-selection");
@@ -2814,7 +3028,17 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         <PersonalitySelectionScreen cursor={cursor} selected={selectedPersonality} />
       ) : null}
       {screen === "pi-runner-dashboard" ? (
-        <RunnerDashboardScreens state={dashboardState} installResults={dashboardActionResults} completionStatus={dashboardCompletionStatus} canRunPlan={canRunDashboardPlan(dashboardState)} runBlockDiagnostics={getDashboardRunBlockDiagnostics(dashboardState)} capabilityResolver={dashboardCapabilityResolver} />
+        <RunnerDashboardScreens
+          state={dashboardState}
+          installResults={dashboardActionResults}
+          completionStatus={dashboardCompletionStatus}
+          canRunPlan={canRunDashboardPlan(dashboardState)}
+          runBlockDiagnostics={getDashboardRunBlockDiagnostics(dashboardState)}
+          capabilityResolver={dashboardCapabilityResolver}
+          serenaStages={dashboardSerenaStages}
+          serenaOutcome={dashboardSerenaOutcome}
+          cancellationRequested={dashboardCancellationRequested}
+        />
       ) : null}
       {dashboardError && screen === "pi-runner-dashboard" ? (
         <Box marginTop={1} flexDirection="column">
@@ -2916,7 +3140,7 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "model-environment-selection": "Select runner for model config",
     "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",
-    "personality-selection": "Choose orchestrator personality",
+    "personality-selection": "Choose Lead personality",
     "pi-runner-dashboard": runnerScope === "opencode" ? "OpenCode Runner Setup Dashboard" : "Pi Runner Setup Dashboard",
     "pi-preflight-checking": "Checking Pi environment",
     "pi-preflight": "Pi Environment Preflight",
@@ -3030,7 +3254,7 @@ export function PersonalitySelectionScreen({ cursor, selected }: { cursor: numbe
 
   return (
     <Box flexDirection="column">
-      <Text dimColor>Controls how verbose the orchestrator is when communicating decisions and rationale.</Text>
+      <Text dimColor>Controls how verbose Lead is when communicating decisions and rationale.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}

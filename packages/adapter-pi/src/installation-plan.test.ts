@@ -7,6 +7,17 @@ import {
 } from "./installation-plan";
 
 describe("buildPiInstallationPlan", () => {
+  test("uses the serena-agent source and managed MCP install kind for Serena", () => {
+    expect(PI_INSTALLABLE_TOOLS).toContainEqual(
+      expect.objectContaining({
+        id: "serena",
+        source: "serena-agent",
+        installKind: "shared-binary-plus-mcp",
+        required: false,
+      }),
+    );
+  });
+
   test("includes missing required tools and selected optional tools", () => {
     const plan = buildPiInstallationPlan({
       requiredTools: [

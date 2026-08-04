@@ -44,7 +44,7 @@ function openCodePreparationAuthority(
   const delegationDigest = buildSessionPreparationDelegationDigestV1({
     sessionIdDigest,
     invocationId,
-    agentId: "deck-init",
+    agentId: "deck-setup",
     activeRunnerId,
     projectRootDigest,
     needs,
@@ -54,7 +54,7 @@ function openCodePreparationAuthority(
   const issue = {
     sessionId,
     invocationId,
-    agentId: "deck-init",
+    agentId: "deck-setup",
     activeRunnerId,
     projectRootDigest,
     delegationDigest,
@@ -244,7 +244,7 @@ async function runOpenCodeHostFixture(
   });
   const hooks = await plugin();
   await hooks["chat.message"]({ sessionID: "session-1", messageID: "message-1" }, { message: { role: "user" }, parts: [{ type: "text", text: "Apply the authorized batch." }] });
-  const args: Record<string, unknown> = { subagent_type: "deck-developer-apply-general" };
+  const args: Record<string, unknown> = { subagent_type: "deck-apply-fast" };
   await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "session-1", callID: "opencode-execution-1" }, { args });
   return { fixture, bridgeCalls, bridgeResult, resolverCalls, args };
 }
@@ -261,11 +261,11 @@ test("D-REACH-04 OpenCode install materializes the packaged execution plugin", (
     expect(pluginContent).toContain("deterministic-targeted-repair-authority-v1");
     expect(pluginContent).not.toContain(process.cwd());
     const orchestratorSkill = readFileSync(
-      join(configDir, "skills", "deck-developer-orchestrator", "SKILL.md"),
+      join(configDir, "skills", "deck-lead", "SKILL.md"),
       "utf8",
     );
-    expect(orchestratorSkill).toContain("targeted -> affected_area -> Review -> broad");
-    expect(orchestratorSkill).toContain("deckExecution");
+    expect(orchestratorSkill).toContain("Quality is not a universal gate");
+    expect(orchestratorSkill).toContain("implement a clear, reversible, low-risk change directly");
     expect(result.fileResults.find((entry) => entry.kind === "plugin")).toEqual({ agentId: "developer-team-execution", kind: "plugin", status: "created", absolutePath: pluginPath });
   } finally {
     rmSync(configDir, { recursive: true, force: true });
@@ -308,7 +308,7 @@ test("D-REACH-16 standalone packaged plugin uses its bundled deterministic runti
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "standalone-session", callID: "standalone-execution" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).resolves.toBeUndefined();
 });
@@ -334,7 +334,7 @@ test("D-REACH-17 standalone packaged plugin rejects tampered deterministic autho
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "tampered-session", callID: "tampered-execution" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("invalid-evidence");
 });
@@ -342,7 +342,7 @@ test("D-REACH-17 standalone packaged plugin rejects tampered deterministic autho
 test("D-REACH-18 OpenCode caller-only deckExecution with no provider fails closed in invocation-required", async () => {
   const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
   const args: Record<string, unknown> = {
-    subagent_type: "deck-developer-apply-general",
+    subagent_type: "deck-apply-fast",
     deckExecution: fixture.event({
       deterministicRepairAuthority: deterministicRepairAuthority(fixture.dossier),
     }),
@@ -378,7 +378,7 @@ test("D-REACH-18 OpenCode caller-only deckExecution with no provider fails close
 test("D-REACH-19 OpenCode caller-only deckExecution with no provider preserves legacy in static-compatible", async () => {
   const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
   const args: Record<string, unknown> = {
-    subagent_type: "deck-developer-apply-general",
+    subagent_type: "deck-apply-fast",
     deckExecution: fixture.event({
       deterministicRepairAuthority: deterministicRepairAuthority(fixture.dossier),
     }),
@@ -415,7 +415,7 @@ test("D-REACH-20 OpenCode provider authority wins over conflicting caller deckEx
   const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
   const providerEvent = fixture.event();
   const args: Record<string, unknown> = {
-    subagent_type: "deck-developer-apply-general",
+    subagent_type: "deck-apply-fast",
     deckExecution: fixture.event({ mode: "legacy" }),
   };
   let bridgeCalls = 0;
@@ -472,7 +472,7 @@ test("D-REACH-21 caller marker cannot activate a provider-supplied V1 event", as
     { tool: "delegate", sessionID: "marker-session", callID: "marker-execution" },
     {
       args: {
-        subagent_type: "deck-developer-apply-general",
+        subagent_type: "deck-apply-fast",
         deckExecution: {
           deterministicRepairAuthority: {
             schema: "deterministic-targeted-repair-authority-v1",
@@ -519,7 +519,7 @@ test("OpenCode static-compatible hook ignores agent context and preserves legacy
   const createPlugin = await loadOpenCodePluginFactory();
   const hooks = await createPlugin()();
   await hooks["chat.message"]({ sessionID: "session-untrusted", messageID: "message-untrusted" }, { message: { role: "user" }, parts: [] });
-  const args = { subagent_type: "deck-developer-apply-general", deckExecution: fixture.event() };
+  const args = { subagent_type: "deck-apply-fast", deckExecution: fixture.event() };
   let rejection: unknown;
   try {
     await hooks["tool.execute.before"](
@@ -540,7 +540,7 @@ test("OpenCode static-compatible hook preserves legacy delegation when its provi
   await hooks["chat.message"]({ sessionID: "session-provider-error", messageID: "message-provider-error" }, { message: { role: "user" }, parts: [] });
   let rejection: unknown;
   try {
-    await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "session-provider-error", callID: "provider-error" }, { args: { subagent_type: "deck-developer-apply-general" } });
+    await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "session-provider-error", callID: "provider-error" }, { args: { subagent_type: "deck-apply-fast" } });
   } catch (error) {
     rejection = error;
   }
@@ -554,7 +554,7 @@ test("OpenCode invocation-required hook blocks when the trusted provider is abse
   await hooks["chat.message"]({ sessionID: "session-required", messageID: "message-required" }, { message: { role: "user" }, parts: [] });
   await expect(hooks["tool.execute.before"](
     { tool: "delegate", sessionID: "session-required", callID: "required-missing-provider" },
-    { args: { subagent_type: "deck-developer-apply-general" } },
+    { args: { subagent_type: "deck-apply-fast" } },
   )).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
 });
 
@@ -567,7 +567,7 @@ test("OpenCode invocation-required hook redacts trusted-provider failures", asyn
   await hooks["chat.message"]({ sessionID: "session-required-error", messageID: "message-required-error" }, { message: { role: "user" }, parts: [] });
   await expect(hooks["tool.execute.before"](
     { tool: "delegate", sessionID: "session-required-error", callID: "required-provider-error" },
-    { args: { subagent_type: "deck-developer-apply-general" } },
+    { args: { subagent_type: "deck-apply-fast" } },
   )).rejects.toThrow("invalid-evidence");
 });
 
@@ -589,7 +589,7 @@ test("D-REACH-22 OpenCode plugin captures resolver at init; late global installa
     invocationAuthorization: "invocation-required",
   });
   const hooks = await plugin();
-  const args: Record<string, unknown> = { subagent_type: "deck-developer-apply-general" };
+  const args: Record<string, unknown> = { subagent_type: "deck-apply-fast" };
   await expect(
     hooks["tool.execute.before"]({ tool: "delegate", sessionID: "late-global", callID: "late-global-1" }, { args }),
   ).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
@@ -616,7 +616,7 @@ test("D-REACH-23 OpenCode plugin captures mode at init; post-init options mutati
   const plugin = createOpenCodeDeveloperTeamExecutionPluginV1(options as any);
   options.invocationAuthorization = "invocation-required";
   const hooks = await plugin();
-  const args: Record<string, unknown> = { subagent_type: "deck-developer-apply-general" };
+  const args: Record<string, unknown> = { subagent_type: "deck-apply-fast" };
   let rejection: unknown;
   try {
     await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "mutable-options", callID: "mutable-options-call" }, { args });
@@ -648,7 +648,7 @@ test("D-REACH-24 OpenCode installed resolver returning null yields invalid-evide
     },
   });
   const hooks = await plugin();
-  const args: Record<string, unknown> = { subagent_type: "deck-developer-apply-general" };
+  const args: Record<string, unknown> = { subagent_type: "deck-apply-fast" };
   await expect(
     hooks["tool.execute.before"]({ tool: "delegate", sessionID: "null-resolver", callID: "null-resolver-call" }, { args }),
   ).rejects.toThrow("invalid-evidence");
@@ -677,7 +677,7 @@ test("D-REACH-25 OpenCode installed resolver returning non-object yields invalid
     },
   });
   const hooks = await plugin();
-  const args: Record<string, unknown> = { subagent_type: "deck-developer-apply-general" };
+  const args: Record<string, unknown> = { subagent_type: "deck-apply-fast" };
   await expect(
     hooks["tool.execute.before"]({ tool: "delegate", sessionID: "non-object-resolver", callID: "non-object-resolver-call" }, { args }),
   ).rejects.toThrow("invalid-evidence");
@@ -706,7 +706,7 @@ test("D-REACH-26 OpenCode unrelated role strips caller deckExecution, provider n
     },
   });
   const hooks = await plugin();
-  const args: Record<string, unknown> = { subagent_type: "deck-developer-explorer", deckExecution: fixture.event() };
+  const args: Record<string, unknown> = { subagent_type: "deck-investigate", deckExecution: fixture.event() };
   let rejection: unknown;
   try {
     await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "non-apply", callID: "non-apply-call" }, { args });
@@ -740,7 +740,7 @@ test("D-REACH-27 OpenCode unrelated role preserves zero bridge/effect even when 
     },
   });
   const hooks = await plugin();
-  const args: Record<string, unknown> = { subagent_type: "deck-developer-explorer", deckExecution: fixture.event() };
+  const args: Record<string, unknown> = { subagent_type: "deck-investigate", deckExecution: fixture.event() };
   let rejection: unknown;
   try {
     await hooks["tool.execute.before"]({ tool: "delegate", sessionID: "non-apply-with-marker", callID: "non-apply-with-marker-call" }, { args });
@@ -780,7 +780,7 @@ test("D-REACH-28 OpenCode invalid invocationAuthorization string yields invalid-
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "invalid-mode", callID: "invalid-mode-call" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("invalid-evidence");
   expect(resolverCalls).toBe(0);
@@ -815,7 +815,7 @@ test("D-REACH-29 OpenCode null invocationAuthorization yields invalid-evidence w
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "null-mode", callID: "null-mode-call" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("invalid-evidence");
   expect(resolverCalls).toBe(0);
@@ -850,7 +850,7 @@ test("D-REACH-30 OpenCode object invocationAuthorization yields invalid-evidence
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "object-mode", callID: "object-mode-call" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("invalid-evidence");
   expect(resolverCalls).toBe(0);
@@ -885,7 +885,7 @@ test("D-REACH-31 OpenCode empty string invocationAuthorization yields invalid-ev
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "empty-mode", callID: "empty-mode-call" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("invalid-evidence");
   expect(resolverCalls).toBe(0);
@@ -910,7 +910,7 @@ test("D-REACH-32 OpenCode post-init mutation of invalid invocationAuthorization 
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "post-mutate", callID: "post-mutate-call" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("invalid-evidence");
   expect(fixture.delegationCount()).toBe(0);
@@ -942,7 +942,7 @@ test("D-REACH-33 OpenCode late global provider does not bypass invalid invocatio
     await expect(
       hooks["tool.execute.before"](
         { tool: "delegate", sessionID: "late-global-invalid", callID: "late-global-invalid-call" },
-        { args: { subagent_type: "deck-developer-apply-general" } },
+        { args: { subagent_type: "deck-apply-fast" } },
       ),
     ).rejects.toThrow("invalid-evidence");
   } finally {
@@ -974,7 +974,7 @@ test("D-REACH-34 OpenCode installed resolver with missing receipt yields invalid
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "missing-receipt", callID: "missing-receipt-call" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("invalid-evidence");
   expect(resolverCalls).toBe(1);
@@ -1005,7 +1005,7 @@ test("D-REACH-35 OpenCode installed resolver with missing receipt yields invalid
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "missing-receipt-shadow", callID: "missing-receipt-shadow-call" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("invalid-evidence");
   expect(resolverCalls).toBe(1);
@@ -1035,7 +1035,7 @@ test("D-REACH-36 OpenCode absent resolver in invocation-required remains AUTHZ_M
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "absent-resolver", callID: "absent-resolver-call" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
   expect(bridgeCalls).toBe(0);
@@ -1078,7 +1078,7 @@ test("D-REACH-37 OpenCode getter invocationAuthorization invalid-then-valid fail
   await expect(
     hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "getter-mode", callID: "getter-mode-call" },
-      { args: { subagent_type: "deck-developer-apply-general" } },
+      { args: { subagent_type: "deck-apply-fast" } },
     ),
   ).rejects.toThrow("invalid-evidence");
   expect(modeReads).toBe(1);
@@ -1130,7 +1130,7 @@ test("D-REACH-38 OpenCode Proxy provider invocationAuthorization invalid-then-va
     await expect(
       hooks["tool.execute.before"](
         { tool: "delegate", sessionID: "proxy-provider-mode", callID: "proxy-provider-mode-call" },
-        { args: { subagent_type: "deck-developer-apply-general" } },
+        { args: { subagent_type: "deck-apply-fast" } },
       ),
     ).rejects.toThrow("invalid-evidence");
   } finally {
@@ -1143,7 +1143,7 @@ test("D-REACH-38 OpenCode Proxy provider invocationAuthorization invalid-then-va
 });
 
 
-test("T03 OpenCode reserves trusted preparation authority before one native deck-init delegation", async () => {
+test("T03 OpenCode reserves trusted preparation authority before one native deck-setup delegation", async () => {
   const authority = openCodePreparationAuthority("prep-session", "prep-call");
   let providerCalls = 0;
   let poisonCalls = 0;
@@ -1157,7 +1157,7 @@ test("T03 OpenCode reserves trusted preparation authority before one native deck
   try {
     const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
     const args: Record<string, unknown> = {
-      subagent_type: "deck-init",
+      subagent_type: "deck-setup",
       deckPreparation: { authorization: "caller-poison" },
       install: () => { poisonCalls += 1; },
       network: () => { poisonCalls += 1; },
@@ -1193,7 +1193,7 @@ test("T03 OpenCode fails closed before delegation for replay and runner mismatch
     const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
     const invoke = (sessionID: string, callID: string) => hooks["tool.execute.before"](
       { tool: "delegate", sessionID, callID },
-      { args: { subagent_type: "deck-init" } },
+      { args: { subagent_type: "deck-setup" } },
     );
     await invoke("replay-session", "replay-call");
     await expect(invoke("replay-session", "replay-call")).rejects.toThrow("modification-not-authorized:AUTHZ_REPLAYED");
@@ -1207,7 +1207,7 @@ test("T03 OpenCode fails closed before delegation for replay and runner mismatch
     const mismatchHooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
     await expect(mismatchHooks["tool.execute.before"](
       { tool: "delegate", sessionID: "mismatch-session", callID: "mismatch-call" },
-      { args: { subagent_type: "deck-init" } },
+      { args: { subagent_type: "deck-setup" } },
     )).rejects.toThrow("modification-not-authorized:AUTHZ_RUNNER_MISMATCH");
   } finally {
     delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];
@@ -1225,7 +1225,7 @@ test("T03 OpenCode never resolves preparation for unrelated agents and clears cl
     const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
     await hooks["tool.execute.before"](
       { tool: "delegate", sessionID: "ordinary-session", callID: "ordinary-call" },
-      { args: { subagent_type: "deck-developer-apply-backend", deckPreparation: "caller-poison" } },
+      { args: { subagent_type: "deck-apply-deep", deckPreparation: "caller-poison" } },
     );
     expect(providerCalls).toBe(0);
     await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "ordinary-session" } } } });
@@ -1239,7 +1239,7 @@ test("T03 OpenCode never resolves preparation for unrelated agents and clears cl
 test("T03 OpenCode rejects caller-only preparation metadata when the host provider is absent", async () => {
   const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
   const args: Record<string, unknown> = {
-    subagent_type: "deck-init",
+    subagent_type: "deck-setup",
     deckPreparation: { authorization: "caller-only" },
   };
   await expect(hooks["tool.execute.before"](
@@ -1275,7 +1275,7 @@ test("D-REACH-39 OpenCode registers correlated QA hooks for the native task tool
   });
   const hooks = await plugin();
   const args: Record<string, unknown> = {
-    subagent_type: "deck-developer-verify",
+    subagent_type: "deck-quality",
     deckQaInvocation: { invocationId: "caller-poison" },
     deckQaResult: { status: "caller-poison" },
   };
@@ -1326,7 +1326,7 @@ test("D-REACH-40 OpenCode consumes a QA result once and rejects missing or misma
     qaAuthority,
   });
   const hooks = await plugin();
-  const args = { subagent_type: "deck-developer-review" };
+  const args = { subagent_type: "deck-quality" };
   const mismatchedInput = { tool: "delegate", sessionID: "qa-once-session", callID: "qa-mismatch" };
   await hooks["tool.execute.before"](mismatchedInput, { args });
 
@@ -1360,7 +1360,7 @@ test("D-REACH-41 OpenCode invocation-required QA delegation fails closed without
   const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1({ invocationAuthorization: "invocation-required" })();
   await expect(hooks["tool.execute.before"](
     { tool: "delegate", sessionID: "qa-missing", callID: "qa-missing-call" },
-    { args: { subagent_type: "deck-developer-review", deckQaInvocation: { caller: true }, deckQaResult: { caller: true } } },
+    { args: { subagent_type: "deck-quality", deckQaInvocation: { caller: true }, deckQaResult: { caller: true } } },
   )).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
 });
 
@@ -1379,7 +1379,7 @@ test("D-REACH-42 OpenCode clears pending QA correlation and invokes session clea
   try {
     const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
     const input = { tool: "delegate", sessionID: "qa-cleanup", callID: "qa-cleanup-call" };
-    const args = { subagent_type: "verify-general" };
+    const args = { subagent_type: "deck-quality" };
     await hooks["tool.execute.before"](input, { args });
     await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "qa-cleanup" } } } });
     expect(cleared).toEqual(["qa-cleanup"]);
@@ -1403,7 +1403,7 @@ test("T03 OpenCode blocks missing and invalid provider claims before native dele
     const missingHooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
     await expect(missingHooks["tool.execute.before"](
       { tool: "delegate", sessionID: "missing-claim-session", callID: "missing-claim-call" },
-      { args: { subagent_type: "deck-init" } },
+      { args: { subagent_type: "deck-setup" } },
     )).rejects.toThrow("modification-not-authorized:AUTHZ_MISSING");
 
     const invalid = openCodePreparationAuthority("invalid-claim-session", "invalid-claim-call");
@@ -1421,7 +1421,7 @@ test("T03 OpenCode blocks missing and invalid provider claims before native dele
     const invalidHooks = await createOpenCodeDeveloperTeamExecutionPluginV1()();
     await expect(invalidHooks["tool.execute.before"](
       { tool: "delegate", sessionID: "invalid-claim-session", callID: "invalid-claim-call" },
-      { args: { subagent_type: "deck-init" } },
+      { args: { subagent_type: "deck-setup" } },
     )).rejects.toThrow("modification-not-authorized:AUTHZ_PROOF_INVALID");
   } finally {
     delete (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT_SYMBOL];

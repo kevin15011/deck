@@ -205,7 +205,7 @@ export function runOrchestratorPipeline(
         outcome: "needs-init",
         blockReason: undefined,
         stageErrors,
-        delegate: { skillId: "deck-init", reason: "Project not initialized" },
+        delegate: { skillId: "deck-setup", reason: "Project readiness requires Setup" },
         initState,
       };
     }

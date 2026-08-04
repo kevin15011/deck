@@ -3,7 +3,14 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { validateSupermemoryOpenCodeMcpConfig, writeSupermemoryOpenCodeMcpConfig, SUPERMEMORY_MCP_URL, SUPERMEMORY_MCP_SERVER_NAME } from "./opencode-mcp-config";
+import {
+  validateSupermemoryOpenCodeMcpConfig,
+  writeSupermemoryOpenCodeMcpConfig,
+  writeSerenaOpenCodeMcpConfig,
+  SUPERMEMORY_MCP_URL,
+  SUPERMEMORY_MCP_SERVER_NAME,
+} from "./opencode-mcp-config";
+import type { SerenaReadinessEvidence } from "@deck/core";
 
 function createTempDir(): string {
   const dir = join(tmpdir(), `deck-mcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -420,6 +427,132 @@ describe("fail-open diagnostics", () => {
     } finally {
       cleanup(dir);
     }
+  });
+});
+
+describe("writeSerenaOpenCodeMcpConfig", () => {
+  const ownedRoot = "/fixtures/deck-data/tools/serena";
+  const executable = `${ownedRoot}/bin/serena`;
+  const readiness: SerenaReadinessEvidence = {
+    capabilityId: "serena",
+    state: "ready",
+    resolvedExecutablePath: executable,
+    source: "installed-deck-tool",
+    probe: "serena-help",
+    fingerprint: "serena-fingerprint",
+  };
+  const command = [executable, "start-mcp-server", "--context", "ide", "--project-from-cwd"] as const;
+
+  function fakeFileSystem(initial: Record<string, string> = {}) {
+    const files = new Map(Object.entries(initial));
+    const writes: string[] = [];
+    const renames: Array<[string, string]> = [];
+    return {
+      files,
+      writes,
+      renames,
+      fileSystem: {
+        exists: (path: string) => files.has(path),
+        readFile: (path: string) => files.get(path) ?? (() => { throw new Error("missing"); })(),
+        writeFile: (path: string, content: string) => { writes.push(path); files.set(path, content); },
+        rename: (from: string, to: string) => {
+          renames.push([from, to]);
+          const content = files.get(from);
+          if (content === undefined) throw new Error("temporary file missing");
+          files.set(to, content);
+          files.delete(from);
+        },
+      },
+    };
+  }
+
+  test("creates an atomic local MCP entry with the exact absolute command array", () => {
+    const path = "/fixtures/opencode/opencode.json";
+    const fake = fakeFileSystem();
+
+    const result = writeSerenaOpenCodeMcpConfig({
+      configPath: path,
+      ownedRoot,
+      readiness,
+      command,
+      fileSystem: fake.fileSystem,
+    });
+
+    expect(result).toMatchObject({ ok: true, status: "created", serverName: "serena" });
+    expect(fake.writes).toHaveLength(1);
+    expect(fake.renames).toHaveLength(1);
+    const config = JSON.parse(fake.files.get(path)!);
+    expect(config.mcp.serena).toEqual({ type: "local", command: [...command], enabled: true });
+    expect(config.mcp.serena.command[0]).toBe(executable);
+  });
+
+  test("returns unchanged without writing equivalent known-good configuration", () => {
+    const path = "/fixtures/opencode/opencode.json";
+    const original = JSON.stringify({
+      unrelated: { keep: true },
+      mcp: {
+        other: { type: "local", command: ["other"] },
+        serena: { type: "local", command: [...command], enabled: true },
+      },
+    });
+    const fake = fakeFileSystem({ [path]: original });
+
+    const result = writeSerenaOpenCodeMcpConfig({ configPath: path, ownedRoot, readiness, command, fileSystem: fake.fileSystem });
+
+    expect(result).toMatchObject({ ok: true, status: "unchanged" });
+    expect(fake.writes).toHaveLength(0);
+    expect(fake.renames).toHaveLength(0);
+    expect(fake.files.get(path)).toBe(original);
+  });
+
+  test("updates a legacy bare command only after validated evidence", () => {
+    const path = "/fixtures/opencode/opencode.json";
+    const fake = fakeFileSystem({
+      [path]: JSON.stringify({ mcp: { serena: { type: "local", command: ["serena", "start-mcp-server"] }, other: { keep: true } } }),
+    });
+
+    const result = writeSerenaOpenCodeMcpConfig({ configPath: path, ownedRoot, readiness, command, fileSystem: fake.fileSystem });
+
+    expect(result).toMatchObject({ ok: true, status: "updated" });
+    const config = JSON.parse(fake.files.get(path)!);
+    expect(config.mcp.serena.command).toEqual([...command]);
+    expect(config.mcp.other).toEqual({ keep: true });
+  });
+
+  test("rejects unsafe or wrong evidence and preserves the original file", () => {
+    const path = "/fixtures/opencode/opencode.json";
+    const original = JSON.stringify({ mcp: { serena: { type: "local", command: ["serena"] }, other: { keep: true } } });
+    for (const unsafe of [
+      { ...readiness, resolvedExecutablePath: "relative/serena" },
+      { ...readiness, resolvedExecutablePath: "/other-user/bin/serena" },
+      { ...readiness, resolvedExecutablePath: `${ownedRoot}/bin/../outside` },
+      { ...readiness, resolvedExecutablePath: `${ownedRoot}/bin/serena\0bad` },
+    ]) {
+      const fake = fakeFileSystem({ [path]: original });
+      const result = writeSerenaOpenCodeMcpConfig({ configPath: path, ownedRoot, readiness: unsafe, command, fileSystem: fake.fileSystem });
+      expect(result.ok).toBe(false);
+      expect(fake.writes).toHaveLength(0);
+      expect(fake.files.get(path)).toBe(original);
+    }
+
+    const fake = fakeFileSystem({ [path]: original });
+    const wrongCommand = ["serena", ...command.slice(1)] as const;
+    const result = writeSerenaOpenCodeMcpConfig({ configPath: path, ownedRoot, readiness, command: wrongCommand, fileSystem: fake.fileSystem });
+    expect(result.ok).toBe(false);
+    expect(fake.writes).toHaveLength(0);
+    expect(fake.files.get(path)).toBe(original);
+  });
+
+  test("rejects malformed configuration without rewriting it", () => {
+    const path = "/fixtures/opencode/opencode.json";
+    const original = "{ malformed";
+    const fake = fakeFileSystem({ [path]: original });
+
+    const result = writeSerenaOpenCodeMcpConfig({ configPath: path, ownedRoot, readiness, command, fileSystem: fake.fileSystem });
+
+    expect(result.ok).toBe(false);
+    expect(fake.writes).toHaveLength(0);
+    expect(fake.files.get(path)).toBe(original);
   });
 });
 

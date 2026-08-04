@@ -28,7 +28,7 @@ function hash(s: string): number {
  */
 const BASELINE_HASHES: Record<string, Record<string, number>> = {
   "adaptive-memory": {
-    agent: -326231982, // R32: removed ## headings, backtick refs
+    agent: 1776894620, // adaptive team example updated to the seven-role flow
     session: 1747602442, // R32: removed ## headings, backtick refs
     skill: 2073604142, // R32: removed ## headings, backtick refs
   },

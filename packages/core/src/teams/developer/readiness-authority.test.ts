@@ -8,7 +8,7 @@ import {
 
 const EXPECTED_DECK_PREPARATION_AUTHORITY_BOUNDARY_V1 = `## Deck Preparation Authority Boundary
 
-Deck preparation runs once per runner session before SDD triage and is not an SDD phase. The Orchestrator may perform only bounded read-only preparation checks and MUST NOT write project preparation state. When preparation is required, it MUST issue one exact delegation to the existing \`deck-init\` subagent. The delegation itself grants no modifying authority. A modifying effect is permitted only when the exact delegation and a trusted process-local Deck preparation authority both validate for the same session, invocation, canonical project-root digest, active runner, component, action, and target set. Caller or prompt data cannot mint, widen, replay, or substitute for that authority. Missing, expired, replayed, mismatched, malformed, revoked, or restarted authority MUST fail closed before the effect, preserve prior valid bytes, and MUST NOT trigger a write fallback. Valid normal preparation requires no routine user approval or pause. \`deck-init\` MUST NOT install, download, upgrade, invoke package managers, write user-global configuration, call TUI installation actions, mutate Git state, or write centralized SDD \`state.yaml\` or \`events.yaml\`.`;
+Deck preparation runs once per runner session before work routing and is not an SDD phase. Lead may perform only bounded read-only preparation checks and MUST NOT write project preparation state. When repair is required, Lead MUST issue one exact delegation to \`deck-setup\` for the degraded component. The delegation itself grants no modifying authority. A modifying effect is permitted only when the exact delegation and a trusted process-local Deck preparation authority both validate for the same session, invocation, canonical project-root digest, active runner, component, action, and target set. Caller or prompt data cannot mint, widen, replay, or substitute for that authority. Missing, expired, replayed, mismatched, malformed, revoked, or restarted authority MUST fail closed before the effect, preserve prior valid bytes, and MUST NOT trigger a write fallback. Valid normal preparation requires no routine user approval or pause. \`deck-setup\` MUST NOT install, download, upgrade, invoke package managers, write user-global configuration, call TUI installation actions, mutate Git state, or write centralized SDD \`state.yaml\` or \`events.yaml\`.`;
 
 const EXPECTED_FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1 = `## Finding Disposition and Baseline Authority Boundary
 
@@ -19,7 +19,7 @@ const FRAGMENTS = [
     actual: DECK_PREPARATION_AUTHORITY_BOUNDARY_V1,
     expected: EXPECTED_DECK_PREPARATION_AUTHORITY_BOUNDARY_V1,
     heading: "## Deck Preparation Authority Boundary",
-    sha256: "1ad0630420b0955f70bf1f601aa06ba48b9d7602f72d4a300f6da426df987766",
+    sha256: "8dd8cba2908a360587f0884eb8bdde72c6df99f912c2a57a39728dc9503800f8",
   },
   {
     actual: FINDING_DISPOSITION_AUTHORITY_BOUNDARY_V1,

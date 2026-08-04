@@ -127,6 +127,24 @@ describe("mergeConfig", () => {
     expect(merged.agent!["agent.alice"]?.description).toBe("Alice");
   });
 
+  test("removes only explicitly listed legacy agent keys", () => {
+    const merged = mergeConfig(
+      {
+        agent: {
+          "deck-developer-orchestrator": { mode: "primary", description: "legacy", prompt: "legacy" },
+          "user-agent": { mode: "subagent", description: "user", prompt: "user" },
+        },
+      },
+      { "deck-lead": { mode: "primary", description: "lead", prompt: "lead" } },
+      [],
+      ["deck-developer-orchestrator"],
+    );
+
+    expect(merged.agent?.["deck-developer-orchestrator"]).toBeUndefined();
+    expect(merged.agent?.["deck-lead"]).toBeDefined();
+    expect(merged.agent?.["user-agent"]).toBeDefined();
+  });
+
   test("appends plugins to plugin array if not present", () => {
     const existing: OpenCodeConfig = { plugin: ["existing-plugin"] };
     const merged = mergeConfig(existing, {}, ["new-plugin"]);

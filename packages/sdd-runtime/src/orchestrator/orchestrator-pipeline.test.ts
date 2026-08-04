@@ -63,8 +63,8 @@ describe("orchestrator-pipeline", () => {
       const result = runOrchestratorPipeline(input, config);
 
       expect(result.outcome).toBe("needs-init");
-      expect(result.delegate?.skillId).toBe("deck-init");
-      expect(result.delegate?.reason).toBe("Project not initialized");
+      expect(result.delegate?.skillId).toBe("deck-setup");
+      expect(result.delegate?.reason).toBe("Project readiness requires Setup");
       expect(result.initState?.initialized).toBe(false);
     });
 

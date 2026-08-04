@@ -1,0 +1,199 @@
+schema: spec-registry-events-v1
+events:
+  - phase: spec
+    status: in_progress
+    event: spec.in_progress
+    artifact: proposal.md
+    timestamp: "2026-08-03T20:05:14.000Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:23403c129c5e1079609c250c4c550a22
+    idempotency_key: sha256:86cb2a2349343fc4ee154ddbabff888b23b1a56aefba6fdbc3834e7b773942b9
+    transaction_id: registry-transaction:v1:proposal-approved-to-spec-design
+    approval_receipt:
+      schema: approval-receipt-v1
+      receiptId: approval-receipt:v1:d2d9aba2093cd2e685505f305351bbcc
+      digest: sha256:d2d9aba2093cd2e685505f305351bbcce96c6d1f987fbc44324bb264a3c8213b
+      changeId: auto-bootstrap-serena-prerequisites
+      gate: proposal-approval
+      subjectDigest: sha256:a4afa8e8145200fc7d7d7cad509d2880ce76d02006a76bc8fbb2a8d72f1c28de
+      decision: approved
+      actor: user
+      timestamp: "2026-08-03T20:05:14.000Z"
+      transitionId: proposal-approved-to-spec-design
+    approval_consumption:
+      receiptId: approval-receipt:v1:d2d9aba2093cd2e685505f305351bbcc
+      receiptDigest: sha256:d2d9aba2093cd2e685505f305351bbcce96c6d1f987fbc44324bb264a3c8213b
+      transitionId: proposal-approved-to-spec-design
+    notes:
+      - "User approved proposal digest sha256:a4afa8e8145200fc7d7d7cad509d2880ce76d02006a76bc8fbb2a8d72f1c28de."
+      - "Approval consumed for proposal-to-spec-design transition."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-08-03T20:19:17.297Z"
+    actor: deck-developer-spec
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:78675f052fd452dafd2e7fa83460dbd1
+    idempotency_key: sha256:85a6009c20f55a0d4bbe258f8d49cfe91cabb6f0ebe9887ba976fe4f860d2341
+    transaction_id: registry-transaction:v1:spec-completed
+    notes:
+      - "Behavior specification completed: 13 requirements, 18 scenarios."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-08-03T20:19:48.615Z"
+    actor: deck-developer-design
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:0c453cbbf707e1b817b6d3776b7b6e85
+    idempotency_key: sha256:7f574a630c821e76a549b1eee941577f598ac6c10bd21a836c5ca694686b3e08
+    transaction_id: registry-transaction:v1:design-completed
+    notes:
+      - "Design completed; no prompts or skills are affected."
+      - "Apply remains blocked pending approved uv trust material."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-03T20:39:38.962Z"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:b5a7c513cfefeda3f93d351c4ee5d817
+    idempotency_key: sha256:2284f9912c0996e877e69522853b3df1ea86e1544ab8e6300eebd3e3a8352152
+    transaction_id: registry-transaction:v1:tasks-completed
+    notes:
+      - "Created 19 tasks in six groups."
+      - "Apply is blocked by P-SEC-001 and P-CLI-001."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-08-03T21:09:05.897Z"
+    actor: deck-developer-design
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:329553aa2ea83864e585ef598afe58c2
+    idempotency_key: sha256:1ff3f5e102eab633f9cc50ed7e06ff7542bda4a86e8f316d89ecf6a3b50ca6a1
+    transaction_id: registry-transaction:v1:design-topology-repair
+    notes:
+      - "Repaired the archive topology to an exact ordered three-entry policy."
+      - "P-SEC-001 and P-CLI-001 remain blocking."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-03T21:09:37.953Z"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:4ffaed8c55227f92258ac311ded63f71
+    idempotency_key: sha256:fbc2d4cb04389d57775972c22e64ee3428983703efda9084b2a1598d90f173a5
+    transaction_id: registry-transaction:v1:tasks-topology-repair
+    notes:
+      - "Reconciled T01 with the repaired Design archive topology."
+      - "Independent focused review passed; P-SEC-001 and P-CLI-001 remain blocking."
+  - phase: proposal
+    status: in_progress
+    event: proposal.in_progress
+    artifact: proposal.md
+    timestamp: "2026-08-03T21:22:28.021Z"
+    actor: deck-developer-proposal
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:e9b84bff5e34746bb30cfbf161b5fa51
+    idempotency_key: sha256:7b72682a9c98b8307ee70799d3e3c77f09420a7c36b223287e1fed07ec9fefb6
+    transaction_id: registry-transaction:v1:proposal-official-uv-revision
+    notes:
+      - "User selected controlled official uv installer use."
+      - "Prior approval does not bind the revised proposal digest."
+  - phase: spec
+    status: in_progress
+    event: spec.in_progress
+    artifact: proposal.md
+    timestamp: "2026-08-03T21:24:20.913Z"
+    actor: deck-developer-orchestrator
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:98bcea6486636b254efd8b950e4ab5b3
+    idempotency_key: sha256:8cd757f0120a41faaca1fd2d6caeb87c563c6355c6ddc6ad81d90a706cdf5daf
+    transaction_id: registry-transaction:v1:revised-proposal-approved-to-spec-design
+    approval_receipt:
+      schema: approval-receipt-v1
+      receiptId: approval-receipt:v1:fc1e64c49f4e91034a7145624ff4b0d2
+      digest: sha256:fc1e64c49f4e91034a7145624ff4b0d241ebbb03ede2bec2270cf4b31cf825fd
+      changeId: auto-bootstrap-serena-prerequisites
+      gate: revised-proposal-approval
+      subjectDigest: sha256:d4cc905b11ca6604f2760b3ab11abafa466a8815258f53f0979f4bb8481e8184
+      decision: approved
+      actor: user
+      timestamp: "2026-08-03T21:24:20.913Z"
+      transitionId: revised-proposal-approved-to-spec-design
+    approval_consumption:
+      receiptId: approval-receipt:v1:fc1e64c49f4e91034a7145624ff4b0d2
+      receiptDigest: sha256:fc1e64c49f4e91034a7145624ff4b0d241ebbb03ede2bec2270cf4b31cf825fd
+      transitionId: revised-proposal-approved-to-spec-design
+    notes:
+      - "User approved revised proposal digest sha256:d4cc905b11ca6604f2760b3ab11abafa466a8815258f53f0979f4bb8481e8184."
+      - "Approval consumed for revised-proposal-to-spec-design transition."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-08-03T21:30:00.335Z"
+    actor: deck-developer-spec
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:e88f38696afdc73720780d13e229c6c8
+    idempotency_key: sha256:8b51e6670361bde107df8716eb563e8dd87d8a71a42e1ac35de11daab57f0ca8
+    transaction_id: registry-transaction:v1:spec-official-uv-reconciliation
+    notes:
+      - "Reconciled 13 requirements and 19 scenarios to the approved official uv installer approach."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-08-03T21:36:23.317Z"
+    actor: deck-developer-design
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:6a956d014685b20fe79931af28d81e81
+    idempotency_key: sha256:b15f1eb0e2d184763a51f26a583c8873b5cf8a1bcfcb13b12bc286b25cea1e0f
+    transaction_id: registry-transaction:v1:design-official-uv-reconciliation
+    notes:
+      - "Replaced custom uv archive verification with the approved controlled official installer approach."
+      - "P-CLI-001 remains blocking."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-03T22:00:07.965Z"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:d89ddf1bcdafbb70faf13e35fb3740c6
+    idempotency_key: sha256:d5340e2a666e03654c37d5184d1cc3f0e7208ef6155748c1d1155d4107c01e92
+    transaction_id: registry-transaction:v1:tasks-official-uv-reconciliation
+    notes:
+      - "Reconciled 21 tasks across eight groups."
+      - "P-SEC-001 is superseded; P-CLI-001 and Bun availability remain blockers."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-03T22:33:50.232Z"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:5116a1069b5972891594f97d320a5e7d
+    idempotency_key: sha256:f720c5db3d02894207a9c7f7a87e5636e2ea078014d2d675731341e76228899f
+    transaction_id: registry-transaction:v1:tasks-app-ownership-resolution
+    notes:
+      - "P-CLI-001 resolved by user-authorized closure of the stale related change."
+      - "Bun-capable independent QA remains required."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: preconditions.md
+    timestamp: "2026-08-04T00:43:08.286Z"
+    actor: deck-developer-task
+    registry_write: non-deferred
+    intent_id: registry-intent:v1:78943d8507a1f557284fd6d63a3661d7
+    idempotency_key: sha256:02434523b9763953935077f161ac07602af950bd21b02ff40880a5a9c22a3200
+    transaction_id: registry-transaction:v1:preconditions-bun-ready
+    notes:
+      - "Verified /home/dev/.bun/bin/bun version 1.3.14."
+      - "P-ENV-001 is resolved; Apply may begin."
