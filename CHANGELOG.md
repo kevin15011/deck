@@ -9,6 +9,13 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-08-05
+
+### Changed
+
+- Redesigned Developer Team execution around adaptive, outcome-driven routes with clearer ownership, focused follow-up deltas, and protected quality checks for material risk.
+- Hardened OpenCode and Pi runner setup with deterministic readiness handling, model migration, and Serena bridge integration.
+
 ## [0.2.5] - 2026-08-03
 
 ### Added
@@ -48,7 +55,8 @@ All notable release changes to Deck are recorded here. Current release procedure
 - OpenCode model selection now uses the model inventory resolved by the active runner.
 - Streamlined project documentation and strengthened contributor, architecture, release, and documentation-governance guidance.
 
-[Unreleased]: https://github.com/kevin15011/deck/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/kevin15011/deck/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/kevin15011/deck/releases/tag/v0.2.6
 [0.2.5]: https://github.com/kevin15011/deck/releases/tag/v0.2.5
 [0.2.4]: https://github.com/kevin15011/deck/releases/tag/v0.2.4
 [0.2.3]: https://github.com/kevin15011/deck/releases/tag/v0.2.3
