@@ -16,6 +16,10 @@ All notable release changes to Deck are recorded here. Current release procedure
 - Redesigned Developer Team execution around adaptive, outcome-driven routes with clearer ownership, focused follow-up deltas, and protected quality checks for material risk.
 - Hardened OpenCode and Pi runner setup with deterministic readiness handling, model migration, and Serena bridge integration.
 
+### Fixed
+
+- Stable and main-branch releases now publish the Intel macOS (`darwin-x64`) archive alongside the other supported binary targets.
+
 ## [0.2.5] - 2026-08-03
 
 ### Added

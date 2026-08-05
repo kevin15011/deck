@@ -56,8 +56,9 @@ jobs:
         target:
           - linux-x64
           - linux-arm64
+          - darwin-x64
           - darwin-arm64
-    runs-on: ${{ matrix.target == 'darwin-x64' || matrix.target == 'darwin-arm64' && 'macos-latest' || 'ubuntu-latest' }}
+    runs-on: ${{ startsWith(matrix.target, 'darwin-') && 'macos-latest' || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -188,6 +189,7 @@ jobs:
           files: |
             release-assets/deck_v*_linux-x64.tar.gz
             release-assets/deck_v*_linux-arm64.tar.gz
+            release-assets/deck_v*_darwin-x64.tar.gz
             release-assets/deck_v*_darwin-arm64.tar.gz
             release-assets/checksums.txt
             release-assets/release.json
@@ -262,6 +264,7 @@ jobs:
           files: |
             release-assets/deck_v*_linux-x64.tar.gz
             release-assets/deck_v*_linux-arm64.tar.gz
+            release-assets/deck_v*_darwin-x64.tar.gz
             release-assets/deck_v*_darwin-arm64.tar.gz
             release-assets/checksums.txt
             release-assets/release.json

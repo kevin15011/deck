@@ -312,6 +312,7 @@ describe("prepare-release / buildBinaryItemsFromAssetsDir", () => {
     dir = mkdtempSync(join(tmpdir(), "prepare-release-assets-"));
     writeFileSync(join(dir, "deck_v1.2.0_linux-x64.tar.gz"), "linux-x64 blob");
     writeFileSync(join(dir, "deck_v1.2.0_linux-arm64.tar.gz"), "linux-arm64 blob");
+    writeFileSync(join(dir, "deck_v1.2.0_darwin-x64.tar.gz"), "darwin-x64 blob");
     writeFileSync(join(dir, "deck_v1.2.0_darwin-arm64.tar.gz"), "darwin-arm64 blob");
     // Non-matching file should be ignored
     writeFileSync(join(dir, "checksums.txt"), "irrelevant");
@@ -326,9 +327,9 @@ describe("prepare-release / buildBinaryItemsFromAssetsDir", () => {
       dir,
       "https://github.com/owner/repo/releases/download/v1.2.0"
     );
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(4);
     const platforms = items.map((i) => i.platform).sort();
-    expect(platforms).toEqual(["darwin-arm64", "linux-arm64", "linux-x64"]);
+    expect(platforms).toEqual(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"]);
     // Each item must have the spec-shaped fields.
     for (const item of items) {
       expect(item.asset_name).toMatch(/^deck_v[0-9A-Za-z.\-+]+_[a-z0-9]+-[a-z0-9]+\.tar\.gz$/);
