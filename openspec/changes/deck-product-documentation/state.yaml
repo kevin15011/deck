@@ -1,0 +1,22 @@
+schema: spec-registry-v1
+changeId: deck-product-documentation
+name: Deck Human-Facing Product Documentation
+currentPhase: apply
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+provenance:
+  - phase: explore
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "Established the evidence-backed product inventory, documentation architecture, public status vocabulary, and README-first narrative. Full SDD was not justified for this reversible documentation change."
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "Authorized the Markdown product-documentation vertical and source-backed documentation governance checks."
