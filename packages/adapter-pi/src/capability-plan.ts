@@ -1,5 +1,6 @@
 import {
   ALL_PI_RUNNER_CAPABILITY_IDS,
+  PI_RUNNER_CAPABILITY_CONTRIBUTION,
   getUserFacingCapability,
   type CapabilityId,
   type CapabilityImplementationId,
@@ -175,7 +176,7 @@ export function buildPiRunnerReviewPlan(
   ].some((action) => action.status === "manual" || action.status === "pending" || action.status === "blocked" || action.kind === "pending-source");
 
   // Resolve parity report for Pi runner
-  const parity = resolveRunnerParity("pi", runtimeHints);
+  const parity = resolveRunnerParity("pi", runtimeHints, [PI_RUNNER_CAPABILITY_CONTRIBUTION]);
 
   return {
     groups: cleanGroups,

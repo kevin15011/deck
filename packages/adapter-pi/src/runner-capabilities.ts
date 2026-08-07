@@ -33,9 +33,10 @@ import type {
   AdaptiveMemoryProvider,
   RunnerCapabilityCatalogEntry,
 } from "@deck/core";
-import { resolveRunnerParity, type ParityReport, type ParityReportEntry } from "@deck/core";
+import { resolvePiRunnerParity } from "./capability-parity";
+import { PI_RUNNER_CAPABILITY_CONTRIBUTION } from "./capability-catalog";
 import type { TeamEntry } from "@deck/core";
-import { DEVELOPER_TEAM_AGENTS, getModelCatalog } from "@deck/core";
+import { DEVELOPER_TEAM_AGENTS, getModelCatalog, getRunnerCapabilityMapping } from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { join } from "node:path";
 
@@ -250,6 +251,7 @@ function getPiCapability(capabilityId: string): import("@deck/core").RunnerCapab
     toolId: entry.toolId,
     source: entry.source,
     installKind: entry.installKind,
+    supportStatus: getRunnerCapabilityMapping(capabilityId, "pi", [PI_RUNNER_CAPABILITY_CONTRIBUTION])?.status,
     isInternal: entry.isInternal,
   };
 }
@@ -305,7 +307,7 @@ export type PiCapabilityParityResult = {
  * Get Pi runner capability parity report.
  * Uses resolveRunnerParity from core to compute gaps and blockers.
  */
-function getPiCapabilityParity(input: PiCapabilityParityInput): PiCapabilityParityResult {
+export function getPiCapabilityParity(input: PiCapabilityParityInput): PiCapabilityParityResult {
   // Build runtime hints from input
   const runtimeHints = {
     binariesInPath: input.binariesInPath,
@@ -314,7 +316,7 @@ function getPiCapabilityParity(input: PiCapabilityParityInput): PiCapabilityPari
     projectIndexVerified: input.projectIndexVerified,
   };
 
-  const parityReport = resolveRunnerParity("pi", runtimeHints);
+  const parityReport = resolvePiRunnerParity(runtimeHints);
 
   return {
     runnerId: "pi",

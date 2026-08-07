@@ -4,10 +4,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createPiRunnerCapabilities } from "./runner-capabilities";
+import { resolvePiRunnerParity } from "./capability-parity";
 import { buildDeveloperTeamManifest } from "../../core/src/teams/developer/manifest";
 
 describe("Pi RunnerCapabilities factory", () => {
   const capabilities = createPiRunnerCapabilities();
+
+  test("translates neutral parity failures to the legacy Pi boundary codes", () => {
+    const report = resolvePiRunnerParity({
+      binariesInPath: ["context-mode", "codebase-memory-mcp"],
+      mcpServersConfigured: ["codebase-memory"],
+      projectIndexVerified: false,
+    });
+
+    expect(report.capabilities.find((entry) => entry.capabilityId === "context-mode")?.code).toBe("pi-context-mode-mcp-missing");
+    expect(report.capabilities.find((entry) => entry.capabilityId === "rtk")?.code).toBe("shared-binary-not-usable");
+    expect(report.capabilities.find((entry) => entry.capabilityId === "serena")?.code).toBe("shared-binary-not-usable");
+    expect(report.capabilities.find((entry) => entry.capabilityId === "codebase-memory")?.code).toBe("codebase-memory-index-unverified");
+
+    const missingMcp = resolvePiRunnerParity({
+      binariesInPath: ["context-mode", "codebase-memory-mcp", "rtk", "serena"],
+      mcpServersConfigured: ["context-mode", "serena"],
+    });
+    expect(missingMcp.capabilities.find((entry) => entry.capabilityId === "codebase-memory-mcp")?.code).toBe("codebase-memory-mcp-missing");
+  });
 
   test("returns an object satisfying RunnerCapabilities type", () => {
     expect(capabilities).toBeDefined();

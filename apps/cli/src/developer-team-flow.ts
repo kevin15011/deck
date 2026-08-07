@@ -8,6 +8,7 @@ export type NextScreen =
   | "personality-selection"
   | "pi-preflight-checking"
   | "opencode-preflight-checking"
+  | "codex-preflight-checking"
   | "complete";
 
 type FlowContext = {
@@ -70,34 +71,9 @@ export function getNextScreenAfterEnvironmentSelection(context: FlowContext): Ne
   return "complete";
 }
 
-export function getNextScreenAfterPersonalitySelection(context: FlowContext): NextScreen {
-  const hasPi = context.selectedEnvironments.includes("pi-development");
-
-  if (hasPi) {
-    return "pi-preflight-checking";
-  }
-
-  const hasOpenCode = context.selectedEnvironments.includes("opencode-development");
-
-  if (hasOpenCode) {
-    return "opencode-preflight-checking";
-  }
-
-  return "complete";
-}
-
 function resolveNextEnvironment(nextEnvironment: EnvironmentId | null): NextScreen {
-  if (nextEnvironment === null) {
-    return "complete";
-  }
-
-  // Generic environment-to-screen resolution based on environment ID pattern
-  if (nextEnvironment.endsWith("-development")) {
-    // For development environments, the preflight screen is the environment name
-    // with "-development" replaced by "-preflight-checking"
-    const baseName = nextEnvironment.replace("-development", "");
-    return `${baseName}-preflight-checking` as NextScreen;
-  }
-
+  if (nextEnvironment === "pi-development") return "pi-preflight-checking";
+  if (nextEnvironment === "opencode-development") return "opencode-preflight-checking";
+  if (nextEnvironment === "codex-development") return "codex-preflight-checking";
   return "complete";
 }

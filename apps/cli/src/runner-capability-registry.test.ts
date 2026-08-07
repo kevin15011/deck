@@ -1,8 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { createRunnerCapabilityRegistry, createMemoryProviders, type MemoryProviderRegistration, type RunnerCapabilityCatalog } from "./runner-capability-registry";
+import { createRunnerCapabilityRegistry, createMemoryProviders, createRunnerParityContributions, type MemoryProviderRegistration, type RunnerCapabilityCatalog } from "./runner-capability-registry";
+import { composeRunnerCapabilityContributions } from "@deck/core";
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
 
 describe("runner-capability-registry", () => {
+  test("composes all real adapter parity contributions without collisions or order dependence", () => {
+    const contributions = createRunnerParityContributions();
+    const forward = composeRunnerCapabilityContributions(contributions);
+    const reversed = composeRunnerCapabilityContributions([...contributions].reverse());
+    expect(reversed).toEqual(forward);
+  });
+
   describe("createMemoryProviders", () => {
     test("creates engram memory provider", () => {
       const providers = createMemoryProviders();

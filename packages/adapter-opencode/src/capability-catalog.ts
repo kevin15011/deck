@@ -171,7 +171,12 @@ export function getUserFacingOpenCodeCapability(capabilityId: OpenCodeCapability
 // Registry Validation
 // ---------------------------------------------------------------------------
 
-import { getCanonicalCapability, getRunnerCapabilityMapping } from "@deck/core/runner-capability-registry";
+import {
+  defineRunnerCapabilityContribution,
+  getCanonicalCapability,
+  getRunnerCapabilityMapping,
+  type RunnerCapabilityMapping,
+} from "@deck/core";
 
 /**
  * Validates that all OpenCode catalog entries have a corresponding canonical capability mapping.
@@ -188,14 +193,14 @@ export function validateOpenCodeCatalogAgainstRegistry(): readonly string[] {
     }
 
     // Check that the canonical capability exists in the registry
-    const canonical = getCanonicalCapability(canonicalId);
+    const canonical = getCanonicalCapability(canonicalId, [OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION]);
     if (!canonical) {
       warnings.push(`OpenCode capability '${id}' maps to canonical '${canonicalId}' but that capability does not exist in registry`);
       continue;
     }
 
     // Check that there's a mapping for OpenCode runner
-    const mapping = getRunnerCapabilityMapping(canonicalId, "opencode");
+    const mapping = getRunnerCapabilityMapping(canonicalId, "opencode", [OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION]);
     if (!mapping) {
       warnings.push(`OpenCode capability '${id}' (canonical: ${canonicalId}) has no mapping for runner 'opencode' in registry`);
     }
@@ -212,3 +217,54 @@ export function getCanonicalCapabilityId(capabilityId: OpenCodeCapabilityId): Ca
   const entry = FULL_OPENCODE_CAPABILITY_CATALOG[capabilityId];
   return entry?.canonicalCapabilityId;
 }
+
+const protectedControlMappings = [
+  "trusted-runner-host-bridge",
+  "invocation-authorization",
+  "execution-dossier",
+  "controlled-effects",
+  "registry-coordination",
+  "bound-verification",
+].map((capabilityId): RunnerCapabilityMapping => ({
+  capabilityId,
+  runnerId: "opencode",
+  status: "supported",
+  adapterSource: "@deck/adapter-opencode",
+  installKind: "native-plugin-bridge",
+}));
+
+export const OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityContribution({
+  runnerId: "opencode",
+  capabilities: [
+    { id: "opencode-primary-orchestrator", label: "OpenCode Primary Orchestrator", category: "agents", requirement: "required", userFacing: true },
+    { id: "opencode-mermaid", label: "OpenCode Mermaid", category: "runner-silent-packages", requirement: "internal-required", userFacing: false },
+    { id: "opencode-mermaid-renderer", label: "OpenCode Mermaid Renderer", category: "runner-silent-packages", requirement: "internal-required", userFacing: false },
+    { id: "deck-model-variants", label: "Deck Model Variants", category: "runner-silent-packages", requirement: "internal-required", userFacing: false },
+  ],
+  mappings: [
+    ...protectedControlMappings,
+    { capabilityId: "code-economy", runnerId: "opencode", status: "supported", adapterSource: "@deck/adapter-opencode", installKind: "native-instruction-composition", provisionMode: "native-instruction-composition", parityChecks: ["instruction-bundle-present"] },
+    { capabilityId: "context-mode", runnerId: "opencode", status: "supported", adapterSource: "opencode-mcp-config", installKind: "npm-package-plus-mcp", provisionMode: "npm-package-plus-mcp", detectors: { commands: ["context-mode"], mcpServerNames: ["context-mode"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
+    { capabilityId: "codebase-memory", runnerId: "opencode", status: "supported", adapterSource: "codebase-memory-mcp", installKind: "shared-binary-plus-mcp", provisionMode: "shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
+    { capabilityId: "codebase-memory-mcp", runnerId: "opencode", status: "supported", adapterSource: "codebase-memory-mcp", installKind: "shared-binary-plus-mcp", provisionMode: "shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present"] },
+    { capabilityId: "rtk", runnerId: "opencode", status: "shared", adapterSource: "rtk", installKind: "shared-binary", provisionMode: "shared-binary", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall"] },
+    { capabilityId: "serena", runnerId: "opencode", status: "supported", adapterSource: "serena", installKind: "python-tool", provisionMode: "python-tool", detectors: { commands: ["serena"], mcpServerNames: ["serena"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
+    { capabilityId: "context7", runnerId: "opencode", status: "supported", adapterSource: "@upstash/context7-mcp", installKind: "mcp-server", provisionMode: "mcp-server", detectors: { mcpServerNames: ["context7"] }, parityChecks: ["mcp-config-present"] },
+    { capabilityId: "supermemory-tool-bindings", runnerId: "opencode", status: "supported", adapterSource: "supermemory", installKind: "mcp-server", provisionMode: "mcp-server", detectors: { mcpServerNames: ["supermemory"] }, parityChecks: ["mcp-config-present"] },
+    { capabilityId: "opencode-primary-orchestrator", runnerId: "opencode", status: "supported", adapterSource: "opencode-primary-orchestrator", installKind: "opencode-plugin", provisionMode: "opencode-plugin" },
+    { capabilityId: "opencode-mermaid", runnerId: "opencode", status: "runner-specific", adapterSource: "opencode-mermaid-renderer", installKind: "internal-required", provisionMode: "internal-required" },
+    { capabilityId: "opencode-mermaid-renderer", runnerId: "opencode", status: "runner-specific", adapterSource: "opencode-mermaid-renderer", installKind: "internal-required", provisionMode: "internal-required" },
+    { capabilityId: "deck-model-variants", runnerId: "opencode", status: "runner-specific", adapterSource: "deck-model-variants", installKind: "internal-required", provisionMode: "internal-required" },
+    { capabilityId: "pi-orchestrator-prompt-persistence", runnerId: "opencode", status: "not-applicable", adapterSource: "@deck/adapter-opencode", provisionMode: "foreign-runner-capability" },
+    { capabilityId: "pi-mermaid", runnerId: "opencode", status: "not-applicable", adapterSource: "@deck/adapter-opencode", provisionMode: "foreign-runner-capability" },
+    { capabilityId: "pi-hud", runnerId: "opencode", status: "not-applicable", adapterSource: "@deck/adapter-opencode", provisionMode: "foreign-runner-capability" },
+    { capabilityId: "deck-setup", runnerId: "opencode", status: "supported", adapterSource: "deck-setup", installKind: "npm-package", provisionMode: "npm-package" },
+  ],
+});
+
+export const OPENCODE_ADAPTER_CAPABILITY_DISPOSITIONS = Object.freeze([
+  { capabilityId: "engram", status: "provider-selected" },
+  { capabilityId: "opencode-mermaid-renderer", status: "runner-specific", installKind: "internal-required" },
+  { capabilityId: "deck-model-variants", status: "runner-specific", installKind: "internal-required" },
+  { capabilityId: "pi-hud", status: "not-applicable" },
+] as const);

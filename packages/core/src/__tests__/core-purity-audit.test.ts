@@ -79,19 +79,11 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^"Pi Mermaid"$/, reason: "capability display name with runner prefix" },
   // Adapter sources: runner-prefixed adapter source identifiers
   { pattern: /^"opencode-mcp-config"$/, reason: "adapter source ID with runner prefix" },
-  // Runner-capability-parity.ts: parity error codes (spec-defined gap identifiers)
-  // Error codes embed runner names as gap identifiers, not runtime references
-  { pattern: /^"pi-context-mode-mcp-missing"$/, reason: "parity error code with runner prefix" },
-  { pattern: /^"pi-rtk-mapping-missing"$/, reason: "parity error code with runner prefix" },
-  { pattern: /^"pi-supermemory-extra-gate-present"$/, reason: "parity error code with runner/provider prefix" },
-  { pattern: /^"pi-serena-not-satisfied"$/, reason: "parity error code with runner prefix" },
   // Runner-adapter.ts: engram as model provider ID in RunnerModelProvider union
   { pattern: /^"engram"$/, reason: "model provider ID in RunnerModelProvider type" },
   // Runner capability parity gap descriptions (spec-authored content embedded in catalog)
   // These describe parity gaps for specific runners — spec-defined, not implementation references
-  { pattern: /Serena is mandatory for Pi parity/, reason: "parity gap description referencing runner name" },
   { pattern: /parity with OpenCode/, reason: "parity gap description referencing runner name" },
-  { pattern: /Pi parity/, reason: "parity gap description referencing runner name" },
   { pattern: /RTK via Bash hook in OpenCode/, reason: "parity gap notes referencing runner name" },
   { pattern: /Deck init is bundled with OpenCode/, reason: "capability notes referencing runner name" },
   { pattern: /OpenCode Mermaid renderer/, reason: "capability description referencing runner name" },

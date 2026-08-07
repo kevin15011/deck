@@ -6,13 +6,89 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  resolveRunnerParity,
-  getParityGaps,
+  resolveRunnerParity as resolveCoreRunnerParity,
+  getParityGaps as getCoreParityGaps,
   type ParityReport,
   type ParityReportEntry,
 } from "./runner-capability-parity";
+import { defineRunnerCapabilityContribution } from "./runner-capability-registry";
+import { PI_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-pi";
+import { OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-opencode";
+
+const adapterContributions = [PI_RUNNER_CAPABILITY_CONTRIBUTION, OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION] as const;
+const resolveRunnerParity = (runnerId: string, runtimeHints?: Parameters<typeof resolveCoreRunnerParity>[1]) =>
+  resolveCoreRunnerParity(runnerId, runtimeHints, adapterContributions);
+const getParityGaps = (runnerId: string) => getCoreParityGaps(runnerId, adapterContributions);
 
 describe("Runner Capability Parity Resolver", () => {
+  it("uses runner-neutral codes and identifies the runner and capability in failures", () => {
+    const contribution = defineRunnerCapabilityContribution({
+      runnerId: "codex",
+      mappings: [
+        { capabilityId: "context-mode", runnerId: "codex", status: "shared", detectors: { commands: ["context-mode"], mcpServerNames: ["context-mode"] }, parityChecks: ["binary-usable", "mcp-config-present"] },
+        { capabilityId: "codebase-memory", runnerId: "codex", status: "shared", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present"] },
+      ],
+    });
+    const report = resolveCoreRunnerParity("codex", {
+      binariesInPath: ["context-mode", "codebase-memory-mcp"],
+      mcpServersConfigured: ["codebase-memory"],
+      projectIndexVerified: false,
+    }, [contribution]);
+
+    expect(report.capabilities.find((entry) => entry.capabilityId === "context-mode")).toMatchObject({
+      runnerId: "codex",
+      code: "capability-mcp-not-configured",
+    });
+    expect(report.capabilities.find((entry) => entry.capabilityId === "codebase-memory")).toMatchObject({
+      runnerId: "codex",
+      code: "capability-index-unverified",
+    });
+    for (const entry of report.capabilities.filter((candidate) => candidate.code)) {
+      expect(entry.code).not.toMatch(/^pi-/);
+      expect(entry.message).toContain(`Runner codex capability ${entry.capabilityId}`);
+    }
+  });
+
+  it("uses the same neutral context-mode, RTK, Serena, MCP, and index failures for a synthetic runner", () => {
+    const contribution = defineRunnerCapabilityContribution({
+      runnerId: "synthetic",
+      mappings: [
+        { capabilityId: "context-mode", runnerId: "synthetic", status: "shared" },
+        { capabilityId: "rtk", runnerId: "synthetic", status: "gap" },
+        { capabilityId: "serena", runnerId: "synthetic", status: "shared" },
+        { capabilityId: "codebase-memory", runnerId: "synthetic", status: "shared" },
+        { capabilityId: "codebase-memory-mcp", runnerId: "synthetic", status: "shared" },
+      ],
+    });
+    const report = resolveCoreRunnerParity("synthetic", {
+      binariesInPath: ["context-mode", "codebase-memory-mcp"],
+      mcpServersConfigured: ["codebase-memory"],
+      projectIndexVerified: false,
+    }, [contribution]);
+
+    expect(report.capabilities.find((entry) => entry.capabilityId === "context-mode")?.code).toBe("capability-mcp-not-configured");
+    expect(report.capabilities.find((entry) => entry.capabilityId === "rtk")?.code).toBe("capability-mapping-gap");
+    expect(report.capabilities.find((entry) => entry.capabilityId === "serena")?.code).toBe("capability-binary-not-usable");
+    expect(report.capabilities.find((entry) => entry.capabilityId === "codebase-memory")?.code).toBe("capability-index-unverified");
+    const mcpReport = resolveCoreRunnerParity("synthetic", {
+      binariesInPath: ["context-mode", "codebase-memory-mcp"],
+      mcpServersConfigured: [],
+    }, [contribution]);
+    expect(mcpReport.capabilities.find((entry) => entry.capabilityId === "codebase-memory-mcp")?.code).toBe("capability-mcp-not-configured");
+  });
+
+  it("required protected capabilities omitted by an adapter are explicit error gaps", () => {
+    const contribution = defineRunnerCapabilityContribution({ runnerId: "synthetic", mappings: [] });
+    const report = resolveCoreRunnerParity("synthetic", undefined, [contribution]);
+    for (const capabilityId of ["trusted-runner-host-bridge", "invocation-authorization", "execution-dossier", "controlled-effects", "registry-coordination", "bound-verification"]) {
+      expect(report.gaps).toContainEqual(expect.objectContaining({
+        capabilityId,
+        status: "gap",
+        severity: "error",
+        code: "missing-runner-mapping",
+      }));
+    }
+  });
   describe("OpenCode with full runtime hints", () => {
     it("should have minimal gaps for OpenCode with binaries in PATH", () => {
       const report = resolveRunnerParity("opencode", {
@@ -62,7 +138,7 @@ describe("Runner Capability Parity Resolver", () => {
 
       const serenaEntry = report.capabilities.find((c) => c.capabilityId === "serena");
       expect(serenaEntry?.status).toBe("gap");
-      expect(serenaEntry?.code).toBe("shared-binary-not-usable");
+      expect(serenaEntry?.code).toBe("capability-binary-not-usable");
     });
 
     it("should identify Context7 gap when MCP not configured", () => {
@@ -86,7 +162,7 @@ describe("Runner Capability Parity Resolver", () => {
         (c) => c.capabilityId === "supermemory-tool-bindings"
       );
       expect(supermemoryEntry?.status).toBe("gap");
-      expect(supermemoryEntry?.code).toBe("memory-tools-unverified");
+      expect(supermemoryEntry?.code).toBe("capability-mcp-not-configured");
     });
   });
 
@@ -119,7 +195,7 @@ describe("Runner Capability Parity Resolver", () => {
 
       const cbmEntry = report.capabilities.find((c) => c.capabilityId === "codebase-memory");
       expect(cbmEntry?.status).toBe("gap");
-      expect(cbmEntry?.code).toBe("shared-binary-not-usable");
+      expect(cbmEntry?.code).toBe("capability-binary-not-usable");
     });
   });
 
@@ -164,7 +240,7 @@ describe("Runner Capability Parity Resolver", () => {
         (c) => c.capabilityId === "codebase-memory-mcp"
       );
       expect(cbmMcpEntry?.status).toBe("gap");
-      expect(cbmMcpEntry?.code).toBe("codebase-memory-mcp-missing");
+      expect(cbmMcpEntry?.code).toBe("capability-mcp-not-configured");
     });
 
     it("should report gap when codebase-memory-mcp binary not usable", () => {
@@ -214,7 +290,7 @@ describe("Runner Capability Parity Resolver", () => {
       });
 
       const cbmEntry = report.capabilities.find((c) => c.capabilityId === "codebase-memory");
-      expect(cbmEntry?.code).toBe("codebase-memory-index-unverified");
+      expect(cbmEntry?.code).toBe("capability-index-unverified");
       expect(cbmEntry?.severity).toBe("warning");
     });
   });

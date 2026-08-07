@@ -1,0 +1,191 @@
+schema: spec-registry-v1
+changeId: add-first-class-codex-runner-support
+name: Add First-Class Codex CLI Runner Support
+currentPhase: review
+status: approved
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+provenance:
+  - phase: explore
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-05"
+    registryWrite: non-deferred
+    note: "Mapped existing Pi/OpenCode architecture and current official Codex CLI integration surfaces with a delegated investigation."
+  - phase: proposal
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-05"
+    registryWrite: non-deferred
+    note: "Defined first-class staged support, explicit non-goals, security boundaries, and recommended product defaults."
+  - phase: spec
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-05"
+    registryWrite: non-deferred
+    note: "Specified runner composition, safe materialization, launch, integrations, security, UX, and verification requirements."
+  - phase: design
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-05"
+    registryWrite: non-deferred
+    note: "Recorded the RunnerAdapter authority decision, Codex-native layout, source-preserving config strategy, and transaction design."
+  - phase: tasks
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-05"
+    registryWrite: non-deferred
+    note: "Created six staged vertical implementation phases plus preconditions and verification gates."
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-05"
+    registryWrite: non-deferred
+    note: "User approved all four product defaults; Apply started with Phase 0 mandatory spikes."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "Focused, broad, typecheck, build, and built-artifact smoke evidence passed after the core-purity repair."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Independent iterative review found and drove repairs until no blocker, High, or Medium implementation finding remained."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Corrected package selection to five optional package-instruction IDs and removed journal persistence amplification."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "Post-delta broad suite passed 4319/4319; typecheck and four-target build passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Package selection and transaction batching delta approved with no blocker, High, or Medium findings."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Replaced static Codex model availability with authenticated CLI discovery and explicit bundled/degraded fallback."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "Post-model-discovery suite passed 4333/4333; typecheck and four-target build passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Authenticated/stale model discovery and subprocess hardening approved with no blocker, High, or Medium findings."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Made malformed dashboard inventory fail closed and replaced Codex Supermemory bearer-token setup with credential-free native OAuth status plus verified post-apply evidence."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "Post-OAuth suite passed 4354/4354; typecheck and four-target build passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Malformed-inventory and native OAuth delta approved with no blocker, High, Medium, or advisory findings."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Stopped approved typed static-compatible gaps from blocking executable install readiness while preserving genuine blockers and visible warnings."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "Post-readiness suite passed 4356/4356; typecheck and four-target build passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Static-compatible Review & Install readiness delta approved with no blocker, High, Medium, or advisory findings."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Removed installer-owned Codex OAuth effects and made the native login command an inert user-owned follow-up shown only after total success."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "User-owned OAuth suite passed 4349/4349; typecheck and four-target build passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "User-owned OAuth delta approved with no blocker, High, Medium, or advisory findings."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Restored Codex model and reasoning assignments from bounded project-local role TOML and hardened reads against unsafe path ancestry."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "Model-rehydration suite passed 4352/4352; typecheck and four-target build passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Codex model-rehydration delta approved with no blocker, High, Medium, or advisory findings."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Made new Codex Developer Team roots start automatically with bounded Lead instructions and persisted Lead model/reasoning while keeping resume unchanged."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: non-deferred
+    note: "Direct-Lead suite passed 4360/4360; typecheck and four-target build passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-06"
+    registryWrite: deferred-reconciled
+    note: "Direct Codex root Lead launch delta approved with no blocker, High, Medium, or advisory findings."
+next_action: "Obtain user acceptance, then commit if requested and archive through the normal OpenSpec lifecycle."

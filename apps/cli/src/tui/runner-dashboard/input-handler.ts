@@ -2,12 +2,13 @@
  * Runtime-agnostic dashboard input handler.
  *
  * Works with any runner (Pi, OpenCode, etc.).
- * Capability IDs are derived from the state's selectedCapabilities keys.
+ * Package instruction IDs come from canonical config metadata plus adapter support.
  */
 
 import type { RunnerDashboardAction } from "./reducer";
-import { getDashboardSectionSummaries, getToggleableCapabilityIds, type CapabilityResolver } from "./selectors";
-import type { RunnerDashboardState } from "./state";
+import { PACKAGE_INSTRUCTION_PACKAGE_IDS } from "@deck/core";
+import { getDashboardSectionSummaries, getToggleablePackageInstructionIds, type CapabilityResolver } from "./selectors";
+import { runnerRequiresExternalSupermemoryToken, type RunnerDashboardState } from "./state";
 
 export type RunnerDashboardContinueEffect =
   | { type: "dispatch"; action: RunnerDashboardAction }
@@ -18,6 +19,17 @@ export type RunnerDashboardContinueEffect =
   | { type: "complete-dashboard" }
   | { type: "none" };
 
+export function getReviewPlanBlockerReason(plan: RunnerDashboardState["plan"]): string | undefined {
+  if (!plan || plan.ready) return undefined;
+  const diagnostic = plan.diagnostics.find((entry) => entry.severity === "error");
+  if (diagnostic) return diagnostic.message;
+  for (const actions of Object.values(plan.groups)) {
+    const action = actions.find((entry) => entry.status === "blocked" || entry.status === "failed");
+    if (action) return action.diagnostics?.[0] ?? `${action.title} is blocked.`;
+  }
+  return undefined;
+}
+
 /**
  * Returns the toggle action for the current cursor position.
  */
@@ -25,28 +37,13 @@ export function getDashboardToggleAction(
   state: RunnerDashboardState,
   resolver?: CapabilityResolver,
 ): RunnerDashboardAction | undefined {
-  if (!resolver) {
-    // Backward-compatible fallback for tests
-    const defaultIds = ["rtk", "context-mode", "codebase-memory", "serena", "pi-hud"];
-    if (state.screen === "packages-detail") {
-      const capabilityId = defaultIds[state.cursor];
-      return capabilityId ? { type: "toggle-capability", capabilityId } : undefined;
-    }
-    if (state.screen === "teams-detail" && state.cursor === 0) {
-      return { type: "toggle-team", teamId: "developer-team" };
-    }
-    return undefined;
-  }
-
   if (state.screen === "packages-detail") {
-    // Use toggleable capability IDs (configurable + optional) to match UI rendering
-    const toggleableIds = getToggleableCapabilityIds(state, resolver);
-    // Cursor at toggleableIds.length = "Back to dashboard" position - no toggle action
-    if (state.cursor >= toggleableIds.length) {
-      return undefined;
-    }
-    const capabilityId = toggleableIds[state.cursor];
-    return capabilityId ? { type: "toggle-capability", capabilityId } : undefined;
+    const effectiveResolver = resolver ?? {
+      getSupportedPackageInstructionIds: () => PACKAGE_INSTRUCTION_PACKAGE_IDS,
+    };
+    const packageIds = getToggleablePackageInstructionIds(state, effectiveResolver);
+    const packageId = packageIds[state.cursor];
+    return packageId ? { type: "toggle-package-instruction", packageId } : undefined;
   }
 
   if (state.screen === "teams-detail" && state.cursor === 0) {
@@ -63,8 +60,7 @@ export function getDashboardContinueEffect(
 ): RunnerDashboardContinueEffect {
   // Backward-compatible default resolver for tests
   const effectiveResolver = resolver ?? {
-    getCapability: () => undefined,
-    getUserFacingIds: () => ["rtk", "context-mode", "codebase-memory", "serena", "pi-hud"],
+    getSupportedPackageInstructionIds: () => PACKAGE_INSTRUCTION_PACKAGE_IDS,
   };
 
   if (state.screen === "dashboard") {
@@ -79,7 +75,7 @@ export function getDashboardContinueEffect(
 
   if (state.screen === "packages-detail") {
     // Use toggleable capability IDs to match UI rendering (configurable + optional + back)
-    const toggleableIds = getToggleableCapabilityIds(state, effectiveResolver);
+    const toggleableIds = getToggleablePackageInstructionIds(state, effectiveResolver);
     // Last item is "Back to dashboard" at index toggleableIds.length
     if (state.cursor === toggleableIds.length) return { type: "dispatch", action: { type: "go-dashboard" } };
     const action = getDashboardToggleAction(state, effectiveResolver);
@@ -91,7 +87,7 @@ export function getDashboardContinueEffect(
     const provider = providers[state.cursor];
     if (!provider) return { type: "dispatch", action: { type: "go-dashboard" } };
     const action: RunnerDashboardAction = { type: "select-adaptive-memory", provider };
-    return provider === "supermemory" && state.runnerScope !== "opencode"
+    return provider === "supermemory" && runnerRequiresExternalSupermemoryToken(state)
       ? { type: "select-supermemory-and-open-setup", action }
       : { type: "dispatch", action };
   }
@@ -114,6 +110,12 @@ export function getDashboardContinueEffect(
 
   if (state.screen === "review-plan") {
     if (state.cursor === 0) {
+      if (state.plan?.ready !== true) {
+        return {
+          type: "block-review-install",
+          status: getReviewPlanBlockerReason(state.plan) ?? "Review plan is not ready. Resolve plan diagnostics before executing Review & Install.",
+        };
+      }
       if (!options.canRunPlan) {
         return {
           type: "block-review-install",

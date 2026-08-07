@@ -1,0 +1,282 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-08-05"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Repository architecture and official Codex CLI surfaces were investigated."
+      - "Adaptive memory was advisory only; OpenSpec, source, tests, and official Codex documentation remained authoritative."
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-08-05"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Proposed first-class staged Codex support without a prerequisite big-bang TUI refactor."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-08-05"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Defined normative requirements and Given/When/Then acceptance scenarios."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-08-05"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Selected RunnerAdapter as operational authority and isolated Codex-native materialization behind a new adapter."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-05"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Prepared phased implementation, preconditions, TDD fixtures, and broad release gates."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-08-05"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User approved artifact policy, Engram deferral, trusted-bridge release policy, and mutation consent defaults."
+      - "Apply begins with released Codex compatibility, source-preserving TOML, and trusted-host bridge spikes."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Implemented first-class Codex adapter surfaces with an approved static-compatible execution classification."
+      - "Moved runner mappings to immutable adapter-owned contributions after broad core-purity evidence identified the boundary violation."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Final broad suite passed 4308/4308; typecheck, four-target build, and Linux artifact smoke passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-08-06"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "No blocker, High, or Medium implementation finding remained after iterative independent review and repairs."
+      - "Trusted Codex host enforcement and Engram remain explicit approved gaps."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-06"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "User-feedback delta limited package selection to five optional package-instruction IDs and retained code-economy as baseline."
+      - "Transaction journal persistence became constant per transaction without weakening recovery."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Post-delta full suite passed 4319/4319; typecheck and four-target build passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-08-06"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Final package-boundary review found no blocker, High, or Medium findings."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-06"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Replaced static Codex model availability with authenticated `codex debug models` discovery and explicit stale bundled fallback."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Post-model-discovery full suite passed 4333/4333; typecheck and four-target build passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-08-06"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Final model-discovery review found no blocker, High, or Medium findings."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-06"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Made malformed dashboard inventories visible and fail-closed instead of dereferencing an absent capabilities array."
+      - "Replaced Codex Supermemory bearer-token setup with native MCP OAuth, strict runtime status parsing, and verified post-apply sequencing."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Post-OAuth full suite passed 4354/4354; typecheck and four-target build passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-08-06"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Final inventory/OAuth review found no blocker, High, Medium, or advisory finding after two repair passes."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-06"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Excluded only typed approved static-compatible protected-control gaps from executable install work and review readiness."
+      - "Preserved genuine blockers and surfaced their first specific reason in Review & Install."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Post-readiness full suite passed 4356/4356; typecheck and four-target build passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-08-06"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Final static-compatible readiness review found no blocker, High, Medium, or advisory finding."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-06"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Removed installer-owned Codex OAuth execution and all browser, callback-listener, and authorization-URL effects."
+      - "Added an inert user-owned login command shown only after complete successful MCP configuration and installation."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User-owned OAuth full suite passed 4349/4349; typecheck and four-target build passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-08-06"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Final user-owned OAuth review found no blocker, High, Medium, or advisory finding."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-06"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Implemented bounded project-local Codex role model and reasoning rehydration with canonical ID restoration."
+      - "Hardened assignment reads against symlink ancestors, root escapes, malformed TOML, and oversized values."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Model-rehydration full suite passed 4352/4352; typecheck and four-target build passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-08-06"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Final Codex model-rehydration review found no blocker, High, Medium, or advisory finding."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-06"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Made new Codex Developer Team interactive and exec roots start automatically with bounded Deck Lead instructions and persisted Lead model/reasoning."
+      - "Moved exec prompts to bounded typed stdin and preserved existing resume sessions without reinjection."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Direct-Lead full suite passed 4360/4360; typecheck and four-target build passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-08-06"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Final direct Codex root Lead launch review found no blocker, High, Medium, or advisory finding."

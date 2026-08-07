@@ -78,7 +78,7 @@ describe("Pi Runner dashboard render", () => {
   });
 
   test("OpenCode runner muestra OpenCode Runner Setup Dashboard", () => {
-    const state = createDefaultPiRunnerDashboardState({ plan, runnerScope: "opencode" });
+    const state = createDefaultPiRunnerDashboardState({ plan, runnerScope: "opencode", runnerDisplayName: "OpenCode" });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
     expect(output).toContain("OpenCode Runner Setup Dashboard");
@@ -97,7 +97,7 @@ describe("Pi Runner dashboard render", () => {
     });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
-    expect(output).toContain("Packages");
+    expect(output).toContain("Package instructions");
     expect(output).toContain("Back to dashboard");
   });
 
@@ -142,7 +142,7 @@ describe("Pi Runner dashboard render", () => {
     expect(output).toContain("Review & Install");
     expect(output).toContain("5 actions planned");
     expect(output).toContain("1 automatic");
-    expect(output).toContain("Run install");
+    expect(output).toContain("Blocked");
   });
 
   test("Complete muestra pantalla de completado", () => {

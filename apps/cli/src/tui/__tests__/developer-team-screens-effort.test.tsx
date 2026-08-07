@@ -21,12 +21,17 @@ import { getAdapter } from "../../runner-adapters";
 import {
   AgentModelAssignmentScreen,
   AgentModelConfigListScreen,
+  MemoryProviderSelectionScreen,
+  ModelProviderSelectionScreen,
+  NoProvidersScreen,
   OpenCodeModelDiscoveryScreen,
+  SupermemorySetupScreen,
 } from "../screens/developer-team-screens";
 import type { RunnerAdapter, RunnerThinkingLevel, RunnerModelInventory, RunnerModelInventoryResult } from "@deck/core";
 import {
   buildTuiInventoryFromAdapterInventory,
   buildTuiInventoryFromDiscoveryResult,
+  buildDashboardSupermemorySetupUpdate,
   resolveOpenCodeModelDiscovery,
 } from "../app";
 
@@ -175,6 +180,61 @@ describe("T13: Adapter-driven inventory contract (REQ-INV-001, REQ-TUI-001)", ()
 
     // REQ-INV-002: Adapter-driven inventory source is runner-owned
     expect(inventory.providers[0].source).toBe("runner-resolved");
+  });
+});
+
+describe("Codex normalized model and reasoning presentation", () => {
+  test("renders Codex-native provider/remediation copy without Pi paths", () => {
+    const codex = getAdapter("codex");
+    const providers = renderToString(<ModelProviderSelectionScreen cursor={0} providers={[{ id: "openai-codex", displayName: "OpenAI Codex", envVars: [] }]} runtime={codex.runnerId} runnerLabel={codex.displayName} modelUi={codex.ui?.model} />);
+    expect(providers).toContain("Select a Codex CLI provider");
+    expect(providers).toContain("codex debug models");
+    expect(providers).toContain("active account");
+
+    const missing = renderToString(<NoProvidersScreen runtime={codex.runnerId} runnerLabel={codex.displayName} modelUi={codex.ui?.model} />);
+    expect(missing).toContain("No Codex CLI providers detected");
+    expect(missing).toContain("codex debug models");
+    expect(missing).not.toContain("~/.pi");
+    expect(missing).not.toContain("pi --list-models");
+  });
+
+  test("renders the adapter-provided Codex xhigh reasoning level", () => {
+    const output = renderToString(<AgentModelAssignmentScreen
+      cursor={5}
+      agentIndex={0}
+      totalAgents={7}
+      modelId="openai-codex/gpt-5.5"
+      defaultThinking="medium"
+      runtime="codex"
+      thinkingLevels={["minimal", "low", "medium", "high", "xhigh"]}
+    />);
+    expect(output).toContain("Choose Codex thinking/effort level");
+    expect(output).toContain("thinking xhigh");
+  });
+
+  test("defers user-owned Codex Supermemory authorization guidance until verified installation", () => {
+    const providerPicker = renderToString(<MemoryProviderSelectionScreen cursor={2} selectedProvider="none" runtime="codex" />);
+    expect(providerPicker).toContain("credential-free configuration");
+    expect(providerPicker).toMatch(/user-owned native OAuth\s+next step only after verified install/);
+    expect(providerPicker).not.toContain("requires token only");
+    const output = renderToString(<SupermemorySetupScreen screen="supermemory-token" values={{ token: "secret" }} runtime="codex" />);
+    expect(output).toContain("native OAuth");
+    expect(output).toMatch(/After Deck applies and verifies\s+the MCP configuration/);
+    expect(output).not.toMatch(/codex\s+mcp login\s+supermemory/);
+    expect(output).not.toMatch(/Review.*Install.*runs/i);
+    expect(output).not.toContain("SUPERMEMORY_API_KEY");
+    expect(output).not.toContain("~/.pi");
+    expect(output).not.toContain("Pi MCP");
+    expect(output).not.toContain("secret");
+    const setup = buildDashboardSupermemorySetupUpdate({ token: "secret" }, "codex");
+    expect(setup.ok).toBe(true);
+    if (setup.ok) {
+      expect(setup.status).toContain("after it applies and verifies the MCP configuration");
+      expect(setup.status).not.toMatch(/codex\s+mcp login\s+supermemory/);
+      expect(setup.values).toMatchObject({ configured: true, hasToken: false });
+      expect(setup.status).not.toContain("Pi MCP");
+      expect(setup.status).not.toContain("secret");
+    }
   });
 });
 
@@ -673,7 +733,15 @@ describe("OpenCode TUI discovery states (Group 3)", () => {
             id: "openai/gpt-5.3-codex",
             providerId: "openai",
             displayName: "Gpt 5.3 Codex",
+            description: "Current coding model",
+            priority: 2,
             supportsReasoning: true,
+            variants: ["low", "max", "ultra"],
+            defaultVariant: "ultra",
+            upgrade: { model: "openai/gpt-5.4", upgradeCopy: "Upgrade" },
+            inputModalities: ["text", "image"],
+            experimentalSupportedTools: ["shell"],
+            supportsParallelToolCalls: true,
             source: "runner-resolved",
           },
           {
@@ -706,7 +774,17 @@ describe("OpenCode TUI discovery states (Group 3)", () => {
     // The exact runner-resolved model key must surface unchanged in the TUI.
     const openaiModels = mapped.modelsByProvider["openai"] ?? [];
     expect(openaiModels.map((m) => m.id)).toContain("openai/gpt-5.3-codex");
-    expect(openaiModels.find((m) => m.id === "openai/gpt-5.3-codex")?.thinking).toBe(true);
+    expect(openaiModels.find((m) => m.id === "openai/gpt-5.3-codex")).toMatchObject({
+      thinking: true,
+      description: "Current coding model",
+      priority: 2,
+      variants: ["low", "max", "ultra"],
+      defaultVariant: "ultra",
+      upgrade: { model: "openai/gpt-5.4", upgradeCopy: "Upgrade" },
+      inputModalities: ["text", "image"],
+      experimentalSupportedTools: ["shell"],
+      supportsParallelToolCalls: true,
+    });
 
     const anthropicModels = mapped.modelsByProvider["anthropic"] ?? [];
     expect(anthropicModels.map((m) => m.id)).toContain("anthropic/claude-sonnet-4");

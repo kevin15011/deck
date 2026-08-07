@@ -12,14 +12,15 @@
  * This module MUST NOT import TUI components — only adapters and core.
  */
 
-import type { RunnerCapabilities, AdaptiveMemoryProvider } from "@deck/core";
+import { composeRunnerCapabilityContributions, type RunnerCapabilities, type AdaptiveMemoryProvider, type RunnerCapabilityContribution } from "@deck/core";
 
 // ---------------------------------------------------------------------------
 // Runner adapter factories
 // ---------------------------------------------------------------------------
 
-import { createPiRunnerCapabilities } from "@deck/adapter-pi";
-import { createOpenCodeRunnerCapabilities } from "@deck/adapter-opencode";
+import { createPiRunnerCapabilities, PI_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-pi";
+import { createOpenCodeRunnerCapabilities, OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-opencode";
+import { CODEX_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-codex";
 
 // ---------------------------------------------------------------------------
 // Memory provider factories
@@ -104,6 +105,16 @@ export function createMemoryProviders(): readonly MemoryProviderRegistration[] {
   ];
 }
 
+export function createRunnerParityContributions(): readonly RunnerCapabilityContribution[] {
+  const contributions = Object.freeze([
+    PI_RUNNER_CAPABILITY_CONTRIBUTION,
+    OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION,
+    CODEX_RUNNER_CAPABILITY_CONTRIBUTION,
+  ]);
+  composeRunnerCapabilityContributions(contributions);
+  return contributions;
+}
+
 // ---------------------------------------------------------------------------
 // Runner capability registry
 // ---------------------------------------------------------------------------
@@ -118,6 +129,10 @@ export function createMemoryProviders(): readonly MemoryProviderRegistration[] {
  *
  * The TUI receives the catalog from the composition root; it never imports
  * adapter packages directly.
+ */
+/**
+ * @deprecated Read-only compatibility projection for one release. Runtime effects and
+ * composition must resolve through AdapterRegistry; remove after remaining TUI consumers migrate.
  */
 export function createRunnerCapabilityRegistry(): RunnerCapabilityCatalog {
   // Create runner capabilities from adapter factories

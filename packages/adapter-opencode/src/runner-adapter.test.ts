@@ -36,6 +36,23 @@ function toolsReviewFor(toolId: "codebase-memory", installed: boolean): OpenCode
   };
 }
 
+describe("OpenCode package instruction boundary", () => {
+  test("supports the canonical package metadata without treating baseline or capability IDs as toggles", () => {
+    const adapter = createOpenCodeRunnerAdapter();
+    expect(adapter.packageInstructionIds).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
+    const inventory = { runnerId: "opencode", environmentId: "opencode-development", capabilities: [] } as any;
+    const base = { runnerId: "opencode", environmentId: "opencode-development", selectedCapabilities: {}, adaptiveMemory: { provider: "none" } } as const;
+
+    const enabled = adapter.buildReviewPlan({ ...base, packageInstructions: { "context-mode": true, serena: true, "code-economy": true, context7: true } } as any, inventory);
+    expect(enabled.groups.configWrites).toContainEqual(expect.objectContaining({ id: "package-instructions.opencode.deck-config", kind: "write-deck-config" }));
+
+    const baselineOnly = adapter.buildReviewPlan({ ...base, packageInstructions: { "code-economy": true, context7: true } } as any, inventory);
+    expect(baselineOnly.groups.configWrites).not.toContainEqual(expect.objectContaining({ id: "package-instructions.opencode.deck-config" }));
+    const installation = adapter.buildInstallationPlan({ ...base, packageInstructions: { serena: true }, selectedCapabilities: {} } as any);
+    expect(installation.steps).not.toContainEqual(expect.objectContaining({ capabilityId: "serena" }));
+  });
+});
+
 describe("OpenCode RunnerAdapter developer team install plan", () => {
   test("includes complete standalone external skills by default", () => {
     const adapter = createOpenCodeRunnerAdapter();

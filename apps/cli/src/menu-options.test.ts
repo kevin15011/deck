@@ -111,12 +111,12 @@ describe("Pi installation next steps", () => {
 });
 
 describe("environment options", () => {
-  test("allows selecting Pi plus future environments as placeholders", () => {
+  test("registers Codex while retaining only unsupported environments as placeholders", () => {
     expect(getEnvironmentOptions()).toEqual([
       { value: "pi-development", label: "Pi Development Environment" },
       { value: "opencode-development", label: "OpenCode Development Environment" },
       { value: "claude-development", label: `Claude Development Environment ${placeholder()}` },
-      { value: "codex-development", label: `Codex Development Environment ${placeholder()}` },
+      { value: "codex-development", label: "Codex Development Environment" },
     ]);
   });
 });

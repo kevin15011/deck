@@ -12,10 +12,59 @@ import {
   getRunnerCapabilityMapping,
   CANONICAL_CATEGORIES,
   SUPPORT_STATUSES,
+  defineRunnerCapabilityContribution,
+  RunnerCapabilityCompositionError,
+  validateRunnerCapabilitySemantics,
   type CanonicalCapabilityCategory,
 } from "./runner-capability-registry";
 
 describe("Runner Capability Registry", () => {
+  it("accepts immutable synthetic adapter mappings without core registry edits", () => {
+    const contribution = defineRunnerCapabilityContribution({
+      runnerId: "synthetic",
+      mappings: [{ capabilityId: "context-mode", runnerId: "synthetic", status: "shared", provisionMode: "reuse", detectors: { commands: ["synthetic-context"] }, parityChecks: ["binary-usable"] }],
+    });
+
+    expect(Object.isFrozen(contribution)).toBe(true);
+    expect(Object.isFrozen(contribution.mappings)).toBe(true);
+    expect(getRunnerCapabilityMapping("context-mode", "synthetic", [contribution])).toMatchObject({ status: "shared", provisionMode: "reuse" });
+    expect(validateRunnerCapabilitySemantics("synthetic", [{ capabilityId: "context-mode", status: "shared", provisionMode: "reuse", executable: "synthetic-context" }], [contribution])).toEqual([]);
+  });
+
+  it("composes contributions deterministically and rejects mapping collisions", () => {
+    const first = defineRunnerCapabilityContribution({
+      runnerId: "synthetic",
+      mappings: [{ capabilityId: "context-mode", runnerId: "synthetic", status: "shared" }],
+    });
+    const second = defineRunnerCapabilityContribution({
+      runnerId: "synthetic",
+      mappings: [{ capabilityId: "rtk", runnerId: "synthetic", status: "shared" }],
+    });
+    expect(getRunnerMappings("synthetic", [first, second])).toEqual(getRunnerMappings("synthetic", [second, first]));
+
+    const collision = defineRunnerCapabilityContribution({
+      runnerId: "synthetic",
+      mappings: [{ capabilityId: "context-mode", runnerId: "synthetic", status: "supported" }],
+    });
+    expect(() => getRunnerMappings("synthetic", [first, collision])).toThrow(RunnerCapabilityCompositionError);
+    try {
+      getRunnerMappings("synthetic", [collision, first]);
+      throw new Error("expected collision");
+    } catch (error) {
+      expect(error).toBeInstanceOf(RunnerCapabilityCompositionError);
+      expect((error as RunnerCapabilityCompositionError).code).toBe("duplicate-runner-capability-mapping");
+    }
+  });
+
+  it("keeps core free of runner-owned mappings and canonical capabilities", () => {
+    expect(getRunnerMappings("pi")).toEqual([]);
+    expect(getRunnerMappings("opencode")).toEqual([]);
+    const ids = getCanonicalRunnerCapabilities().map((capability) => capability.id);
+    expect(ids).not.toContain("pi-orchestrator-prompt-persistence");
+    expect(ids).not.toContain("opencode-primary-orchestrator");
+    expect(ids).not.toContain("pi-mermaid");
+    expect(ids).not.toContain("opencode-mermaid");
+  });
   describe("Canonical Capabilities", () => {
     it("should have at least 12 capabilities", () => {
       const capabilities = getCanonicalRunnerCapabilities();
@@ -69,11 +118,6 @@ describe("Runner Capability Registry", () => {
       expect(capability?.id).toBe("supermemory-tool-bindings");
     });
 
-    it("should include pi-orchestrator-prompt-persistence", () => {
-      const capability = getCanonicalCapability("pi-orchestrator-prompt-persistence");
-      expect(capability).toBeDefined();
-      expect(capability?.id).toBe("pi-orchestrator-prompt-persistence");
-    });
   });
 
   describe("Categories", () => {
@@ -86,7 +130,8 @@ describe("Runner Capability Registry", () => {
       expect(CANONICAL_CATEGORIES).toContain("runner-silent-packages");
       expect(CANONICAL_CATEGORIES).toContain("prompts-profiles");
       expect(CANONICAL_CATEGORIES).toContain("memory-tool-bindings");
-      expect(CANONICAL_CATEGORIES.length).toBe(8);
+      expect(CANONICAL_CATEGORIES).toContain("execution-controls");
+      expect(CANONICAL_CATEGORIES.length).toBe(9);
     });
 
     it("should have runner-silent-packages category", () => {
@@ -94,71 +139,7 @@ describe("Runner Capability Registry", () => {
       const silentPackages = capabilities.filter(
         (c) => c.category === "runner-silent-packages"
       );
-      expect(silentPackages.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe("Silent Packages", () => {
-    it("should have opencode-mermaid in runner-silent-packages", () => {
-      const capability = getCanonicalCapability("opencode-mermaid");
-      expect(capability).toBeDefined();
-      expect(capability?.category).toBe("runner-silent-packages");
-      expect(capability?.userFacing).toBe(false);
-    });
-
-    it("should have pi-mermaid in runner-silent-packages", () => {
-      const capability = getCanonicalCapability("pi-mermaid");
-      expect(capability).toBeDefined();
-      expect(capability?.category).toBe("runner-silent-packages");
-      expect(capability?.userFacing).toBe(false);
-    });
-  });
-
-  describe("Per-Runner Mappings", () => {
-    it("should have mappings for opencode", () => {
-      const mappings = getRunnerMappings("opencode");
-      expect(mappings.length).toBeGreaterThan(0);
-    });
-
-    it("should have mappings for pi", () => {
-      const mappings = getRunnerMappings("pi");
-      expect(mappings.length).toBeGreaterThan(0);
-    });
-
-    it("should find specific capability mapping", () => {
-      const mapping = getRunnerCapabilityMapping("rtk", "opencode");
-      expect(mapping).toBeDefined();
-      expect(mapping?.capabilityId).toBe("rtk");
-      expect(mapping?.runnerId).toBe("opencode");
-    });
-
-    it("should return undefined for non-existent mapping", () => {
-      const mapping = getRunnerCapabilityMapping("non-existent", "opencode");
-      expect(mapping).toBeUndefined();
-    });
-
-    it("should have codebase-memory mapping for pi", () => {
-      const mapping = getRunnerCapabilityMapping("codebase-memory", "pi");
-      expect(mapping).toBeDefined();
-      expect(mapping?.status).toBe("shared");
-    });
-
-    it("should have rtk mapping for pi", () => {
-      const mapping = getRunnerCapabilityMapping("rtk", "pi");
-      expect(mapping).toBeDefined();
-      expect(mapping?.status).toBe("shared");
-    });
-
-    it("should have pi-mermaid as runner-specific for pi", () => {
-      const mapping = getRunnerCapabilityMapping("pi-mermaid", "pi");
-      expect(mapping).toBeDefined();
-      expect(mapping?.status).toBe("runner-specific");
-    });
-
-    it("should have opencode-mermaid as runner-specific for opencode", () => {
-      const mapping = getRunnerCapabilityMapping("opencode-mermaid", "opencode");
-      expect(mapping).toBeDefined();
-      expect(mapping?.status).toBe("runner-specific");
+      expect(silentPackages).toEqual([]);
     });
   });
 

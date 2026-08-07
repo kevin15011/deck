@@ -21,6 +21,22 @@ For a published binary, use the supported [installer](scripts/install.sh). The C
 
 ## Next steps
 
+### Codex CLI
+
+Codex CLI `0.145.0` or newer is a registered Developer Team environment:
+
+```bash
+deck codex developer --dry-run
+deck codex developer --yes
+deck codex developer exec -- --your-prompt
+deck codex developer resume <session-id>
+deck codex developer resume --last
+```
+
+Deck previews project-local changes before applying `.codex/config.toml`, `.codex/agents/deck-*.toml`, `.agents/skills/**`, and its marker-owned `AGENTS.md` section. Deck never enables repository trust. Interactive, exec, resume-by-ID, and resume-latest are public `static-compatible` routes; the adapter does not install or expose a trusted-hook host surface.
+
+See [runner support](docs/runner-support.md) for MCP, memory, ownership, rollback, and known-gap details.
+
 - [Contributing](CONTRIBUTING.md) explains repository setup and verification.
 - [Architecture](docs/architecture.md) explains stable package boundaries.
 - [Release guidance](docs/maintainers/releasing.md) is for maintainers preparing a release.

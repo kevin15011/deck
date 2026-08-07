@@ -48,7 +48,6 @@ import {
   type PiRequiredToolsReview,
   type PiToolInstallResult,
   type PiRunnerCapabilityInventory,
-  type PiRunnerFullCapabilityInventory,
   type PiThinkingLevel,
   type AgentApplyResult,
   type DeveloperTeamApplyResult,
@@ -58,9 +57,6 @@ import {
   type PiMcpConfigWriteResult,
   buildPiInstallationPlan,
   installPiTools,
-  inspectPiEnvironment,
-  reviewPiRequiredTools,
-  buildPiRunnerCapabilityInventory,
   listModelsForProvider,
   buildModelInventoryFromPiListModels,
   installInternalRunnerPackages,
@@ -68,9 +64,6 @@ import {
   detectConfiguredProviders,
 } from "@deck/adapter-pi";
 import {
-  inspectOpenCodeEnvironment,
-  reviewOpenCodeTools,
-  buildOpenCodeRunnerCapabilityInventory,
   installOpenCodeTools,
   createOpenCodeEvidenceContext,
   OPENCODE_INSTALLABLE_TOOLS,
@@ -82,7 +75,18 @@ import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/e
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
-import { readDeckConfig, writeDeckConfig, readGlobalDeckConfig, writeGlobalDeckConfig, getDefaultDeckConfig, type AdaptiveMemoryActiveProvider, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
+import {
+  getConfigurablePackageInstructionMetadata,
+  PACKAGE_INSTRUCTION_CONFIGURATION_METADATA,
+  readDeckConfig,
+  writeDeckConfig,
+  readGlobalDeckConfig,
+  writeGlobalDeckConfig,
+  getDefaultDeckConfig,
+  type AdaptiveMemoryActiveProvider,
+  type NormalizedDeckConfig,
+  type PackageInstructionConfigurationMetadata,
+} from "@deck/core/config/deck-config";
 import { buildCapabilityInstructionBundle, getEnabledPackageInstructionIds } from "@deck/core";
 import type {
   RunnerModelDiscoveryRequest,
@@ -91,6 +95,10 @@ import type {
   RunnerVariantKey,
   RunnerAction,
   RunnerAdapter,
+  RunnerId,
+  CapabilityInventory,
+  DashboardState,
+  RunnerProjectInspection,
   SerenaBootstrapAuthorization,
   SerenaOperationIdentity,
 } from "@deck/core";
@@ -101,9 +109,9 @@ import {
   getNextScreenAfterEnvironmentSelection,
   getNextScreenAfterPiToolInstall,
   getNextScreenAfterTeamSelection,
-  getNextScreenAfterPersonalitySelection,
 } from "../developer-team-flow";
 import { getEnvironmentOptions, getHomeMenuOptions } from "../menu-options";
+import { buildEnvironmentMenuOptions, buildRunnerMenuOptions, resolveRunnerMenuSelection } from "./runner-options";
 import { resolveProjectRoot } from "../project-root";
 import { detectSelectedRuntimes, type EnvironmentId, type RuntimeStatus } from "../runtime-detection";
 import { spawnSync } from "../runtime/process";
@@ -117,6 +125,7 @@ import {
   ModelProviderSelectionScreen,
   ModelSelectionScreen,
   NoProvidersScreen,
+  CodexModelDiscoveryScreen,
   OpenCodeModelDiscoveryScreen,
   MemoryProviderSelectionScreen,
   SupermemorySetupScreen,
@@ -132,12 +141,14 @@ import {
 } from "./runner-dashboard/action-runner";
 import {
   getDashboardContinueEffect,
+  getReviewPlanBlockerReason,
   getDashboardToggleAction,
   type RunnerDashboardContinueEffect,
 } from "./runner-dashboard/input-handler";
 import { reduceRunnerDashboard, type RunnerDashboardAction } from "./runner-dashboard/reducer";
-import { getToggleableCapabilityIds } from "./runner-dashboard/selectors";
-import { createDefaultRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type RunnerDashboardState, type RunnerReviewPlan } from "./runner-dashboard/state";
+import { normalizeDashboardCapabilityInventory } from "./runner-dashboard/inventory";
+import { getToggleablePackageInstructionIds } from "./runner-dashboard/selectors";
+import { createDefaultRunnerDashboardState, createRunnerReviewPlanFailure, loadRunnerPackageInstructionsFromConfig, runnerRequiresExternalSupermemoryToken, type RunnerDashboardState, type RunnerOperationIdentity, type RunnerReviewPlan } from "./runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 import { getAdapter, createDefaultAdapterRegistry } from "../runner-adapters";
 import { HomeScreen } from "./screens/home-screen";
@@ -181,6 +192,7 @@ type Screen =
   | "model-selection"
   | "agent-model-assignment"
   | "opencode-model-discovery"
+  | "codex-model-discovery"
   | "no-providers"
   | "memory-provider-selection"
   | "supermemory-token"
@@ -188,6 +200,7 @@ type Screen =
   | "developer-team-review"
   | "developer-team-installing"
   | "opencode-preflight-checking"
+  | "codex-preflight-checking"
   | "configure-packages-runner-selection"
   | "configure-packages-detail"
   | "doctor"
@@ -196,14 +209,23 @@ type Screen =
 const HELP = "j/k or ↑/↓: navigate • space: toggle • enter: continue • esc: back • q: quit";
 
 function nextRunnerOperation(
-  runner: Exclude<RunnerDashboardState["runnerScope"], "all">,
+  runner: RunnerId,
   sequence: number,
-): SerenaOperationIdentity {
+): RunnerOperationIdentity {
   return {
     runner,
     operationId: `${runner}-review-install-${sequence}`,
     explicitlySelected: false,
   };
+}
+
+function isRunnerProjectInspection(value: unknown): value is RunnerProjectInspection {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<RunnerProjectInspection>;
+  return typeof candidate.projectRoot === "string"
+    && (candidate.state === "ready" || candidate.state === "degraded" || candidate.state === "blocked" || candidate.state === "unsupported")
+    && typeof candidate.evidence === "object"
+    && Array.isArray(candidate.diagnostics);
 }
 
 export async function runSerenaAdapterAction(
@@ -311,6 +333,21 @@ export function buildMemoryProviderConfig(choice: MemoryProviderChoice, values: 
   return { version: 1, adaptiveMemory: { activeProvider: choice } };
 }
 
+export function resolveDashboardMemoryProviderForInstall(
+  runnerId: RunnerId,
+  provider: AdaptiveMemoryActiveProvider,
+  fallback: AdaptiveMemoryProvider | undefined,
+): AdaptiveMemoryProvider | undefined {
+  if (runnerId === "codex" && provider === "supermemory") {
+    return createSupermemoryMemoryProvider({ mcpServerName: "supermemory" });
+  }
+  return fallback;
+}
+
+export function shouldUseLegacySupermemoryTokenRoute(selectedEnvironments: readonly EnvironmentId[]): boolean {
+  return !selectedEnvironments.includes("codex-development") || selectedEnvironments.includes("pi-development");
+}
+
 export function createMemoryProviderForSelection(choice: MemoryProviderChoice, values?: SupermemorySetupValues): AdaptiveMemoryProvider | undefined {
   if (choice === "engram") return createEngramMemoryProvider();
   if (choice === "supermemory" && values) {
@@ -353,9 +390,21 @@ export function handOffSupermemoryCredentialToPiMcp(
   };
 }
 
-export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupValues):
-  | { ok: true; values: { configured: true; hasToken: true; diagnostics: string[] }; status: string }
+export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupValues, runtime: RunnerId = "pi"):
+  | { ok: true; values: { configured: true; hasToken: boolean; diagnostics: string[] }; status: string }
   | { ok: false; message: string } {
+  if (runtime === "codex") {
+    return {
+      ok: true,
+      values: {
+        configured: true,
+        hasToken: false,
+        diagnostics: ["Codex Supermemory authorization is user-owned after the reviewed MCP configuration is applied."],
+      },
+      status: "Dashboard Adaptive Memory: Supermemory configuration is ready. Deck will show the user-owned native OAuth next step after it applies and verifies the MCP configuration.",
+    };
+  }
+
   const normalizedValues = {
     token: values.token.trim(),
   };
@@ -372,9 +421,13 @@ export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupVal
       hasToken: true,
       // userId no longer stored: derived from token automatically
       // teamId/orgId removed: project scoping via x-sm-project header
-      diagnostics: ["Supermemory token captured ephemerally for Review & Install; no Pi MCP config was written yet."],
+      diagnostics: [runtime === "pi"
+        ? "Supermemory token captured ephemerally for Review & Install; no Pi MCP config was written yet."
+        : "Supermemory token captured ephemerally for Review & Install; no Deck or OpenCode project file contains the credential."],
     },
-    status: "Dashboard Adaptive Memory: Supermemory ready for Review & Install. Token: [redacted]; Pi MCP config will include x-sm-project header.",
+    status: runtime === "pi"
+      ? "Dashboard Adaptive Memory: Supermemory ready for Review & Install. Token: [redacted]; Pi MCP config will include x-sm-project header."
+      : "Dashboard Adaptive Memory: Supermemory ready for OpenCode Review & Install. Token: [redacted]; provider credentials remain external.",
   };
 }
 
@@ -416,13 +469,30 @@ type TuiDetectedModel = {
   id: string;
   displayName: string;
   providerId: string;
+  description?: string;
+  priority?: number;
   thinking?: boolean;
-  variants: readonly RunnerVariantKey[];
+  variants?: readonly RunnerVariantKey[];
+  variantDescriptions?: Readonly<Record<RunnerVariantKey, string>>;
+  defaultVariant?: RunnerVariantKey;
+  upgrade?: {
+    model: string;
+    upgradeCopy?: string;
+    modelLink?: string;
+    migrationMarkdown?: string;
+  } | null;
+  inputModalities?: readonly string[];
+  experimentalSupportedTools?: readonly string[];
+  supportsParallelToolCalls?: boolean;
+  supportsReasoningSummaryParameter?: boolean;
+  supportsImageDetailOriginal?: boolean;
+  supportsSearchTool?: boolean;
 };
 
 export type TuiModelInventory = {
   providers: TuiDetectedProvider[];
   modelsByProvider: Record<string, TuiDetectedModel[]>;
+  diagnostics?: readonly string[];
 };
 
 /**
@@ -452,12 +522,23 @@ export function buildTuiInventoryFromAdapterInventory(
         id: model.id,
         displayName: model.displayName,
         providerId: model.providerId,
+        ...(model.description === undefined ? {} : { description: model.description }),
+        ...(model.priority === undefined ? {} : { priority: model.priority }),
         thinking: typeof model.supportsReasoning === "boolean" ? model.supportsReasoning : undefined,
         variants: model.variants ?? [],
+        ...(model.variantDescriptions === undefined ? {} : { variantDescriptions: model.variantDescriptions }),
+        ...(model.defaultVariant === undefined ? {} : { defaultVariant: model.defaultVariant }),
+        ...(model.upgrade === undefined ? {} : { upgrade: model.upgrade }),
+        ...(model.inputModalities === undefined ? {} : { inputModalities: model.inputModalities }),
+        ...(model.experimentalSupportedTools === undefined ? {} : { experimentalSupportedTools: model.experimentalSupportedTools }),
+        ...(model.supportsParallelToolCalls === undefined ? {} : { supportsParallelToolCalls: model.supportsParallelToolCalls }),
+        ...(model.supportsReasoningSummaryParameter === undefined ? { } : { supportsReasoningSummaryParameter: model.supportsReasoningSummaryParameter }),
+        ...(model.supportsImageDetailOriginal === undefined ? {} : { supportsImageDetailOriginal: model.supportsImageDetailOriginal }),
+        ...(model.supportsSearchTool === undefined ? {} : { supportsSearchTool: model.supportsSearchTool }),
       });
     }
   }
-  return { providers, modelsByProvider };
+  return { providers, modelsByProvider, ...(raw.diagnostics === undefined ? {} : { diagnostics: raw.diagnostics }) };
 }
 
 /**
@@ -478,12 +559,15 @@ export function buildTuiInventoryFromAdapterInventory(
 
 
 
-export type TuiOpenCodeDiscoveryState =
+export type TuiRunnerModelDiscoveryState =
   | { kind: "loading" }
-  | { kind: "ready"; inventory: TuiModelInventory; discoveredAt: number; fingerprint: string }
-  | { kind: "empty"; discoveredAt: number; fingerprint: string }
-  | { kind: "stale"; inventory: TuiModelInventory; discoveredAt: number; fingerprint: string; errorMessage: string }
-  | { kind: "blocked"; errorMessage: string };
+  | { kind: "ready"; inventory: TuiModelInventory; source: "live" | "memory"; diagnostics: readonly string[]; discoveredAt: number; fingerprint: string }
+  | { kind: "empty"; source: "live" | "memory"; diagnostics: readonly string[]; discoveredAt: number; fingerprint: string }
+  | { kind: "stale"; inventory: TuiModelInventory; source: "last-known-good" | "bundled" | "deck-fallback"; diagnostics: readonly string[]; discoveredAt: number; fingerprint: string; errorMessage: string }
+  | { kind: "blocked"; source: "none"; diagnostics: readonly string[]; errorMessage: string };
+
+export type TuiOpenCodeDiscoveryState = TuiRunnerModelDiscoveryState;
+export type TuiCodexDiscoveryState = TuiRunnerModelDiscoveryState;
 
 function inventoryHasModels(inventory: TuiModelInventory): boolean {
   return Object.values(inventory.modelsByProvider).some((models) => models.length > 0);
@@ -494,7 +578,7 @@ export function buildTuiInventoryFromDiscoveryResult(
   result: RunnerModelInventoryResult,
 ): TuiOpenCodeDiscoveryState {
   if (result.state === "blocked") {
-    return { kind: "blocked", errorMessage: result.error.message };
+    return { kind: "blocked", source: "none", diagnostics: [], errorMessage: result.error.message };
   }
 
   const inventory = buildTuiInventoryFromAdapterInventory(result.inventory);
@@ -502,6 +586,8 @@ export function buildTuiInventoryFromDiscoveryResult(
     return {
       kind: "stale",
       inventory,
+      source: result.source,
+      diagnostics: result.inventory.diagnostics ?? [],
       discoveredAt: result.discoveredAt,
       fingerprint: result.fingerprint,
       errorMessage: result.error.message,
@@ -509,8 +595,8 @@ export function buildTuiInventoryFromDiscoveryResult(
   }
 
   return inventoryHasModels(inventory)
-    ? { kind: "ready", inventory, discoveredAt: result.discoveredAt, fingerprint: result.fingerprint }
-    : { kind: "empty", discoveredAt: result.discoveredAt, fingerprint: result.fingerprint };
+    ? { kind: "ready", inventory, source: result.source, diagnostics: result.inventory.diagnostics ?? [], discoveredAt: result.discoveredAt, fingerprint: result.fingerprint }
+    : { kind: "empty", source: result.source, diagnostics: result.inventory.diagnostics ?? [], discoveredAt: result.discoveredAt, fingerprint: result.fingerprint };
 }
 
 /**
@@ -522,12 +608,26 @@ export async function resolveOpenCodeModelDiscovery(
   request: RunnerModelDiscoveryRequest,
 ): Promise<TuiOpenCodeDiscoveryState> {
   if (typeof adapter.getModelInventory !== "function") {
-    return { kind: "blocked", errorMessage: "OpenCode model discovery is unavailable. Check the OpenCode runner and retry." };
+    return { kind: "blocked", source: "none", diagnostics: [], errorMessage: "OpenCode model discovery is unavailable. Check the OpenCode runner and retry." };
   }
   try {
     return buildTuiInventoryFromDiscoveryResult(await adapter.getModelInventory(request));
   } catch {
-    return { kind: "blocked", errorMessage: "OpenCode model discovery failed. Check the OpenCode runner and retry." };
+    return { kind: "blocked", source: "none", diagnostics: [], errorMessage: "OpenCode model discovery failed. Check the OpenCode runner and retry." };
+  }
+}
+
+export async function resolveCodexModelDiscovery(
+  adapter: { getModelInventory?: (request: RunnerModelDiscoveryRequest) => Promise<RunnerModelInventoryResult> },
+  request: RunnerModelDiscoveryRequest,
+): Promise<TuiCodexDiscoveryState> {
+  if (typeof adapter.getModelInventory !== "function") {
+    return { kind: "blocked", source: "none", diagnostics: [], errorMessage: "Codex model discovery is unavailable. Check the Codex runner and retry." };
+  }
+  try {
+    return buildTuiInventoryFromDiscoveryResult(await adapter.getModelInventory(request));
+  } catch {
+    return { kind: "blocked", source: "none", diagnostics: [], errorMessage: "Codex model discovery failed. Check the Codex runner and retry." };
   }
 }
 
@@ -555,12 +655,75 @@ function humanizeModelName(modelName: string): string {
 /** Narrow composition seam for deterministic discovery UI tests; defaults preserve production wiring. */
 export type DeckAppDependencies = {
   getAdapter?: typeof getAdapter;
+  adapterRegistry?: import("@deck/core").AdapterRegistry;
   resolveProjectRoot?: typeof resolveProjectRoot;
   runReleaseCheck?: typeof runReleaseCheckWithTimeout;
 };
 
+async function rollbackOrThrow(adapter: import("@deck/core").RunnerAdapter, backup: unknown): Promise<void> {
+  const result = await adapter.rollbackDeveloperTeamFiles(backup);
+  if (result.status === "conflict") throw new Error(result.diagnostics.join("; ") || `Rollback conflicts: ${result.conflicts.join(", ")}`);
+}
+
+function getSupportedPackageInstructionMetadata(
+  adapter: Pick<RunnerAdapter, "packageInstructionIds"> | null | undefined,
+): readonly PackageInstructionConfigurationMetadata[] {
+  const supported = new Set(adapter?.packageInstructionIds ?? []);
+  return PACKAGE_INSTRUCTION_CONFIGURATION_METADATA.filter((entry) => supported.has(entry.id));
+}
+
+function getConfiguredPackageInstructionIds(
+  supportedMetadata: readonly PackageInstructionConfigurationMetadata[],
+  toggles: Readonly<Record<string, boolean>>,
+) {
+  return supportedMetadata
+    .filter((entry) => entry.defaultEnabled || (entry.configurable && toggles[entry.id] === true))
+    .map((entry) => entry.id);
+}
+
+function getEnabledSupportedPackageInstructionIds(
+  adapter: Pick<RunnerAdapter, "packageInstructionIds"> | null | undefined,
+  enabledIds: readonly string[],
+) {
+  const enabled = new Set(enabledIds);
+  return getSupportedPackageInstructionMetadata(adapter)
+    .filter((entry) => enabled.has(entry.id))
+    .map((entry) => entry.id);
+}
+
+function packageInstructionTogglesFromConfig(
+  supportedMetadata: readonly PackageInstructionConfigurationMetadata[],
+  configured: Readonly<Record<string, boolean>>,
+): Record<string, boolean> {
+  return Object.fromEntries(
+    supportedMetadata
+      .filter((entry) => entry.configurable)
+      .map((entry) => [entry.id, configured[entry.id] === true]),
+  );
+}
+
+function packageInstructionConfigForPersistence(
+  supportedMetadata: readonly PackageInstructionConfigurationMetadata[],
+  toggles: Readonly<Record<string, boolean>>,
+): Record<string, boolean> {
+  return Object.fromEntries(supportedMetadata.map((entry) => [
+    entry.id,
+    entry.defaultEnabled || (entry.configurable && toggles[entry.id] === true),
+  ]));
+}
+
 export function DeckApp(dependencies: DeckAppDependencies = {}) {
-  const adapterFor = dependencies.getAdapter ?? getAdapter;
+  const adapterRegistry = useMemo(
+    () => dependencies.adapterRegistry ?? createDefaultAdapterRegistry(),
+    [dependencies.adapterRegistry],
+  );
+  const adapterFor = dependencies.adapterRegistry
+    ? (runnerId: string) => adapterRegistry.tryGet(runnerId)
+      ?? adapterRegistry.resolveByEnvironment(runnerId)
+      ?? adapterRegistry.get(runnerId)
+    : dependencies.getAdapter ?? getAdapter;
+  const runnerOptions = buildRunnerMenuOptions(adapterRegistry);
+  const environmentOptions = buildEnvironmentMenuOptions(adapterRegistry, getEnvironmentOptions());
   const projectRootFor = dependencies.resolveProjectRoot ?? resolveProjectRoot;
   const releaseCheckFor = dependencies.runReleaseCheck ?? runReleaseCheckWithTimeout;
   const { exit } = useApp();
@@ -578,16 +741,16 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [runtimeStatuses, setRuntimeStatuses] = useState<RuntimeStatus[]>([]);
   const [piPreflight, setPiPreflight] = useState<PiPreflightResult | null>(null);
   const [toolsReview, setToolsReview] = useState<PiRequiredToolsReview | null>(null);
-  const [selectedOptionalTools, setSelectedOptionalTools] = useState<InstallablePiToolId[]>(
-    adapterFor("pi").getSelectableTools().map((tool: any) => tool.id),
+  const [selectedOptionalTools, setSelectedOptionalTools] = useState<InstallablePiToolId[]>(() =>
+    (adapterRegistry.tryGet("pi")?.getSelectableTools() ?? []).map((tool: any) => tool.id),
   );
   const [openCodePreflight, setOpenCodePreflight] = useState<OpenCodePreflightResult | null>(null);
   const [openCodeToolsReview, setOpenCodeToolsReview] = useState<OpenCodeToolsReview | null>(null);
   const [installResults, setInstallResults] = useState<(PiToolInstallResult | OpenCodeToolInstallResult)[]>([]);
   const [developerTeamResults, setDeveloperTeamResults] = useState<AgentApplyResult[]>([]);
   const [developerTeamCursor, setDeveloperTeamCursor] = useState(0);
-  const [selectedTeams, setSelectedTeams] = useState<string[]>(
-    adapterFor("pi").getTeams("pi-development").map((team: any) => team.id),
+  const [selectedTeams, setSelectedTeams] = useState<string[]>(() =>
+    (adapterRegistry.tryGet("pi")?.getTeams("pi-development") ?? []).map((team: any) => team.id),
   );
 
   // Project root resolved once at startup (can be null for global config fallback)
@@ -602,7 +765,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [modelAssignments, setModelAssignments] = useState<DeveloperTeamModelAssignments>({});
   const [thinkingAssignments, setThinkingAssignments] = useState<DeveloperTeamThinkingAssignments>({});
   const [openCodeDiscovery, setOpenCodeDiscovery] = useState<TuiOpenCodeDiscoveryState>({ kind: "loading" });
+  const [codexDiscovery, setCodexDiscovery] = useState<TuiCodexDiscoveryState>({ kind: "loading" });
   const [openCodeAssignmentStates, setOpenCodeAssignmentStates] = useState<Record<string, "available" | "model-unavailable" | "variant-unavailable" | "unverified">>({});
+  const [codexAssignmentStates, setCodexAssignmentStates] = useState<Record<string, "available" | "model-unavailable" | "variant-unavailable" | "unverified">>({});
   const [changedOpenCodeAgentIds, setChangedOpenCodeAgentIds] = useState<ReadonlySet<string>>(new Set());
   const [agentAssignmentIndex, setAgentAssignmentIndex] = useState(0);
   const [agentConfigCursor, setAgentConfigCursor] = useState(0);
@@ -610,17 +775,27 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [modelTeamCursor, setModelTeamCursor] = useState(0);
   const [selectedModelEnvironment, setSelectedModelEnvironment] = useState<EnvironmentId | null>(null);
   const [modelConfigSource, setModelConfigSource] = useState<"install" | "menu" | "dashboard" | null>(null);
-  const [modelConfigRuntime, setModelConfigRuntime] = useState<"pi" | "opencode">("pi");
-  const modelConfigRuntimeRef = useRef(modelConfigRuntime);
+  const [modelConfigRuntime, setModelConfigRuntime] = useState<RunnerId>("pi");
   const openCodeProjectRootRef = useRef(localResolvedProjectRoot ?? process.cwd());
+  const codexProjectRootRef = useRef(localResolvedProjectRoot ?? process.cwd());
   const openCodeDiscoveryCoordinatorRef = useRef<OpenCodeDiscoveryCoordinator<TuiOpenCodeDiscoveryState> | null>(null);
-  modelConfigRuntimeRef.current = modelConfigRuntime;
   if (!openCodeDiscoveryCoordinatorRef.current) {
     openCodeDiscoveryCoordinatorRef.current = createOpenCodeDiscoveryCoordinator<TuiOpenCodeDiscoveryState>({
       discover: (request) => resolveOpenCodeModelDiscovery(adapterFor("opencode"), request),
       getActiveIdentity: () => ({
-        runtime: modelConfigRuntimeRef.current,
+        runtime: "opencode",
         projectRoot: openCodeProjectRootRef.current,
+      }),
+      loadingState: { kind: "loading" },
+    });
+  }
+  const codexDiscoveryCoordinatorRef = useRef<OpenCodeDiscoveryCoordinator<TuiCodexDiscoveryState, "codex"> | null>(null);
+  if (!codexDiscoveryCoordinatorRef.current) {
+    codexDiscoveryCoordinatorRef.current = createOpenCodeDiscoveryCoordinator<TuiCodexDiscoveryState, "codex">({
+      discover: (request) => resolveCodexModelDiscovery(adapterFor("codex"), request),
+      getActiveIdentity: () => ({
+        runtime: "codex",
+        projectRoot: codexProjectRootRef.current,
       }),
       loadingState: { kind: "loading" },
     });
@@ -633,7 +808,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [dashboardSupermemorySetupActive, setDashboardSupermemorySetupActive] = useState(false);
   const [dashboardCompletionStatus, setDashboardCompletionStatus] = useState<string | undefined>(undefined);
   const [dashboardState, setDashboardState] = useState<RunnerDashboardState>(() => createDefaultRunnerDashboardState());
-  const [dashboardInventory, setDashboardInventory] = useState<PiRunnerFullCapabilityInventory>({});
+  const [dashboardInventory, setDashboardInventory] = useState<CapabilityInventory | null>(null);
+  const [dashboardEnvironmentId, setDashboardEnvironmentId] = useState<EnvironmentId | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardActionResults, setDashboardActionResults] = useState<RunnerActionRunResult[]>([]);
   const [dashboardSerenaStages, setDashboardSerenaStages] = useState<RunnerSerenaStage[]>([]);
@@ -645,9 +821,21 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const dashboardExitRequestedRef = useRef(false);
 
   // Configure packages standalone flow
-  const [configurePackagesRunner, setConfigurePackagesRunner] = useState<"pi" | "opencode" | null>(null);
+  const [configurePackagesRunner, setConfigurePackagesRunner] = useState<RunnerId | null>(null);
   const [configurePackagesCursor, setConfigurePackagesCursor] = useState(0);
   const [configurePackagesToggles, setConfigurePackagesToggles] = useState<Record<string, boolean>>({});
+  const configurePackagesAdapter = useMemo(
+    () => configurePackagesRunner ? adapterRegistry.tryGet(configurePackagesRunner) ?? null : null,
+    [adapterRegistry, configurePackagesRunner],
+  );
+  const configurePackageMetadata = useMemo(
+    () => getSupportedPackageInstructionMetadata(configurePackagesAdapter),
+    [configurePackagesAdapter],
+  );
+  const configurePackageRows = useMemo(
+    () => getConfigurablePackageInstructionMetadata(configurePackagesAdapter?.packageInstructionIds ?? []),
+    [configurePackagesAdapter],
+  );
 
   // Personality selection state
   const [selectedPersonality, setSelectedPersonality] = useState<"guia" | "pragmatica">(() => {
@@ -758,18 +946,15 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
   // Runtime-agnostic capability resolver — dispatches to the correct adapter based on runnerScope
   const dashboardCapabilityResolver = useMemo(() => ({
-    getCapability: (capabilityId: string) => {
-      return adapterFor(dashboardState.runnerScope).getCapability(capabilityId) as any;
-    },
-    getUserFacingIds: () => {
-      return adapterFor(dashboardState.runnerScope).getCapabilityIds() as string[];
+    getSupportedPackageInstructionIds: () => {
+      return adapterFor(dashboardState.runnerScope).packageInstructionIds ?? [];
     },
   }), [dashboardState.runnerScope]);
 
   // Compute toggleable capability count for cursor clamping (configurable + optional only)
   const dashboardToggleableCount = useMemo(() => {
     if (dashboardState.screen !== "packages-detail") return 5; // default
-    const toggleableIds = getToggleableCapabilityIds(dashboardState, dashboardCapabilityResolver);
+    const toggleableIds = getToggleablePackageInstructionIds(dashboardState, dashboardCapabilityResolver);
     return toggleableIds.length;
   }, [dashboardState.screen, dashboardState.runnerScope]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -777,31 +962,48 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const dashboardPlanBuilder = useMemo(() => {
     return (state: RunnerDashboardState, inventory: unknown) => {
       log(`dashboardPlanBuilder: called. runnerScope=${state.runnerScope} selectedCaps=${JSON.stringify(state.selectedCapabilities)} inventoryType=${typeof inventory}`);
+      if (state.runnerScope === "all" || !dashboardEnvironmentId) {
+        return createRunnerReviewPlanFailure("dashboard-inventory-invalid", "Runner capability inventory is unavailable. Return to Dashboard and retry.");
+      }
+      const normalizedInventory = normalizeDashboardCapabilityInventory(inventory, state.runnerScope, dashboardEnvironmentId);
+      if (!normalizedInventory.ok) {
+        return createRunnerReviewPlanFailure(normalizedInventory.diagnostic.code, normalizedInventory.diagnostic.message);
+      }
       try {
         const adapter = adapterFor(state.runnerScope);
         log(`dashboardPlanBuilder: adapter=${adapter.runnerId}`);
+        const adapterState: DashboardState & {
+          teams: RunnerDashboardState["teams"];
+          runtime: { toolsReview?: unknown };
+        } = {
+          runnerId: normalizedInventory.inventory.runnerId,
+          environmentId: normalizedInventory.inventory.environmentId,
+          selectedCapabilities: Object.fromEntries(
+            Object.entries(state.selectedCapabilities).map(([capabilityId, selected]) => [capabilityId, selected === true]),
+          ),
+          explicitlySelectedCapabilities: Object.fromEntries(
+            Object.entries(state.explicitlySelectedCapabilities).map(([capabilityId, selected]) => [capabilityId, selected === true]),
+          ),
+          operationId: state.operationId,
+          adaptiveMemory: state.adaptiveMemory,
+          packageInstructions: Object.fromEntries(
+            Object.entries(state.packageInstructions).map(([packageId, enabled]) => [packageId, enabled === true]),
+          ),
+          teams: state.teams,
+          runtime: { toolsReview: state.runtime.toolsReview },
+        };
         const plan = adapter.buildReviewPlan(
-          {
-            runnerId: state.runnerScope as any,
-            selectedCapabilities: state.selectedCapabilities as Record<string, boolean>,
-            explicitlySelectedCapabilities: state.explicitlySelectedCapabilities as Record<string, boolean>,
-            operationId: state.operationId,
-            adaptiveMemory: state.adaptiveMemory as any,
-            teams: state.teams as any,
-            runtime: { toolsReview: state.runtime.toolsReview as any },
-            packageInstructions: state.packageInstructions as any,
-          } as any,
-          inventory as Parameters<ReturnType<typeof getAdapter>["buildReviewPlan"]>[1],
+          adapterState,
+          normalizedInventory.inventory,
         );
         log(`dashboardPlanBuilder: SUCCESS. planSteps=${Array.isArray(plan) ? plan.length : "not-array"}`);
         return plan as RunnerReviewPlan;
-      } catch (error) {
-        const msg = error instanceof Error ? `${error.message}\n${error.stack}` : String(error);
-        log(`dashboardPlanBuilder: FAILED: ${msg}`);
-        throw error;
+      } catch {
+        log("dashboardPlanBuilder: FAILED to build review plan");
+        return createRunnerReviewPlanFailure();
       }
     };
-  }, []);
+  }, [dashboardEnvironmentId]);
 
   const installedPi = runtimeStatuses.find((status) => status.runtime === "pi" && status.installed && status.command);
   const installedOpenCode = runtimeStatuses.find((status) => status.runtime === "opencode" && status.installed && status.command);
@@ -853,6 +1055,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       return;
     }
 
+    if (input === "r" && modelConfigRuntime === "codex" && screen === "codex-model-discovery") {
+      startCodexModelDiscovery("rescan");
+      return;
+    }
+
     if (key.escape) {
       if (dashboardSupermemorySetupActive) {
         clearDashboardSupermemoryEphemeralState();
@@ -893,125 +1100,6 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   });
 
   useEffect(() => {
-    if (screen !== "pi-preflight-checking") return;
-
-    let cancelled = false;
-
-    async function runPreflight() {
-      await new Promise((resolve) => setTimeout(resolve, 120));
-
-      const selected = selectedEnvironments;
-      const statuses = detectSelectedRuntimes(selected);
-      const detectedPi = statuses.find((s) => s.runtime === "pi" && s.installed && s.command);
-
-      if (!detectedPi?.command) {
-        if (!cancelled) resetCursor("complete");
-        return;
-      }
-
-      const preflight = inspectPiEnvironment({ command: detectedPi.command, includeChecks: true });
-      const review = reviewPiRequiredTools({ command: detectedPi.command });
-
-      if (!cancelled) {
-        setPiPreflight(preflight);
-        setToolsReview(review);
-        const inventory = buildPiRunnerCapabilityInventory(review, preflight, { runnerScope: "pi" });
-        setDashboardInventory(inventory);
-        // Use resolvedProjectRoot from state, which can be null - fall back to default config
-        const piConfig = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
-        dashboardOperationSequenceRef.current += 1;
-        const operation = nextRunnerOperation("pi", dashboardOperationSequenceRef.current);
-        setDashboardState(createDefaultRunnerDashboardState({
-          runtime: { runnerCommand: detectedPi.command, preflight, toolsReview: review },
-          operationId: operation.operationId,
-          currentOperation: operation,
-          capabilityStatuses: Object.fromEntries(
-            Object.entries(inventory)
-              .filter(([key]) => key !== '_internal')
-              .map(([capabilityId, entry]) => [capabilityId, (entry as any)?.status]),
-          ),
-          packageInstructions: loadRunnerPackageInstructionsFromConfig(piConfig, "pi"),
-        }));
-        setDashboardActionResults([]);
-        setDashboardSerenaStages([]);
-        setDashboardSerenaOutcome(undefined);
-        setDashboardCancellationRequested(false);
-        resetCursor("pi-runner-dashboard");
-      }
-    }
-
-    void runPreflight();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [screen, selectedEnvironments]);
-
-  useEffect(() => {
-    if (screen !== "opencode-preflight-checking") return;
-
-    let cancelled = false;
-
-    async function runOpenCodePreflight() {
-      await new Promise((resolve) => setTimeout(resolve, 120));
-
-      const selected = selectedEnvironments;
-      const statuses = detectSelectedRuntimes(selected);
-      const detectedOpenCode = statuses.find((s) => s.runtime === "opencode" && s.installed && s.command);
-
-      if (!detectedOpenCode?.command) {
-        if (!cancelled) resetCursor("complete");
-        return;
-      }
-
-      const preflight = inspectOpenCodeEnvironment({ command: detectedOpenCode.command, includeChecks: true });
-      const review = reviewOpenCodeTools({ packageManifest: preflight.packageManifest });
-
-      if (!cancelled) {
-        setOpenCodePreflight(preflight);
-        setOpenCodeToolsReview(review);
-        // Build OpenCode capability inventory and route to the same runner dashboard
-        const inventory = buildOpenCodeRunnerCapabilityInventory(review, { runnerScope: "opencode", includeInternal: true });
-        setDashboardInventory(inventory as any);
-        // Use resolvedProjectRoot from state, which can be null - fall back to default config
-        const opencodeConfig = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
-        dashboardOperationSequenceRef.current += 1;
-        const operation = nextRunnerOperation("opencode", dashboardOperationSequenceRef.current);
-        setDashboardState(createDefaultRunnerDashboardState({
-          runtime: { runnerCommand: detectedOpenCode.command, preflight, toolsReview: review as any },
-          runnerScope: "opencode",
-          operationId: operation.operationId,
-          currentOperation: operation,
-          capabilityStatuses: Object.fromEntries(
-            Object.entries(inventory)
-              .filter(([key]) => key !== '_internal')
-              .map(([capabilityId, entry]) => [capabilityId, (entry as any)?.status]),
-          ),
-          teams: {
-            "developer-team": {
-              teamId: "developer-team",
-              label: "Developer Team",
-              selected: true,
-            },
-          },
-          packageInstructions: loadRunnerPackageInstructionsFromConfig(opencodeConfig, "opencode"),
-        }));
-        setDashboardActionResults([]);
-        setDashboardSerenaStages([]);
-        setDashboardSerenaOutcome(undefined);
-        setDashboardCancellationRequested(false);
-        resetCursor("pi-runner-dashboard");
-      }
-    }
-
-    void runOpenCodePreflight();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [screen, selectedEnvironments]);
-
-  useEffect(() => {
     if (screen !== "installing") return;
 
     let cancelled = false;
@@ -1035,7 +1123,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }, [installationPlan, installedPi?.command, screen]);
 
   useEffect(() => {
-    if (screen !== "pi-runner-dashboard" || dashboardState.screen !== "install-progress" || !dashboardState.plan) return;
+    if (screen !== "pi-runner-dashboard" || dashboardState.screen !== "install-progress" || dashboardState.plan?.ready !== true) return;
 
     log(`useEffect[install-progress]: STARTING. screen=${screen} dashboardScreen=${dashboardState.screen} hasPlan=${!!dashboardState.plan}`);
 
@@ -1052,7 +1140,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       setDashboardActionResults([]);
       const adapter = adapterFor(dashboardState.runnerScope);
       log(`runDashboardInstall: adapter=${adapter.runnerId} projectRoot=${localResolvedProjectRoot ?? process.cwd()}`);
-      const resolvedMemoryProvider = memoryProvider;
+      const resolvedMemoryProvider = resolveDashboardMemoryProviderForInstall(
+        adapter.runnerId,
+        dashboardState.adaptiveMemory.provider,
+        memoryProvider,
+      );
       // Use stored project root, not the function
       const projectRoot = localResolvedProjectRoot ?? process.cwd();
       const environmentId = adapter.environmentIds[0];
@@ -1176,7 +1268,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           return results;
         },
         dashboardState,
-        runnerId: adapter.runnerId as "pi" | "opencode",
+        packageInstructionIds: adapter.packageInstructionIds,
+        runnerId: adapter.runnerId,
         operationId: currentOperation?.operationId,
         currentOperation,
         serenaAuthorization,
@@ -1338,11 +1431,13 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           log(`installPackages (OpenCode): results=${results.map(r => `${r.id}:${r.outcome}`).join(",")}`);
           return results;
         },
-        installTeamBundle: async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments }) => {
-          // Build capability instructions for OpenCode (Pi ignores undefined capabilityInstructions)
+        installTeamBundle: async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments; capabilityIds?: readonly string[] }) => {
+          // Build capability instructions through the active adapter's registered runner ID.
           const deckConfig = readDeckConfig(projectRoot);
-          const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
-          const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+          const enabledIds = getEnabledPackageInstructionIds(deckConfig, adapter.runnerId);
+          const capabilityInstructions = buildCapabilityInstructionBundle(
+            getEnabledSupportedPackageInstructionIds(adapter, enabledIds),
+          );
 
           const plan = adapter.buildDeveloperTeamInstallPlan({
             projectRoot,
@@ -1351,6 +1446,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             thinkingAssignments: options?.thinkingAssignments,
             memoryProvider: options?.memoryProvider,
             capabilityInstructions,
+            capabilityIds: options?.capabilityIds,
           });
 
           const backup = adapter.backupDeveloperTeamFiles(plan);
@@ -1362,9 +1458,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
               environmentId,
             });
 
-            const verifyResult = adapter.verifyDeveloperTeamInstall(plan);
+            const verifyResult = await adapter.verifyDeveloperTeamInstall(plan);
             if (!verifyResult.valid) {
-              adapter.rollbackDeveloperTeamFiles(backup);
+              await rollbackOrThrow(adapter, backup);
               const diagnosticsMsg =
                 verifyResult.diagnostics.length > 0
                   ? `\nDetails: ${verifyResult.diagnostics.slice(0, 3).join("; ")}${verifyResult.diagnostics.length > 3 ? ` (+${verifyResult.diagnostics.length - 3} more)` : ""}`
@@ -1374,9 +1470,13 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
               throw new Error(failMsg);
             }
 
-            return { results: applyResult.results };
+            return {
+              results: applyResult.results,
+              verificationEvidence: verifyResult.verificationEvidence ?? [],
+              postInstallFollowUps: verifyResult.postInstallFollowUps ?? [],
+            };
           } catch (error) {
-            adapter.rollbackDeveloperTeamFiles(backup);
+            await rollbackOrThrow(adapter, backup);
             throw error instanceof Error ? error : new Error(String(error));
           }
         },
@@ -1623,11 +1723,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
       try {
         const applyResult = await adapter.applyDeveloperTeamInstall({ projectRoot, plan, environmentId });
-        const verifyResult = adapter.verifyDeveloperTeamInstall(plan);
+        const verifyResult = await adapter.verifyDeveloperTeamInstall(plan);
 
         if (!cancelled) {
           if (!verifyResult.valid) {
-            adapter.rollbackDeveloperTeamFiles(backup);
+            await rollbackOrThrow(adapter, backup);
             setDeveloperTeamResults([]);
             const diagnosticsMsg =
               verifyResult.diagnostics.length > 0
@@ -1655,7 +1755,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         }
       } catch (error) {
         if (!cancelled) {
-          adapter.rollbackDeveloperTeamFiles(backup);
+          await rollbackOrThrow(adapter, backup);
           setDeveloperTeamResults([]);
           setInstallResults((current) => [
             ...current,
@@ -1693,6 +1793,111 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     if (nextScreen === "developer-team-review") setDeveloperTeamCursor(0);
   }
 
+  async function composeRegisteredRunnerDashboard(environmentId: EnvironmentId): Promise<boolean> {
+    const adapter = adapterRegistry.resolveByEnvironment(environmentId);
+    if (!adapter) return false;
+
+    const projectRoot = projectRootFor({ require: true }) ?? process.cwd();
+    const config = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
+    setDashboardError(null);
+
+    try {
+      const [runtimes, inspection, toolsReview, inventory] = await Promise.all([
+        adapter.detectRuntimes({ projectRoot, environmentId }),
+        adapter.inspectProject ? adapter.inspectProject(projectRoot) : adapter.inspectEnvironment(),
+        adapter.reviewTools(),
+        adapter.getCapabilityInventory({ projectRoot, environmentId, runnerId: adapter.runnerId }),
+      ]);
+      const normalizedInventory = normalizeDashboardCapabilityInventory(inventory, adapter.runnerId, environmentId);
+      if (!normalizedInventory.ok) {
+        setDashboardInventory(null);
+        setDashboardEnvironmentId(environmentId);
+        setDashboardError(`[dashboard inventory error] ${normalizedInventory.diagnostic.message}`);
+        setDashboardState(createDefaultRunnerDashboardState({
+          runnerScope: adapter.runnerId,
+          runnerDisplayName: adapter.displayName,
+          runnerUi: adapter.ui,
+          runtime: { inspectionState: "blocked", diagnostics: [normalizedInventory.diagnostic.message] },
+          packageInstructions: loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds),
+        }));
+        resetCursor("pi-runner-dashboard");
+        return true;
+      }
+      const dashboardCapabilityInventory = normalizedInventory.inventory;
+      const projectInspection = isRunnerProjectInspection(inspection) ? inspection : undefined;
+      const selectedTeamIds = new Set(adapter.ui?.dashboard?.defaultSelectedTeamIds ?? []);
+      const teams = Object.fromEntries(adapter.getTeams(environmentId).map((team) => [team.id, {
+        teamId: team.id,
+        label: team.displayName,
+        selected: selectedTeamIds.has(team.id),
+      }]));
+      const executionClass = adapter.ui?.dashboard?.executionClass;
+      const routeEvidence = projectInspection?.evidence;
+      const unavailable = projectInspection?.state === "unsupported"
+        ? "unsupported"
+        : projectInspection?.state === "blocked"
+          ? "blocked"
+          : undefined;
+      const classifyRoute = (supported: boolean): "first-class" | "static-compatible" | "unsupported" | "blocked" =>
+        unavailable ?? (supported && executionClass ? executionClass : "unsupported");
+      const executionRoutes: RunnerDashboardState["runtime"]["executionRoutes"] = executionClass && routeEvidence
+        ? {
+            interactive: classifyRoute(routeEvidence.interactive === true),
+            exec: classifyRoute(routeEvidence.exec === true),
+            "resume-by-id": classifyRoute(routeEvidence.resume === true),
+            "resume-latest": classifyRoute(routeEvidence.resumeLatest === true),
+          }
+        : undefined;
+      dashboardOperationSequenceRef.current += 1;
+      const operation = nextRunnerOperation(adapter.runnerId, dashboardOperationSequenceRef.current);
+
+      setDashboardInventory(dashboardCapabilityInventory);
+      setDashboardEnvironmentId(environmentId);
+      setDashboardState(createDefaultRunnerDashboardState({
+        runnerScope: adapter.runnerId,
+        runnerDisplayName: adapter.displayName,
+        runnerUi: adapter.ui,
+        runtime: {
+          runnerCommand: runtimes.find((runtime) => runtime.isAvailable)?.runtimeId ?? runtimes[0]?.runtimeId ?? adapter.runnerId,
+          preflight: inspection,
+          toolsReview,
+          inspectionState: projectInspection?.state,
+          diagnostics: projectInspection?.diagnostics.map((diagnostic) => diagnostic.message)
+            ?? runtimes.flatMap((runtime) => runtime.diagnostics ?? []),
+          ...(executionRoutes ? { executionRoutes } : {}),
+        },
+        operationId: operation.operationId,
+        currentOperation: operation,
+        capabilityStatuses: Object.fromEntries(dashboardCapabilityInventory.capabilities.map((entry) => [
+          entry.capabilityId,
+          entry.isBlocked ? "blocked" : entry.isInstalled ? "ready" : "missing",
+        ])),
+        teams,
+        packageInstructions: loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds),
+      }));
+      setDashboardActionResults([]);
+      setDashboardSerenaStages([]);
+      setDashboardSerenaOutcome(undefined);
+      setDashboardCancellationRequested(false);
+      resetCursor("pi-runner-dashboard");
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setDashboardInventory(null);
+      setDashboardEnvironmentId(environmentId);
+      setDashboardError(`[dashboard preflight error] ${message}`);
+      setDashboardState(createDefaultRunnerDashboardState({
+        runnerScope: adapter.runnerId,
+        runnerDisplayName: adapter.displayName,
+        runnerUi: adapter.ui,
+        runtime: { inspectionState: "blocked", diagnostics: [message] },
+        packageInstructions: loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds),
+      }));
+      resetCursor("pi-runner-dashboard");
+      return true;
+    }
+  }
+
   /**
    * Build the `RollbackAvailability` argument for `getHomeMenuOptions`
    * from the discovered manifest. Returns `null` when no backup is
@@ -1712,13 +1917,13 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     if (screen === "upgrade-progress") return 0;
     if (screen === "rollback-confirm") return 1; // Run rollback, Cancel
     if (screen === "rollback-progress") return 0;
-    if (screen === "model-environment-selection") return getEnvironmentOptions().length - 1;
+    if (screen === "model-environment-selection") return environmentOptions.length - 1;
     if (screen === "model-team-selection") {
       const env = selectedModelEnvironment ?? "pi-development";
       const teams = adapterFor(env).getTeams(env) as any[];
       return Math.max(0, teams.length - 1);
     }
-    if (screen === "environment-selection") return getEnvironmentOptions().length - 1;
+    if (screen === "environment-selection") return environmentOptions.length - 1;
     if (screen === "optional-tools") return getAdapter("pi").getSelectableTools().length - 1;
     if (screen === "installation-review") return 1;
     if (screen === "team-selection") return Math.max(0, getAdapter("pi").getTeams("pi-development").length - 1);
@@ -1728,24 +1933,20 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     if (screen === "model-provider-selection") return Math.max(0, detectedProviders.length - 1);
     if (screen === "model-selection") return Math.max(0, providerModels.length - 1);
     if (screen === "agent-model-assignment") {
-      // Use model-specific thinking levels for OpenCode (from the adapter's
-      // model inventory) rather than the hardcoded OPENCODE_THINKING_LEVELS
-      // constant. Pi keeps its fixed PI_THINKING_LEVELS set.
       const adapter = adapterFor(modelConfigRuntime);
       const supportsThinking = selectedModel
-        ? modelConfigRuntime === "opencode"
-          ? getActiveThinkingLevels(selectedModel.id).length > 0
-          : adapter.supportsThinking(selectedModel.id)
+        ? getActiveThinkingLevels(selectedModel.id).length > 0 && adapter.supportsThinking(selectedModel.id)
         : false;
       if (!selectedModel || !supportsThinking) return 0;
       const thinkingLevels = getActiveThinkingLevels(selectedModel.id);
       return Math.max(0, thinkingLevels.length - 1);
     }
     if (screen === "opencode-model-discovery") return openCodeDiscovery.kind === "loading" ? 0 : 1;
+    if (screen === "codex-model-discovery") return codexDiscovery.kind === "loading" ? 0 : 1;
     if (screen === "no-providers") return 0;
     if (screen === "personality-selection") return 1; // 2 options: guia, pragmatica
-    if (screen === "configure-packages-runner-selection") return 2; // Pi, OpenCode, Back
-    if (screen === "configure-packages-detail") return 4; // 3 packages + Apply + Back
+    if (screen === "configure-packages-runner-selection") return runnerOptions.length - 1;
+    if (screen === "configure-packages-detail") return configurePackageRows.length + 1; // optional packages + Apply + Back
     return 0;
   }
 
@@ -1766,7 +1967,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
   function toggleCurrent() {
     if (screen === "environment-selection") {
-      const option = getEnvironmentOptions()[cursor];
+      const option = environmentOptions[cursor];
       if (!option) return;
       const id = option.value as EnvironmentId;
       setSelectedEnvironments((current) =>
@@ -1794,12 +1995,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
 
     if (screen === "configure-packages-detail") {
-      const packages = ["codebase-memory", "context-mode", "rtk"];
-      const pkg = packages[configurePackagesCursor];
+      const pkg = configurePackageRows[configurePackagesCursor];
       if (!pkg) return;
       setConfigurePackagesToggles((current) => ({
         ...current,
-        [pkg]: !current[pkg],
+        [pkg.id]: !current[pkg.id],
       }));
     }
   }
@@ -1867,12 +2067,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
 
     if (screen === "model-environment-selection") {
-      const option = getEnvironmentOptions()[modelEnvironmentCursor];
+      const option = environmentOptions[modelEnvironmentCursor];
       if (!option) return;
       const environment = option.value as EnvironmentId;
       setSelectedModelEnvironment(environment);
 
-      if (environment === "pi-development" || environment === "opencode-development") {
+      if (adapterRegistry.resolveByEnvironment(environment)) {
         resetCursor("model-team-selection");
       } else {
         resetCursor("complete");
@@ -1887,13 +2087,22 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       if (!team) return;
 
       if (team.id === "developer-team") {
-        const isO = selectedModelEnvironment === "opencode-development";
-        const runtime: "pi" | "opencode" = isO ? "opencode" : "pi";
+        const selectedAdapter = adapterFor(env);
+        const runtime = selectedAdapter.runnerId;
+        const isO = runtime === "opencode";
         setModelConfigRuntime(runtime);
         hydrateDeveloperTeamModelConfig(runtime);
 
         if (isO) {
           startOpenCodeModelDiscovery();
+        } else if (runtime === "codex") {
+          startCodexModelDiscovery();
+        } else if (selectedAdapter.getModelInventory) {
+          const result = await selectedAdapter.getModelInventory({ projectRoot: localResolvedProjectRoot ?? process.cwd(), mode: "prefer-cache" });
+          const inventory = buildTuiInventoryFromAdapterInventory(result && result.state !== "blocked" ? result.inventory : null);
+          setDetectedProviders(inventory.providers);
+          setModelsByProvider(inventory.modelsByProvider);
+          resetCursor(inventory.providers.length > 0 ? "agent-model-config-list" : "no-providers");
         } else {
           const inventory = detectPiModelInventoryForTui();
           setDetectedProviders(inventory.providers);
@@ -1944,46 +2153,37 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         // Stay on screen, user can retry
         return;
       }
-      const nextScreen = getNextScreenAfterPersonalitySelection({
-        selectedEnvironments,
-        hasPiCommand: true,
-        nextEnvironment: selectedEnvironments[0] ?? null,
-      });
-      resetCursor(nextScreen);
+      const environmentId = selectedEnvironments.find((candidate) => adapterRegistry.resolveByEnvironment(candidate));
+      if (!environmentId || !await composeRegisteredRunnerDashboard(environmentId)) resetCursor("complete");
       return;
     }
 
     if (screen === "configure-packages-runner-selection") {
-      const runners = [
-        { id: "pi", label: "Pi" },
-        { id: "opencode", label: "OpenCode" },
-        { id: "back", label: "Back" },
-      ];
-      const selected = runners[configurePackagesCursor];
-      if (!selected || selected.id === "back") {
+      const selected = resolveRunnerMenuSelection(adapterRegistry, runnerOptions, configurePackagesCursor);
+      if (!selected) {
         resetCursor("home");
         return;
       }
-      const runner = selected.id as "pi" | "opencode";
+      const runner = selected.runnerId;
+      const adapter = adapterRegistry.tryGet(runner);
+      if (!adapter) {
+        resetCursor("home");
+        return;
+      }
       // Use resolvedProjectRoot from state, which can be null - fall back to default config
       const config = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
-      const instructions = loadRunnerPackageInstructionsFromConfig(config, runner);
+      const instructions = loadRunnerPackageInstructionsFromConfig(config, runner, adapter.packageInstructionIds);
+      const supportedMetadata = getSupportedPackageInstructionMetadata(adapter);
       setConfigurePackagesRunner(runner);
       setConfigurePackagesCursor(0);
-      setConfigurePackagesToggles({
-        "codebase-memory": instructions["codebase-memory"] ?? false,
-        "context-mode": instructions["context-mode"] ?? false,
-        "rtk": instructions["rtk"] ?? false,
-      });
+      setConfigurePackagesToggles(packageInstructionTogglesFromConfig(supportedMetadata, instructions));
       resetCursor("configure-packages-detail");
       return;
     }
 
     if (screen === "configure-packages-detail") {
       const options = [
-        { id: "codebase-memory" },
-        { id: "context-mode" },
-        { id: "rtk" },
+        ...configurePackageRows.map((entry) => ({ id: entry.id })),
         { id: "apply" },
         { id: "back" },
       ];
@@ -1998,14 +2198,15 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       }
 
       if (selected.id === "apply" && configurePackagesRunner) {
+        const adapter = configurePackagesAdapter;
+        if (!adapter) return;
         // Use require: true for backward compatibility - writes need a path
         const projectRoot = projectRootFor({ require: true }) ?? process.cwd();
         const existingConfig = readDeckConfig(projectRoot);
         const newPackageInstructions = {
           ...existingConfig.packageInstructions,
           [configurePackagesRunner]: {
-            ...existingConfig.packageInstructions?.[configurePackagesRunner],
-            ...configurePackagesToggles,
+            ...packageInstructionConfigForPersistence(configurePackageMetadata, configurePackagesToggles),
           },
         };
         writeDeckConfig(projectRoot, {
@@ -2013,25 +2214,24 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           packageInstructions: newPackageInstructions,
         });
 
-        const adapter = adapterFor(configurePackagesRunner);
+        const environmentId = adapter.environmentIds[0];
+        if (!environmentId) throw new Error(`Runner ${configurePackagesRunner} does not declare an environment.`);
 
-        // Construir bundle de instrucciones
-        const enabledIds = Object.entries(configurePackagesToggles)
-          .filter(([, enabled]) => enabled)
-          .map(([id]) => id);
-        const bundle = buildCapabilityInstructionBundle(enabledIds as any);
+        const bundle = buildCapabilityInstructionBundle(
+          getConfiguredPackageInstructionIds(configurePackageMetadata, configurePackagesToggles),
+        );
 
         // Generar y aplicar plan vía adapter (el adapter lee assignments internamente)
         const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
         const plan = adapter.buildDeveloperTeamInstallPlan({
           projectRoot,
-          environmentId: configurePackagesRunner as any,
+          environmentId,
           capabilityInstructions: bundle,
           standaloneSkills,
         });
 
         try {
-          const result = await adapter.applyDeveloperTeamInstall({ projectRoot, plan, environmentId: configurePackagesRunner as any });
+          const result = await adapter.applyDeveloperTeamInstall({ projectRoot, plan, environmentId });
           const updatedCount = result.results.filter((r) => r.status === "updated").length;
           const createdCount = result.results.filter((r) => r.status === "created").length;
           setDashboardCompletionStatus(
@@ -2071,12 +2271,16 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
       if (nextScreen === "developer-team-review") {
         // Insert model configuration before review
-        const runtime: "pi" | "opencode" = selectedEnvironments.includes("opencode-development") && !selectedEnvironments.includes("pi-development") ? "opencode" : "pi";
+        const runtime = selectedEnvironments
+          .map((environmentId) => adapterRegistry.resolveByEnvironment(environmentId)?.runnerId)
+          .find((runnerId): runnerId is string => Boolean(runnerId)) ?? "pi";
         setModelConfigRuntime(runtime);
         hydrateDeveloperTeamModelConfig(runtime);
         setModelConfigSource("install");
         if (runtime === "opencode") {
           startOpenCodeModelDiscovery();
+        } else if (runtime === "codex") {
+          startCodexModelDiscovery();
         } else {
           const inventory = detectPiModelInventoryForTui();
           setDetectedProviders(inventory.providers);
@@ -2095,7 +2299,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const provider = detectedProviders[cursor];
       if (!provider) return;
       setSelectedProvider(provider);
-      const models = modelsByProvider[provider.id] ?? (modelConfigRuntime === "opencode" ? [] : listModelsForProvider(provider.id, { runCommand: runPiCommand }));
+      const models = modelsByProvider[provider.id] ?? (modelConfigRuntime === "pi" ? listModelsForProvider(provider.id, { runCommand: runPiCommand }) : []);
       setProviderModels(models);
       setSelectedModel(null);
       resetCursor("model-selection");
@@ -2105,6 +2309,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     if (screen === "agent-model-config-list") {
       if (modelConfigRuntime === "opencode" && openCodeDiscovery.kind === "stale") {
         resetCursor("opencode-model-discovery");
+        return;
+      }
+      if (modelConfigRuntime === "codex" && codexDiscovery.kind !== "ready") {
+        resetCursor("codex-model-discovery");
         return;
       }
       if (cursor === DEVELOPER_TEAM_AGENTS.length) {
@@ -2136,11 +2344,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const model = providerModels[cursor];
       if (!model) return;
 
-      // OpenCode variants are runner-owned. Pi keeps its independent resolver.
+      // Non-Pi variants are runner-owned; Pi keeps its fixed resolver.
       const thinkingLevels = getActiveThinkingLevels(model.id);
-      const supportsThinking = modelConfigRuntime === "opencode"
-        ? thinkingLevels.length > 0
-        : adapterFor(modelConfigRuntime).supportsThinking(model.id);
+      const supportsThinking = thinkingLevels.length > 0 && adapterFor(modelConfigRuntime).supportsThinking(model.id);
 
       if (!supportsThinking) {
         // Model doesn't support reasoning - clean up and skip assignment screen
@@ -2152,7 +2358,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             delete next[agent.id];
             return next;
           });
-          if (modelConfigRuntime === "opencode") {
+          if (modelConfigRuntime === "opencode" || modelConfigRuntime === "codex") {
             setChangedOpenCodeAgentIds((current) => new Set(current).add(agent.id));
           }
         }
@@ -2165,13 +2371,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
       const existingThinking = agent ? thinkingAssignments[agent.id] : undefined;
 
-      // Model-specific thinking levels for OpenCode (from the adapter's model
-      // inventory). Pi keeps its fixed PI_THINKING_LEVELS set. This drives the
-      // cursor position for the effort picker so the preselected level matches
-      // the model's real variants.
-      const defaultThinking = modelConfigRuntime === "opencode"
-        ? (existingThinking && thinkingLevels.includes(existingThinking) ? existingThinking : thinkingLevels[0])
-        : adapterFor(modelConfigRuntime).resolveThinking(model.id, existingThinking as any) ?? "low";
+      const adapterDefault = adapterFor(modelConfigRuntime).getDefaultThinking(model.id);
+      const defaultThinking = existingThinking && thinkingLevels.includes(existingThinking)
+        ? existingThinking
+        : thinkingLevels.includes(adapterDefault)
+          ? adapterDefault
+          : thinkingLevels[0];
       const thinkingIndex = thinkingLevels.indexOf(defaultThinking as any);
       resetCursor("agent-model-assignment", Math.max(0, thinkingIndex));
       return;
@@ -2182,14 +2387,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const agent = DEVELOPER_TEAM_AGENTS[agentAssignmentIndex];
       if (!agent) return;
 
-      // Model-specific thinking levels for OpenCode (from the adapter's model
-      // inventory). Pi keeps its fixed PI_THINKING_LEVELS set. The cursor
-      // indexes into the model's real variants rather than a hardcoded set.
       const thinkingLevels = getActiveThinkingLevels(selectedModel.id);
-      const rawThinking = thinkingLevels[cursor];
-      const thinking = modelConfigRuntime === "opencode"
-        ? rawThinking
-        : adapterFor(modelConfigRuntime).resolveThinking(selectedModel.id, rawThinking as any ?? "low");
+      const thinking = thinkingLevels[cursor];
 
       setModelAssignments((current) => ({ ...current, [agent.id]: selectedModel.id }));
       setThinkingAssignments((current) => {
@@ -2198,7 +2397,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         else delete next[agent.id];
         return next;
       });
-      if (modelConfigRuntime === "opencode") {
+      if (modelConfigRuntime === "opencode" || modelConfigRuntime === "codex") {
         setChangedOpenCodeAgentIds((current) => new Set(current).add(agent.id));
       }
       setSelectedModel(null);
@@ -2210,6 +2409,14 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const action = getOpenCodeDiscoveryAction(openCodeDiscovery, cursor);
       if (action === "wait") return;
       if (action === "retry") startOpenCodeModelDiscovery("rescan");
+      else goBack();
+      return;
+    }
+
+    if (screen === "codex-model-discovery") {
+      const action = getOpenCodeDiscoveryAction(codexDiscovery, cursor);
+      if (action === "wait") return;
+      if (action === "retry") startCodexModelDiscovery("rescan");
       else goBack();
       return;
     }
@@ -2231,6 +2438,13 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       setMemoryProviderChoice(choice);
       setSupermemoryError(undefined);
       if (choice === "supermemory") {
+        if (!shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)) {
+          setSupermemorySetup({ token: "" });
+          setMemoryProvider(undefined);
+          setMemoryStatus("Supermemory uses Codex native OAuth from the runner dashboard; no token was captured.");
+          resetCursor("developer-team-review");
+          return;
+        }
         setDashboardSupermemorySetupActive(false);
         resetCursor("supermemory-token");
         return;
@@ -2450,6 +2664,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           startOpenCodeModelDiscovery();
           return;
         }
+        if (runtime === "codex") {
+          startCodexModelDiscovery();
+          return;
+        }
         const inventory = detectPiModelInventoryForTui();
         setDetectedProviders(inventory.providers);
         setModelsByProvider(inventory.modelsByProvider);
@@ -2465,15 +2683,16 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         // Use require: true for backward compatibility - reads need a path
         const targetRoot = projectRootFor({ require: true });
         const adapter = adapterFor(runtime);
-        const assignments = adapter.readModelAssignments(targetRoot ?? "");
+        const modelAssignments = adapter.readModelAssignments(targetRoot ?? "");
+        const thinkingAssignments = adapter.readThinkingAssignments(targetRoot ?? "");
         setDashboardState((state) => ({
           ...state,
           teams: {
             ...state.teams,
             "developer-team": {
               ...state.teams["developer-team"],
-              modelAssignments: (assignments.modelAssignments ?? {}) as unknown as DeveloperTeamModelAssignments,
-              thinkingAssignments: assignments.thinkingAssignments as any,
+              modelAssignments,
+              thinkingAssignments,
               status: "Modelos actuales/defaults conservados para Developer Team.",
             },
           },
@@ -2493,7 +2712,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         }));
         return;
       case "complete-dashboard":
-        goToNextEnvironmentAfterDashboardComplete();
+        await goToNextEnvironmentAfterDashboardComplete();
         return;
       case "none":
         return;
@@ -2520,6 +2739,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       goBack();
       return;
     }
+    if (!shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)) {
+      setSupermemorySetup({ token: "" });
+      setSupermemoryError("Codex uses native OAuth; this token input is unavailable.");
+      return;
+    }
     if (key.return) {
       continueSupermemorySetup();
       return;
@@ -2539,6 +2763,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     setSupermemoryError(undefined);
     // Token-only: after token is entered, complete setup directly
     if (screen === "supermemory-token") {
+      if (!shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)) {
+        setSupermemorySetup({ token: "" });
+        setSupermemoryError("Codex uses native OAuth; this token input is unavailable.");
+        return;
+      }
       if (!supermemorySetup.token.trim()) {
         setSupermemoryError("Supermemory token is required and must be stored outside Deck config.");
         return;
@@ -2560,7 +2789,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }
 
   function persistDashboardSupermemorySelection(values: SupermemorySetupValues): boolean {
-    const setup = buildDashboardSupermemorySetupUpdate(values);
+    const setup = buildDashboardSupermemorySetupUpdate(values, dashboardState.runnerScope === "all" ? "pi" : dashboardState.runnerScope);
     if (!setup.ok) {
       setSupermemoryError(setup.message);
       return false;
@@ -2591,25 +2820,34 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
   function getDashboardRunBlockDiagnostics(state: RunnerDashboardState = dashboardState, token: string = supermemorySetup.token) {
     const diagnostics: { message: string }[] = [];
+    if (state.plan?.ready !== true) {
+      diagnostics.push({ message: getReviewPlanBlockerReason(state.plan) ?? "Review plan is not ready. Return to Dashboard and retry." });
+    }
     if (state.adaptiveMemory.provider === "supermemory") {
       const setup = state.adaptiveMemory.supermemory;
       if (!setup?.configured) {
         diagnostics.push({ message: "Supermemory setup must be selected before Review/Install." });
-      } else if (state.runnerScope !== "opencode" && !setup.hasToken) {
-        diagnostics.push({ message: "Supermemory requires token to run Review/Install on Pi." });
-      } else if (state.runnerScope !== "opencode" && !token.trim()) {
-        diagnostics.push({ message: "Supermemory requires re-entering the token before running Review/Install on Pi." });
+      } else if (runnerRequiresExternalSupermemoryToken(state) && !setup.hasToken) {
+        diagnostics.push({ message: "Supermemory requires an external token to run Review/Install on this runner." });
+      } else if (runnerRequiresExternalSupermemoryToken(state) && !token.trim()) {
+        diagnostics.push({ message: "Supermemory requires re-entering the external token before running Review/Install." });
       }
     }
     return diagnostics;
   }
 
   function canRunDashboardPlan(state: RunnerDashboardState): boolean {
-    return getDashboardRunBlockDiagnostics(state, supermemorySetup.token).length === 0;
+    return state.plan?.ready === true && getDashboardRunBlockDiagnostics(state, supermemorySetup.token).length === 0;
   }
 
   function persistMemoryProviderSelection(choice: MemoryProviderChoice, values: SupermemorySetupValues): boolean {
     try {
+      if (choice === "supermemory" && !shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)) {
+        setSupermemorySetup({ token: "" });
+        setMemoryProvider(undefined);
+        setSupermemoryError("Codex uses native OAuth; no Supermemory token was persisted.");
+        return false;
+      }
       if (choice === "supermemory") {
         const result = writeSupermemoryPiMcpConfig({ token: values.token.trim(), serverName: "supermemory" });
         if (!result.ok) {
@@ -2648,11 +2886,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     });
   }
 
-  function hydrateDeveloperTeamModelConfig(runtime?: "pi" | "opencode") {
+  function hydrateDeveloperTeamModelConfig(runtime?: RunnerId) {
     const effectiveRuntime = runtime ?? modelConfigRuntime;
     const adapter = adapterFor(effectiveRuntime);
-    const modelAssigns = adapter.readModelAssignments("") || {};
-    const thinkingAssigns = adapter.readThinkingAssignments("") || {};
+    const projectRoot = projectRootFor({ require: true });
+    const modelAssigns = adapter.readModelAssignments(projectRoot ?? undefined) || {};
+    const thinkingAssigns = adapter.readThinkingAssignments(projectRoot ?? undefined) || {};
 
     // Discovery is informational: persisted model and variant strings must remain
     // raw until the user intentionally changes that agent.
@@ -2679,14 +2918,14 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   function getActiveThinkingLevels(modelId?: string): readonly RunnerVariantKey[] {
     const adapter = adapterFor(modelConfigRuntime);
     const targetModelId = modelId ?? (selectedModel ? selectedModel.id : undefined);
-    if (modelConfigRuntime === "opencode") {
+    if (modelConfigRuntime !== "pi") {
       return adapter.getThinkingLevels(targetModelId);
     }
     return PI_THINKING_LEVELS;
   }
 
   function getThinkingLevelByCursor(index: number) {
-    if (modelConfigRuntime === "opencode") {
+    if (modelConfigRuntime !== "pi") {
       // Use model-specific levels from the adapter's inventory rather than the
       // hardcoded OPENCODE_THINKING_LEVELS constant.
       const levels = getActiveThinkingLevels();
@@ -2722,10 +2961,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       return;
     }
     const adapter = adapterFor(modelConfigRuntime);
-    const changedAgentIds = modelConfigRuntime === "opencode" ? [...changedOpenCodeAgentIds] : [];
+    const requiresDynamicValidation = modelConfigRuntime === "opencode" || modelConfigRuntime === "codex";
+    const changedAgentIds = requiresDynamicValidation ? [...changedOpenCodeAgentIds] : [];
     let validatedInventoryFingerprint: string | undefined;
 
-    if (modelConfigRuntime === "opencode" && changedAgentIds.length > 0) {
+    if (requiresDynamicValidation && changedAgentIds.length > 0) {
       const validation = await adapter.validateModelAssignments?.({
         projectRoot,
         modelAssignments,
@@ -2734,7 +2974,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       });
       if (!validation || !validation.valid) {
         const message = !validation
-          ? "OpenCode assignment validation is unavailable. Retry discovery before changing assignments."
+          ? `${adapter.displayName} assignment validation is unavailable. Retry discovery before changing assignments.`
           : validation.issues.map((issue) => issue.message).join(" ");
         setInstallResults((current) => [
           ...current,
@@ -2751,10 +2991,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     const standaloneSkills = modelConfigRuntime === "opencode"
       ? getStandaloneSkills().map((skill: { skillId: string }) => ({ skillId: skill.skillId, body: getStandaloneSkillBody(skill.skillId)! }))
       : undefined;
+    const environmentId = adapter.environmentIds[0];
+    if (!environmentId) throw new Error(`Runner ${adapter.runnerId} has no registered environment.`);
 
     const plan = adapter.buildDeveloperTeamInstallPlan({
       projectRoot,
-      environmentId: modelConfigRuntime === "opencode" ? "opencode-development" : "pi-development",
+      environmentId,
       modelAssignments,
       thinkingAssignments,
       changedAgentIds,
@@ -2769,11 +3011,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const applyResult = await adapter.applyDeveloperTeamInstall({
         projectRoot,
         plan,
-        environmentId: modelConfigRuntime === "opencode" ? "opencode-development" : "pi-development",
+        environmentId,
       });
-      const verifyResult = adapter.verifyDeveloperTeamInstall(plan);
+      const verifyResult = await adapter.verifyDeveloperTeamInstall(plan);
       if (!verifyResult.valid) {
-        adapter.rollbackDeveloperTeamFiles(backup);
+        await rollbackOrThrow(adapter, backup);
         setDeveloperTeamResults([]);
         const diagnosticsMsg = verifyResult.diagnostics.length > 0
           ? `\nDetails: ${verifyResult.diagnostics.slice(0, 3).join(";")}${verifyResult.diagnostics.length > 3 ? ` (+${verifyResult.diagnostics.length - 3} more)` : ""}`
@@ -2785,9 +3027,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         return;
       }
       setDeveloperTeamResults(applyResult.results as any);
-      if (modelConfigRuntime === "opencode") setChangedOpenCodeAgentIds(new Set());
+      if (requiresDynamicValidation) setChangedOpenCodeAgentIds(new Set());
     } catch (error) {
-      adapter.rollbackDeveloperTeamFiles(backup);
+      await rollbackOrThrow(adapter, backup);
       setDeveloperTeamResults([]);
       setInstallResults((current) => [
         ...current,
@@ -2834,6 +3076,16 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
     if (discovery.kind === "loading") return;
 
+    setOpenCodeAssignmentStates(modelAssignmentStatesForDiscovery(discovery, assignmentSnapshot));
+  }
+
+  function modelAssignmentStatesForDiscovery(
+    discovery: TuiRunnerModelDiscoveryState,
+    assignmentSnapshot: {
+      modelAssignments: DeveloperTeamModelAssignments;
+      thinkingAssignments: DeveloperTeamThinkingAssignments;
+    },
+  ): Record<string, "available" | "model-unavailable" | "variant-unavailable" | "unverified"> {
     const assignmentStates: Record<string, "available" | "model-unavailable" | "variant-unavailable" | "unverified"> = {};
     for (const [agentId, modelId] of Object.entries(assignmentSnapshot.modelAssignments)) {
       const variant = assignmentSnapshot.thinkingAssignments[agentId];
@@ -2847,17 +3099,16 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         .find((entry) => entry.id === modelId);
       assignmentStates[agentId] = !model
         ? "model-unavailable"
-        : variant && !model.variants.includes(variant)
+        : variant && !(model.variants ?? []).includes(variant)
           ? "variant-unavailable"
           : "available";
     }
-    setOpenCodeAssignmentStates(assignmentStates);
+    return assignmentStates;
   }
 
 
   function startOpenCodeModelDiscovery(mode: RunnerModelDiscoveryRequest["mode"] = "prefer-cache") {
     const projectRoot = projectRootFor({ require: true }) ?? process.cwd();
-    modelConfigRuntimeRef.current = "opencode";
     openCodeProjectRootRef.current = projectRoot;
     const assignmentSnapshot = {
       modelAssignments: { ...modelAssignments },
@@ -2876,6 +3127,35 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       if (applied && (completedDiscovery?.kind === "ready" || completedDiscovery?.kind === "stale")) {
         resetCursor("agent-model-config-list");
       }
+    });
+  }
+
+  function startCodexModelDiscovery(mode: RunnerModelDiscoveryRequest["mode"] = "prefer-cache") {
+    const projectRoot = projectRootFor({ require: true }) ?? process.cwd();
+    codexProjectRootRef.current = projectRoot;
+    const assignmentSnapshot = {
+      modelAssignments: adapterFor("codex").readModelAssignments(projectRoot),
+      thinkingAssignments: adapterFor("codex").readThinkingAssignments(projectRoot),
+    };
+    let completedDiscovery: TuiCodexDiscoveryState | undefined;
+    resetCursor("codex-model-discovery");
+    const coordinator = codexDiscoveryCoordinatorRef.current!;
+    void coordinator.start(
+      { runtime: "codex", projectRoot, mode },
+      (discovery) => {
+        if (discovery.kind !== "loading") completedDiscovery = discovery;
+        setCodexDiscovery(discovery);
+        if (discovery.kind === "ready") {
+          setDetectedProviders(discovery.inventory.providers);
+          setModelsByProvider(discovery.inventory.modelsByProvider);
+        } else if (discovery.kind !== "loading") {
+          setDetectedProviders([]);
+          setModelsByProvider({});
+        }
+        if (discovery.kind !== "loading") setCodexAssignmentStates(modelAssignmentStatesForDiscovery(discovery, assignmentSnapshot));
+      },
+    ).then((applied) => {
+      if (applied && completedDiscovery?.kind === "ready") resetCursor("agent-model-config-list");
     });
   }
 
@@ -2905,23 +3185,24 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     resetCursor(nextScreen);
   }
 
-  function getNextScreenAfterDashboardComplete(): Screen {
-    const statuses = detectSelectedRuntimes(selectedEnvironments);
-    const hasOpenCode = statuses.some((s) => s.runtime === "opencode" && s.installed && s.command);
-    if (selectedEnvironments.includes("opencode-development") && hasOpenCode) {
-      return "opencode-preflight-checking";
-    }
-    return "home";
+  function getNextDashboardEnvironmentId(): EnvironmentId | undefined {
+    const currentIndex = dashboardEnvironmentId ? selectedEnvironments.indexOf(dashboardEnvironmentId) : -1;
+    return selectedEnvironments
+      .slice(currentIndex + 1)
+      .find((environmentId) => Boolean(adapterRegistry.resolveByEnvironment(environmentId)));
   }
 
   function getDashboardCompletionStatus(): string {
-    return getNextScreenAfterDashboardComplete() === "opencode-preflight-checking"
-      ? "Enter para continuar con OpenCode."
+    const nextEnvironmentId = getNextDashboardEnvironmentId();
+    const nextAdapter = nextEnvironmentId ? adapterRegistry.resolveByEnvironment(nextEnvironmentId) : undefined;
+    return nextAdapter
+      ? `Enter para continuar con ${nextAdapter.displayName}.`
       : "Enter para finalizar y volver a Home.";
   }
 
-  function goToNextEnvironmentAfterDashboardComplete() {
-    resetCursor(getNextScreenAfterDashboardComplete());
+  async function goToNextEnvironmentAfterDashboardComplete() {
+    const nextEnvironmentId = getNextDashboardEnvironmentId();
+    if (!nextEnvironmentId || !await composeRegisteredRunnerDashboard(nextEnvironmentId)) resetCursor("home");
   }
 
   function goBack() {
@@ -2948,6 +3229,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         "model-selection": "model-provider-selection",
         "agent-model-assignment": "model-selection",
         "opencode-model-discovery": "agent-model-config-list",
+        "codex-model-discovery": "agent-model-config-list",
         "no-providers": "team-selection",
         "memory-provider-selection": "agent-model-config-list",
         "supermemory-token": "memory-provider-selection",
@@ -2955,6 +3237,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         "developer-team-review": "memory-provider-selection",
         "developer-team-installing": "developer-team-review",
         "opencode-preflight-checking": "environment-selection",
+        "codex-preflight-checking": "environment-selection",
         "configure-packages-runner-selection": "home",
         "configure-packages-detail": "configure-packages-runner-selection",
         "doctor": "home",
@@ -2980,8 +3263,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     };
   }
 
+  const dashboardRunnerLabel = dashboardState.runnerScope === "all"
+    ? "Runner"
+    : adapterRegistry.tryGet(dashboardState.runnerScope)?.displayName ?? dashboardState.runnerDisplayName ?? dashboardState.runnerScope;
+
   return (
-    <ScreenFrame title={screenTitle(screen, dashboardState.runnerScope)} help={HELP} width={stdout.columns || 72} height={stdout.rows || undefined} logs={logs}>
+    <ScreenFrame title={screenTitle(screen, dashboardRunnerLabel)} help={HELP} width={stdout.columns || 72} height={stdout.rows || undefined} logs={logs}>
       {screen === "home" ? <HomeScreen cursor={homeCursor} releaseCheck={releaseCheck} /> : null}
       {screen === "upgrade-confirm" ? (
         releaseCheck.kind === "available" ? (
@@ -3017,12 +3304,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         />
       ) : null}
       {screen === "doctor" ? <DoctorScreen /> : null}
-      {screen === "model-environment-selection" ? <ModelEnvironmentSelectionScreen cursor={modelEnvironmentCursor} /> : null}
+      {screen === "model-environment-selection" ? <ModelEnvironmentSelectionScreen cursor={modelEnvironmentCursor} options={environmentOptions} /> : null}
       {screen === "model-team-selection" && selectedModelEnvironment ? (
-        <ModelTeamSelectionScreen cursor={modelTeamCursor} environment={selectedModelEnvironment} />
+        <ModelTeamSelectionScreen cursor={modelTeamCursor} environment={selectedModelEnvironment} teams={adapterFor(selectedModelEnvironment).getTeams(selectedModelEnvironment) as any[]} />
       ) : null}
       {screen === "environment-selection" ? (
-        <EnvironmentSelectionScreen cursor={cursor} selected={selectedEnvironments} />
+        <EnvironmentSelectionScreen cursor={cursor} selected={selectedEnvironments} options={environmentOptions} />
       ) : null}
       {screen === "personality-selection" ? (
         <PersonalitySelectionScreen cursor={cursor} selected={selectedPersonality} />
@@ -3038,6 +3325,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           serenaStages={dashboardSerenaStages}
           serenaOutcome={dashboardSerenaOutcome}
           cancellationRequested={dashboardCancellationRequested}
+          runnerLabel={dashboardRunnerLabel}
         />
       ) : null}
       {dashboardError && screen === "pi-runner-dashboard" ? (
@@ -3056,19 +3344,19 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       {screen === "agent-model-config-list" ? (
         <AgentModelConfigListScreen
           cursor={agentConfigCursor}
-          modelAssignments={modelAssignments}
-          thinkingAssignments={thinkingAssignments}
-          assignmentStates={modelConfigRuntime === "opencode" ? openCodeAssignmentStates : undefined}
+            modelAssignments={modelAssignments}
+            thinkingAssignments={thinkingAssignments}
+            assignmentStates={modelConfigRuntime === "opencode" ? openCodeAssignmentStates : modelConfigRuntime === "codex" ? codexAssignmentStates : undefined}
           discoveryState={modelConfigRuntime === "opencode" && openCodeDiscovery.kind === "stale" ? "stale" : undefined}
           dashboardContext={dashboardDeveloperTeamContext()}
           runtime={modelConfigRuntime}
         />
       ) : null}
       {screen === "model-provider-selection" ? (
-        <ModelProviderSelectionScreen cursor={cursor} providers={detectedProviders} runtime={modelConfigRuntime} />
+        <ModelProviderSelectionScreen cursor={cursor} providers={detectedProviders} runtime={modelConfigRuntime} runnerLabel={adapterFor(modelConfigRuntime).displayName} modelUi={adapterFor(modelConfigRuntime).ui?.model} />
       ) : null}
       {screen === "model-selection" && selectedProvider ? (
-        <ModelSelectionScreen cursor={cursor} provider={selectedProvider} models={providerModels} runtime={modelConfigRuntime} />
+        <ModelSelectionScreen cursor={cursor} provider={selectedProvider} models={providerModels} runtime={modelConfigRuntime} runnerLabel={adapterFor(modelConfigRuntime).displayName} modelUi={adapterFor(modelConfigRuntime).ui?.model} />
       ) : null}
       {screen === "agent-model-assignment" && selectedModel ? (
         <AgentModelAssignmentScreen
@@ -3076,22 +3364,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           agentIndex={agentAssignmentIndex}
           totalAgents={DEVELOPER_TEAM_AGENTS.length}
           modelId={selectedModel.id}
-          defaultThinking={
-            modelConfigRuntime === "opencode"
-              ? (thinkingAssignments[DEVELOPER_TEAM_AGENTS[agentAssignmentIndex]?.id ?? ""] ?? getActiveThinkingLevels(selectedModel.id)[0] ?? "")
-              : adapterFor(modelConfigRuntime).getDefaultThinking(selectedModel.id) as "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
-          }
-          supportsThinking={modelConfigRuntime === "opencode" ? getActiveThinkingLevels(selectedModel.id).length > 0 : adapterFor(modelConfigRuntime).supportsThinking(selectedModel.id)}
+          defaultThinking={thinkingAssignments[DEVELOPER_TEAM_AGENTS[agentAssignmentIndex]?.id ?? ""] ?? adapterFor(modelConfigRuntime).getDefaultThinking(selectedModel.id) ?? getActiveThinkingLevels(selectedModel.id)[0] ?? ""}
+          supportsThinking={getActiveThinkingLevels(selectedModel.id).length > 0 && adapterFor(modelConfigRuntime).supportsThinking(selectedModel.id)}
           runtime={modelConfigRuntime}
-          // Pass model-specific thinking levels for OpenCode so the rendered
-          // options match the model's real reasoning_options variants
-          // (e.g. ["high","max"]) rather than the hardcoded 4-level constant.
-          // Pi omits this prop and falls back to PI_THINKING_LEVELS.
-          thinkingLevels={
-            modelConfigRuntime === "opencode"
-              ? getActiveThinkingLevels(selectedModel.id)
-              : undefined
-          }
+          runnerLabel={adapterFor(modelConfigRuntime).displayName}
+          modelUi={adapterFor(modelConfigRuntime).ui?.model}
+          thinkingLevels={modelConfigRuntime === "pi" ? undefined : getActiveThinkingLevels(selectedModel.id)}
         />
       ) : null}
       {screen === "opencode-model-discovery" ? (
@@ -3100,12 +3378,18 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           state={openCodeDiscovery}
         />
       ) : null}
-      {screen === "no-providers" ? <NoProvidersScreen dashboardContext={dashboardDeveloperTeamContext()} runtime={modelConfigRuntime} /> : null}
+      {screen === "codex-model-discovery" ? (
+        <CodexModelDiscoveryScreen
+          cursor={cursor}
+          state={codexDiscovery}
+        />
+      ) : null}
+      {screen === "no-providers" ? <NoProvidersScreen dashboardContext={dashboardDeveloperTeamContext()} runtime={modelConfigRuntime} runnerLabel={adapterFor(modelConfigRuntime).displayName} modelUi={adapterFor(modelConfigRuntime).ui?.model} /> : null}
       {screen === "memory-provider-selection" ? (
-        <MemoryProviderSelectionScreen cursor={cursor} selectedProvider={memoryProviderChoice} status={memoryStatus} />
+        <MemoryProviderSelectionScreen cursor={cursor} selectedProvider={memoryProviderChoice} status={memoryStatus} runtime={dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope} />
       ) : null}
       {isSupermemoryInputScreen(screen) ? (
-        <SupermemorySetupScreen screen={screen} values={supermemorySetup} error={supermemoryError} />
+        <SupermemorySetupScreen screen={screen} values={supermemorySetup} error={supermemoryError} runtime={dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope} />
       ) : null}
       {screen === "developer-team-review" ? (
         // Use require: true for backward compatibility - prop expects string
@@ -3115,13 +3399,16 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         <DeveloperTeamInstallingScreen currentStep={agentAssignmentIndex} totalSteps={DEVELOPER_TEAM_AGENTS.length} />
       ) : null}
       {screen === "opencode-preflight-checking" ? <OpenCodeCheckingScreen /> : null}
+      {screen === "codex-preflight-checking" ? <CodexCheckingScreen /> : null}
       {screen === "configure-packages-runner-selection" ? (
-        <ConfigurePackagesRunnerSelection cursor={configurePackagesCursor} />
+        <ConfigurePackagesRunnerSelection cursor={configurePackagesCursor} options={runnerOptions} />
       ) : null}
       {screen === "configure-packages-detail" ? (
         <ConfigurePackagesDetail
           cursor={configurePackagesCursor}
-          runner={configurePackagesRunner}
+          adapter={configurePackagesAdapter}
+          packages={configurePackageRows}
+          baseline={configurePackageMetadata.find((entry) => entry.defaultEnabled)}
           toggles={configurePackagesToggles}
         />
       ) : null}
@@ -3130,7 +3417,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   );
 }
 
-function screenTitle(screen: Screen, runnerScope?: string): string {
+function screenTitle(screen: Screen, runnerLabel?: string): string {
   const titles: Record<Screen, string> = {
     home: "Deck",
     "upgrade-confirm": "Update Deck",
@@ -3141,7 +3428,7 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "model-team-selection": "Select team for model config",
     "environment-selection": "Select environments",
     "personality-selection": "Choose Lead personality",
-    "pi-runner-dashboard": runnerScope === "opencode" ? "OpenCode Runner Setup Dashboard" : "Pi Runner Setup Dashboard",
+    "pi-runner-dashboard": `${runnerLabel ?? "Runner"} Setup Dashboard`,
     "pi-preflight-checking": "Checking Pi environment",
     "pi-preflight": "Pi Environment Preflight",
     "required-tools": "Review required tools",
@@ -3154,6 +3441,7 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "model-selection": "Select model",
     "agent-model-assignment": "Select reasoning level",
     "opencode-model-discovery": "OpenCode model discovery",
+    "codex-model-discovery": "Codex model discovery",
     "no-providers": "No providers detected",
     "memory-provider-selection": "Adaptive memory provider",
     // Removed: userId/teamId/orgId screens — token-only config
@@ -3161,6 +3449,7 @@ function screenTitle(screen: Screen, runnerScope?: string): string {
     "developer-team-review": "Developer Team",
     "developer-team-installing": "Installing Developer Team",
     "opencode-preflight-checking": "Checking OpenCode environment",
+    "codex-preflight-checking": "Checking Codex environment",
     "configure-packages-runner-selection": "Configure Packages",
     "configure-packages-detail": "Configure Packages",
     doctor: "Doctor",
@@ -3188,18 +3477,23 @@ function OpenCodeCheckingScreen() {
   );
 }
 
-function ConfigurePackagesRunnerSelection({ cursor }: { cursor: number }) {
+function CodexCheckingScreen() {
+  return (
+    <Box flexDirection="column">
+      <Text color="cyan">Inspecting Codex configuration...</Text>
+      <Text dimColor>Deck is checking version, trust activation, managed content, bridge classification, MCP, and shared binaries.</Text>
+    </Box>
+  );
+}
+
+function ConfigurePackagesRunnerSelection({ cursor, options }: { cursor: number; options: readonly { id: string; label: string }[] }) {
   return (
     <Box flexDirection="column">
       <Text dimColor>Select a runner to configure package instructions for.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
-          items={[
-            { id: "pi", label: "Pi" },
-            { id: "opencode", label: "OpenCode" },
-            { id: "back", label: "Back" },
-          ]}
+          items={[...options]}
         />
       </Box>
     </Box>
@@ -3208,25 +3502,31 @@ function ConfigurePackagesRunnerSelection({ cursor }: { cursor: number }) {
 
 function ConfigurePackagesDetail({
   cursor,
-  runner,
+  adapter,
+  packages,
+  baseline,
   toggles,
 }: {
   cursor: number;
-  runner: "pi" | "opencode" | null;
+  adapter: Pick<RunnerAdapter, "runnerId" | "displayName" | "environmentIds" | "ui"> | null;
+  packages: readonly PackageInstructionConfigurationMetadata[];
+  baseline?: PackageInstructionConfigurationMetadata;
   toggles: Record<string, boolean>;
 }) {
-  const packages = [
-    { id: "codebase-memory", label: "Codebase Memory", hint: "graph-based code discovery instructions" },
-    { id: "context-mode", label: "Context Mode", hint: "batch execute and think-in-code instructions" },
-    { id: "rtk", label: "RTK", hint: "fallback guidance for hook-less environments" },
-  ];
+  const environmentLabel = adapter?.environmentIds
+    .map((environmentId) => adapter.ui?.environmentLabels[environmentId])
+    .find((label): label is string => Boolean(label));
 
   return (
     <Box flexDirection="column">
       <Text bold>
-        {runner ? `Configure Packages — ${runner === "pi" ? "Pi" : "OpenCode"}` : "Configure Packages"}
+        {adapter ? `Configure Packages — ${adapter.displayName}` : "Configure Packages"}
       </Text>
-      <Text dimColor>Space toggles package instructions. Enter selects Apply or Back.</Text>
+      <Text dimColor>
+        Space toggles package instructions. Enter selects Apply or Back.
+        {baseline ? ` ${baseline.label} is always enabled as the baseline.` : ""}
+        {environmentLabel ? ` Target: ${environmentLabel}.` : ""}
+      </Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
@@ -3234,7 +3534,7 @@ function ConfigurePackagesDetail({
             ...packages.map((pkg) => ({
               id: pkg.id,
               label: `${toggles[pkg.id] ? "[x]" : "[ ]"} ${pkg.label}`,
-              hint: pkg.hint,
+              hint: pkg.description,
             })),
             { id: "apply", label: "Apply changes" },
             { id: "back", label: "Back" },
@@ -3269,7 +3569,7 @@ export function PersonalitySelectionScreen({ cursor, selected }: { cursor: numbe
   );
 }
 
-function EnvironmentSelectionScreen({ cursor, selected }: { cursor: number; selected: EnvironmentId[] }) {
+function EnvironmentSelectionScreen({ cursor, selected, options }: { cursor: number; selected: EnvironmentId[]; options: readonly { value: string; label: string }[] }) {
   return (
     <Box flexDirection="column">
       <Text dimColor>Choose one or more environments. Space toggles selection.</Text>
@@ -3277,7 +3577,7 @@ function EnvironmentSelectionScreen({ cursor, selected }: { cursor: number; sele
         <MenuList
           cursor={cursor}
           multiselect
-          items={getEnvironmentOptions().map((option) => ({
+          items={options.map((option) => ({
             id: option.value,
             label: option.label,
             checked: selected.includes(option.value as EnvironmentId),
@@ -3288,17 +3588,17 @@ function EnvironmentSelectionScreen({ cursor, selected }: { cursor: number; sele
   );
 }
 
-function ModelEnvironmentSelectionScreen({ cursor }: { cursor: number }) {
+function ModelEnvironmentSelectionScreen({ cursor, options }: { cursor: number; options: readonly { value: string; label: string; available?: boolean }[] }) {
   return (
     <Box flexDirection="column">
       <Text dimColor>Select which runner/environment owns the model configuration.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
-          items={getEnvironmentOptions().map((option) => ({
+          items={options.map((option) => ({
             id: option.value,
             label: option.label,
-            hint: option.value === "pi-development" || option.value === "opencode-development" ? "available" : "not implemented yet",
+            hint: option.available ? "available" : "not implemented yet",
           }))}
         />
       </Box>
@@ -3306,9 +3606,7 @@ function ModelEnvironmentSelectionScreen({ cursor }: { cursor: number }) {
   );
 }
 
-function ModelTeamSelectionScreen({ cursor, environment }: { cursor: number; environment: EnvironmentId }) {
-  const teams = getAdapter(environment).getTeams(environment) as any[];
-
+function ModelTeamSelectionScreen({ cursor, environment, teams }: { cursor: number; environment: EnvironmentId; teams: any[] }) {
   return (
     <Box flexDirection="column">
       <Text dimColor>Select which team you want to configure for {environment}.</Text>
@@ -3354,10 +3652,12 @@ function PiPreflightScreen({ preflight }: { preflight: PiPreflightResult }) {
       <Text>Version: {preflight.version}</Text>
       <Text>Config directory: {preflight.configDirectory ?? "not found"}</Text>
       <Text>Existing configuration: {preflight.existingConfiguration ? "found" : "not found"}</Text>
-      <Text>Agents support: <Text color="yellow">pending (placeholder)</Text></Text>
-      <Text>Subagents support: <Text color="yellow">pending (placeholder)</Text></Text>
-      <Text>MCP support: <Text color="yellow">pending (placeholder)</Text></Text>
-      <Text>Model profiles: <Text color="yellow">pending (placeholder)</Text></Text>
+      <Text>Preflight: {preflight.summary?.ready ? <Text color="green">ready</Text> : <Text color="yellow">attention required</Text>}</Text>
+      {(preflight.checks ?? []).map((check) => (
+        <Text key={check.id} color={check.status === "fail" ? "red" : check.status === "warn" ? "yellow" : "green"}>
+          {check.id}: {check.message}
+        </Text>
+      ))}
     </Box>
   );
 }

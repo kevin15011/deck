@@ -16,6 +16,9 @@ import type { RunnerActionRunResult } from "../runner-dashboard/action-runner";
 import { createDefaultRunnerDashboardState } from "../runner-dashboard/state";
 import type { PiPreflightResult } from "@deck/adapter-pi";
 import type { OpenCodePreflightResult } from "@deck/adapter-opencode";
+import { getAdapter } from "../../runner-adapters";
+import { createCodexRunnerAdapter } from "@deck/adapter-codex";
+import { getToggleablePackageInstructionIds } from "../runner-dashboard/selectors";
 
 // ============================================================================
 // Fixtures
@@ -257,6 +260,7 @@ function createMinimalPlan(overrides?: Partial<RunnerReviewPlan>): RunnerReviewP
 function createMockedPiDashboardState(partial?: Partial<RunnerDashboardState>): RunnerDashboardState {
   return createDefaultRunnerDashboardState({
     runnerScope: "pi",
+    runnerUi: getAdapter("pi").ui,
     runtime: {
       runnerCommand: "pi",
       preflight: PASSING_PI_PREFLIGHT,
@@ -270,6 +274,8 @@ function createMockedPiDashboardState(partial?: Partial<RunnerDashboardState>): 
 function createMockedOpenCodeDashboardState(partial?: Partial<RunnerDashboardState>): RunnerDashboardState {
   return createDefaultRunnerDashboardState({
     runnerScope: "opencode",
+    runnerDisplayName: "OpenCode",
+    runnerUi: getAdapter("opencode").ui,
     runtime: {
       runnerCommand: "opencode",
       preflight: PASSING_OPENCODE_PREFLIGHT,
@@ -280,16 +286,20 @@ function createMockedOpenCodeDashboardState(partial?: Partial<RunnerDashboardSta
   });
 }
 
+function createMockedCodexDashboardState(partial?: Partial<RunnerDashboardState>): RunnerDashboardState {
+  return createDefaultRunnerDashboardState({
+    runnerScope: "codex",
+    runnerDisplayName: "Codex",
+    runnerUi: getAdapter("codex").ui,
+    runtime: { runnerCommand: "codex", preflight: null, toolsReview: null },
+    plan: createMinimalPlan(),
+    ...partial,
+  });
+}
+
 function createMockedCapabilityResolver() {
   return {
-    getCapability: (capabilityId: string) => ({
-      capabilityId,
-      label: capabilityId,
-      description: `Capability ${capabilityId}`,
-      runnerScope: "pi",
-      requirementLevel: "configurable" as const,
-    }),
-    getUserFacingIds: () => ["context-mode", "codebase-memory-mcp", "rtk", "serena", "context7"],
+    getSupportedPackageInstructionIds: () => ["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"] as const,
   };
 }
 
@@ -375,6 +385,237 @@ describe("E2E-ish Pi install flow (Task 8)", () => {
       />,
     );
     expect(output).toContain("complete");
+  });
+});
+
+describe("Codex adapter-driven render-only states", () => {
+  test("renders real Codex protected parity gaps and safe review actions in the generic dashboard", async () => {
+    const adapter = createCodexRunnerAdapter({
+      preflight: {
+        probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex\nexec\nresume", execHelp: "Usage: codex exec", resumeHelp: "Usage: codex resume [SESSION_ID]" }),
+        inspectTrust: async () => "trusted",
+      },
+      sharedBinaryUsability: async (command) => ({ command, status: "ready", resolvedPath: `/bin/${command}`, diagnostics: [] }),
+      codebaseIndexReadiness: () => true,
+      supermemoryOAuthStatus: async () => ({ state: "authenticated" }),
+    });
+    const inventory = await adapter.getCapabilityInventory({ projectRoot: "/tmp/deck-codex-tui-parity", environmentId: "codex-development", runnerId: "codex" });
+    const plan = adapter.buildReviewPlan({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: {}, packageInstructions: {}, adaptiveMemory: { provider: "none" } }, inventory);
+    const capabilityStatuses = Object.fromEntries(inventory.capabilities.map((capability) => [capability.capabilityId, capability.isBlocked ? "blocked" as const : capability.isInstalled ? "ready" as const : "missing" as const]));
+    const resolver = {
+      getSupportedPackageInstructionIds: () => ["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"] as const,
+    };
+    const packages = renderToString(<RunnerDashboardScreens state={createDefaultRunnerDashboardState({ runnerScope: "codex", runnerDisplayName: adapter.displayName, runnerUi: adapter.ui, screen: "packages-detail", capabilityStatuses })} capabilityResolver={resolver} />);
+    for (const label of ["Trusted Runner Host Bridge", "Invocation Authorization", "Execution Dossier", "Controlled Effects", "Registry Coordination", "Bound Verification", "Engram", "Context7", "Pi HUD"]) {
+      expect(packages).not.toContain(label);
+    }
+    const dashboardState = createDefaultRunnerDashboardState({ runnerScope: "codex", runnerDisplayName: adapter.displayName, runnerUi: adapter.ui, screen: "packages-detail", capabilityStatuses });
+    const toggleableIds = getToggleablePackageInstructionIds(dashboardState, resolver);
+    expect(toggleableIds).toEqual(["codebase-memory", "context-mode", "rtk", "adaptive-memory", "serena"]);
+    expect(toggleableIds).not.toContain("code-economy");
+    const dispositions = renderToString(<RunnerDashboardScreens state={dashboardState} capabilityResolver={resolver} />);
+    for (const label of ["Codebase Memory", "Context Mode", "RTK", "Adaptive Memory", "Serena"]) expect(dispositions).toContain(`[ ] ${label}`);
+    expect(dispositions).not.toContain("[ ] Code Economy");
+    expect(dispositions).not.toContain("OpenCode Mermaid Renderer");
+    expect(dispositions).not.toContain("Deck Model Variants");
+
+    const review = renderToString(<RunnerDashboardScreens state={createDefaultRunnerDashboardState({ runnerScope: "codex", runnerDisplayName: adapter.displayName, runnerUi: adapter.ui, screen: "review-plan", plan: plan as RunnerReviewPlan })} capabilityResolver={resolver} />);
+    expect(review).toContain("0 manual");
+    expect(review).toContain("static-compatible Codex gap");
+    expect(review).toContain("Run install");
+    expect(review).toContain("Trusted Runner Host Bridge");
+  });
+
+  test("renders registered Codex dashboard and review collision/rollback diagnostics generically", () => {
+    const overview = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState()} capabilityResolver={createMockedCapabilityResolver()} />);
+    expect(overview).toContain("Codex Runner Setup Dashboard");
+    const state = createMockedCodexDashboardState({
+      screen: "review-plan",
+      plan: createMinimalPlan({
+        ready: false,
+        diagnostics: [
+          { code: "mcp-config-collision", severity: "error", message: "Existing user MCP server differs." },
+          { code: "rollback-conflict", severity: "error", message: "Rollback requires conflict recovery." },
+        ],
+      }),
+    });
+    const review = renderToString(<RunnerDashboardScreens state={state} canRunPlan={false} runBlockDiagnostics={[{ message: "Resolve collisions before install." }]} />);
+    expect(review).toContain("Existing user MCP server differs");
+    expect(review).toContain("Rollback requires conflict recovery");
+    expect(review).toContain("Resolve collisions before install");
+  });
+
+  test("enables approved static-compatible Codex reviews and shows the first genuine blocker", () => {
+    const staticCompatible = renderToString(<RunnerDashboardScreens
+      state={createMockedCodexDashboardState({
+        screen: "review-plan",
+        plan: createMinimalPlan({
+          diagnostics: [{
+            code: "static-compatible-gap:trusted-runner-host-bridge",
+            severity: "warning",
+            message: "Trusted Runner Host Bridge remains a static-compatible Codex gap.",
+          }],
+        }),
+      })}
+      canRunPlan
+      capabilityResolver={createMockedCapabilityResolver()}
+    />);
+    expect(staticCompatible).toContain("Run install");
+    expect(staticCompatible).toContain("static-compatible Codex gap");
+
+    const authorizationFollowUp = renderToString(<RunnerDashboardScreens
+      state={createMockedCodexDashboardState({
+        screen: "complete",
+      })}
+      installResults={[createActionResult("codex-developer-team", "executed", "Codex content verified", {
+        postInstallFollowUps: [{
+          id: "supermemory-user-authorization",
+          message: "Run codex mcp login supermemory when you are ready to authorize Supermemory.",
+        }],
+      })]}
+      capabilityResolver={createMockedCapabilityResolver()}
+    />);
+    expect(authorizationFollowUp).toContain("Codex Runner setup complete");
+    expect(authorizationFollowUp).toMatch(/Run codex\s+mcp login\s+supermemory when you are ready to authorize Supermemory/);
+
+    const failedAuthorization = renderToString(<RunnerDashboardScreens
+      state={createMockedCodexDashboardState({ screen: "complete" })}
+      installResults={[
+        createActionResult("codex-developer-team", "executed", "Codex content verified", {
+          postInstallFollowUps: [{
+            id: "supermemory-user-authorization",
+            message: "Run codex mcp login supermemory when you are ready to authorize Supermemory.",
+          }],
+        }),
+        createActionResult("codex-verify", "failed", "Codex configuration failed"),
+      ]}
+      capabilityResolver={createMockedCapabilityResolver()}
+    />);
+    expect(failedAuthorization).not.toContain("Run codex mcp login supermemory");
+
+    for (const outcome of ["cancelled", "partial"] as const) {
+      const stoppedAuthorization = renderToString(<RunnerDashboardScreens
+        state={createMockedCodexDashboardState({ screen: "complete" })}
+        installResults={[
+          createActionResult("codex-developer-team", "executed", "Codex content verified", {
+            postInstallFollowUps: [{
+              id: "supermemory-user-authorization",
+              message: "Run codex mcp login supermemory when you are ready to authorize Supermemory.",
+            }],
+          }),
+          createActionResult("codex-verify", "executed", `Codex verification ${outcome}`, { serenaOutcome: outcome }),
+        ]}
+        capabilityResolver={createMockedCapabilityResolver()}
+      />);
+      expect(stoppedAuthorization).toContain("Codex Runner setup stopped before completion");
+      expect(stoppedAuthorization).not.toContain("Run codex mcp login supermemory");
+    }
+
+    const blocked = renderToString(<RunnerDashboardScreens
+      state={createMockedCodexDashboardState({
+        screen: "review-plan",
+        plan: createMinimalPlan({
+          ready: false,
+          diagnostics: [{ code: "codex-runtime-unsupported", severity: "error", message: "Codex 0.144.0 is below the supported version." }],
+        }),
+      })}
+      canRunPlan={false}
+      runBlockDiagnostics={[{ message: "Codex 0.144.0 is below the supported version." }]}
+      capabilityResolver={createMockedCapabilityResolver()}
+    />);
+    expect(blocked).toContain("Blocked");
+    expect(blocked).toContain("Codex 0.144.0 is below the supported version.");
+  });
+
+  test("renders a plan-build failure as blocked without relying on the caller to disable run", () => {
+    const state = createMockedCodexDashboardState({
+      screen: "review-plan",
+      plan: createMinimalPlan({
+        ready: false,
+        diagnostics: [{ code: "plan-build-failed", severity: "error", message: "Could not build the review plan. Return to Dashboard and retry." }],
+      }),
+    });
+
+    const review = renderToString(<RunnerDashboardScreens state={state} canRunPlan />);
+
+    expect(review).toContain("Could not build the review plan. Return to Dashboard and retry.");
+    expect(review).toContain("Blocked");
+    expect(review).not.toContain("Run install");
+  });
+
+  test("renders normalized runtime state and per-route execution classifications", () => {
+    const output = renderToString(<RunnerDashboardScreens
+      state={createMockedCodexDashboardState({
+        runtime: {
+          runnerCommand: "codex",
+          inspectionState: "unsupported",
+          diagnostics: ["Codex 0.100.0 is older than supported 0.145.0."],
+          executionRoutes: {
+            interactive: "static-compatible",
+            exec: "static-compatible",
+            "resume-by-id": "unsupported",
+            "resume-latest": "blocked",
+          },
+        },
+      })}
+      capabilityResolver={createMockedCapabilityResolver()}
+    />);
+    expect(output).toContain("Runtime: unsupported");
+    expect(output).toContain("Codex 0.100.0 is older than supported 0.145.0");
+    expect(output).toContain("interactive: static-compatible");
+    expect(output).toContain("exec: static-compatible");
+    expect(output).toContain("resume-by-id: unsupported");
+    expect(output).toContain("resume-latest: blocked");
+  });
+
+  test("renders none and Supermemory normally while exposing the Codex Engram gap", () => {
+    const none = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState({ screen: "adaptive-memory-detail", adaptiveMemory: { provider: "none" } })} />);
+    expect(none).toContain("No adaptive memory active by default");
+
+    const supermemory = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState({ screen: "adaptive-memory-detail", adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true, diagnostics: [] } } })} />);
+    expect(supermemory).toContain("without authorizing it");
+    expect(supermemory).not.toContain("mcp login supermemory");
+
+    const engram = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState({ screen: "adaptive-memory-detail", adaptiveMemory: { provider: "engram" } })} />);
+    expect(engram).toContain("Engram (deferred for Codex)");
+    expect(engram).toContain("no verified Codex provider contract");
+  });
+
+  test("renders Codex preview confirmation, install progress, failure, and completion through generic screens", () => {
+    const review = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState({
+      screen: "review-plan",
+      plan: createMinimalPlan({
+        ready: true,
+        groups: {
+          automaticInstalls: [],
+          manualSteps: [],
+          configWrites: [{ id: "codex-config:context7", kind: "codex-config-preview", title: "Configure Context7", status: "ready" }],
+          teamApplications: [{ id: "codex-developer-team", kind: "apply-team-bundle", title: "Apply Codex Developer Team", status: "ready" }],
+          validations: [{ id: "codex-verify", kind: "validate", title: "Verify Codex content", status: "ready" }],
+        },
+      }),
+    })} canRunPlan />);
+    expect(review).toContain("Review & Install");
+    expect(review).toContain("Run install");
+    expect(review).toContain("3 actions planned");
+
+    const progress = renderToString(<RunnerDashboardScreens
+      state={createMockedCodexDashboardState({ screen: "install-progress" })}
+      installResults={[createActionResult("codex-developer-team", "executed", "Codex content applied and verified.")]}
+    />);
+    expect(progress).toContain("Install Progress");
+    expect(progress).toContain("Codex content applied and verified");
+
+    const failed = renderToString(<RunnerDashboardScreens
+      state={createMockedCodexDashboardState({ screen: "complete" })}
+      installResults={[createActionResult("codex-developer-team", "failed", "Install rolled back.", { diagnostics: ["collision preserved"] })]}
+    />);
+    expect(failed).toContain("Codex Runner setup stopped before completion");
+    expect(failed).toContain("Install rolled back");
+
+    const complete = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState({ screen: "complete" })} completionStatus="Verified" />);
+    expect(complete).toContain("Codex Runner setup complete");
+    expect(complete).toContain("Verified");
   });
 });
 

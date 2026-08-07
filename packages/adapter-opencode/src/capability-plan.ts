@@ -1,5 +1,6 @@
 import {
   ALL_OPENCODE_RUNNER_CAPABILITY_IDS,
+  OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION,
   getUserFacingOpenCodeCapability,
   type OpenCodeCapabilityId,
   type OpenCodeCapabilityStatus,
@@ -11,8 +12,7 @@ import type { CapabilityInstructionBundle } from "@deck/core/teams/developer/ins
 import type { SerenaOperationIdentity } from "@deck/core";
 import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
 import { appendFileSync } from "node:fs";
-import { resolveRunnerParity, type ParityReport } from "@deck/core/runner-capability-parity";
-import type { ParityRuntimeHints } from "@deck/core/runner-capability-registry";
+import { resolveRunnerParity, type ParityReport, type ParityRuntimeHints } from "@deck/core";
 
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
@@ -116,7 +116,7 @@ export function buildOpenCodeRunnerReviewPlan(
 
   let parity: ParityReport | undefined;
   try {
-    parity = resolveRunnerParity("opencode", runtimeHints);
+    parity = resolveRunnerParity("opencode", runtimeHints, [OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION]);
     log(`buildOpenCodeRunnerReviewPlan: parity resolved. gaps=${parity.gaps.length}, blockers=${parity.blockers.length}, silentPackages=${parity.silentPackages.length}`);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

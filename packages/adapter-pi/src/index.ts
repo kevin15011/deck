@@ -1,6 +1,7 @@
 export * from "./capability-catalog";
 export * from "./capability-inventory";
 export * from "./capability-plan";
+export * from "./capability-parity";
 export * from "./developer-team-catalog";
 export * from "./developer-team-install";
 export * from "./developer-team-execution-bridge";

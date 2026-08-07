@@ -6,15 +6,19 @@
 
 // @ts-expect-error - vitest types are available at runtime via bun
 import { describe, it, expect } from "vitest";
-import { resolveRunnerParity, getParityGaps } from "@deck/core/runner-capability-parity";
+import { resolveRunnerParity as resolveCoreRunnerParity, getParityGaps as getCoreParityGaps } from "@deck/core/runner-capability-parity";
 import {
   validateOpenCodeCatalogAgainstRegistry,
   getCanonicalCapabilityId,
   OPENCODE_RUNNER_CAPABILITY_IDS,
   getOpenCodeRunnerCapability,
+  OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION,
 } from "./capability-catalog";
 import { OPENCODE_INSTALLABLE_TOOLS } from "./installation-plan";
 import type { CanonicalCapabilityId } from "./capability-catalog";
+
+const resolveRunnerParity = (runnerId: string, runtimeHints?: Parameters<typeof resolveCoreRunnerParity>[1]) => resolveCoreRunnerParity(runnerId, runtimeHints, [OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION]);
+const getParityGaps = (runnerId: string) => getCoreParityGaps(runnerId, [OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION]);
 
 describe("OpenCode Registry Consumption", () => {
   describe("validateOpenCodeCatalogAgainstRegistry", () => {

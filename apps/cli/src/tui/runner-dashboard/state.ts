@@ -1,3 +1,10 @@
+import {
+  PACKAGE_INSTRUCTION_CONFIGURATION_METADATA,
+  PACKAGE_INSTRUCTION_PACKAGE_IDS,
+  normalizeSupportedPackageInstructionSelection,
+  type PackageInstructionPackageId,
+} from "@deck/core";
+
 /**
  * Runtime-agnostic runner dashboard state.
  *
@@ -85,8 +92,10 @@ export type ImplementationId = string;
  * Canonical package instruction IDs for instruction injection.
  * These are the packages that can be toggled via Configure Packages.
  */
-export const CANONICAL_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "context-mode", "rtk", "serena"] as const;
-export type CanonicalInstructionPackageId = (typeof CANONICAL_INSTRUCTION_PACKAGE_IDS)[number];
+export const CANONICAL_INSTRUCTION_PACKAGE_IDS = PACKAGE_INSTRUCTION_CONFIGURATION_METADATA
+  .filter((entry) => entry.configurable)
+  .map((entry) => entry.id) as readonly Exclude<PackageInstructionPackageId, "code-economy">[];
+export type CanonicalInstructionPackageId = Exclude<PackageInstructionPackageId, "code-economy">;
 
 /**
  * Loads package instructions from a deck config for a specific runner scope.
@@ -95,21 +104,20 @@ export type CanonicalInstructionPackageId = (typeof CANONICAL_INSTRUCTION_PACKAG
 export function loadRunnerPackageInstructionsFromConfig(
   config: { packageInstructions?: Record<string, Record<string, boolean>> },
   runnerScope: RunnerScope,
-): Partial<Record<CapabilityId, boolean>> {
-  const runner = runnerScope as "pi" | "opencode";
-  const runnerConfig = config?.packageInstructions?.[runner];
-  if (!runnerConfig) return {};
-  return { ...runnerConfig };
+  supportedIds: readonly PackageInstructionPackageId[] = PACKAGE_INSTRUCTION_PACKAGE_IDS,
+): Partial<Record<PackageInstructionPackageId, boolean>> {
+  const runnerConfig = config?.packageInstructions?.[runnerScope];
+  return normalizeSupportedPackageInstructionSelection(runnerConfig, supportedIds);
 }
 
-export type RunnerScope = "pi" | "opencode" | "all";
+export type RunnerScope = import("@deck/core").RunnerId | "all";
 
 /**
  * Ephemeral identity for one interactive Review & Install operation.
  * This is never derived from persisted config, inventory, or preferences.
  */
 export type RunnerOperationIdentity = {
-  runner: Exclude<RunnerScope, "all">;
+  runner: import("@deck/core").RunnerId;
   operationId: string;
   explicitlySelected: boolean;
 };
@@ -121,6 +129,8 @@ export type RunnerDashboardState = {
   backStack: RunnerDashboardScreen[];
   cursor: number;
   runnerScope: RunnerScope;
+  runnerDisplayName?: string;
+  runnerUi?: import("@deck/core").RunnerUiMetadata;
   selectedCapabilities: Partial<Record<CapabilityId, boolean>>;
   /** Current-operation provenance; never persisted or populated from config. */
   explicitlySelectedCapabilities: Partial<Record<CapabilityId, boolean>>;
@@ -137,13 +147,20 @@ export type RunnerDashboardState = {
     runnerCommand?: string;
     preflight?: unknown;
     toolsReview?: unknown;
+    inspectionState?: "ready" | "degraded" | "blocked" | "unsupported";
+    diagnostics?: string[];
+    executionRoutes?: Partial<Record<"interactive" | "exec" | "resume-by-id" | "resume-latest", "first-class" | "static-compatible" | "unsupported" | "blocked">>;
   };
-  /** Package instruction injection toggles for canonical packages: codebase-memory, context-mode, rtk. */
-  packageInstructions: Partial<Record<CapabilityId, boolean>>;
+  /** Canonical package-instruction toggles; code-economy is persisted as the always-on baseline. */
+  packageInstructions: Partial<Record<PackageInstructionPackageId, boolean>>;
   plan?: RunnerReviewPlan;
   planRevision: number;
   planGeneratedForRevision?: number;
 };
+
+export function runnerRequiresExternalSupermemoryToken(state?: Pick<RunnerDashboardState, "runnerUi">): boolean {
+  return state?.runnerUi?.adaptiveMemory?.supermemory.requiresExternalToken ?? true;
+}
 
 export type RunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
 
@@ -187,6 +204,23 @@ export type RunnerReviewPlan = {
   ready: boolean;
 };
 
+export function createRunnerReviewPlanFailure(
+  code = "plan-build-failed",
+  message = "Could not build the review plan. Return to Dashboard and retry.",
+): RunnerReviewPlan {
+  return {
+    groups: {
+      automaticInstalls: [],
+      manualSteps: [],
+      configWrites: [],
+      teamApplications: [],
+      validations: [],
+    },
+    diagnostics: [{ code, message, severity: "error" }],
+    ready: false,
+  };
+}
+
 export type TeamCapabilityConsumption =
   | "required"
   | "consumes-directly"
@@ -224,6 +258,7 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   backStack: [],
   cursor: 0,
   runnerScope: "pi",
+  runnerDisplayName: "Pi",
   selectedCapabilities: {
     "context-mode": true,
     "codebase-memory-mcp": true,
@@ -247,7 +282,7 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
     },
   },
   runtime: {},
-  packageInstructions: {},
+  packageInstructions: { "code-economy": true },
   plan: undefined,
   planRevision: 0,
   planGeneratedForRevision: undefined,

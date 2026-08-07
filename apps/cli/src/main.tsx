@@ -6,13 +6,14 @@ import { getBuildInfo } from "./runtime/build-info";
 import { spawnInherited } from "./runtime/process";
 import { runPiLaunch } from "./pi-launch-command";
 import { resolveProjectRoot } from "./project-root";
-import { createRunnerCapabilityRegistry, type RunnerCapabilityCatalog } from "./runner-capability-registry";
+import { createDefaultAdapterRegistry } from "./runner-adapters";
+import { createNodeRunnerProcessEffects, runRunnerLaunch } from "./runner-launch-command";
 import { DeckApp } from "./tui/app";
 import { ScreenFrame } from "./tui/screen-frame";
 import { HomeScreen } from "./tui/screens/home-screen";
 
-// Create the runner capability catalog at composition time
-const runnerCatalog: RunnerCapabilityCatalog = createRunnerCapabilityRegistry();
+// One authoritative operational registry is shared by direct commands and the TUI.
+const adapterRegistry = createDefaultAdapterRegistry();
 
 // Drop the runtime/script args — Bun passes them as argv[0] and argv[1]
 const userArgs = process.argv.slice(2);
@@ -147,7 +148,52 @@ if (
   }
 }
 
-if (parsed.command === "pi-launch") {
+if (parsed.command === "runner-launch") {
+  const projectRoot = resolveProjectRoot() ?? process.cwd();
+  const adapter = adapterRegistry.get(parsed.runnerId);
+  const launch = { ...parsed.launch, projectRoot, teamId: parsed.teamId };
+  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+  const result = await runRunnerLaunch({
+    adapter,
+    launch,
+    installOnly: parsed.installOnly,
+    dryRun: parsed.dryRun,
+    yes: parsed.yes,
+    localOnly: parsed.localOnly,
+    interactive,
+    confirm: interactive ? async (summary) => {
+      const { createInterface } = await import("node:readline/promises");
+      const prompt = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const answer = await prompt.question(`${summary}. Apply these project changes? [y/N] `);
+        return /^(y|yes)$/i.test(answer.trim());
+      } finally {
+        prompt.close();
+      }
+    } : undefined,
+    presentPreview: async (preview) => { console.log(preview); },
+    processEffects: createNodeRunnerProcessEffects(),
+  });
+  if (result.status === "blocked") {
+    console.error(result.message);
+    process.exit(1);
+  }
+  if (result.status === "unsupported") {
+    console.error(result.message);
+    process.exit(2);
+  }
+  if (result.status === "dry-run" || result.status === "installed") {
+    for (const diagnostic of result.diagnostics) console.log(diagnostic);
+    process.exit(0);
+  }
+  if (result.status === "launched") {
+    for (const diagnostic of result.launch.diagnostics) console.error(`[${diagnostic.code}] ${diagnostic.message}`);
+    if (result.outcome.stdout) process.stdout.write(result.outcome.stdout);
+    if (result.outcome.stderr) process.stderr.write(result.outcome.stderr);
+    if (result.outcome.truncated) console.error("Runner output was truncated; it is not complete verification evidence.");
+    process.exit(result.outcome.exitCode);
+  }
+} else if (parsed.command === "pi-launch") {
   const projectRoot = resolveProjectRoot() ?? process.cwd();
   const result = await runPiLaunch({
     teamId: parsed.teamId,
@@ -181,7 +227,7 @@ if (parsed.command === "pi-launch") {
   });
   process.exit(exitCode);
 } else if (process.stdin.isTTY) {
-  render(<DeckApp />, {
+  render(<DeckApp adapterRegistry={adapterRegistry} />, {
     alternateScreen: true,
     exitOnCtrlC: true,
     incrementalRendering: true,

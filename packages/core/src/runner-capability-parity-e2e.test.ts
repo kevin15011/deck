@@ -18,15 +18,25 @@
 // @ts-expect-error - vitest types are available at runtime via bun
 import { describe, test, expect } from "vitest";
 import {
-  resolveRunnerParity,
-  getParityGaps,
+  resolveRunnerParity as resolveCoreRunnerParity,
+  getParityGaps as getCoreParityGaps,
 } from "./runner-capability-parity";
 import {
-  getCanonicalRunnerCapabilities,
-  getCanonicalCapability,
-  getRunnerMappings,
-  getRunnerCapabilityMapping,
+  getCanonicalRunnerCapabilities as getCoreCanonicalRunnerCapabilities,
+  getCanonicalCapability as getCoreCanonicalCapability,
+  getRunnerMappings as getCoreRunnerMappings,
+  getRunnerCapabilityMapping as getCoreRunnerCapabilityMapping,
 } from "./runner-capability-registry";
+import { PI_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-pi";
+import { OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-opencode";
+
+const adapterContributions = [PI_RUNNER_CAPABILITY_CONTRIBUTION, OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION] as const;
+const resolveRunnerParity = (runnerId: string, runtimeHints?: Parameters<typeof resolveCoreRunnerParity>[1]) => resolveCoreRunnerParity(runnerId, runtimeHints, adapterContributions);
+const getParityGaps = (runnerId: string) => getCoreParityGaps(runnerId, adapterContributions);
+const getCanonicalRunnerCapabilities = () => getCoreCanonicalRunnerCapabilities(adapterContributions);
+const getCanonicalCapability = (capabilityId: string) => getCoreCanonicalCapability(capabilityId, adapterContributions);
+const getRunnerMappings = (runnerId: string) => getCoreRunnerMappings(runnerId, adapterContributions);
+const getRunnerCapabilityMapping = (capabilityId: string, runnerId: string) => getCoreRunnerCapabilityMapping(capabilityId, runnerId, adapterContributions);
 
 describe("Runner Capability Parity E2E", () => {
   // ========================================================================
@@ -35,7 +45,7 @@ describe("Runner Capability Parity E2E", () => {
 
   test("opencode runner has no critical gaps when configured", () => {
     const report = resolveRunnerParity("opencode", {
-      binariesInPath: ["rtk", "context-mode", "codebase-memory-mcp"],
+      binariesInPath: ["rtk", "context-mode", "codebase-memory-mcp", "serena"],
       mcpServersConfigured: ["context-mode", "codebase-memory", "context7", "serena"],
       supermemoryConfigured: true,
       authenticatedRuntimeValidated: true,
@@ -176,7 +186,7 @@ describe("Runner Capability Parity E2E", () => {
 
     const ctxModeGap = report.gaps.find((g) => g.capabilityId === "context-mode");
     expect(ctxModeGap).toBeDefined();
-    expect(ctxModeGap?.code).toMatch(/missing|pi-context-mode|shared-binary-not-usable/);
+    expect(ctxModeGap?.code).toMatch(/missing|capability-(?:mcp-not-configured|binary-not-usable)/);
   });
 
   // ========================================================================
@@ -214,7 +224,7 @@ describe("Runner Capability Parity E2E", () => {
 
     const cbMemGap = report.gaps.find((g) => g.capabilityId === "codebase-memory");
     expect(cbMemGap).toBeDefined();
-    expect(cbMemGap?.code).toMatch(/codebase-memory-mcp-missing|mcp/);
+    expect(cbMemGap?.code).toBe("capability-mcp-not-configured");
   });
 
   test("codebase-memory-index-unverified code when not indexed", () => {
@@ -279,10 +289,7 @@ describe("Runner Capability Parity E2E", () => {
       authenticatedRuntimeValidated: false, // NOT required
     });
 
-    // Should NOT have pi-supermemory-extra-gate-present gap
-    const gateGap = report.gaps.find(
-      (g) => g.code === "pi-supermemory-extra-gate-present"
-    );
+    const gateGap = report.gaps.find((g) => g.message.includes("authenticatedRuntimeValidated"));
     expect(gateGap).toBeUndefined();
   });
 
@@ -312,7 +319,7 @@ describe("Runner Capability Parity E2E", () => {
 
     // Should show gaps for shared binaries that are not configured
     const rtkGap = report.gaps.find((g) => g.capabilityId === "rtk");
-    expect(rtkGap?.code).toMatch(/shared-binary-not-usable|pi-rtk-mapping-missing/);
+    expect(rtkGap?.code).toBe("capability-binary-not-usable");
   });
 
   test("unusableBinaries hint is accepted without error", () => {

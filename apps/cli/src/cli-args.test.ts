@@ -1,8 +1,42 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseArgs, type ParsedArgs } from "./cli-args";
+import { parseArgs, serializeCodexExecPrompt, type ParsedArgs } from "./cli-args";
 
 describe("parseArgs", () => {
+  test("parses the exact Codex developer grammar", () => {
+    expect(parseArgs(["codex", "developer"])).toMatchObject({ command: "runner-launch", runnerId: "codex", launch: { mode: "interactive" } });
+    expect(parseArgs(["codex", "developer", "--install-only", "--dry-run"])).toMatchObject({ command: "runner-launch", installOnly: true, dryRun: true });
+    expect(parseArgs(["codex", "developer", "--yes", "exec", "--", "fix", "it"])).toMatchObject({ command: "runner-launch", yes: true, launch: { mode: "exec", prompt: ["fix", "it"], stdin: "closed", stdinPayload: { type: "utf8", content: "fix it" } } });
+    expect(parseArgs(["codex", "developer", "exec", "--", "include", "--yes"])).toMatchObject({ command: "runner-launch", launch: { mode: "exec", prompt: ["include", "--yes"] } });
+    expect(parseArgs(["codex", "developer", "resume", "session-1"])).toMatchObject({ command: "runner-launch", launch: { mode: "resume-by-id", sessionId: "session-1" } });
+    expect(parseArgs(["codex", "developer", "resume", "--last", "--local-only"])).toMatchObject({ command: "runner-launch", localOnly: true, launch: { mode: "resume-latest" } });
+  });
+
+  test("rejects malformed Codex grammar instead of guessing", () => {
+    expect(parseArgs(["codex", "developer", "exec", "fix it"]).command).toBe("error");
+    expect(parseArgs(["codex", "developer", "resume"]).command).toBe("error");
+    expect(parseArgs(["codex", "other"]).command).toBe("error");
+  });
+
+  test("serializes Codex exec content deterministically and rejects unsafe stdin payloads", () => {
+    expect(serializeCodexExecPrompt(["quoted value", "line\nnext", "--flag"])).toEqual({
+      ok: true,
+      payload: { type: "utf8", content: "quoted value line\nnext --flag" },
+    });
+    expect(parseArgs(["codex", "developer", "exec", "--", "safe\0unsafe"])).toMatchObject({ command: "error", message: expect.stringContaining("NUL") });
+    expect(parseArgs(["codex", "developer", "exec", "--", "x".repeat(64 * 1024 + 1)])).toMatchObject({ command: "error", message: expect.stringContaining("payload limit") });
+  });
+
+  test("makes the existing OpenCode developer launch reachable", () => {
+    expect(parseArgs(["opencode", "developer", "--yes"])).toMatchObject({
+      command: "runner-launch",
+      runnerId: "opencode",
+      teamId: "developer-team",
+      yes: true,
+      launch: { mode: "interactive" },
+    });
+  });
+
   test("returns TUI mode when no args are provided", () => {
     const result = parseArgs([]);
     expect(result).toEqual({ command: "tui" });

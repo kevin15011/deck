@@ -9,7 +9,10 @@ import {
   DEFAULT_ORCHESTRATOR_PERSONALITY,
   getDeckConfigPath,
   ORCHESTRATOR_PERSONALITIES,
-PACKAGE_INSTRUCTION_PACKAGE_IDS,
+  PACKAGE_INSTRUCTION_CONFIGURATION_METADATA,
+  PACKAGE_INSTRUCTION_PACKAGE_IDS,
+  getConfigurablePackageInstructionMetadata,
+  normalizeSupportedPackageInstructionSelection,
 
   readDeckConfig,
   resolveActiveMemoryProvider,
@@ -63,6 +66,36 @@ describe("PACKAGE_INSTRUCTION_PACKAGE_IDS", () => {
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toContain("serena");
     expect(PACKAGE_INSTRUCTION_PACKAGE_IDS).toHaveLength(6);
   });
+
+  test("derives the five configurable packages in canonical order and excludes the baseline", () => {
+    expect(getConfigurablePackageInstructionMetadata(PACKAGE_INSTRUCTION_PACKAGE_IDS).map((entry) => entry.id)).toEqual([
+      "codebase-memory",
+      "context-mode",
+      "rtk",
+      "adaptive-memory",
+      "serena",
+    ]);
+    expect(PACKAGE_INSTRUCTION_CONFIGURATION_METADATA.find((entry) => entry.id === "code-economy")).toMatchObject({
+      configurable: false,
+      defaultEnabled: true,
+    });
+  });
+
+  test("normalizes selections to supported package metadata and forces code-economy on", () => {
+    expect(normalizeSupportedPackageInstructionSelection({
+      "code-economy": false,
+      "context-mode": true,
+      "adaptive-memory": true,
+      "pi-hud": true,
+    }, ["code-economy", "context-mode", "adaptive-memory"])).toEqual({
+      "codebase-memory": false,
+      "code-economy": true,
+      "context-mode": true,
+      rtk: false,
+      "adaptive-memory": true,
+      serena: false,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -81,6 +114,7 @@ describe("readDeckConfig", () => {
       packageInstructions: {
         pi: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
         opencode: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+        codex: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
       },
       orchestratorPersonality: "pragmatica",
       developerTeamExecution: {
@@ -135,6 +169,10 @@ describe("validateDeckConfig - developerTeamExecution", () => {
     });
   });
 
+  test("rejects Codex invocation-required configuration while the public runner is static-compatible", () => {
+    expect(() => validateDeckConfig({ developerTeamExecution: { invocationAuthorization: { codex: "invocation-required" } } })).toThrow("codex");
+  });
+
   test("accepts the authorization control key without weakening secret rejection", () => {
     expect(validateDeckConfig({ developerTeamExecution: { invocationAuthorization: { pi: "invocation-required" } } })
       .developerTeamExecution.invocationAuthorization.pi).toBe("invocation-required");
@@ -165,6 +203,11 @@ describe("validateDeckConfig - developerTeamExecution", () => {
 // ---------------------------------------------------------------------------
 
 describe("validateDeckConfig — packageInstructions", () => {
+  test("defaults Codex to code-economy only in canonical six-ID order", () => {
+    const config = validateDeckConfig({});
+    expect(Object.keys(config.packageInstructions.codex)).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
+    expect(config.packageInstructions.codex).toEqual({ "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false });
+  });
   test("defaults code-economy to true (always-active baseline) and others to false when field is absent", () => {
     const config = validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "none" } });
 

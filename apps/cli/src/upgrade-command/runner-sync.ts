@@ -69,7 +69,7 @@ export type RunnerSyncOutcome = {
   /** Backup that should be retained while this sync outcome is current. */
   adapterBackup: unknown;
   /** True when the sync was a no-op because the runner is not installed. */
-  skippedReason?: "not-detected" | "no-selections";
+  skippedReason?: "not-detected";
 };
 
 /**
@@ -79,6 +79,8 @@ export type RunnerSyncResult = {
   outcomes: readonly RunnerSyncOutcome[];
   /** Updated manifest entries (paths + metadata) per file written. */
   manifestEntries: readonly ManifestFile[];
+  /** Previously managed runner paths removed by an ownership-verified delete. */
+  manifestRemovals?: readonly { path: string; owner: `runner:${string}` }[];
 };
 
 /**
@@ -130,6 +132,7 @@ export async function runRunnerSync(
   const ids = input.runnerIds ?? registry.list().map((a) => a.runnerId);
   const outcomes: RunnerSyncOutcome[] = [];
   const manifestEntries: ManifestFile[] = [];
+  const manifestRemovals: Array<{ path: string; owner: `runner:${string}` }> = [];
 
   for (const runnerId of ids) {
     if (!registry.has(runnerId)) {
@@ -165,19 +168,8 @@ export async function runRunnerSync(
     // 2. Read the user's package selections for this runner.
     const enabledIds: CapabilityInstructionPackageId[] =
       getEnabledPackageInstructionIds(config, runnerId);
-    if (enabledIds.length === 0) {
-      outcomes.push({
-        runnerId,
-        status: "skipped",
-        filesWritten: [],
-        diagnostics: [`Runner ${runnerId} has no enabled package instructions; skipping sync.`],
-        adapterBackup: undefined,
-        skippedReason: "no-selections",
-      });
-      continue;
-    }
-
-    // 3. Build the capability instruction bundle.
+    // 3. Build the capability instruction bundle. An empty selection still
+    // synchronizes base roles, skills, bootstrap content, and instructions.
     const bundle: CapabilityInstructionBundle = buildCapabilityInstructionBundle(enabledIds);
 
     // 4. Plan → backup → apply → verify.
@@ -196,19 +188,26 @@ export async function runRunnerSync(
         environmentId: (adapter.environmentIds[0] ?? "opencode-development") as never,
       });
     } catch (err) {
+      const diagnostics = [`applyDeveloperTeamInstall failed: ${(err as Error).message}`];
+      if (adapterBackup !== undefined) {
+        try {
+          const rollback = await adapter.rollbackDeveloperTeamFiles(adapterBackup);
+          if (rollback.status === "conflict") diagnostics.push(rollback.diagnostics.join("; ") || `Rollback conflicts: ${rollback.conflicts.join(", ")}`);
+        } catch (rollbackError) {
+          diagnostics.push(`rollbackDeveloperTeamFiles failed: ${(rollbackError as Error).message}`);
+        }
+      }
       outcomes.push({
         runnerId,
         status: "failed",
         filesWritten: [],
-        diagnostics: [
-          `applyDeveloperTeamInstall failed: ${(err as Error).message}`,
-        ],
+        diagnostics,
         adapterBackup,
       });
       continue;
     }
 
-    const verify = safeVerify(adapter, plan);
+    const verify = await safeVerify(adapter, plan);
 
     // The orchestrator treats the sync as failed when verify returns
     // invalid OR the apply produced no results at all (an empty
@@ -222,7 +221,8 @@ export async function runRunnerSync(
       // Partial failure: try to roll back via the adapter backup if present.
       if (adapterBackup !== undefined) {
         try {
-          adapter.rollbackDeveloperTeamFiles(adapterBackup);
+          const rollback = await adapter.rollbackDeveloperTeamFiles(adapterBackup);
+          if (rollback.status === "conflict") throw new Error(rollback.diagnostics.join("; ") || `Rollback conflicts: ${rollback.conflicts.join(", ")}`);
         } catch (err) {
           outcomes.push({
             runnerId,
@@ -262,6 +262,9 @@ export async function runRunnerSync(
       });
       filePaths.push(file.path);
     }
+    for (const mutation of plan.mutationPreview ?? []) {
+      if (mutation.action === "delete") manifestRemovals.push({ path: mutation.path, owner: `runner:${runnerId}` });
+    }
 
     outcomes.push({
       runnerId,
@@ -272,7 +275,7 @@ export async function runRunnerSync(
     });
   }
 
-  return { outcomes, manifestEntries };
+  return { outcomes, manifestEntries, manifestRemovals };
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +293,10 @@ export function applyRunnerSyncToManifest(
   result: RunnerSyncResult,
   deckVersion: string,
 ): ManifestJsonV2 {
-  let next = manifest;
+  let next = {
+    ...manifest,
+    files: manifest.files.filter((file) => !(result.manifestRemovals ?? []).some((removal) => removal.path === file.path && removal.owner === file.owner)),
+  };
   for (const file of result.manifestEntries) {
     next = upsertManifestFile(
       next,
@@ -355,12 +361,12 @@ async function safeApply(
   return adapter.applyDeveloperTeamInstall(input);
 }
 
-function safeVerify(
+async function safeVerify(
   adapter: RunnerAdapter,
   plan: unknown,
-): { valid: boolean; diagnostics: readonly string[] } {
+): Promise<{ valid: boolean; diagnostics: readonly string[] }> {
   try {
-    return adapter.verifyDeveloperTeamInstall(plan);
+    return await adapter.verifyDeveloperTeamInstall(plan);
   } catch (err) {
     return { valid: false, diagnostics: [(err as Error).message] };
   }

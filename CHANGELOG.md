@@ -9,6 +9,17 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+### Added
+
+- Added a `static-compatible` Codex CLI runner beta with native Developer Team roles and skills, project-local transactional materialization, MCP/shared-binary readiness, Supermemory integration, targeted TUI and doctor flows, and content-only upgrade synchronization. The public adapter installs no trusted-hook surface and marks host authorization, dossier, controlled-effect, registry, and bound-verification controls as explicit gaps.
+
+### Security
+
+- Codex integration never auto-trusts repositories or persists external credentials. Managed writes use reviewed previews, optimistic preimages, durable recovery journals, semantic verification, and conflict-preserving rollback.
+- Codex rollback is operation-scoped by exact native/local-only transaction IDs, and semantic verification failure now awaits rollback before returning.
+- Codex package instructions preserve canonical metadata and tool policy while translating runner-specific OpenCode/Claude wording to verified Codex behavior.
+
+
 ## [0.2.6] - 2026-08-05
 
 ### Changed

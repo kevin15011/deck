@@ -27,7 +27,7 @@ import {
 import { decideQaNextActionV1 } from "./qa-execution-authority";
 
 export interface QaRunnerHostInvocationRequestV1 {
-  readonly runnerId: "opencode" | "pi";
+  readonly runnerId: "opencode" | "pi" | "codex";
   readonly sessionId: string;
   /** The runner's own call identifier, not the control-plane invocation identifier. */
   readonly invocationId: string;
@@ -131,7 +131,7 @@ function isHostError(error: unknown): error is Error {
 function sanitizeRequest(value: unknown): QaRunnerHostInvocationRequestV1 {
   assertExactKeys(value, ["runnerId", "sessionId", "invocationId", "requestedRole"], "qa host request");
   return deepFreeze({
-    runnerId: enumValue(value.runnerId, ["opencode", "pi"] as const, "qa host request.runnerId"),
+    runnerId: enumValue(value.runnerId, ["opencode", "pi", "codex"] as const, "qa host request.runnerId"),
     sessionId: stringValue(value.sessionId, "qa host request.sessionId", 256),
     invocationId: stringValue(value.invocationId, "qa host request.invocationId", 256),
     requestedRole: enumValue(value.requestedRole, ["verify", "review"] as const, "qa host request.requestedRole"),

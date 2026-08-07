@@ -31,7 +31,8 @@ import type {
   DeveloperTeamInstallFile,
   TeamEntry,
 } from "@deck/core";
-import { DEVELOPER_TEAM_AGENTS, getModelCatalog } from "@deck/core";
+import { DEVELOPER_TEAM_AGENTS, getModelCatalog, getRunnerCapabilityMapping } from "@deck/core";
+import { OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION } from "./capability-catalog";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { join } from "node:path";
 
@@ -218,6 +219,7 @@ function getOpenCodeCapability(capabilityId: string): import("@deck/core").Runne
     toolId: entry.toolId,
     source: entry.source,
     installKind: entry.installKind,
+    supportStatus: getRunnerCapabilityMapping(capabilityId, "opencode", [OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION])?.status,
     isInternal: entry.isInternal,
   };
 }

@@ -4,10 +4,11 @@ import { Box, Text } from "ink";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import { PI_THINKING_LEVELS, supportsDeveloperTeamModel, supportsThinkingForModel } from "@deck/adapter-pi";
-import { OPENCODE_THINKING_LEVELS, supportsThinkingForOpenCodeModel } from "@deck/adapter-opencode";
+import { OPENCODE_THINKING_LEVELS } from "@deck/adapter-opencode";
 import type { CapabilityStatus, PiModel, PiProvider, PiThinkingLevel } from "@deck/adapter-pi";
 import type { OpenCodeThinkingLevel } from "@deck/adapter-opencode";
 import type { AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
+import type { RunnerUiMetadata } from "@deck/core";
 import { MenuList } from "../components/menu-list";
 import { getAdapter } from "../../runner-adapters";
 
@@ -105,20 +106,24 @@ type MemoryProviderSelectionScreenProps = {
   cursor: number;
   selectedProvider: AdaptiveMemoryActiveProvider;
   status?: string;
+  runtime?: string;
 };
 
-export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status }: MemoryProviderSelectionScreenProps) {
+export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status, runtime = "pi" }: MemoryProviderSelectionScreenProps) {
+  const isCodex = runtime === "codex";
   return (
     <Box flexDirection="column">
       <Text bold>Select adaptive-memory provider</Text>
-      <Text dimColor>Exactly one provider can be active. Supermemory credentials are never written to .deck/config.json.</Text>
+      <Text dimColor>{isCodex
+        ? "Codex uses credential-free configuration. Deck shows the user-owned native OAuth next step only after verified install."
+        : "Exactly one provider can be active. Supermemory credentials are never written to .deck/config.json."}</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
           items={[
             { id: "none", label: "None", hint: selectedProvider === "none" ? "active" : "disable adaptive memory" },
             { id: "engram", label: "Engram", hint: selectedProvider === "engram" ? "active" : "existing provider" },
-            { id: "supermemory", label: "Supermemory MCP", hint: selectedProvider === "supermemory" ? "active" : "requires token only" },
+            { id: "supermemory", label: "Supermemory MCP", hint: selectedProvider === "supermemory" ? "active" : isCodex ? "credential-free native OAuth" : "requires token only" },
           ]}
         />
       </Box>
@@ -131,9 +136,19 @@ type SupermemorySetupScreenProps = {
   screen: "supermemory-token"; // Simplified: only token required
   values: SupermemorySetupValues;
   error?: string;
+  runtime?: string;
 };
 
-export function SupermemorySetupScreen({ screen, values, error }: SupermemorySetupScreenProps) {
+export function SupermemorySetupScreen({ screen, values, error, runtime = "pi" }: SupermemorySetupScreenProps) {
+  if (runtime === "codex") {
+    return (
+      <Box flexDirection="column">
+        <Text bold>Supermemory native OAuth</Text>
+        <Text dimColor>Codex configures Supermemory without a token. After Deck applies and verifies the MCP configuration, it will show the user-owned native OAuth next step.</Text>
+        <Text dimColor>Deck never asks for, stores, or displays a Supermemory token for Codex.</Text>
+      </Box>
+    );
+  }
   // Token-only config: no userId/teamId/orgId fields
   const field = "token";
   const label = "Supermemory token";
@@ -145,9 +160,9 @@ export function SupermemorySetupScreen({ screen, values, error }: SupermemorySet
     <Box flexDirection="column">
       <Text bold>{label} {required ? "(required)" : ""}</Text>
       <Text dimColor>
-        {field === "token"
+        {runtime === "pi"
           ? "Token is written only to Pi's global MCP config (~/.pi/agent/mcp.json) and is never stored in Deck config. User identity is derived automatically from token. Project scoping handled via x-sm-project header."
-          : ""}
+          : "Token remains external to Deck project configuration and is handled by the active OpenCode provider flow."}
       </Text>
       <Box marginTop={1}>
         <Text>{label}: <Text color="cyan">{displayValue}</Text></Text>
@@ -166,15 +181,32 @@ export function SupermemorySetupScreen({ screen, values, error }: SupermemorySet
 type ModelProviderSelectionScreenProps = {
   cursor: number;
   providers: PiProvider[];
-  runtime?: "pi" | "opencode";
+  runtime?: string;
+  runnerLabel?: string;
+  modelUi?: RunnerUiMetadata["model"];
 };
 
-export function ModelProviderSelectionScreen({ cursor, providers, runtime = "pi" }: ModelProviderSelectionScreenProps) {
-  const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
+const DEFAULT_MODEL_UI: RunnerUiMetadata["model"] = {
+  providerSource: "Providers come from Pi settings and detected credentials.",
+  missingChecks: ["~/.pi/agent/settings.json defaultProvider/defaultModel", "pi --list-models", "Provider env vars such as OPENCODE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY"],
+  remediation: "Run `pi --list-models` or `pi config` to confirm Pi can see your providers.",
+  defaultThinkingLevels: PI_THINKING_LEVELS,
+  usesNativeCompatibilityChecks: true,
+};
+
+function modelUiMetadata(runtime: string, runnerLabel?: string, modelUi?: RunnerUiMetadata["model"]) {
+  return {
+    label: runnerLabel ?? (runtime === "pi" ? "Pi" : runtime.replace(/(^|-)(\w)/g, (_, __, letter: string) => ` ${letter.toUpperCase()}`).trim()),
+    ...(modelUi ?? DEFAULT_MODEL_UI),
+  };
+}
+
+export function ModelProviderSelectionScreen({ cursor, providers, runtime = "pi", runnerLabel, modelUi }: ModelProviderSelectionScreenProps) {
+  const metadata = modelUiMetadata(runtime, runnerLabel, modelUi);
   return (
     <Box flexDirection="column">
-      <Text bold>Select a {runtimeLabel} provider</Text>
-      <Text dimColor>{runtime === "opencode" ? "Providers come from the active OpenCode runner." : `Providers come from ${runtimeLabel} settings and detected credentials.`}</Text>
+      <Text bold>Select a {metadata.label} provider</Text>
+      <Text dimColor>{metadata.providerSource}</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
@@ -192,27 +224,30 @@ type ModelSelectionScreenProps = {
   cursor: number;
   provider: PiProvider;
   models: PiModel[];
-  runtime?: "pi" | "opencode";
+  runtime?: string;
+  runnerLabel?: string;
+  modelUi?: RunnerUiMetadata["model"];
 };
 
-export function ModelSelectionScreen({ cursor, provider, models, runtime = "pi" }: ModelSelectionScreenProps) {
-  const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
+export function ModelSelectionScreen({ cursor, provider, models, runtime = "pi", runnerLabel, modelUi }: ModelSelectionScreenProps) {
+  const metadata = modelUiMetadata(runtime, runnerLabel, modelUi);
   // T8: Use resolver to differentiate "not compatible" vs "compatible"
   return (
     <Box flexDirection="column">
       <Text bold>Select a model for {provider.displayName}</Text>
-      <Text dimColor>{runtime === "opencode" ? "Models and reasoning variants come from the active OpenCode runner." : `Models are loaded from ${runtimeLabel} when available; defaults are fallback only.`}</Text>
+      <Text dimColor>{metadata.providerSource}</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
           items={models.map((m) => {
             // T8: Check if model supports thinking using the adapter's resolver
-            const supportsThinking = runtime === "opencode"
-              ? supportsThinkingForOpenCodeModel(m.id)
-              : supportsThinkingForModel(m);
+            const usesNativeCompatibilityChecks = metadata.usesNativeCompatibilityChecks === true;
+            const supportsThinking = usesNativeCompatibilityChecks
+              ? supportsThinkingForModel(m)
+              : m.thinking === true || ("variants" in m && Array.isArray(m.variants) && m.variants.length > 0);
 
             let hint: string;
-            if (runtime === "pi" && !supportsDeveloperTeamModel(m)) {
+            if (usesNativeCompatibilityChecks && !supportsDeveloperTeamModel(m)) {
               hint = `${m.id} · not compatible with Developer Team conversation history`;
             } else if (supportsThinking) {
               hint = m.id; // Show model ID hint for supported models
@@ -240,7 +275,9 @@ type AgentModelAssignmentScreenProps = {
   modelId: string;
   defaultThinking: string;
   supportsThinking?: boolean;
-  runtime?: "pi" | "opencode";
+  runtime?: string;
+  runnerLabel?: string;
+  modelUi?: RunnerUiMetadata["model"];
   /**
    * Model-specific thinking/effort levels to render. When provided, takes
    * precedence over the runtime-default constant (e.g. OPENCODE_THINKING_LEVELS).
@@ -267,15 +304,18 @@ export function AgentModelAssignmentScreen({
   defaultThinking,
   supportsThinking = true,
   runtime = "pi",
+  runnerLabel,
+  modelUi,
   thinkingLevels,
 }: AgentModelAssignmentScreenProps) {
   const agent = DEVELOPER_TEAM_AGENTS[agentIndex];
   const progress = `${agentIndex + 1}/${totalAgents}`;
-  const fallbackLevels = runtime === "opencode" ? OPENCODE_THINKING_LEVELS : PI_THINKING_LEVELS;
+  const metadata = modelUiMetadata(runtime, runnerLabel, modelUi);
+  const fallbackLevels = modelUi?.defaultThinkingLevels ?? (runtime === "pi" ? PI_THINKING_LEVELS : OPENCODE_THINKING_LEVELS);
   const hasModelSpecificLevels = thinkingLevels !== undefined;
   const effectiveLevels = hasModelSpecificLevels ? thinkingLevels : fallbackLevels;
   const effectiveSupportsThinking = hasModelSpecificLevels ? effectiveLevels.length > 0 : supportsThinking;
-  const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
+  const runtimeLabel = metadata.label;
 
   return (
     <Box flexDirection="column">
@@ -297,7 +337,7 @@ export function AgentModelAssignmentScreen({
             />
           </Box>
         </>
-      ) : runtime === "opencode" && hasModelSpecificLevels ? (
+      ) : runtime !== "pi" && hasModelSpecificLevels ? (
         <Text color="yellow">No reasoning choice applies to this model.</Text>
       ) : (
         <Text color="yellow">Thinking not supported by this provider/model; using off.</Text>
@@ -313,7 +353,7 @@ type AgentModelConfigListScreenProps = {
   assignmentStates?: Readonly<Record<string, "available" | "model-unavailable" | "variant-unavailable" | "unverified">>;
   discoveryState?: "stale";
   dashboardContext?: DeveloperTeamDashboardContext;
-  runtime?: "pi" | "opencode";
+  runtime?: string;
 };
 
 export function AgentModelConfigListScreen({
@@ -340,10 +380,7 @@ export function AgentModelConfigListScreen({
     } else if (assignmentState === "unverified") {
       hint = `${assigned}${thinking ? ` · thinking ${thinking}` : ""} · Availability unverified`;
     } else {
-      const supportsThinking = runtime === "opencode"
-        ? supportsThinkingForOpenCodeModel(assigned)
-        : supportsThinkingForModel(assigned as any);
-      hint = supportsThinking && thinking ? `${assigned} · thinking ${thinking}` : assigned;
+      hint = thinking ? `${assigned} · thinking ${thinking}` : assigned;
     }
 
     return { id: agent.id, label: agent.displayName, hint };
@@ -415,40 +452,78 @@ export function OpenCodeModelDiscoveryScreen({ cursor, state }: OpenCodeModelDis
   );
 }
 
+type CodexModelDiscoveryScreenProps = {
+  cursor: number;
+  state:
+    | { kind: "loading" }
+    | { kind: "ready" }
+    | { kind: "empty"; diagnostics?: readonly string[] }
+    | { kind: "stale"; source: "last-known-good" | "bundled" | "deck-fallback"; diagnostics?: readonly string[]; errorMessage: string }
+    | { kind: "blocked"; errorMessage: string };
+};
+
+/** Codex fallback catalogs are diagnostic-only: only an authenticated result unlocks editing. */
+export function CodexModelDiscoveryScreen({ cursor, state }: CodexModelDiscoveryScreenProps) {
+  if (state.kind === "loading") {
+    return (
+      <Box flexDirection="column">
+        <Text bold>Reading models from Codex…</Text>
+        <Text dimColor>Only the authenticated Codex catalog can enable model changes.</Text>
+      </Box>
+    );
+  }
+
+  if (state.kind === "ready") return <Text>Authenticated Codex models are ready.</Text>;
+
+  const title = state.kind === "empty"
+    ? "Codex reported no active-account models."
+    : state.kind === "stale" && state.source === "bundled"
+      ? "Codex bundled models are not active-account availability."
+      : state.kind === "stale" && state.source === "deck-fallback"
+        ? "Codex model discovery is degraded; no model choices are available."
+        : state.kind === "stale"
+          ? "Codex model availability is stale and cannot be edited."
+          : "Codex model discovery is unavailable.";
+  const diagnostics = state.kind === "empty" || state.kind === "stale" ? state.diagnostics ?? [] : [];
+
+  return (
+    <Box flexDirection="column">
+      <Text color={state.kind === "blocked" ? "red" : "yellow"} bold>{title}</Text>
+      {state.kind === "stale" ? <Text color="yellow">{state.errorMessage}</Text> : null}
+      {state.kind === "blocked" ? <Text color="red">{state.errorMessage}</Text> : null}
+      {diagnostics.map((diagnostic) => <Text key={diagnostic} dimColor>{diagnostic}</Text>)}
+      <Text>Assignments remain unchanged. Retry discovery to rescan the authenticated Codex catalog.</Text>
+      <Box marginTop={1}>
+        <MenuList cursor={cursor} items={[
+          { id: "retry", label: "Retry discovery", hint: "authenticated rescan" },
+          { id: "back", label: "Back" },
+        ]} />
+      </Box>
+    </Box>
+  );
+}
+
 type NoProvidersScreenProps = {
   onContinue?: () => void;
   dashboardContext?: DeveloperTeamDashboardContext;
-  runtime?: "pi" | "opencode";
+  runtime?: string;
+  runnerLabel?: string;
+  modelUi?: RunnerUiMetadata["model"];
 };
 
-export function NoProvidersScreen({ dashboardContext, runtime = "pi" }: NoProvidersScreenProps) {
-  const runtimeLabel = runtime === "opencode" ? "OpenCode" : "Pi";
+export function NoProvidersScreen({ dashboardContext, runtime = "pi", runnerLabel, modelUi }: NoProvidersScreenProps) {
+  const metadata = modelUiMetadata(runtime, runnerLabel, modelUi);
   return (
     <Box flexDirection="column">
-      <Text color="yellow" bold>No {runtimeLabel} providers detected</Text>
+      <Text color="yellow" bold>No {metadata.label} providers detected</Text>
       {dashboardContext?.source === "dashboard" ? <DashboardContextSummary context={dashboardContext} /> : null}
-      <Text dimColor>Deck could not find providers in {runtimeLabel} settings or detected credentials.</Text>
+      <Text dimColor>{metadata.providerSource}</Text>
       <Box marginTop={1} flexDirection="column">
         <Text>Deck checks:</Text>
-        {runtime === "opencode" ? (
-          <>
-            <Text>  ~/.config/opencode/opencode.json agent model entries</Text>
-            <Text>  opencode models</Text>
-          </>
-        ) : (
-          <>
-            <Text>  ~/.pi/agent/settings.json defaultProvider/defaultModel</Text>
-            <Text>  pi --list-models</Text>
-            <Text>  Provider env vars such as OPENCODE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY</Text>
-          </>
-        )}
+        {metadata.missingChecks.map((check) => <Text key={check}>  {check}</Text>)}
       </Box>
       <Box marginTop={1}>
-        {runtime === "opencode" ? (
-          <Text dimColor>Run `opencode models` to confirm OpenCode can see your providers.</Text>
-        ) : (
-          <Text dimColor>Run `pi --list-models` or `pi config` to confirm Pi can see your providers.</Text>
-        )}
+        <Text dimColor>{metadata.remediation}</Text>
       </Box>
       <Box marginTop={1}>
         <Text dimColor>Press Enter to skip model assignment (you can configure it later).</Text>

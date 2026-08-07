@@ -49,6 +49,10 @@ function fabClaudeStatus(command = "claude") {
   return { environment: "Claude Development Environment", runtime: "claude" as const, installed: true, command };
 }
 
+function fabCodexStatus(command = "codex") {
+  return { environment: "Codex Development Environment", runtime: "codex" as const, installed: true, command };
+}
+
 function fabOkMcpResult() {
   return {
     ok: true,
@@ -77,6 +81,7 @@ function fabDependencies() {
     })),
     memoryBinaryAvailable: vi.fn((_command: string) => false),
     readOpenCodeMcpSection: vi.fn((): Record<string, unknown> | null => null),
+    inspectCodex: vi.fn(async (): Promise<ReadonlyArray<{ category: string; status: "ok" | "warning" | "error"; message: string; suggestion?: string }>> => []),
   };
 }
 
@@ -173,6 +178,22 @@ describe("runDoctorDiagnostics", () => {
     expect(claude!.checks[0].category).toBe("Runtime");
     expect(claude!.checks[0].items[0].status).toBe("ok");
     expect(claude!.checks[0].items[0].message).toContain("Claude detected");
+  });
+
+  test("Codex doctor projects trust, content, capability, route, collision, and recovery checks safely", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([fabCodexStatus()]);
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
+    const dependencies = fabDependencies();
+    dependencies.inspectCodex.mockResolvedValue([
+      { category: "Trust activation", status: "warning", message: "Project trust is indeterminate." },
+      { category: "Managed content", status: "error", message: "MCP collision token=secret-value", suggestion: "Resolve collision." },
+      { category: "Execution route: exec", status: "warning", message: "exec: static-compatible." },
+      { category: "Rollback and recovery", status: "error", message: "One transaction contains conflicts." },
+    ]);
+    const result = await runDoctorDiagnostics(dependencies);
+    const codex = result.runtimes.find((runtime) => runtime.runtimeId === "codex")!;
+    expect(codex.checks.map((check) => check.category)).toEqual(["Trust activation", "Managed content", "Execution route: exec", "Rollback and recovery"]);
+    expect(JSON.stringify(codex)).not.toContain("secret-value");
   });
 
   // ── Engram available ─────────────────────────────────────────────────────
@@ -352,7 +373,7 @@ describe("runDoctorDiagnostics", () => {
 
 
 describe("runDoctorDiagnostics dependency seam", () => {
-  test("uses exactly four deterministic diagnostic dependencies", async () => {
+  test("uses the deterministic diagnostic dependency seams", async () => {
     mockDetectSelectedRuntimes.mockReturnValue([]);
     mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
     const dependencies = fabDependencies();
@@ -367,6 +388,7 @@ describe("runDoctorDiagnostics dependency seam", () => {
 
     expect(Object.keys(dependencies).sort()).toEqual([
       "fetchReleaseDescriptor",
+      "inspectCodex",
       "memoryBinaryAvailable",
       "readOpenCodeMcpSection",
       "runDeckChecks",

@@ -25,7 +25,7 @@ export type ModelCapability =
   | "local"
   | (string & {});
 
-export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export type ModelProviderEntry = {
   id: string;

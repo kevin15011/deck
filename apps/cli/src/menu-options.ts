@@ -67,7 +67,7 @@ export function getEnvironmentOptions(): MenuOption[] {
     { value: "pi-development", label: "Pi Development Environment" },
     { value: "opencode-development", label: "OpenCode Development Environment" },
     { value: "claude-development", label: `Claude Development Environment ${placeholder()}` },
-    { value: "codex-development", label: `Codex Development Environment ${placeholder()}` },
+    { value: "codex-development", label: "Codex Development Environment" },
   ];
 }
 

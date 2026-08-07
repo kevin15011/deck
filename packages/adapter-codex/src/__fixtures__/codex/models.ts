@@ -1,0 +1,53 @@
+export const CURRENT_CODEX_MODELS_FIXTURE = JSON.stringify({
+  models: [
+    {
+      slug: "gpt-5.4",
+      display_name: "GPT-5.4",
+      description: "Retired model.",
+      visibility: "hide",
+      priority: 16,
+      supported_reasoning_levels: [{ effort: "medium", description: "Balanced" }],
+      default_reasoning_level: "medium",
+      upgrade: {
+        model: "gpt-5.6-terra",
+        upgrade_copy: "Use GPT-5.6 Terra instead.",
+        migration_markdown: "GPT-5.4 is retired.",
+      },
+    },
+    {
+      slug: "gpt-5.6-terra",
+      display_name: "GPT-5.6 Terra",
+      description: "Balanced agentic coding model.",
+      visibility: "list",
+      priority: 2,
+      supported_reasoning_levels: [
+        { effort: "low", description: "Fast" },
+        { effort: "max", description: "Maximum reasoning" },
+        { effort: "ultra", description: "Ultra reasoning" },
+      ],
+      default_reasoning_level: "ultra",
+      upgrade: {
+        model: "gpt-5.6-terra",
+        upgrade_copy: "Prefer GPT-5.6 Terra for harder work.",
+        migration_markdown: "GPT-5.6 Luna remains available.\n\nUse GPT-5.6 Terra for deeper reasoning.",
+      },
+      input_modalities: ["text", "image"],
+      experimental_supported_tools: ["shell", "apply_patch"],
+      supports_parallel_tool_calls: true,
+      supports_reasoning_summary_parameter: true,
+    },
+    {
+      slug: "gpt-5.6-luna",
+      display_name: "GPT-5.6 Luna",
+      description: "Fast coding model.",
+      visibility: "list",
+      priority: 1,
+      supported_reasoning_levels: [{ effort: "medium", description: "Balanced" }],
+      default_reasoning_level: "medium",
+      upgrade: null,
+      input_modalities: ["text"],
+      experimental_supported_tools: [],
+      supports_parallel_tool_calls: false,
+    },
+  ],
+});

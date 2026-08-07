@@ -42,7 +42,7 @@ const PATH_CONTEXT = { repositoryRoot: "." } as const;
 
 export interface DeveloperTeamHostExecutionEventV1 {
   readonly schema: "developer-team-host-execution-event-v1";
-  readonly runnerId: "opencode" | "pi";
+  readonly runnerId: "opencode" | "pi" | "codex";
   readonly executionId: string;
   readonly mode: "legacy" | "shadow" | "active";
   readonly legacyInput: OrchestratorPipelineInput;
@@ -65,7 +65,7 @@ export interface DeveloperTeamHostExecutionEventV1 {
 
 export interface DeveloperTeamHostExecutionResultV1 {
   readonly schema: "developer-team-host-execution-result-v1";
-  readonly runnerId: "opencode" | "pi";
+  readonly runnerId: "opencode" | "pi" | "codex";
   readonly executionId: string;
   readonly code:
     | "executed"
@@ -82,7 +82,7 @@ export interface DeveloperTeamHostExecutionResultV1 {
 }
 
 export interface DeveloperTeamRunnerHostBridgeV1 {
-  readonly runnerId: "opencode" | "pi";
+  readonly runnerId: "opencode" | "pi" | "codex";
   readonly capabilities: {
     readonly invocationAuthorizationV1: boolean;
     readonly perExecutionDossierV1: boolean;
@@ -92,7 +92,7 @@ export interface DeveloperTeamRunnerHostBridgeV1 {
 }
 
 export interface DeveloperTeamRunnerHostBridgeOptionsV1 {
-  readonly runnerId: "opencode" | "pi";
+  readonly runnerId: "opencode" | "pi" | "codex";
   readonly authorizationService: InvocationAuthorizationServiceV1;
   readonly delegate: (request: TargetedRepairRequestV1) => Promise<void>;
   readonly telemetry?: SafeTelemetrySinkV1;
@@ -135,7 +135,7 @@ function parseGitEffect(value: unknown): DeveloperTeamHostExecutionEventV1["gitE
   return { kind, commandDigest: value.commandDigest };
 }
 
-function parseHostEvent(value: unknown, runnerId: "opencode" | "pi"): ParsedHostEventV1 {
+function parseHostEvent(value: unknown, runnerId: "opencode" | "pi" | "codex"): ParsedHostEventV1 {
   assertExactKeys(value, ["schema", "runnerId", "executionId", "mode", "legacyInput", "dossier", "authorization", "taskArtifactPath", "target", "userAuthorizationReceiptDigest", "policy", "gitSafety", "gitEffect", "governance", "deterministicRepairAuthority"], "host execution event");
   if (value.schema !== "developer-team-host-execution-event-v1" || value.runnerId !== runnerId) throw new Error("invalid-evidence: host execution identity");
   const executionId = codeValue(value.executionId, "hostEvent.executionId");
@@ -208,7 +208,7 @@ function parseHostEvent(value: unknown, runnerId: "opencode" | "pi"): ParsedHost
   };
 }
 
-function result(runnerId: "opencode" | "pi", executionId: string, code: DeveloperTeamHostExecutionResultV1["code"], effect: EffectResultV1, composition?: DeveloperTeamExecutionCompositionResultV1, authorizationCode?: InvocationAuthorizationRejectionCodeV1): DeveloperTeamHostExecutionResultV1 {
+function result(runnerId: "opencode" | "pi" | "codex", executionId: string, code: DeveloperTeamHostExecutionResultV1["code"], effect: EffectResultV1, composition?: DeveloperTeamExecutionCompositionResultV1, authorizationCode?: InvocationAuthorizationRejectionCodeV1): DeveloperTeamHostExecutionResultV1 {
   return Object.freeze({
     schema: "developer-team-host-execution-result-v1" as const,
     runnerId,

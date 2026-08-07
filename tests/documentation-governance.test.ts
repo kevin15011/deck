@@ -9,6 +9,8 @@ const maintainedSurfaces = [
   "AGENTS.md",
   "CHANGELOG.md",
   "docs/architecture.md",
+  "docs/developer-team-execution.md",
+  "docs/runner-support.md",
   "docs/maintainers/releasing.md",
   "docs/release-descriptor.md",
   ".agents/skills/deck-release-publish/SKILL.md",
@@ -43,6 +45,14 @@ function isSupportedDirectCommand(command: string): boolean {
   if (command === "bun install" || command === "bun test" || command === "bunx tsc --noEmit" || command === "deck --help" || command === "./dist/cli/deck --help") {
     return true;
   }
+  if (new Set([
+    "deck codex developer --dry-run",
+    "deck codex developer --yes",
+    "deck codex developer exec -- --your-prompt",
+    "deck codex developer resume <session-id>",
+    "deck codex developer resume --last",
+    "deck doctor",
+  ]).has(command)) return true;
 
   const target = command.match(/^bun test ((?:tests|packages|apps|scripts)(?:\/[\w-]+)*\/[\w-]+\.test\.(?:ts|tsx))$/)?.[1];
   if (!target) return false;

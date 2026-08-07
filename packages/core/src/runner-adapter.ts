@@ -22,6 +22,8 @@ import type {
 } from "./runner-capability";
 import type { AdaptiveMemoryProvider } from "./memory/adaptive-memory";
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles";
+import type { RunnerCapabilitySupportStatus } from "./runner-capability-registry";
+import type { PackageInstructionPackageId } from "./config/deck-config";
 import type { SkillDiscoverySourceProviderV1 } from "./skill-discovery/contracts";
 import type {
   SerenaBootstrapAuthorization,
@@ -63,6 +65,33 @@ export type RunnerId = string;
 
 /** Runner-specific environment (e.g. "pi-development") */
 export type EnvironmentId = string;
+
+/** Adapter-owned labels and model guidance consumed by generic runner UIs. */
+export type RunnerUiMetadata = Readonly<{
+  environmentLabels: Readonly<Record<EnvironmentId, string>>;
+  dashboard?: Readonly<{
+    defaultSelectedTeamIds: readonly string[];
+    executionClass?: "first-class" | "static-compatible";
+  }>;
+  model: Readonly<{
+    providerSource: string;
+    missingChecks: readonly string[];
+    remediation: string;
+    defaultThinkingLevels: readonly RunnerVariantKey[];
+    usesNativeCompatibilityChecks?: boolean;
+  }>;
+  adaptiveMemory?: Readonly<{
+    supermemory: Readonly<{
+      requiresExternalToken: boolean;
+      selectionStatus: string;
+      configuredDiagnostics?: readonly string[];
+    }>;
+    engram?: Readonly<{
+      label: string;
+      detail: string;
+    }>;
+  }>;
+}>;
 
 // ---------------------------------------------------------------------------
 // Shared assignment types (moved from adapter packages to @deck/core)
@@ -124,6 +153,111 @@ export type RuntimeStatus = {
 // Capability inventory (getCapabilityInventory)
 // ---------------------------------------------------------------------------
 
+export type RunnerDiagnostic = {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+};
+
+export type RunnerLaunchBase = {
+  projectRoot: string;
+  teamId: string;
+  modelId?: string;
+  reasoningLevel?: string;
+};
+
+export const MAX_RUNNER_STDIN_PAYLOAD_BYTES = 64 * 1024;
+
+/** Bounded UTF-8 user input passed to a runner process without using argv or environment variables. */
+export type RunnerStdinPayload = Readonly<{
+  type: "utf8";
+  content: string;
+}>;
+
+export type RunnerLaunchInput =
+  | (RunnerLaunchBase & { mode: "interactive" })
+  | (RunnerLaunchBase & { mode: "exec"; prompt: readonly string[]; stdin: "inherit" | "closed"; stdinPayload?: RunnerStdinPayload })
+  | (RunnerLaunchBase & { mode: "resume-by-id"; sessionId: string })
+  | (RunnerLaunchBase & { mode: "resume-latest" });
+
+export type RunnerLaunchPlan = {
+  command: string;
+  args: readonly string[];
+  cwd: string;
+  envOverlay?: Readonly<Record<string, { value: string; sensitive?: boolean }>>;
+  stdio: "inherit" | "pipe";
+  stdin: "inherit" | "closed";
+  stdinPayload?: RunnerStdinPayload;
+  captureLimitBytes?: number;
+  /** Per-route execution-control classification after production binding verification. */
+  executionClass?: "first-class" | "static-compatible";
+  bridgeBinding?: Readonly<{ surface: string; mode: RunnerLaunchInput["mode"]; evidence: string }>;
+};
+
+export type RunnerLaunchResult =
+  | { status: "ready"; plan: RunnerLaunchPlan; diagnostics: readonly RunnerDiagnostic[] }
+  | { status: "unsupported"; code: string; diagnostics: readonly RunnerDiagnostic[] }
+  | { status: "blocked"; code: string; diagnostics: readonly RunnerDiagnostic[] };
+
+export type RunnerProjectInspection = {
+  projectRoot: string;
+  state: "ready" | "degraded" | "blocked" | "unsupported";
+  evidence: Readonly<Record<string, string | number | boolean | readonly string[] | null>>;
+  diagnostics: readonly RunnerDiagnostic[];
+};
+
+export type RunnerDoctorCheck = Readonly<{
+  category: string;
+  status: "ok" | "warning" | "error";
+  message: string;
+  suggestion?: string;
+}>;
+
+export type RunnerNativeMutationManifest = {
+  projectRoot: string;
+  mutations: readonly {
+    relativePath: string;
+    expectedKind: "absent" | "file";
+    expectedHash?: string;
+    expectedMode?: number;
+    postimageHash: string;
+    postimageMode: number;
+    ownershipEvidence: string;
+    rollback: "restore" | "delete";
+  }[];
+};
+
+export type RunnerRollbackResult = {
+  status: "rolled-back" | "conflict" | "nothing-to-do";
+  conflicts: readonly string[];
+  diagnostics: readonly string[];
+};
+
+export type RunnerBackupResult = {
+  payload: unknown;
+  diagnostics: readonly string[];
+};
+
+export type RunnerVerificationEvidence = {
+  /** Stable identifier an adapter can prove after a successful apply. */
+  id: string;
+};
+
+export type RunnerPostInstallFollowUp = {
+  /** Stable identifier for a user-visible next step after successful verification. */
+  id: string;
+  /** Non-secret instruction; execution remains user-owned. */
+  message: string;
+};
+
+export type RunnerVerifyResult = {
+  valid: boolean;
+  diagnostics: readonly string[];
+  /** Non-secret post-apply facts available to later actions in the same plan. */
+  verificationEvidence?: readonly RunnerVerificationEvidence[];
+  /** Non-secret, user-owned next steps available only after successful verification. */
+  postInstallFollowUps?: readonly RunnerPostInstallFollowUp[];
+};
 export type CapabilityInventoryInput = {
   projectRoot: string;
   environmentId: RunnerEnvironmentId;
@@ -148,7 +282,9 @@ export type CapabilityCatalogEntry = {
   requirementLevel: "required" | "optional" | "configurable";
   toolId?: string;
   source?: string;
-  installKind: "pi-package" | "external" | "opencode-plugin";
+  installKind: "pi-package" | "external" | "opencode-plugin" | "runner-native";
+  /** Adapter disposition; not-applicable entries are diagnostic-only and never installable. */
+  supportStatus?: RunnerCapabilitySupportStatus;
   isInstalled: boolean;
   isBlocked: boolean;
   diagnostics?: readonly string[];
@@ -163,6 +299,7 @@ export type CapabilityCatalogEntry = {
  */
 export type RunnerModelSource =
   | "runner-resolved"
+  | "runner-bundled"
   // Legacy sources remain readable during the staged adapter migration. New
   // discovery results must use "runner-resolved".
   | "runner-cache"
@@ -188,11 +325,35 @@ export type RunnerModelEntry = {
   /** The portion after the first slash for runner-resolved entries. */
   modelId?: string;
   displayName: string;
+  /** Runner-provided descriptive display text. */
+  description?: string;
+  /** Runner picker rank, where lower numbers are preferred. */
+  priority?: number;
   supportsTools?: boolean;
   /** Presentation metadata only; it cannot authorize variants. */
   supportsReasoning?: boolean | null;
   /** Runner-defined keys; an empty array means no selectable variants. */
   variants?: readonly RunnerVariantKey[];
+  /** Runner-provided human labels for the exact variant keys. */
+  variantDescriptions?: Readonly<Record<RunnerVariantKey, string>>;
+  /** Runner-recommended member of `variants`, when one is advertised. */
+  defaultVariant?: RunnerVariantKey;
+  /** Runner-defined picker visibility, retained even when a consumer filters it. */
+  visibility?: string;
+  /** The runner's migration target, if the selected model has been superseded. */
+  upgrade?: {
+    model: string;
+    upgradeCopy?: string;
+    modelLink?: string;
+    migrationMarkdown?: string;
+  } | null;
+  /** Runner-exposed modality and tool capability metadata. */
+  inputModalities?: readonly string[];
+  experimentalSupportedTools?: readonly string[];
+  supportsParallelToolCalls?: boolean;
+  supportsReasoningSummaryParameter?: boolean;
+  supportsImageDetailOriginal?: boolean;
+  supportsSearchTool?: boolean;
   /** Metadata may enrich a matching runner entry but cannot add authority. */
   metadataSource?: "runner" | "runner+cache";
   source: RunnerModelSource;
@@ -238,7 +399,7 @@ export type RunnerModelInventoryResult =
   | {
       state: "stale";
       inventory: RunnerModelInventory;
-      source: "last-known-good";
+      source: "last-known-good" | "bundled" | "deck-fallback";
       discoveredAt: number;
       fingerprint: string;
       error: RunnerModelDiscoveryError;
@@ -376,7 +537,11 @@ export type DeveloperTeamAdapterInstallInput = {
   validatedInventoryFingerprint?: string;
   memoryProvider?: AdaptiveMemoryProvider;
   capabilityInstructions?: CapabilityInstructionBundle;
+  /** Reviewed capability selections whose runner-native configuration may be materialized. */
+  capabilityIds?: readonly string[];
   standaloneSkills?: readonly { skillId: string; body: string; files?: Record<string, string> }[];
+  /** Best-effort exact exclusion of new, untracked, fully owned files. */
+  localOnly?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -496,6 +661,21 @@ export interface RunnerAdapter {
 
   /** Environment IDs supported by this runner */
   readonly environmentIds: readonly RunnerEnvironmentId[];
+
+  /** Optional presentation metadata. Generic fallbacks keep older adapters compatible. */
+  readonly ui?: RunnerUiMetadata;
+
+  /** Package-instruction configuration supported by this adapter; separate from runtime capabilities. */
+  readonly packageInstructionIds?: readonly PackageInstructionPackageId[];
+
+  /** Project-scoped native inspection for adapters that mutate project files. */
+  inspectProject?(projectRoot: string): Promise<RunnerProjectInspection>;
+
+  /** Adapter-owned, read-only doctor projection for runner-native state. */
+  diagnoseProject?(projectRoot: string): Promise<readonly RunnerDoctorCheck[]>;
+
+  /** Adapter-owned launch planning. The CLI remains the sole process owner. */
+  buildLaunchPlan?(input: RunnerLaunchInput): Promise<RunnerLaunchResult> | RunnerLaunchResult;
 
   // -------------------------------------------------------------------------
   // Runtime detection
@@ -687,13 +867,13 @@ export interface RunnerAdapter {
    * Backup developer team files before making changes.
    * Returns backup metadata for potential rollback.
    */
-  backupDeveloperTeamFiles(plan: unknown): unknown;
+  backupDeveloperTeamFiles(plan: unknown): RunnerBackupResult;
 
   /**
    * Rollback developer team files from a previous backup.
    * Restores files to their state before installation.
    */
-  rollbackDeveloperTeamFiles(backup: unknown): void;
+  rollbackDeveloperTeamFiles(backup: unknown): Promise<RunnerRollbackResult>;
 
   // -------------------------------------------------------------------------
   // Developer team verification
@@ -703,7 +883,7 @@ export interface RunnerAdapter {
    * Verify the developer team installation is valid and complete.
    * Returns verification result with valid flag and diagnostics.
    */
-  verifyDeveloperTeamInstall(plan: unknown): { valid: boolean; diagnostics: readonly string[] };
+  verifyDeveloperTeamInstall(plan: unknown): RunnerVerifyResult | Promise<RunnerVerifyResult>;
 
   // -------------------------------------------------------------------------
   // Thinking resolution (wraps resolveThinking functions)

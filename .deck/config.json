@@ -24,6 +24,14 @@
       "rtk": true,
       "adaptive-memory": true,
       "serena": true
+    },
+    "codex": {
+      "codebase-memory": true,
+      "code-economy": true,
+      "context-mode": true,
+      "rtk": true,
+      "adaptive-memory": true,
+      "serena": true
     }
   },
   "orchestratorPersonality": "pragmatica",

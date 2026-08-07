@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { getCanonicalRunnerCapabilities, getRunnerMappings } from "@deck/core";
 
 import {
   ALL_PI_RUNNER_CAPABILITY_IDS,
   INTERNAL_CAPABILITY_ENTRIES,
+  PI_ADAPTER_CAPABILITY_DISPOSITIONS,
+  PI_RUNNER_CAPABILITY_CONTRIBUTION,
   PI_RUNNER_CAPABILITY_CATALOG,
   PI_RUNNER_CAPABILITY_IDS,
   getPiRunnerCapability,
@@ -12,6 +15,17 @@ import {
 } from "./capability-catalog";
 
 describe("PI_RUNNER_CAPABILITY_CATALOG", () => {
+  test("owns a mapping for every core and Pi canonical capability", () => {
+    const canonical = getCanonicalRunnerCapabilities([PI_RUNNER_CAPABILITY_CONTRIBUTION]);
+    const mappings = getRunnerMappings("pi", [PI_RUNNER_CAPABILITY_CONTRIBUTION]);
+    expect(canonical.every((capability) => mappings.some((mapping) => mapping.capabilityId === capability.id))).toBe(true);
+  });
+
+  test("keeps provider and optional visual dispositions adapter-owned", () => {
+    expect(PI_ADAPTER_CAPABILITY_DISPOSITIONS).toContainEqual({ capabilityId: "engram", status: "provider-selected" });
+    expect(PI_ADAPTER_CAPABILITY_DISPOSITIONS).toContainEqual({ capabilityId: "pi-hud", status: "gap", installKind: "user-optional" });
+  });
+
   test("identifies Serena by the serena-agent source without generic Python/default metadata", () => {
     const serena = PI_RUNNER_CAPABILITY_CATALOG.serena;
 

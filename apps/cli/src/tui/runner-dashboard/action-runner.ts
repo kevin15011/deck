@@ -8,7 +8,14 @@
 import { readFileSync, existsSync, writeFileSync, appendFileSync, readdirSync, statSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@deck/core/config/deck-config";
+import {
+  PACKAGE_INSTRUCTION_PACKAGE_IDS,
+  normalizeSupportedPackageInstructionSelection,
+  readDeckConfig,
+  writeDeckConfig,
+  type NormalizedDeckConfig,
+  type PackageInstructionPackageId,
+} from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import {
   validateSerenaOperationAuthorization,
@@ -16,8 +23,10 @@ import {
   type SerenaBootstrapAuthorization,
   type SerenaOperationIdentity,
   type SerenaReadinessEvidence,
+  type RunnerPostInstallFollowUp,
+  type RunnerVerificationEvidence,
 } from "@deck/core";
-import type { RunnerAction, RunnerDashboardState, RunnerReviewPlan } from "./state";
+import { runnerRequiresExternalSupermemoryToken, type RunnerAction, type RunnerDashboardState, type RunnerReviewPlan } from "./state";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "@deck/core";
 // Canonical server name for codebase-memory MCP — defined locally to avoid adapter dependency in the runner
 const CODEBASE_MEMORY_MCP_SERVER_NAME = "codebase-memory";
@@ -40,6 +49,10 @@ export type RunnerActionRunResult = {
   serenaOutcome?: RunnerSerenaOutcome;
   /** Serena-only fixed progress stage. */
   serenaStage?: RunnerSerenaStage;
+  /** Non-secret post-apply facts retained only for this reviewed plan. */
+  verificationEvidence?: readonly RunnerVerificationEvidence[];
+  /** User-owned next steps emitted only by a successful verified installation. */
+  postInstallFollowUps?: readonly RunnerPostInstallFollowUp[];
 };
 
 export type RunnerSerenaStage =
@@ -52,7 +65,7 @@ export type RunnerSerenaOutcome = "reused" | "installed" | "failed" | "cancelled
 
 export type RunnerSerenaActionContext = Readonly<{
   projectRoot: string;
-  runnerId: "pi" | "opencode";
+  runnerId: string;
   environmentId: string;
   operationId: string;
   operation: SerenaOperationIdentity;
@@ -121,8 +134,13 @@ export type TeamBundleInstallerFn = (
     memoryProvider?: AdaptiveMemoryProvider;
     modelAssignments?: DeveloperTeamModelAssignments;
     thinkingAssignments?: DeveloperTeamThinkingAssignments;
+    capabilityIds?: readonly string[];
   },
-) => Promise<{ results: Array<{ agentId: string; kind: string; status: string }> }>;
+) => Promise<{
+  results: Array<{ agentId: string; kind: string; status: string }>;
+  verificationEvidence?: readonly RunnerVerificationEvidence[];
+  postInstallFollowUps?: readonly RunnerPostInstallFollowUp[];
+}>;
 
 /**
  * Generic MCP config writer — adapters provide their own.
@@ -156,6 +174,7 @@ export type RunnerActionRunnerDependencies = {
   projectRoot?: string;
   runnerCommand?: string;
   dashboardState?: RunnerDashboardState;
+  packageInstructionIds?: readonly PackageInstructionPackageId[];
   supermemoryToken?: string;
   memoryProvider?: AdaptiveMemoryProvider;
   resolvedMemoryProvider?: AdaptiveMemoryProvider;
@@ -167,7 +186,7 @@ export type RunnerActionRunnerDependencies = {
   onActionResult?: (result: RunnerActionRunResult) => void;
   onInstallResult?: (result: RunnerPackageInstallResult) => void;
   /** Current-operation Serena authorization and the single operation signal. */
-  runnerId?: "pi" | "opencode";
+  runnerId?: string;
   operationId?: string;
   currentOperation?: SerenaOperationIdentity;
   serenaAuthorization?: SerenaBootstrapAuthorization;
@@ -202,12 +221,35 @@ export function getRunnerReviewPlanRunBlockDiagnostics(
   const setup = state.adaptiveMemory.supermemory;
   const diagnostics: string[] = [];
   if (!setup?.configured) diagnostics.push("Supermemory setup is not configured for Review & Install.");
-  if (state.runnerScope !== "opencode") {
+  if (runnerRequiresExternalSupermemoryToken(state)) {
     if (!setup?.hasToken) diagnostics.push("Supermemory token must be provided ephemerally for Review & Install.");
     if (setup?.hasToken && !options.supermemoryToken?.trim()) diagnostics.push("Supermemory credential was marked ready but the ephemeral credential is no longer available; re-enter setup before Review & Install.");
   }
   diagnostics.push(...(setup?.diagnostics ?? []).filter(isBlockingSetupDiagnostic));
   return redactDiagnostics(diagnostics);
+}
+
+function getReviewedPlanExecutionBlocker(
+  plan: RunnerReviewPlan,
+  dependencies: RunnerActionRunnerDependencies,
+): string | undefined {
+  const state = dependencies.dashboardState;
+  if (!state || state.plan !== plan) return undefined;
+  if (!plan.ready) return "Review & Install requires a ready reviewed plan.";
+  if (state.planGeneratedForRevision !== undefined && state.planGeneratedForRevision !== state.planRevision) {
+    return "Review & Install is blocked because the reviewed plan is stale.";
+  }
+  const expectedOperation = state.currentOperation;
+  const currentOperation = dependencies.currentOperation;
+  if (!expectedOperation && !currentOperation) return undefined;
+  if (!expectedOperation || !currentOperation
+    || state.operationId !== expectedOperation.operationId
+    || dependencies.operationId !== undefined && dependencies.operationId !== expectedOperation.operationId
+    || currentOperation.operationId !== expectedOperation.operationId
+    || currentOperation.runner !== expectedOperation.runner) {
+    return "Review & Install is blocked because the reviewed operation identity changed.";
+  }
+  return undefined;
 }
 
 const TUI_DIAGNOSTIC_LINE_LIMIT = 8;
@@ -559,7 +601,7 @@ function getSerenaActionContext(
 ): { context: RunnerSerenaActionContext } | { error: string } {
   if (dependencies.serenaPlanValid === false) return { error: "Serena plan is stale or no longer matches the current operation." };
   const state = dependencies.dashboardState;
-  const runner = dependencies.runnerId ?? (state?.runnerScope === "pi" || state?.runnerScope === "opencode" ? state.runnerScope : undefined);
+  const runner = dependencies.runnerId ?? (state?.runnerScope !== "all" ? state?.runnerScope : undefined);
   const operation = dependencies.currentOperation ?? state?.currentOperation;
   const operationId = dependencies.operationId ?? state?.operationId ?? operation?.operationId;
 
@@ -571,7 +613,12 @@ function getSerenaActionContext(
     return { error: "Serena requires current-operation explicit selection." };
   }
 
-  const authorization = validateSerenaOperationAuthorization(dependencies.serenaAuthorization, operation);
+  const serenaOperation: SerenaOperationIdentity = {
+    runner,
+    operationId: operation.operationId,
+    explicitlySelected: operation.explicitlySelected,
+  };
+  const authorization = validateSerenaOperationAuthorization(dependencies.serenaAuthorization, serenaOperation);
   if (!authorization.valid || authorization.authorization.runner !== runner) {
     return { error: "Serena operation authorization is missing or stale." };
   }
@@ -582,8 +629,8 @@ function getSerenaActionContext(
       runnerId: runner,
       environmentId: runner === "pi" ? "pi-development" : "opencode-development",
       operationId: operation.operationId,
-      operation,
-      currentOperation: operation,
+      operation: serenaOperation,
+      currentOperation: serenaOperation,
       serenaAuthorization: authorization.authorization,
       signal: dependencies.signal,
       onSerenaStage: dependencies.onSerenaStage,
@@ -817,6 +864,18 @@ export async function runRunnerReviewPlan(
     return [blockedResult];
   }
 
+  const reviewedPlanBlocker = getReviewedPlanExecutionBlocker(plan, dependencies);
+  if (reviewedPlanBlocker) {
+    const blockedResult: RunnerActionRunResult = {
+      actionId: "review-plan.preflight",
+      status: "failed",
+      message: "Review & Install is blocked before any action can run.",
+      diagnostics: [reviewedPlanBlocker],
+    };
+    dependencies.onActionResult?.(blockedResult);
+    return [blockedResult];
+  }
+
   const results: RunnerActionRunResult[] = [];
   const unsatisfiedInstallCapabilities = new Set<string>();
   const satisfiedInstallCapabilities = new Set<string>();
@@ -929,7 +988,7 @@ export async function runRunnerReviewPlan(
   for (const action of plan.groups.teamApplications) {
     if (dependencies.signal?.aborted) return results;
     log(`runRunnerReviewPlan: team ${action.id} kind=${action.kind}`);
-    await runAndRecord(action, teamDependencies);
+    const result = await runAndRecord(action, teamDependencies);
     log(`runRunnerReviewPlan: team ${action.id} done`);
   }
 
@@ -1191,34 +1250,16 @@ function writeDeckConfigAction(
   // Read existing config to preserve OTHER runner's packageInstructions
   const existingConfig = readDeckConfig(projectRoot);
 
-  // Determine current runner scope (defaults to "pi" for backward compatibility)
-  const currentRunner: "pi" | "opencode" = (state?.runnerScope ?? "pi") as "pi" | "opencode";
-
-  // Build packageInstructions: preserve other runner's config, update current runner's toggles
-  const currentPackageInstructions = state?.packageInstructions ?? {};
-  const piInstructions = currentRunner === "pi"
-    ? { ...existingConfig.packageInstructions.pi, ...currentPackageInstructions }
-    : { ...existingConfig.packageInstructions.pi };
-  const opencodeInstructions = currentRunner === "opencode"
-    ? { ...existingConfig.packageInstructions.opencode, ...currentPackageInstructions }
-    : { ...existingConfig.packageInstructions.opencode };
-
+  // Preserve every registered runner's config and update only the active runner.
+  const currentRunner = state?.runnerScope && state.runnerScope !== "all" ? state.runnerScope : "pi";
+  const currentPackageInstructions = normalizeSupportedPackageInstructionSelection(
+    state.packageInstructions,
+    dependencies.packageInstructionIds ?? PACKAGE_INSTRUCTION_PACKAGE_IDS,
+  );
   const updatedPackageInstructions: NormalizedDeckConfig["packageInstructions"] = {
-    pi: {
-      "codebase-memory": piInstructions["codebase-memory"] ?? false,
-      "context-mode": piInstructions["context-mode"] ?? false,
-      rtk: piInstructions.rtk ?? false,
-      "adaptive-memory": piInstructions["adaptive-memory"] ?? false,
-      serena: piInstructions.serena ?? false,
-      "code-economy": true, // Always true - baseline, not a user toggle
-    },
-    opencode: {
-      "codebase-memory": opencodeInstructions["codebase-memory"] ?? false,
-      "context-mode": opencodeInstructions["context-mode"] ?? false,
-      rtk: opencodeInstructions.rtk ?? false,
-      "adaptive-memory": opencodeInstructions["adaptive-memory"] ?? false,
-      serena: opencodeInstructions.serena ?? false,
-      "code-economy": true, // Always true - baseline, not a user toggle
+    ...existingConfig.packageInstructions,
+    [currentRunner]: {
+      ...currentPackageInstructions,
     },
   };
 
@@ -1392,7 +1433,7 @@ async function writeMcpConfigAction(
 
   // Default: Supermemory remote MCP. OpenCode owns OAuth credentials; Pi
   // continues to use the explicit API-key handoff.
-  const nativeOAuth = dependencies.dashboardState?.runnerScope === "opencode";
+  const nativeOAuth = !runnerRequiresExternalSupermemoryToken(dependencies.dashboardState);
   const token = dependencies.supermemoryToken;
   if (!nativeOAuth && !token?.trim()) {
     return skippedResult(action, "Supermemory token is required for MCP config write.");
@@ -1448,22 +1489,25 @@ async function applyTeamBundleAction(
     memoryProvider?: AdaptiveMemoryProvider;
     modelAssignments?: DeveloperTeamModelAssignments;
     thinkingAssignments?: DeveloperTeamThinkingAssignments;
+    capabilityIds?: readonly string[];
   } = {};
   if (memoryProvider) installerOptions.memoryProvider = memoryProvider;
   if (modelAssignments) installerOptions.modelAssignments = modelAssignments;
   if (thinkingAssignments) installerOptions.thinkingAssignments = thinkingAssignments;
+  installerOptions.capabilityIds = Object.entries(dependencies.dashboardState?.selectedCapabilities ?? {}).filter(([, enabled]) => enabled).map(([id]) => id);
 
   const installerResult = await installer(projectRoot, Object.keys(installerOptions).length > 0 ? installerOptions : undefined);
 
-  const result = installerResult as { results?: Array<{ agentId?: string; kind?: string; status?: string }> };
-  const count = result?.results?.length ?? 0;
+  const count = installerResult.results.length;
 
   return {
     actionId: action.id,
     status: "executed",
     message: `Developer Team bundle installed: ${count} agent(s).`,
     diagnostics: redactDiagnostics(action.diagnostics ?? []),
-    raw: redactRaw(result),
+    raw: redactRaw(installerResult),
+    ...(installerResult.verificationEvidence?.length ? { verificationEvidence: installerResult.verificationEvidence } : {}),
+    ...(installerResult.postInstallFollowUps?.length ? { postInstallFollowUps: installerResult.postInstallFollowUps } : {}),
   };
 }
 
@@ -1481,7 +1525,7 @@ function validateAction(
       return skippedResult(action, "MCP config validator not provided.");
     }
 
-    const nativeOAuth = dependencies.dashboardState?.runnerScope === "opencode";
+    const nativeOAuth = !runnerRequiresExternalSupermemoryToken(dependencies.dashboardState);
     const token = dependencies.supermemoryToken;
     if (!nativeOAuth && !token?.trim()) {
       const redactedDiagnostics = redactDiagnostics(action.diagnostics ?? []);

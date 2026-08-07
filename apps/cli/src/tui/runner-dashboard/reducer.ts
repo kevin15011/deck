@@ -7,14 +7,18 @@
 
 import {
   createDefaultRunnerDashboardState,
+  CANONICAL_INSTRUCTION_PACKAGE_IDS,
+  runnerRequiresExternalSupermemoryToken,
   type AdaptiveMemoryProviderChoice,
   type CapabilityId,
   type CapabilityStatus,
+  type CanonicalInstructionPackageId,
   type RunnerDashboardScreen,
   type RunnerDashboardState,
   type RunnerOperationIdentity,
   type RunnerReviewPlan,
   type SupermemorySetupState,
+  createRunnerReviewPlanFailure,
 } from "./state";
 import { clampCursor, getCursorLimit, type CapabilityResolver } from "./selectors";
 
@@ -34,8 +38,8 @@ export type RunnerDashboardAction =
   | { type: "update-supermemory"; values: Partial<SupermemorySetupState> }
   | { type: "toggle-team"; teamId: string }
   | { type: "set-team-selected"; teamId: string; selected: boolean }
-  | { type: "toggle-package-instruction"; packageId: CapabilityId }
-  | { type: "set-package-instruction"; packageId: CapabilityId; enabled: boolean }
+  | { type: "toggle-package-instruction"; packageId: CanonicalInstructionPackageId }
+  | { type: "set-package-instruction"; packageId: CanonicalInstructionPackageId; enabled: boolean }
   | { type: "set-runner"; runnerScope: RunnerDashboardState["runnerScope"]; operationId?: string }
   | { type: "set-runner-scope"; runnerScope: RunnerDashboardState["runnerScope"]; operationId?: string }
   | { type: "new-operation"; runnerScope?: Exclude<RunnerDashboardState["runnerScope"], "all">; operationId: string }
@@ -200,7 +204,7 @@ function setCapability(
 function getCurrentOperation(state: RunnerDashboardState): RunnerOperationIdentity | undefined {
   if (state.currentOperation) return state.currentOperation;
   if (
-    (state.runnerScope === "pi" || state.runnerScope === "opencode")
+    state.runnerScope !== "all"
     && typeof state.operationId === "string"
     && state.operationId.length > 0
   ) {
@@ -217,7 +221,7 @@ function isCurrentOperation(state: RunnerDashboardState): boolean {
   const operation = getCurrentOperation(state);
   return Boolean(
     operation
-    && (state.runnerScope === "pi" || state.runnerScope === "opencode")
+    && state.runnerScope !== "all"
     && operation.runner === state.runnerScope
     && operation.operationId.length > 0,
   );
@@ -228,7 +232,7 @@ function beginRunnerOperation(
   runnerScope: RunnerDashboardState["runnerScope"],
   operationId?: string,
 ): RunnerDashboardState {
-  const currentOperation = runnerScope === "pi" || runnerScope === "opencode"
+  const currentOperation = runnerScope !== "all"
     ? operationId
       ? { runner: runnerScope, operationId, explicitlySelected: false }
       : undefined
@@ -250,7 +254,8 @@ function selectAdaptiveMemoryProvider(
   if (provider === state.adaptiveMemory.provider) return state;
 
   if (provider === "supermemory") {
-    const nativeOAuth = state.runnerScope === "opencode";
+    const supermemoryUi = state.runnerUi?.adaptiveMemory?.supermemory;
+    const nativeOAuth = !runnerRequiresExternalSupermemoryToken(state);
     const next = invalidatePlan({
       ...state,
       adaptiveMemory: {
@@ -259,12 +264,10 @@ function selectAdaptiveMemoryProvider(
           ? {
               configured: true,
               hasToken: false,
-              diagnostics: ["OpenCode will authenticate Supermemory through native OAuth on first connection."],
+              diagnostics: [...(supermemoryUi?.configuredDiagnostics ?? [])],
             }
           : createEmptySupermemorySetup(),
-        status: nativeOAuth
-          ? "Supermemory selected; OpenCode will request OAuth once through /connect."
-          : "Supermemory selected; provide an API key for the Pi MCP handoff.",
+        status: supermemoryUi?.selectionStatus ?? "Supermemory selected; provide an external API key for the runner MCP handoff.",
       },
     });
     return nativeOAuth ? navigate(next, "dashboard") : next;
@@ -320,7 +323,8 @@ function setTeamSelected(state: RunnerDashboardState, teamId: string, selected: 
   });
 }
 
-function setPackageInstruction(state: RunnerDashboardState, packageId: CapabilityId, enabled: boolean): RunnerDashboardState {
+function setPackageInstruction(state: RunnerDashboardState, packageId: CanonicalInstructionPackageId, enabled: boolean): RunnerDashboardState {
+  if (!CANONICAL_INSTRUCTION_PACKAGE_IDS.includes(packageId)) return state;
   if (Boolean(state.packageInstructions[packageId]) === enabled) return state;
 
   return invalidatePlan({
@@ -337,7 +341,12 @@ function enterReview(state: RunnerDashboardState, inventory: unknown, planBuilde
 }
 
 function withCurrentPlan(state: RunnerDashboardState, inventory: unknown, planBuilder: PlanBuilderFn): RunnerDashboardState {
-  const plan = planBuilder(state, inventory);
+  let plan: RunnerReviewPlan;
+  try {
+    plan = planBuilder(state, inventory);
+  } catch {
+    plan = createRunnerReviewPlanFailure();
+  }
   return {
     ...state,
     plan,
@@ -346,7 +355,7 @@ function withCurrentPlan(state: RunnerDashboardState, inventory: unknown, planBu
 }
 
 function hasCurrentPlan(state: RunnerDashboardState): boolean {
-  return Boolean(state.plan) && state.planGeneratedForRevision === state.planRevision;
+  return state.plan?.ready === true && state.planGeneratedForRevision === state.planRevision;
 }
 
 function invalidatePlan(state: RunnerDashboardState): RunnerDashboardState {

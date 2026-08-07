@@ -26,6 +26,16 @@ Ownership stays split across the runtime boundaries:
 
 ## Principal flows
 
+### Codex adapter boundary
+
+`@deck/adapter-codex` owns Codex TOML, role, skill, MCP, hook, transaction, and semantic verification effects. Core owns canonical capability and instruction contracts. The CLI owns preview, consent, orchestration, spawning, and TUI composition; TUI production modules access Codex only through `RunnerAdapter` and `AdapterRegistry`.
+
+The public Codex adapter is `static-compatible`: it installs no lifecycle-hook transport, accepts no caller-provided binding callbacks, and cannot promote a route to first-class. Internal bridge fixtures remain research evidence only. Canonical parity marks trusted-host, invocation-authorization, dossier, controlled-effect, registry, and bound-verification controls as explicit Codex gaps without weakening Codex sandbox or approval policy.
+
+Content-only synchronization reads the Codex ownership manifest and may update only verified Deck-managed roles, all skill classes/support files, bootstrap skills, and base/selected instructions. Runtime packages, MCP/provider installation, shared binaries, and optional capabilities remain outside sync.
+
+Codex mutation backup and apply results carry one operation receipt with exact native and optional local-only transaction IDs. Verification failure awaits rollback of that receipt only; adapters do not retain a global “last journal” rollback target.
+
 For runner materialization, core definitions flow through an adapter, then the CLI writes or invokes the runner-native result. External skill Markdown under `packages/core/src/skills/external/` is handwritten product input; [the skill-bundle generator](../scripts/generate-skill-bundle.ts) materializes its generated output. [The build-info generator](../scripts/generate-build-info.ts) owns release build metadata.
 
 For SDD, an active OpenSpec change supplies proposal, specification, design, and tasks. `@deck/sdd-runtime` coordinates the lifecycle and artifact-state boundaries; `state.yaml` and `events.yaml` preserve the change record. OpenSpec governs requirements and lifecycle but does not replace runtime source authority.

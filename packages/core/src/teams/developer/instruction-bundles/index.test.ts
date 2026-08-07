@@ -10,6 +10,7 @@ import {
   buildCapabilityToolPolicyBundle,
   composeCapabilityInstructions,
   getEnabledPackageInstructionIds,
+  validateCapabilityInstructionMetadata,
   type CapabilityInstructionBundle,
   type CapabilityInstructionCompositionContext,
 } from "./index";
@@ -39,6 +40,14 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
         "adaptive-memory": overrides.opencode?.["adaptive-memory"] ?? false,
         serena: overrides.opencode?.serena ?? false,
       },
+      codex: {
+        "codebase-memory": overrides.codex?.["codebase-memory"] ?? false,
+        "code-economy": overrides.codex?.["code-economy"] ?? true,
+        "context-mode": overrides.codex?.["context-mode"] ?? false,
+        rtk: overrides.codex?.rtk ?? false,
+        "adaptive-memory": overrides.codex?.["adaptive-memory"] ?? false,
+        serena: overrides.codex?.serena ?? false,
+      },
     },
     orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
     developerTeamExecution: getDefaultDeckConfig().developerTeamExecution,
@@ -46,6 +55,32 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
     activeProfile: "default",
   };
 }
+
+test("Codex defaults preserve canonical six-package order and valid surface metadata", () => {
+  const config = getDefaultDeckConfig();
+  expect(Object.keys(config.packageInstructions.codex)).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
+  expect(getEnabledPackageInstructionIds(config, "codex")).toEqual(["code-economy"]);
+  const bundle = buildCapabilityInstructionBundle(["serena", "code-economy", "context-mode", "code-economy"]);
+  expect([...new Set(bundle.instructions.map((fragment) => fragment.packageId))]).toEqual(["code-economy", "context-mode", "serena"]);
+  expect(validateCapabilityInstructionMetadata(bundle)).toEqual([]);
+});
+
+test("instruction metadata validation rejects canonical surface and tool-policy mismatches", () => {
+  const canonical = buildCapabilityInstructionBundle(["codebase-memory", "serena"]);
+  const changedSurface: CapabilityInstructionBundle = {
+    instructions: canonical.instructions.map((fragment, index) => index === 0 ? { ...fragment, surface: "session" } : fragment),
+  };
+  expect(validateCapabilityInstructionMetadata(changedSurface)).toContainEqual(expect.stringContaining("canonical instruction metadata mismatch"));
+
+  const policy = buildCapabilityToolPolicyBundle(["serena"]);
+  const mismatchedPolicy = {
+    policies: {
+      ...policy.policies,
+      serena: { ...policy.policies.serena!, enabledTools: policy.policies.serena!.enabledTools.slice(1) },
+    },
+  };
+  expect(validateCapabilityInstructionMetadata(buildCapabilityInstructionBundle(["serena"]), mismatchedPolicy)).toContainEqual(expect.stringContaining("canonical tool policy mismatch"));
+});
 
 // ---------------------------------------------------------------------------
 // buildCapabilityInstructionBundle

@@ -12,6 +12,10 @@ const entries = [
     input: resolve(root, "packages/adapter-pi/assets/pi/extensions/developer-team-execution.ts"),
     output: resolve(root, "packages/adapter-pi/assets/pi/extensions/developer-team-execution.generated.js"),
   },
+  {
+    input: resolve(root, "packages/adapter-codex/assets/codex/hooks/developer-team-execution.ts"),
+    output: resolve(root, "packages/adapter-codex/assets/codex/hooks/developer-team-execution.generated.js"),
+  },
 ] as const;
 
 for (const entry of entries) {

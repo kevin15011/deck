@@ -10,7 +10,7 @@ import {
 
 export interface TargetedRepairCapabilityDescriptorV1 {
   readonly kind: "targeted-repair-capability-v1";
-  readonly runnerId: "opencode" | "pi";
+  readonly runnerId: "opencode" | "pi" | "codex";
   readonly invocationId: string;
   readonly batchId: string;
   readonly batchDigest: Sha256Digest;
@@ -86,7 +86,7 @@ export function parseTargetedRepairCapabilityDescriptorV1(
     ),
     runnerId: enumValue(
       raw.runnerId,
-      ["opencode", "pi"] as const,
+      ["opencode", "pi", "codex"] as const,
       "capability descriptor.runnerId",
     ),
     invocationId: codeValue(

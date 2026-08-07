@@ -770,6 +770,7 @@ export function applyOpenCodeDeveloperTeamInstall(
   try {
 
   // 1. Config merge (agents + mermaid plugin)
+  if (!exists(configDir)) mkdir(configDir, { recursive: true });
   const mermaidPlugins = INTERNAL_OPENCODE_PACKAGE_IDS.filter(() => plan.mermaidPluginStatus === "missing");
 
   let configMergeResult: OpenCodeDeveloperTeamApplyResult["configMergeResult"];

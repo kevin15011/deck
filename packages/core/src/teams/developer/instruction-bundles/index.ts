@@ -290,3 +290,44 @@ export function buildCapabilityToolPolicyBundle(
   // Cast to match the bundle type - empty when no policies added
   return { policies: policies } as CapabilityToolPolicyBundle;
 }
+
+export function validateCapabilityInstructionMetadata(
+  bundle: CapabilityInstructionBundle,
+  toolPolicies: CapabilityToolPolicyBundle = buildCapabilityToolPolicyBundle(bundle.instructions.map((fragment) => fragment.packageId)),
+): readonly string[] {
+  const issues: string[] = [];
+  const seen = new Set<string>();
+  for (const fragment of bundle.instructions) {
+    if (!PACKAGE_ORDER.includes(fragment.packageId)) issues.push(`${fragment.packageId}: unknown instruction package.`);
+    if (!["session", "agent", "skill"].includes(fragment.surface)) issues.push(`${fragment.packageId}: invalid instruction surface.`);
+    if (!fragment.markdown.trim()) issues.push(`${fragment.packageId}:${fragment.surface}: empty instruction content.`);
+    const key = JSON.stringify([fragment.packageId, fragment.surface, fragment.teamId ?? null, fragment.agentIds ?? null, fragment.skillIds ?? null]);
+    if (seen.has(key)) issues.push(`${fragment.packageId}:${fragment.surface}: duplicate instruction metadata.`);
+    seen.add(key);
+  }
+  const selectedPackages = [...new Set(bundle.instructions.map((fragment) => fragment.packageId))];
+  const metadataSignature = (fragment: CapabilityInstructionFragment) => JSON.stringify({
+    surface: fragment.surface,
+    teamId: fragment.teamId ?? null,
+    agentIds: fragment.agentIds ? [...fragment.agentIds] : null,
+    skillIds: fragment.skillIds ? [...fragment.skillIds] : null,
+  });
+  for (const packageId of selectedPackages) {
+    const builder = PACKAGE_BUILDERS[packageId];
+    if (!builder) continue;
+    const expected = builder().instructions.map(metadataSignature).sort();
+    const actual = bundle.instructions.filter((fragment) => fragment.packageId === packageId).map(metadataSignature).sort();
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) issues.push(`${packageId}: canonical instruction metadata mismatch.`);
+  }
+  for (const [packageId, policy] of Object.entries(toolPolicies.policies)) {
+    if (policy.packageId !== packageId) issues.push(`${packageId}: tool policy package identity mismatch.`);
+    if (policy.enabledTools.some((tool) => !tool.trim()) || policy.disabledTools.some((tool) => !tool.trim())) issues.push(`${packageId}: tool policy contains an empty tool name.`);
+    if (policy.enabledTools.some((tool) => policy.disabledTools.includes(tool))) issues.push(`${packageId}: tool policy enables and disables the same tool.`);
+  }
+  for (const packageId of selectedPackages) {
+    const expected = getCapabilityToolPolicy(packageId);
+    const actual = toolPolicies.policies[packageId];
+    if (JSON.stringify(actual ?? null) !== JSON.stringify(expected ?? null)) issues.push(`${packageId}: canonical tool policy mismatch.`);
+  }
+  return issues;
+}

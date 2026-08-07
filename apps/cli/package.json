@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@deck/adapter-engram": "workspace:*",
+    "@deck/adapter-codex": "workspace:*",
     "@deck/adapter-opencode": "workspace:*",
     "@deck/adapter-pi": "workspace:*",
     "@deck/adapter-supermemory": "workspace:*",

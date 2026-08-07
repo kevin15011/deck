@@ -110,6 +110,7 @@ export type RunnerToolInstallInput = {
 // ---------------------------------------------------------------------------
 
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles/index";
+import type { RunnerCapabilitySupportStatus } from "./runner-capability-registry";
 
 export type DeveloperTeamManifestInput = {
   projectRoot: string;
@@ -200,6 +201,15 @@ export type DeveloperTeamInstallPlanInput = {
 
 export type RunnerDeveloperTeamInstallPlan = {
   files: readonly DeveloperTeamInstallFile[];
+  diagnostics?: readonly string[];
+  blocked?: boolean;
+  mutationPreview?: readonly {
+    action: "create" | "update" | "delete";
+    path: string;
+    preimage: string;
+    postimage: string;
+    ownership: string;
+  }[];
 };
 
 export type DeveloperTeamInstallFile = {
@@ -342,6 +352,8 @@ export type RunnerCapabilityCatalogEntry = {
   toolId?: string;
   source?: string;
   installKind: "pi-package" | "external" | "opencode-plugin" | "pending";
+  /** Adapter disposition used by generic consumers to distinguish readiness from applicability. */
+  supportStatus?: RunnerCapabilitySupportStatus;
   isInternal?: boolean;
 };
 
@@ -440,7 +452,15 @@ export type DeveloperTeamApplyResult = {
   results: readonly DeveloperTeamApplyAgentResult[];
   changedCount: number;
   unchangedCount: number;
+  /** Exact operation/transaction identity for conflict-preserving rollback. */
+  operation?: DeveloperTeamOperationReceipt;
 };
+
+export type DeveloperTeamOperationReceipt = Readonly<{
+  runnerId: string;
+  operationId: string;
+  transactions: readonly Readonly<{ kind: string; id: string }>[];
+}>;
 
 export type DeveloperTeamApplyAgentResult = {
   agentId: string;

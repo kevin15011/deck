@@ -5,7 +5,6 @@ import {
   getNextScreenAfterDeveloperTeamReview,
   getNextScreenAfterDeveloperTeamInstall,
   getNextScreenAfterEnvironmentSelection,
-  getNextScreenAfterPersonalitySelection,
 } from "./developer-team-flow";
 
 describe("Developer Team flow helpers", () => {
@@ -35,6 +34,16 @@ describe("Developer Team flow helpers", () => {
         selectedEnvironments: ["pi-development"],
         hasPiCommand: false,
         nextEnvironment: null,
+      });
+
+      expect(result).toBe("complete");
+    });
+
+    test("never constructs an unrendered preflight screen for a registered extension environment", () => {
+      const result = getNextScreenAfterPiToolInstall({
+        selectedEnvironments: ["atlas-development"],
+        hasPiCommand: false,
+        nextEnvironment: "atlas-development",
       });
 
       expect(result).toBe("complete");
@@ -183,45 +192,4 @@ describe("Developer Team flow helpers", () => {
     });
   });
 
-  describe("getNextScreenAfterPersonalitySelection", () => {
-    test("routes to pi-preflight-checking when Pi is selected", () => {
-      const result = getNextScreenAfterPersonalitySelection({
-        selectedEnvironments: ["pi-development"],
-        hasPiCommand: true,
-        nextEnvironment: null,
-      });
-
-      expect(result).toBe("pi-preflight-checking");
-    });
-
-    test("routes to pi-preflight-checking when Pi and OpenCode are both selected", () => {
-      const result = getNextScreenAfterPersonalitySelection({
-        selectedEnvironments: ["pi-development", "opencode-development"],
-        hasPiCommand: true,
-        nextEnvironment: "opencode-development",
-      });
-
-      expect(result).toBe("pi-preflight-checking");
-    });
-
-    test("routes to opencode-preflight-checking when only OpenCode is selected", () => {
-      const result = getNextScreenAfterPersonalitySelection({
-        selectedEnvironments: ["opencode-development"],
-        hasPiCommand: false,
-        nextEnvironment: "opencode-development",
-      });
-
-      expect(result).toBe("opencode-preflight-checking");
-    });
-
-    test("routes to complete when no environments are selected (defensive)", () => {
-      const result = getNextScreenAfterPersonalitySelection({
-        selectedEnvironments: [],
-        hasPiCommand: false,
-        nextEnvironment: null,
-      });
-
-      expect(result).toBe("complete");
-    });
-  });
 });

@@ -10,7 +10,8 @@
  */
 
 import { inspectPiEnvironment, type PiPreflightResult } from "./preflight";
-import { accessSync, constants as fsConstants, existsSync, realpathSync, statSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { buildPiRunnerCapabilityInventory, type PiRunnerCapabilityInventory, type PiRunnerFullCapabilityInventory } from "./capability-inventory";
@@ -19,6 +20,7 @@ import { buildPiInstallationPlan, getPiInstallableTool, type InstallablePiToolId
 import { installPiTools, installInternalRunnerPackages } from "./install-tools";
 import { reviewPiRequiredTools, type PiRequiredToolsReview } from "./required-tools";
 import { getTeamsForEnvironment } from "./team-catalog";
+import { buildPiTeamLaunchPlan } from "./pi-team-launch";
 import {
   readDeveloperTeamModelAssignments,
   readDeveloperTeamThinkingAssignments,
@@ -30,7 +32,7 @@ import {
   type DeveloperTeamInstallPlan as PiDeveloperTeamInstallPlan,
 } from "./developer-team-install";
 import { PI_THINKING_LEVELS, supportsThinkingForModel, getDefaultThinkingForModel, resolveThinkingForModel } from "./model-config";
-import { getPiRunnerCapability, PI_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
+import { getPiRunnerCapability, PI_RUNNER_CAPABILITY_CONTRIBUTION, PI_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
 import { getOptionalPiTools } from "./installation-plan";
 import {
   writeSupermemoryPiMcpConfig,
@@ -88,6 +90,10 @@ import type {
 } from "@deck/core";
 import {
   getModelCatalog as getCoreModelCatalog,
+  getRunnerCapabilityMapping,
+  PACKAGE_INSTRUCTION_PACKAGE_IDS,
+  buildCapabilityInstructionBundle,
+  getConfigurablePackageInstructionMetadata,
   runEvidenceGatedSerenaWriter,
   SERENA_MCP_ARGS,
   validateSerenaOperationAuthorization,
@@ -483,6 +489,25 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   readonly runnerId: string = PI_RUNNER_ID;
   readonly displayName: string = PI_DISPLAY_NAME;
   readonly environmentIds: readonly string[] = PI_ENVIRONMENT_IDS;
+  readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS;
+  readonly ui = {
+    environmentLabels: { "pi-development": "Pi Development (Recommended)" },
+    dashboard: { defaultSelectedTeamIds: [] },
+    model: {
+      providerSource: "Providers come from Pi settings and detected credentials.",
+      missingChecks: ["~/.pi/agent/settings.json defaultProvider/defaultModel", "pi --list-models", "Provider env vars such as OPENCODE_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY"],
+      remediation: "Run `pi --list-models` or `pi config` to confirm Pi can see your providers.",
+      defaultThinkingLevels: PI_THINKING_LEVELS,
+      usesNativeCompatibilityChecks: true,
+    },
+    adaptiveMemory: {
+      supermemory: {
+        requiresExternalToken: true,
+        selectionStatus: "Supermemory selected; provide an API key for the Pi MCP handoff.",
+      },
+      engram: { label: "Engram", detail: "Engram enables the derived engram-memory technical action." },
+    },
+  } as const;
 
   // Store last native plan for backup/restore/verify operations
   #lastNativePlan: PiDeveloperTeamInstallPlan | null = null;
@@ -500,7 +525,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
 
   readonly skillDiscovery: SkillDiscoverySourceProviderV1;
 
+  #homeDirectory: string;
   constructor(options: PiRunnerAdapterOptions = {}) {
+    this.#homeDirectory = options.homeDirectory ?? process.env.HOME ?? homedir();
     this.skillDiscovery = createPiSkillDiscoveryProvider(options);
     this.#installTools = options.installTools ?? installPiTools;
     this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
@@ -586,7 +613,13 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         adaptiveMemory: state.adaptiveMemory as { provider?: "none" | "engram" | "supermemory"; supermemory?: { configured?: boolean; hasToken?: boolean; userId?: string; teamId?: string; organizationId?: string } },
         teams: {} as Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>,
         runtime: { toolsReview: review },
-        packageInstructions: state.packageInstructions as any,
+        packageInstructions: {
+          [runnerScope]: buildCapabilityInstructionBundle(
+            getConfigurablePackageInstructionMetadata(this.packageInstructionIds)
+              .filter((entry) => state.packageInstructions[entry.id] === true)
+              .map((entry) => entry.id),
+          ),
+        },
       },
       piInventory as any,
     );
@@ -902,6 +935,27 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     return getTeamsForEnvironment(environmentId);
   }
 
+  buildLaunchPlan(input: import("@deck/core").RunnerLaunchInput): import("@deck/core").RunnerLaunchResult {
+    if (input.mode !== "interactive") return {
+      status: "unsupported",
+      code: `pi-${input.mode}-unsupported`,
+      diagnostics: [{ code: "unsupported-launch-mode", severity: "error", message: "Pi generic compatibility launch currently supports interactive mode only." }],
+    };
+    const native = buildPiTeamLaunchPlan({ teamId: input.teamId, projectRoot: input.projectRoot });
+    return {
+      status: "ready",
+      plan: {
+        command: native.command,
+        args: native.args,
+        cwd: native.cwd,
+        stdio: "inherit",
+        stdin: "inherit",
+        envOverlay: native.env.PI_SESSION_DIR ? { PI_SESSION_DIR: { value: native.env.PI_SESSION_DIR } } : undefined,
+      },
+      diagnostics: [],
+    };
+  }
+
   // -------------------------------------------------------------------------
   // Model catalog and assignments
   // -------------------------------------------------------------------------
@@ -958,30 +1012,32 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       capabilityInstructions: input.capabilityInstructions,
       standaloneSkills: input.standaloneSkills,
     });
-
-    // Store native plan for backup/restore/verify operations
     this.#lastNativePlan = nativePlan;
-
-    const files: import("@deck/core").DeveloperTeamInstallFile[] = [
-      ...nativePlan.agents.map((a: { relativePath: string; content: string }) => ({ path: a.relativePath, content: a.content, kind: "agent" as const })),
-      ...nativePlan.skills.map((s) => ({ path: s.relativePath, content: s.content, kind: "skill" as const, skillId: s.agent.skillId, packagePath: "SKILL.md" })),
-      ...nativePlan.standaloneSkills.map((s) => ({ path: s.relativePath, content: s.content, kind: "standalone-skill" as const, skillId: s.skillId, packagePath: s.packagePath })),
+    const configDir = join(this.#homeDirectory, ".pi", "agent");
+    const planned = [
+      ...nativePlan.agents.map((file) => ({ path: file.relativePath, absolutePath: join(configDir, "agents", file.relativePath.split("/").pop()!), content: file.content, kind: "agent" as const })),
+      ...nativePlan.skills.map((file) => ({ path: file.relativePath, absolutePath: join(configDir, "skills", file.agent.skillId, "SKILL.md"), content: file.content, kind: "skill" as const, skillId: file.agent.skillId, packagePath: "SKILL.md" })),
+      ...nativePlan.standaloneSkills.map((file) => ({ path: file.relativePath, absolutePath: join(configDir, "skills", file.skillId, file.packagePath), content: file.content, kind: "standalone-skill" as const, skillId: file.skillId, packagePath: file.packagePath })),
+      ...nativePlan.sddSkillFiles.map((file) => ({ path: file.relativePath, absolutePath: join(configDir, "skills", file.skillId, "SKILL.md"), content: file.content, kind: "skill" as const, skillId: file.skillId, packagePath: "SKILL.md" })),
     ];
-
-    return { files };
+    const digest = (content: string) => createHash("sha256").update(content).digest("hex");
+    return {
+      files: planned.map(({ absolutePath: _absolutePath, ...file }) => file),
+      mutationPreview: planned.filter((file) => !existsSync(file.absolutePath) || readFileSync(file.absolutePath, "utf8") !== file.content).map((file) => ({
+        action: existsSync(file.absolutePath) ? "update" as const : "create" as const,
+        path: file.absolutePath,
+        preimage: existsSync(file.absolutePath) ? digest(readFileSync(file.absolutePath, "utf8")) : "absent",
+        postimage: digest(file.content),
+        ownership: "pi-native-plan",
+      })),
+    };
   }
 
   async applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
-    // Use the native plan captured by buildDeveloperTeamInstallPlan so package
-    // metadata and support-file paths survive the generic runner boundary.
-    if (!this.#lastNativePlan) {
-      throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
-    }
-    const homeDir = process.env.HOME ?? "/home/user";
-    const piConfigDir = `${homeDir}/.pi/agent`;
+    if (!this.#lastNativePlan) throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
+    const piConfigDir = `${this.#homeDirectory}/.pi/agent`;
     const piAgentsDir = `${piConfigDir}/agents`;
     const piSkillsDir = `${piConfigDir}/skills`;
-
     const plan: PiDeveloperTeamInstallPlan = {
       ...this.#lastNativePlan,
       projectRoot: input.projectRoot,
@@ -992,14 +1048,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       standaloneSkills: this.#lastNativePlan.standaloneSkills.map((file) => ({ ...file, absolutePath: `${piSkillsDir}/${file.skillId}/${file.packagePath}` })),
       sddSkillFiles: this.#lastNativePlan.sddSkillFiles.map((file) => ({ ...file, absolutePath: `${piSkillsDir}/${file.skillId}/SKILL.md` })),
     };
-
     const result = applyPiDeveloperTeamInstall(plan);
-
-    return {
-      results: result.results,
-      changedCount: result.changedCount,
-      unchangedCount: result.unchangedCount,
-    };
+    this.#lastNativePlan = plan;
+    return { results: result.results, changedCount: result.changedCount, unchangedCount: result.unchangedCount };
   }
 
   // -------------------------------------------------------------------------
@@ -1094,15 +1145,15 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // Team file backup/restore
   // -------------------------------------------------------------------------
 
-  backupDeveloperTeamFiles(plan: unknown): unknown {
-    if (!this.#lastNativePlan) {
-      throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
-    }
-    return backupDeveloperTeamFiles(this.#lastNativePlan);
+  backupDeveloperTeamFiles(plan: unknown): import("@deck/core").RunnerBackupResult {
+    if (!this.#lastNativePlan) throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
+    return { payload: backupDeveloperTeamFiles(this.#lastNativePlan), diagnostics: [] };
   }
 
-  rollbackDeveloperTeamFiles(backup: unknown): void {
-    rollbackDeveloperTeamFiles(backup as Parameters<typeof rollbackDeveloperTeamFiles>[0]);
+  async rollbackDeveloperTeamFiles(backup: unknown): Promise<import("@deck/core").RunnerRollbackResult> {
+    const payload = (backup as import("@deck/core").RunnerBackupResult).payload;
+    rollbackDeveloperTeamFiles(payload as Parameters<typeof rollbackDeveloperTeamFiles>[0]);
+    return { status: "rolled-back", conflicts: [], diagnostics: [] };
   }
 
   // -------------------------------------------------------------------------
@@ -1257,6 +1308,7 @@ function toCapabilityInventory(
       toolId: typedEntry.toolId,
       source: typedEntry.source,
       installKind: "pi-package",
+      supportStatus: getRunnerCapabilityMapping(capabilityId, runnerId, [PI_RUNNER_CAPABILITY_CONTRIBUTION])?.status,
       isInstalled: typedEntry.status === "ready",
       isBlocked: typedEntry.status === "blocked",
       diagnostics: typedEntry.diagnostics,

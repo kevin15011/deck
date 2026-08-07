@@ -7,11 +7,11 @@ import {
   getAdaptiveMemorySummary,
   getDashboardSectionSummaries,
   getPlanActionCounts,
-  getRunnerCapabilitySummaries,
+  getPackageInstructionSummaries,
   getTeamCapabilityProfile,
   type CapabilityResolver,
 } from "../runner-dashboard/selectors";
-import type { RunnerAction, RunnerDashboardState } from "../runner-dashboard/state";
+import { runnerRequiresExternalSupermemoryToken, type RunnerAction, type RunnerDashboardState } from "../runner-dashboard/state";
 
 type DashboardRunDiagnostic = { message: string };
 
@@ -25,6 +25,7 @@ type RunnerDashboardScreensProps = {
   serenaStages?: readonly RunnerSerenaStage[];
   serenaOutcome?: RunnerSerenaOutcome;
   cancellationRequested?: boolean;
+  runnerLabel?: string;
 };
 
 /**
@@ -33,7 +34,7 @@ type RunnerDashboardScreensProps = {
  * Works with any runner (Pi, OpenCode, etc.) via the capabilityResolver.
  * Dashboard sections: Packages, Adaptive Memory, Teams, Review & Install.
  */
-export function RunnerDashboardScreens({ state, installResults = [], completionStatus, canRunPlan, runBlockDiagnostics = [], capabilityResolver, serenaStages = [], serenaOutcome, cancellationRequested = false }: RunnerDashboardScreensProps) {
+export function RunnerDashboardScreens({ state, installResults = [], completionStatus, canRunPlan, runBlockDiagnostics = [], capabilityResolver, serenaStages = [], serenaOutcome, cancellationRequested = false, runnerLabel }: RunnerDashboardScreensProps) {
   switch (state.screen) {
     case "packages-detail":
       return <PackagesDetail state={state} resolver={capabilityResolver} />;
@@ -48,10 +49,10 @@ export function RunnerDashboardScreens({ state, installResults = [], completionS
     case "install-progress":
       return <InstallProgressScreen state={state} results={installResults} serenaStages={serenaStages} serenaOutcome={serenaOutcome} cancellationRequested={cancellationRequested} />;
     case "complete":
-      return <DashboardCompleteScreen results={installResults} completionStatus={completionStatus} runnerScope={state.runnerScope} />;
+      return <DashboardCompleteScreen results={installResults} completionStatus={completionStatus} runnerLabel={runnerLabel ?? state.runnerDisplayName ?? state.runnerScope} />;
     case "dashboard":
     default:
-      return <DashboardOverview state={state} resolver={capabilityResolver} />;
+      return <DashboardOverview state={state} resolver={capabilityResolver} runnerLabel={runnerLabel ?? state.runnerDisplayName ?? state.runnerScope} />;
   }
 }
 
@@ -75,25 +76,38 @@ function isInternalAction(action: RunnerAction): boolean {
   return action.id.startsWith("capability.runner-mermaid") || action.id.startsWith("capability.opencode-mermaid");
 }
 
+function runnerSetupName(displayName: string): string {
+  return /\brunner\b/i.test(displayName) ? displayName : `${displayName} Runner`;
+}
+
 function canRunPlanFromState(state: RunnerDashboardState): boolean {
+  if (state.plan?.ready !== true) return false;
   if (state.adaptiveMemory.provider !== "supermemory") return true;
   const setup = state.adaptiveMemory.supermemory;
-  return state.runnerScope === "opencode"
-    ? Boolean(setup?.configured)
-    : Boolean(setup?.configured && setup?.hasToken);
+  return runnerRequiresExternalSupermemoryToken(state)
+    ? Boolean(setup?.configured && setup?.hasToken)
+    : Boolean(setup?.configured);
 }
 
 // ---------------------------------------------------------------------------
 // Dashboard Overview
 // ---------------------------------------------------------------------------
 
-function DashboardOverview({ state, resolver }: { state: RunnerDashboardState; resolver?: CapabilityResolver }) {
+function DashboardOverview({ state, resolver, runnerLabel }: { state: RunnerDashboardState; resolver?: CapabilityResolver; runnerLabel: string }) {
   const sections = getDashboardSectionSummaries(state, resolver);
-  const runnerLabel = state.runnerScope === "opencode" ? "OpenCode" : "Pi";
+  const executionRoutes = state.runtime.executionRoutes ? Object.entries(state.runtime.executionRoutes) : [];
   return (
     <Box flexDirection="column">
-      <Text bold>{runnerLabel} Runner Setup Dashboard</Text>
+      <Text bold>{runnerSetupName(runnerLabel)} Setup Dashboard</Text>
       <Text dimColor>Configure packages, Adaptive Memory, Teams and Review &amp; Install.</Text>
+      {state.runtime.inspectionState ? <Text>Runtime: {state.runtime.inspectionState}</Text> : null}
+      {state.runtime.diagnostics?.map((diagnostic, index) => <Text key={`runtime-${index}`} color="yellow">{sanitizeDashboardText(diagnostic)}</Text>)}
+      {executionRoutes.length > 0 ? (
+        <Box flexDirection="column">
+          <Text bold>Execution modes</Text>
+          {executionRoutes.map(([mode, classification]) => <Text key={mode}>{mode}: {classification}</Text>)}
+        </Box>
+      ) : null}
       <Box marginTop={1}>
         <MenuList
           cursor={state.cursor}
@@ -113,21 +127,20 @@ function DashboardOverview({ state, resolver }: { state: RunnerDashboardState; r
 // ---------------------------------------------------------------------------
 
 function PackagesDetail({ state, resolver }: { state: RunnerDashboardState; resolver?: CapabilityResolver }) {
-  const capabilities = getRunnerCapabilitySummaries(state, resolver);
-  const toggleable = capabilities.filter((capability) => capability.requirementLevel === "configurable" || capability.requirementLevel === "optional");
+  const packages = getPackageInstructionSummaries(state, resolver);
 
   return (
     <Box flexDirection="column">
-      <Text bold>Packages</Text>
-      <Text dimColor>Select packages to install or configure. Space toggles configurable and optional packages.</Text>
+      <Text bold>Package instructions</Text>
+      <Text dimColor>Select optional instruction bundles. Code Economy is always enabled as the non-toggleable baseline.</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={state.cursor}
           items={[
-            ...toggleable.map((capability) => ({
-              id: capability.capabilityId,
-              label: `${capability.selected ? "[x]" : "[ ]"} ${capability.label}`,
-              hint: `${capability.status} · ${capability.detail}`,
+            ...packages.map((pkg) => ({
+              id: pkg.capabilityId,
+              label: `${pkg.selected ? "[x]" : "[ ]"} ${pkg.label}`,
+              hint: pkg.detail,
             })),
             { id: "back", label: "Back to dashboard" },
           ]}
@@ -230,12 +243,20 @@ function DeveloperTeamDetail({ state, resolver }: { state: RunnerDashboardState;
 
 function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { state: RunnerDashboardState; canRunPlan?: boolean; runBlockDiagnostics?: DashboardRunDiagnostic[] }) {
   const counts = getPlanActionCounts(state.plan);
-  const effectiveCanRun = canRunPlan ?? canRunPlanFromState(state);
+  const effectiveCanRun = state.plan?.ready === true && (canRunPlan ?? canRunPlanFromState(state));
 
   return (
     <Box flexDirection="column">
       <Text bold>Review &amp; Install</Text>
       <Text dimColor>{counts.total} actions planned: {counts.automatic} automatic, {counts.manual} manual, {counts.config} config, {counts.team} team, {counts.validation} validation.</Text>
+      {state.plan?.diagnostics && state.plan.diagnostics.length > 0 && (
+        <Box marginTop={1} flexDirection="column">
+          <Text bold>Plan diagnostics:</Text>
+          {state.plan.diagnostics.map((diagnostic, index) => (
+            <Text key={`${diagnostic.code}-${index}`} color={diagnostic.severity === "error" ? "red" : "yellow"}>  {sanitizeDashboardText(diagnostic.message)}</Text>
+          ))}
+        </Box>
+      )}
       {runBlockDiagnostics.length > 0 && (
         <Box marginTop={1} flexDirection="column">
           <Text color="yellow" bold>Blocked:</Text>
@@ -248,7 +269,7 @@ function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { sta
         <MenuList
           cursor={state.cursor}
           items={[
-            { id: "run", label: effectiveCanRun ? "Run install" : "Blocked", hint: effectiveCanRun ? "" : "Complete Supermemory setup first" },
+            { id: "run", label: effectiveCanRun ? "Run install" : "Blocked", hint: effectiveCanRun ? "" : runBlockDiagnostics[0]?.message ?? "Resolve plan diagnostics first" },
             { id: "dashboard", label: "Dashboard" },
           ]}
         />
@@ -313,7 +334,7 @@ function sanitizeDashboardText(value: unknown): string {
     .replace(new RegExp(`((?:${keys})\\s*[:=]\\s*)[^\\s,;]+`, "giu"), "$1[REDACTED]")
     .replace(/\bBearer\s+[^\s,;]+/giu, "Bearer [REDACTED]")
     .replace(/\braw\b/giu, "[REDACTED]")
-    .replace(/\b[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[REDACTED]")
+    .replace(/\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, "[REDACTED]")
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[REDACTED]")
     .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/g, "[REDACTED]")
     .replace(/\bgithub_pat_[A-Za-z0-9_]+\b/g, "[REDACTED]");
@@ -459,16 +480,19 @@ function InstallProgressScreen({
 // Dashboard Complete Screen
 // ---------------------------------------------------------------------------
 
-function DashboardCompleteScreen({ results, completionStatus, runnerScope }: { results: RunnerActionRunResult[]; completionStatus?: string; runnerScope?: string }) {
+function DashboardCompleteScreen({ results, completionStatus, runnerLabel }: { results: RunnerActionRunResult[]; completionStatus?: string; runnerLabel: string }) {
   const failed = results.filter((r) => r.status === "failed");
   const stoppedSerena = serenaOutcomeFromResults(results);
-  const label = runnerScope === "opencode" ? "OpenCode" : "Pi";
+  const completedSuccessfully = failed.length === 0 && stoppedSerena !== "cancelled" && stoppedSerena !== "partial";
+  const postInstallFollowUps = results
+    .filter((result) => completedSuccessfully && result.status === "executed")
+    .flatMap((result) => result.postInstallFollowUps ?? []);
   return (
     <Box flexDirection="column">
-      <Text bold color={failed.length > 0 || stoppedSerena === "cancelled" || stoppedSerena === "partial" ? "yellow" : "green"}>
-        {failed.length > 0 || stoppedSerena === "cancelled" || stoppedSerena === "partial"
-          ? `${label} Runner setup stopped before completion`
-          : `${label} Runner setup complete`}
+      <Text bold color={completedSuccessfully ? "green" : "yellow"}>
+        {completedSuccessfully
+          ? `${runnerSetupName(runnerLabel)} setup complete`
+          : `${runnerSetupName(runnerLabel)} setup stopped before completion`}
       </Text>
       {completionStatus && <Text dimColor>{completionStatus}</Text>}
       {failed.length > 0 && (
@@ -483,6 +507,12 @@ function DashboardCompleteScreen({ results, completionStatus, runnerScope }: { r
               </React.Fragment>
             );
           })}
+        </Box>
+      )}
+      {postInstallFollowUps.length > 0 && (
+        <Box marginTop={1} flexDirection="column">
+          <Text bold>Next steps</Text>
+          {postInstallFollowUps.map((followUp) => <Text key={followUp.id}>• {sanitizeDashboardText(followUp.message)}</Text>)}
         </Box>
       )}
       <Box marginTop={1}>

@@ -8,12 +8,12 @@
 import type {
   CanonicalRunnerCapability,
   RunnerCapabilityMapping,
+  RunnerCapabilityContribution,
   ParityRuntimeHints,
 } from "./runner-capability-registry";
 import {
   getCanonicalRunnerCapabilities,
   getRunnerMappings,
-  getCanonicalCapability,
 } from "./runner-capability-registry";
 
 // ---------------------------------------------------------------------------
@@ -26,17 +26,13 @@ export type ParityReportSeverity = "info" | "warning" | "error";
 /** Error codes from the spec */
 export type ParityErrorCode =
   | "missing-runner-mapping"
-  | "first-class-capability-mapping-missing"
   | "silent-package-not-modeled"
-  | "shared-binary-not-usable"
-  | "pi-context-mode-mcp-missing"
-  | "codebase-memory-mcp-missing"
-  | "codebase-memory-index-unverified"
-  | "pi-rtk-mapping-missing"
-  | "pi-supermemory-extra-gate-present"
-  | "mcp-standard-blocked"
-  | "memory-tools-unverified"
-  | "pi-serena-not-satisfied";
+  | "capability-binary-not-usable"
+  | "capability-mcp-not-configured"
+  | "capability-mapping-gap"
+  | "capability-blocked"
+  | "capability-index-unverified"
+  | "capability-configuration-unverified";
 
 /** A single entry in the parity report */
 export type ParityReportEntry = {
@@ -88,212 +84,126 @@ function isMcpServerConfigured(
  * Resolve a single capability's parity status
  */
 function resolveCapabilityParity(
+  runnerId: string,
   capability: CanonicalRunnerCapability,
   mapping: RunnerCapabilityMapping | undefined,
-  runtimeHints?: ParityRuntimeHints
+  runtimeHints?: ParityRuntimeHints,
 ): ParityReportEntry {
   const capabilityId = capability.id;
-  const runnerId = mapping?.runnerId ?? "unknown";
+  const failure = (
+    code: ParityErrorCode,
+    detail: string,
+    recommendedAction: string,
+    severity: ParityReportSeverity = "error",
+  ): ParityReportEntry => ({
+    capabilityId,
+    runnerId,
+    status: "gap",
+    severity,
+    code,
+    message: `Runner ${runnerId} capability ${capabilityId}: ${detail}`,
+    recommendedAction,
+  });
 
-  // Handle runner-specific silent packages - these are NOT gaps
   if (capability.category === "runner-silent-packages") {
-    // If no mapping exists for a silent package, that's a gap - must be explicitly modeled
     if (!mapping) {
-      return {
-        capabilityId,
-        runnerId,
-        status: "gap",
-        severity: "error",
-        code: "silent-package-not-modeled",
-        message: `Silent package ${capabilityId} must be modeled explicitly`,
-        recommendedAction: `Add runner-specific mapping for ${capabilityId}`,
-      };
+      return failure(
+        "silent-package-not-modeled",
+        "the runner-specific silent package is not explicitly modeled",
+        `Add a ${runnerId} mapping for ${capabilityId}`,
+      );
     }
     return {
       capabilityId,
       runnerId,
-      status: mapping.status ?? "runner-specific",
+      status: mapping.status,
       severity: "info",
-      message: `${capability.label} is a runner-specific silent package`,
+      message: `${capability.label} is ${mapping.status} for ${runnerId}`,
     };
   }
 
-  // No mapping exists - this is a gap
   if (!mapping) {
+    return failure(
+      "missing-runner-mapping",
+      "the required runner mapping is missing",
+      `Add a ${runnerId} mapping for ${capabilityId}`,
+    );
+  }
+
+  if (mapping.status === "gap") {
+    return failure(
+      "capability-mapping-gap",
+      "the adapter mapping declares an unresolved capability gap",
+      `Provide or explicitly resolve the ${runnerId} mapping for ${capabilityId}`,
+    );
+  }
+
+  if (mapping.status === "blocked") {
+    return {
+      ...failure(
+        "capability-blocked",
+        "the adapter mapping declares this capability blocked",
+        `Resolve the ${runnerId} blocker for ${capabilityId}`,
+      ),
+      status: "blocked",
+    };
+  }
+
+  if (mapping.status === "not-applicable") {
     return {
       capabilityId,
       runnerId,
-      status: "gap",
-      severity: "error",
-      code: "missing-runner-mapping",
-      message: `Runner mapping missing for required capability: ${capabilityId}`,
-      recommendedAction: `Add mapping for ${capabilityId} in runner capability registry`,
+      status: "not-applicable",
+      severity: "info",
+      message: `${capability.label} is not applicable to ${runnerId}`,
     };
   }
 
-  // Check binary usability for shared capabilities
-  if (capability.sharedBinary) {
-    const binaryUsable = isBinaryUsable(capability.sharedBinary.command, runtimeHints);
-
-    if (mapping.status === "shared" && !binaryUsable) {
-      return {
-        capabilityId,
-        runnerId,
-        status: "gap",
-        severity: "error",
-        code: "shared-binary-not-usable",
-        message: `Shared binary ${capability.sharedBinary.command} exists but failed usability checks`,
-        recommendedAction: `Install or verify ${capability.sharedBinary.command} is in PATH and responds to --version/--help`,
-      };
-    }
-
-    // Check MCP config for MCP-enabled shared binaries
-    if (capability.sharedBinary.mcpServerName && mapping.status === "shared") {
-      const mcpConfigured = isMcpServerConfigured(capability.sharedBinary.mcpServerName, runtimeHints);
-      if (!mcpConfigured && binaryUsable) {
-        const errorCode = capabilityId === "codebase-memory-mcp"
-          ? "codebase-memory-mcp-missing"
-          : capabilityId === "context-mode"
-          ? "pi-context-mode-mcp-missing"
-          : undefined;
-
-        return {
-          capabilityId,
-          runnerId,
-          status: "gap",
-          severity: "error",
-          code: errorCode,
-          message: `${capability.label} requires local MCP integration for this runner`,
-          recommendedAction: `Configure MCP server ${capability.sharedBinary.mcpServerName} in runner config`,
-        };
-      }
-    }
+  const binaryCommands = mapping.status === "shared" && mapping.parityChecks?.includes("binary-usable")
+    ? mapping.detectors?.commands ?? (capability.sharedBinary ? [capability.sharedBinary.command] : [])
+    : capability.sharedBinary && mapping.status === "shared"
+      ? [capability.sharedBinary.command]
+      : [];
+  const unusableCommand = binaryCommands.find((command) => !isBinaryUsable(command, runtimeHints));
+  if (unusableCommand) {
+    return failure(
+      "capability-binary-not-usable",
+      `required binary ${unusableCommand} is not usable`,
+      `Install or verify ${unusableCommand} is available to runner ${runnerId}`,
+    );
   }
 
-  // Handle specific capability checks
-  switch (capabilityId) {
-    case "rtk": {
-      const rtkUsable = isBinaryUsable("rtk", runtimeHints);
-      if (mapping.status === "gap") {
-        return {
-          capabilityId,
-          runnerId,
-          status: "gap",
-          severity: "error",
-          code: "pi-rtk-mapping-missing",
-          message: "RTK capability must be supported, shared, blocked, or explicitly mapped",
-          recommendedAction: "Add RTK as shared binary with reuse/no-reinstall logic",
-        };
-      }
-      if (mapping.status === "shared" && !rtkUsable) {
-        return {
-          capabilityId,
-          runnerId,
-          status: "gap",
-          severity: "error",
-          code: "shared-binary-not-usable",
-          message: "RTK binary not usable in PATH",
-          recommendedAction: "Install rtk or add to PATH",
-        };
-      }
-      break;
-    }
-
-    case "serena": {
-      const serenaUsable = isBinaryUsable("serena", runtimeHints);
-      if ((mapping.status === "gap" || mapping.status === "shared") && !serenaUsable) {
-        return {
-          capabilityId,
-          runnerId,
-          status: "gap",
-          severity: "error",
-          code: "pi-serena-not-satisfied",
-          message: "Serena is mandatory for Pi parity but binary not detected in PATH",
-          recommendedAction: "Install serena via uv tool install or pipx, or configure as manual-verified",
-        };
-      }
-      break;
-    }
-
-    case "context7": {
-      const context7Configured = isMcpServerConfigured("context7", runtimeHints);
-      if ((mapping.status === "gap" || mapping.status === "shared") && !context7Configured) {
-        return {
-          capabilityId,
-          runnerId,
-          status: "gap",
-          severity: "error",
-          code: "mcp-standard-blocked",
-          message: "Context7 MCP not configured; fallback required",
-          recommendedAction: "Configure @upstash/context7-mcp or use fallback wrapper",
-        };
-      }
-      break;
-    }
-
-    case "supermemory-tool-bindings": {
-      const supermemoryConfigured = runtimeHints?.supermemoryConfigured;
-      if ((mapping.status === "gap" || mapping.status === "shared") && !supermemoryConfigured) {
-        return {
-          capabilityId,
-          runnerId,
-          status: "gap",
-          severity: "error",
-          code: "memory-tools-unverified",
-          message: "Memory tools could not be verified; explicit action required",
-          recommendedAction: "Configure Supermemory MCP with valid credentials",
-        };
-      }
-      break;
-    }
-
-    case "codebase-memory": {
-      if (mapping.status === "shared") {
-        const cbmMcpUsable = isBinaryUsable("codebase-memory-mcp", runtimeHints);
-        const cbmMcpConfigured = isMcpServerConfigured("codebase-memory", runtimeHints);
-
-        if (!cbmMcpUsable) {
-          return {
-            capabilityId,
-            runnerId,
-            status: "gap",
-            severity: "error",
-            code: "shared-binary-not-usable",
-            message: "codebase-memory-mcp binary not usable",
-            recommendedAction: "Install codebase-memory-mcp binary",
-          };
-        }
-
-        if (!cbmMcpConfigured) {
-          return {
-            capabilityId,
-            runnerId,
-            status: "gap",
-            severity: "error",
-            code: "codebase-memory-mcp-missing",
-            message: "codebase-memory requires local MCP integration for this runner",
-            recommendedAction: "Configure codebase-memory MCP in runner config",
-          };
-        }
-
-        // Check index status
-        if (runtimeHints?.projectIndexVerified === false) {
-          return {
-            capabilityId,
-            runnerId,
-            status: "gap",
-            severity: "warning",
-            code: "codebase-memory-index-unverified",
-            message: "codebase-memory project index is required but not verified",
-            recommendedAction: "Run codebase-memory index command or verify index exists",
-          };
-        }
-      }
-      break;
-    }
+  const mcpServerNames = mapping.status === "shared" && mapping.parityChecks?.includes("mcp-config-present")
+    ? mapping.detectors?.mcpServerNames ?? (capability.sharedBinary?.mcpServerName ? [capability.sharedBinary.mcpServerName] : [])
+    : capability.sharedBinary?.mcpServerName && mapping.status === "shared"
+      ? [capability.sharedBinary.mcpServerName]
+      : [];
+  const missingMcpServer = mcpServerNames.find((serverName) => !isMcpServerConfigured(serverName, runtimeHints));
+  if (missingMcpServer && !(capabilityId === "supermemory-tool-bindings" && runtimeHints?.supermemoryConfigured === true)) {
+    return failure(
+      "capability-mcp-not-configured",
+      `required MCP server ${missingMcpServer} is not configured`,
+      `Configure MCP server ${missingMcpServer} for runner ${runnerId}`,
+    );
   }
 
-  // Default: mapping exists and appears satisfied
+  if (capabilityId === "supermemory-tool-bindings" && runtimeHints?.supermemoryConfigured === false) {
+    return failure(
+      "capability-configuration-unverified",
+      "required runtime configuration could not be verified",
+      `Verify configuration for ${capabilityId} on runner ${runnerId}`,
+    );
+  }
+
+  if (capabilityId === "codebase-memory" && runtimeHints?.projectIndexVerified === false) {
+    return failure(
+      "capability-index-unverified",
+      "the required project index is not verified",
+      `Verify the project index for ${capabilityId} on runner ${runnerId}`,
+      "warning",
+    );
+  }
+
   return {
     capabilityId,
     runnerId,
@@ -308,10 +218,11 @@ function resolveCapabilityParity(
  */
 export function resolveRunnerParity(
   runnerId: string,
-  runtimeHints?: ParityRuntimeHints
+  runtimeHints?: ParityRuntimeHints,
+  contributions: readonly RunnerCapabilityContribution[] = [],
 ): ParityReport {
-  const capabilities = getCanonicalRunnerCapabilities();
-  const mappings = getRunnerMappings(runnerId);
+  const capabilities = getCanonicalRunnerCapabilities(contributions);
+  const mappings = getRunnerMappings(runnerId, contributions);
 
   const entries: ParityReportEntry[] = [];
   const gaps: ParityReportEntry[] = [];
@@ -320,7 +231,7 @@ export function resolveRunnerParity(
 
   for (const capability of capabilities) {
     const mapping = mappings.find((m) => m.capabilityId === capability.id);
-    const entry = resolveCapabilityParity(capability, mapping, runtimeHints);
+    const entry = resolveCapabilityParity(runnerId, capability, mapping, runtimeHints);
 
     entries.push(entry);
 
@@ -328,7 +239,7 @@ export function resolveRunnerParity(
     if (capability.category === "runner-silent-packages") {
       silentPackages.push(entry);
     } else if (entry.severity === "error" || entry.status === "gap" || entry.status === "blocked") {
-      if (entry.code === "mcp-standard-blocked" || entry.status === "blocked") {
+      if (entry.status === "blocked") {
         blockers.push(entry);
       } else {
         gaps.push(entry);
@@ -348,7 +259,10 @@ export function resolveRunnerParity(
 /**
  * Get only the gaps for a runner (excluding info entries)
  */
-export function getParityGaps(runnerId: string): readonly ParityReportEntry[] {
-  const report = resolveRunnerParity(runnerId);
-  return [...report.gaps, ...report.blockers];
+export function getParityGaps(
+  runnerId: string,
+  contributions: readonly RunnerCapabilityContribution[] = [],
+): readonly ParityReportEntry[] {
+  const report = resolveRunnerParity(runnerId, undefined, contributions);
+  return [...report.gaps, ...report.blockers].filter((entry) => entry.severity !== "info");
 }

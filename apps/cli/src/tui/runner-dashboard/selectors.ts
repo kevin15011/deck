@@ -6,16 +6,17 @@
  */
 
 import {
-  CANONICAL_INSTRUCTION_PACKAGE_IDS,
   type AdaptiveMemoryProviderChoice,
   type CapabilityId,
   type CapabilityStatus,
+  type CanonicalInstructionPackageId,
   type RunnerAction,
   type RunnerDashboardScreen,
   type RunnerDashboardState,
   type RunnerReviewPlan,
   type TeamCapabilityProfile,
 } from "./state";
+import { getConfigurablePackageInstructionMetadata, type PackageInstructionPackageId } from "@deck/core";
 
 /**
  * Dashboard section IDs for the grouping.
@@ -47,7 +48,6 @@ export type CapabilityOptionSummary = {
   selected: boolean;
   status: CapabilityStatus | "unknown";
   runnerScope: string;
-  implementationId?: string;
   detail: string;
 };
 
@@ -68,26 +68,10 @@ export type PlanActionCounts = {
 };
 
 /**
- * Generic capability catalog entry — adapters provide their own catalogs.
- */
-export type CapabilityCatalogEntry = {
-  capabilityId: CapabilityId;
-  label: string;
-  description: string;
-  runnerScope: string;
-  requirementLevel: "required" | "optional" | "configurable";
-  toolId?: string;
-  source?: string;
-  implementations?: Record<string, { id: string; source: string; installKind: string; note?: string }>;
-  isInternal?: boolean;
-};
-
-/**
- * Resolver function that adapters provide to look up capabilities.
+ * Package-selection contract. Runtime capabilities intentionally do not cross this boundary.
  */
 export type CapabilityResolver = {
-  getCapability: (capabilityId: CapabilityId) => CapabilityCatalogEntry | undefined;
-  getUserFacingIds: () => CapabilityId[];
+  getSupportedPackageInstructionIds?: () => readonly PackageInstructionPackageId[];
 };
 
 type SectionSignals = {
@@ -156,11 +140,11 @@ export function getPlanActionCounts(plan: RunnerReviewPlan | undefined): PlanAct
 
 export function getDashboardSectionSummaries(state: RunnerDashboardState, resolver?: CapabilityResolver): DashboardSectionSummary[] {
   const counts = getPlanActionCounts(state.plan);
-  const capabilityOptions = getRunnerCapabilitySummaries(state, resolver);
-  const selectedPackages = capabilityOptions.filter((option) => option.selected && option.requirementLevel === "configurable").length;
+  const capabilityOptions = getPackageInstructionSummaries(state, resolver);
+  const selectedPackages = capabilityOptions.filter((option) => option.selected).length;
   const selectedTeams = Object.values(state.teams).filter((team) => team.selected).length;
-  const configurableIds = resolver?.getUserFacingIds() ?? [];
-  const packagesSignals = signalsForSection(state, configurableIds);
+  const packageInstructionIds = capabilityOptions.map((option) => option.capabilityId);
+  const packagesSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("package-instructions.")));
   const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.") || (action.capabilityId === "codebase-memory" && state.adaptiveMemory.provider === "engram")));
   const teamSignals = signalsForActions(state.plan?.groups.teamApplications ?? []);
 
@@ -171,9 +155,9 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
       screen: "packages-detail",
       readiness: selectedPackages === 0 ? "pending" : readinessFromSignals(packagesSignals),
       selectedCount: selectedPackages,
-      totalCount: configurableIds.length,
+      totalCount: packageInstructionIds.length,
       actionCount: packagesSignals.actions,
-      detail: `${selectedPackages}/${configurableIds.length} packages selected; ${formatSignals(packagesSignals)}.`,
+      detail: `${selectedPackages}/${packageInstructionIds.length} packages selected; ${formatSignals(packagesSignals)}.`,
     },
     {
       id: "adaptive-memory",
@@ -212,41 +196,45 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
  * Returns capability option summaries for the Packages section.
  * Uses the injected capability resolver to get catalog entries.
  */
-export function getRunnerCapabilitySummaries(state: RunnerDashboardState, resolver?: CapabilityResolver): CapabilityOptionSummary[] {
-  const configurable = resolver?.getUserFacingIds() ?? [];
-  return configurable.map((capabilityId) =>
-    capabilitySummary(state, capabilityId, Boolean(state.selectedCapabilities[capabilityId]), resolver),
-  );
-}
-
 /**
  * Returns only toggleable capability IDs (configurable + optional requirement levels).
  * This matches what the UI renders in PackagesDetail.
  */
-export function getToggleableCapabilityIds(state: RunnerDashboardState, resolver?: CapabilityResolver): CapabilityId[] {
-  const summaries = getRunnerCapabilitySummaries(state, resolver);
-  return summaries
-    .filter((s) => s.requirementLevel === "configurable" || s.requirementLevel === "optional")
-    .map((s) => s.capabilityId);
+export function getPackageInstructionSummaries(state: RunnerDashboardState, resolver?: CapabilityResolver): CapabilityOptionSummary[] {
+  return getConfigurablePackageInstructionMetadata(resolver?.getSupportedPackageInstructionIds?.() ?? []).map((entry) => ({
+    capabilityId: entry.id,
+    label: entry.label,
+    requirementLevel: "configurable",
+    selected: state.packageInstructions[entry.id] === true,
+    status: state.capabilityStatuses[entry.id] ?? "unknown",
+    runnerScope: state.runnerScope,
+    detail: entry.description,
+  }));
+}
+
+export function getToggleablePackageInstructionIds(state: RunnerDashboardState, resolver?: CapabilityResolver): CanonicalInstructionPackageId[] {
+  return getPackageInstructionSummaries(state, resolver).map((summary) => summary.capabilityId as CanonicalInstructionPackageId);
 }
 
 export function getAdaptiveMemorySummary(state: RunnerDashboardState): AdaptiveMemorySummary {
   const provider = state.adaptiveMemory.provider;
   const configured = provider !== "supermemory" || Boolean(state.adaptiveMemory.supermemory?.configured);
+  const supermemoryUi = state.runnerUi?.adaptiveMemory?.supermemory;
+  const engramUi = state.runnerUi?.adaptiveMemory?.engram;
 
   return {
     provider,
     configured,
     options: [
       { provider: "none", selected: provider === "none", label: "None" },
-      { provider: "engram", selected: provider === "engram", label: "Engram" },
+      { provider: "engram", selected: provider === "engram", label: engramUi?.label ?? "Engram" },
       { provider: "supermemory", selected: provider === "supermemory", label: "Supermemory" },
     ],
     detail: provider === "none"
       ? "No adaptive memory active by default."
       : provider === "engram"
-        ? "Engram enables the derived engram-memory technical action."
-        : "Supermemory uses non-secret config and redacted MCP credentials.",
+        ? engramUi?.detail ?? "Engram enables the derived engram-memory technical action."
+        : supermemoryUi?.selectionStatus ?? "Supermemory uses non-secret config and redacted MCP credentials.",
   };
 }
 
@@ -276,73 +264,6 @@ export function getTeamCapabilityProfile(state: RunnerDashboardState, teamId: st
 /**
  * Returns a summary for a single capability option.
  */
-function capabilitySummary(state: RunnerDashboardState, capabilityId: CapabilityId, selected: boolean, resolver?: CapabilityResolver): CapabilityOptionSummary {
-  const capability = resolver?.getCapability(capabilityId);
-  if (!capability) {
-    return {
-      capabilityId,
-      label: capabilityId,
-      requirementLevel: "configurable",
-      selected,
-      status: state.capabilityStatuses[capabilityId] ?? "unknown",
-      runnerScope: state.runnerScope,
-      detail: `Capability '${capabilityId}' not found in user-facing catalog.`,
-    };
-  }
-
-  const implementation = capability.implementations?.[state.runnerScope as "pi" | "opencode"];
-  const status = state.capabilityStatuses[capabilityId] ?? "unknown";
-
-  return {
-    capabilityId,
-    label: capability.label,
-    requirementLevel: capability.requirementLevel,
-    selected,
-    status,
-    runnerScope: capability.runnerScope,
-    implementationId: implementation?.id,
-    detail: capability.description,
-  };
-}
-
-function signalsForSection(state: RunnerDashboardState, capabilityIds: CapabilityId[]): SectionSignals {
-  const statusSignals = signalsForCapabilityStatuses(capabilityIds.map((capabilityId) => state.capabilityStatuses[capabilityId]));
-  const actionSignals = signalsForActions(actionsForCapabilities(state.plan, capabilityIds));
-
-  return {
-    ready: statusSignals.ready + actionSignals.ready,
-    manual: statusSignals.manual + actionSignals.manual,
-    pending: statusSignals.pending + actionSignals.pending,
-    blocked: statusSignals.blocked + actionSignals.blocked,
-    unknown: statusSignals.unknown + actionSignals.unknown,
-    actions: actionSignals.actions,
-  };
-}
-
-function signalsForCapabilityStatuses(statuses: Array<CapabilityStatus | undefined>): SectionSignals {
-  return statuses.reduce<SectionSignals>((signals, status) => {
-    switch (status) {
-      case "ready":
-        signals.ready += 1;
-        break;
-      case "blocked":
-        signals.blocked += 1;
-        break;
-      case "pending-source":
-      case "manual":
-        signals.pending += 1;
-        break;
-      case "missing":
-        signals.manual += 1;
-        break;
-      default:
-        signals.unknown += 1;
-        break;
-    }
-    return signals;
-  }, emptySignals());
-}
-
 function signalsForActions(actions: RunnerAction[]): SectionSignals {
   return actions.reduce<SectionSignals>((signals, action) => {
     signals.actions += 1;
@@ -373,12 +294,6 @@ function formatSignals(signals: SectionSignals): string {
 
 function emptySignals(): SectionSignals {
   return { ready: 0, manual: 0, pending: 0, blocked: 0, unknown: 0, actions: 0 };
-}
-
-function actionsForCapabilities(plan: RunnerReviewPlan | undefined, capabilityIds: CapabilityId[]): RunnerAction[] {
-  if (!plan) return [];
-  const wanted = new Set<CapabilityId>(capabilityIds);
-  return allPlanActions(plan).filter((action) => action.capabilityId && wanted.has(action.capabilityId));
 }
 
 function actionsMatching(plan: RunnerReviewPlan | undefined, predicate: (action: RunnerAction) => boolean): RunnerAction[] {

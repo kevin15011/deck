@@ -75,6 +75,7 @@ export type {
   BackupManifest,
   BackupFileEntry,
   DeveloperTeamApplyResult,
+  DeveloperTeamOperationReceipt,
   DeveloperTeamApplyAgentResult,
   DeveloperTeamVerifyResult,
   DeveloperTeamVerifySkillResult,
@@ -133,6 +134,19 @@ export type {
   RunnerVariantKey,
   RuntimeDetectionInput,
   RuntimeStatus,
+  RunnerDiagnostic,
+  RunnerLaunchBase,
+  RunnerLaunchInput,
+  RunnerLaunchPlan,
+  RunnerLaunchResult,
+  RunnerStdinPayload,
+  RunnerProjectInspection,
+  RunnerNativeMutationManifest,
+  RunnerRollbackResult,
+  RunnerBackupResult,
+  RunnerPostInstallFollowUp,
+  RunnerVerificationEvidence,
+  RunnerVerifyResult,
   CapabilityInventoryInput,
   CapabilityInventory,
   CapabilityCatalogEntry,
@@ -164,10 +178,14 @@ export type {
   RunnerPlanDiagnosticSeverity,
   RunnerDeckInstallInput,
   RunnerDeckInstallStatus,
+  RunnerUiMetadata,
 } from "./runner-adapter";
+
+export { MAX_RUNNER_STDIN_PAYLOAD_BYTES } from "./runner-adapter";
 
 // Runner-neutral skill discovery contracts and source-provider interfaces
 export * from "./skill-discovery";
+export { parseSkillDescriptor } from "./skill-discovery/discovery";
 
 // Adapter registry — CLI-side registration with runtime lookup
 export {

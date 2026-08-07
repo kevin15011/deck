@@ -13,6 +13,8 @@
  * - `deck pi developer --memory=none` → explicitly disable memory provider (default)
  */
 
+import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, type RunnerStdinPayload } from "@deck/core";
+
 export type ParsedArgs =
   | { command: "tui" }
   | { command: "doctor" }
@@ -66,6 +68,20 @@ export type ParsedArgs =
       memoryProvider?: string;
     }
   | {
+      command: "runner-launch";
+      runnerId: "codex" | "opencode";
+      teamId: "developer-team";
+      launch:
+        | { mode: "interactive" }
+        | { mode: "exec"; prompt: readonly string[]; stdin: "closed"; stdinPayload: RunnerStdinPayload }
+        | { mode: "resume-by-id"; sessionId: string }
+        | { mode: "resume-latest" };
+      installOnly?: boolean;
+      dryRun?: boolean;
+      localOnly?: boolean;
+      yes?: boolean;
+    }
+  | {
       command: "error";
       message: string;
     };
@@ -90,9 +106,72 @@ function parseBooleanFlag(value: string | undefined): boolean | undefined {
   return true;
 }
 
+/** Canonical, bounded serialization for `deck codex developer exec -- <prompt...>`. */
+export function serializeCodexExecPrompt(tokens: readonly string[]): { ok: true; payload: RunnerStdinPayload } | { ok: false; message: string } {
+  const content = tokens.join(" ");
+  if (content.includes("\0")) return { ok: false, message: "Codex exec prompts cannot contain NUL bytes." };
+  if (Buffer.byteLength(content, "utf8") > MAX_RUNNER_STDIN_PAYLOAD_BYTES) {
+    return { ok: false, message: "Codex exec prompt exceeds the supported stdin payload limit." };
+  }
+  return { ok: true, payload: { type: "utf8", content } };
+}
+
 /**
  * Parse raw CLI arguments into a structured command.
  */
+function parseCodexArgs(rest: string[]): ParsedArgs {
+  if (rest[0] !== "developer") {
+    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--local-only] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck never enables project trust; the shipped registry has no external hook-host binding, so every production route is currently static-compatible." };
+  }
+
+  const tokens = rest.slice(1);
+  const separatorIndex = tokens.indexOf("--");
+  const deckFlagRegion = separatorIndex >= 0 ? tokens.slice(0, separatorIndex) : tokens;
+  const dryRun = deckFlagRegion.includes("--dry-run");
+  const localOnly = deckFlagRegion.includes("--local-only");
+  const yes = deckFlagRegion.includes("--yes");
+  const installOnly = deckFlagRegion.includes("--install-only");
+  const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only"]);
+  const filtered = [
+    ...deckFlagRegion.filter((token) => !deckFlags.has(token)),
+    ...(separatorIndex >= 0 ? ["--", ...tokens.slice(separatorIndex + 1)] : []),
+  ];
+
+  let launch: Extract<ParsedArgs, { command: "runner-launch" }>["launch"] = { mode: "interactive" };
+  if (filtered[0] === "exec") {
+    if (filtered[1] !== "--" || filtered.length < 3) {
+      return { command: "error", message: "Usage: deck codex developer exec -- <prompt...>" };
+    }
+    const serialized = serializeCodexExecPrompt(filtered.slice(2));
+    if (!serialized.ok) return { command: "error", message: serialized.message };
+    launch = { mode: "exec", prompt: filtered.slice(2), stdin: "closed", stdinPayload: serialized.payload };
+  } else if (filtered[0] === "resume") {
+    if (filtered.length !== 2) {
+      return { command: "error", message: "Usage: deck codex developer resume <session-id> | resume --last" };
+    }
+    launch = filtered[1] === "--last"
+      ? { mode: "resume-latest" }
+      : { mode: "resume-by-id", sessionId: filtered[1]! };
+  } else if (filtered.length > 0) {
+    return { command: "error", message: `Unknown Codex developer argument: ${filtered[0]}` };
+  }
+
+  if (installOnly && launch.mode !== "interactive") {
+    return { command: "error", message: "--install-only cannot be combined with exec or resume." };
+  }
+
+  return {
+    command: "runner-launch",
+    runnerId: "codex",
+    teamId: "developer-team",
+    launch,
+    ...(installOnly ? { installOnly: true } : {}),
+    ...(dryRun ? { dryRun: true } : {}),
+    ...(localOnly ? { localOnly: true } : {}),
+    ...(yes ? { yes: true } : {}),
+  };
+}
+
 export function parseArgs(argv: string[]): ParsedArgs {
   // argv[0] is typically the runtime, argv[1] is the script
   // We skip those — the caller should pass only the user args
@@ -254,6 +333,25 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (first === "skill-registry") {
     return parseSkillRegistryArgs(rest);
+  }
+
+  if (first === "codex") {
+    return parseCodexArgs(rest);
+  }
+
+  if (first === "opencode") {
+    if (rest[0] !== "developer" || rest.some((token, index) => index > 0 && !["--yes", "--dry-run", "--install-only"].includes(token))) {
+      return { command: "error", message: "Usage: deck opencode developer [--install-only] [--dry-run] [--yes]" };
+    }
+    return {
+      command: "runner-launch",
+      runnerId: "opencode",
+      teamId: "developer-team",
+      launch: { mode: "interactive" },
+      ...(rest.includes("--install-only") ? { installOnly: true } : {}),
+      ...(rest.includes("--dry-run") ? { dryRun: true } : {}),
+      ...(rest.includes("--yes") ? { yes: true } : {}),
+    };
   }
 
   if (first !== "pi") {

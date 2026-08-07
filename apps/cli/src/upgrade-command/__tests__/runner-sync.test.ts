@@ -4,8 +4,14 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import { getDefaultDeckConfig, type RunnerAdapter } from "@deck/core";
+import { createCodexRunnerAdapter } from "@deck/adapter-codex";
 
 import {
   applyRunnerSyncToManifest,
@@ -91,8 +97,8 @@ function makeAdapter(overrides: Partial<RunnerAdapter> = {}): RunnerAdapter {
     }),
     inspectEnvironment: async () => ({}),
     reviewTools: async () => ({}),
-    backupDeveloperTeamFiles: () => ({ snapshot: "v1" }),
-    rollbackDeveloperTeamFiles: () => undefined,
+    backupDeveloperTeamFiles: () => ({ payload: { snapshot: "v1" }, diagnostics: [] }),
+    rollbackDeveloperTeamFiles: async () => ({ status: "rolled-back", conflicts: [], diagnostics: [] }),
     verifyDeveloperTeamInstall: () => ({ valid: true, diagnostics: [] }),
     resolveThinking: () => undefined,
     getDefaultThinking: () => "off",
@@ -152,7 +158,7 @@ describe("runner-sync", () => {
     expect(result.outcomes[0]?.skippedReason).toBe("not-detected");
   });
 
-  it("skips when the user has no enabled package instructions", async () => {
+  it("synchronizes base managed content when no optional package instructions are enabled", async () => {
     const adapter = makeAdapter({
       detectDeckInstall: async () => ({
         installed: true,
@@ -167,8 +173,8 @@ describe("runner-sync", () => {
       deckVersion: "1.0.0",
       runnerIds: ["opencode"],
     });
-    expect(result.outcomes[0]?.status).toBe("skipped");
-    expect(result.outcomes[0]?.skippedReason).toBe("no-selections");
+    expect(result.outcomes[0]?.status).toBe("synced");
+    expect(result.manifestEntries).toHaveLength(1);
   });
 
   it("syncs when the runner is detected and selections are enabled", async () => {
@@ -190,13 +196,69 @@ describe("runner-sync", () => {
     expect(result.manifestEntries).toHaveLength(1);
   });
 
+  it("Codex content-only sync repairs owned roles, support files, and bootstrap content with no optional selections", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-codex-sync-"));
+    const journalRoot = join(root, "journals");
+    try {
+      const adapter = createCodexRunnerAdapter({ journalRoot });
+      const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development" });
+      await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
+      const paths = [
+        ".codex/agents/deck-lead.toml",
+        ".agents/skills/idea-refine/examples.md",
+        ".agents/skills/deck-onboard/SKILL.md",
+      ];
+      const manifestPath = join(root, ".codex", "deck-manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { files: Record<string, string> };
+      const removedPath = ".agents/skills/removed-skill/reference.md";
+      await mkdir(join(root, ".agents", "skills", "removed-skill"), { recursive: true });
+      await writeFile(join(root, removedPath), "owned removed content", "utf8");
+      manifest.files[removedPath] = createHash("sha256").update("owned removed content").digest("hex");
+      for (const relativePath of paths) {
+        const path = join(root, relativePath);
+        const old = `${await readFile(path, "utf8")}\n# old-release-content\n`;
+        await writeFile(path, old, "utf8");
+        manifest.files[relativePath] = createHash("sha256").update(old).digest("hex");
+      }
+      await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+      const config = getDefaultDeckConfig();
+      for (const key of Object.keys(config.packageInstructions.codex)) config.packageInstructions.codex[key as keyof typeof config.packageInstructions.codex] = false;
+      const result = await runRunnerSync({ config, registry: makeRegistry([adapter]), projectRoot: root, deckVersion: "next", runnerIds: ["codex"] });
+      expect(result.outcomes[0]?.status).toBe("synced");
+      expect(result.outcomes[0]?.filesWritten).toEqual(expect.arrayContaining(paths));
+      for (const relativePath of paths) expect(await readFile(join(root, relativePath), "utf8")).not.toContain("old-release-content");
+      expect(existsSync(join(root, removedPath))).toBe(false);
+      expect(result.manifestRemovals).toContainEqual({ path: removedPath, owner: "runner:codex" });
+      expect(result.outcomes[0]?.diagnostics.join(" ")).not.toMatch(/install runtime|install MCP|reinstall/i);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("treats a fully current verified Codex installation as a successful no-op sync", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-codex-sync-current-"));
+    try {
+      const adapter = createCodexRunnerAdapter({ journalRoot: join(root, "journals") });
+      const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", capabilityInstructions: { instructions: [] } });
+      await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
+      const config = getDefaultDeckConfig();
+      for (const key of Object.keys(config.packageInstructions.codex)) config.packageInstructions.codex[key as keyof typeof config.packageInstructions.codex] = false;
+
+      const result = await runRunnerSync({ config, registry: makeRegistry([adapter]), projectRoot: root, deckVersion: "next", runnerIds: ["codex"] });
+      expect(result.outcomes[0]).toMatchObject({ status: "synced", filesWritten: [] });
+      expect(result.outcomes[0]?.diagnostics).not.toContainEqual(expect.stringContaining("changedCount=0"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("records the backup so the orchestrator can roll back per-runner", async () => {
     let captured: unknown;
     const adapter = makeAdapter({
       detectDeckInstall: async () => ({ installed: true, managedPaths: [] }),
       backupDeveloperTeamFiles: (plan) => {
         captured = plan;
-        return { snapshot: "BACKUP" };
+        return { payload: { snapshot: "BACKUP" }, diagnostics: [] };
       },
     });
     const config = makeConfig({ opencode: { rtk: true } });
@@ -208,7 +270,7 @@ describe("runner-sync", () => {
       runnerIds: ["opencode"],
     });
     expect(captured).toBeDefined();
-    expect(result.outcomes[0]?.adapterBackup).toEqual({ snapshot: "BACKUP" });
+    expect(result.outcomes[0]?.adapterBackup).toEqual({ payload: { snapshot: "BACKUP" }, diagnostics: [] });
   });
 
   it("marks a runner as failed when verify returns invalid", async () => {
@@ -229,6 +291,29 @@ describe("runner-sync", () => {
     });
     expect(result.outcomes[0]?.status).toBe("failed");
     expect(result.outcomes[0]?.diagnostics.join("\n")).toContain("AGENTS.md");
+  });
+
+  it("rolls back the adapter backup when apply throws after a partial mutation", async () => {
+    let rollbackCalls = 0;
+    const adapter = makeAdapter({
+      detectDeckInstall: async () => ({ installed: true, managedPaths: [] }),
+      applyDeveloperTeamInstall: async () => {
+        throw new Error("partial apply failed");
+      },
+      rollbackDeveloperTeamFiles: async () => {
+        rollbackCalls += 1;
+        return { status: "rolled-back", conflicts: [], diagnostics: [] };
+      },
+    });
+    const result = await runRunnerSync({
+      config: makeConfig(),
+      registry: makeRegistry([adapter]),
+      projectRoot: "/tmp",
+      deckVersion: "1.0.0",
+      runnerIds: ["opencode"],
+    });
+    expect(rollbackCalls).toBe(1);
+    expect(result.outcomes[0]).toMatchObject({ status: "failed", diagnostics: [expect.stringContaining("partial apply failed")] });
   });
 
   it("preserves model and memory settings (does not touch the config)", async () => {
@@ -305,5 +390,7 @@ describe("applyRunnerSyncToManifest", () => {
     );
     expect(next.files).toHaveLength(1);
     expect(next.files[0]?.path).toBe("/tmp/.config/test-runner/AGENTS.md");
+    const removed = applyRunnerSyncToManifest(next, { outcomes: [], manifestEntries: [], manifestRemovals: [{ path: file.path, owner: "runner:test-runner" }] }, "1.0.0");
+    expect(removed.files).toHaveLength(0);
   });
 });

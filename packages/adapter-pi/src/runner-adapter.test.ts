@@ -26,6 +26,23 @@ import type { OpaqueSkillInventoryResultV1 } from "@deck/core";
 import type { SerenaReadinessEvidence } from "@deck/core";
 import { discoverSkillsFromProvider } from "../../core/src/skill-discovery/discovery";
 
+describe("Pi package instruction boundary", () => {
+  test("supports the canonical package metadata and reviews only optional toggles", () => {
+    const adapter = createPiRunnerAdapter();
+    expect(adapter.packageInstructionIds).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
+    const inventory = { runnerId: "pi", environmentId: "pi-development", capabilities: [] } as any;
+    const base = { runnerId: "pi", environmentId: "pi-development", selectedCapabilities: {}, adaptiveMemory: { provider: "none" } } as const;
+
+    const enabled = adapter.buildReviewPlan({ ...base, packageInstructions: { "codebase-memory": true, "adaptive-memory": true, "code-economy": true, "pi-hud": true } } as any, inventory);
+    expect(enabled.groups.configWrites).toContainEqual(expect.objectContaining({ id: "package-instructions.pi.deck-config", kind: "write-deck-config" }));
+
+    const baselineOnly = adapter.buildReviewPlan({ ...base, packageInstructions: { "code-economy": true, "pi-hud": true } } as any, inventory);
+    expect(baselineOnly.groups.configWrites).not.toContainEqual(expect.objectContaining({ id: "package-instructions.pi.deck-config" }));
+    const installation = adapter.buildInstallationPlan({ ...base, packageInstructions: { serena: true }, selectedCapabilities: {} } as any);
+    expect(installation.steps).not.toContainEqual(expect.objectContaining({ capabilityId: "serena" }));
+  });
+});
+
 describe("Pi active-runner skill discovery provider", () => {
   test("attaches deterministic Pi-only filesystem source declarations", async () => {
     const home = tempHome();

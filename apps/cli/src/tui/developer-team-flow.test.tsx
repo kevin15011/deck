@@ -562,36 +562,6 @@ describe("Developer Team TUI screens", () => {
       expect(result).toBe("personality-selection");
     });
 
-    test("personality-selection routes to pi-preflight when Pi is selected", () => {
-      const { getNextScreenAfterPersonalitySelection } = require("../developer-team-flow");
-      const result = getNextScreenAfterPersonalitySelection({
-        selectedEnvironments: ["pi-development"],
-        hasPiCommand: true,
-        nextEnvironment: null,
-      });
-      expect(result).toBe("pi-preflight-checking");
-    });
-
-    test("personality-selection routes to pi-preflight when Pi and OpenCode are both selected", () => {
-      const { getNextScreenAfterPersonalitySelection } = require("../developer-team-flow");
-      const result = getNextScreenAfterPersonalitySelection({
-        selectedEnvironments: ["pi-development", "opencode-development"],
-        hasPiCommand: true,
-        nextEnvironment: "opencode-development",
-      });
-      expect(result).toBe("pi-preflight-checking");
-    });
-
-    test("personality-selection routes to opencode-preflight when only OpenCode is selected", () => {
-      const { getNextScreenAfterPersonalitySelection } = require("../developer-team-flow");
-      const result = getNextScreenAfterPersonalitySelection({
-        selectedEnvironments: ["opencode-development"],
-        hasPiCommand: false,
-        nextEnvironment: "opencode-development",
-      });
-      expect(result).toBe("opencode-preflight-checking");
-    });
-
     test("getNextScreenAfterEnvironmentSelection returns complete when no environments selected", () => {
       const { getNextScreenAfterEnvironmentSelection } = require("../developer-team-flow");
       const result = getNextScreenAfterEnvironmentSelection({

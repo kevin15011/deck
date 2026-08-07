@@ -422,6 +422,7 @@ type DoctorDiagnosticsDependencies = Readonly<{
   fetchReleaseDescriptor: typeof fetchReleaseDescriptor;
   memoryBinaryAvailable: typeof memoryBinaryAvailable;
   readOpenCodeMcpSection: typeof readOpenCodeMcpSection;
+  inspectCodex: (projectRoot: string) => Promise<ReadonlyArray<{ category: string; status: DoctorStatus; message: string; suggestion?: string }>>;
 }>;
 
 const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
@@ -429,7 +430,16 @@ const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
   fetchReleaseDescriptor,
   memoryBinaryAvailable,
   readOpenCodeMcpSection,
+  inspectCodex: async (projectRoot) => {
+    const { getAdapter } = await import("../runner-adapters");
+    const adapter = getAdapter("codex");
+    return adapter.diagnoseProject?.(projectRoot) ?? [];
+  },
 };
+
+function redactCodexDoctorValue(value: string): string {
+  return redact(value).replace(/\b(token|secret|credential|api[-_]?key|password)=\S+/gi, "$1=[REDACTED]");
+}
 
 async function buildBinaryUpgradeCheck(
   fetchDescriptor: typeof fetchReleaseDescriptor,
@@ -555,6 +565,7 @@ export async function runDoctorDiagnostics(
     fetchReleaseDescriptor: overrides.fetchReleaseDescriptor ?? defaultDoctorDiagnosticsDependencies.fetchReleaseDescriptor,
     memoryBinaryAvailable: overrides.memoryBinaryAvailable ?? defaultDoctorDiagnosticsDependencies.memoryBinaryAvailable,
     readOpenCodeMcpSection: overrides.readOpenCodeMcpSection ?? defaultDoctorDiagnosticsDependencies.readOpenCodeMcpSection,
+    inspectCodex: overrides.inspectCodex ?? defaultDoctorDiagnosticsDependencies.inspectCodex,
   };
   const runtimes: DoctorRuntimeResult[] = [];
   let memoryCritical = false;
@@ -597,7 +608,19 @@ export async function runDoctorDiagnostics(
       runtimes.push(checkPiRuntime(status.command!));
     } else if (status.runtime === "opencode") {
       runtimes.push(checkOpenCodeRuntime(status.command!));
-    } else if (status.runtime === "claude" || status.runtime === "codex") {
+    } else if (status.runtime === "codex") {
+      try {
+        const checks = await dependencies.inspectCodex(process.cwd());
+        runtimes.push({
+          runtimeId: "codex",
+          name: "Codex",
+          installed: true,
+          checks: checks.map((check) => ({ category: check.category, status: check.status, items: [{ status: check.status, message: redactCodexDoctorValue(check.message), ...(check.suggestion ? { suggestion: redactCodexDoctorValue(check.suggestion) } : {}) }] })),
+        });
+      } catch {
+        runtimes.push({ runtimeId: "codex", name: "Codex", installed: true, checks: [{ category: "Runtime", status: "error", items: [{ status: "error", message: "Codex diagnostics failed safely.", suggestion: "Retry doctor with a readable project configuration." }] }] });
+      }
+    } else if (status.runtime === "claude") {
       runtimes.push(checkClaudeOrCodexRuntime(status.runtime, status.installed));
     }
   }

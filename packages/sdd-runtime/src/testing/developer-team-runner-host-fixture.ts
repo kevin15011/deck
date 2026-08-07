@@ -35,7 +35,7 @@ export const RUNNER_HOST_PROTECTED_RISK_POLICY = {
   mandatoryDataLossOracleIds: [] as readonly string[],
 };
 
-export type RunnerId = "opencode" | "pi";
+export type RunnerId = "opencode" | "pi" | "codex";
 export type BridgeFactory = (options: Omit<DeveloperTeamRunnerHostBridgeOptionsV1, "runnerId">) => DeveloperTeamRunnerHostBridgeV1;
 
 function makeDossier(withFindings = true): ExecutionDossierV1 {

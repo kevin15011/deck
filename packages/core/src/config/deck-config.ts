@@ -65,6 +65,42 @@ export type PackageInstructionRunnerId = string & {};
 export const PACKAGE_INSTRUCTION_PACKAGE_IDS = ["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"] as const;
 export type PackageInstructionPackageId = (typeof PACKAGE_INSTRUCTION_PACKAGE_IDS)[number];
 
+export type PackageInstructionConfigurationMetadata = {
+  id: PackageInstructionPackageId;
+  label: string;
+  description: string;
+  configurable: boolean;
+  defaultEnabled: boolean;
+};
+
+/** Canonical package-instruction configuration order and toggle policy. */
+export const PACKAGE_INSTRUCTION_CONFIGURATION_METADATA = Object.freeze([
+  { id: "codebase-memory", label: "Codebase Memory", description: "Inject Codebase Memory usage guidance.", configurable: true, defaultEnabled: false },
+  { id: "code-economy", label: "Code Economy", description: "Always-on concise implementation guidance.", configurable: false, defaultEnabled: true },
+  { id: "context-mode", label: "Context Mode", description: "Inject Context Mode usage guidance.", configurable: true, defaultEnabled: false },
+  { id: "rtk", label: "RTK", description: "Inject RTK command guidance.", configurable: true, defaultEnabled: false },
+  { id: "adaptive-memory", label: "Adaptive Memory", description: "Inject adaptive-memory provider guidance.", configurable: true, defaultEnabled: false },
+  { id: "serena", label: "Serena", description: "Inject Serena symbolic-editing guidance.", configurable: true, defaultEnabled: false },
+] as const satisfies readonly PackageInstructionConfigurationMetadata[]);
+
+export function getConfigurablePackageInstructionMetadata(
+  supportedIds: readonly string[] = [],
+): readonly PackageInstructionConfigurationMetadata[] {
+  const supported = new Set(supportedIds);
+  return PACKAGE_INSTRUCTION_CONFIGURATION_METADATA.filter((entry) => entry.configurable && supported.has(entry.id));
+}
+
+export function normalizeSupportedPackageInstructionSelection(
+  selection: Readonly<Record<string, boolean>> | undefined,
+  supportedIds: readonly string[],
+): Record<PackageInstructionPackageId, boolean> {
+  const supported = new Set(supportedIds);
+  return Object.fromEntries(PACKAGE_INSTRUCTION_CONFIGURATION_METADATA.map((entry) => [
+    entry.id,
+    entry.configurable ? supported.has(entry.id) && selection?.[entry.id] === true : entry.defaultEnabled,
+  ])) as Record<PackageInstructionPackageId, boolean>;
+}
+
 /**
  * Validate runner keys against registered adapters.
  *
@@ -234,6 +270,7 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
     packageInstructions: {
       pi: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
       opencode: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+      codex: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
     },
     orchestratorPersonality: DEFAULT_ORCHESTRATOR_PERSONALITY,
     developerTeamExecution: {
@@ -639,11 +676,11 @@ function normalizePackageInstructionConfig(
   configPath?: string,
   options?: { registry?: AdapterRegistry },
 ): NormalizedDeckConfig["packageInstructions"] {
-  // Default: code-economy is ALWAYS true for supported runners (pi, opencode)
-  // getDefaultDeckConfig() provides defaults for pi + opencode for backward compat
+  // Default: code-economy is active for every registered first-class runner.
   const defaultResult: NormalizedDeckConfig["packageInstructions"] = {
     pi: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
     opencode: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
+    codex: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
   };
 
   if (value === undefined || value === null) {
@@ -661,8 +698,8 @@ function normalizePackageInstructionConfig(
     validateRunnerKeys(Object.keys(value), options.registry);
   }
 
-  // Normalize: start from empty object, apply provided values (any runner key allowed)
-  const result: NormalizedDeckConfig["packageInstructions"] = {};
+  // Normalize from canonical defaults so omitted registered runners retain their baseline.
+  const result: NormalizedDeckConfig["packageInstructions"] = structuredClone(defaultResult);
 
   for (const [runner, runnerValue] of Object.entries(value)) {
     if (runnerValue === undefined || runnerValue === null) {
@@ -672,7 +709,7 @@ function normalizePackageInstructionConfig(
 
     assertPlainObject(runnerValue, `packageInstructions.${runner}`, configPath);
 
-    // Initialize runner entry: code-economy is ALWAYS true for supported runners (pi, opencode)
+    // Initialize runner entry: code-economy is always the baseline.
     // Other packages default to false
     result[runner as PackageInstructionRunnerId] = {
       "codebase-memory": false,

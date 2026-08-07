@@ -45,6 +45,14 @@ For planned work, locate or create an active change under `openspec/changes/`, t
 
 ## Generated and external-tool boundaries
 
+Codex execution-hook output at `packages/adapter-codex/assets/codex/hooks/developer-team-execution.generated.js` is generated. Edit its TypeScript source and run:
+
+```bash
+bun scripts/generate-runner-execution-assets.ts
+```
+
+Never hand-edit generated runner assets. Codex changes should use focused adapter, bridge, config, runner-sync, doctor, and render-only TUI tests. Tests must inject temporary project/journal roots and must not install binaries, contact MCP providers, alter repository trust, or write to the user's home directory.
+
 Do not hand-edit generated outputs, including `packages/core/src/skills/external/content.generated.ts` and `apps/cli/src/runtime/build-info.generated.ts`; their generators and existing tests own freshness.
 
 For external development tools, use canonical upstream sources: [RTK](https://github.com/rtk-ai/rtk), [context-mode](https://github.com/mksglu/context-mode), and [codebase-memory](https://github.com/DeusData/codebase-memory-mcp). Detect RTK, context-mode, codebase-memory, and Engram by their binaries rather than guessing Pi package names. Pi-native packages remain runner-specific configuration, and OpenCode installation state must be verified from its configuration and available binaries.

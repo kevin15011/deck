@@ -6,9 +6,11 @@ import {
   type DeveloperTeamThinkingAssignments,
 } from "@deck/adapter-pi";
 import { buildDashboardSupermemorySetupUpdate } from "../app";
+import { getAdapter } from "../../runner-adapters";
 import type { NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import {
   getPiRunnerReviewPlanRunBlockDiagnostics,
+  runRunnerAction,
   runRunnerReviewPlan,
   runPiRunnerAction,
   runPiRunnerReviewPlan,
@@ -60,6 +62,51 @@ const SERENA_EVIDENCE = {
 };
 
 describe("Pi Runner dashboard action runner Supermemory safety", () => {
+  test("persists only canonical package instructions and keeps code-economy enabled", async () => {
+    const plan: PiRunnerReviewPlan = {
+      ready: true,
+      diagnostics: [],
+      groups: {
+        automaticInstalls: [],
+        manualSteps: [],
+        configWrites: [{ id: "package-instructions.codex.deck-config", kind: "write-deck-config", title: "Write package instructions", status: "ready" }],
+        teamApplications: [],
+        validations: [],
+      },
+    };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "codex",
+      packageInstructions: {
+        "codebase-memory": true,
+        "code-economy": false,
+        "adaptive-memory": true,
+        "pi-hud": true,
+      } as any,
+    });
+    const writes: NormalizedDeckConfig[] = [];
+
+    await runRunnerReviewPlan(plan, {
+      projectRoot: "/tmp/project",
+      dashboardState: state,
+      packageInstructionIds: getAdapter("codex").packageInstructionIds,
+      writeDeckConfig: (_root, config) => {
+        writes.push(config as NormalizedDeckConfig);
+        return config as NormalizedDeckConfig;
+      },
+    });
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.packageInstructions.codex).toEqual({
+      "codebase-memory": true,
+      "code-economy": true,
+      "context-mode": false,
+      rtk: false,
+      "adaptive-memory": true,
+      serena: false,
+    });
+    expect(writes[0]!.packageInstructions.codex).not.toHaveProperty("pi-hud");
+  });
+
   test("bloquea Review & Install cuando Supermemory no tiene configuración completa", async () => {
     const state = createDefaultPiRunnerDashboardState({
       adaptiveMemory: {
@@ -530,6 +577,7 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
   test("no exige ni persiste API key al escribir y validar la configuración MCP", async () => {
     const state = createDefaultPiRunnerDashboardState({
       runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
       adaptiveMemory: {
         provider: "supermemory",
         supermemory: { configured: true, hasToken: false, diagnostics: [] },
@@ -577,6 +625,86 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
 
     expect(validatorInput).toEqual({ serverName: "supermemory" });
     expect(validateResult).toMatchObject({ status: "executed" });
+  });
+});
+
+describe("dashboard post-install follow-ups", () => {
+  function teamInstallPlan(): PiRunnerReviewPlan {
+    return {
+      ready: true,
+      diagnostics: [],
+      groups: {
+        automaticInstalls: [],
+        manualSteps: [],
+        configWrites: [],
+        teamApplications: [{
+          id: "codex-developer-team",
+          kind: "apply-team-bundle",
+          title: "Apply Codex Developer Team content",
+          status: "ready",
+        }],
+        validations: [],
+      },
+    };
+  }
+
+  function reviewedState(plan: PiRunnerReviewPlan, overrides: Record<string, unknown> = {}) {
+    return createDefaultPiRunnerDashboardState({
+      runnerScope: "pi",
+      runnerUi: getAdapter("pi").ui,
+      plan,
+      planRevision: 0,
+      planGeneratedForRevision: 0,
+      operationId: "post-install-operation",
+      currentOperation: { runner: "pi", operationId: "post-install-operation", explicitlySelected: true },
+      ...overrides,
+    } as any);
+  }
+
+  test("retains user follow-ups only after a successful current team application", async () => {
+    const plan = teamInstallPlan();
+    const state = reviewedState(plan);
+    const success = await runRunnerReviewPlan(plan, {
+      projectRoot: "/tmp/project",
+      dashboardState: state,
+      installTeamBundle: async () => {
+        return {
+          results: [],
+          verificationEvidence: [{ id: "mcp:supermemory" }],
+          postInstallFollowUps: [{ id: "user-authorization", message: "Run the native authorization command when ready." }],
+        } as any;
+      },
+      operationId: "post-install-operation",
+      currentOperation: { runner: "pi", operationId: "post-install-operation", explicitlySelected: true },
+    } as any);
+    const failedPlan = teamInstallPlan();
+    const failed = await runRunnerReviewPlan(failedPlan, {
+      projectRoot: "/tmp/project",
+      dashboardState: reviewedState(failedPlan),
+      operationId: "post-install-operation",
+      currentOperation: { runner: "pi", operationId: "post-install-operation", explicitlySelected: true },
+      installTeamBundle: async () => { throw new Error("configuration apply failed"); },
+    } as any);
+    const stalePlan = teamInstallPlan();
+    let staleTeamApplications = 0;
+    const stale = await runRunnerReviewPlan(stalePlan, {
+      projectRoot: "/tmp/project",
+      dashboardState: reviewedState(stalePlan, { planRevision: 1, planGeneratedForRevision: 0 }),
+      operationId: "post-install-operation",
+      currentOperation: { runner: "pi", operationId: "post-install-operation", explicitlySelected: true },
+      installTeamBundle: async () => {
+        staleTeamApplications += 1;
+        return { results: [] } as any;
+      },
+    } as any);
+
+    expect(success).toContainEqual(expect.objectContaining({
+      status: "executed",
+      postInstallFollowUps: [{ id: "user-authorization", message: "Run the native authorization command when ready." }],
+    }));
+    expect(JSON.stringify(failed)).not.toContain("Run the native authorization command when ready.");
+    expect(JSON.stringify(stale)).not.toContain("Run the native authorization command when ready.");
+    expect(staleTeamApplications).toBe(0);
   });
 });
 

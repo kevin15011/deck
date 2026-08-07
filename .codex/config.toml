@@ -1,0 +1,34 @@
+[features]
+multi_agent = true
+# deck-codex-mcp:context-mode
+[mcp_servers.context-mode]
+command = "context-mode"
+args = ["mcp"]
+
+[mcp_servers.context-mode.tools.ctx_execute]
+approval_mode = "approve"
+
+# deck-codex-mcp:codebase-memory
+[mcp_servers.codebase-memory]
+command = "codebase-memory-mcp"
+
+[mcp_servers.codebase-memory.tools.search_code]
+approval_mode = "approve"
+
+[mcp_servers.codebase-memory.tools.trace_path]
+approval_mode = "approve"
+
+[mcp_servers.codebase-memory.tools.search_graph]
+approval_mode = "approve"
+
+[mcp_servers.codebase-memory.tools.get_code_snippet]
+approval_mode = "approve"
+
+# deck-codex-mcp:serena
+[mcp_servers.serena]
+command = "serena"
+args = ["start-mcp-server", "--project-from-cwd"]
+
+# deck-codex-mcp:supermemory
+[mcp_servers.supermemory]
+url = "https://mcp.supermemory.ai/mcp"

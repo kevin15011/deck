@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 
-export type TelemetryRunnerV1 = "opencode" | "pi";
+export type TelemetryRunnerV1 = "opencode" | "pi" | "codex";
 export type TelemetryPhaseV1 = "apply" | "verify" | "review";
 export type TelemetryRiskTierV1 = "low" | "medium" | "high" | "critical";
 export type TelemetryLaneV1 = "fast" | "guarded" | "full_sdd";

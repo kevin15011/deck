@@ -8,12 +8,16 @@
  */
 
 import { homedir } from "node:os";
-import { appendFileSync, writeFileSync, existsSync, promises as fs } from "node:fs";
+import { appendFileSync, writeFileSync, readFileSync, existsSync, mkdirSync, promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
 
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
 function log(msg: string) { if (!process.env.DECK_DEBUG) return; try { appendFileSync(LOG, `${_ts()} [opencode-adapter] ${msg}\n`); } catch {} }
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { mergeConfig } from "./config-merge";
+import { INTERNAL_OPENCODE_PACKAGE_IDS } from "./internal-opencode-packages";
+import { DEVELOPER_TEAM_LEGACY_AGENT_IDS } from "@deck/core/teams/developer/catalog";
 
 import type {
   RunnerAdapter,
@@ -70,6 +74,10 @@ import type {
 
 import {
   getModelCatalog,
+  getRunnerCapabilityMapping,
+  PACKAGE_INSTRUCTION_PACKAGE_IDS,
+  buildCapabilityInstructionBundle,
+  getConfigurablePackageInstructionMetadata,
   SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
   SKILL_DISCOVERY_SOURCE_SCHEMA,
   SKILL_DISCOVERY_V1_BOUNDS,
@@ -119,7 +127,7 @@ import {
   writeSerenaOpenCodeMcpConfig,
   type OpenCodeMcpConfigFileSystem,
 } from "./opencode-mcp-config";
-import { getUserFacingOpenCodeCapability, OPENCODE_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
+import { getUserFacingOpenCodeCapability, OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION, OPENCODE_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
 import type { CapabilityCatalogEntry } from "@deck/core";
 import { discoverModelInventory } from "./model-inventory";
 import { LastKnownGoodStore, ModelInventoryCache, buildDiscoveryFingerprint, buildLastKnownGoodScopeKey } from "./model-inventory-cache";
@@ -653,6 +661,25 @@ class OpenCodeRunnerAdapterImpl {
   readonly runnerId: RunnerId = "opencode";
   readonly displayName: string = "OpenCode";
   readonly environmentIds: readonly RunnerEnvironmentId[] = [...OPENCODE_ENVIRONMENT_IDS];
+  readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS;
+  readonly ui = {
+    environmentLabels: { "opencode-development": "OpenCode Development" },
+    dashboard: { defaultSelectedTeamIds: ["developer-team"] },
+    model: {
+      providerSource: "Providers and models come from the active OpenCode runner.",
+      missingChecks: ["~/.config/opencode/opencode.json agent model entries", "opencode models"],
+      remediation: "Run `opencode models` to confirm OpenCode can see your providers.",
+      defaultThinkingLevels: ["off", "low", "medium", "high"],
+    },
+    adaptiveMemory: {
+      supermemory: {
+        requiresExternalToken: false,
+        selectionStatus: "Supermemory selected; OpenCode will request OAuth once through /connect.",
+        configuredDiagnostics: ["OpenCode will authenticate Supermemory through native OAuth on first connection."],
+      },
+      engram: { label: "Engram", detail: "Engram enables the derived engram-memory technical action." },
+    },
+  } as const;
   readonly skillDiscovery: SkillDiscoverySourceProviderV1;
 
   #inventoryDiscovery: (request: RunnerModelDiscoveryRequest) => Promise<RunnerModelInventoryResult>;
@@ -684,12 +711,10 @@ class OpenCodeRunnerAdapterImpl {
     this.#serenaMcpWriter = options?.serenaMcpWriter;
     this.#serenaMcpFileSystem = options?.serenaMcpFileSystem;
     this.#serenaOwnedRoot = options?.serenaOwnedRoot;
-    this.#serenaOwnedRootIsExplicit = options !== undefined
-      && Object.prototype.hasOwnProperty.call(options, "serenaOwnedRoot");
+    this.#serenaOwnedRootIsExplicit = options !== undefined && Object.prototype.hasOwnProperty.call(options, "serenaOwnedRoot");
     this.#serenaConfigPath = options?.serenaConfigPath;
     this.#serenaStage = options?.serenaStage;
-    this.#inventoryDiscovery = options?.inventoryDiscovery
-      ?? createDefaultOpenCodeInventoryDiscovery(options?.productionDiscoveryDependencies);
+    this.#inventoryDiscovery = options?.inventoryDiscovery ?? createDefaultOpenCodeInventoryDiscovery(options?.productionDiscoveryDependencies);
     const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
     this.skillDiscovery = createOpenCodeSkillDiscoveryProvider({
       configDir,
@@ -786,6 +811,7 @@ class OpenCodeRunnerAdapterImpl {
           toolId: capability.toolId,
           source: capability.source,
           installKind: capability.installKind as CapabilityCatalogEntry["installKind"],
+          supportStatus: getRunnerCapabilityMapping(cap.capabilityId, this.runnerId, [OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION])?.status,
           isInstalled: cap.installed,
           isBlocked: cap.status === "blocked",
           diagnostics: cap.diagnostics,
@@ -806,6 +832,7 @@ class OpenCodeRunnerAdapterImpl {
           requirementLevel: "required",
           source: entry.source,
           installKind: "opencode-plugin" as const,
+          supportStatus: getRunnerCapabilityMapping(entry.capabilityId as string, this.runnerId, [OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION])?.status,
           isInstalled: entry.installed,
           isBlocked: (entry.status as string) === "blocked",
           diagnostics: entry.diagnostics,
@@ -873,7 +900,13 @@ class OpenCodeRunnerAdapterImpl {
         } : undefined,
       } : undefined,
       teams: state.teams as Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }> | undefined,
-      packageInstructions: state.packageInstructions ? { [state.runnerId]: state.packageInstructions as any } : undefined,
+      packageInstructions: {
+        [state.runnerId]: buildCapabilityInstructionBundle(
+          getConfigurablePackageInstructionMetadata(this.packageInstructionIds)
+            .filter((entry) => state.packageInstructions[entry.id] === true)
+            .map((entry) => entry.id),
+        ),
+      },
       runtime: { toolsReview },
     };
     log(`buildReviewPlan: calling buildOpenCodeRunnerReviewPlan`);
@@ -931,38 +964,22 @@ class OpenCodeRunnerAdapterImpl {
       ? this.#toolsReview({ projectRoot: process.cwd(), runnerId: this.runnerId, environmentId: state.environmentId })
       : this.#toolsReview ?? reviewOpenCodeTools();
 
-    // Determine selected tool IDs based on packageInstructions or defaults
-    const runnerScope = state.runnerId;
-    const packageInstructions = state.packageInstructions;
-
-    // Map package instructions to selected tool IDs
-    let selectedToolIds: string[] = OPENCODE_INSTALLABLE_TOOLS
+    // Package-instruction toggles control prompt composition only. Tool installation
+    // remains driven by the adapter's install catalog and explicit tool selection.
+    const selectedToolIds = OPENCODE_INSTALLABLE_TOOLS
       .filter((tool) => tool.id !== "serena")
       .map((tool) => tool.id);
-
-    // If we have package instructions, use those to determine selection
-    if (packageInstructions && typeof packageInstructions === "object") {
-      const opencodeInstructions = (packageInstructions as unknown as Record<string, Record<string, boolean>>)[runnerScope];
-      if (opencodeInstructions) {
-        selectedToolIds = Object.entries(opencodeInstructions)
-          .filter(([, enabled]) => enabled)
-          .map(([id]) => id)
-          .filter((id) => id !== "serena");
-      }
-    }
-
     if (hasExplicitSerenaDashboardSelection(state)) selectedToolIds.push("serena");
 
     const plan = buildOpenCodeInstallationPlan({ tools: toolsReview.tools, selectedToolIds });
-
-    const steps: InstallationStep[] = plan.map((tool) => ({
-      action: "install" as const,
-      tool: tool.module,
-      reason: `${tool.name} is selected for installation`,
-      capabilityId: tool.id,
-    }));
-
-    return { steps };
+    return {
+      steps: plan.map((tool) => ({
+        action: "install" as const,
+        tool: tool.module,
+        reason: `${tool.name} is selected for installation`,
+        capabilityId: tool.id,
+      })),
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -1351,6 +1368,27 @@ class OpenCodeRunnerAdapterImpl {
     return getTeamsForEnvironment(environmentId);
   }
 
+  buildLaunchPlan(input: import("@deck/core").RunnerLaunchInput): import("@deck/core").RunnerLaunchResult {
+    if (input.mode !== "interactive") {
+      return {
+        status: "unsupported",
+        code: `opencode-${input.mode}-unsupported`,
+        diagnostics: [{ code: "unsupported-launch-mode", severity: "error", message: "OpenCode compatibility launch currently supports interactive mode only." }],
+      };
+    }
+    return {
+      status: "ready",
+      plan: {
+        command: "opencode",
+        args: [input.projectRoot],
+        cwd: input.projectRoot,
+        stdio: "inherit",
+        stdin: "inherit",
+      },
+      diagnostics: [],
+    };
+  }
+
   // -------------------------------------------------------------------------
   // Model catalog and assignments
   // -------------------------------------------------------------------------
@@ -1427,11 +1465,34 @@ class OpenCodeRunnerAdapterImpl {
       capabilityInstructions: input.capabilityInstructions,
       standaloneSkills,
     });
-    const files: Array<{ path: string; content: string; kind: "skill" | "standalone-skill"; skillId: string; packagePath: string }> = [
-      ...nativePlan.skills.map((skill) => ({ path: skill.relativePath, content: skill.content, kind: "skill" as const, skillId: skill.agent.skillId, packagePath: "SKILL.md" })),
-      ...nativePlan.standaloneSkills.map((skill) => ({ path: skill.relativePath, content: skill.content, kind: "standalone-skill" as const, skillId: skill.skillId, packagePath: skill.packagePath })),
+    const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
+    const configPath = join(configDir, "opencode.json");
+    let blocked = false;
+    const diagnostics: string[] = [];
+    let existingConfig: Record<string, unknown> = {};
+    if (existsSync(configPath)) {
+      try { existingConfig = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>; }
+      catch { blocked = true; diagnostics.push("Existing opencode.json is malformed; exact preview is unavailable and apply is blocked."); }
+    }
+    const mergedConfig = mergeConfig(existingConfig, nativePlan.agentEntries, [...INTERNAL_OPENCODE_PACKAGE_IDS], [...DEVELOPER_TEAM_LEGACY_AGENT_IDS]);
+    const plannedFiles: Array<{ path: string; absolutePath: string; content: string; kind: import("@deck/core").DeveloperTeamInstallFile["kind"]; skillId?: string; packagePath?: string }> = [
+      { path: "opencode.json", absolutePath: configPath, content: JSON.stringify(mergedConfig, null, 2), kind: "other" },
+      ...nativePlan.skills.map((skill) => ({ path: skill.relativePath, absolutePath: skill.absolutePath, content: skill.content, kind: "skill" as const, skillId: skill.agent.skillId, packagePath: "SKILL.md" })),
+      ...nativePlan.standaloneSkills.map((skill) => ({ path: skill.relativePath, absolutePath: skill.absolutePath, content: skill.content, kind: "standalone-skill" as const, skillId: skill.skillId, packagePath: skill.packagePath })),
+      ...(nativePlan.executionPlugin ? [{ path: nativePlan.executionPlugin.relativePath, absolutePath: nativePlan.executionPlugin.absolutePath, content: nativePlan.executionPlugin.content, kind: "other" as const }] : []),
+      ...nativePlan.promptGenerationPlan.map((file) => ({ path: relative(configDir, file.absolutePath), absolutePath: file.absolutePath, content: file.content, kind: "prompt" as const })),
+      ...nativePlan.commandGenerationPlan.map((file) => ({ path: relative(configDir, file.absolutePath), absolutePath: file.absolutePath, content: file.content, kind: "command" as const })),
     ];
-    const plan: RunnerDeveloperTeamInstallPlan = { files };
+    const digest = (content: string) => createHash("sha256").update(content).digest("hex");
+    const files: import("@deck/core").DeveloperTeamInstallFile[] = plannedFiles.map(({ absolutePath: _absolutePath, ...file }) => file);
+    const mutationPreview = plannedFiles.filter((file) => !existsSync(file.absolutePath) || readFileSync(file.absolutePath, "utf8") !== file.content).map((file) => ({
+      action: existsSync(file.absolutePath) ? "update" as const : "create" as const,
+      path: file.absolutePath,
+      preimage: existsSync(file.absolutePath) ? digest(readFileSync(file.absolutePath, "utf8")) : "absent",
+      postimage: digest(file.content),
+      ownership: "opencode-native-plan",
+    }));
+    const plan: RunnerDeveloperTeamInstallPlan = { files, mutationPreview, blocked, diagnostics };
     this.#planBindings.set(plan, {
       nativePlan,
       validation: {
@@ -1582,14 +1643,16 @@ class OpenCodeRunnerAdapterImpl {
   // Team file backup/restore
   // -------------------------------------------------------------------------
 
-  backupDeveloperTeamFiles(plan: unknown): unknown {
+  backupDeveloperTeamFiles(plan: unknown): import("@deck/core").RunnerBackupResult {
     const binding = this.#planBindings.get(plan as RunnerDeveloperTeamInstallPlan);
     if (!binding) throw new Error("The supplied developer-team plan was not built by this adapter instance.");
-    return backupDeveloperTeamFiles(binding.nativePlan);
+    return { payload: backupDeveloperTeamFiles(binding.nativePlan), diagnostics: [] };
   }
 
-  rollbackDeveloperTeamFiles(backup: unknown): void {
-    rollbackDeveloperTeamFiles(backup as Parameters<typeof rollbackDeveloperTeamFiles>[0]);
+  async rollbackDeveloperTeamFiles(backup: unknown): Promise<import("@deck/core").RunnerRollbackResult> {
+    const payload = (backup as import("@deck/core").RunnerBackupResult).payload;
+    rollbackDeveloperTeamFiles(payload as Parameters<typeof rollbackDeveloperTeamFiles>[0]);
+    return { status: "rolled-back", conflicts: [], diagnostics: [] };
   }
 
   // -------------------------------------------------------------------------

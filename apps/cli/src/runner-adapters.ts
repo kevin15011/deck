@@ -2,7 +2,7 @@
  * CLI adapter registry composition root.
  *
  * This file is the SOLE place that imports concrete adapter packages
- * (@deck/adapter-pi, @deck/adapter-opencode). It wires them into the
+ * (@deck/adapter-pi, @deck/adapter-opencode, @deck/adapter-codex). It wires them into the
  * AdapterRegistry so that app.tsx can use getAdapter() without any
  * runner-specific knowledge.
  *
@@ -13,6 +13,7 @@
 import { createAdapterRegistry, type AdapterRegistry } from "@deck/core";
 import { createPiRunnerAdapter } from "@deck/adapter-pi";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
+import { createCodexRunnerAdapter } from "@deck/adapter-codex";
 
 /**
  * Singleton registry instance for use by getAdapter() and listAdapters().
@@ -32,15 +33,17 @@ function _getDefaultRegistry(): AdapterRegistry {
  *
  * Call this once in main.tsx and pass the resulting registry to DeckApp.
  */
-export function createDefaultAdapterRegistry(): AdapterRegistry {
+export type DefaultAdapterRegistryOptions = {
+  pi?: Parameters<typeof createPiRunnerAdapter>[0];
+  opencode?: Parameters<typeof createOpenCodeRunnerAdapter>[0];
+  codex?: Parameters<typeof createCodexRunnerAdapter>[0];
+};
+
+export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOptions = {}): AdapterRegistry {
   const registry = createAdapterRegistry();
-
-  // Register Pi runner adapter
-  registry.register("pi", createPiRunnerAdapter());
-
-  // Register OpenCode runner adapter
-  registry.register("opencode", createOpenCodeRunnerAdapter());
-
+  registry.register("pi", createPiRunnerAdapter(options.pi));
+  registry.register("opencode", createOpenCodeRunnerAdapter(options.opencode));
+  registry.register("codex", createCodexRunnerAdapter(options.codex));
   return registry;
 }
 

@@ -6,6 +6,8 @@ import {
   getPiRunnerDashboardToggleAction,
 } from "./input-handler";
 import { createDefaultPiRunnerDashboardState } from "./state";
+import { getAdapter } from "../../runner-adapters";
+import { getDashboardSectionSummaries, getToggleablePackageInstructionIds, type CapabilityResolver } from "./selectors";
 
 const inventory: PiRunnerCapabilityInventory = {
   "context-mode": { capabilityId: "context-mode", status: "missing", runnerScope: "pi", installed: false, toolId: "context-mode", source: "npm:context-mode", diagnostics: [] },
@@ -36,18 +38,40 @@ describe("Pi Runner dashboard input mapping", () => {
     }
   });
 
-  test("space/enter togglea pi-hud desde Packages detail (no visual helpers)", () => {
-    // REQ-DASH-002: Runner UI/visual helpers merged into Packages section
-    // REQ-DASH-001: Mermaid not present; pi-hud is toggled from packages-detail
-    let state = createDefaultPiRunnerDashboardState({ screen: "packages-detail", cursor: 4 }); // cursor 4 = pi-hud (after serena at cursor 3)
-    const action = getPiRunnerDashboardToggleAction(state);
-    expect(action).toEqual({ type: "toggle-capability", capabilityId: "pi-hud" });
+  test("Pi, OpenCode, and Codex expose the same five package-instruction toggles", () => {
+    const expected = ["codebase-memory", "context-mode", "rtk", "adaptive-memory", "serena"] as const;
+    for (const runnerId of ["pi", "opencode", "codex"] as const) {
+      const adapter = getAdapter(runnerId);
+      const resolver: CapabilityResolver = {
+        getSupportedPackageInstructionIds: () => adapter.packageInstructionIds ?? [],
+      };
+      const state = createDefaultPiRunnerDashboardState({ runnerScope: runnerId, screen: "packages-detail" });
+      expect(getToggleablePackageInstructionIds(state, resolver)).toEqual([...expected]);
+      expect(getDashboardSectionSummaries(state, resolver)[0]).toMatchObject({ totalCount: 5, selectedCount: 0 });
+    }
+  });
+
+  test("package input toggles packageInstructions without selecting runtime capabilities", () => {
+    const adapter = getAdapter("pi");
+    const resolver: CapabilityResolver = {
+      getSupportedPackageInstructionIds: () => adapter.packageInstructionIds ?? [],
+    };
+    let state = createDefaultPiRunnerDashboardState({ screen: "packages-detail", cursor: 0 });
+    const selectedBefore = state.selectedCapabilities["codebase-memory"];
+    const action = getPiRunnerDashboardToggleAction(state, resolver);
+    expect(action).toEqual({ type: "toggle-package-instruction", packageId: "codebase-memory" });
 
     state = reduce(state, action!);
-    expect(state.selectedCapabilities["pi-hud"]).toBe(true);
+    expect(state.packageInstructions["codebase-memory"]).toBe(true);
+    expect(state.selectedCapabilities["codebase-memory"]).toBe(selectedBefore);
+  });
 
-    const enterEffect = getPiRunnerDashboardContinueEffect(state, { inventory });
-    expect(enterEffect).toEqual({ type: "dispatch", action: { type: "toggle-capability", capabilityId: "pi-hud" } });
+  test("synthetic adapter support is intersected with canonical package metadata order", () => {
+    const resolver: CapabilityResolver = {
+      getSupportedPackageInstructionIds: () => ["serena", "code-economy", "rtk", "codebase-memory"],
+    };
+    const state = createDefaultPiRunnerDashboardState({ runnerScope: "synthetic", screen: "packages-detail" });
+    expect(getToggleablePackageInstructionIds(state, resolver)).toEqual(["codebase-memory", "rtk", "serena"]);
   });
 
   test("seleccionar Supermemory abre setup y bloquea ejecución hasta configurar", () => {
@@ -60,7 +84,12 @@ describe("Pi Runner dashboard input mapping", () => {
 
     if (setupEffect.type === "select-supermemory-and-open-setup") state = reduce(state, setupEffect.action);
     state = reduce(state, { type: "enter-review", inventory });
-    state = { ...state, cursor: 0 };
+    state = {
+      ...state,
+      cursor: 0,
+      plan: { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } },
+      planGeneratedForRevision: state.planRevision,
+    };
 
     expect(getPiRunnerDashboardContinueEffect(state, { inventory, canRunPlan: false })).toEqual({
       type: "block-review-install",
@@ -71,6 +100,21 @@ describe("Pi Runner dashboard input mapping", () => {
   test("OpenCode selecciona Supermemory con OAuth nativo sin pedir API key", () => {
     const state = createDefaultPiRunnerDashboardState({
       runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
+      screen: "adaptive-memory-detail",
+      cursor: 2,
+    });
+
+    expect(getPiRunnerDashboardContinueEffect(state, { inventory })).toEqual({
+      type: "dispatch",
+      action: { type: "select-adaptive-memory", provider: "supermemory" },
+    });
+  });
+
+  test("Codex selects Supermemory with native OAuth and never requests an external token", () => {
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "codex",
+      runnerUi: getAdapter("codex").ui,
       screen: "adaptive-memory-detail",
       cursor: 2,
     });
@@ -90,8 +134,53 @@ describe("Pi Runner dashboard input mapping", () => {
     expect(getPiRunnerDashboardContinueEffect(createDefaultPiRunnerDashboardState({ screen: "developer-team-detail", cursor: 1 }), { inventory })).toEqual({ type: "reuse-developer-team-model-config" });
     expect(getPiRunnerDashboardContinueEffect(createDefaultPiRunnerDashboardState({ screen: "developer-team-detail", cursor: 2 }), { inventory })).toEqual({ type: "dispatch", action: { type: "back" } });
 
-    const reviewState = createDefaultPiRunnerDashboardState({ screen: "review-plan", cursor: 0 });
+    const reviewState = createDefaultPiRunnerDashboardState({
+      screen: "review-plan",
+      cursor: 0,
+      plan: { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } },
+      planGeneratedForRevision: 0,
+    });
     expect(getPiRunnerDashboardContinueEffect(reviewState, { inventory, canRunPlan: true })).toEqual({ type: "dispatch", action: { type: "start-install" } });
     expect(getPiRunnerDashboardContinueEffect(reviewState, { inventory, canRunPlan: false }).type).toBe("block-review-install");
+  });
+
+  test("allows reviewed static-compatible gaps while keeping their diagnostic visible", () => {
+    const reviewState = createDefaultPiRunnerDashboardState({
+      runnerScope: "codex",
+      runnerUi: getAdapter("codex").ui,
+      screen: "review-plan",
+      cursor: 0,
+      plan: {
+        ready: true,
+        diagnostics: [{
+          code: "static-compatible-gap:trusted-runner-host-bridge",
+          severity: "warning",
+          message: "Trusted Runner Host Bridge remains a static-compatible Codex gap.",
+        }],
+        groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
+      },
+      planGeneratedForRevision: 0,
+    });
+
+    expect(getPiRunnerDashboardContinueEffect(reviewState, { inventory, canRunPlan: true }))
+      .toEqual({ type: "dispatch", action: { type: "start-install" } });
+  });
+
+  test("does not dispatch installation for a non-ready review plan even when an external caller says it can run", () => {
+    const reviewState = createDefaultPiRunnerDashboardState({
+      screen: "review-plan",
+      cursor: 0,
+      plan: {
+        ready: false,
+        diagnostics: [{ code: "codex-runtime-unsupported", severity: "error", message: "Codex 0.144.0 is below the supported version." }],
+        groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
+      },
+      planGeneratedForRevision: 0,
+    });
+
+    expect(getPiRunnerDashboardContinueEffect(reviewState, { inventory, canRunPlan: true })).toEqual({
+      type: "block-review-install",
+      status: "Codex 0.144.0 is below the supported version.",
+    });
   });
 });

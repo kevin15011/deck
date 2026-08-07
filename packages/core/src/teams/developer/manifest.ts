@@ -64,7 +64,8 @@ export interface ManifestBuildResult {
 export type DeveloperTeamModelAssignmentOverride = {
   agentId: string;
   modelId: string;
-  reasoning?: ReasoningLevel;
+  /** Exact runner-advertised effort key; dynamic runners are not closed unions. */
+  reasoning?: string;
 };
 
 // ---------------------------------------------------------------------------

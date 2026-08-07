@@ -33,8 +33,8 @@ describe("RunnerCapabilities core types", () => {
     });
 
     test("ReasoningLevel covers all expected levels", () => {
-      const levels: ReasoningLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
-      expect(levels).toHaveLength(6);
+      const levels: ReasoningLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+      expect(levels).toHaveLength(8);
     });
 
     test("ModelCatalogEntry has required fields", () => {

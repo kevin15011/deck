@@ -1,13 +1,13 @@
 import type { RunnerModelDiscoveryRequest } from "@deck/core";
 
-export type OpenCodeDiscoveryIdentity = {
-  runtime: "opencode" | "pi";
+export type OpenCodeDiscoveryIdentity<Runtime extends "opencode" | "codex" = "opencode"> = {
+  runtime: Runtime;
   projectRoot: string;
 };
 
-export type OpenCodeDiscoveryCoordinator<State> = {
+export type OpenCodeDiscoveryCoordinator<State, Runtime extends "opencode" | "codex" = "opencode"> = {
   start(
-    request: RunnerModelDiscoveryRequest & { runtime: "opencode" },
+    request: RunnerModelDiscoveryRequest & { runtime: Runtime },
     apply: (state: State) => void,
   ): Promise<boolean>;
 };
@@ -21,15 +21,15 @@ export function getOpenCodeDiscoveryAction(
 }
 
 /** Applies only the newest discovery result for the active runner/project. */
-export function createOpenCodeDiscoveryCoordinator<State>({
+export function createOpenCodeDiscoveryCoordinator<State, Runtime extends "opencode" | "codex" = "opencode">({
   discover,
   getActiveIdentity,
   loadingState,
 }: {
   discover: (request: RunnerModelDiscoveryRequest) => Promise<State>;
-  getActiveIdentity: () => OpenCodeDiscoveryIdentity;
+  getActiveIdentity: () => OpenCodeDiscoveryIdentity<Runtime>;
   loadingState: State;
-}): OpenCodeDiscoveryCoordinator<State> {
+}): OpenCodeDiscoveryCoordinator<State, Runtime> {
   let generation = 0;
 
   return {

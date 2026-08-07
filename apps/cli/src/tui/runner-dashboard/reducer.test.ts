@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildPiRunnerReviewPlan, type PiRunnerCapabilityInventory } from "@deck/adapter-pi";
 import { reduce, type PlanBuilderFn } from "./reducer";
 import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan, type RunnerDashboardState } from "./state";
+import { getAdapter } from "../../runner-adapters";
 
 const piPlanBuilder: PlanBuilderFn = (state, inventory) => buildPiRunnerReviewPlan(state as any, inventory as PiRunnerCapabilityInventory);
 
@@ -60,6 +61,34 @@ function allActionIds(plan: PiRunnerReviewPlan | undefined): string[] {
 }
 
 describe("Pi Runner dashboard reducer", () => {
+  test("tracks an operation for an arbitrary registered runner identity", () => {
+    const state = reduce(createDefaultPiRunnerDashboardState(), {
+      type: "set-runner",
+      runnerScope: "atlas",
+      operationId: "atlas-operation-1",
+    });
+
+    expect(state.currentOperation).toEqual({
+      runner: "atlas",
+      operationId: "atlas-operation-1",
+      explicitlySelected: false,
+    });
+  });
+
+  test("uses adapter-owned memory behavior for an arbitrary runner identity", () => {
+    const nativeOAuthUi = getAdapter("opencode").ui!;
+    const state = reduce(createDefaultPiRunnerDashboardState({
+      runnerScope: "atlas",
+      runnerUi: { ...nativeOAuthUi, environmentLabels: { "atlas-development": "Atlas Development" } },
+      screen: "adaptive-memory-detail",
+      backStack: ["dashboard"],
+    }), { type: "select-adaptive-memory", provider: "supermemory" });
+
+    expect(state.screen).toBe("dashboard");
+    expect(state.adaptiveMemory.supermemory).toMatchObject({ configured: true, hasToken: false });
+    expect(state.adaptiveMemory.status).toContain("OAuth");
+  });
+
   test("keeps Serena explicit authorization separate from defaults and config state", () => {
     const state = createDefaultPiRunnerDashboardState({
       operationId: "pi-operation-1",
@@ -262,6 +291,7 @@ describe("Pi Runner dashboard reducer", () => {
   test("OpenCode prepara Supermemory para OAuth nativo y vuelve al dashboard", () => {
     let state = createDefaultPiRunnerDashboardState({
       runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
       screen: "adaptive-memory-detail",
       backStack: ["dashboard"],
     });
@@ -317,6 +347,24 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.plan?.groups.automaticInstalls.some((action) => action.capabilityId === "context-mode")).toBe(true);
   });
 
+  test("contains plan-builder failures in a non-ready plan and never starts installation", () => {
+    const failingPlanBuilder: PlanBuilderFn = () => {
+      throw new Error("adapter inventory contract mismatch");
+    };
+    let state = createDefaultPiRunnerDashboardState({ cursor: 3 });
+
+    state = reduce(state, { type: "enter-review", inventory: {} }, failingPlanBuilder);
+
+    expect(state.screen).toBe("review-plan");
+    expect(state.plan).toMatchObject({
+      ready: false,
+      diagnostics: [{ code: "plan-build-failed", severity: "error" }],
+    });
+
+    state = reduce(state, { type: "start-install" }, failingPlanBuilder);
+    expect(state.screen).toBe("review-plan");
+  });
+
   test("toggle-package-instruction actualiza packageInstructions y invalida plan", () => {
     let state = createDefaultPiRunnerDashboardState();
     const initialRevision = state.planRevision;
@@ -347,6 +395,12 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.packageInstructions.rtk).toBe(false);
 
     expect(state.plan).toBeUndefined();
+  });
+
+  test("rejects baseline and non-package IDs at the reducer boundary", () => {
+    const state = createDefaultPiRunnerDashboardState();
+    expect(reduce(state, { type: "toggle-package-instruction", packageId: "code-economy" } as any)).toBe(state);
+    expect(reduce(state, { type: "toggle-package-instruction", packageId: "pi-hud" } as any)).toBe(state);
   });
 
   test("packageInstructions es independiente de selectedCapabilities", () => {

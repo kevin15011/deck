@@ -137,6 +137,9 @@ const ready = {
 async function mountDiscovery(discover: (request: any) => Promise<any>, resolveProjectRoot: () => string) {
   const { DeckApp } = await import("./app");
   const adapter = {
+    runnerId: "opencode",
+    displayName: "OpenCode",
+    environmentIds: ["opencode-development"],
     getSelectableTools: () => [],
     getTeams: () => [{ id: "developer-team", name: "Developer Team" }],
     readModelAssignments: () => ({}),

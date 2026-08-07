@@ -1,4 +1,9 @@
-import { getCanonicalCapability, type RunnerCapabilitySupportStatus } from "@deck/core";
+import {
+  defineRunnerCapabilityContribution,
+  getCanonicalCapability,
+  type RunnerCapabilityMapping,
+  type RunnerCapabilitySupportStatus,
+} from "@deck/core";
 import type { InstallablePiToolId } from "./installation-plan";
 
 /**
@@ -307,7 +312,7 @@ export function getUserFacingCapability(
 export function resolveToCanonicalCapabilityId(
   capabilityId: CapabilityId,
 ): string | undefined {
-  const canonical = getCanonicalCapability(capabilityId);
+  const canonical = getCanonicalCapability(capabilityId, [PI_RUNNER_CAPABILITY_CONTRIBUTION]);
   return canonical?.id;
 }
 
@@ -326,3 +331,51 @@ export function validatePiCapabilityMapping(capabilityId: CapabilityId): boolean
   // All other capabilities must exist in the canonical registry
   return resolveToCanonicalCapabilityId(capabilityId) !== undefined;
 }
+
+const protectedControlMappings = [
+  "trusted-runner-host-bridge",
+  "invocation-authorization",
+  "execution-dossier",
+  "controlled-effects",
+  "registry-coordination",
+  "bound-verification",
+].map((capabilityId): RunnerCapabilityMapping => ({
+  capabilityId,
+  runnerId: "pi",
+  status: "supported",
+  adapterSource: "@deck/adapter-pi",
+  installKind: "native-extension-bridge",
+}));
+
+export const PI_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityContribution({
+  runnerId: "pi",
+  capabilities: [
+    { id: "pi-orchestrator-prompt-persistence", label: "Orchestrator Prompt Persistence", category: "prompts-profiles", requirement: "required", userFacing: false, requiredSurfaces: ["prompt-profile"] },
+    { id: "pi-mermaid", label: "Pi Mermaid", category: "runner-silent-packages", requirement: "internal-required", userFacing: false },
+    { id: "pi-hud", label: "Pi HUD", category: "packages", requirement: "optional", userFacing: true },
+  ],
+  mappings: [
+    ...protectedControlMappings,
+    { capabilityId: "code-economy", runnerId: "pi", status: "supported", adapterSource: "@deck/adapter-pi", installKind: "native-instruction-composition", provisionMode: "native-instruction-composition", parityChecks: ["instruction-bundle-present"] },
+    { capabilityId: "context-mode", runnerId: "pi", status: "shared", adapterSource: "context-mode", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["context-mode"], mcpServerNames: ["context-mode"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall"] },
+    { capabilityId: "codebase-memory", runnerId: "pi", status: "shared", adapterSource: "codebase-memory-mcp", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall"] },
+    { capabilityId: "codebase-memory-mcp", runnerId: "pi", status: "shared", adapterSource: "codebase-memory-mcp", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present"] },
+    { capabilityId: "rtk", runnerId: "pi", status: "shared", adapterSource: "rtk", installKind: "shared-binary", provisionMode: "reuse-shared-binary", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall"] },
+    { capabilityId: "serena", runnerId: "pi", status: "shared", adapterSource: "serena", installKind: "python-tool", provisionMode: "python-tool", detectors: { commands: ["serena"], mcpServerNames: ["serena"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
+    { capabilityId: "context7", runnerId: "pi", status: "shared", adapterSource: "@upstash/context7-mcp", installKind: "npm-package-plus-mcp", provisionMode: "npm-package-plus-mcp", detectors: { mcpServerNames: ["context7"] }, parityChecks: ["mcp-config-present"] },
+    { capabilityId: "supermemory-tool-bindings", runnerId: "pi", status: "shared", adapterSource: "supermemory", installKind: "mcp-server", provisionMode: "mcp-server", detectors: { mcpServerNames: ["supermemory"] }, parityChecks: ["mcp-config-present"] },
+    { capabilityId: "pi-orchestrator-prompt-persistence", runnerId: "pi", status: "supported", adapterSource: "pi-team-profile", installKind: "manual", provisionMode: "profile-prompt", parityChecks: ["instruction-bundle-present"] },
+    { capabilityId: "pi-mermaid", runnerId: "pi", status: "runner-specific", adapterSource: "pi-mermaid", installKind: "internal-required", provisionMode: "internal-required" },
+    { capabilityId: "pi-hud", runnerId: "pi", status: "gap", adapterSource: "pi-hud", installKind: "user-optional", provisionMode: "user-optional" },
+    { capabilityId: "opencode-primary-orchestrator", runnerId: "pi", status: "not-applicable", adapterSource: "@deck/adapter-pi", provisionMode: "foreign-runner-capability" },
+    { capabilityId: "opencode-mermaid", runnerId: "pi", status: "not-applicable", adapterSource: "@deck/adapter-pi", provisionMode: "foreign-runner-capability" },
+    { capabilityId: "opencode-mermaid-renderer", runnerId: "pi", status: "not-applicable", adapterSource: "@deck/adapter-pi", provisionMode: "foreign-runner-capability" },
+    { capabilityId: "deck-model-variants", runnerId: "pi", status: "not-applicable", adapterSource: "@deck/adapter-pi", provisionMode: "foreign-runner-capability" },
+    { capabilityId: "deck-setup", runnerId: "pi", status: "supported", adapterSource: "deck-setup", installKind: "npm-package", provisionMode: "npm-package" },
+  ],
+});
+
+export const PI_ADAPTER_CAPABILITY_DISPOSITIONS = Object.freeze([
+  { capabilityId: "engram", status: "provider-selected" },
+  { capabilityId: "pi-hud", status: "gap", installKind: "user-optional" },
+] as const);

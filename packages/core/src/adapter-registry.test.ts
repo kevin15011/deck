@@ -78,11 +78,11 @@ function createMockAdapter(
     async reviewTools() {
       return {};
     },
-    backupDeveloperTeamFiles(_plan: unknown) {
-      return {};
+  backupDeveloperTeamFiles(_plan: unknown) {
+      return { payload: {}, diagnostics: [] };
     },
-    rollbackDeveloperTeamFiles(_backup: unknown) {
-      // noop
+    async rollbackDeveloperTeamFiles(_backup: unknown) {
+      return { status: "rolled-back" as const, conflicts: [], diagnostics: [] };
     },
     verifyDeveloperTeamInstall(_plan: unknown) {
       return { valid: true, diagnostics: [] as readonly string[] };

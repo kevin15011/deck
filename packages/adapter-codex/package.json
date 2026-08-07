@@ -1,0 +1,14 @@
+{
+  "name": "@deck/adapter-codex",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@deck/core": "workspace:*",
+    "@deck/sdd-runtime": "workspace:*",
+    "toml-eslint-parser": "1.0.3"
+  }
+}
