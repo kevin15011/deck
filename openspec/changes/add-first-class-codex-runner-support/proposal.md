@@ -34,7 +34,7 @@ A user can select Codex in Deck, review its capabilities, safely materialize the
 - Requiring Codex app-server for normal interactive/exec launch. It MAY be used for the trusted execution bridge only if Phase 0 proves a stable released contract.
 - Depending on unreleased or emerging plugin manifests or lifecycle hooks. A stable released surface MAY be selected for the required trusted bridge.
 - Automatically trusting a repository.
-- Automatically weakening sandbox or approval policy.
+- Persisting sandbox or approval-policy changes outside the explicitly approved `deck codex developer` launch policy.
 - Persisting credentials in project files.
 - Mutating global `~/.codex/config.toml` by default.
 - Claiming dynamic model discovery without a stable tested interface.
@@ -73,6 +73,7 @@ These defaults are recommended but require confirmation before Apply:
 2. Initial memory support includes no provider and Supermemory. Engram is reported as deferred until verified.
 3. A first-class release requires trusted Codex runner-host enforcement. If no stable released Codex surface can provide it, Deck may expose only an explicitly approved `static-compatible` beta with protected controls unavailable.
 4. Direct Codex commands never mutate silently: when changes are needed they show a plan and require interactive confirmation; non-interactive mutation requires explicit `--yes`.
+5. Every non-install-only `deck codex developer` launch passes `--dangerously-bypass-approvals-and-sandbox` automatically. This user-approved policy intentionally removes Codex command approvals and sandboxing for this route; Deck does not persist the override in global or project Codex configuration.
 
 ## Risks and mitigations
 
@@ -85,6 +86,7 @@ These defaults are recommended but require confirmation before Apply:
 | Existing runner behavior regresses | Migrate through additive contracts and focused Pi/OpenCode regression tests. |
 | Codex prompts claim controls that are not enforced | Gate first-class status on the runner-host bridge; static-compatible content and doctor output remove enforcement claims. |
 | Secrets enter project files or diagnostics | Use environment references, redact diagnostics, and forbid credentials in managed TOML. |
+| Always-on bypass permits unrestricted Codex effects without approval prompts | Scope the bypass only to `deck codex developer`, expose an explicit warning in plans/diagnostics/docs, never persist the setting, and keep the route `static-compatible`; the user accepted the residual risk on 2026-08-10. |
 | Rollback destroys later edits | Use pre/post hashes and optimistic rollback conflicts. |
 | Dual abstractions continue indefinitely | Set a one-release removal boundary for the compatibility projection and parallel CLI registry. |
 
@@ -105,7 +107,7 @@ These defaults are recommended but require confirmation before Apply:
 - Exec and supported resume modes have deterministic launch plans and exit behavior.
 - Native Codex roles, skills, and Deck instructions are available without overwriting unrelated content.
 - MCP and shared binaries are reused and verified where possible.
-- Project trust, sandbox, approval policy, and credentials remain under user/Codex control.
+- Project trust and credentials remain under user/Codex control. Sandbox and approval defaults remain unchanged persistently, while `deck codex developer` intentionally applies the approved per-launch bypass.
 - Capability gaps are explicit for deferred or unsupported behavior.
 - Codex appears as supported in doctor and TUI rather than as a placeholder.
 - Pi and OpenCode remain green across focused and broad verification.

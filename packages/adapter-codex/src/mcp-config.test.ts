@@ -14,6 +14,45 @@ describe("Codex MCP semantic configuration", () => {
     expect(merged.content).toContain("[mcp_servers.user]");
   });
 
+  test("serializes the portable Deck Serena proxy without user-specific paths or shell", () => {
+    const desired = buildCodexMcpServers({ packageIds: ["serena"], memoryProvider: "none", serenaLauncherAvailable: true, serenaProxyAvailable: true });
+    const merged = mergeCodexMcpServers("", desired.servers);
+
+    expect(desired.gaps).toEqual([]);
+    expect(merged).toMatchObject({ status: "updated" });
+    expect(merged.content).toContain('command = "deck"');
+    expect(merged.content).toContain('args = ["internal", "serena-mcp"]');
+    expect(merged.content).toContain('env_vars = ["HOME", "PATH", "XDG_DATA_HOME"]');
+    expect(merged.content).not.toMatch(/\/home\/dev|serena\/bin|\$\{|sh -c/);
+  });
+
+
+  test("migrates marker-owned bare and absolute Serena entries but blocks unmanaged collisions", () => {
+    const desired = buildCodexMcpServers({
+      packageIds: ["serena"],
+      memoryProvider: "none",
+      serenaLauncherAvailable: true,
+      serenaProxyAvailable: true,
+    });
+    const legacySources = [
+      '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand = "serena"\nargs = ["start-mcp-server", "--context", "ide", "--project-from-cwd"]\n',
+      '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand = "/legacy/user/tools/serena/bin/serena"\nargs = ["start-mcp-server", "--context", "ide", "--project-from-cwd"]\n',
+    ];
+
+    for (const source of legacySources) {
+      const migrated = mergeCodexMcpServers(source, desired.servers);
+      expect(migrated).toMatchObject({ status: "updated" });
+      expect(migrated.content).toContain('command = "deck"');
+      expect(migrated.content).not.toContain("/legacy/user");
+    }
+
+    const unmanaged = mergeCodexMcpServers(
+      '[mcp_servers.serena]\ncommand = "/user-owned/serena"\nargs = ["serve"]\n',
+      desired.servers,
+    );
+    expect(unmanaged).toMatchObject({ status: "blocked", collisions: ["serena"] });
+  });
+
   test("is semantically idempotent and blocks same-ID collisions", () => {
     const desired = buildCodexMcpServers({ packageIds: ["context-mode"], memoryProvider: "none" });
     const first = mergeCodexMcpServers("", desired.servers);

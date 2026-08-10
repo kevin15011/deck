@@ -26,7 +26,7 @@ Codex interactive, exec, resume-by-ID, and resume-latest routes are all classifi
 |---|---|
 | `static-compatible` | Native roles, skills, instructions, and launch are available, but host-enforced execution controls are not proven for that route. |
 
-Deck never changes Codex trust, sandbox, approval, provider, profile, or telemetry security settings. The public Codex adapter installs no hook asset/config and exposes no callback-based first-class promotion API.
+Deck never changes Codex trust, provider, profile, or telemetry security settings, and it never persists sandbox or approval-policy changes. The sole exception is an always-on per-process launch policy: every non-install-only Codex Developer Team route passes `--dangerously-bypass-approvals-and-sandbox` before its Codex subcommand. Sandboxing and command approvals are disabled for that process, so Codex may modify or delete files and run commands without approval; launch preview and Doctor report this high-risk policy. The public Codex adapter installs no hook asset/config and exposes no callback-based first-class promotion API.
 
 Codex MCP configuration supports verified stdio and streamable HTTP entries. Context7 credentials remain environment references only. Supermemory uses credential-free project configuration: after Deck successfully applies and verifies its MCP entry, the user may run `codex mcp login supermemory` when ready. Deck never executes that command, opens a browser, captures a token, or stores OAuth credentials. Secret values do not enter project TOML, previews, diagnostics, or reports. Engram remains an explicit gap.
 

@@ -10,6 +10,8 @@ import {
   createDefaultSerenaBootstrapEffects,
   createSerenaReadinessRevalidator,
   redactSerenaDiagnostic,
+  resolveExistingSerenaReadiness,
+  resolveDefaultDeckDataRoot,
   resolveSerenaOwnedRoot,
   type SerenaBootstrapEffects,
   type SerenaBootstrapRequest,
@@ -144,6 +146,11 @@ function request(
 }
 
 describe("serena bootstrap Core service", () => {
+  it("resolves the Deck Serena root from XDG_DATA_HOME with a safe home fallback", () => {
+    expect(resolveDefaultDeckDataRoot({ XDG_DATA_HOME: "/tmp/xdg-data" }, "/home/tester")).toBe("/tmp/xdg-data/deck");
+    expect(resolveDefaultDeckDataRoot({ XDG_DATA_HOME: "relative" }, "/home/tester")).toBe("/home/tester/.local/share/deck");
+  });
+
   it("uses the production default seam for a valid selected request", async () => {
     const controller = new AbortController();
     // Abort before the first effect: the default composition is selected, but
@@ -314,6 +321,19 @@ describe("serena bootstrap Core service", () => {
         fingerprint: "serena-fp",
       },
     });
+    expect(state.calls.fetches).toHaveLength(0);
+    expect(state.calls.processes).toHaveLength(0);
+    expect(state.calls.directories).toHaveLength(0);
+  });
+
+  it("reads a healthy Deck-owned Serena launcher without authorization, installation, or a long-lived MCP process", async () => {
+    const { effects, state } = makeEffects();
+    state.inspections.set(SERENA_PATH, [readyInspection(SERENA_PATH, "serena-fp")]);
+    state.probes.push({ state: "ready", resolvedPath: SERENA_PATH, fingerprint: "serena-fp" });
+
+    const result = await resolveExistingSerenaReadiness(effects);
+
+    expect(result).toMatchObject({ state: "ready", evidence: { resolvedExecutablePath: SERENA_PATH, source: "existing-deck-tool" } });
     expect(state.calls.fetches).toHaveLength(0);
     expect(state.calls.processes).toHaveLength(0);
     expect(state.calls.directories).toHaveLength(0);

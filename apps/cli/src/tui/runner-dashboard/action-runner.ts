@@ -605,7 +605,7 @@ function getSerenaActionContext(
   const operation = dependencies.currentOperation ?? state?.currentOperation;
   const operationId = dependencies.operationId ?? state?.operationId ?? operation?.operationId;
 
-  if (runner !== "pi" && runner !== "opencode") return { error: "Serena requires a selected runner operation." };
+  if (runner !== "pi" && runner !== "opencode" && runner !== "codex") return { error: "Serena requires a selected runner operation." };
   if (!operation || operation.runner !== runner || operation.operationId !== operationId || operation.explicitlySelected !== true) {
     return { error: "Serena requires explicit selection in the current runner operation." };
   }
@@ -627,7 +627,7 @@ function getSerenaActionContext(
     context: {
       projectRoot: dependencies.projectRoot ?? "",
       runnerId: runner,
-      environmentId: runner === "pi" ? "pi-development" : "opencode-development",
+      environmentId: `${runner}-development`,
       operationId: operation.operationId,
       operation: serenaOperation,
       currentOperation: serenaOperation,

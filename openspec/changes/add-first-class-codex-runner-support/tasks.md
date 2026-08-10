@@ -47,7 +47,7 @@ Keep one implementation owner through the first functional Codex candidate (Phas
 
 - Add discriminated interactive, exec, resume-by-ID, and resume-latest input types plus ready/unsupported/blocked results to `packages/core/src/runner-adapter.ts`.
 - Define allowlisted environment overlays, sensitive-key redaction, bounded capture, stdin behavior, and exit/signal outcomes.
-- Do not expose sandbox or approval override strings in the initial contract.
+- Keep sandbox and approval override strings out of caller-controlled contracts; model the approved Codex bypass as one fixed adapter-owned launch policy.
 - Keep launch optional during migration.
 - Add contract tests for ready, blocked, interactive, and captured-output plans.
 
@@ -170,11 +170,11 @@ Keep one implementation owner through the first functional Codex candidate (Phas
 
 - Build interactive, exec, resume-by-ID, and resume-latest plans only when supported.
 - Map explicit model/reasoning selections.
-- Omit sandbox and approval overrides by default.
+- Emit the exact fixed `--dangerously-bypass-approvals-and-sandbox` token once for every supported Codex Developer Team launch mode and expose a high-risk warning.
 - Return `unsupported` separately from policy/environment `blocked` diagnostics.
 - Keep the candidate classified `static-compatible` until Task 4.1 proves trusted host enforcement.
 
-**Verification:** Argument-order, feature-gating, unknown-reasoning, and no-dangerous-default tests pass.
+**Verification:** Argument-order, feature-gating, unknown-reasoning, exact dangerous-policy placement/cardinality, warning, and cross-runner isolation tests pass.
 
 ### Task 3.2: Route `deck codex developer`
 

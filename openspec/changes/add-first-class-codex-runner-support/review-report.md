@@ -109,6 +109,34 @@ Final model-rehydration findings: Blocker 0, High 0, Medium 0, advisory 0. The c
 
 Quality confirmed the upstream limitation: Codex 0.146 has no OpenCode-style Tab selector or native `--agent` flag for the root session. The final Deck launch uses a bounded static developer-instruction override rather than a synthetic user prompt or auto-spawned Lead child. New interactive/exec roots receive Lead behavior plus persisted model/reasoning; resume routes remain untouched.
 
-Review covered valid TOML/config grammar, bounded non-secret bootstrap text, exact stdin-only exec prompts, option-shaped/quoted/newline/NUL/oversized input, EPIPE and redaction, generic executor closure, no prompt leakage, no dangerous overrides or global writes, static-compatible claims, and Pi/OpenCode compatibility. An initial review found inherited-stdin input could produce a structurally invalid ready exec plan; Apply normalized all deterministic Codex exec plans to the generic executable stdin contract.
+Review covered valid TOML/config grammar, bounded non-secret bootstrap text, exact stdin-only exec prompts, option-shaped/quoted/newline/NUL/oversized input, EPIPE and redaction, generic executor closure, no prompt leakage, no global writes, static-compatible claims, and Pi/OpenCode compatibility. Its historical conclusion that no dangerous override existed was explicitly superseded by the user-approved 2026-08-10 always-on bypass amendment. An initial review found inherited-stdin input could produce a structurally invalid ready exec plan; Apply normalized all deterministic Codex exec plans to the generic executable stdin contract.
 
 Final direct-Lead findings: Blocker 0, High 0, Medium 0, advisory 0. The candidate remains approved for user acceptance.
+
+## Always-on dangerous Codex launch policy delta review
+
+Quality reviewed the user-approved policy as a protected security delta. The first pass found that an option-shaped model value could duplicate the reserved token and that install-only dry-run omitted policy disclosure. Apply added strict scalar checks, a final exact-cardinality/position invariant, persisted-assignment rejection, and a runner-neutral static policy diagnostic.
+
+The final review confirmed exact token placement/cardinality for all four modes, stdin-only same-string prompts, install-only no-spawn behavior, process-local scope, no project/global persistence, warning/Doctor/docs coverage, static-compatible classification, trust preservation, root Lead behavior, resume non-reinjection, prompt bounds/redaction, and Pi/OpenCode isolation.
+
+Bypass delta findings: Blocker 0, High 0, Medium 0, advisory 0. Delta correctness is approved.
+
+Overall candidate findings remain: two inherited materialization blockers—marker text accepted without manifest-backed ownership and unowned-byte drift/comment loss during removal—plus the previously catalogued Medium backlog. Therefore the overall decision is CHANGES REQUESTED and the branch is not ready for push, merge, or release.
+
+## Shared Serena launcher delta review
+
+Quality confirmed that Codex now reuses the same Core/Deck private Serena installation as OpenCode and Pi, blocks broken configuration, provisions only through an authorized Core action, repairs only legacy Deck-managed entries, and revalidates launcher/config readiness during apply and verify. The initial absolute project serialization reviewed here was later rejected as non-portable and is superseded by the portable proxy review below. No global PATH change or unnecessary reinstall occurs.
+
+The first review found that Doctor built a plan before refreshing Serena readiness and that independent inventories could retain stale evidence. Apply reordered Doctor composition and made public inspections fresh while keeping operation-local one-use evidence bounded. Final probes confirmed consistent healthy/missing Doctor states, ready→missing and missing→ready transitions, exact resolver counts, and no redundant bootstrap.
+
+The tracked `deck-release-publish` skill now has valid Codex YAML frontmatter and passes governance parsing.
+
+Serena/frontmatter delta findings: Blocker 0, High 0, Medium 0, advisory 0. Delta correctness is approved. Overall merge/release remains blocked only by inherited materialization ownership/byte-preservation findings and existing backlog.
+
+## Portable Serena proxy pre-commit review
+
+Pre-commit Quality rejected the intermediate absolute project path and found missing Serena preparation at several plan call sites. Apply replaced the project entry with the portable hidden Deck proxy, added an explicit `full | content-only` planning scope, routed normal call sites through one prepare/build contract, and kept content-only sync/backup free of runtime/MCP/config effects. Public inventory now requires a fresh effective-proxy probe. Parent-targeted signal forwarding and a 2-second compiled-binary startup bound were added after adversarial review and real smoke evidence.
+
+Current project config and manifest were regenerated transactionally using a temporary current Linux binary on PATH. They contain no home path and the committed proxy bytes are portable across user directories, subject to the documented requirement that the effective Deck binary supports `internal serena-mcp`.
+
+Portable Serena delta findings: Blocker 0, High 0, Medium 0, advisory 0 after repair. Commit checkpoint is acceptable for this delta once final Git hygiene passes. Overall merge/release remains blocked by inherited marker-ownership and unowned-byte-preservation findings.

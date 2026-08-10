@@ -168,6 +168,7 @@ export type {
   RunnerActionRunResult,
   ModelCatalogContext,
   DeveloperTeamAdapterInstallInput,
+  DeveloperTeamMaterializationScope,
   RunnerMcpConfigInput,
   RunnerMcpConfigResult,
   FlowState,
@@ -181,7 +182,7 @@ export type {
   RunnerUiMetadata,
 } from "./runner-adapter";
 
-export { MAX_RUNNER_STDIN_PAYLOAD_BYTES } from "./runner-adapter";
+export { MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan } from "./runner-adapter";
 
 // Runner-neutral skill discovery contracts and source-provider interfaces
 export * from "./skill-discovery";

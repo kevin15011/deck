@@ -131,7 +131,7 @@ Final rehydration gates:
 
 Because Codex 0.146 has no native root-agent selector, Deck now uses a bounded static developer-instruction bootstrap for new Developer Team interactive and exec sessions. The root starts with Lead behavior and the verified persisted Lead model/reasoning without requiring a user role-selection prompt. The mechanism remains explicitly instruction-level and static-compatible.
 
-Interactive launch contains no positional bootstrap or synthetic user turn. Exec uses `codex exec -` with a bounded typed stdin payload; user text is absent from argv, environment, previews, and diagnostics. Every ready exec plan normalizes to the generic executable stdin contract. Resume routes preserve existing sessions without reinjection. Option-injection, NUL, size, EPIPE, capture, redaction, trust, sandbox, and approval boundaries remain intact.
+Interactive launch contains no positional bootstrap or synthetic user turn. Exec uses `codex exec -` with a bounded typed stdin payload; user text is absent from argv, environment, previews, and diagnostics. Every ready exec plan normalizes to the generic executable stdin contract. Resume routes preserve existing sessions without reinjection. Option-injection, NUL, size, EPIPE, capture, redaction, and trust boundaries remain intact. The sandbox/approval conclusion in this historical verification was explicitly superseded by the user-approved 2026-08-10 always-on bypass amendment.
 
 Final direct-Lead gates:
 
@@ -141,3 +141,54 @@ Final direct-Lead gates:
 - `bun run build`: passed for all four release targets.
 - `git diff --check`: passed.
 - Independent Quality: approved with no findings.
+
+## Always-on dangerous Codex launch policy delta
+
+The amended REQ-CDX-RUN-005 is implemented for interactive, exec, resume-by-ID, and resume-latest. Every ready plan contains the fixed bypass token exactly once at argv position zero. Final invariants reject reserved-token aliases and all option-shaped argv-producing model/reasoning values, including unsafe persisted role assignments. Exec prompts remain stdin-only, and installation never persists the policy.
+
+Install-only remains no-plan/no-spawn. Its dry-run preview receives the same high-risk future-launch disclosure through a runner-neutral adapter policy diagnostic. Pi and OpenCode do not receive the token or warning. Doctor and public docs disclose the scope and consequence.
+
+Final bypass gates:
+
+- Focused final security evidence: 110 passed, 0 failed, plus adversarial plan probes for all four modes.
+- `bun test --timeout 30000`: 4365 passed, 0 failed; 17,563 assertions; 274 files.
+- `bunx tsc --noEmit`: passed.
+- `bun run build`: passed for all four release targets.
+- `git diff --check`: passed.
+- OpenSpec validation: 0 errors, 0 warnings.
+- Delta correctness: PASS.
+
+Overall verification remains blocked for release by the independently reproduced marker-ownership and unowned-byte-preservation violations and the existing Medium backlog. These are inherited findings, not regressions introduced by the bypass delta.
+
+## Shared Serena launcher and release-skill frontmatter delta
+
+Codex now consumes Core's canonical Deck-owned Serena readiness evidence instead of assuming a PATH command. The initial absolute project serialization recorded in this section was rejected by pre-commit portability review and is superseded by the portable proxy evidence below. Missing/unusable evidence blocks configuration unless an explicitly authorized Core provisioning action succeeds. Apply and verify revalidate launcher reachability and configuration semantics; independent inventory/Doctor calls refresh readiness, while one operation reuses bounded one-use evidence.
+
+Final Serena gates:
+
+- Focused final Quality evidence: 158 passed, 0 failed, plus independent Doctor, freshness, one-operation, canonical-argv, collision, and frontmatter probes.
+- `bun test --timeout 30000`: 4373 passed, 0 failed; 17,606 assertions; 274 files.
+- `bunx tsc --noEmit`: passed.
+- `bun run build`: passed for all four release targets.
+- `git diff --check`: passed.
+- Serena delta correctness: PASS with no finding.
+
+Overall release verification remains blocked by the inherited materialization ownership and byte-preservation findings.
+
+## Portable Serena proxy and content-only composition delta
+
+Commit-eligible Codex config now contains no user-specific launcher path. It invokes the stable hidden Deck proxy with fixed arguments and inherited environment-name declarations. The proxy resolves Core's private Serena runtime read-only, forwards inherited stdio/signals, never shells out or bootstraps, and is included in compiled binaries. Exact proxy capability is bounded and mandatory for readiness.
+
+Normal planning uses a shared prepare-and-build contract. Content-only synchronization and backup explicitly skip runtime preparation and preserve existing config bytes/hash without adopting drift or rewriting runtime state. Full managed migration converts legacy bare/absolute entries to the portable proxy; unowned collisions remain blocked.
+
+Final portable Serena gates:
+
+- Focused implementation evidence: 617 passed before timeout repair; 270 passed for bounded compiled-probe repair.
+- `bun test --timeout 30000`: 4387 passed, 0 failed; 17,665 assertions; 275 files.
+- `bunx tsc --noEmit`: passed.
+- `bun run build`: passed for all four release targets.
+- Extracted Linux x64 release archive: `internal serena-mcp --probe` returned `deck-serena-mcp-proxy-v1`.
+- Current portable project config/manifest hashes are consistent; diff scan found no secret or absolute home path.
+- `git diff --check`: passed.
+
+Overall release verification remains blocked only by separately inherited materialization ownership and unowned-byte-preservation findings/backlog.

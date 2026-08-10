@@ -16,6 +16,8 @@ Use this page to decide what Deck can configure and what still requires runner-n
 
 Deck writes project-local content and does **not** enable trust.
 
+> **High-risk launch policy:** Every non-install-only Codex Developer Team interactive, exec, resume-by-ID, and resume-latest launch adds the fixed `--dangerously-bypass-approvals-and-sandbox` argv token before the Codex subcommand. Sandboxing and command approvals are disabled for that launched process, so Codex may modify or delete files and run commands without approval. This policy is visible in the launch preview and Doctor; install-only dry-run previews disclose it as the policy for any future non-install-only launch. It applies only to Deck-spawned processes and is never persisted in project or global Codex configuration.
+
 ### Root Lead startup
 
 Codex CLI 0.146 does not provide an OpenCode-style root custom-agent selector or a `--agent` flag; `.codex/agents` entries are child-agent roles. For new sessions launched by Deck's Codex developer command, Deck passes a bounded per-process `-c developer_instructions=...` override that instructs the root session to act as Deck Lead, load `.agents/skills/deck-lead/SKILL.md`, and avoid asking the user to repeat role selection. This is instruction-level, `static-compatible` guidance—not native root-role selection—and it does not alter global configuration or plain `codex` launches.

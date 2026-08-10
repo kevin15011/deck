@@ -138,6 +138,28 @@ describe("RunnerAdapter interface contracts", () => {
     expect(_check).toBe(true);
   });
 
+  it("should allow optional static launch-policy diagnostics", () => {
+    type RunnerAdapter = import("../runner-adapter").RunnerAdapter;
+    type HasLaunchPolicyDiagnostics = RunnerAdapter extends {
+      getLaunchPolicyDiagnostics?: () => readonly import("../runner-adapter").RunnerDiagnostic[];
+    }
+      ? true
+      : false;
+    const _check: HasLaunchPolicyDiagnostics = true;
+    expect(_check).toBe(true);
+  });
+
+  it("should allow optional asynchronous install prerequisite preparation", () => {
+    type RunnerAdapter = import("../runner-adapter").RunnerAdapter;
+    type HasPreparationMethod = RunnerAdapter extends {
+      prepareDeveloperTeamInstall?: (input: import("../runner-adapter").DeveloperTeamAdapterInstallInput) => Promise<readonly import("../runner-adapter").RunnerDiagnostic[]>;
+    }
+      ? true
+      : false;
+    const _check: HasPreparationMethod = true;
+    expect(_check).toBe(true);
+  });
+
   it("should allow optional getModelInventory method", () => {
     // getModelInventory is optional - adapters can implement dynamic discovery incrementally.
     type RunnerAdapter = import("../runner-adapter").RunnerAdapter;

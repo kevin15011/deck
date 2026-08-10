@@ -87,7 +87,7 @@ import {
   type NormalizedDeckConfig,
   type PackageInstructionConfigurationMetadata,
 } from "@deck/core/config/deck-config";
-import { buildCapabilityInstructionBundle, getEnabledPackageInstructionIds } from "@deck/core";
+import { buildCapabilityInstructionBundle, getEnabledPackageInstructionIds, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
 import type {
   RunnerModelDiscoveryRequest,
   RunnerModelInventory,
@@ -1439,7 +1439,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             getEnabledSupportedPackageInstructionIds(adapter, enabledIds),
           );
 
-          const plan = adapter.buildDeveloperTeamInstallPlan({
+          const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
             projectRoot,
             environmentId,
             modelAssignments: options?.modelAssignments,
@@ -1709,7 +1709,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
       const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
 
-      const plan = adapter.buildDeveloperTeamInstallPlan({
+      const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
         projectRoot,
         environmentId,
         modelAssignments,
@@ -2223,7 +2223,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
         // Generar y aplicar plan vía adapter (el adapter lee assignments internamente)
         const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
-        const plan = adapter.buildDeveloperTeamInstallPlan({
+        const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
           projectRoot,
           environmentId,
           capabilityInstructions: bundle,
@@ -2994,7 +2994,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     const environmentId = adapter.environmentIds[0];
     if (!environmentId) throw new Error(`Runner ${adapter.runnerId} has no registered environment.`);
 
-    const plan = adapter.buildDeveloperTeamInstallPlan({
+    const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
       projectRoot,
       environmentId,
       modelAssignments,

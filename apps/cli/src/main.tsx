@@ -8,6 +8,7 @@ import { runPiLaunch } from "./pi-launch-command";
 import { resolveProjectRoot } from "./project-root";
 import { createDefaultAdapterRegistry } from "./runner-adapters";
 import { createNodeRunnerProcessEffects, runRunnerLaunch } from "./runner-launch-command";
+import { INTERNAL_SERENA_MCP_PROBE_TOKEN, runInternalSerenaMcp } from "./internal-serena-mcp";
 import { DeckApp } from "./tui/app";
 import { ScreenFrame } from "./tui/screen-frame";
 import { HomeScreen } from "./tui/screens/home-screen";
@@ -22,6 +23,19 @@ const parsed = parseArgs(userArgs);
 if (parsed.command === "error") {
   console.error(parsed.message);
   process.exit(1);
+}
+
+if (parsed.command === "internal-serena-mcp") {
+  if (parsed.probe) {
+    console.log(INTERNAL_SERENA_MCP_PROBE_TOKEN);
+    process.exit(0);
+  }
+  const result = await runInternalSerenaMcp();
+  if (result.signal) {
+    process.kill(process.pid, result.signal);
+    process.exit(1);
+  }
+  process.exit(result.exitCode);
 }
 
 if (parsed.command === "doctor") {

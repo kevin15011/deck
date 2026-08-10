@@ -280,3 +280,102 @@ events:
     registry_write: reconciled-by-orchestrator
     notes:
       - "Final direct Codex root Lead launch review found no blocker, High, Medium, or advisory finding."
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-08-10"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User explicitly selected the always-on `--dangerously-bypass-approvals-and-sandbox` policy after an informed warning."
+      - "OpenSpec launch and security requirements were amended before implementation."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-10"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Implemented one fixed process-local bypass token for every supported non-install-only Codex Developer Team launch mode."
+      - "Added exact cardinality/position invariants, option-shaped assignment rejection, and runner-neutral install-only dry-run disclosure."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-10"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Always-on bypass full suite passed 4365/4365; typecheck and four-target build passed."
+      - "Delta verification passed, while inherited materialization blockers remain open."
+  - phase: review
+    status: changes_requested
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-08-10"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Always-on bypass delta approved with no finding after repair."
+      - "Overall candidate remains changes-requested because inherited marker-ownership and byte-preservation blockers remain open."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-10"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Made Codex reuse Core's validated absolute Deck-owned Serena launcher and canonical MCP arguments."
+      - "Added valid Codex YAML frontmatter to the tracked project-local release skill."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-10"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Serena/frontmatter full suite passed 4373/4373; typecheck and four-target build passed."
+      - "Delta verification passed, while inherited materialization blockers remain open."
+  - phase: review
+    status: changes_requested
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-08-10"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Serena/frontmatter delta approved with no finding after Doctor/freshness repair."
+      - "Overall candidate remains changes-requested because inherited marker-ownership and byte-preservation blockers remain open."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-10"
+    actor: deck-apply-deep
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Replaced non-portable absolute Serena project configuration with the hidden portable Deck proxy."
+      - "Added full/content-only planning scopes, complete call-site preparation, signal forwarding, and bounded proxy probing."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-10"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Portable Serena full suite passed 4387/4387; typecheck, four-target build, and packaged Linux proxy smoke passed."
+  - phase: review
+    status: changes_requested
+    event: review.failed
+    artifact: review-report.md
+    timestamp: "2026-08-10"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Portable Serena delta repaired the pre-commit High findings."
+      - "Overall candidate remains changes-requested because inherited marker-ownership and byte-preservation blockers remain open."

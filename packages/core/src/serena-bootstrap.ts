@@ -227,6 +227,18 @@ export type SerenaReadinessRevalidator = (
   evidence: SerenaReadinessEvidence,
 ) => SerenaReadinessValidationResult | Promise<SerenaReadinessValidationResult>;
 
+/** Read-only resolution of the exact Deck-owned Serena launcher. */
+export type SerenaExistingReadinessResult =
+  | Readonly<{
+      state: "ready";
+      evidence: SerenaReadinessEvidence;
+      revalidate: SerenaReadinessRevalidator;
+    }>
+  | Readonly<{
+      state: "missing" | "unusable" | "indeterminate";
+      diagnostic: SafeDiagnostic;
+    }>;
+
 export type SerenaMcpWriteStatus = "created" | "updated" | "unchanged";
 
 export type SerenaMcpWriteResult =
@@ -316,13 +328,19 @@ function isProtectedSystemPath(path: string): boolean {
   return PROTECTED_SYSTEM_ROOTS.some((root) => isContained(path, root));
 }
 
-function defaultDeckDataRoot(): string {
-  const home = homedir();
-  const configuredDataHome = process.env.XDG_DATA_HOME;
+export function resolveDefaultDeckDataRoot(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  home = homedir(),
+): string {
+  const configuredDataHome = environment.XDG_DATA_HOME;
   const dataHome = configuredDataHome && configuredDataHome.startsWith("/") && !hasUnsafeCharacters(configuredDataHome)
     ? configuredDataHome
     : join(home, ".local", "share");
   return join(dataHome, "deck");
+}
+
+function defaultDeckDataRoot(): string {
+  return resolveDefaultDeckDataRoot();
 }
 
 /**
@@ -1659,6 +1677,53 @@ export async function resolveSerenaOwnedRoot(
 ): Promise<string | undefined> {
   const resolution = await resolveSerenaOwnedRootForOperation(effects, signal);
   return resolution.ok ? resolution.ownedRoot : undefined;
+}
+
+/**
+ * Read and probe only the canonical Deck-owned launcher. This deliberately
+ * requires no operation authorization because it cannot create directories,
+ * install Serena, or write runner configuration.
+ */
+export async function resolveExistingSerenaReadiness(
+  effects: SerenaBootstrapEffects = defaultSerenaBootstrapEffects,
+  signal: AbortSignal = new AbortController().signal,
+): Promise<SerenaExistingReadinessResult> {
+  const resolution = await resolveSerenaOwnedRootForOperation(effects, signal);
+  if (!resolution.ok) {
+    return {
+      state: "indeterminate",
+      diagnostic: resolution.result.outcome === "failed"
+        ? resolution.result.diagnostic
+        : { code: "serena-indeterminate", message: "Deck-owned Serena readiness could not be determined." },
+    };
+  }
+  const paths = makeOwnedPaths(resolution.ownedRoot);
+  const readiness = await readSerenaReadiness(
+    effects,
+    paths,
+    paths.serenaPath,
+    signal,
+    { signal },
+    "existing-deck-tool",
+  );
+  if (readiness.kind === "ready") {
+    return {
+      state: "ready",
+      evidence: readiness.evidence,
+      revalidate: createSerenaReadinessRevalidator(resolution.ownedRoot, effects),
+    };
+  }
+  if (readiness.kind === "missing") {
+    return { state: "missing", diagnostic: { code: "serena-not-ready", message: "The Deck-owned Serena launcher is not ready." } };
+  }
+  return {
+    state: readiness.result.outcome === "failed" && readiness.result.code.includes("indeterminate")
+      ? "indeterminate"
+      : readiness.result.outcome === "failed" ? "unusable" : "indeterminate",
+    diagnostic: readiness.result.outcome === "failed"
+      ? readiness.result.diagnostic
+      : { code: "serena-indeterminate", message: "Deck-owned Serena readiness could not be determined." },
+  };
 }
 
 /** Build the immediate same-path/fingerprint verifier used before an MCP writer. */

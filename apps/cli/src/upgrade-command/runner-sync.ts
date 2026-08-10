@@ -34,6 +34,7 @@ import type { NormalizedDeckConfig } from "@deck/core";
 import {
   buildCapabilityInstructionBundle,
   getEnabledPackageInstructionIds,
+  prepareAndBuildDeveloperTeamInstallPlan,
   type CapabilityInstructionBundle,
   type CapabilityInstructionPackageId,
 } from "@deck/core";
@@ -173,10 +174,11 @@ export async function runRunnerSync(
     const bundle: CapabilityInstructionBundle = buildCapabilityInstructionBundle(enabledIds);
 
     // 4. Plan → backup → apply → verify.
-    const plan: RunnerDeveloperTeamInstallPlan = safeBuildPlan(adapter, {
+    const plan: RunnerDeveloperTeamInstallPlan = await safeBuildPlan(adapter, {
       projectRoot,
       environmentId: (adapter.environmentIds[0] ?? "opencode-development") as never,
       capabilityInstructions: bundle,
+      materializationScope: "content-only",
     });
 
     const adapterBackup = safeBackup(adapter, plan);
@@ -331,17 +333,18 @@ async function safeDetect(
   }
 }
 
-function safeBuildPlan(
+async function safeBuildPlan(
   adapter: RunnerAdapter,
   input: {
     projectRoot: string;
     environmentId: never;
     capabilityInstructions: CapabilityInstructionBundle;
+    materializationScope: "content-only";
   },
-): RunnerDeveloperTeamInstallPlan {
+): Promise<RunnerDeveloperTeamInstallPlan> {
   try {
-    return adapter.buildDeveloperTeamInstallPlan(input as never);
-  } catch (err) {
+    return (await prepareAndBuildDeveloperTeamInstallPlan(adapter, input as never)).plan;
+  } catch {
     return { files: [] };
   }
 }

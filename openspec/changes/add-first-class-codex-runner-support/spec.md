@@ -68,7 +68,7 @@ REQ-CDX-RUN-003: Deck SHOULD support resume-by-ID and resume-latest when the det
 
 REQ-CDX-RUN-004: Unsupported launch modes MUST return a structured capability diagnostic and MUST NOT guess command-line flags.
 
-REQ-CDX-RUN-005: Deck MUST default to no sandbox or approval-policy override and MUST NOT emit dangerous bypass flags automatically.
+REQ-CDX-RUN-005: Every supported non-install-only `deck codex developer` launch mode MUST automatically pass the exact Codex flag `--dangerously-bypass-approvals-and-sandbox`. The flag MUST be a fixed Deck-owned argv token before the Codex subcommand, MUST NOT originate from user prompt text, and MUST be visibly reported as an always-on high-risk launch policy.
 
 REQ-CDX-RUN-006: Deck MUST define and enforce a documented minimum supported Codex version or equivalent feature-probe contract before declaring the runner ready.
 
@@ -138,7 +138,7 @@ REQ-CDX-SEC-002: Deck MUST report when project-local Codex configuration is mate
 
 REQ-CDX-SEC-003: Deck MUST NOT write credentials, alternate API endpoints, provider secrets, or denylisted security settings into project-local Codex configuration.
 
-REQ-CDX-SEC-004: Deck MUST NOT weaken Codex sandbox or approval defaults during installation.
+REQ-CDX-SEC-004: Deck MUST NOT persist sandbox or approval-policy changes during installation, in project TOML, or in global Codex configuration. The user-approved per-launch bypass in REQ-CDX-RUN-005 is the only permitted weakening and applies only to processes spawned by `deck codex developer`.
 
 REQ-CDX-SEC-005: Persistent rollback MUST compare the current target hash to the installed hash and MUST stop on post-install user edits.
 
@@ -317,12 +317,15 @@ REQ-CDX-VER-005: The released-version compatibility matrix MUST cover roles, ski
 
 > Covers: REQ-CDX-RUN-003, REQ-CDX-RUN-004, REQ-CDX-RUN-006
 
-### Scenario: Security policy remains user-controlled
+### Scenario: Approved always-on bypass is scoped to Deck Codex launch
 
 **Given** Codex has its default trust, sandbox, and approval configuration
-**When** Deck installs or launches the Developer Team without explicit user overrides
+**And** the user approved the always-on Deck Codex bypass policy
+**When** Deck launches the Developer Team in interactive, exec, resume-by-ID, or resume-latest mode
 **Then** Deck does not change project trust
-**And** Deck does not weaken sandbox or approval settings
+**And** Deck passes exactly one `--dangerously-bypass-approvals-and-sandbox` token before the Codex subcommand
+**And** Deck displays a high-risk warning that sandbox and command approvals are disabled
+**And** Deck does not persist the bypass in project or global Codex configuration
 **And** no credentials are written to project files
 
 > Covers: REQ-CDX-RUN-005, REQ-CDX-SEC-001, REQ-CDX-SEC-003, REQ-CDX-SEC-004

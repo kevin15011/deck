@@ -98,7 +98,7 @@ describe("executeRunnerLaunchPlan", () => {
     if (launch.status !== "ready") return;
     const result = await executeRunnerLaunchPlan(launch.plan, {
       spawn: async (_command, args, options) => {
-        expect(args).toEqual(["exec", "-"]);
+        expect(args).toEqual(["--dangerously-bypass-approvals-and-sandbox", "exec", "-"]);
         expect(options).toMatchObject({ stdio: "pipe", stdin: "closed", stdinPayload: { type: "utf8", content: "safe" } });
         return { exitCode: 0, stdout: "", stderr: "" };
       },
@@ -158,6 +158,92 @@ describe("runRunnerLaunch consent and status", () => {
     expect(result).toMatchObject({ status: "unsupported", code: "no-resume" });
   });
 
+  test("renders generic adapter prerequisite diagnostics before building the install plan", async () => {
+    let prepared = 0;
+    let preview = "";
+    const result = await runRunnerLaunch({
+      adapter: adapter({
+        prepareDeveloperTeamInstall: async () => {
+          prepared += 1;
+          return [{ code: "shared-prerequisite", severity: "warning", message: "A runner prerequisite was checked." }];
+        },
+        buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+      }),
+      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      dryRun: true,
+      interactive: false,
+      presentPreview: async (value) => { preview = value; },
+      processEffects: { spawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
+    });
+
+    expect(result.status).toBe("dry-run");
+    expect(prepared).toBe(1);
+    expect(preview).toContain("A runner prerequisite was checked.");
+  });
+
+  test("does not build a Codex launch plan or spawn for install-only", async () => {
+    let launchPlanCalls = 0;
+    let spawnCalls = 0;
+    const result = await runRunnerLaunch({
+      adapter: adapter({
+        runnerId: "codex",
+        readModelAssignments: () => ({}),
+        readThinkingAssignments: () => ({}),
+        buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+        buildLaunchPlan: () => {
+          launchPlanCalls += 1;
+          throw new Error("install-only must not plan a Codex launch");
+        },
+      }),
+      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      installOnly: true,
+      interactive: false,
+      presentPreview: async () => {},
+      processEffects: { spawn: async () => {
+        spawnCalls += 1;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      } },
+    });
+
+    expect(result.status).toBe("installed");
+    expect(launchPlanCalls).toBe(0);
+    expect(spawnCalls).toBe(0);
+  });
+
+  test("shows adapter-owned future launch policy in an install-only dry-run without planning or spawning", async () => {
+    let launchPlanCalls = 0;
+    let spawnCalls = 0;
+    let preview = "";
+    const result = await runRunnerLaunch({
+      adapter: adapter({
+        buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+        getLaunchPolicyDiagnostics: () => [{
+          code: "future-launch-policy",
+          severity: "warning",
+          message: "Future launches disable sandboxing and command approvals.",
+        }],
+        buildLaunchPlan: () => {
+          launchPlanCalls += 1;
+          throw new Error("install-only must not plan a launch");
+        },
+      }),
+      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      installOnly: true,
+      dryRun: true,
+      interactive: false,
+      presentPreview: async (value) => { preview = value; },
+      processEffects: { spawn: async () => {
+        spawnCalls += 1;
+        return { exitCode: 0, stdout: "", stderr: "" };
+      } },
+    });
+
+    expect(result.status).toBe("dry-run");
+    expect(preview).toContain("Future launches disable sandboxing and command approvals.");
+    expect(launchPlanCalls).toBe(0);
+    expect(spawnCalls).toBe(0);
+  });
+
   test("real Pi and OpenCode adapters expose generic interactive compatibility plans", async () => {
     const input = { projectRoot: "/tmp/deck-generic-launch", teamId: "developer-team", mode: "interactive" as const };
     expect(await createPiRunnerAdapter().buildLaunchPlan?.(input)).toMatchObject({ status: "ready", plan: { command: "pi", stdio: "inherit" } });
@@ -174,16 +260,18 @@ describe("runRunnerLaunch consent and status", () => {
       for (const runner of adapters) {
         await mkdir(join(root, runner.runnerId), { recursive: true });
         const events: string[] = [];
+        let preview = "";
         const result = await runRunnerLaunch({
           adapter: runner,
           launch: { projectRoot: join(root, runner.runnerId), teamId: "developer-team", mode: "interactive" },
           interactive: true,
-          presentPreview: async () => { events.push("preview"); },
+          presentPreview: async (value) => { preview = value; events.push("preview"); },
           confirm: async () => { events.push("consent"); return true; },
           processEffects: { spawn: async () => { events.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
         });
         expect(result.status).toBe("launched");
         expect(events).toEqual(["preview", "consent", "spawn"]);
+        expect(preview).not.toContain("sandboxing and command approvals are disabled");
       }
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -235,19 +323,22 @@ describe("runRunnerLaunch consent and status", () => {
       const routes = [
         { launch: { projectRoot, teamId: "developer-team", mode: "interactive" as const }, newSession: true },
         { launch: { projectRoot, teamId: "developer-team", mode: "exec" as const, prompt: [], stdin: "closed" as const }, newSession: true },
-        { launch: { projectRoot, teamId: "developer-team", mode: "resume-by-id" as const, sessionId: "session-1" }, args: ["resume", "session-1"] },
-        { launch: { projectRoot, teamId: "developer-team", mode: "resume-latest" as const }, args: ["resume", "--last"] },
+        { launch: { projectRoot, teamId: "developer-team", mode: "resume-by-id" as const, sessionId: "session-1" }, args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "session-1"] },
+        { launch: { projectRoot, teamId: "developer-team", mode: "resume-latest" as const }, args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "--last"] },
       ];
       for (const route of routes) {
         const events: string[] = [];
+        const previews: string[] = [];
         const result = await runRunnerLaunch({
           adapter,
           launch: route.launch,
           interactive: false,
           yes: true,
-          presentPreview: async () => { events.push("preview"); },
+          presentPreview: async (preview) => { previews.push(preview); events.push("preview"); },
           processEffects: { spawn: async (_command, args, options) => {
             events.push("spawn");
+            const bypass = "--dangerously-bypass-approvals-and-sandbox";
+            expect(args.filter((arg) => arg === bypass)).toHaveLength(1);
             if (route.newSession) {
               expect(args).toContain("-c");
               expect(args.join(" ")).toContain("developer_instructions=");
@@ -267,6 +358,7 @@ describe("runRunnerLaunch consent and status", () => {
         });
         expect(result.status).toBe("launched");
         expect(events).toEqual(["preview", "spawn"]);
+        expect(previews).toEqual([expect.stringContaining("sandboxing and command approvals are disabled")]);
         if (result.status === "launched") {
           expect(result.launch.status).toBe("ready");
           if (result.launch.status === "ready") {

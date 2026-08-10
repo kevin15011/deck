@@ -32,6 +32,12 @@ export type BuildCodexInstallPlanInput = {
   capabilityInstructions?: CapabilityInstructionBundle;
   memoryProvider?: "none" | "supermemory" | "engram";
   mcpCapabilityIds?: readonly string[];
+  /** Full materialization may change runner config; content-only refreshes Deck content only. */
+  materializationScope?: "full" | "content-only";
+  /** A fresh Core probe confirmed the Deck-owned Serena launcher. */
+  serenaLauncherAvailable?: boolean;
+  /** The effective `deck` executable has confirmed portable Serena proxy support. */
+  serenaProxyAvailable?: boolean;
   confirmedModels?: readonly string[];
   confirmedReasoningByModel?: Readonly<Record<string, readonly string[]>>;
 };
@@ -46,6 +52,11 @@ function safeRelativePath(path: string): string {
     throw new Error(`Unsafe managed path: ${path}`);
   }
   return normalized;
+}
+
+
+function isPreservedRuntimePath(path: string): boolean {
+  return path === ".codex/config.toml";
 }
 
 function tomlString(value: string): string {
@@ -109,6 +120,7 @@ function ensureNativeSkillFrontmatter(content: string, skillId: string): string 
 }
 
 export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanInput): CodexMutationPlan {
+  const materializationScope = input.materializationScope ?? "full";
   const manifestPath = ".codex/deck-manifest.json";
   const diagnostics: RunnerDiagnostic[] = [];
   const capabilityInstructions = translateCodexCapabilityInstructions(input.capabilityInstructions);
@@ -246,35 +258,57 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
     add("AGENTS.md", agentsMerge.content, "instructions", "marker-span", `${AGENTS_START}|${AGENTS_END}`);
   }
 
-  const configSource = input.existingFiles.get(".codex/config.toml") ?? "";
-  const config = mergeCodexProjectConfig(configSource, { multiAgent: true });
-  if (config.status === "blocked") {
-    blocked = true;
-    diagnostics.push(...config.diagnostics.map((message) => ({ code: "toml-merge-blocked", severity: "error" as const, message })));
-  } else {
-    const packageIds = [...new Set(capabilityInstructions?.instructions.map((fragment) => fragment.packageId) ?? [])];
-    const desiredMcp = buildCodexMcpServers({
-      packageIds: [...packageIds, ...(input.mcpCapabilityIds ?? [])],
-      memoryProvider: input.memoryProvider ?? "none",
-    });
-    for (const gap of desiredMcp.gaps) diagnostics.push({ code: gap, severity: "warning", message: "Engram has no verified Codex provider contract and remains deferred." });
-    const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers);
-    if (mcp.status === "blocked") {
+  if (materializationScope === "full") {
+    const configSource = input.existingFiles.get(".codex/config.toml") ?? "";
+    const config = mergeCodexProjectConfig(configSource, { multiAgent: true });
+    if (config.status === "blocked") {
       blocked = true;
-      diagnostics.push(...mcp.diagnostics.map((message) => ({ code: "mcp-config-collision", severity: "error" as const, message })));
+      diagnostics.push(...config.diagnostics.map((message) => ({ code: "toml-merge-blocked", severity: "error" as const, message })));
     } else {
-      const hooks = mergeCodexTrustedHookConfig(mcp.content, false);
-      if (hooks.status === "blocked") {
+      const desiredMcp = buildCodexMcpServers({
+        packageIds: input.mcpCapabilityIds ?? [],
+        memoryProvider: input.memoryProvider ?? "none",
+        serenaLauncherAvailable: input.serenaLauncherAvailable,
+        serenaProxyAvailable: input.serenaProxyAvailable,
+      });
+      for (const gap of desiredMcp.gaps) {
+        if (gap === "serena-launcher-not-ready") {
+          blocked = true;
+          diagnostics.push({
+            code: gap,
+            severity: "error",
+            message: "Serena is selected but no healthy Deck-owned launcher is ready. Use the explicitly authorized Serena action in Review before rerunning the full Codex install.",
+          });
+        } else if (gap === "serena-proxy-not-ready") {
+          blocked = true;
+          diagnostics.push({
+            code: gap,
+            severity: "error",
+            message: "Serena is selected but the effective `deck` command cannot serve the portable proxy. Update Deck on PATH, then rerun the full Codex install.",
+          });
+        } else {
+          diagnostics.push({ code: gap, severity: "warning", message: "Engram has no verified Codex provider contract and remains deferred." });
+        }
+      }
+      const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers);
+      if (mcp.status === "blocked") {
         blocked = true;
-        diagnostics.push(...hooks.diagnostics.map((message) => ({ code: "trusted-hook-config-collision", severity: "error" as const, message })));
+        diagnostics.push(...mcp.diagnostics.map((message) => ({ code: "mcp-config-collision", severity: "error" as const, message })));
       } else {
-        add(".codex/config.toml", hooks.content, "config", "toml-key", "features.multi_agent|mcp_servers|hooks");
+        const hooks = mergeCodexTrustedHookConfig(mcp.content, false);
+        if (hooks.status === "blocked") {
+          blocked = true;
+          diagnostics.push(...hooks.diagnostics.map((message) => ({ code: "trusted-hook-config-collision", severity: "error" as const, message })));
+        } else {
+          add(".codex/config.toml", hooks.content, "config", "toml-key", "features.multi_agent|mcp_servers|hooks");
+        }
       }
     }
   }
 
   for (const priorPath of Object.keys(priorHashes)) {
     if (priorPath === manifestPath || expected.has(priorPath)) continue;
+    if (materializationScope === "content-only" && isPreservedRuntimePath(priorPath)) continue;
     const existing = input.existingFiles.get(priorPath);
     if (existing === undefined) continue;
     if (hash(existing) !== priorHashes[priorPath]) {
@@ -295,7 +329,13 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
     diagnostics.push({ code: "stale-managed-file-removal", severity: "warning", message: `Stale Deck-managed Codex file will be removed after review: ${priorPath}.` });
   }
 
-  const ownedFiles = Object.fromEntries([...expected.values()].sort((a, b) => a.relativePath.localeCompare(b.relativePath)).map((file) => [file.relativePath, file.hash]));
+  const preservedRuntimeHashes = materializationScope === "content-only"
+    ? Object.fromEntries(Object.entries(priorHashes).filter(([path]) => isPreservedRuntimePath(path)))
+    : {};
+  const ownedFiles = Object.fromEntries([
+    ...Object.entries(preservedRuntimeHashes),
+    ...[...expected.values()].map((file) => [file.relativePath, file.hash] as const),
+  ].sort(([left], [right]) => left.localeCompare(right)));
   const manifestContent = `${JSON.stringify({ version: 1, files: ownedFiles }, null, 2)}\n`;
   add(manifestPath, manifestContent, "ownership-manifest", "deck-manifest", "deck-codex-manifest-v1");
 

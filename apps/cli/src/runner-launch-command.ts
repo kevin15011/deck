@@ -4,7 +4,7 @@ import type {
   RunnerLaunchPlan,
   RunnerLaunchResult,
 } from "@deck/core";
-import { MAX_RUNNER_STDIN_PAYLOAD_BYTES } from "@deck/core";
+import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
 import { spawn as nodeSpawn } from "node:child_process";
 
 export type SpawnedRunnerResult = {
@@ -157,12 +157,19 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
         thinkingAssignments: input.adapter.readThinkingAssignments(input.launch.projectRoot),
       }
     : undefined;
-  const plan = input.adapter.buildDeveloperTeamInstallPlan({
+  const installInput = {
     projectRoot: input.launch.projectRoot,
     environmentId: input.adapter.environmentIds[0]!,
     localOnly: input.localOnly,
     ...(codexAssignments ? codexAssignments : {}),
-  });
+  };
+  const { preparationDiagnostics, plan } = await prepareAndBuildDeveloperTeamInstallPlan(input.adapter, installInput);
+  const launchPolicyDiagnostics = input.adapter.getLaunchPolicyDiagnostics?.() ?? [];
+  let launch: RunnerLaunchResult | undefined;
+  if (!input.installOnly) {
+    if (!input.adapter.buildLaunchPlan) return { status: "blocked", message: `${input.adapter.displayName} does not expose launch planning.` };
+    launch = await input.adapter.buildLaunchPlan(input.launch);
+  }
   const safeMutations = plan.mutationPreview ?? [];
   const previewIncomplete = plan.files.length > 0 && plan.mutationPreview === undefined;
   const preview = [
@@ -171,6 +178,8 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       ? ["(no file mutations)"]
       : safeMutations.map((mutation) => `${mutation.action} ${mutation.path} pre=${mutation.preimage} post=${mutation.postimage} owner=${mutation.ownership}`)),
     ...(plan.diagnostics ?? []).map((diagnostic) => `! ${diagnostic}`),
+    ...preparationDiagnostics.map((diagnostic) => `! ${diagnostic.message}`),
+    ...(launch?.diagnostics ?? launchPolicyDiagnostics).map((diagnostic) => `! ${diagnostic.message}`),
     ...inspectionDiagnostics.map((diagnostic) => `! ${diagnostic}`),
     ...(previewIncomplete ? ["! Exact mutation metadata is unavailable; apply is blocked."] : []),
   ].join("\n");
@@ -180,18 +189,12 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   if (plan.blocked) return { status: "blocked", message: plan.diagnostics?.join("; ") ?? "Runner installation plan is blocked." };
   if (input.dryRun) return { status: "dry-run", diagnostics: [preview] };
 
-  let launch: RunnerLaunchResult | undefined;
-  if (!input.installOnly) {
-    if (!input.adapter.buildLaunchPlan) return { status: "blocked", message: `${input.adapter.displayName} does not expose launch planning.` };
-    launch = await input.adapter.buildLaunchPlan(input.launch);
-    if (launch.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; ") };
-    if (launch.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; ") };
-  }
-
   if (safeMutations.length > 0 && !input.yes) {
     if (!input.interactive || !input.confirm) return { status: "blocked", message: "Mutation requires --yes in non-interactive mode." };
     if (!(await input.confirm(preview))) return { status: "blocked", message: "Mutation was not confirmed." };
   }
+  if (launch?.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; ") };
+  if (launch?.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; ") };
   const backup = input.adapter.backupDeveloperTeamFiles(plan);
   let applyResult: Awaited<ReturnType<RunnerAdapter["applyDeveloperTeamInstall"]>>;
   try {

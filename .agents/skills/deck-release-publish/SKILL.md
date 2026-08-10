@@ -1,3 +1,8 @@
+---
+name: deck-release-publish
+description: Prepare, verify, and publish Deck releases through the repository's canonical release workflow and explicit safety gates.
+---
+
 # Skill: deck-release-publish
 
 > **Audience:** Project-local agents preparing a Deck release.

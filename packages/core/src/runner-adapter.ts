@@ -526,9 +526,13 @@ export type ModelCatalogContext = {
 // Developer Team install (buildDeveloperTeamInstallPlan / applyDeveloperTeamInstall)
 // ---------------------------------------------------------------------------
 
+export type DeveloperTeamMaterializationScope = "full" | "content-only";
+
 export type DeveloperTeamAdapterInstallInput = {
   projectRoot: string;
   environmentId: RunnerEnvironmentId;
+  /** Full plans may change runner runtime configuration; content-only plans only refresh Deck-owned content. */
+  materializationScope?: DeveloperTeamMaterializationScope;
   modelAssignments?: DeveloperTeamModelAssignments;
   thinkingAssignments?: DeveloperTeamThinkingAssignments;
   /** Agents changed by the user; unchanged persisted assignments stay untouched. */
@@ -677,6 +681,9 @@ export interface RunnerAdapter {
   /** Adapter-owned launch planning. The CLI remains the sole process owner. */
   buildLaunchPlan?(input: RunnerLaunchInput): Promise<RunnerLaunchResult> | RunnerLaunchResult;
 
+  /** Static policy warnings shown before a launch is planned, including install-only dry-runs. */
+  getLaunchPolicyDiagnostics?(): readonly RunnerDiagnostic[];
+
   // -------------------------------------------------------------------------
   // Runtime detection
   // -------------------------------------------------------------------------
@@ -801,6 +808,9 @@ export interface RunnerAdapter {
    */
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan;
 
+  /** Optional read-only prerequisite preparation before producing an install plan. */
+  prepareDeveloperTeamInstall?(input: DeveloperTeamAdapterInstallInput): Promise<readonly RunnerDiagnostic[]>;
+
   /**
    * Apply the developer team installation plan to disk.
    */
@@ -922,6 +932,26 @@ export interface RunnerAdapter {
    * Get the list of selectable/installable tools for this runner.
    */
   getSelectableTools(): unknown[];
+}
+
+
+/**
+ * Runs the optional read-only prerequisite once and builds the corresponding
+ * immutable Developer Team plan. Callers must use this handoff instead of
+ * independently invoking preparation and planning.
+ */
+export async function prepareAndBuildDeveloperTeamInstallPlan(
+  adapter: Pick<RunnerAdapter, "prepareDeveloperTeamInstall" | "buildDeveloperTeamInstallPlan">,
+  input: DeveloperTeamAdapterInstallInput,
+): Promise<Readonly<{
+  plan: RunnerDeveloperTeamInstallPlan;
+  preparationDiagnostics: readonly RunnerDiagnostic[];
+}>> {
+  const preparationDiagnostics = await adapter.prepareDeveloperTeamInstall?.(input) ?? [];
+  return Object.freeze({
+    plan: adapter.buildDeveloperTeamInstallPlan(input),
+    preparationDiagnostics,
+  });
 }
 
 // ---------------------------------------------------------------------------

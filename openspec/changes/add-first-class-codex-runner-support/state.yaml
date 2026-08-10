@@ -2,7 +2,7 @@ schema: spec-registry-v1
 changeId: add-first-class-codex-runner-support
 name: Add First-Class Codex CLI Runner Support
 currentPhase: review
-status: approved
+status: failed
 artifacts:
   exploration: exploration.md
   proposal: proposal.md
@@ -188,4 +188,64 @@ provenance:
     timestamp: "2026-08-06"
     registryWrite: deferred-reconciled
     note: "Direct Codex root Lead launch delta approved with no blocker, High, Medium, or advisory findings."
-next_action: "Obtain user acceptance, then commit if requested and archive through the normal OpenSpec lifecycle."
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: non-deferred
+    note: "User approved an always-on dangerous Codex sandbox/approval bypass; official requirements were amended before implementation."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: deferred-reconciled
+    note: "Implemented the fixed always-on bypass token with exact argv invariants and runner-neutral policy disclosure."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: non-deferred
+    note: "Bypass suite passed 4365/4365; typecheck and four-target build passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: deferred-reconciled
+    note: "Bypass delta approved, but overall review remains changes-requested because inherited marker-ownership and unowned-byte-preservation blockers remain open."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: deferred-reconciled
+    note: "Reused Core's absolute Deck-owned Serena launcher in Codex, refreshed readiness correctly, and fixed release-skill frontmatter."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: non-deferred
+    note: "Serena/frontmatter suite passed 4373/4373; typecheck and four-target build passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: deferred-reconciled
+    note: "Serena/frontmatter delta approved, but overall review remains failed because inherited materialization blockers remain open."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: deferred-reconciled
+    note: "Replaced the absolute Serena project path with a portable hidden Deck proxy and repaired full/content-only planning composition."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: non-deferred
+    note: "Portable Serena suite passed 4387/4387; typecheck, four-target build, and packaged Linux proxy smoke passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-10"
+    registryWrite: deferred-reconciled
+    note: "Portable Serena pre-commit findings were repaired; overall review remains failed because inherited materialization blockers remain open."
+next_action: "Repair manifest-backed marker/TOML ownership and exact unowned-byte preservation, then rerun full security review before push, merge, or release."

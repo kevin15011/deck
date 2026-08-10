@@ -1,7 +1,11 @@
 import { parseTOML, type AST } from "toml-eslint-parser";
-
 export const CODEX_MCP_SERVER_IDS = ["context7", "context-mode", "codebase-memory", "serena", "supermemory"] as const;
 export const CODEX_SUPERMEMORY_MCP_URL = "https://mcp.supermemory.ai/mcp";
+
+
+export const CODEX_SERENA_PROXY_COMMAND = "deck";
+export const CODEX_SERENA_PROXY_ARGS = ["internal", "serena-mcp"] as const;
+export const CODEX_SERENA_PROXY_ENV_VARS = ["HOME", "PATH", "XDG_DATA_HOME"] as const;
 export type CodexMcpServerId = (typeof CODEX_MCP_SERVER_IDS)[number];
 
 export type CodexMcpServer =
@@ -77,6 +81,23 @@ export function isCodexSupermemoryMcpConfigured(source: string): boolean {
   }
 }
 
+/** Confirms the exact portable Deck proxy contract. */
+export function isCodexSerenaMcpConfigured(source: string): boolean {
+  try {
+    const server = existingServers(source).get("serena");
+    const expected = normalized({
+      id: "serena",
+      transport: "stdio",
+      command: CODEX_SERENA_PROXY_COMMAND,
+      args: [...CODEX_SERENA_PROXY_ARGS],
+      envVars: [...CODEX_SERENA_PROXY_ENV_VARS],
+    });
+    return server !== undefined && JSON.stringify(canonical(server)) === JSON.stringify(canonical(expected));
+  } catch {
+    return false;
+  }
+}
+
 function validate(server: CodexMcpServer): void {
   if (!CODEX_MCP_SERVER_IDS.includes(server.id)) throw new Error(`Unsupported Codex MCP server: ${server.id}`);
   if (server.transport === "stdio") {
@@ -116,6 +137,11 @@ function render(server: CodexMcpServer): string {
 
 function managedServerIds(source: string): Set<string> {
   return new Set([...source.matchAll(/^# deck-codex-mcp:([a-z0-9-]+)$/gm)].map((match) => match[1]!));
+}
+
+/** True only for a Deck-owned MCP block, never a same-named user MCP server. */
+export function isDeckManagedCodexMcpServer(source: string, serverId: CodexMcpServerId): boolean {
+  return managedServerIds(source).has(serverId);
 }
 
 function stripManagedServerBlocks(source: string, ids: ReadonlySet<string>): string {
@@ -168,15 +194,35 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
 export function buildCodexMcpServers(input: {
   packageIds: readonly string[];
   memoryProvider: "none" | "supermemory" | "engram";
+  /** A fresh Core probe confirmed the Deck-owned Serena launcher. */
+  serenaLauncherAvailable?: boolean;
+  /** The effective `deck` command has confirmed the hidden Serena proxy route. */
+  serenaProxyAvailable?: boolean;
 }): { servers: readonly CodexMcpServer[]; gaps: readonly string[] } {
   const selected = new Set(input.packageIds);
   const servers: CodexMcpServer[] = [];
+  const gaps: string[] = [];
   if (selected.has("context-mode")) servers.push({ id: "context-mode", transport: "stdio", command: "context-mode", args: ["mcp"] });
   if (selected.has("codebase-memory")) servers.push({ id: "codebase-memory", transport: "stdio", command: "codebase-memory-mcp" });
-  if (selected.has("serena")) servers.push({ id: "serena", transport: "stdio", command: "serena", args: ["start-mcp-server", "--project-from-cwd"] });
+  if (selected.has("serena")) {
+    if (input.serenaLauncherAvailable !== true) {
+      gaps.push("serena-launcher-not-ready");
+    } else if (input.serenaProxyAvailable === true) {
+      servers.push({
+        id: "serena",
+        transport: "stdio",
+        command: CODEX_SERENA_PROXY_COMMAND,
+        args: [...CODEX_SERENA_PROXY_ARGS],
+        envVars: [...CODEX_SERENA_PROXY_ENV_VARS],
+      });
+    } else {
+      gaps.push("serena-proxy-not-ready");
+    }
+  }
   if (selected.has("context7")) servers.push({ id: "context7", transport: "streamable-http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } });
   if (input.memoryProvider === "supermemory") servers.push({ id: "supermemory", transport: "streamable-http", url: CODEX_SUPERMEMORY_MCP_URL });
-  return { servers, gaps: input.memoryProvider === "engram" ? ["engram-codex-deferred"] : [] };
+  if (input.memoryProvider === "engram") gaps.push("engram-codex-deferred");
+  return { servers, gaps };
 }
 
 export function redactCodexMcpDiagnostic(message: string): string {

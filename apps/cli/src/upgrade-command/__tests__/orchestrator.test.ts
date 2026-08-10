@@ -46,6 +46,7 @@ import {
   ORCHESTRATOR_ERROR_CODES,
   runUpgradeOrchestrator,
   stageReleaseAssets,
+  collectRunnerBackupTargets,
   type OrchestratorDeps,
 } from "../orchestrator.js";
 import { createBackup } from "../backup-store.js";
@@ -376,6 +377,31 @@ function createMultipleDeckCandidatesArchive(archivePath: string): void {
 // ---------------------------------------------------------------------------
 
 describe("orchestrator", () => {
+  it("uses content-only materialization for runner backup discovery", async () => {
+    let prepared = 0;
+    let capturedScope: unknown;
+    const adapter = makeAdapter({
+      detectDeckInstall: async () => ({ installed: true, managedPaths: ["/tmp/AGENTS.md"] }),
+      prepareDeveloperTeamInstall: async () => {
+        prepared += 1;
+        return [];
+      },
+      buildDeveloperTeamInstallPlan: (input) => {
+        capturedScope = input.materializationScope;
+        return { files: [{ path: "/tmp/AGENTS.md", content: "content" }] };
+      },
+    });
+    const targets = await collectRunnerBackupTargets({
+      projectRoot: "/tmp",
+      readDeckConfig: () => makeConfig({ opencode: { rtk: true } }),
+      adapterRegistry: makeRegistry([adapter]),
+    } as OrchestratorDeps);
+
+    expect(prepared).toBe(1);
+    expect(capturedScope).toBe("content-only");
+    expect(targets).toEqual([expect.objectContaining({ sourcePath: "/tmp/AGENTS.md", owner: "runner:opencode" })]);
+  });
+
   let workDir: string;
   let stagingDir: string;
   let binaryPath: string;

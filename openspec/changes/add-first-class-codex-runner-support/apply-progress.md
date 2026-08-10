@@ -188,7 +188,7 @@ User acceptance testing identified an experience gap relative to OpenCode: Codex
 
 `deck codex developer` now establishes new interactive and exec root sessions as Deck Lead automatically through a bounded static `developer_instructions` configuration override. The bootstrap requires the root to load the installed Lead skill, own the user outcome, route proportionately, coordinate native child roles, and remain the centralized OpenSpec writer. It is instruction-level and remains truthfully `static-compatible`; it does not claim native Codex root-role identity or host enforcement.
 
-New sessions also apply the verified persisted Lead model and reasoning assignment. Interactive launch adds no synthetic user turn. Exec uses exact `codex exec -` grammar and sends the bounded user prompt only through typed stdin; prompts never enter argv, environment, previews, or diagnostics. Resume-by-ID/latest preserves the existing session without bootstrap, model, reasoning, or prompt reinjection. No `--agent`, child Lead spawn, global config write, trust change, or sandbox/approval bypass is introduced.
+New sessions also apply the verified persisted Lead model and reasoning assignment. Interactive launch adds no synthetic user turn. Exec uses exact `codex exec -` grammar and sends the bounded user prompt only through typed stdin; prompts never enter argv, environment, previews, or diagnostics. Resume-by-ID/latest preserves the existing session without bootstrap, model, reasoning, or prompt reinjection. No `--agent`, child Lead spawn, global config write, or trust change is introduced. At the time of this delta, no sandbox/approval bypass was introduced; that historical policy was explicitly superseded by the user-approved 2026-08-10 amendment recorded in `preconditions.md` and REQ-CDX-RUN-005.
 
 Direct Lead launch verification:
 
@@ -197,3 +197,58 @@ Direct Lead launch verification:
 - Final broad suite: 4360 passed, 0 failed; 17,514 assertions across 274 files.
 - TypeScript: passed.
 - Four-target release build: passed.
+
+## User-approved always-on Codex sandbox and approval bypass
+
+On 2026-08-10, after an informed warning, the user explicitly selected an always-on launch policy for Deck's Codex Developer Team route. Every supported non-install-only interactive, exec, resume-by-ID, and resume-latest plan now places exactly one fixed `--dangerously-bypass-approvals-and-sandbox` token at argv position zero, before any Codex subcommand.
+
+The policy is adapter-owned and cannot be supplied, removed, duplicated, or transformed through caller input, persisted model/reasoning assignments, user prompts, environment, project TOML, global config, roles, or manifests. Option-shaped model/reasoning values fail closed, while the same text in an exec prompt remains bounded stdin-only data. Install-only performs no launch; install-only dry-run receives a runner-neutral policy diagnostic without planning or spawning Codex. Interactive previews, launch diagnostics, Doctor, and public documentation warn that Codex may run commands and modify or delete files without sandboxing or command approvals.
+
+Always-on bypass verification:
+
+- Independent security review initially found argv duplication through an adversarial model value and missing install-only dry-run disclosure; both were repaired and re-reviewed.
+- Final delta review: no blocker, High, Medium, or advisory finding.
+- Final broad suite: 4365 passed, 0 failed; 17,563 assertions across 274 files.
+- TypeScript: passed.
+- Four-target release build: passed.
+- No real Codex process was launched during automated verification.
+
+This delta does not resolve the separately confirmed marker-ownership and unowned-byte-preservation blockers or the existing Medium backlog. The overall candidate remains not ready for push, merge, or release.
+
+## Post-acceptance shared Serena launcher correction
+
+Runtime testing on Codex 0.147 showed that Serena failed with `No such file or directory` even though Deck had already installed a healthy Serena 1.6.1 runtime for OpenCode. OpenCode used the absolute Deck-owned launcher under the private Serena tool root, while Codex incorrectly serialized the bare command `serena`, which was not on `PATH`.
+
+Core now exposes the canonical bounded existing-Serena readiness contract. The first repair serialized the validated absolute launcher like OpenCode/Pi; pre-commit review found that representation was not portable in commit-eligible project Codex configuration. That intermediate serialization is superseded by the portable Deck proxy correction below. Missing or unusable readiness still blocks broken MCP configuration; explicitly authorized provisioning uses the existing Core bootstrap. Legacy Deck-managed entries remain repairable, while unowned same-ID collisions remain fail-closed.
+
+The project-local `deck-release-publish` skill also received valid Codex YAML frontmatter; it was a tracked legacy skill rather than a Codex-generated manifest entry.
+
+Serena/frontmatter verification:
+
+- Existing private launcher probe: Serena 1.6.1 resolved outside `PATH` with no reinstall.
+- Independent Quality initially found Doctor ordering and stale inspection-cache issues; both were repaired and the final delta review approved with no findings.
+- Final broad suite: 4373 passed, 0 failed; 17,606 assertions across 274 files.
+- TypeScript: passed.
+- Four-target release build: passed.
+- No current project config, user-home config, real MCP server, commit, or push was modified by verification.
+
+The overall candidate remains blocked by the inherited marker-ownership and unowned-byte-preservation findings.
+
+## Pre-commit portable Serena proxy and planning-scope correction
+
+Pre-commit review rejected the user-specific absolute Serena path and found that several TUI/sync call sites could build plans without preparation. Codex now commits only the portable MCP entry `command = "deck"`, `args = ["internal", "serena-mcp"]`, and inherited environment names `HOME`, `PATH`, and `XDG_DATA_HOME`. The hidden `deck internal serena-mcp` route performs read-only Core resolution and proxies fixed Serena arguments without a shell, bootstrap, configuration write, arbitrary input, or global PATH mutation. It forwards termination signals, cleans handlers/timers, and preserves child exit/signal outcomes.
+
+Full install paths require a bounded capability probe returning `deck-serena-mcp-proxy-v1`; unsupported or stale Deck binaries block before portable config is claimed ready. The final probe bound is 2 seconds, matching the existing bounded Doctor executable probe and accommodating compiled binary startup. Public inventory probes freshly; Doctor and one operation reuse bounded evidence; apply/verify revalidate.
+
+Generic planning now distinguishes `full` from `content-only`. Normal CLI/TUI team/package/model/install paths prepare exactly once. Content-only sync and backup perform no Serena resolution/bootstrap and no runtime/MCP/provider/config mutation; existing manifest-owned config bytes/hash carry forward without adopting drift. A later full install performs the managed bare/absolute-to-proxy migration. The current project artifacts were regenerated transactionally with no home path.
+
+Portable Serena verification:
+
+- Current `.codex/config.toml`: portable `deck internal serena-mcp` entry; no username or installation root.
+- Temporary and packaged Linux x64 binary probes returned `deck-serena-mcp-proxy-v1`.
+- Final broad suite: 4387 passed, 0 failed; 17,665 assertions across 275 files.
+- TypeScript: passed.
+- Four-target release build: passed.
+- No secret or absolute home path was added to the diff.
+
+The overall candidate remains blocked by the inherited materialization ownership and unowned-byte-preservation findings.

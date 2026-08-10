@@ -91,6 +91,7 @@ import { spawnAsync } from "../runtime/process.js";
 import {
   getEnabledPackageInstructionIds,
   buildCapabilityInstructionBundle,
+  prepareAndBuildDeveloperTeamInstallPlan,
   type CapabilityInstructionBundle,
   type CapabilityInstructionPackageId,
 } from "@deck/core";
@@ -1203,10 +1204,11 @@ export async function collectRunnerBackupTargets(
 
     // 3. Build the capability bundle and install plan.
     const bundle = buildCapabilityInstructionBundle(enabledIds);
-    const plan = safeBuildDeveloperTeamPlan(adapter, {
+    const plan = await safeBuildDeveloperTeamPlan(adapter, {
       projectRoot: deps.projectRoot,
       environmentId: (adapter.environmentIds[0] ?? "opencode-development") as never,
       capabilityInstructions: bundle,
+      materializationScope: "content-only",
     });
 
     if (!plan.files || plan.files.length === 0) {
@@ -1251,22 +1253,20 @@ async function safeDetectDeckInstall(
  * Safe wrapper for adapter.buildDeveloperTeamInstallPlan — returns a safe plan
  * when the method is missing or throws.
  */
-function safeBuildDeveloperTeamPlan(
+async function safeBuildDeveloperTeamPlan(
   adapter: RunnerSyncAdapterRegistry extends { get(runnerId: string): infer T } ? T : never,
   input: {
     projectRoot: string;
     environmentId: string;
     capabilityInstructions: CapabilityInstructionBundle;
+    materializationScope: "content-only";
   },
-): { files?: Array<{ path: string }> } {
+): Promise<{ files?: readonly { path: string }[] }> {
   if (typeof (adapter as any).buildDeveloperTeamInstallPlan !== "function") {
     return { files: [] };
   }
   try {
-    return (adapter as any).buildDeveloperTeamInstallPlan(input.projectRoot, {
-      environmentId: input.environmentId,
-      capabilityInstructions: input.capabilityInstructions,
-    });
+    return (await prepareAndBuildDeveloperTeamInstallPlan(adapter as any, input as any)).plan;
   } catch {
     return { files: [] };
   }

@@ -6,11 +6,11 @@
 import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { getDefaultDeckConfig, type RunnerAdapter } from "@deck/core";
+import { getDefaultDeckConfig, prepareAndBuildDeveloperTeamInstallPlan, type RunnerAdapter } from "@deck/core";
 import { createCodexRunnerAdapter } from "@deck/adapter-codex";
 
 import {
@@ -247,6 +247,82 @@ describe("runner-sync", () => {
       const result = await runRunnerSync({ config, registry: makeRegistry([adapter]), projectRoot: root, deckVersion: "next", runnerIds: ["codex"] });
       expect(result.outcomes[0]).toMatchObject({ status: "synced", filesWritten: [] });
       expect(result.outcomes[0]?.diagnostics).not.toContainEqual(expect.stringContaining("changedCount=0"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+
+  it("keeps Codex runtime config and manifest ownership unchanged during content-only sync, then migrates on a later full install", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-codex-content-only-runtime-"));
+    let resolverCalls = 0;
+    let bootstrapCalls = 0;
+    const readiness = () => {
+      const evidence: import("@deck/core").SerenaReadinessEvidence = {
+        capabilityId: "serena",
+        state: "ready",
+        resolvedExecutablePath: "/fixtures/deck-data/tools/serena/bin/serena",
+        source: "existing-deck-tool",
+        probe: "serena-help",
+        fingerprint: "fixture",
+      };
+      return { state: "ready" as const, evidence, revalidate: async (value: import("@deck/core").SerenaReadinessEvidence) => ({ valid: true as const, evidence: value }) };
+    };
+    try {
+      const adapter = createCodexRunnerAdapter({
+        journalRoot: join(root, "journals"),
+        mcpCapabilityIds: ["serena"],
+        serenaReadinessResolver: async () => {
+          resolverCalls += 1;
+          return readiness();
+        },
+        serenaProxyProbe: async () => ({ state: "ready" as const }),
+        serenaBootstrap: async () => {
+          bootstrapCalls += 1;
+          return { outcome: "failed", diagnostic: { code: "unexpected", message: "bootstrap must not run" } } as never;
+        },
+      });
+      const installInput = { projectRoot: root, environmentId: "codex-development" as const };
+      const initial = await prepareAndBuildDeveloperTeamInstallPlan(adapter, installInput);
+      expect(initial.plan.blocked).toBe(false);
+      await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial.plan });
+
+      const configPath = join(root, ".codex", "config.toml");
+      const manifestPath = join(root, ".codex", "deck-manifest.json");
+      const originalManifest = JSON.parse(await readFile(manifestPath, "utf8")) as { files: Record<string, string> };
+      const legacyConfig = [
+        "[features]",
+        "multi_agent = false",
+        "",
+        "# deck-codex-mcp:serena",
+        "[mcp_servers.serena]",
+        'command = "/legacy/user/tools/serena/bin/serena"',
+        'args = ["start-mcp-server", "--context", "ide", "--project-from-cwd"]',
+        "",
+      ].join("\n");
+      await writeFile(configPath, legacyConfig, "utf8");
+      await chmod(configPath, 0o600);
+      const configMode = (await stat(configPath)).mode & 0o777;
+      resolverCalls = 0;
+
+      const config = getDefaultDeckConfig();
+      for (const key of Object.keys(config.packageInstructions.codex)) config.packageInstructions.codex[key as keyof typeof config.packageInstructions.codex] = false;
+      const sync = await runRunnerSync({ config, registry: makeRegistry([adapter]), projectRoot: root, deckVersion: "next", runnerIds: ["codex"] });
+
+      expect(sync.outcomes[0]).toMatchObject({ status: "synced" });
+      expect(resolverCalls).toBe(0);
+      expect(bootstrapCalls).toBe(0);
+      expect(await readFile(configPath, "utf8")).toBe(legacyConfig);
+      expect((await stat(configPath)).mode & 0o777).toBe(configMode);
+      const syncedManifest = JSON.parse(await readFile(manifestPath, "utf8")) as { files: Record<string, string> };
+      expect(syncedManifest.files[".codex/config.toml"]).toBe(originalManifest.files[".codex/config.toml"]);
+
+      const migrated = await prepareAndBuildDeveloperTeamInstallPlan(adapter, installInput);
+      expect(resolverCalls).toBe(1);
+      expect(migrated.plan.blocked).toBe(false);
+      const migratedConfig = migrated.plan.files.find((file) => file.path === ".codex/config.toml")?.content ?? "";
+      expect(migratedConfig).toContain('command = "deck"');
+      expect(migratedConfig).not.toContain("/legacy/user");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

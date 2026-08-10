@@ -15,6 +15,8 @@ import {
   checkSharedBinaryUsability,
   getCanonicalCapability,
   getRunnerCapabilityMapping,
+  bootstrapSerena,
+  resolveExistingSerenaReadiness,
   type SharedBinaryUsabilityResult,
   type CapabilityInventory,
   type CapabilityInventoryInput,
@@ -43,6 +45,10 @@ import {
   type RunnerModelInventory,
   type RunnerModelInventoryResult,
   type RunnerModelDiscoveryRequest,
+  type SerenaBootstrapEffects,
+  type SerenaBootstrapRequest,
+  type SerenaBootstrapResult,
+  type SerenaExistingReadinessResult,
   parseSkillDescriptor,
 } from "@deck/core";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
@@ -50,9 +56,13 @@ import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 import { buildCodexDeveloperTeamInstallPlan } from "./developer-team-install";
 import { CODEX_CAPABILITY_CATALOG, CODEX_RUNNER_CAPABILITY_CONTRIBUTION } from "./capability-catalog";
 import { mergeCodexProjectConfig } from "./codex-config";
-import { buildCodexLaunchPlan } from "./launch";
+import {
+  CODEX_DEVELOPER_BYPASS_DIAGNOSTIC,
+  buildCodexLaunchPlan,
+  isSafeCodexLaunchScalar,
+} from "./launch";
 import { composeLocalOnlyExclude } from "./local-only";
-import { inspectCodexMcpServerIds, isCodexSupermemoryMcpConfigured } from "./mcp-config";
+import { inspectCodexMcpServerIds, isCodexSerenaMcpConfigured, isCodexSupermemoryMcpConfigured, isDeckManagedCodexMcpServer } from "./mcp-config";
 import { inspectCodexSupermemoryOAuth, type CodexSupermemoryOAuthStatus } from "./mcp-oauth";
 import { createNodeCodexFileEffects } from "./node-effects";
 import {
@@ -77,6 +87,13 @@ export type CodexRunnerAdapterOptions = {
   codebaseIndexReadiness?: (projectRoot: string) => boolean | Promise<boolean>;
   /** Read-only native Codex OAuth status inspection; injected for hermetic tests. */
   supermemoryOAuthStatus?: (projectRoot: string) => Promise<CodexSupermemoryOAuthStatus>;
+  /** Read-only Core resolver for the exact Deck-owned Serena launcher. */
+  serenaReadinessResolver?: (signal?: AbortSignal) => Promise<SerenaExistingReadinessResult>;
+  /** Core-controlled installer seam for explicitly authorized Serena actions. */
+  serenaBootstrap?: (request: SerenaBootstrapRequest, effects?: SerenaBootstrapEffects) => Promise<SerenaBootstrapResult>;
+  serenaBootstrapEffects?: SerenaBootstrapEffects;
+  /** Checks whether the effective `deck` command can serve the portable Serena proxy. */
+  serenaProxyProbe?: () => Promise<DeckSerenaProxyReadiness>;
 };
 
 export type CodexGitEffects = {
@@ -84,10 +101,110 @@ export type CodexGitEffects = {
   isTracked(projectRoot: string, relativePath: string): boolean;
 };
 
+
+export type DeckSerenaProxyReadiness =
+  | Readonly<{ state: "ready" }>
+  | Readonly<{ state: "unsupported" | "indeterminate"; message: string }>;
+
+/** Two seconds matches Deck Doctor's bounded binary-version probe while allowing compiled CLI startup. */
+export const SERENA_PROXY_PROBE_TIMEOUT_MS = 2_000;
+export const SERENA_PROXY_PROBE_MAX_OUTPUT_BYTES = 4 * 1024;
+
+export type DeckSerenaProxyProbeResult = Readonly<{
+  error?: NodeJS.ErrnoException;
+  status?: number | null;
+  signal?: NodeJS.Signals | null;
+  stdout?: string | Buffer | null;
+}>;
+
+export type DeckSerenaProxyProbeRequest = Readonly<{
+  command: string;
+  args: readonly string[];
+  timeoutMs: number;
+  maxOutputBytes: number;
+}>;
+
+export type DeckSerenaProxyProbeOptions = Readonly<{
+  command?: string;
+  timeoutMs?: number;
+  run?: (request: DeckSerenaProxyProbeRequest) => DeckSerenaProxyProbeResult;
+}>;
+
+type PendingSerenaPreparation = Readonly<{
+  readiness: SerenaExistingReadinessResult;
+  proxy: DeckSerenaProxyReadiness;
+}>;
+
+function defaultDeckSerenaProxyProbeRun(request: DeckSerenaProxyProbeRequest): DeckSerenaProxyProbeResult {
+  return spawnSync(request.command, [...request.args], {
+    encoding: "utf8",
+    timeout: request.timeoutMs,
+    maxBuffer: request.maxOutputBytes,
+    windowsHide: true,
+    shell: false,
+  });
+}
+
+/** Creates a bounded, fixed-argv probe for the effective Deck Serena proxy route. */
+export function createDeckSerenaProxyProbe(
+  options: DeckSerenaProxyProbeOptions = {},
+): () => Promise<DeckSerenaProxyReadiness> {
+  const timeoutMs = typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? Math.floor(options.timeoutMs)
+    : SERENA_PROXY_PROBE_TIMEOUT_MS;
+  const request: DeckSerenaProxyProbeRequest = {
+    command: options.command ?? "deck",
+    args: ["internal", "serena-mcp", "--probe"],
+    timeoutMs,
+    maxOutputBytes: SERENA_PROXY_PROBE_MAX_OUTPUT_BYTES,
+  };
+  const run = options.run ?? defaultDeckSerenaProxyProbeRun;
+  return async () => {
+    const result = run(request);
+    if (!result.error && result.status === 0 && `${result.stdout ?? ""}`.trim() === "deck-serena-mcp-proxy-v1") {
+      return { state: "ready" };
+    }
+    if (result.error?.code === "ETIMEDOUT" || typeof result.signal === "string") {
+      return {
+        state: "indeterminate",
+        message: "The effective `deck internal serena-mcp --probe` capability did not complete within the bounded check. Retry after verifying the active Deck installation.",
+      };
+    }
+    if (result.error) {
+      return {
+        state: "indeterminate",
+        message: "The effective `deck internal serena-mcp --probe` capability could not be checked. Retry after verifying the active Deck installation.",
+      };
+    }
+    return {
+      state: "unsupported",
+      message: "The active `deck` command does not support `deck internal serena-mcp`. Update Deck on PATH, then rerun the full Codex install.",
+    };
+  };
+}
+
+function defaultSerenaProxyProbe(): Promise<DeckSerenaProxyReadiness> {
+  return createDeckSerenaProxyProbe()();
+}
+
 type CodexOperationRecord = {
   readonly receipt: DeveloperTeamOperationReceipt;
   state: "planned" | "applying" | "applied" | "failed" | "rolled-back";
 };
+
+type ReadySerenaReadiness = Extract<SerenaExistingReadinessResult, { state: "ready" }>;
+
+function codexMcpCapabilityIds(
+  capabilityInstructions: ReturnType<typeof buildCapabilityInstructionBundle> | undefined,
+  adapterCapabilityIds: readonly string[],
+  inputCapabilityIds: readonly string[] | undefined,
+): readonly string[] {
+  return [...new Set([
+    ...(capabilityInstructions?.instructions.map((fragment) => fragment.packageId) ?? []),
+    ...adapterCapabilityIds,
+    ...(inputCapabilityIds ?? []),
+  ])];
+}
 
 const CODEX_ROLE_ASSIGNMENT_MAX_FILE_BYTES = 512 * 1024;
 const CODEX_ROLE_ASSIGNMENT_MAX_VALUE_BYTES = 1024;
@@ -135,12 +252,30 @@ function nativeCodexModelSlug(modelId: string | undefined): string | undefined {
   const prefix = "openai-codex/";
   if (!modelId?.startsWith(prefix)) return undefined;
   const slug = boundedAssignmentString(modelId.slice(prefix.length));
-  return slug && !slug.includes("/") && !slug.includes("\r") && !slug.includes("\n") ? slug : undefined;
+  return slug && isSafeCodexLaunchScalar(slug) && !slug.includes("/") ? slug : undefined;
 }
 
 function safePersistedReasoning(value: string | undefined): string | undefined {
   const reasoning = boundedAssignmentString(value);
-  return reasoning && !reasoning.includes("\r") && !reasoning.includes("\n") ? reasoning : undefined;
+  return reasoning && isSafeCodexLaunchScalar(reasoning) ? reasoning : undefined;
+}
+
+function hasUnsafeCodexModelAssignment(value: string | undefined): boolean {
+  if (!value) return false;
+  return !isSafeCodexLaunchScalar(value)
+    || (value.startsWith("openai-codex/") && !nativeCodexModelSlug(value));
+}
+
+function blockedUnsafeCodexLaunchScalar(): RunnerLaunchResult {
+  return {
+    status: "blocked",
+    code: "codex-invalid-launch-scalar",
+    diagnostics: [{
+      code: "invalid-launch-scalar",
+      severity: "error",
+      message: "Codex model and reasoning assignments must be bounded non-option scalars and cannot override Deck's reserved launch policy token.",
+    }],
+  };
 }
 
 function readCodexRoleAssignments(projectRoot?: string): CodexRoleAssignmentRead {
@@ -310,8 +445,11 @@ function defaultProjectSnapshot(projectRoot: string) {
   };
 }
 
-function readExistingPlanFiles(projectRoot: string): { files: Map<string, string>; modes: Map<string, number> } {
-  const empty = buildCodexDeveloperTeamInstallPlan({ projectRoot, existingFiles: new Map() });
+function readExistingPlanFiles(
+  projectRoot: string,
+  materializationScope: "full" | "content-only" = "full",
+): { files: Map<string, string>; modes: Map<string, number> } {
+  const empty = buildCodexDeveloperTeamInstallPlan({ projectRoot, existingFiles: new Map(), materializationScope });
   const existing = new Map<string, string>();
   const modes = new Map<string, number>();
   for (const relativePath of new Set([...empty.mutations.map((mutation) => mutation.relativePath), "AGENTS.md", ".codex/config.toml"])) {
@@ -430,6 +568,13 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly #sharedBinaryUsability: NonNullable<CodexRunnerAdapterOptions["sharedBinaryUsability"]>;
   readonly #codebaseIndexReadiness: NonNullable<CodexRunnerAdapterOptions["codebaseIndexReadiness"]>;
   readonly #supermemoryOAuthStatus: NonNullable<CodexRunnerAdapterOptions["supermemoryOAuthStatus"]>;
+  readonly #serenaReadinessResolver: NonNullable<CodexRunnerAdapterOptions["serenaReadinessResolver"]>;
+  readonly #serenaBootstrap: NonNullable<CodexRunnerAdapterOptions["serenaBootstrap"]>;
+  readonly #serenaBootstrapEffects?: SerenaBootstrapEffects;
+  readonly #serenaProxyProbe: NonNullable<CodexRunnerAdapterOptions["serenaProxyProbe"]>;
+  /** One-use Serena and effective Deck proxy evidence for a matching full plan. */
+  readonly #pendingSerenaPreparationByProject = new Map<string, PendingSerenaPreparation>();
+  readonly #serenaReadinessByPlan = new WeakMap<object, ReadySerenaReadiness>();
   readonly #nativePlans = new WeakMap<object, CodexMutationPlan>();
   readonly #localPlans = new WeakMap<object, CodexMutationPlan>();
   readonly #planOperations = new WeakMap<object, CodexOperationRecord>();
@@ -448,12 +593,55 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#sharedBinaryUsability = options.sharedBinaryUsability ?? ((command) => checkSharedBinaryUsability(command));
     this.#codebaseIndexReadiness = options.codebaseIndexReadiness ?? ((projectRoot) => existsSync(join(projectRoot, ".codebase-memory", "graph.db")) || existsSync(join(projectRoot, ".codebase-memory", "graph.db.zst")));
     this.#supermemoryOAuthStatus = options.supermemoryOAuthStatus ?? ((projectRoot) => inspectCodexSupermemoryOAuth({ projectRoot }));
+    this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
+    this.#serenaProxyProbe = options.serenaProxyProbe ?? defaultSerenaProxyProbe;
+    this.#serenaReadinessResolver = options.serenaReadinessResolver
+      ?? ((signal) => resolveExistingSerenaReadiness(this.#serenaBootstrapEffects, signal));
+    this.#serenaBootstrap = options.serenaBootstrap ?? ((request, effects) => bootstrapSerena(request, effects));
     this.#journalRoot = options.journalRoot ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "deck", "backups", "codex");
+  }
+
+  async #resolveSerenaReadiness(signal?: AbortSignal): Promise<SerenaExistingReadinessResult> {
+    return this.#serenaReadinessResolver(signal);
+  }
+
+  async #prepareSerena(projectRoot: string, signal?: AbortSignal): Promise<PendingSerenaPreparation> {
+    const existing = this.#pendingSerenaPreparationByProject.get(resolve(projectRoot));
+    if (existing) return existing;
+    const readiness = await this.#resolveSerenaReadiness(signal);
+    const proxy = readiness.state === "ready"
+      ? await this.#serenaProxyProbe()
+      : { state: "indeterminate" as const, message: "The Serena proxy cannot be used until Deck-owned Serena is ready." };
+    const preparation = Object.freeze({ readiness, proxy });
+    this.#pendingSerenaPreparationByProject.set(resolve(projectRoot), preparation);
+    return preparation;
+  }
+
+  #takePendingSerenaPreparation(projectRoot: string): PendingSerenaPreparation | undefined {
+    const key = resolve(projectRoot);
+    const preparation = this.#pendingSerenaPreparationByProject.get(key);
+    this.#pendingSerenaPreparationByProject.delete(key);
+    return preparation;
+  }
+
+  #rememberPendingSerenaPreparation(projectRoot: string, preparation: PendingSerenaPreparation): void {
+    this.#pendingSerenaPreparationByProject.set(resolve(projectRoot), preparation);
+  }
+
+  #selectedMcpCapabilityIds(
+    input: DeveloperTeamAdapterInstallInput,
+    capabilityInstructions: ReturnType<typeof buildCapabilityInstructionBundle> | undefined,
+    configSource = "",
+  ): readonly string[] {
+    const ids = new Set(codexMcpCapabilityIds(capabilityInstructions, this.#mcpCapabilityIds, input.capabilityIds));
+    if (isDeckManagedCodexMcpServer(configSource, "serena")) ids.add("serena");
+    return [...ids];
   }
 
   async inspectProject(projectRoot: string): Promise<RunnerProjectInspection> {
     return inspectCodexProject(projectRoot, this.#preflight);
   }
+  getLaunchPolicyDiagnostics() { return [CODEX_DEVELOPER_BYPASS_DIAGNOSTIC]; }
   async buildLaunchPlan(input: RunnerLaunchInput): Promise<RunnerLaunchResult> {
     const inspection = await this.inspectProject(input.projectRoot);
     if (inspection.state === "unsupported") return { status: "unsupported", code: "codex-version-unsupported", diagnostics: inspection.diagnostics };
@@ -478,6 +666,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const explicitReasoning = input.reasoningLevel !== undefined;
     const requestedModel = explicitModel ? input.modelId : persistedModels["deck-lead"];
     const requestedReasoning = explicitReasoning ? input.reasoningLevel : persistedReasoning["deck-lead"];
+    if (hasUnsafeCodexModelAssignment(requestedModel) || (requestedReasoning !== undefined && !isSafeCodexLaunchScalar(requestedReasoning))) {
+      return blockedUnsafeCodexLaunchScalar();
+    }
     const inventory = explicitModel || explicitReasoning
       ? await this.getModelInventory({ projectRoot: input.projectRoot, mode: "prefer-cache" })
       : undefined;
@@ -514,11 +705,26 @@ class CodexRunnerAdapter implements RunnerAdapter {
     return [{ runtimeId: "codex", displayName: this.displayName, isAvailable: inspection.evidence.binary === true, version: typeof inspection.evidence.version === "string" ? inspection.evidence.version : undefined, diagnostics: inspection.diagnostics.map((diagnostic) => diagnostic.message) }];
   }
   async getCapabilityInventory(input: CapabilityInventoryInput): Promise<CapabilityInventory> {
+    const serenaReadiness = await this.#resolveSerenaReadiness();
+    const serenaProxy = serenaReadiness.state === "ready"
+      ? await this.#serenaProxyProbe()
+      : undefined;
+    return this.#getCapabilityInventory(input, serenaReadiness, serenaProxy);
+  }
+  async #getCapabilityInventory(
+    input: CapabilityInventoryInput,
+    serenaReadiness: SerenaExistingReadinessResult,
+    serenaProxy?: DeckSerenaProxyReadiness,
+  ): Promise<CapabilityInventory> {
     const inspection = await this.inspectProject(input.projectRoot);
     const config = inspection.evidence.projectConfig === true ? defaultProjectSnapshot(input.projectRoot).config ?? "" : "";
     const mcp = new Set(inspectCodexMcpServerIds(config));
-    const commands = ["context-mode", "codebase-memory-mcp", "rtk", "serena"] as const;
+    const commands = ["context-mode", "codebase-memory-mcp", "rtk"] as const;
     const readiness = new Map(await Promise.all(commands.map(async (command) => [command, await this.#sharedBinaryUsability(command)] as const)));
+    const serenaConfigured = mcp.has("serena");
+    const serenaMcpReady = serenaReadiness.state === "ready"
+      && serenaProxy?.state === "ready"
+      && isCodexSerenaMcpConfigured(config);
     const supportStatusFor = (capabilityId: string) => CODEX_CAPABILITY_CATALOG.find((entry) => entry.capabilityId === capabilityId)?.status
       ?? getRunnerCapabilityMapping(capabilityId, this.runnerId, [CODEX_RUNNER_CAPABILITY_CONTRIBUTION])?.status
       ?? "supported";
@@ -560,12 +766,37 @@ class CodexRunnerAdapter implements RunnerAdapter {
         supermemory.diagnostics.push("supermemory: OAuth status could not be established safely; run `codex mcp list --json` and sign in if needed.");
       }
     }
+    const serena = {
+      capabilityId: "serena",
+      label: "Serena",
+      description: "Serena Codex readiness",
+      section: "tools",
+      requirementLevel: "optional" as const,
+      installKind: "runner-native" as const,
+      supportStatus: supportStatusFor("serena"),
+      isInstalled: serenaMcpReady,
+      isBlocked: serenaReadiness.state === "unusable"
+         || serenaReadiness.state === "indeterminate"
+         || (serenaReadiness.state === "ready" && serenaProxy?.state !== "ready"),
+      diagnostics: [
+        ...(serenaReadiness.state === "ready"
+          ? [`serena: Deck-owned executable ${serenaReadiness.evidence.source === "existing-deck-tool" ? "reused" : "installed"}`]
+          : [`serena: executable ${serenaReadiness.state}`]),
+        ...(serenaReadiness.state === "ready" && serenaProxy?.state !== "ready"
+          ? [serenaProxy === undefined
+            ? "serena: the effective `deck internal serena-mcp --probe` capability could not be confirmed."
+            : serenaProxy.message]
+          : []),
+        `serena: MCP ${serenaConfigured ? "configured" : "not configured"}`,
+        `serena: MCP ${serenaMcpReady ? "ready" : "not ready"}`,
+      ],
+    };
     const capabilities: CapabilityInventory["capabilities"][number][] = [
       { capabilityId: "codex-runtime", label: "Codex runtime", description: "Native roles, skills, materialization, and CLI launch", section: "runtime", requirementLevel: "required", installKind: "runner-native", supportStatus: "supported", isInstalled: inspection.evidence.binary === true, isBlocked: inspection.state === "blocked" || inspection.state === "unsupported", diagnostics: inspection.diagnostics.map((diagnostic) => diagnostic.message) },
       capability("context-mode", "Context Mode", "context-mode", "context-mode"),
       codebase,
       capability("rtk", "RTK", "rtk"),
-      capability("serena", "Serena", "serena", "serena"),
+      serena,
       capability("context7", "Context7", undefined, "context7"),
       supermemory,
       { ...capability("engram", "Engram"), isInstalled: false, isBlocked: true, diagnostics: ["Engram Codex integration is deferred."] },
@@ -641,10 +872,36 @@ class CodexRunnerAdapter implements RunnerAdapter {
       const capability = byId.get(capabilityId);
       if (!capability) continue;
       if (capability.supportStatus === "not-applicable") continue;
+      if (capabilityId === "serena" && !capability.isInstalled) {
+        if (capability.isBlocked) {
+          addBlockedCapability(capability);
+        } else if (state.explicitlySelectedCapabilities?.serena === true) {
+          manualSteps.push({
+            id: "codex-serena-bootstrap",
+            kind: "install",
+            title: "Reuse or install Deck-owned Serena",
+            capabilityId: "serena",
+            status: "ready",
+            required: false,
+            diagnostics: ["The explicitly selected Core Serena flow validates an existing Deck-owned launcher before any Codex MCP configuration is planned."],
+          });
+        } else {
+          manualSteps.push({
+            id: "codex-serena-selection-required",
+            kind: "authorization-required",
+            title: "Explicitly select Serena before provisioning",
+            capabilityId: "serena",
+            status: "blocked",
+            required: false,
+            diagnostics: ["Serena is not ready. Explicit selection and current-operation authorization are required before Deck can provision it."],
+          });
+        }
+        continue;
+      }
       if (capability.isBlocked) {
         if (isApprovedStaticCompatibleGap(capability.capabilityId)) addStaticCompatibleGap(capability);
         else addBlockedCapability(capability);
-      } else if (!capability.isInstalled && ["context-mode", "codebase-memory", "serena", "context7", "supermemory-tool-bindings"].includes(capabilityId)) {
+      } else if (!capability.isInstalled && ["context-mode", "codebase-memory", "context7", "supermemory-tool-bindings"].includes(capabilityId)) {
         configWrites.push({ id: `codex-config:${capabilityId}`, kind: "codex-config-preview", title: `Configure ${capability.label} through the reviewed Codex plan`, capabilityId, status: "ready" });
       }
     }
@@ -680,12 +937,73 @@ class CodexRunnerAdapter implements RunnerAdapter {
     return {
       steps: [
         { action: "configure", tool: "codex", capabilityId: "developer-team", reason: "Materialize project-scoped Developer Team roles, skills, bootstrap content, and instructions" },
-        ...selected.filter((id) => ["context-mode", "codebase-memory", "serena", "context7", "supermemory-tool-bindings"].includes(id)).map((capabilityId) => ({ action: "configure" as const, tool: capabilityId, capabilityId, reason: "Apply reviewed Codex MCP configuration without installing runtime packages" })),
+        ...selected.filter((id) => id === "serena").map((capabilityId) => ({ action: "install" as const, tool: capabilityId, capabilityId, reason: "Reuse or provision Serena through the explicitly authorized Core bootstrap before configuring Codex MCP" })),
+        ...selected.filter((id) => ["context-mode", "codebase-memory", "context7", "supermemory-tool-bindings"].includes(id)).map((capabilityId) => ({ action: "configure" as const, tool: capabilityId, capabilityId, reason: "Apply reviewed Codex MCP configuration without installing runtime packages" })),
         { action: "validate", tool: "codex", capabilityId: "codex-runtime", reason: "Verify managed content, trust activation, route classification, and capability readiness" },
       ],
     };
   }
-  async runAction(action: RunnerAction, _context: RunnerActionContext): Promise<RunnerActionRunResult> { return { actionId: action.id, status: "informational", message: "Codex project effects are applied through the confirmed Developer Team plan.", diagnostics: [] }; }
+  async prepareDeveloperTeamInstall(input: DeveloperTeamAdapterInstallInput) {
+    if (input.materializationScope === "content-only") return [];
+    const config = readDeckConfig(input.projectRoot);
+    const capabilityInstructions = input.capabilityInstructions
+      ?? buildCapabilityInstructionBundle(getEnabledPackageInstructionIds(config, "codex"));
+    const existingConfig = readExistingPlanFiles(input.projectRoot).files.get(".codex/config.toml") ?? "";
+    if (!this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingConfig).includes("serena")) return [];
+    const preparation = await this.#prepareSerena(input.projectRoot);
+    if (preparation.readiness.state !== "ready") {
+      return [{
+        code: "codex-serena-launcher-not-ready",
+        severity: "error" as const,
+        message: "Serena is selected but no healthy Deck-owned launcher is ready. Use the explicitly authorized Serena action in Review; Deck will not write a bare MCP command.",
+      }];
+    }
+    if (preparation.proxy.state !== "ready") {
+      return [{
+        code: "codex-serena-proxy-not-ready",
+        severity: "error" as const,
+        message: preparation.proxy.message,
+      }];
+    }
+    return [];
+  }
+  async runAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
+    if (action.capabilityId !== "serena") {
+      return { actionId: action.id, status: "informational", message: "Codex project effects are applied through the confirmed Developer Team plan.", diagnostics: [] };
+    }
+    const result = await this.#serenaBootstrap({
+      authorization: context.serenaAuthorization,
+      runner: "codex",
+      operationId: context.operationId,
+      operation: context.operation,
+      currentOperation: context.currentOperation,
+      signal: context.signal,
+    }, this.#serenaBootstrapEffects);
+    if (result.outcome !== "reused" && result.outcome !== "installed") {
+      const message = result.outcome === "failed"
+        ? result.diagnostic.message
+        : "Serena provisioning did not produce validated readiness evidence.";
+      return { actionId: action.id, status: "failed", message, diagnostics: [message] };
+    }
+    const readiness = await this.#resolveSerenaReadiness(context.signal);
+    if (readiness.state !== "ready") {
+      const message = "Serena provisioning completed without a reusable validated launcher; Codex MCP configuration was not planned.";
+      return { actionId: action.id, status: "failed", message, diagnostics: [message] };
+    }
+    const proxy = await this.#serenaProxyProbe();
+    const preparation = Object.freeze({ readiness, proxy });
+    this.#rememberPendingSerenaPreparation(context.projectRoot, preparation);
+    if (proxy.state !== "ready") {
+      return { actionId: action.id, status: "failed", message: proxy.message, diagnostics: [proxy.message] };
+    }
+    return {
+      actionId: action.id,
+      status: "executed",
+      message: result.outcome === "reused" ? "Reused the validated Deck-owned Serena launcher." : "Installed and validated the Deck-owned Serena launcher.",
+      diagnostics: [],
+      raw: { outcome: result.outcome },
+    };
+  }
   getTeams() { return [DEVELOPER_TEAM]; }
   getModelCatalog(): ModelCatalog {
     const inventory = this.#latestReadyInventory?.inventory;
@@ -742,10 +1060,17 @@ class CodexRunnerAdapter implements RunnerAdapter {
     return issues.length ? { valid: false, issues } : { valid: true, fingerprint: result.fingerprint };
   }
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput) {
-    const existing = readExistingPlanFiles(input.projectRoot);
+    const materializationScope = input.materializationScope ?? "full";
+    const existing = readExistingPlanFiles(input.projectRoot, materializationScope);
     const config = readDeckConfig(input.projectRoot);
     const capabilityInstructions = input.capabilityInstructions
       ?? buildCapabilityInstructionBundle(getEnabledPackageInstructionIds(config, "codex"));
+    const mcpCapabilityIds = materializationScope === "full"
+      ? this.#selectedMcpCapabilityIds(input, capabilityInstructions, existing.files.get(".codex/config.toml") ?? "")
+      : [];
+    const serenaPreparation = mcpCapabilityIds.includes("serena")
+      ? this.#takePendingSerenaPreparation(input.projectRoot)
+      : undefined;
     let native = buildCodexDeveloperTeamInstallPlan({
       projectRoot: input.projectRoot,
       existingFiles: existing.files,
@@ -754,7 +1079,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
       thinkingAssignments: input.thinkingAssignments,
       capabilityInstructions,
       memoryProvider: (input.memoryProvider?.id ?? config.adaptiveMemory.activeProvider) as "none" | "supermemory" | "engram",
-      mcpCapabilityIds: [...new Set([...this.#mcpCapabilityIds, ...(input.capabilityIds ?? [])])],
+      mcpCapabilityIds,
+      materializationScope,
+      serenaLauncherAvailable: serenaPreparation?.readiness.state === "ready",
+      serenaProxyAvailable: serenaPreparation?.readiness.state === "ready" && serenaPreparation.proxy.state === "ready",
       confirmedModels: this.#latestReadyInventory
         ? Object.values(this.#latestReadyInventory.inventory.modelsByProvider).flat().map((model) => model.id)
         : [],
@@ -857,6 +1185,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
       ],
     };
     this.#nativePlans.set(plan, native);
+    if (serenaPreparation?.readiness.state === "ready" && serenaPreparation.proxy.state === "ready") {
+      this.#serenaReadinessByPlan.set(plan, serenaPreparation.readiness);
+    }
     if (localPlan) this.#localPlans.set(plan, localPlan);
     const receipt: DeveloperTeamOperationReceipt = Object.freeze({
       runnerId: "codex",
@@ -876,6 +1207,19 @@ class CodexRunnerAdapter implements RunnerAdapter {
     if (!native || !operation) throw new Error("Codex apply requires the exact reviewed immutable plan.");
     if (operation.state !== "planned") throw new Error(`Codex operation ${operation.receipt.operationId} is already ${operation.state}.`);
     operation.state = "applying";
+    const serenaReadiness = this.#serenaReadinessByPlan.get(input.plan as object);
+    if (serenaReadiness) {
+      const refreshed = await serenaReadiness.revalidate(serenaReadiness.evidence);
+      if (!refreshed.valid) {
+        operation.state = "failed";
+        throw new Error("The validated Serena launcher is no longer reachable; Codex MCP configuration was not written.");
+      }
+      const proxy = await this.#serenaProxyProbe();
+      if (proxy.state !== "ready") {
+        operation.state = "failed";
+        throw new Error("The effective `deck` command can no longer serve the portable Serena proxy; Codex MCP configuration was not written.");
+      }
+    }
     const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
     const nativeTransaction = operation.receipt.transactions.find((entry) => entry.kind === "native");
     const localTransaction = operation.receipt.transactions.find((entry) => entry.kind === "local-only");
@@ -949,14 +1293,24 @@ class CodexRunnerAdapter implements RunnerAdapter {
   async diagnoseProject(projectRoot: string): Promise<ReadonlyArray<{ category: string; status: "ok" | "warning" | "error"; message: string; suggestion?: string }>> {
     const inspection = await this.inspectProject(projectRoot);
     const install = await this.detectDeckInstall({ projectRoot });
-    const plan = this.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development" });
-    const inventory = await this.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
+    const installInput = { projectRoot, environmentId: "codex-development" as const };
+    await this.prepareDeveloperTeamInstall(installInput);
+    const preparedSerena = this.#pendingSerenaPreparationByProject.get(resolve(projectRoot));
+    const plan = this.buildDeveloperTeamInstallPlan(installInput);
+    const freshReadiness = preparedSerena?.readiness ?? await this.#resolveSerenaReadiness();
+    const freshProxy = preparedSerena?.proxy ?? (freshReadiness.state === "ready" ? await this.#serenaProxyProbe() : undefined);
+    const inventory = await this.#getCapabilityInventory(
+      { projectRoot, environmentId: "codex-development", runnerId: "codex" },
+      freshReadiness,
+      freshProxy,
+    );
     const roleAssignmentRead = readCodexRoleAssignments(projectRoot);
     const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
     const journals = await effects.listJournals();
     const checks: Array<{ category: string; status: "ok" | "warning" | "error"; message: string; suggestion?: string }> = [];
     checks.push({ category: "Binary and version", status: inspection.state === "unsupported" || inspection.state === "blocked" ? "error" : "ok", message: inspection.evidence.binary === true ? `Codex ${String(inspection.evidence.version ?? "unknown")} detected.` : "Codex binary is unavailable.", suggestion: inspection.evidence.binary === true ? undefined : "Install a supported Codex CLI release." });
     checks.push({ category: "Trust activation", status: inspection.evidence.trust === "trusted" ? "ok" : "warning", message: inspection.evidence.trust === "trusted" ? "Project-local Codex configuration is trusted and active." : "Project trust is absent or indeterminate; Deck did not change trust.", suggestion: inspection.evidence.trust === "trusted" ? undefined : "Review the repository and activate trust through Codex if appropriate." });
+    checks.push({ category: "Execution safety", status: "warning", message: "Deck always launches Codex Developer Team with --dangerously-bypass-approvals-and-sandbox; sandboxing and command approvals are disabled, so Codex may modify/delete files or run commands without approval.", suggestion: "Run this command only when you intend to grant Codex unrestricted execution for this launch." });
     checks.push({ category: "Managed content", status: plan.blocked ? "error" : plan.files.length > 0 && install.installed ? "warning" : "ok", message: plan.blocked ? plan.diagnostics.join("; ") : install.installed ? plan.files.length > 0 ? `${plan.files.length} managed files are stale or incomplete.` : "Roles, all skill classes, bootstrap skills, package instructions, and ownership metadata match." : "No Deck-managed Codex installation was detected.", suggestion: plan.blocked ? "Resolve collisions before applying the reviewed plan." : plan.files.length > 0 ? "Preview and confirm the Codex repair plan." : undefined });
     if (roleAssignmentRead.diagnostics.length > 0) {
       checks.push({
@@ -989,6 +1343,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
             ? supermemoryPendingAuthorization
               ? "Run codex mcp login supermemory when you are ready to authorize Supermemory."
               : "Apply the reviewed Supermemory MCP configuration and verify it before authorizing Supermemory."
+            : capability.capabilityId === "serena"
+              ? capability.isBlocked
+                ? "Resolve the Deck-owned Serena launcher state before configuring Codex MCP."
+                : "Explicitly select Serena in Review to reuse or provision it before configuring Codex MCP."
             : "Review this capability in the Codex installation plan; Deck will not reinstall a usable shared binary.",
       });
     }
@@ -1040,10 +1398,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
     }
     return { status: "rolled-back", conflicts: [], diagnostics: [] };
   }
-  verifyDeveloperTeamInstall(plan: unknown): { valid: boolean; diagnostics: readonly string[] } {
+  async verifyDeveloperTeamInstall(plan: unknown): Promise<{ valid: boolean; diagnostics: readonly string[] }> {
     const native = this.#nativePlans.get(plan as object);
     if (!native) return { valid: false, diagnostics: ["Unknown Codex installation plan."] };
     const problems: string[] = [];
+    const serenaReadiness = this.#serenaReadinessByPlan.get(plan as object);
     for (const expected of native.expectedFiles) {
       const path = join(native.projectRoot, expected.relativePath);
       if (!existsSync(path)) {
@@ -1065,6 +1424,21 @@ class CodexRunnerAdapter implements RunnerAdapter {
       if ((expected.kind === "agent-skill" || expected.kind === "bootstrap-skill")
         && (!content.startsWith("---\n") || !parseSkillDescriptor(content, expected.relativePath.split("/").at(-2)).ok)) {
         problems.push(`Invalid skill descriptor: ${expected.relativePath}`);
+      }
+    }
+    if (serenaReadiness) {
+      const config = native.expectedFiles.find((expected) => expected.kind === "config");
+      const configured = config && existsSync(join(native.projectRoot, config.relativePath))
+        ? isCodexSerenaMcpConfigured(readFileSync(join(native.projectRoot, config.relativePath), "utf8"))
+        : false;
+      if (!configured) problems.push("Serena MCP launcher configuration is missing or drifted.");
+      try {
+        const refreshed = await serenaReadiness.revalidate(serenaReadiness.evidence);
+        if (!refreshed.valid) problems.push("Serena launcher is no longer reachable after configuration.");
+        const proxy = await this.#serenaProxyProbe();
+        if (proxy.state !== "ready") problems.push("The effective `deck` command can no longer serve the portable Serena proxy after configuration.");
+      } catch {
+        problems.push("Serena launcher reachability could not be verified after configuration.");
       }
     }
     const local = this.#localPlans.get(plan as object);

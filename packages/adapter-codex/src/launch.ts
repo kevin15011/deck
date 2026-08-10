@@ -2,6 +2,7 @@ import {
   MAX_RUNNER_STDIN_PAYLOAD_BYTES,
   type RunnerLaunchInput,
   type RunnerLaunchResult,
+  type RunnerDiagnostic,
   type RunnerStdinPayload,
 } from "@deck/core";
 
@@ -17,6 +18,12 @@ export type CodexNewSessionBootstrap = Readonly<{
 }>;
 
 const MAX_CODEX_BOOTSTRAP_BYTES = 4096;
+export const CODEX_DEVELOPER_BYPASS_ARG = "--dangerously-bypass-approvals-and-sandbox";
+export const CODEX_DEVELOPER_BYPASS_DIAGNOSTIC: Readonly<RunnerDiagnostic> = {
+  code: "codex-dangerous-bypass",
+  severity: "warning",
+  message: "Deck always launches Codex Developer Team with --dangerously-bypass-approvals-and-sandbox; sandboxing and command approvals are disabled, so Codex may modify/delete files or run commands without approval.",
+};
 
 function safeTomlString(value: string, limit: number): string | undefined {
   if (!value || value.includes("\0") || Buffer.byteLength(value, "utf8") > limit) return undefined;
@@ -28,9 +35,43 @@ function safeStdinContent(value: string): string | undefined {
   return value;
 }
 
+function isReservedBypassAlias(value: string): boolean {
+  return value === CODEX_DEVELOPER_BYPASS_ARG || value.startsWith(`${CODEX_DEVELOPER_BYPASS_ARG}=`);
+}
+
+export function isSafeCodexLaunchScalar(value: string | undefined): value is string {
+  return Boolean(
+    value
+    && value.trim() === value
+    && !value.startsWith("-")
+    && !isReservedBypassAlias(value)
+    && !value.includes("\0")
+    && !value.includes("\r")
+    && !value.includes("\n")
+    && Buffer.byteLength(value, "utf8") <= 1024,
+  );
+}
+
 function safeCodexScalar(value: string | undefined): string | undefined {
-  if (!value || value.trim() !== value || value.includes("\0") || value.includes("\r") || value.includes("\n") || Buffer.byteLength(value, "utf8") > 1024) return undefined;
-  return value;
+  return isSafeCodexLaunchScalar(value) ? value : undefined;
+}
+
+function invalidLaunchScalar(field: "model" | "reasoning"): RunnerLaunchResult {
+  return {
+    status: "blocked",
+    code: "codex-invalid-launch-scalar",
+    diagnostics: [{
+      code: "invalid-launch-scalar",
+      severity: "error",
+      message: `Codex ${field} values must be bounded non-option scalars and cannot override Deck's reserved launch policy token.`,
+    }],
+  };
+}
+
+function hasOwnedBypassPolicy(args: readonly string[]): boolean {
+  return args[0] === CODEX_DEVELOPER_BYPASS_ARG
+    && args.filter((arg) => arg === CODEX_DEVELOPER_BYPASS_ARG).length === 1
+    && !args.slice(1).some(isReservedBypassAlias);
 }
 
 function execPayload(input: Extract<RunnerLaunchInput, { mode: "exec" }>): RunnerStdinPayload | undefined {
@@ -62,7 +103,9 @@ export function buildCodexLaunchPlan(
   }
 
   const newSession = input.mode === "interactive" || input.mode === "exec";
-  const args: string[] = [];
+  if (newSession && input.modelId !== undefined && !safeCodexScalar(input.modelId)) return invalidLaunchScalar("model");
+  if (newSession && input.reasoningLevel !== undefined && !safeCodexScalar(input.reasoningLevel)) return invalidLaunchScalar("reasoning");
+  const args: string[] = [CODEX_DEVELOPER_BYPASS_ARG];
   if (newSession && bootstrap) {
     const developerInstructions = safeTomlString(bootstrap.developerInstructions, MAX_CODEX_BOOTSTRAP_BYTES);
     if (!developerInstructions) {
@@ -96,6 +139,17 @@ export function buildCodexLaunchPlan(
   }
   if (input.mode === "resume-by-id") args.push("resume", input.sessionId);
   if (input.mode === "resume-latest") args.push("resume", "--last");
+  if (!hasOwnedBypassPolicy(args)) {
+    return {
+      status: "blocked",
+      code: "codex-launch-policy-invariant",
+      diagnostics: [{
+        code: "launch-policy-invariant",
+        severity: "error",
+        message: "Deck rejected the Codex launch because argv violates its reserved bypass-policy invariant.",
+      }],
+    };
+  }
 
   return {
     status: "ready",
@@ -110,6 +164,7 @@ export function buildCodexLaunchPlan(
       ...(input.mode === "exec" ? { captureLimitBytes: 1024 * 1024 } : {}),
     },
     diagnostics: [
+      CODEX_DEVELOPER_BYPASS_DIAGNOSTIC,
       ...(newSession ? [] : [{
         code: "codex-resume-existing-history",
         severity: "info" as const,

@@ -60,7 +60,7 @@ export type RunnerLaunchResult =
 
 `RunnerAdapter.buildLaunchPlan` is initially optional so Pi and OpenCode can migrate additively. It becomes required for adapters declared CLI-launchable after the compatibility release.
 
-Sandbox and approval overrides are intentionally absent from the initial public contract. A later change may add strict enums only with explicit authorization and preview semantics.
+Sandbox and approval override strings remain absent from caller-controlled launch contracts. The Codex adapter owns one fixed user-approved policy token, `--dangerously-bypass-approvals-and-sandbox`, and emits it for every non-install-only Developer Team launch. Callers cannot supply arbitrary sandbox or approval values through this contract.
 
 The CLI merges `envOverlay` into the inherited environment, redacts sensitive entries, bounds captured stdout/stderr, distinguishes exit from signal termination, and never treats truncated output as complete evidence.
 
@@ -251,8 +251,9 @@ Multi-file installation is recoverable, not globally atomic: every target uses a
 - Report `materialized-but-inactive` when project config is not active.
 - Allowlist only non-secret, non-denylisted project config.
 - Never persist credentials, provider secrets, alternate endpoints, or API tokens.
-- Default launch plans omit sandbox and approval overrides.
-- Explicit future overrides must be typed, visible in preview, and never translate to bypass flags automatically.
+- Every Codex Developer Team launch plan emits the fixed `--dangerously-bypass-approvals-and-sandbox` argv token exactly once before any Codex subcommand.
+- The bypass is visible in launch previews, diagnostics, Doctor, and documentation as a high-risk user-approved policy.
+- Deck never writes the bypass to project or global Codex configuration and never extends it to Pi, OpenCode, or plain `codex` launches.
 
 ## Model and reasoning behavior
 
@@ -283,7 +284,7 @@ deck codex developer resume <session-id>
 deck codex developer resume --last
 ```
 
-`--dry-run` previews without mutation. `--yes` confirms the displayed Deck-owned mutation plan for non-interactive use; it never confirms project trust, credential changes, sandbox bypass, or approval bypass. If mutation is required and neither an interactive confirmation nor `--yes` exists, the command exits without writing.
+`--dry-run` previews without mutation, including the fixed dangerous Codex launch policy. `--yes` confirms the displayed Deck-owned mutation plan for non-interactive use; it does not persist project trust, credentials, sandbox policy, or approval policy. The sandbox/approval bypass is governed by the separately approved always-on launch policy. If mutation is required and neither an interactive confirmation nor `--yes` exists, the command exits without writing.
 
 `--local-only` is best-effort and honest: it resolves Git's effective worktree-aware exclude path (for example through `git rev-parse --git-path info/exclude`) and adds exact entries only for newly created, untracked, fully Deck-owned files. It never adds broad `.agents/` or `.codex/` patterns, never hides tracked files, and cannot hide a Deck marker inside shared `AGENTS.md` or config. Tracked/shared mutations remain visible in the preview. If the user requires zero visible tracked changes, Deck blocks required shared-file mutation and reports the resulting capability gaps. Deck never edits `.gitignore` implicitly and removes only its own exclude block during rollback.
 

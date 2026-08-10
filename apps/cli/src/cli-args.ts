@@ -19,6 +19,7 @@ export type ParsedArgs =
   | { command: "tui" }
   | { command: "doctor" }
   | { command: "version" }
+  | { command: "internal-serena-mcp"; probe: boolean }
   | {
       command: "upgrade";
       flags: {
@@ -182,6 +183,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   const [first, ...rest] = args;
+
+  if (first === "internal") {
+    if (rest.length === 2 && rest[0] === "serena-mcp" && rest[1] === "--probe") return { command: "internal-serena-mcp", probe: true };
+    if (rest.length === 1 && rest[0] === "serena-mcp") return { command: "internal-serena-mcp", probe: false };
+    return { command: "error", message: "Usage: deck internal serena-mcp" };
+  }
 
   if (first === "doctor") {
     if (rest.length > 0) {

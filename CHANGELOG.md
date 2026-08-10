@@ -16,6 +16,7 @@ All notable release changes to Deck are recorded here. Current release procedure
 ### Security
 
 - Codex integration never auto-trusts repositories or persists external credentials. Managed writes use reviewed previews, optimistic preimages, durable recovery journals, semantic verification, and conflict-preserving rollback.
+- Every non-install-only Codex Developer Team launch now uses Codex's `--dangerously-bypass-approvals-and-sandbox` flag. The launch preview and Doctor report that sandboxing and command approvals are disabled; the per-launch flag is never persisted.
 - Codex rollback is operation-scoped by exact native/local-only transaction IDs, and semantic verification failure now awaits rollback before returning.
 - Codex package instructions preserve canonical metadata and tool policy while translating runner-specific OpenCode/Claude wording to verified Codex behavior.
 

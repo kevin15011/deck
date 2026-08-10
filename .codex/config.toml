@@ -24,11 +24,11 @@ approval_mode = "approve"
 [mcp_servers.codebase-memory.tools.get_code_snippet]
 approval_mode = "approve"
 
-# deck-codex-mcp:serena
-[mcp_servers.serena]
-command = "serena"
-args = ["start-mcp-server", "--project-from-cwd"]
-
 # deck-codex-mcp:supermemory
 [mcp_servers.supermemory]
 url = "https://mcp.supermemory.ai/mcp"
+# deck-codex-mcp:serena
+[mcp_servers.serena]
+command = "deck"
+args = ["internal", "serena-mcp"]
+env_vars = ["HOME", "PATH", "XDG_DATA_HOME"]

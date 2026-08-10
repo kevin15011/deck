@@ -411,6 +411,39 @@ expect(setup.ok).toBe(true);
 });
 
 describe("Serena action-runner evidence and cancellation gates", () => {
+  test("routes an explicitly authorized Codex Serena action through its adapter without a runner-specific executor", async () => {
+    const operation = { runner: "codex" as const, operationId: "codex-serena-operation", explicitlySelected: true };
+    const authorization = {
+      kind: "interactive-tui-explicit-selection" as const,
+      runner: "codex" as const,
+      operationId: operation.operationId,
+    };
+    let receivedContext: unknown;
+
+    const result = await runRunnerAction({
+      id: "codex-serena-bootstrap",
+      kind: "install",
+      title: "Reuse Serena",
+      capabilityId: "serena",
+      status: "ready",
+    }, {
+      runnerId: "codex",
+      projectRoot: "/tmp/codex-serena-action",
+      currentOperation: operation,
+      serenaAuthorization: authorization,
+      serenaExecutionState: { attempted: false, succeeded: false },
+      runnerAdapter: {
+        runAction: async (_action: unknown, context: unknown) => {
+          receivedContext = context;
+          return { actionId: "codex-serena-bootstrap", status: "executed", message: "reused", diagnostics: [], raw: { outcome: "reused" } };
+        },
+      } as never,
+    });
+
+    expect(result).toMatchObject({ status: "executed", serenaOutcome: "reused" });
+    expect(receivedContext).toMatchObject({ runnerId: "codex", environmentId: "codex-development", serenaAuthorization: authorization });
+  });
+
   function serenaPlan() : PiRunnerReviewPlan {
     return {
       ready: true,

@@ -12,6 +12,13 @@ describe("parseArgs", () => {
     expect(parseArgs(["codex", "developer", "resume", "--last", "--local-only"])).toMatchObject({ command: "runner-launch", localOnly: true, launch: { mode: "resume-latest" } });
   });
 
+
+  test("parses only the hidden Serena proxy route and its bounded capability probe", () => {
+    expect(parseArgs(["internal", "serena-mcp"])).toEqual({ command: "internal-serena-mcp", probe: false });
+    expect(parseArgs(["internal", "serena-mcp", "--probe"])).toEqual({ command: "internal-serena-mcp", probe: true });
+    expect(parseArgs(["internal", "serena-mcp", "--anything"])).toMatchObject({ command: "error" });
+  });
+
   test("rejects malformed Codex grammar instead of guessing", () => {
     expect(parseArgs(["codex", "developer", "exec", "fix it"]).command).toBe("error");
     expect(parseArgs(["codex", "developer", "resume"]).command).toBe("error");
