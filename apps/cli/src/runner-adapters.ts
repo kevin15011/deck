@@ -14,6 +14,7 @@ import { createAdapterRegistry, type AdapterRegistry } from "@deck/core";
 import { createPiRunnerAdapter } from "@deck/adapter-pi";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { createCodexRunnerAdapter } from "@deck/adapter-codex";
+import { getWebSearchProviderDescriptor } from "./web-search-provider";
 
 /**
  * Singleton registry instance for use by getAdapter() and listAdapters().
@@ -41,9 +42,18 @@ export type DefaultAdapterRegistryOptions = {
 
 export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOptions = {}): AdapterRegistry {
   const registry = createAdapterRegistry();
-  registry.register("pi", createPiRunnerAdapter(options.pi));
-  registry.register("opencode", createOpenCodeRunnerAdapter(options.opencode));
-  registry.register("codex", createCodexRunnerAdapter(options.codex));
+  registry.register("pi", createPiRunnerAdapter({
+    webSearchProviderResolver: getWebSearchProviderDescriptor,
+    ...options.pi,
+  }));
+  registry.register("opencode", createOpenCodeRunnerAdapter({
+    webSearchProviderResolver: getWebSearchProviderDescriptor,
+    ...options.opencode,
+  }));
+  registry.register("codex", createCodexRunnerAdapter({
+    webSearchProviderResolver: getWebSearchProviderDescriptor,
+    ...options.codex,
+  }));
   return registry;
 }
 

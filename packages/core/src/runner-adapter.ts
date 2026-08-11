@@ -23,6 +23,11 @@ import type {
 import type { AdaptiveMemoryProvider } from "./memory/adaptive-memory";
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles";
 import type { RunnerCapabilitySupportStatus } from "./runner-capability-registry";
+import type {
+  WebSearchProviderDescriptorV1,
+  WebSearchReadinessEvidence,
+  WebSearchReadinessResult,
+} from "./web-search-capability";
 import type { PackageInstructionPackageId } from "./config/deck-config";
 import type { SkillDiscoverySourceProviderV1 } from "./skill-discovery/contracts";
 import type {
@@ -288,6 +293,10 @@ export type CapabilityCatalogEntry = {
   isInstalled: boolean;
   isBlocked: boolean;
   diagnostics?: readonly string[];
+  webSearchReadiness?: WebSearchReadinessResult;
+  webSearchEvidence?: WebSearchReadinessEvidence;
+  /** Runtime-only descriptor used to validate and materialize Web Search. */
+  webSearchProvider?: WebSearchProviderDescriptorV1;
 };
 
 // ---------------------------------------------------------------------------
@@ -441,6 +450,10 @@ export type DashboardState = {
   /** Ephemeral current-operation provenance; it is never persisted by Core. */
   explicitlySelectedCapabilities?: Readonly<Record<string, boolean>>;
   operationId?: string;
+  /** Opaque provider selection persisted by the CLI dashboard. */
+  webSearchProvider?: string;
+  /** Runtime-only descriptor selected by the CLI composition root. */
+  webSearchProviderDescriptor?: WebSearchProviderDescriptorV1;
   packageInstructions: Record<string, boolean>;
   adaptiveMemory: {
     provider: "none" | "engram" | "supermemory";
@@ -499,6 +512,8 @@ export type RunnerActionContext = {
   signal?: AbortSignal;
   runnerCommand?: string;
   dashboardState?: DashboardState;
+  /** Runtime-only provider descriptor; never persisted or logged. */
+  webSearchProvider?: WebSearchProviderDescriptorV1;
   supermemoryToken?: string;
   /** Resolved adaptive memory provider — set by action-runner before calling runAction */
   resolvedMemoryProvider?: import("./memory/adaptive-memory").AdaptiveMemoryProvider;
@@ -562,6 +577,8 @@ export type RunnerMcpConfigInput = {
   serenaRevalidator?: SerenaReadinessRevalidator;
   url?: string;
   headers?: Record<string, string>;
+  /** Runtime-only provider descriptor selected by the CLI composition root. */
+  webSearchProvider?: WebSearchProviderDescriptorV1;
 };
 
 export type RunnerMcpConfigResult = {

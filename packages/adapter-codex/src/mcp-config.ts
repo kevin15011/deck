@@ -1,5 +1,11 @@
 import { parseTOML, type AST } from "toml-eslint-parser";
-export const CODEX_MCP_SERVER_IDS = ["context7", "context-mode", "codebase-memory", "serena", "supermemory"] as const;
+import {
+  isWebSearchProviderDescriptor,
+  WEB_SEARCH_CAPABILITY_ID,
+  type WebSearchProviderDescriptorV1,
+} from "@deck/core";
+
+export const CODEX_MCP_SERVER_IDS = ["context7", "context-mode", "codebase-memory", "serena", "supermemory", WEB_SEARCH_CAPABILITY_ID] as const;
 export const CODEX_SUPERMEMORY_MCP_URL = "https://mcp.supermemory.ai/mcp";
 
 
@@ -91,6 +97,27 @@ export function isCodexSerenaMcpConfigured(source: string): boolean {
       command: CODEX_SERENA_PROXY_COMMAND,
       args: [...CODEX_SERENA_PROXY_ARGS],
       envVars: [...CODEX_SERENA_PROXY_ENV_VARS],
+    });
+    return server !== undefined && JSON.stringify(canonical(server)) === JSON.stringify(canonical(expected));
+  } catch {
+    return false;
+  }
+}
+
+/** Confirms the exact credential-name-only Web Search table. */
+export function isCodexWebSearchMcpConfigured(
+  source: string,
+  provider?: WebSearchProviderDescriptorV1,
+): boolean {
+  if (!isWebSearchProviderDescriptor(provider)) return false;
+  try {
+    const server = existingServers(source).get(provider.semanticServerId);
+    const expected = normalized({
+      id: provider.semanticServerId as CodexMcpServerId,
+      transport: "stdio",
+      command: provider.command[0]!,
+      args: [...provider.command.slice(1)],
+      envVars: [provider.credentialEnvVar],
     });
     return server !== undefined && JSON.stringify(canonical(server)) === JSON.stringify(canonical(expected));
   } catch {
@@ -198,6 +225,16 @@ export function buildCodexMcpServers(input: {
   serenaLauncherAvailable?: boolean;
   /** The effective `deck` command has confirmed the hidden Serena proxy route. */
   serenaProxyAvailable?: boolean;
+  /** Provider selection is validated by the CLI composition root. */
+  webSearchProviderSupported?: boolean;
+  /** Provider selection was supplied at all; false reports an incomplete optional setup. */
+  webSearchProviderConfigured?: boolean;
+  /** Reviewed provider descriptor selected by the CLI composition root. */
+  webSearchProvider?: WebSearchProviderDescriptorV1;
+  /** Presence-only credential evidence; the value is never accepted here. */
+  webSearchCredentialAvailable?: boolean;
+  /** Presence-only executable prerequisite evidence. */
+  webSearchExecutableAvailable?: boolean;
 }): { servers: readonly CodexMcpServer[]; gaps: readonly string[] } {
   const selected = new Set(input.packageIds);
   const servers: CodexMcpServer[] = [];
@@ -221,6 +258,23 @@ export function buildCodexMcpServers(input: {
   }
   if (selected.has("context7")) servers.push({ id: "context7", transport: "streamable-http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } });
   if (input.memoryProvider === "supermemory") servers.push({ id: "supermemory", transport: "streamable-http", url: CODEX_SUPERMEMORY_MCP_URL });
+  if (selected.has(WEB_SEARCH_CAPABILITY_ID)) {
+    if (input.webSearchProviderConfigured !== true) {
+      gaps.push("web-search-provider-unconfigured");
+    } else if (input.webSearchProviderSupported !== true || !isWebSearchProviderDescriptor(input.webSearchProvider)) {
+      gaps.push("web-search-provider-unsupported");
+    } else {
+      if (input.webSearchCredentialAvailable !== true) gaps.push("web-search-credential-missing");
+      if (input.webSearchExecutableAvailable !== true) gaps.push("web-search-executable-missing");
+      servers.push({
+        id: input.webSearchProvider.semanticServerId as CodexMcpServerId,
+        transport: "stdio",
+        command: input.webSearchProvider.command[0]!,
+        args: [...input.webSearchProvider.command.slice(1)],
+        envVars: [input.webSearchProvider.credentialEnvVar],
+      });
+    }
+  }
   if (input.memoryProvider === "engram") gaps.push("engram-codex-deferred");
   return { servers, gaps };
 }

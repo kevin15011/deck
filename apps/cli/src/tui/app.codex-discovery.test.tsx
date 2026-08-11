@@ -211,10 +211,10 @@ describe("DeckApp Codex discovery composition", () => {
       harness.input("\r");
       await waitFor(instance, () => harness.output().includes("Choose Lead personality"), "personality selection");
       const dashboardBoundary = harness.output().length;
-      harness.input("\r");
-      await instance.waitUntilRenderFlush();
-      await waitForFresh(instance, harness.output, dashboardBoundary, "Codex CLI Runner Setup Dashboard");
-      for (let index = 0; index < 3; index++) {
+       harness.input("\r");
+       await instance.waitUntilRenderFlush();
+       await waitForFresh(instance, harness.output, dashboardBoundary, "Codex CLI Runner Setup Dashboard");
+       for (let index = 0; index < 4; index++) {
         harness.input("j");
         await instance.waitUntilRenderFlush();
       }
@@ -226,10 +226,10 @@ describe("DeckApp Codex discovery composition", () => {
       expect(harness.output()).not.toContain("DASHBOARD ERROR");
       expect(applyCalls).toBe(0);
 
-      const backBoundary = harness.output().length;
-      harness.input("\u001b");
-      await waitForFresh(instance, harness.output, backBoundary, "Codex CLI Runner Setup Dashboard");
-      for (let index = 0; index < 3; index++) {
+       const backBoundary = harness.output().length;
+       harness.input("\u001b");
+       await waitForFresh(instance, harness.output, backBoundary, "Codex CLI Runner Setup Dashboard");
+       for (let index = 0; index < 4; index++) {
         harness.input("j");
         await instance.waitUntilRenderFlush();
       }

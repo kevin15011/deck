@@ -24,9 +24,11 @@ import type { PiRequiredToolsReview } from "./required-tools";
 import {
   resolveRunnerParity,
   getParityGaps,
+  isWebSearchProviderDescriptor,
   type ParityReport,
   type ParityRuntimeHints,
   type SerenaOperationIdentity,
+  type WebSearchProviderDescriptorV1,
 } from "@deck/core";
 
 export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
@@ -87,6 +89,8 @@ type BuildPiRunnerReviewPlanState = {
   runtime?: { toolsReview?: PiRequiredToolsReview };
   /** Package instruction bundle per runner scope. */
   packageInstructions?: Partial<Record<import("@deck/core/config/deck-config").PackageInstructionRunnerId, import("@deck/core/teams/developer/instruction-bundles").CapabilityInstructionBundle>>;
+  /** Reviewed provider descriptor selected by the CLI composition root. */
+  webSearchProvider?: WebSearchProviderDescriptorV1;
 };
 
 const EXCLUDED_PLAN_TERMS = ["@juicesharp/rpiv-todo", "@juicesharp/rpiv-ask-user-question"];
@@ -101,6 +105,7 @@ const CAPABILITIES_WITH_MCP_CONFIG = new Set<CapabilityId>([
   "codebase-memory-mcp",
   "serena",
   "context7",
+  "web-search",
 ]);
 
 type CapabilityToolPlanMetadata = ReturnType<typeof getCapabilityInstallableToolMappings>[number];
@@ -112,6 +117,7 @@ type CapabilityToolPlanMetadata = ReturnType<typeof getCapabilityInstallableTool
 function buildParityRuntimeHints(inventory: PiRunnerCapabilityInventory): ParityRuntimeHints {
   const binariesInPath: string[] = [];
   const mcpServersConfigured: string[] = [];
+  const webSearch = inventory["web-search"]?.webSearchEvidence;
 
   for (const [capabilityId, entry] of Object.entries(inventory)) {
     if (entry.status === "ready") {
@@ -134,6 +140,7 @@ function buildParityRuntimeHints(inventory: PiRunnerCapabilityInventory): Parity
     mcpServersConfigured: mcpServersConfigured.length > 0 ? mcpServersConfigured : undefined,
     supermemoryConfigured,
     projectIndexVerified: (inventory as any)._codebaseMemoryIndexed ?? undefined,
+    ...(webSearch ? { webSearch } : {}),
   };
 }
 
@@ -214,6 +221,17 @@ function addCapabilityActions(
 ): void {
   const selectedCapabilities = state.selectedCapabilities ?? {};
   const serenaAuthorized = isPiSerenaSelectionAuthorized(state, runnerScope);
+  if (selectedCapabilities["web-search"] === false) {
+    groups.configWrites.push({
+      id: "capability.web-search.deck-config",
+      kind: "write-deck-config",
+      title: "Persist Web Search selection",
+      description: "Persist the current Web Search enabled/provider selection.",
+      capabilityId: "web-search",
+      status: "ready",
+      required: false,
+    });
+  }
 
   for (const [capabilityId, selected] of Object.entries(selectedCapabilities) as [CapabilityId, boolean][]) {
     if (!selected) continue;
@@ -225,6 +243,31 @@ function addCapabilityActions(
     const installKind = toolMetadata?.installKind ?? capability.installKind;
     const toolId = toolMetadata?.toolId ?? capability.toolId;
     const source = toolMetadata?.source ?? capability.source;
+
+    if (capabilityId === "web-search") {
+      if (!entry || entry.status === "unsupported" || !isWebSearchProviderDescriptor(state.webSearchProvider)) continue;
+      groups.configWrites.push({
+        id: "capability.web-search.deck-config",
+        kind: "write-deck-config",
+        title: "Persist Web Search selection",
+        description: "Persist the current Web Search enabled/provider selection before native MCP materialization.",
+        capabilityId,
+        status: "ready",
+        required: false,
+      });
+      groups.configWrites.push({
+        id: `capability.${capabilityId}.mcp-config`,
+        kind: "write-pi-mcp-config",
+        title: `Configure ${capability.label} MCP`,
+        description: `Writes MCP configuration for ${capability.label}.`,
+        capabilityId,
+        toolId,
+        source,
+        status: entry.webSearchReadiness?.code === "mcp-config-conflict" ? "blocked" : "ready",
+        diagnostics: entry.diagnostics,
+      });
+      continue;
+    }
 
     // Generate write-pi-mcp-config action if this capability has MCP config
     // This should happen for ALL selected capabilities with MCP config, regardless of install status

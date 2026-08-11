@@ -10,11 +10,14 @@ import {
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   getConfigurablePackageInstructionMetadata,
   buildCapabilityInstructionBundle,
-  getEnabledPackageInstructionIds,
+  getEnabledCapabilityInstructionIds,
   readDeckConfig,
   checkSharedBinaryUsability,
   getCanonicalCapability,
   getRunnerCapabilityMapping,
+  resolveWebSearchReadiness,
+  hasWebSearchProviderCredential,
+  isWebSearchProviderDescriptor,
   bootstrapSerena,
   resolveExistingSerenaReadiness,
   type SharedBinaryUsabilityResult,
@@ -50,6 +53,7 @@ import {
   type SerenaBootstrapResult,
   type SerenaExistingReadinessResult,
   parseSkillDescriptor,
+  type WebSearchProviderDescriptorV1,
 } from "@deck/core";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 
@@ -62,7 +66,7 @@ import {
   isSafeCodexLaunchScalar,
 } from "./launch";
 import { composeLocalOnlyExclude } from "./local-only";
-import { inspectCodexMcpServerIds, isCodexSerenaMcpConfigured, isCodexSupermemoryMcpConfigured, isDeckManagedCodexMcpServer } from "./mcp-config";
+import { inspectCodexMcpServerIds, isCodexSerenaMcpConfigured, isCodexSupermemoryMcpConfigured, isCodexWebSearchMcpConfigured, isDeckManagedCodexMcpServer } from "./mcp-config";
 import { inspectCodexSupermemoryOAuth, type CodexSupermemoryOAuthStatus } from "./mcp-oauth";
 import { createNodeCodexFileEffects } from "./node-effects";
 import {
@@ -94,6 +98,10 @@ export type CodexRunnerAdapterOptions = {
   serenaBootstrapEffects?: SerenaBootstrapEffects;
   /** Checks whether the effective `deck` command can serve the portable Serena proxy. */
   serenaProxyProbe?: () => Promise<DeckSerenaProxyReadiness>;
+  /** Provider descriptor selected by the CLI composition root. */
+  webSearchProvider?: WebSearchProviderDescriptorV1;
+  /** Resolve the selected provider without putting provider metadata in Core. */
+  webSearchProviderResolver?: (provider: string | undefined) => WebSearchProviderDescriptorV1 | undefined;
 };
 
 export type CodexGitEffects = {
@@ -185,6 +193,19 @@ export function createDeckSerenaProxyProbe(
 
 function defaultSerenaProxyProbe(): Promise<DeckSerenaProxyReadiness> {
   return createDeckSerenaProxyProbe()();
+}
+
+function commandAvailable(command: string, environment: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  const pathValue = environment.PATH ?? "";
+  const separator = process.platform === "win32" ? ";" : ":";
+  return pathValue.split(separator).some((directory) => {
+    const candidate = join(directory || process.cwd(), command);
+    try {
+      return lstatSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  });
 }
 
 type CodexOperationRecord = {
@@ -572,6 +593,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly #serenaBootstrap: NonNullable<CodexRunnerAdapterOptions["serenaBootstrap"]>;
   readonly #serenaBootstrapEffects?: SerenaBootstrapEffects;
   readonly #serenaProxyProbe: NonNullable<CodexRunnerAdapterOptions["serenaProxyProbe"]>;
+  readonly #webSearchProvider?: WebSearchProviderDescriptorV1;
+  readonly #webSearchProviderResolver?: CodexRunnerAdapterOptions["webSearchProviderResolver"];
   /** One-use Serena and effective Deck proxy evidence for a matching full plan. */
   readonly #pendingSerenaPreparationByProject = new Map<string, PendingSerenaPreparation>();
   readonly #serenaReadinessByPlan = new WeakMap<object, ReadySerenaReadiness>();
@@ -598,7 +621,16 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#serenaReadinessResolver = options.serenaReadinessResolver
       ?? ((signal) => resolveExistingSerenaReadiness(this.#serenaBootstrapEffects, signal));
     this.#serenaBootstrap = options.serenaBootstrap ?? ((request, effects) => bootstrapSerena(request, effects));
+    this.#webSearchProvider = options.webSearchProvider;
+    this.#webSearchProviderResolver = options.webSearchProviderResolver;
     this.#journalRoot = options.journalRoot ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "deck", "backups", "codex");
+  }
+
+  private resolveWebSearchProvider(provider: string | undefined): WebSearchProviderDescriptorV1 | undefined {
+    const selected = provider?.trim();
+    if (!selected) return undefined;
+    if (this.#webSearchProvider?.providerId === selected) return this.#webSearchProvider;
+    return this.#webSearchProviderResolver?.(selected);
   }
 
   async #resolveSerenaReadiness(signal?: AbortSignal): Promise<SerenaExistingReadinessResult> {
@@ -632,9 +664,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
     input: DeveloperTeamAdapterInstallInput,
     capabilityInstructions: ReturnType<typeof buildCapabilityInstructionBundle> | undefined,
     configSource = "",
+    webSearchEnabled = false,
   ): readonly string[] {
     const ids = new Set(codexMcpCapabilityIds(capabilityInstructions, this.#mcpCapabilityIds, input.capabilityIds));
     if (isDeckManagedCodexMcpServer(configSource, "serena")) ids.add("serena");
+    if (webSearchEnabled) ids.add("web-search");
     return [...ids];
   }
 
@@ -718,6 +752,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
   ): Promise<CapabilityInventory> {
     const inspection = await this.inspectProject(input.projectRoot);
     const config = inspection.evidence.projectConfig === true ? defaultProjectSnapshot(input.projectRoot).config ?? "" : "";
+    const deckConfig = readDeckConfig(input.projectRoot);
+    const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
     const mcp = new Set(inspectCodexMcpServerIds(config));
     const commands = ["context-mode", "codebase-memory-mcp", "rtk"] as const;
     const readiness = new Map(await Promise.all(commands.map(async (command) => [command, await this.#sharedBinaryUsability(command)] as const)));
@@ -766,6 +802,31 @@ class CodexRunnerAdapter implements RunnerAdapter {
         supermemory.diagnostics.push("supermemory: OAuth status could not be established safely; run `codex mcp list --json` and sign in if needed.");
       }
     }
+    const webSearchEvidence = {
+      enabled: deckConfig.webSearch.enabled,
+      runnerSupported: true,
+      providerConfigured: isWebSearchProviderDescriptor(webSearchProvider),
+      credentialAvailable: hasWebSearchProviderCredential(webSearchProvider, process.env),
+      executableAvailable: webSearchProvider ? commandAvailable(webSearchProvider.command[0]!) : false,
+      mcpConfigured: webSearchProvider !== undefined && mcp.has(webSearchProvider.semanticServerId) && isCodexWebSearchMcpConfigured(config, webSearchProvider),
+      mcpConfigConflict: webSearchProvider !== undefined && mcp.has(webSearchProvider.semanticServerId) && !isCodexWebSearchMcpConfigured(config, webSearchProvider),
+    } as const;
+    const webSearchReadiness = resolveWebSearchReadiness(webSearchEvidence);
+    const webSearch = {
+      capabilityId: "web-search",
+      label: "Web Search",
+      description: "Web Search Codex readiness",
+      section: "tools",
+      requirementLevel: "optional" as const,
+      installKind: "runner-native" as const,
+      supportStatus: supportStatusFor("web-search"),
+      isInstalled: webSearchReadiness.state === "ready",
+       isBlocked: webSearchReadiness.code === "mcp-config-conflict",
+      diagnostics: [...webSearchReadiness.diagnostics],
+      webSearchReadiness,
+       webSearchEvidence,
+       webSearchProvider,
+    };
     const serena = {
       capabilityId: "serena",
       label: "Serena",
@@ -798,6 +859,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       capability("rtk", "RTK", "rtk"),
       serena,
       capability("context7", "Context7", undefined, "context7"),
+      webSearch,
       supermemory,
       { ...capability("engram", "Engram"), isInstalled: false, isBlocked: true, diagnostics: ["Engram Codex integration is deferred."] },
     ];
@@ -843,6 +905,17 @@ class CodexRunnerAdapter implements RunnerAdapter {
         status: "ready",
         required: false,
         diagnostics: [`Optional instruction bundles: ${enabledPackageInstructionIds.join(", ")}`],
+      });
+    }
+    if (state.selectedCapabilities["web-search"] !== undefined) {
+      configWrites.push({
+        id: "capability.web-search.deck-config",
+        kind: "write-deck-config",
+        title: "Persist Web Search selection",
+        capabilityId: "web-search",
+        status: "ready",
+        required: false,
+        diagnostics: ["Persist the current Web Search enabled/provider selection before native Codex MCP materialization."],
       });
     }
     const blockedCapabilityIds = new Set<string>();
@@ -901,7 +974,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
       if (capability.isBlocked) {
         if (isApprovedStaticCompatibleGap(capability.capabilityId)) addStaticCompatibleGap(capability);
         else addBlockedCapability(capability);
-      } else if (!capability.isInstalled && ["context-mode", "codebase-memory", "context7", "supermemory-tool-bindings"].includes(capabilityId)) {
+      } else if (!capability.isInstalled && ["context-mode", "codebase-memory", "context7", "web-search", "supermemory-tool-bindings"].includes(capabilityId)) {
+        if (capabilityId === "web-search" && !capability.webSearchProvider) continue;
         configWrites.push({ id: `codex-config:${capabilityId}`, kind: "codex-config-preview", title: `Configure ${capability.label} through the reviewed Codex plan`, capabilityId, status: "ready" });
       }
     }
@@ -938,7 +1012,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       steps: [
         { action: "configure", tool: "codex", capabilityId: "developer-team", reason: "Materialize project-scoped Developer Team roles, skills, bootstrap content, and instructions" },
         ...selected.filter((id) => id === "serena").map((capabilityId) => ({ action: "install" as const, tool: capabilityId, capabilityId, reason: "Reuse or provision Serena through the explicitly authorized Core bootstrap before configuring Codex MCP" })),
-        ...selected.filter((id) => ["context-mode", "codebase-memory", "context7", "supermemory-tool-bindings"].includes(id)).map((capabilityId) => ({ action: "configure" as const, tool: capabilityId, capabilityId, reason: "Apply reviewed Codex MCP configuration without installing runtime packages" })),
+        ...selected.filter((id) => ["context-mode", "codebase-memory", "context7", "web-search", "supermemory-tool-bindings"].includes(id)).map((capabilityId) => ({ action: "configure" as const, tool: capabilityId, capabilityId, reason: "Apply reviewed Codex MCP configuration without installing runtime packages" })),
         { action: "validate", tool: "codex", capabilityId: "codex-runtime", reason: "Verify managed content, trust activation, route classification, and capability readiness" },
       ],
     };
@@ -947,9 +1021,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
     if (input.materializationScope === "content-only") return [];
     const config = readDeckConfig(input.projectRoot);
     const capabilityInstructions = input.capabilityInstructions
-      ?? buildCapabilityInstructionBundle(getEnabledPackageInstructionIds(config, "codex"));
+      ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "codex"));
     const existingConfig = readExistingPlanFiles(input.projectRoot).files.get(".codex/config.toml") ?? "";
-    if (!this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingConfig).includes("serena")) return [];
+    if (!this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingConfig, config.webSearch.enabled).includes("serena")) return [];
     const preparation = await this.#prepareSerena(input.projectRoot);
     if (preparation.readiness.state !== "ready") {
       return [{
@@ -1063,10 +1137,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const materializationScope = input.materializationScope ?? "full";
     const existing = readExistingPlanFiles(input.projectRoot, materializationScope);
     const config = readDeckConfig(input.projectRoot);
+    const webSearchProvider = this.resolveWebSearchProvider(config.webSearch.provider);
     const capabilityInstructions = input.capabilityInstructions
-      ?? buildCapabilityInstructionBundle(getEnabledPackageInstructionIds(config, "codex"));
+      ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "codex"));
     const mcpCapabilityIds = materializationScope === "full"
-      ? this.#selectedMcpCapabilityIds(input, capabilityInstructions, existing.files.get(".codex/config.toml") ?? "")
+      ? this.#selectedMcpCapabilityIds(input, capabilityInstructions, existing.files.get(".codex/config.toml") ?? "", config.webSearch.enabled)
       : [];
     const serenaPreparation = mcpCapabilityIds.includes("serena")
       ? this.#takePendingSerenaPreparation(input.projectRoot)
@@ -1080,6 +1155,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
       capabilityInstructions,
       memoryProvider: (input.memoryProvider?.id ?? config.adaptiveMemory.activeProvider) as "none" | "supermemory" | "engram",
       mcpCapabilityIds,
+       webSearchProviderSupported: webSearchProvider !== undefined,
+       webSearchProviderConfigured: config.webSearch.provider !== undefined,
+       webSearchProvider,
+       webSearchCredentialAvailable: hasWebSearchProviderCredential(webSearchProvider, process.env),
+       webSearchExecutableAvailable: webSearchProvider ? commandAvailable(webSearchProvider.command[0]!) : false,
       materializationScope,
       serenaLauncherAvailable: serenaPreparation?.readiness.state === "ready",
       serenaProxyAvailable: serenaPreparation?.readiness.state === "ready" && serenaPreparation.proxy.state === "ready",
@@ -1439,6 +1519,13 @@ class CodexRunnerAdapter implements RunnerAdapter {
         if (proxy.state !== "ready") problems.push("The effective `deck` command can no longer serve the portable Serena proxy after configuration.");
       } catch {
         problems.push("Serena launcher reachability could not be verified after configuration.");
+      }
+    }
+    const webSearchProvider = this.resolveWebSearchProvider(readDeckConfig(native.projectRoot).webSearch.provider);
+    const webSearchConfig = native.expectedFiles.find((expected) => expected.kind === "config");
+    if (webSearchProvider && webSearchConfig && webSearchConfig.content.includes(`[mcp_servers.${webSearchProvider.semanticServerId}]`)) {
+      if (!isCodexWebSearchMcpConfigured(webSearchConfig.content, webSearchProvider)) {
+        problems.push("Web Search MCP provider configuration is missing or drifted.");
       }
     }
     const local = this.#localPlans.get(plan as object);

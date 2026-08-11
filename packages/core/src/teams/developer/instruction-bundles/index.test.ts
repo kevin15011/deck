@@ -9,6 +9,7 @@ import {
   buildCapabilityInstructionBundle,
   buildCapabilityToolPolicyBundle,
   composeCapabilityInstructions,
+  getEnabledCapabilityInstructionIds,
   getEnabledPackageInstructionIds,
   validateCapabilityInstructionMetadata,
   type CapabilityInstructionBundle,
@@ -23,6 +24,7 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
   return {
     version: 1,
     adaptiveMemory: { activeProvider: "none" },
+    webSearch: { enabled: false },
     packageInstructions: {
       pi: {
         "codebase-memory": overrides.pi?.["codebase-memory"] ?? false,
@@ -63,6 +65,13 @@ test("Codex defaults preserve canonical six-package order and valid surface meta
   const bundle = buildCapabilityInstructionBundle(["serena", "code-economy", "context-mode", "code-economy"]);
   expect([...new Set(bundle.instructions.map((fragment) => fragment.packageId))]).toEqual(["code-economy", "context-mode", "serena"]);
   expect(validateCapabilityInstructionMetadata(bundle)).toEqual([]);
+});
+
+test("Web Search instructions follow the separate optional capability toggle", () => {
+  const config = { ...getDefaultDeckConfig(), webSearch: { enabled: true, provider: "tavily" } };
+
+  expect(getEnabledCapabilityInstructionIds(config, "codex")).toContain("web-search");
+  expect(getEnabledCapabilityInstructionIds(getDefaultDeckConfig(), "codex")).not.toContain("web-search");
 });
 
 test("instruction metadata validation rejects canonical surface and tool-policy mismatches", () => {

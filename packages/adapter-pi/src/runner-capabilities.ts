@@ -373,9 +373,9 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
   const resolvedCapabilityInstructions = capabilityInstructions ?? (() => {
     try {
       const { readDeckConfig } = require("@deck/core/config/deck-config");
-      const { getEnabledPackageInstructionIds, buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles/index");
-      const config = readDeckConfig(input.projectRoot);
-      const enabledIds = getEnabledPackageInstructionIds(config, "pi");
+       const { getEnabledCapabilityInstructionIds, buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles/index");
+       const config = readDeckConfig(input.projectRoot);
+       const enabledIds = getEnabledCapabilityInstructionIds(config, "pi");
       return enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
     } catch {
       return undefined;

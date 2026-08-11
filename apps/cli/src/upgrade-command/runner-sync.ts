@@ -33,7 +33,7 @@
 import type { NormalizedDeckConfig } from "@deck/core";
 import {
   buildCapabilityInstructionBundle,
-  getEnabledPackageInstructionIds,
+  getEnabledCapabilityInstructionIds,
   prepareAndBuildDeveloperTeamInstallPlan,
   type CapabilityInstructionBundle,
   type CapabilityInstructionPackageId,
@@ -168,7 +168,7 @@ export async function runRunnerSync(
 
     // 2. Read the user's package selections for this runner.
     const enabledIds: CapabilityInstructionPackageId[] =
-      getEnabledPackageInstructionIds(config, runnerId);
+      getEnabledCapabilityInstructionIds(config, runnerId);
     // 3. Build the capability instruction bundle. An empty selection still
     // synchronizes base roles, skills, bootstrap content, and instructions.
     const bundle: CapabilityInstructionBundle = buildCapabilityInstructionBundle(enabledIds);

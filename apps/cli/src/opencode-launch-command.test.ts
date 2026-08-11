@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runOpenCodeLaunch } from "./opencode-launch-command";
+import { getDefaultDeckConfig, writeDeckConfig } from "@deck/core";
 
 // Mock imports before importing the module under test
 const mockGetSupportedProviderIds = mock(() => ["engram", "supermemory"]);
@@ -93,6 +94,36 @@ describe("production prompt activation", () => {
       expect(prompt).toContain("## Proportional TDD");
       expect(prompt).toContain("Modifying work requires the user's request and the active runner's authority");
       expect(prompt).not.toContain("Orchestrator will inject renderApplyAuthorizationCard()");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("legacy OpenCode launch installs provider-neutral Web Search instructions when enabled", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-web-search-launch-"));
+    const configDir = join(projectRoot, ".config", "opencode");
+    try {
+      mkdirSync(configDir, { recursive: true });
+      writeDeckConfig(projectRoot, {
+        ...getDefaultDeckConfig(),
+        webSearch: { enabled: true, provider: "tavily" },
+      });
+
+      const result = await runOpenCodeLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        configDir,
+        commandExists: () => true,
+        dryRun: true,
+      });
+      const leadPrompt = readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8");
+      const leadSkill = readFileSync(join(configDir, "skills", "deck-lead", "SKILL.md"), "utf8");
+      const content = `${leadPrompt}\n${leadSkill}`;
+
+      expect(result.status).toBe("ready");
+      expect(content).toContain("Web Search Capability (provider-neutral)");
+      expect(content).toContain("Use short direct research only when it materially reduces uncertainty");
+      expect(content).not.toMatch(/Tavily|tavily_|TAVILY_API_KEY/);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }

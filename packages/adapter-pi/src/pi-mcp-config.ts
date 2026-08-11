@@ -30,6 +30,7 @@ export type PiMcpConfigDiagnostic = {
     | "PI_MCP_CONFIG_UNCHANGED"
     | "PI_MCP_CONFIG_MALFORMED"
     | "PI_MCP_CONFIG_CONFLICT"
+    | "PI_MCP_PROVIDER_UNAVAILABLE"
     | "PI_MCP_CONFIG_WRITE_FAILED"
     | "PI_MCP_CONFIG_PERMISSION_WARNING";
   message: string;

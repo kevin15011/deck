@@ -419,6 +419,19 @@ function appendCapabilityInstructions(
   return composeCapabilityInstructions(baseContent, bundle, context);
 }
 
+function resolveCapabilityCompositionTeamId(agentId: string): string | undefined {
+  return DEVELOPER_TEAM_AGENTS.some((agent) => agent.id === agentId)
+    || Object.prototype.hasOwnProperty.call(REAL_CONTENT, agentId)
+    ? "developer-team"
+    : undefined;
+}
+
+function resolveCapabilityCompositionSkillIds(agentId: string): readonly string[] {
+  const catalogSkillId = DEVELOPER_TEAM_AGENTS.find((agent) => agent.id === agentId)?.skillId;
+  const historicalSkillId = `${agentId}-skill`;
+  return [...new Set([catalogSkillId, historicalSkillId].filter((skillId): skillId is string => Boolean(skillId)))] as const;
+}
+
 /**
  * Applies composition layers to agent content in the correct order:
  * 1. context-authority guidance (already applied via withAuthority)
@@ -436,16 +449,18 @@ function applyAgentContentComposition(
   if (!bundle) {
     return withLanguagePolicy;
   }
+  const teamId = resolveCapabilityCompositionTeamId(agentId);
+  const skillIds = resolveCapabilityCompositionSkillIds(agentId);
   return {
     agentBody: appendCapabilityInstructions(
       withLanguagePolicy.agentBody,
       bundle,
-      { surface: "agent", agentId },
+      { surface: "agent", teamId, agentId },
     ),
     skillBody: appendCapabilityInstructions(
       withLanguagePolicy.skillBody,
       bundle,
-      { surface: "skill", skillId: `${agentId}-skill` },
+      { surface: "skill", teamId, skillId: skillIds[0], skillIds },
     ),
   };
 }
@@ -720,7 +735,7 @@ export function getTeamSessionInstructions(
     return appendCapabilityInstructions(
       withSkillDiscoveryRuntimeContext,
       options.capabilityInstructions,
-      { surface: "session" },
+      { surface: "session", teamId },
     );
   }
 

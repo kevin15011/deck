@@ -43,6 +43,7 @@ describe("OpenCode Serena capability metadata", () => {
       "rtk",
       "serena",
       "context7",
+      "web-search",
     ]);
   });
 });

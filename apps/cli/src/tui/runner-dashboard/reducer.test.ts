@@ -193,9 +193,9 @@ describe("Pi Runner dashboard reducer", () => {
 
   test("cursor se limita por sección", () => {
     let state = createDefaultPiRunnerDashboardState();
-    // Dashboard has 4 sections: Packages, Adaptive Memory, Teams, Review & Install
+    // Dashboard has 5 sections: Packages, Adaptive Memory, Web Search, Teams, Review & Install
     state = reduce(state, { type: "cursor", cursor: 99 });
-    expect(state.cursor).toBe(3);
+    expect(state.cursor).toBe(4);
 
     state = reduce(state, { type: "navigate", screen: "adaptive-memory-detail" });
     state = reduce(state, { type: "cursor", cursor: 99 });

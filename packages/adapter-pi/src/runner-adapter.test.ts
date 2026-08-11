@@ -24,6 +24,7 @@ import { createPiRunnerAdapter, createPiSkillDiscoveryProvider, isPiSerenaAction
 import { buildPiRunnerReviewPlan } from "./capability-plan";
 import type { OpaqueSkillInventoryResultV1 } from "@deck/core";
 import type { SerenaReadinessEvidence } from "@deck/core";
+import { writeDeckConfig } from "@deck/core";
 import { discoverSkillsFromProvider } from "../../core/src/skill-discovery/discovery";
 
 describe("Pi package instruction boundary", () => {
@@ -40,6 +41,34 @@ describe("Pi package instruction boundary", () => {
     expect(baselineOnly.groups.configWrites).not.toContainEqual(expect.objectContaining({ id: "package-instructions.pi.deck-config" }));
     const installation = adapter.buildInstallationPlan({ ...base, packageInstructions: { serena: true }, selectedCapabilities: {} } as any);
     expect(installation.steps).not.toContainEqual(expect.objectContaining({ capabilityId: "serena" }));
+  });
+});
+
+describe("Pi optional Web Search readiness", () => {
+  test("keeps the canonical optional requirement for disabled, unconfigured, and unsupported selections", async () => {
+    const home = tempHome();
+    const projectRoot = join(home, "project");
+    mkdirSync(projectRoot, { recursive: true });
+    try {
+      writeDeckConfig(projectRoot, { webSearch: { enabled: true, provider: "future-provider" } });
+      const adapter = createPiRunnerAdapter({ homeDirectory: home });
+      const unconfigured = await adapter.getCapabilityInventory({ projectRoot, environmentId: "pi-development", runnerId: "pi" });
+      expect(unconfigured.capabilities).toContainEqual(expect.objectContaining({
+        capabilityId: "web-search",
+        requirementLevel: "optional",
+        isBlocked: false,
+      }));
+
+      writeDeckConfig(projectRoot, { webSearch: { enabled: false, provider: "future-provider" } });
+      const disabled = await adapter.getCapabilityInventory({ projectRoot, environmentId: "pi-development", runnerId: "pi" });
+      expect(disabled.capabilities).toContainEqual(expect.objectContaining({
+        capabilityId: "web-search",
+        requirementLevel: "optional",
+        isBlocked: false,
+      }));
+    } finally {
+      cleanup(home);
+    }
   });
 });
 

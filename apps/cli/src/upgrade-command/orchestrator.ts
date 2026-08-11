@@ -89,7 +89,7 @@ import {
 import { rollbackBackup, RollbackError } from "./rollback.js";
 import { spawnAsync } from "../runtime/process.js";
 import {
-  getEnabledPackageInstructionIds,
+  getEnabledCapabilityInstructionIds,
   buildCapabilityInstructionBundle,
   prepareAndBuildDeveloperTeamInstallPlan,
   type CapabilityInstructionBundle,
@@ -1197,7 +1197,7 @@ export async function collectRunnerBackupTargets(
     }
 
     // 2. Check if there are enabled package instructions.
-    const enabledIds = getEnabledPackageInstructionIds(config, runnerId);
+    const enabledIds = getEnabledCapabilityInstructionIds(config, runnerId);
     if (enabledIds.length === 0) {
       continue;
     }

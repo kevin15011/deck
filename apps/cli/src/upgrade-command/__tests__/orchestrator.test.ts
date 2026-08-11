@@ -402,6 +402,28 @@ describe("orchestrator", () => {
     expect(targets).toEqual([expect.objectContaining({ sourcePath: "/tmp/AGENTS.md", owner: "runner:opencode" })]);
   });
 
+  it("runner backup discovery includes capability-scoped Web Search instructions", async () => {
+    let capturedPackageIds: readonly string[] = [];
+    const adapter = makeAdapter({
+      detectDeckInstall: async () => ({ installed: true, managedPaths: ["/tmp/opencode/prompts/deck-team/deck-lead.md"] }),
+      buildDeveloperTeamInstallPlan: (input) => {
+        capturedPackageIds = input.capabilityInstructions?.instructions.map((fragment) => fragment.packageId) ?? [];
+        return { files: [{ path: "/tmp/opencode/prompts/deck-team/deck-lead.md", content: "ok" }] };
+      },
+    });
+    const config = makeConfig();
+    config.webSearch = { enabled: true, provider: "tavily" };
+
+    const targets = await collectRunnerBackupTargets({
+      projectRoot: "/tmp/project",
+      readDeckConfig: () => config,
+      adapterRegistry: makeRegistry([adapter]),
+    } as OrchestratorDeps);
+
+    expect(targets).toHaveLength(1);
+    expect(capturedPackageIds).toContain("web-search");
+  });
+
   let workDir: string;
   let stagingDir: string;
   let binaryPath: string;

@@ -45,7 +45,6 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^"adaptiveMemory\.supermemory(?:\.[\w]+)?"$/, reason: "config path in deck-config schema" },
   { pattern: /^"Supermemory[^"]*"$/, reason: "named provider reference in config/validation messages" },
   { pattern: /`Invalid Supermemory[^`]*`/, reason: "named provider reference in error message template" },
-  { pattern: /^"Deck config may not store Supermemory credentials\."$/, reason: "credential validation error message" },
   // Forbidden content reason string — explains why engram migration content is banned
   { pattern: /^"Engram migration payloads"$/, reason: "content classification label in governance rules" },
   // Provider labels in adaptive memory instruction content

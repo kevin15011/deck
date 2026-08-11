@@ -128,6 +128,17 @@ describe("runner-capability-registry", () => {
       expect(Array.isArray(catalog.memoryProviders)).toBe(true);
       expect(catalog.memoryProviders.length).toBeGreaterThanOrEqual(2);
     });
+
+    test("catalog exposes only the reviewed Web Search provider", () => {
+      const catalog = createRunnerCapabilityRegistry();
+
+      expect(catalog.webSearchProviderIds).toEqual(["tavily"]);
+      expect(catalog.getWebSearchProvider("tavily")).toMatchObject({
+        providerId: "tavily",
+        implementationId: "tavily-mcp",
+      });
+      expect(catalog.getWebSearchProvider("future-provider")).toBeUndefined();
+    });
   });
 
   describe("memory provider registration", () => {

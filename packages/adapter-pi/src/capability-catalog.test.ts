@@ -47,6 +47,7 @@ describe("PI_RUNNER_CAPABILITY_CATALOG", () => {
       "pi-hud",
       "rtk",
       "serena",
+      "web-search",
     ]);
 
     const serialized = JSON.stringify(PI_RUNNER_CAPABILITY_CATALOG);
@@ -95,6 +96,7 @@ describe("ALL_PI_RUNNER_CAPABILITY_IDS", () => {
       "rtk",
       "runner-mermaid",
       "serena",
+      "web-search",
     ]);
   });
 });
@@ -139,7 +141,7 @@ describe("PI_RUNNER_CAPABILITY_CATALOG structural regressions", () => {
       expect(entry.section).toMatch(/runner-(capabilities|ui-visual-helpers)/);
       expect(entry.runnerScope).toMatch(/^(all|pi|opencode)$/);
       // Updated to include new install kinds for Batch C
-      expect(entry.installKind).toMatch(/^(pi-package|external|pending|python-tool|shared-binary-plus-mcp|shared-binary|npm-package-plus-mcp|manual-verified)$/);
+      expect(entry.installKind).toMatch(/^(pi-package|external|pending|python-tool|shared-binary-plus-mcp|shared-binary|npm-package-plus-mcp|manual-verified|mcp-server)$/);
       expect(entry.detector).toBeTruthy();
     }
 

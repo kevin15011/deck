@@ -24,6 +24,7 @@
         "@deck/adapter-pi": "workspace:*",
         "@deck/adapter-supermemory": "workspace:*",
         "@deck/core": "workspace:*",
+        "@deck/provider-tavily": "workspace:*",
         "ink": "latest",
         "picocolors": "latest",
         "react": "latest",
@@ -35,6 +36,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@deck/core": "workspace:*",
+        "@deck/provider-tavily": "workspace:*",
         "@deck/sdd-runtime": "workspace:*",
         "toml-eslint-parser": "1.0.3",
       },
@@ -52,6 +54,7 @@
       "dependencies": {
         "@deck/adapter-supermemory": "workspace:*",
         "@deck/core": "workspace:*",
+        "@deck/provider-tavily": "workspace:*",
         "@deck/sdd-runtime": "workspace:*",
       },
     },
@@ -60,6 +63,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@deck/core": "workspace:*",
+        "@deck/provider-tavily": "workspace:*",
         "@deck/sdd-runtime": "workspace:*",
       },
     },
@@ -73,6 +77,13 @@
     "packages/core": {
       "name": "@deck/core",
       "version": "0.0.0",
+    },
+    "packages/provider-tavily": {
+      "name": "@deck/provider-tavily",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deck/core": "workspace:*",
+      },
     },
     "packages/sdd-runtime": {
       "name": "@deck/sdd-runtime",
@@ -98,6 +109,8 @@
     "@deck/cli": ["@deck/cli@workspace:apps/cli"],
 
     "@deck/core": ["@deck/core@workspace:packages/core"],
+
+    "@deck/provider-tavily": ["@deck/provider-tavily@workspace:packages/provider-tavily"],
 
     "@deck/sdd-runtime": ["@deck/sdd-runtime@workspace:packages/sdd-runtime"],
 

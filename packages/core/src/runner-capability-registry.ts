@@ -18,9 +18,10 @@ export type RunnerCapabilitySupportStatus =
   | "manual-verified"
   | "gap"
   | "blocked"
+  | "unsupported"
   | "not-applicable";
 
-export type InstructionBundleId = "adaptive-memory" | "codebase-memory" | "context-mode" | "rtk" | "serena";
+export type InstructionBundleId = "adaptive-memory" | "codebase-memory" | "context-mode" | "rtk" | "serena" | "web-search";
 export type CapabilitySurface = "agent" | "skill" | "session" | "mcp" | "install" | "prompt-profile";
 
 export type SharedBinaryConfig = {
@@ -95,6 +96,8 @@ export type ParityRuntimeHints = {
   authenticatedRuntimeValidated?: boolean;
   codebaseMemoryIndexed?: boolean;
   unusableBinaries?: readonly string[];
+  /** Boolean-only readiness evidence for the optional semantic Web Search capability. */
+  webSearch?: import("./web-search-capability").WebSearchReadinessEvidence;
 };
 
 const CORE_CAPABILITIES: readonly CanonicalRunnerCapability[] = Object.freeze([
@@ -146,6 +149,15 @@ const CORE_CAPABILITIES: readonly CanonicalRunnerCapability[] = Object.freeze([
     instructionBundleId: "serena",
     requiredSurfaces: ["install", "mcp", "session"],
     sharedBinary: { command: "serena", usabilityCheck: ["--version", "--help"], mcpServerName: "serena" },
+  },
+  {
+    id: "web-search",
+    label: "Web Search",
+    category: "mcps",
+    requirement: "optional",
+    userFacing: true,
+    instructionBundleId: "web-search",
+    requiredSurfaces: ["agent", "skill", "session", "mcp", "install"],
   },
   { id: "context7", label: "Context7", category: "mcps", requirement: "configurable", userFacing: true, requiredSurfaces: ["install", "mcp"] },
   {
@@ -331,5 +343,6 @@ export const SUPPORT_STATUSES: readonly RunnerCapabilitySupportStatus[] = Object
   "manual-verified",
   "gap",
   "blocked",
+  "unsupported",
   "not-applicable",
 ]);

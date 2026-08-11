@@ -47,6 +47,12 @@ export type DeckAdaptiveMemoryConfig = {
   supermemory?: DeckSupermemoryConfig;
 };
 
+/** Provider-opaque project selection for the optional Web Search capability. */
+export type DeckWebSearchConfig = {
+  enabled?: boolean;
+  provider?: string;
+};
+
 // ---------------------------------------------------------------------------
 // Orchestrator Personality Config
 // ---------------------------------------------------------------------------
@@ -179,6 +185,7 @@ export type DeckPackageInstructionConfig = Partial<Record<PackageInstructionRunn
 export type DeckConfig = {
   version?: typeof DECK_CONFIG_VERSION;
   adaptiveMemory?: DeckAdaptiveMemoryConfig;
+  webSearch?: DeckWebSearchConfig;
   packageInstructions?: DeckPackageInstructionConfig;
   orchestratorPersonality?: OrchestratorPersonality;
   developerTeamExecution?: Partial<Omit<DeveloperTeamExecutionConfigV1, "schema" | "invocationAuthorization">> & {
@@ -195,6 +202,10 @@ export type NormalizedDeckConfig = {
     activeProvider: AdaptiveMemoryActiveProvider;
     supermemory?: DeckSupermemoryConfig;
   };
+  webSearch: {
+    enabled: boolean;
+    provider?: string;
+  };
   packageInstructions: Record<PackageInstructionRunnerId, Record<PackageInstructionPackageId, boolean>>;
   orchestratorPersonality: OrchestratorPersonality;
   developerTeamExecution: DeveloperTeamExecutionConfigV1;
@@ -208,9 +219,10 @@ export type DeckConfigErrorCode =
   | "DECK_CONFIG_UNSUPPORTED_VERSION"
   | "DECK_CONFIG_UNKNOWN_FIELD"
   | "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER"
-  | "SUPERMEMORY_CREDENTIAL_IN_DECK_CONFIG"
+  | "DECK_CONFIG_SECRET_FIELD"
   | "SUPERMEMORY_USER_ID_REQUIRED"
-  | "SUPERMEMORY_CONFIG_INVALID";
+  | "SUPERMEMORY_CONFIG_INVALID"
+  | "WEB_SEARCH_CONFIG_INVALID";
 
 export class DeckConfigError extends Error {
   readonly code: DeckConfigErrorCode;
@@ -242,8 +254,9 @@ export type ActiveMemoryProviderResolution = {
 const SECRET_FIELD_PATTERN =
   /(?:token|secret|credential|credentials|api[-_]?key|password|private[-_]?key|access[-_]?key|auth(?:orization)?)/i;
 
-const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "packageInstructions", "orchestratorPersonality", "developerTeamExecution", "profiles", "activeProfile"]);
+const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "webSearch", "packageInstructions", "orchestratorPersonality", "developerTeamExecution", "profiles", "activeProfile"]);
 const ADAPTIVE_MEMORY_FIELDS = new Set(["activeProvider", "supermemory"]);
+const WEB_SEARCH_FIELDS = new Set(["enabled", "provider"]);
 const SUPERMEMORY_FIELDS = new Set([
   "mcpServerName",
   "searchMode",
@@ -266,6 +279,9 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
     version: DECK_CONFIG_VERSION,
     adaptiveMemory: {
       activeProvider: "none",
+    },
+    webSearch: {
+      enabled: false,
     },
     packageInstructions: {
       pi: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
@@ -457,6 +473,8 @@ export function validateDeckConfig(
     options?.configPath,
   );
 
+  const webSearch = normalizeWebSearchConfig(config.webSearch, options?.configPath);
+
   const packageInstructions = normalizePackageInstructionConfig(
     config.packageInstructions,
     options?.configPath,
@@ -483,12 +501,43 @@ export function validateDeckConfig(
   return {
     version: DECK_CONFIG_VERSION,
     adaptiveMemory,
+    webSearch,
     packageInstructions,
     orchestratorPersonality,
     developerTeamExecution,
     profiles,
     activeProfile,
   };
+}
+
+function normalizeWebSearchConfig(
+  value: unknown,
+  configPath?: string,
+): NormalizedDeckConfig["webSearch"] {
+  if (value === undefined || value === null) return { enabled: false };
+
+  assertPlainObject(value, "webSearch", configPath);
+  assertKnownFields(value, WEB_SEARCH_FIELDS, "webSearch", configPath);
+
+  const enabled = value.enabled === undefined ? false : value.enabled;
+  if (typeof enabled !== "boolean") {
+    throw new DeckConfigError(
+      "WEB_SEARCH_CONFIG_INVALID",
+      "webSearch.enabled must be a boolean.",
+      { configPath, fieldPath: "webSearch.enabled" },
+    );
+  }
+
+  if (value.provider === undefined) return { enabled };
+  if (typeof value.provider !== "string" || value.provider.trim().length === 0) {
+    throw new DeckConfigError(
+      "WEB_SEARCH_CONFIG_INVALID",
+      "webSearch.provider must be a non-empty string when provided.",
+      { configPath, fieldPath: "webSearch.provider" },
+    );
+  }
+
+  return { enabled, provider: value.provider.trim() };
 }
 
 export function resolveActiveMemoryProvider(options?: {
@@ -991,8 +1040,8 @@ function rejectSecretFields(value: unknown, fieldPath: string, configPath?: stri
     const childPath = `${fieldPath}.${key}`;
     if (SECRET_FIELD_PATTERN.test(key) && !SAFE_CONTROL_FIELD_KEYS.has(key)) {
       throw new DeckConfigError(
-        "SUPERMEMORY_CREDENTIAL_IN_DECK_CONFIG",
-        "Deck config may not store Supermemory credentials.",
+        "DECK_CONFIG_SECRET_FIELD",
+        "Deck config may not store credentials or secret-shaped fields.",
         { configPath, fieldPath: childPath },
       );
     }

@@ -7,7 +7,7 @@ import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan } from "./
 /**
  * Pi Runner dashboard render tests.
  *
- * Dashboard sections (4): Packages, Adaptive Memory, Teams, Review & Install
+ * Dashboard sections (5): Packages, Adaptive Memory, Web Search, Teams, Review & Install
  */
 const plan: PiRunnerReviewPlan = {
   ready: false,
@@ -84,10 +84,35 @@ describe("Pi Runner dashboard render", () => {
     expect(output).toContain("OpenCode Runner Setup Dashboard");
     expect(output).toContain("Packages");
     expect(output).toContain("Adaptive Memory");
+    expect(output).toContain("Web Search");
     expect(output).toContain("Teams");
     expect(output).toContain("Review & Install");
-    expect(output).toContain("Configure packages, Adaptive Memory, Teams and Review & Install.");
+    expect(output).toContain("Configure Packages, Adaptive Memory, Web Search, Teams and Review & Install.");
     expect(output).toContain("actions:");
+  });
+
+  test("Web Search detail exposes provider, credential, runner MCP conflict, and readiness without a secret", () => {
+    const state = createDefaultPiRunnerDashboardState({
+      screen: "web-search-detail",
+      selectedCapabilities: { "web-search": false },
+      webSearch: {
+        provider: "tavily",
+        credentialAvailable: false,
+        runnerSupported: true,
+        mcpConfigured: false,
+        mcpConfigConflict: false,
+        readiness: "enabled-unconfigured",
+      },
+    });
+    const output = renderToString(<PiRunnerDashboardScreens state={state} />);
+
+    expect(output).toContain("Web Search");
+    expect(output).toContain("Provider: Tavily");
+    expect(output).toContain("Credential: missing");
+    expect(output).toContain("Runner support: supported");
+    expect(output).toContain("MCP materialization: not configured");
+    expect(output).toContain("Readiness: enabled-unconfigured");
+    expect(output).toContain("does not delete a saved shell-profile credential");
   });
 
   test("Packages detail muestra packages sin resolver (cursor 0 = back)", () => {

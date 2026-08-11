@@ -87,6 +87,9 @@ export type {
   RunnerModelConfigCapabilities,
 } from "./runner-capability";
 
+// Provider-neutral Web Search capability and readiness contract.
+export * from "./web-search-capability";
+
 // Canonical model catalog
 export * from "./model-catalog";
 
@@ -106,12 +109,14 @@ export {
 export {
   buildCapabilityInstructionBundle,
   getEnabledPackageInstructionIds,
+  getEnabledCapabilityInstructionIds,
   composeCapabilityInstructions,
   type CapabilityInstructionSurface,
   type CapabilityInstructionPackageId,
   type CapabilityInstructionFragment,
   type CapabilityInstructionBundle,
   type CapabilityInstructionCompositionContext,
+  buildWebSearchInstructionBundle,
 } from "./teams/developer/instruction-bundles/index";
 
 // Deck project config contracts

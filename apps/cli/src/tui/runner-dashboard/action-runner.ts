@@ -27,7 +27,7 @@ import {
   type RunnerVerificationEvidence,
 } from "@deck/core";
 import { runnerRequiresExternalSupermemoryToken, type RunnerAction, type RunnerDashboardState, type RunnerReviewPlan } from "./state";
-import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "@deck/core";
+import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments, WebSearchProviderDescriptorV1 } from "@deck/core";
 // Canonical server name for codebase-memory MCP — defined locally to avoid adapter dependency in the runner
 const CODEBASE_MEMORY_MCP_SERVER_NAME = "codebase-memory";
 
@@ -73,6 +73,7 @@ export type RunnerSerenaActionContext = Readonly<{
   serenaAuthorization: SerenaBootstrapAuthorization;
   signal?: AbortSignal;
   serenaReadiness?: SerenaReadinessEvidence;
+  webSearchProvider?: WebSearchProviderDescriptorV1;
   onSerenaStage?: (stage: RunnerSerenaStage) => void;
   /** Adapter-specific optional gates are passed through without being serialized. */
   serenaRevalidator?: unknown;
@@ -159,6 +160,7 @@ export type McpConfigWriterFn = (options: {
   url?: string;
   /** For remote MCP servers: optional headers */
   headers?: Record<string, string>;
+  webSearchProvider?: WebSearchProviderDescriptorV1;
 }, context?: RunnerSerenaActionContext) => Promise<{ ok: boolean; path: string; diagnostics?: string[] }>;
 
 /**
@@ -178,6 +180,8 @@ export type RunnerActionRunnerDependencies = {
   supermemoryToken?: string;
   memoryProvider?: AdaptiveMemoryProvider;
   resolvedMemoryProvider?: AdaptiveMemoryProvider;
+  /** Runtime-only provider descriptor selected by the CLI composition root. */
+  webSearchProvider?: WebSearchProviderDescriptorV1;
   installPackages?: PackageInstallerFn;
   installTeamBundle?: TeamBundleInstallerFn;
   writeMcpConfig?: McpConfigWriterFn;
@@ -632,6 +636,7 @@ function getSerenaActionContext(
       operation: serenaOperation,
       currentOperation: serenaOperation,
       serenaAuthorization: authorization.authorization,
+      webSearchProvider: dependencies.webSearchProvider,
       signal: dependencies.signal,
       onSerenaStage: dependencies.onSerenaStage,
       serenaRevalidator: dependencies.serenaRevalidator,
@@ -1262,6 +1267,11 @@ function writeDeckConfigAction(
       ...currentPackageInstructions,
     },
   };
+  const selectedWebSearch = state.selectedCapabilities["web-search"];
+  const webSearchEnabled = selectedWebSearch === undefined
+    ? existingConfig.webSearch.enabled
+    : selectedWebSearch === true;
+  const webSearchProvider = state.webSearchProvider ?? existingConfig.webSearch.provider;
 
   const config: NormalizedDeckConfig = {
     version: 1,
@@ -1273,6 +1283,10 @@ function writeDeckConfigAction(
       : provider === "engram"
         ? { activeProvider: "engram" as const }
         : { activeProvider: "none" as const },
+    webSearch: {
+      enabled: webSearchEnabled,
+      ...(webSearchProvider ? { provider: webSearchProvider } : {}),
+    },
     packageInstructions: updatedPackageInstructions,
     orchestratorPersonality: existingConfig.orchestratorPersonality,
     developerTeamExecution: existingConfig.developerTeamExecution,
@@ -1315,6 +1329,46 @@ async function writeMcpConfigAction(
 
   // Determine the MCP server type based on capabilityId
   const capabilityId = action.capabilityId as string | undefined;
+
+  if (capabilityId === "web-search") {
+    if (!dependencies.writeMcpConfig) {
+      return {
+        actionId: action.id,
+        status: "failed",
+        message: "Web Search requires a provider-aware MCP writer; no MCP write was attempted.",
+        diagnostics: ["Provider-aware Web Search MCP writer is unavailable."],
+      };
+    }
+    const provider = dependencies.webSearchProvider;
+    if (!provider) {
+      return {
+        actionId: action.id,
+        status: "failed",
+        message: "Web Search provider selection is unavailable; no MCP write was attempted.",
+        diagnostics: ["Web Search provider selection is unavailable."],
+      };
+    }
+    const result = await writer({
+      serverName: provider.semanticServerId,
+      type: "local",
+      command: [...provider.command],
+      webSearchProvider: provider,
+    });
+    if (!result.ok) {
+      return {
+        actionId: action.id,
+        status: "failed",
+        message: `Web Search MCP config write failed at ${result.path ?? "unknown path"}.`,
+        diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+      };
+    }
+    return {
+      actionId: action.id,
+      status: "executed",
+      message: `Web Search MCP config written successfully at ${result.path}.`,
+      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...(result.diagnostics ?? [])]),
+    };
+  }
 
   if (capabilityId === "context7") {
     // Context7 is a local MCP server

@@ -11,6 +11,7 @@ import {
   type InternalOpenCodePackageId,
 } from "./internal-opencode-packages";
 import type { OpenCodeToolsReview } from "./required-tools";
+import type { WebSearchProviderDescriptorV1, WebSearchReadinessEvidence, WebSearchReadinessResult } from "@deck/core";
 
 export type OpenCodeRunnerCapabilityInventoryEntry = {
   capabilityId: OpenCodeCapabilityId;
@@ -21,6 +22,9 @@ export type OpenCodeRunnerCapabilityInventoryEntry = {
   toolId?: string;
   source?: string;
   implementationId?: string;
+  webSearchReadiness?: WebSearchReadinessResult;
+  webSearchEvidence?: WebSearchReadinessEvidence;
+  webSearchProvider?: WebSearchProviderDescriptorV1;
   diagnostics: string[];
   /** Commands provided by this capability (for runtime detection hints) */
   commands?: readonly string[];
@@ -47,6 +51,11 @@ export type OpenCodeRunnerFullCapabilityInventory = OpenCodeRunnerCapabilityInve
 export type BuildOpenCodeRunnerCapabilityInventoryConfig = {
   runnerScope?: OpenCodeRunnerScope;
   includeInternal?: boolean;
+  webSearch?: {
+    readiness: WebSearchReadinessResult;
+    evidence: WebSearchReadinessEvidence;
+    provider?: WebSearchProviderDescriptorV1;
+  };
 };
 
 const INTERNAL_PACKAGE_TO_CAPABILITY: Record<InternalOpenCodePackageId, "opencode-mermaid"> = {
@@ -66,6 +75,26 @@ export function buildOpenCodeRunnerCapabilityInventory(
     const capability = getUserFacingOpenCodeCapability(capabilityId);
     if (!capability) continue;
     if (!isCapabilityInScope(capability.runnerScope, runnerScope)) continue;
+
+    if (capabilityId === "web-search") {
+      const webSearch = config.webSearch;
+      const readiness = webSearch?.readiness;
+      inventory[capabilityId] = {
+        capabilityId,
+        runnerScope,
+        installed: readiness?.state === "ready",
+        status: readiness?.state ?? "disabled",
+        source: capability.source,
+        implementationId: capability.implementationId,
+        webSearchReadiness: readiness,
+        webSearchEvidence: webSearch?.evidence,
+        webSearchProvider: webSearch?.provider,
+        commands: capability.detector.commands,
+        mcpServers: capability.detector.mcpServerNames,
+        diagnostics: readiness?.diagnostics ? [...readiness.diagnostics] : ["Web Search is disabled; no provider or runner setup is required."],
+      };
+      continue;
+    }
 
     const installed = isCapabilityInstalled(capabilityId, review, installedNames, capability.detector.pluginNames ?? []);
     const status: OpenCodeCapabilityStatus = installed

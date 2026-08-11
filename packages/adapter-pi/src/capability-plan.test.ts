@@ -6,6 +6,7 @@ import { buildPiRunnerReviewPlan, type PiRunnerReviewPlan } from "./capability-p
 import { buildDeveloperTeamInstallPlan } from "./developer-team-install";
 import type { PiRequiredToolsReview } from "./required-tools";
 import { createToolStatus } from "./tool-status";
+import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
 
 function review(installedPackages: string[] = []): PiRequiredToolsReview {
   const requiredNames = ["sub-agents", "MCP packages", "context-mode", "codebase-memory", "RTK", "Context7", "Engram memory"];
@@ -43,6 +44,46 @@ function actionText(plan: PiRunnerReviewPlan): string {
 }
 
 describe("buildPiRunnerReviewPlan", () => {
+  test("does not schedule Web Search MCP writes without a selected supported provider", () => {
+    const inventory: PiRunnerCapabilityInventory = {
+      "web-search": {
+        capabilityId: "web-search",
+        status: "enabled-unconfigured",
+        runnerScope: "pi",
+        installed: false,
+        diagnostics: ["provider-unconfigured"],
+      },
+    };
+    const plan = buildPiRunnerReviewPlan(
+      baseState({ selectedCapabilities: { "web-search": true } }),
+      inventory,
+    );
+
+    expect(plan.groups.configWrites.some((action) => action.capabilityId === "web-search")).toBe(false);
+  });
+
+  test("plans Web Search materialization when enabled selection replaces disabled inventory", () => {
+    const inventory: PiRunnerCapabilityInventory = {
+      "web-search": {
+        capabilityId: "web-search",
+        status: "disabled",
+        runnerScope: "pi",
+        installed: false,
+        diagnostics: ["Web Search is disabled; no provider or runner setup is required."],
+      },
+    };
+    const plan = buildPiRunnerReviewPlan(
+      baseState({ selectedCapabilities: { "web-search": true }, webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR }),
+      inventory,
+    );
+
+    expect(plan.groups.configWrites.map((action) => action.id)).toEqual([
+      "capability.web-search.deck-config",
+      "capability.web-search.mcp-config",
+    ]);
+    expect(plan.groups.configWrites.every((action) => action.status === "ready")).toBe(true);
+  });
+
   test("keeps Serena inert when it is only ordinarily selected", () => {
     const toolsReview = review(["sub-agents", "MCP packages"]);
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });

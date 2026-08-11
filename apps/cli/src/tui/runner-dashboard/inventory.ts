@@ -1,4 +1,4 @@
-import type { CapabilityCatalogEntry, CapabilityInventory } from "@deck/core";
+import { isWebSearchProviderDescriptor, type CapabilityCatalogEntry, type CapabilityInventory } from "@deck/core";
 
 export type DashboardInventoryNormalization =
   | { ok: true; inventory: CapabilityInventory }
@@ -51,6 +51,7 @@ function isCapabilityCatalogEntry(value: unknown): value is CapabilityCatalogEnt
   if (value.toolId !== undefined && !isString(value.toolId)) return false;
   if (value.source !== undefined && !isString(value.source)) return false;
   if (value.diagnostics !== undefined && !isStringArray(value.diagnostics)) return false;
+  if (value.capabilityId === "web-search" && value.webSearchProvider !== undefined && !isWebSearchProviderDescriptor(value.webSearchProvider)) return false;
   return value.supportStatus === undefined || SUPPORT_STATUSES.has(value.supportStatus as string);
 }
 

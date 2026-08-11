@@ -15,6 +15,7 @@ import {
   getCanonicalRunnerCapabilities,
   getRunnerMappings,
 } from "./runner-capability-registry";
+import { resolveWebSearchReadiness } from "./web-search-capability";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,7 +33,12 @@ export type ParityErrorCode =
   | "capability-mapping-gap"
   | "capability-blocked"
   | "capability-index-unverified"
-  | "capability-configuration-unverified";
+  | "capability-configuration-unverified"
+  | "capability-unsupported"
+  | "web-search-disabled"
+  | "web-search-enabled-unconfigured"
+  | "web-search-not-materialized"
+  | "web-search-ready";
 
 /** A single entry in the parity report */
 export type ParityReportEntry = {
@@ -105,6 +111,58 @@ function resolveCapabilityParity(
     recommendedAction,
   });
 
+  if (capabilityId === "web-search") {
+    const evidence = runtimeHints?.webSearch ?? {
+      enabled: false,
+      runnerSupported: mapping?.status !== "unsupported" && mapping?.status !== "not-applicable",
+      providerConfigured: false,
+      credentialAvailable: false,
+      executableAvailable: false,
+      mcpConfigured: false,
+    };
+
+    if (!evidence.enabled) {
+      return {
+        capabilityId,
+        runnerId,
+        status: "disabled",
+        severity: "info",
+        code: "web-search-disabled",
+        message: `Runner ${runnerId} capability ${capabilityId}: Web Search is disabled; the optional capability does not affect baseline runner readiness.`,
+      };
+    }
+
+    if (!mapping || mapping.status === "unsupported" || mapping.status === "not-applicable") {
+      return {
+        capabilityId,
+        runnerId,
+        status: "unsupported",
+        severity: "warning",
+        code: "capability-unsupported",
+        message: `Runner ${runnerId} does not expose the MCP/materialization surface required by ${capabilityId}.`,
+        recommendedAction: `Use a runner with native MCP materialization for ${capabilityId}`,
+      };
+    }
+
+    const readiness = resolveWebSearchReadiness({ ...evidence, runnerSupported: true });
+    const status = readiness.state;
+    const severity: ParityReportSeverity = readiness.state === "ready" ? "info" : "warning";
+    const code: ParityErrorCode = readiness.state === "ready"
+      ? "web-search-ready"
+      : readiness.state === "configured-but-not-materialized"
+        ? "web-search-not-materialized"
+        : "web-search-enabled-unconfigured";
+    return {
+      capabilityId,
+      runnerId,
+      status,
+      severity,
+      code,
+      message: `Runner ${runnerId} capability ${capabilityId}: ${readiness.diagnostics.join(" ")}`,
+      recommendedAction: readiness.state === "ready" ? undefined : `Resolve Web Search readiness for runner ${runnerId}`,
+    };
+  }
+
   if (capability.category === "runner-silent-packages") {
     if (!mapping) {
       return failure(
@@ -146,6 +204,18 @@ function resolveCapabilityParity(
         `Resolve the ${runnerId} blocker for ${capabilityId}`,
       ),
       status: "blocked",
+    };
+  }
+
+  if (mapping.status === "unsupported") {
+    return {
+      capabilityId,
+      runnerId,
+      status: "unsupported",
+      severity: "warning",
+      code: "capability-unsupported",
+      message: `${capability.label} is unsupported by ${runnerId}.`,
+      recommendedAction: `Use a runner that supports ${capabilityId}`,
     };
   }
 
@@ -235,10 +305,18 @@ export function resolveRunnerParity(
 
     entries.push(entry);
 
-    // Categorize by severity and status
+    // Categorize by severity and status. Optional unsupported/configuration states
+    // remain visible as warnings without becoming baseline-required blockers.
     if (capability.category === "runner-silent-packages") {
       silentPackages.push(entry);
-    } else if (entry.severity === "error" || entry.status === "gap" || entry.status === "blocked") {
+    } else if (
+      entry.severity === "error"
+      || entry.status === "gap"
+      || entry.status === "blocked"
+      || entry.status === "unsupported"
+      || entry.status === "enabled-unconfigured"
+      || entry.status === "configured-but-not-materialized"
+    ) {
       if (entry.status === "blocked") {
         blockers.push(entry);
       } else {

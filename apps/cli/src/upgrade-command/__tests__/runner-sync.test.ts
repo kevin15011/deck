@@ -196,6 +196,33 @@ describe("runner-sync", () => {
     expect(result.manifestEntries).toHaveLength(1);
   });
 
+  it("sync includes capability-scoped Web Search instructions when enabled", async () => {
+    let capturedPackageIds: readonly string[] = [];
+    const adapter = makeAdapter({
+      detectDeckInstall: async () => ({
+        installed: true,
+        managedPaths: ["/tmp/.config/opencode/AGENTS.md"],
+      }),
+      buildDeveloperTeamInstallPlan: (input) => {
+        capturedPackageIds = input.capabilityInstructions?.instructions.map((fragment) => fragment.packageId) ?? [];
+        return { files: [{ path: "/tmp/.config/test-runner/AGENTS.md", content: "ok" }] };
+      },
+    });
+    const config = makeConfig();
+    config.webSearch = { enabled: true, provider: "tavily" };
+
+    const result = await runRunnerSync({
+      config,
+      registry: makeRegistry([adapter]),
+      projectRoot: "/tmp",
+      deckVersion: "1.0.0",
+      runnerIds: ["opencode"],
+    });
+
+    expect(result.outcomes[0]?.status).toBe("synced");
+    expect(capturedPackageIds).toContain("web-search");
+  });
+
   it("Codex content-only sync repairs owned roles, support files, and bootstrap content with no optional selections", async () => {
     const root = await mkdtemp(join(tmpdir(), "deck-codex-sync-"));
     const journalRoot = join(root, "journals");

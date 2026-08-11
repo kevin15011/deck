@@ -15,6 +15,7 @@ import {
   type InternalRunnerPackageStatus,
 } from "./internal-runner-packages";
 import type { PiPreflightResult } from "./preflight";
+import type { WebSearchProviderDescriptorV1, WebSearchReadinessEvidence, WebSearchReadinessResult } from "@deck/core";
 import {
   getCapabilityDetectorMappings,
   type PiRequiredToolsReview,
@@ -29,6 +30,9 @@ export type PiRunnerCapabilityInventoryEntry = {
   toolId?: string;
   source?: string;
   implementationId?: string;
+  webSearchReadiness?: WebSearchReadinessResult;
+  webSearchEvidence?: WebSearchReadinessEvidence;
+  webSearchProvider?: WebSearchProviderDescriptorV1;
   diagnostics: string[];
 };
 
@@ -78,6 +82,11 @@ export type BuildPiRunnerCapabilityInventoryConfig = {
   runnerScope?: RunnerScope;
   /** When true, also populates _internal with internal capability entries. */
   includeInternal?: boolean;
+  webSearch?: {
+    readiness: WebSearchReadinessResult;
+    evidence: WebSearchReadinessEvidence;
+    provider?: WebSearchProviderDescriptorV1;
+  };
 };
 
 /**
@@ -144,6 +153,25 @@ export function buildPiRunnerCapabilityInventory(
 
     if (!capability) continue;
     if (!isCapabilityInScope(capability.runnerScope, runnerScope)) continue;
+
+    if (capabilityId === "web-search") {
+      const webSearch = config.webSearch;
+      const readiness = webSearch?.readiness;
+      inventory[capabilityId] = {
+        capabilityId,
+        runnerScope,
+        installed: readiness?.state === "ready",
+        status: readiness?.state ?? "disabled",
+        toolId: capability.toolId,
+        source: capability.source,
+        implementationId: capability.implementationId,
+        webSearchReadiness: readiness,
+        webSearchEvidence: webSearch?.evidence,
+        webSearchProvider: webSearch?.provider,
+        diagnostics: readiness?.diagnostics ? [...readiness.diagnostics] : ["Web Search is disabled; no provider or runner setup is required."],
+      };
+      continue;
+    }
 
     if (capabilityId === "pi-hud") {
       inventory[capabilityId] = {

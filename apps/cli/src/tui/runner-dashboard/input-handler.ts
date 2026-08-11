@@ -13,6 +13,7 @@ import { runnerRequiresExternalSupermemoryToken, type RunnerDashboardState } fro
 export type RunnerDashboardContinueEffect =
   | { type: "dispatch"; action: RunnerDashboardAction }
   | { type: "select-supermemory-and-open-setup"; action: RunnerDashboardAction }
+  | { type: "open-web-search-credential" }
   | { type: "open-developer-team-model-config" }
   | { type: "reuse-developer-team-model-config" }
   | { type: "block-review-install"; status: string }
@@ -90,6 +91,19 @@ export function getDashboardContinueEffect(
     return provider === "supermemory" && runnerRequiresExternalSupermemoryToken(state)
       ? { type: "select-supermemory-and-open-setup", action }
       : { type: "dispatch", action };
+  }
+
+  if (state.screen === "web-search-detail") {
+    if (state.cursor === 0) {
+      if (state.selectedCapabilities["web-search"]) {
+        return { type: "dispatch", action: { type: "set-capability", capabilityId: "web-search", selected: false } };
+      }
+      return state.webSearch.credentialAvailable
+        ? { type: "dispatch", action: { type: "set-capability", capabilityId: "web-search", selected: true } }
+        : { type: "open-web-search-credential" };
+    }
+    if (state.cursor === 1) return { type: "open-web-search-credential" };
+    return { type: "dispatch", action: { type: "go-dashboard" } };
   }
 
   if (state.screen === "teams-detail") {

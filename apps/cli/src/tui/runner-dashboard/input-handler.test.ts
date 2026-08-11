@@ -27,8 +27,8 @@ describe("Pi Runner dashboard input mapping", () => {
       action: { type: "navigate", screen: "packages-detail" },
     });
 
-    // cursor: 3 = Review & Install (index 3 in 4-section dashboard)
-    state = createDefaultPiRunnerDashboardState({ cursor: 3 });
+    // cursor: 4 = Review & Install after the first-class Web Search section
+    state = createDefaultPiRunnerDashboardState({ cursor: 4 });
     const effect = getPiRunnerDashboardContinueEffect(state, { inventory });
     expect(effect).toMatchObject({ type: "dispatch", action: { type: "enter-review" } });
     if (effect.type === "dispatch") {
@@ -64,6 +64,34 @@ describe("Pi Runner dashboard input mapping", () => {
     state = reduce(state, action!);
     expect(state.packageInstructions["codebase-memory"]).toBe(true);
     expect(state.selectedCapabilities["codebase-memory"]).toBe(selectedBefore);
+  });
+
+  test("Web Search opens masked credential setup only when enablement lacks a credential", () => {
+    const missingCredential = createDefaultPiRunnerDashboardState({
+      screen: "web-search-detail",
+      cursor: 0,
+      selectedCapabilities: { "web-search": false },
+      webSearch: {
+        provider: "tavily",
+        credentialAvailable: false,
+        runnerSupported: true,
+        mcpConfigured: false,
+        mcpConfigConflict: false,
+        readiness: "enabled-unconfigured",
+      },
+    });
+    const availableCredential = {
+      ...missingCredential,
+      webSearch: { ...missingCredential.webSearch, credentialAvailable: true },
+    };
+
+    expect(getPiRunnerDashboardContinueEffect(missingCredential, { inventory })).toEqual({
+      type: "open-web-search-credential",
+    });
+    expect(getPiRunnerDashboardContinueEffect(availableCredential, { inventory })).toEqual({
+      type: "dispatch",
+      action: { type: "set-capability", capabilityId: "web-search", selected: true },
+    });
   });
 
   test("synthetic adapter support is intersected with canonical package metadata order", () => {

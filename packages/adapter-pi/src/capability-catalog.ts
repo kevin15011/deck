@@ -5,6 +5,7 @@ import {
   type RunnerCapabilitySupportStatus,
 } from "@deck/core";
 import type { InstallablePiToolId } from "./installation-plan";
+import { TAVILY_IMPLEMENTATION_ID, TAVILY_MCP_SERVER_ID } from "@deck/provider-tavily";
 
 /**
  * User-facing capability IDs exposed in the Pi dashboard.
@@ -15,8 +16,9 @@ export type CapabilityId =
   | "context-mode"
   | "codebase-memory-mcp"
   | "serena"
-  | "context7"
-  | "pi-hud"
+   | "context7"
+   | "web-search"
+   | "pi-hud"
   | "runner-mermaid";
 
 /**
@@ -33,7 +35,7 @@ export type RunnerScope = "pi" | "opencode" | "all";
 
 export type CapabilityRequirementLevel = "required" | "optional" | "configurable";
 
-export type CapabilityStatus = "ready" | "missing" | "manual" | "pending-source" | "blocked";
+export type CapabilityStatus = "ready" | "missing" | "manual" | "pending-source" | "blocked" | "disabled" | "unsupported" | "enabled-unconfigured" | "configured-but-not-materialized";
 
 export type TechnicalActionKind =
   | "install-pi-package"
@@ -62,7 +64,7 @@ export type CapabilityInstallKind =
   | "manual"
   | "npm-package-plus-mcp"
   | "npm-package"
-  | "mcp-server";
+   | "mcp-server";
 
 export type CapabilityRunnerImplementationTarget = string;
 
@@ -98,6 +100,7 @@ export type CapabilityToolMapping = {
   source?: string;
   installKind: CapabilityInstallKind;
   detector: CapabilityDetector;
+  implementationId?: CapabilityImplementationId;
   implementations?: Partial<Record<CapabilityRunnerImplementationTarget, CapabilityImplementationMapping>>;
   /**
    * When true, this capability is internal and must not appear in
@@ -195,6 +198,19 @@ const FULL_CAPABILITY_CATALOG: Record<CapabilityId, CapabilityToolMapping | Inte
      * REQ-MCP-001: Converge to standard @upstash/context7-mcp unless blocker confirmed.
      */
   },
+  "web-search": {
+    capabilityId: "web-search",
+    label: "Web Search",
+    description: "Optional compact web search and point extraction through native MCP configuration.",
+    section: "runner-capabilities",
+    runnerScope: "all",
+    requirementLevel: "configurable",
+    toolId: "web-search" as InstallablePiToolId,
+    source: TAVILY_IMPLEMENTATION_ID,
+    implementationId: TAVILY_IMPLEMENTATION_ID,
+    installKind: "mcp-server",
+    detector: { commands: ["npx"], mcpServerNames: [TAVILY_MCP_SERVER_ID] },
+  },
   /**
    * runner-mermaid is INTERNAL.
    * Pi visual support is detected via `pi-mermaid` in internal-runner-packages.ts.
@@ -255,6 +271,7 @@ export const PI_RUNNER_CAPABILITY_CATALOG: Record<
   rtk: FULL_CAPABILITY_CATALOG.rtk as CapabilityToolMapping,
   serena: FULL_CAPABILITY_CATALOG.serena as CapabilityToolMapping,
   context7: FULL_CAPABILITY_CATALOG.context7 as CapabilityToolMapping,
+  "web-search": FULL_CAPABILITY_CATALOG["web-search"] as CapabilityToolMapping,
   "pi-hud": FULL_CAPABILITY_CATALOG["pi-hud"] as CapabilityToolMapping,
 } as const satisfies Record<Exclude<CapabilityId, InternalCapabilityId>, CapabilityToolMapping>;
 
@@ -363,6 +380,7 @@ export const PI_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityContribut
     { capabilityId: "rtk", runnerId: "pi", status: "shared", adapterSource: "rtk", installKind: "shared-binary", provisionMode: "reuse-shared-binary", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall"] },
     { capabilityId: "serena", runnerId: "pi", status: "shared", adapterSource: "serena", installKind: "python-tool", provisionMode: "python-tool", detectors: { commands: ["serena"], mcpServerNames: ["serena"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "context7", runnerId: "pi", status: "shared", adapterSource: "@upstash/context7-mcp", installKind: "npm-package-plus-mcp", provisionMode: "npm-package-plus-mcp", detectors: { mcpServerNames: ["context7"] }, parityChecks: ["mcp-config-present"] },
+    { capabilityId: "web-search", runnerId: "pi", status: "supported", adapterSource: "@deck/provider-tavily", installKind: "native-mcp", provisionMode: "native-mcp", implementationId: TAVILY_IMPLEMENTATION_ID, detectors: { mcpServerNames: [TAVILY_MCP_SERVER_ID] }, parityChecks: ["mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "supermemory-tool-bindings", runnerId: "pi", status: "shared", adapterSource: "supermemory", installKind: "mcp-server", provisionMode: "mcp-server", detectors: { mcpServerNames: ["supermemory"] }, parityChecks: ["mcp-config-present"] },
     { capabilityId: "pi-orchestrator-prompt-persistence", runnerId: "pi", status: "supported", adapterSource: "pi-team-profile", installKind: "manual", provisionMode: "profile-prompt", parityChecks: ["instruction-bundle-present"] },
     { capabilityId: "pi-mermaid", runnerId: "pi", status: "runner-specific", adapterSource: "pi-mermaid", installKind: "internal-required", provisionMode: "internal-required" },

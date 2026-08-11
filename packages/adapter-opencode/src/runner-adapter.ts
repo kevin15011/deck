@@ -8,7 +8,7 @@
  */
 
 import { homedir } from "node:os";
-import { appendFileSync, writeFileSync, readFileSync, existsSync, mkdirSync, promises as fs } from "node:fs";
+import { appendFileSync, writeFileSync, readFileSync, existsSync, mkdirSync, accessSync, constants as fsConstants, promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
 
 const LOG = "/tmp/deck-tui.log";
@@ -75,8 +75,10 @@ import type {
 import {
   getModelCatalog,
   getRunnerCapabilityMapping,
+  readDeckConfig,
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   buildCapabilityInstructionBundle,
+  getEnabledCapabilityInstructionIds,
   getConfigurablePackageInstructionMetadata,
   SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
   SKILL_DISCOVERY_SOURCE_SCHEMA,
@@ -88,8 +90,11 @@ import {
   runEvidenceGatedSerenaWriter,
   validateSerenaOperationAuthorization,
   validateSerenaReadinessEvidence,
+  hasWebSearchProviderCredential,
+  isWebSearchProviderDescriptor,
 } from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
+import type { WebSearchProviderDescriptorV1 } from "@deck/core";
 
 // ---------------------------------------------------------------------------
 // OpenCode-specific imports
@@ -128,6 +133,7 @@ import {
   type OpenCodeMcpConfigFileSystem,
 } from "./opencode-mcp-config";
 import { getUserFacingOpenCodeCapability, OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION, OPENCODE_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
+import { inspectOpenCodeWebSearchMcpConfig, resolveOpenCodeWebSearchReadiness, writeOpenCodeWebSearchMcpConfig } from "./web-search";
 import type { CapabilityCatalogEntry } from "@deck/core";
 import { discoverModelInventory } from "./model-inventory";
 import { LastKnownGoodStore, ModelInventoryCache, buildDiscoveryFingerprint, buildLastKnownGoodScopeKey } from "./model-inventory-cache";
@@ -182,6 +188,10 @@ export type OpenCodeRunnerAdapterOptions = {
   serenaOwnedRoot?: string;
   serenaConfigPath?: string;
   serenaStage?: InstallOpenCodeToolsOptions["onStage"];
+  /** Provider descriptor selected by the CLI composition root. */
+  webSearchProvider?: WebSearchProviderDescriptorV1;
+  /** Resolve the selected provider without putting provider metadata in Core. */
+  webSearchProviderResolver?: (provider: string | undefined) => WebSearchProviderDescriptorV1 | undefined;
 };
 
 export type DiscoveryTimers = { setTimeout(callback: () => void, delay: number): ReturnType<typeof setTimeout>; clearTimeout(timer: ReturnType<typeof setTimeout>): void };
@@ -245,6 +255,19 @@ function errorCode(error: unknown): string | undefined {
 
 function isNotFoundError(error: unknown): boolean {
   return errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR";
+}
+
+function commandAvailable(command: string, environment: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  const pathValue = environment.PATH ?? "";
+  const separator = process.platform === "win32" ? ";" : ":";
+  return pathValue.split(separator).some((directory) => {
+    try {
+      accessSync(join(directory || process.cwd(), command), fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 function safeDiagnostic(
@@ -698,6 +721,8 @@ class OpenCodeRunnerAdapterImpl {
   #serenaOwnedRootIsExplicit: boolean;
   #serenaConfigPath?: string;
   #serenaStage?: InstallOpenCodeToolsOptions["onStage"];
+  #webSearchProvider?: WebSearchProviderDescriptorV1;
+  #webSearchProviderResolver?: OpenCodeRunnerAdapterOptions["webSearchProviderResolver"];
   #serenaEvidenceByOperation = new Map<string, { authorization: SerenaBootstrapAuthorization; operation: SerenaOperationIdentity; evidence: SerenaReadinessEvidence }>();
 
   constructor(options?: OpenCodeRunnerAdapterOptions) {
@@ -714,6 +739,8 @@ class OpenCodeRunnerAdapterImpl {
     this.#serenaOwnedRootIsExplicit = options !== undefined && Object.prototype.hasOwnProperty.call(options, "serenaOwnedRoot");
     this.#serenaConfigPath = options?.serenaConfigPath;
     this.#serenaStage = options?.serenaStage;
+    this.#webSearchProvider = options?.webSearchProvider;
+    this.#webSearchProviderResolver = options?.webSearchProviderResolver;
     this.#inventoryDiscovery = options?.inventoryDiscovery ?? createDefaultOpenCodeInventoryDiscovery(options?.productionDiscoveryDependencies);
     const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
     this.skillDiscovery = createOpenCodeSkillDiscoveryProvider({
@@ -739,6 +766,13 @@ class OpenCodeRunnerAdapterImpl {
       workspaceRoot: context.projectRoot,
       evidenceContext: this.getEvidenceContext(context),
     });
+  }
+
+  private resolveWebSearchProvider(provider: string | undefined): WebSearchProviderDescriptorV1 | undefined {
+    const selected = provider?.trim();
+    if (!selected) return undefined;
+    if (this.#webSearchProvider?.providerId === selected) return this.#webSearchProvider;
+    return this.#webSearchProviderResolver?.(selected);
   }
 
   // -------------------------------------------------------------------------
@@ -783,10 +817,36 @@ class OpenCodeRunnerAdapterImpl {
     };
     const toolsReview = this.getToolsReview(actionContext);
     const runnerScope = "opencode";
+    const deckConfig = readDeckConfig(input.projectRoot);
+    const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
+    const webSearchConfigPath = join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
+    const webSearchMcp = inspectOpenCodeWebSearchMcpConfig(webSearchConfigPath, webSearchProvider);
+    const webSearchExecutableAvailable = webSearchProvider ? commandAvailable(webSearchProvider.command[0]!) : false;
+    const webSearchReadiness = resolveOpenCodeWebSearchReadiness({
+      enabled: deckConfig.webSearch.enabled,
+      provider: webSearchProvider,
+      credentialEnvironment: process.env,
+      executableAvailable: webSearchExecutableAvailable,
+      mcpConfigured: webSearchMcp.configured,
+      mcpConfigConflict: webSearchMcp.conflict,
+    });
 
     const inventory = buildOpenCodeRunnerCapabilityInventory(toolsReview, {
       runnerScope,
       includeInternal: true,
+      webSearch: {
+        readiness: webSearchReadiness.readiness,
+        evidence: {
+          enabled: deckConfig.webSearch.enabled,
+          runnerSupported: true,
+          providerConfigured: isWebSearchProviderDescriptor(webSearchProvider),
+          credentialAvailable: hasWebSearchProviderCredential(webSearchProvider, process.env),
+          executableAvailable: webSearchExecutableAvailable,
+          mcpConfigured: webSearchMcp.configured,
+          mcpConfigConflict: webSearchMcp.conflict,
+        },
+        provider: webSearchProvider,
+      },
     });
 
     // Map OpenCode-specific inventory to generic CapabilityInventory
@@ -798,7 +858,7 @@ class OpenCodeRunnerAdapterImpl {
       if ("capabilityId" in entry && typeof entry.capabilityId === "string") {
         // Skip internal entries
         if (capabilityId === "_internal") continue;
-        const cap = entry as { capabilityId: string; runnerScope: string; installed: boolean; status: string; diagnostics?: readonly string[] };
+        const cap = entry as { capabilityId: string; runnerScope: string; installed: boolean; status: string; diagnostics?: readonly string[]; webSearchReadiness?: import("@deck/core").WebSearchReadinessResult; webSearchEvidence?: import("@deck/core").WebSearchReadinessEvidence; webSearchProvider?: WebSearchProviderDescriptorV1 };
         const capability = require("./capability-catalog").getUserFacingOpenCodeCapability(capabilityId as any);
         if (!capability) continue;
 
@@ -810,11 +870,21 @@ class OpenCodeRunnerAdapterImpl {
           requirementLevel: capability.requirementLevel,
           toolId: capability.toolId,
           source: capability.source,
-          installKind: capability.installKind as CapabilityCatalogEntry["installKind"],
+          // Runner-local install mechanics never cross the Core/dashboard port.
+          installKind: capability.installKind === "opencode-plugin"
+            ? "opencode-plugin"
+            : capability.installKind === "external"
+              ? "external"
+              : "runner-native",
           supportStatus: getRunnerCapabilityMapping(cap.capabilityId, this.runnerId, [OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION])?.status,
           isInstalled: cap.installed,
-          isBlocked: cap.status === "blocked",
+           isBlocked: cap.capabilityId === "web-search"
+             ? cap.webSearchReadiness?.code === "mcp-config-conflict"
+             : cap.status === "blocked",
           diagnostics: cap.diagnostics,
+           webSearchReadiness: cap.webSearchReadiness,
+           webSearchEvidence: cap.webSearchEvidence,
+           webSearchProvider: cap.webSearchProvider,
         });
       }
     }
@@ -857,7 +927,7 @@ class OpenCodeRunnerAdapterImpl {
     // Normalize inventory: accept both CapabilityInventory (with .capabilities) 
     // and plain Record<capabilityId, entry> (as stored by the dashboard)
     const capabilities = inventory.capabilities 
-      ?? Object.values(inventory as Record<string, { capabilityId?: string; isInstalled?: boolean; isBlocked?: boolean; toolId?: string; source?: string; diagnostics?: readonly string[] }>);
+      ?? Object.values(inventory as Record<string, { capabilityId?: string; isInstalled?: boolean; isBlocked?: boolean; toolId?: string; source?: string; diagnostics?: readonly string[]; webSearchProvider?: WebSearchProviderDescriptorV1 }>);
     log(`buildReviewPlan: capabilities count=${Array.isArray(capabilities) ? capabilities.length : "not-array"}`);
     
     // Map CapabilityInventory back to OpenCode's native inventory format
@@ -868,10 +938,13 @@ class OpenCodeRunnerAdapterImpl {
         capabilityId: entry.capabilityId,
         runnerScope: "opencode",
         installed: entry.isInstalled,
-        status: entry.isInstalled ? "ready" : entry.isBlocked ? "blocked" : "missing",
+        status: entry.webSearchReadiness?.state ?? (entry.isInstalled ? "ready" : entry.isBlocked ? "blocked" : "missing"),
         toolId: entry.toolId,
         source: entry.source,
         diagnostics: entry.diagnostics ?? [],
+        webSearchReadiness: entry.webSearchReadiness,
+        webSearchEvidence: entry.webSearchEvidence,
+        webSearchProvider: entry.webSearchProvider,
       };
     }
     log(`buildReviewPlan: nativeInventory entries=${Object.keys(nativeInventory).length}`);
@@ -892,6 +965,8 @@ class OpenCodeRunnerAdapterImpl {
           }
         : undefined,
       selectedCapabilities: state.selectedCapabilities,
+      webSearchProvider: capabilities.find((entry) => entry.capabilityId === "web-search")?.webSearchProvider
+        ?? state.webSearchProviderDescriptor,
       adaptiveMemory: state.adaptiveMemory.provider !== "none" ? {
         provider: state.adaptiveMemory.provider,
         supermemory: state.adaptiveMemory.supermemory ? {
@@ -973,12 +1048,20 @@ class OpenCodeRunnerAdapterImpl {
 
     const plan = buildOpenCodeInstallationPlan({ tools: toolsReview.tools, selectedToolIds });
     return {
-      steps: plan.map((tool) => ({
-        action: "install" as const,
-        tool: tool.module,
-        reason: `${tool.name} is selected for installation`,
-        capabilityId: tool.id,
-      })),
+      steps: [
+        ...plan.map((tool) => ({
+          action: "install" as const,
+          tool: tool.module,
+          reason: `${tool.name} is selected for installation`,
+          capabilityId: tool.id,
+        })),
+        ...(state.selectedCapabilities["web-search"] ? [{
+          action: "configure" as const,
+          tool: "web-search",
+          reason: "Configure the reviewed native Web Search MCP server",
+          capabilityId: "web-search",
+        }] : []),
+      ],
     };
   }
 
@@ -1069,7 +1152,7 @@ class OpenCodeRunnerAdapterImpl {
           return this.runSerenaMcpConfigAction(action, context);
         }
 
-        const result = await this.writeMcpConfigFromCapability(capabilityId, action.source);
+        const result = await this.writeMcpConfigFromCapability(capabilityId, action.source, context.webSearchProvider);
         return {
           actionId: action.id,
           status: result.ok ? "executed" : "failed",
@@ -1311,7 +1394,11 @@ class OpenCodeRunnerAdapterImpl {
     return { ok: true, status: result.status };
   }
 
-  private async writeMcpConfigFromCapability(capabilityId: string, source?: string): Promise<{ ok: boolean; diagnostics: string[] }> {
+  private async writeMcpConfigFromCapability(
+    capabilityId: string,
+    source?: string,
+    webSearchProvider?: WebSearchProviderDescriptorV1,
+  ): Promise<{ ok: boolean; diagnostics: string[] }> {
     try {
       switch (capabilityId) {
         case "context7": {
@@ -1330,6 +1417,17 @@ class OpenCodeRunnerAdapterImpl {
             command: ["context-mode"],
             pluginsToRemove: ["context-mode"],
           });
+        }
+        case "web-search": {
+          const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
+          const result = writeOpenCodeWebSearchMcpConfig({
+            configPath: join(configDir, "opencode.json"),
+            provider: webSearchProvider,
+          });
+          return {
+            ok: result.ok,
+            diagnostics: [...result.diagnostics],
+          };
         }
         case "rtk": {
           // RTK MCP config — uses the rtk source for MCP server
@@ -1451,6 +1549,13 @@ class OpenCodeRunnerAdapterImpl {
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
     const modelAssignments = input.modelAssignments ?? {};
     const thinkingAssignments = input.thinkingAssignments ?? {};
+    const capabilityInstructions = input.capabilityInstructions ?? (() => {
+      try {
+        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(readDeckConfig(input.projectRoot), "opencode"));
+      } catch {
+        return undefined;
+      }
+    })();
     const standaloneSkills = input.standaloneSkills ?? getStandaloneSkills().map(({ skillId }) => {
       const bundle = getStandaloneSkill(skillId);
       return { skillId, body: bundle.SKILL, files: bundle.files };
@@ -1462,7 +1567,7 @@ class OpenCodeRunnerAdapterImpl {
       changedAgentIds: input.changedAgentIds,
       memoryProvider: input.memoryProvider as any,
       supportedMemoryProviderIds: ["engram", "supermemory"],
-      capabilityInstructions: input.capabilityInstructions,
+      capabilityInstructions,
       standaloneSkills,
     });
     const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");
@@ -1535,6 +1640,33 @@ class OpenCodeRunnerAdapterImpl {
   // -------------------------------------------------------------------------
 
   async writeMcpConfig(input: RunnerMcpConfigInput): Promise<RunnerMcpConfigResult> {
+    if (input.webSearchProvider) {
+      const configPath = join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
+      if (input.serverName !== input.webSearchProvider.semanticServerId) {
+        return {
+          ok: false,
+          path: configPath,
+          diagnostics: ["Web Search MCP action identity does not match the selected provider descriptor."],
+        };
+      }
+      const result = writeOpenCodeWebSearchMcpConfig({
+        configPath,
+        provider: input.webSearchProvider,
+      });
+      return {
+        ok: result.ok,
+        path: result.path,
+        diagnostics: [...result.diagnostics],
+      };
+    }
+    if (input.serverName === "web-search") {
+      const configPath = join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
+      return {
+        ok: false,
+        path: configPath,
+        diagnostics: ["Web Search provider selection is unavailable; no changes were written."],
+      };
+    }
     if (input.serverName === "serena") {
       return {
         ok: false,

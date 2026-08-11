@@ -1,3 +1,9 @@
+import {
+  defineRunnerCapabilityContribution,
+  type RunnerCapabilityMapping,
+} from "@deck/core";
+import { TAVILY_IMPLEMENTATION_ID, TAVILY_MCP_SERVER_ID } from "@deck/provider-tavily";
+
 export type CodexCapabilityStatus = "supported" | "shared" | "gap" | "not-applicable";
 export type CodexReviewDisposition = "static-compatible-gap";
 
@@ -10,6 +16,7 @@ export type CodexCapabilityCatalogEntry = {
   reviewDisposition?: CodexReviewDisposition;
   executable?: string;
   mcpServerName?: string;
+  implementationId?: string;
   runtimeReadiness?: "binary" | "binary+mcp" | "binary+mcp+index" | "mcp" | "content" | "route-bound";
 };
 
@@ -27,6 +34,7 @@ export const CODEX_CAPABILITY_CATALOG = Object.freeze([
   { capabilityId: "rtk", status: "shared", provisionMode: "reuse-shared-binary", executable: "rtk", runtimeReadiness: "binary" },
   { capabilityId: "serena", status: "shared", provisionMode: "reuse-shared-binary-plus-mcp", executable: "serena", mcpServerName: "serena", runtimeReadiness: "binary+mcp" },
   { capabilityId: "context7", status: "supported", provisionMode: "streamable-http-mcp", mcpServerName: "context7", runtimeReadiness: "mcp" },
+  { capabilityId: "web-search", label: "Web Search", status: "supported", provisionMode: "native-mcp", mcpServerName: TAVILY_MCP_SERVER_ID, implementationId: TAVILY_IMPLEMENTATION_ID, runtimeReadiness: "mcp" },
   { capabilityId: "supermemory-tool-bindings", status: "supported", provisionMode: "streamable-http-mcp-native-oauth", mcpServerName: "supermemory", runtimeReadiness: "mcp" },
   { capabilityId: "engram", label: "Engram", status: "gap", provisionMode: "deferred" },
   { capabilityId: "code-economy", status: "supported", provisionMode: "native-instruction-composition", runtimeReadiness: "content" },
@@ -73,6 +81,7 @@ export const CODEX_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityContri
     { capabilityId: "rtk", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary", provisionMode: "reuse-shared-binary", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall", "instruction-bundle-present"] },
     { capabilityId: "serena", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["serena"], mcpServerNames: ["serena"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall", "instruction-bundle-present"] },
     { capabilityId: "context7", runnerId: "codex", status: "supported", adapterSource: "@deck/adapter-codex", installKind: "remote-mcp", provisionMode: "streamable-http-mcp", detectors: { mcpServerNames: ["context7"] }, parityChecks: ["mcp-config-present"] },
+    { capabilityId: "web-search", runnerId: "codex", status: "supported", adapterSource: "@deck/provider-tavily", installKind: "native-mcp", provisionMode: "native-mcp", implementationId: TAVILY_IMPLEMENTATION_ID, detectors: { mcpServerNames: [TAVILY_MCP_SERVER_ID] }, parityChecks: ["mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "supermemory-tool-bindings", runnerId: "codex", status: "supported", adapterSource: "@deck/adapter-codex", installKind: "remote-mcp-native-oauth", provisionMode: "streamable-http-mcp-native-oauth", detectors: { mcpServerNames: ["supermemory"] }, parityChecks: ["mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "code-economy", runnerId: "codex", status: "supported", adapterSource: "@deck/adapter-codex", installKind: "native-instruction-composition", provisionMode: "native-instruction-composition", parityChecks: ["instruction-bundle-present"] },
     ...protectedControlMappings,
@@ -86,7 +95,3 @@ export const CODEX_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityContri
     { capabilityId: "deck-setup", runnerId: "codex", status: "supported", adapterSource: "@deck/adapter-codex", installKind: "native-agent-bound-skill", provisionMode: "native-agent-bound-skill", notes: "Materialized as the Developer Team's agent-bound setup skill." },
   ],
 });
-import {
-  defineRunnerCapabilityContribution,
-  type RunnerCapabilityMapping,
-} from "@deck/core";

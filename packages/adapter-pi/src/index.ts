@@ -22,4 +22,5 @@ export * from "./settings-merge";
 export * from "./runner-capabilities";
 export * from "./team-catalog";
 export * from "./tool-status";
+export * from "./web-search";
 export type { PromptProfileActivationV1 } from "@deck/sdd-runtime";

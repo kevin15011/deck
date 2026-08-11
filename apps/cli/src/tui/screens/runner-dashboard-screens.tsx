@@ -9,6 +9,7 @@ import {
   getPlanActionCounts,
   getPackageInstructionSummaries,
   getTeamCapabilityProfile,
+  getWebSearchSummary,
   type CapabilityResolver,
 } from "../runner-dashboard/selectors";
 import { runnerRequiresExternalSupermemoryToken, type RunnerAction, type RunnerDashboardState } from "../runner-dashboard/state";
@@ -32,7 +33,7 @@ type RunnerDashboardScreensProps = {
  * Runtime-agnostic Runner Dashboard Screens.
  *
  * Works with any runner (Pi, OpenCode, etc.) via the capabilityResolver.
- * Dashboard sections: Packages, Adaptive Memory, Teams, Review & Install.
+ * Dashboard sections: Packages, Adaptive Memory, Web Search, Teams, Review & Install.
  */
 export function RunnerDashboardScreens({ state, installResults = [], completionStatus, canRunPlan, runBlockDiagnostics = [], capabilityResolver, serenaStages = [], serenaOutcome, cancellationRequested = false, runnerLabel }: RunnerDashboardScreensProps) {
   switch (state.screen) {
@@ -40,6 +41,8 @@ export function RunnerDashboardScreens({ state, installResults = [], completionS
       return <PackagesDetail state={state} resolver={capabilityResolver} />;
     case "adaptive-memory-detail":
       return <AdaptiveMemoryDetail state={state} />;
+    case "web-search-detail":
+      return <WebSearchDetail state={state} />;
     case "teams-detail":
       return <TeamsDetail state={state} resolver={capabilityResolver} />;
     case "developer-team-detail":
@@ -99,7 +102,7 @@ function DashboardOverview({ state, resolver, runnerLabel }: { state: RunnerDash
   return (
     <Box flexDirection="column">
       <Text bold>{runnerSetupName(runnerLabel)} Setup Dashboard</Text>
-      <Text dimColor>Configure packages, Adaptive Memory, Teams and Review &amp; Install.</Text>
+      <Text dimColor>Configure Packages, Adaptive Memory, Web Search, Teams and Review &amp; Install.</Text>
       {state.runtime.inspectionState ? <Text>Runtime: {state.runtime.inspectionState}</Text> : null}
       {state.runtime.diagnostics?.map((diagnostic, index) => <Text key={`runtime-${index}`} color="yellow">{sanitizeDashboardText(diagnostic)}</Text>)}
       {executionRoutes.length > 0 ? (
@@ -174,6 +177,46 @@ function AdaptiveMemoryDetail({ state }: { state: RunnerDashboardState }) {
       </Box>
       <Box marginTop={1}>
         <Text dimColor>{summary.detail}</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Web Search Detail
+// ---------------------------------------------------------------------------
+
+function WebSearchDetail({ state }: { state: RunnerDashboardState }) {
+  const summary = getWebSearchSummary(state);
+  const provider = summary.provider === "tavily" ? "Tavily" : summary.provider;
+  const materialization = summary.mcpConfigConflict
+    ? "conflict"
+    : summary.mcpConfigured
+      ? "configured"
+      : "not configured";
+  return (
+    <Box flexDirection="column">
+      <Text bold>Web Search</Text>
+      <Text dimColor>Compact search and point extraction only. Credentials are stored only by explicit choice in your active shell profile.</Text>
+      <Box marginTop={1} flexDirection="column">
+        <Text>Provider: {provider}</Text>
+        <Text>Credential: {summary.credentialAvailable ? "detected" : "missing"}</Text>
+        <Text>Runner support: {summary.runnerSupported ? "supported" : "unsupported"}</Text>
+        <Text>MCP materialization: {materialization}</Text>
+        <Text>Readiness: {summary.readiness}</Text>
+      </Box>
+      <Box marginTop={1}>
+        <MenuList
+          cursor={state.cursor}
+          items={[
+            { id: "toggle", label: `${summary.enabled ? "[x]" : "[ ]"} Enable Web Search`, hint: summary.enabled ? "Disable without deleting the saved credential." : "Enable Tavily Web Search." },
+            { id: "credential", label: "Enter or replace Tavily credential", hint: "Masked input; value is never stored in Deck or MCP configuration." },
+            { id: "back", label: "Back to dashboard" },
+          ]}
+        />
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>Disabling Web Search does not delete a saved shell-profile credential.</Text>
       </Box>
     </Box>
   );

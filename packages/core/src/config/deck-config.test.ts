@@ -111,6 +111,7 @@ describe("readDeckConfig", () => {
     expect(config).toEqual({
       version: 1,
       adaptiveMemory: { activeProvider: "none" },
+      webSearch: { enabled: false },
       packageInstructions: {
         pi: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
         opencode: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
@@ -178,7 +179,7 @@ describe("validateDeckConfig - developerTeamExecution", () => {
       .developerTeamExecution.invocationAuthorization.pi).toBe("invocation-required");
     expectDeckConfigError(
       () => validateDeckConfig({ developerTeamExecution: { token: "raw-secret" } }),
-      "SUPERMEMORY_CREDENTIAL_IN_DECK_CONFIG",
+      "DECK_CONFIG_SECRET_FIELD",
     );
   });
 
@@ -372,7 +373,7 @@ describe("validateDeckConfig — packageInstructions", () => {
           adaptiveMemory: { activeProvider: "none" },
           packageInstructions: { pi: { "codebase-memory": true, token: "secret" } },
         }),
-      "SUPERMEMORY_CREDENTIAL_IN_DECK_CONFIG",
+      "DECK_CONFIG_SECRET_FIELD",
     );
   });
 
@@ -453,7 +454,7 @@ describe("validateDeckConfig", () => {
     ];
 
     for (const candidate of secretFieldCases) {
-      expectDeckConfigError(() => validateDeckConfig(candidate), "SUPERMEMORY_CREDENTIAL_IN_DECK_CONFIG");
+      expectDeckConfigError(() => validateDeckConfig(candidate), "DECK_CONFIG_SECRET_FIELD");
     }
   });
 
@@ -525,7 +526,7 @@ describe("writeDeckConfig", () => {
             supermemory: { mcpServerName: "supermemory", token: "do-not-store" },
           },
         }),
-      "SUPERMEMORY_CREDENTIAL_IN_DECK_CONFIG",
+      "DECK_CONFIG_SECRET_FIELD",
     );
 
     expect(existsSync(getDeckConfigPath(root))).toBe(false);

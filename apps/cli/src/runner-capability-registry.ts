@@ -28,6 +28,7 @@ import { CODEX_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-codex";
 
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
+import { getWebSearchProviderDescriptor, isSupportedWebSearchProvider, SUPPORTED_WEB_SEARCH_PROVIDER_IDS } from "./web-search-provider";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,6 +61,12 @@ export type RunnerCapabilityCatalog = {
 
   /** Registered memory provider factories */
   memoryProviders: readonly MemoryProviderRegistration[];
+
+  /** Provider implementations accepted by the current CLI composition root. */
+  webSearchProviderIds: readonly string[];
+
+  /** Resolve a provider descriptor without exposing credential values. */
+  getWebSearchProvider(provider: string | undefined): ReturnType<typeof getWebSearchProviderDescriptor>;
 
   /** Look up a runner by ID */
   getRunner(id: string): RunnerCapabilities | undefined;
@@ -154,6 +161,10 @@ export function createRunnerCapabilityRegistry(): RunnerCapabilityCatalog {
     runners,
     runnerIds: runnerIds as readonly string[],
     memoryProviders,
+    webSearchProviderIds: SUPPORTED_WEB_SEARCH_PROVIDER_IDS,
+    getWebSearchProvider(provider: string | undefined) {
+      return isSupportedWebSearchProvider(provider) ? getWebSearchProviderDescriptor(provider) : undefined;
+    },
     getRunner(id: string): RunnerCapabilities | undefined {
       return runners[id];
     },

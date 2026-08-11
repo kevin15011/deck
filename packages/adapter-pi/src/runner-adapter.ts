@@ -19,6 +19,11 @@ import { buildPiRunnerReviewPlan, type PiRunnerReviewPlan } from "./capability-p
 import { buildPiInstallationPlan, getPiInstallableTool, type InstallablePiToolId, type InstallablePiTool } from "./installation-plan";
 import { installPiTools, installInternalRunnerPackages } from "./install-tools";
 import { reviewPiRequiredTools, type PiRequiredToolsReview } from "./required-tools";
+import {
+  inspectPiWebSearchMcpConfig,
+  resolvePiWebSearchReadiness,
+  writePiWebSearchMcpConfig,
+} from "./web-search";
 import { getTeamsForEnvironment } from "./team-catalog";
 import { buildPiTeamLaunchPlan } from "./pi-team-launch";
 import {
@@ -32,7 +37,7 @@ import {
   type DeveloperTeamInstallPlan as PiDeveloperTeamInstallPlan,
 } from "./developer-team-install";
 import { PI_THINKING_LEVELS, supportsThinkingForModel, getDefaultThinkingForModel, resolveThinkingForModel } from "./model-config";
-import { getPiRunnerCapability, PI_RUNNER_CAPABILITY_CONTRIBUTION, PI_RUNNER_CAPABILITY_IDS } from "./capability-catalog";
+import { getPiRunnerCapability, getUserFacingCapability, PI_RUNNER_CAPABILITY_CONTRIBUTION, PI_RUNNER_CAPABILITY_IDS, type CapabilityId } from "./capability-catalog";
 import { getOptionalPiTools } from "./installation-plan";
 import {
   writeSupermemoryPiMcpConfig,
@@ -87,16 +92,22 @@ import type {
   SerenaOperationIdentity,
   SerenaReadinessEvidence,
   SerenaReadinessRevalidator,
+  WebSearchProviderDescriptorV1,
 } from "@deck/core";
 import {
   getModelCatalog as getCoreModelCatalog,
+  getCanonicalCapability,
   getRunnerCapabilityMapping,
+  readDeckConfig,
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   buildCapabilityInstructionBundle,
+  getEnabledCapabilityInstructionIds,
   getConfigurablePackageInstructionMetadata,
   runEvidenceGatedSerenaWriter,
   SERENA_MCP_ARGS,
   validateSerenaOperationAuthorization,
+  hasWebSearchProviderCredential,
+  isWebSearchProviderDescriptor,
   SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
   SKILL_DISCOVERY_SOURCE_SCHEMA,
 } from "@deck/core";
@@ -116,6 +127,8 @@ export type PiRunnerAdapterOptions = {
   readonly opaqueInventory?: () => Promise<OpaqueSkillInventoryResultV1>;
   /** Deterministic Serena installer projection seam. */
   readonly installTools?: typeof installPiTools;
+  /** Hermetic required-tools review seam for inventory consumers. */
+  readonly requiredToolsReview?: () => PiRequiredToolsReview;
   /** Injected Core effects for Serena bootstrap tests. */
   readonly serenaBootstrapEffects?: import("@deck/core").SerenaBootstrapEffects;
   /** Optional default revalidator used by the named Serena config action. */
@@ -126,6 +139,10 @@ export type PiRunnerAdapterOptions = {
   readonly writeSerenaMcpConfig?: (options: WriteSerenaMcpConfigOptions) => PiMcpConfigWriteResult | Promise<PiMcpConfigWriteResult>;
   /** Named non-Serena writer seam for hermetic adapter tests. */
   readonly writeNamedMcpConfig?: (capabilityId: string, context: RunnerActionContext) => Promise<PiMcpConfigWriteResult> | PiMcpConfigWriteResult;
+  /** Provider descriptor selected by the CLI composition root. */
+  readonly webSearchProvider?: WebSearchProviderDescriptorV1;
+  /** Resolve the selected provider without putting provider metadata in Core. */
+  readonly webSearchProviderResolver?: (provider: string | undefined) => WebSearchProviderDescriptorV1 | undefined;
 };
 
 type PiSerenaActionContextExtensions = {
@@ -321,6 +338,19 @@ function normalizeRuntimeDirectory(directory: string): string {
   return isAbsolute(directory) ? resolve(directory) : resolve(homedir());
 }
 
+function commandAvailable(command: string, environment: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  const pathValue = environment.PATH ?? "";
+  const separator = process.platform === "win32" ? ";" : ":";
+  return pathValue.split(separator).some((directory) => {
+    try {
+      accessSync(join(directory || process.cwd(), command), fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 function normalizeProjectRoot(projectRoot: string): string | undefined {
   return typeof projectRoot === "string" && projectRoot.length > 0 && isAbsolute(projectRoot) ? resolve(projectRoot) : undefined;
 }
@@ -512,11 +542,14 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // Store last native plan for backup/restore/verify operations
   #lastNativePlan: PiDeveloperTeamInstallPlan | null = null;
   #installTools: typeof installPiTools;
+  #requiredToolsReview: () => PiRequiredToolsReview;
   #serenaBootstrapEffects?: import("@deck/core").SerenaBootstrapEffects;
   #serenaRevalidator?: SerenaReadinessRevalidator;
   #serenaOwnedRoot?: string;
   #writeSerenaMcpConfig: (options: WriteSerenaMcpConfigOptions) => PiMcpConfigWriteResult | Promise<PiMcpConfigWriteResult>;
   #writeNamedMcpConfig: (capabilityId: string, context: RunnerActionContext) => Promise<PiMcpConfigWriteResult> | PiMcpConfigWriteResult;
+  #webSearchProvider?: WebSearchProviderDescriptorV1;
+  #webSearchProviderResolver?: PiRunnerAdapterOptions["webSearchProviderResolver"];
   #serenaReadinessByOperation = new Map<string, SerenaReadinessEvidence>();
 
   // -------------------------------------------------------------------------
@@ -530,11 +563,21 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     this.#homeDirectory = options.homeDirectory ?? process.env.HOME ?? homedir();
     this.skillDiscovery = createPiSkillDiscoveryProvider(options);
     this.#installTools = options.installTools ?? installPiTools;
+    this.#requiredToolsReview = options.requiredToolsReview ?? (() => reviewPiRequiredTools({ command: "pi" }));
     this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
     this.#serenaRevalidator = options.serenaRevalidator;
     this.#serenaOwnedRoot = options.serenaOwnedRoot;
     this.#writeSerenaMcpConfig = options.writeSerenaMcpConfig ?? writeSerenaMcpConfig;
     this.#writeNamedMcpConfig = options.writeNamedMcpConfig ?? writeNamedPiMcpConfig;
+    this.#webSearchProvider = options.webSearchProvider;
+    this.#webSearchProviderResolver = options.webSearchProviderResolver;
+  }
+
+  private resolveWebSearchProvider(provider: string | undefined): WebSearchProviderDescriptorV1 | undefined {
+    const selected = provider?.trim();
+    if (!selected) return undefined;
+    if (this.#webSearchProvider?.providerId === selected) return this.#webSearchProvider;
+    return this.#webSearchProviderResolver?.(selected);
   }
 
   async detectRuntimes(input?: RuntimeDetectionInput): Promise<readonly RuntimeStatus[]> {
@@ -558,12 +601,36 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   async getCapabilityInventory(input: CapabilityInventoryInput): Promise<CapabilityInventory> {
-    const review = reviewPiRequiredTools({ command: "pi" });
+    const review = this.#requiredToolsReview();
     const runnerScope = input.runnerId as "pi" | "opencode" | "all";
+    const deckConfig = readDeckConfig(input.projectRoot);
+    const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
+    const webSearchMcp = inspectPiWebSearchMcpConfig(join(this.#homeDirectory, ".pi", "agent", "mcp.json"), webSearchProvider);
+    const webSearchEvidence = {
+      enabled: deckConfig.webSearch.enabled,
+      runnerSupported: true,
+      providerConfigured: isWebSearchProviderDescriptor(webSearchProvider),
+      credentialAvailable: hasWebSearchProviderCredential(webSearchProvider, process.env),
+      executableAvailable: webSearchProvider ? commandAvailable(webSearchProvider.command[0]!) : false,
+      mcpConfigured: webSearchMcp.configured,
+      mcpConfigConflict: webSearchMcp.conflict,
+    } as const;
 
     const fullInventory: PiRunnerFullCapabilityInventory = buildPiRunnerCapabilityInventory(review, undefined, {
       runnerScope,
       includeInternal: false,
+      webSearch: {
+        readiness: resolvePiWebSearchReadiness({
+          enabled: deckConfig.webSearch.enabled,
+          provider: webSearchProvider,
+          credentialEnvironment: process.env,
+          executableAvailable: webSearchEvidence.executableAvailable,
+          mcpConfigured: webSearchEvidence.mcpConfigured,
+          mcpConfigConflict: webSearchEvidence.mcpConfigConflict,
+        }).readiness,
+        evidence: webSearchEvidence,
+        provider: webSearchProvider,
+      },
     });
 
     return toCapabilityInventory(fullInventory, input.runnerId, input.environmentId);
@@ -579,7 +646,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     // Normalize inventory: accept both CapabilityInventory (with .capabilities) 
     // and plain Record<capabilityId, entry> (as stored by the dashboard)
     const capabilities = inventory.capabilities 
-      ?? Object.values(inventory as Record<string, { capabilityId?: string; isInstalled?: boolean; requirementLevel?: string; source?: string; diagnostics?: readonly string[] }>);
+      ?? Object.values(inventory as Record<string, { capabilityId?: string; isInstalled?: boolean; requirementLevel?: string; source?: string; diagnostics?: readonly string[]; webSearchProvider?: WebSearchProviderDescriptorV1 }>);
 
     // Build a Pi-compatible inventory for buildPiRunnerReviewPlan
     const piInventory: PiRunnerCapabilityInventory = {};
@@ -587,11 +654,14 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       const capId = entry.capabilityId as string;
       piInventory[capId as keyof PiRunnerCapabilityInventory] = {
         capabilityId: capId,
-        status: toCapabilityStatus(entry.isInstalled, entry.requirementLevel),
+        status: entry.webSearchReadiness?.state ?? toCapabilityStatus(entry.isInstalled, entry.requirementLevel),
         runnerScope,
         installed: entry.isInstalled,
         source: entry.source,
         diagnostics: entry.diagnostics ?? [],
+        webSearchReadiness: entry.webSearchReadiness,
+        webSearchEvidence: entry.webSearchEvidence,
+        webSearchProvider: entry.webSearchProvider,
       } as any;
     }
 
@@ -620,6 +690,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
               .map((entry) => entry.id),
           ),
         },
+        webSearchProvider: capabilities.find((entry) => entry.capabilityId === "web-search")?.webSearchProvider
+          ?? state.webSearchProviderDescriptor,
       },
       piInventory as any,
     );
@@ -644,12 +716,20 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     const steps = buildPiInstallationPlan({ requiredTools, selectedOptionalToolIds });
 
     return {
-      steps: steps.map((tool) => ({
-        action: "install" as const,
-        tool: tool.id,
-        reason: `Pi package${tool.required ? " (required)" : " (optional)"}`,
-        capabilityId: tool.id,
-      })),
+      steps: [
+        ...steps.map((tool) => ({
+          action: "install" as const,
+          tool: tool.id,
+          reason: `Pi package${tool.required ? " (required)" : " (optional)"}`,
+          capabilityId: tool.id,
+        })),
+        ...(state.selectedCapabilities["web-search"] ? [{
+          action: "configure" as const,
+          tool: "web-search",
+          reason: "Configure the reviewed native Web Search MCP server",
+          capabilityId: "web-search",
+        }] : []),
+      ],
     };
   }
 
@@ -1005,11 +1085,18 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
+    const capabilityInstructions = input.capabilityInstructions ?? (() => {
+      try {
+        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(readDeckConfig(input.projectRoot), "pi"));
+      } catch {
+        return undefined;
+      }
+    })();
     const nativePlan = buildPiDeveloperTeamInstallPlan(input.projectRoot, {
       modelAssignments: input.modelAssignments,
       thinkingAssignments: input.thinkingAssignments,
       memoryProvider: input.memoryProvider,
-      capabilityInstructions: input.capabilityInstructions,
+      capabilityInstructions,
       standaloneSkills: input.standaloneSkills,
     });
     this.#lastNativePlan = nativePlan;
@@ -1138,7 +1225,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   async reviewTools(): Promise<unknown> {
-    return reviewPiRequiredTools({ command: "pi" });
+    return this.#requiredToolsReview();
   }
 
   // -------------------------------------------------------------------------
@@ -1253,6 +1340,13 @@ async function writeNamedPiMcpConfig(
       return writeCodebaseMemoryMcpConfig({ configPath, homeDir });
     case "context7":
       return writeContext7McpConfig({ configPath, homeDir });
+    case "web-search":
+      return writePiWebSearchMcpConfig({
+        configPath,
+        homeDir,
+        provider: context.webSearchProvider,
+        credentialEnvironment: process.env,
+      });
     case "supermemory": {
       const token = context.supermemoryToken ?? process.env.SUPERMEMORY_API_KEY;
       if (!token) {
@@ -1297,21 +1391,45 @@ function toCapabilityInventory(
   for (const [capabilityId, entry] of Object.entries(inventory)) {
     if (capabilityId === "_internal" || !entry) continue;
 
-    const typedEntry = entry as { status: string; toolId?: string; source?: string; diagnostics?: string[] };
+    const capability = getUserFacingCapability(capabilityId as CapabilityId);
+    if (!capability) continue;
+    const typedEntry = entry as {
+      status: string;
+      toolId?: string;
+      source?: string;
+      diagnostics?: string[];
+      webSearchReadiness?: import("@deck/core").WebSearchReadinessResult;
+      webSearchEvidence?: import("@deck/core").WebSearchReadinessEvidence;
+      webSearchProvider?: WebSearchProviderDescriptorV1;
+    };
+    const canonicalRequirement = getCanonicalCapability(capabilityId, [PI_RUNNER_CAPABILITY_CONTRIBUTION])?.requirement;
+    const requirementLevel = canonicalRequirement === "required" || canonicalRequirement === "optional" || canonicalRequirement === "configurable"
+      ? canonicalRequirement
+      : capability.requirementLevel;
+    const installKind: CapabilityCatalogEntry["installKind"] = capability.installKind === "pi-package"
+      ? "pi-package"
+      : capability.installKind === "external" || capability.installKind === "manual" || capability.installKind === "manual-verified"
+        ? "external"
+        : "runner-native";
 
     capabilities.push({
       capabilityId,
-      label: capabilityId,
-      description: "",
-      section: "runner",
-      requirementLevel: typedEntry.status === "ready" ? "optional" : "required",
-      toolId: typedEntry.toolId,
-      source: typedEntry.source,
-      installKind: "pi-package",
+      label: capability.label,
+      description: capability.description,
+      section: capability.section,
+      requirementLevel,
+      toolId: typedEntry.toolId ?? capability.toolId,
+      source: typedEntry.source ?? capability.source,
+      installKind,
       supportStatus: getRunnerCapabilityMapping(capabilityId, runnerId, [PI_RUNNER_CAPABILITY_CONTRIBUTION])?.status,
       isInstalled: typedEntry.status === "ready",
-      isBlocked: typedEntry.status === "blocked",
+      isBlocked: capabilityId === "web-search"
+        ? typedEntry.webSearchReadiness?.code === "mcp-config-conflict"
+        : typedEntry.status === "blocked",
       diagnostics: typedEntry.diagnostics,
+      webSearchReadiness: typedEntry.webSearchReadiness,
+      webSearchEvidence: typedEntry.webSearchEvidence,
+      webSearchProvider: typedEntry.webSearchProvider,
     });
   }
 

@@ -18,7 +18,7 @@ import {
 import type { AdaptiveMemoryProvider, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import {
-  getEnabledPackageInstructionIds,
+  getEnabledCapabilityInstructionIds,
   buildCapabilityInstructionBundle,
   type CapabilityInstructionBundle,
 } from "@deck/core/teams/developer/instruction-bundles";
@@ -217,7 +217,7 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   let capabilityInstructions: CapabilityInstructionBundle | undefined;
   try {
     const deckConfig = readDeckConfig(projectRoot);
-    const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
+    const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, "opencode");
     if (enabledIds.length > 0) {
       capabilityInstructions = buildCapabilityInstructionBundle(enabledIds);
     }

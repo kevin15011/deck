@@ -1,10 +1,25 @@
 import { describe, expect, test, vi } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   buildDeveloperTeamInstallPlan,
+  buildPiRunnerCapabilityInventory,
+  buildPiRunnerReviewPlan,
+  inspectPiWebSearchMcpConfig,
+  resolvePiWebSearchReadiness,
+  writePiWebSearchMcpConfig,
   type DeveloperTeamInstallPlan,
   type DeveloperTeamModelAssignments,
   type DeveloperTeamThinkingAssignments,
 } from "@deck/adapter-pi";
+import {
+  buildOpenCodeRunnerCapabilityInventory,
+  buildOpenCodeRunnerReviewPlan,
+  inspectOpenCodeWebSearchMcpConfig,
+  resolveOpenCodeWebSearchReadiness,
+  writeOpenCodeWebSearchMcpConfig,
+} from "@deck/adapter-opencode";
 import { buildDashboardSupermemorySetupUpdate } from "../app";
 import { getAdapter } from "../../runner-adapters";
 import type { NormalizedDeckConfig } from "@deck/core/config/deck-config";
@@ -15,7 +30,9 @@ import {
   runPiRunnerAction,
   runPiRunnerReviewPlan,
 } from "./action-runner";
-import { createDefaultPiRunnerDashboardState, type PiRunnerReviewPlan } from "./state";
+import { createDefaultPiRunnerDashboardState, createDefaultRunnerDashboardState, type PiRunnerReviewPlan } from "./state";
+import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
+import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds, readDeckConfig } from "@deck/core";
 
 const TOKEN_SENTINEL = "sk-sm-test-SHOULD-NOT-LEAK";
 
@@ -62,6 +79,234 @@ const SERENA_EVIDENCE = {
 };
 
 describe("Pi Runner dashboard action runner Supermemory safety", () => {
+  test("round-trips Web Search selection before native materialization", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-dashboard-web-search-"));
+    const mcpWrites: Array<Record<string, unknown>> = [];
+    const state = createDefaultPiRunnerDashboardState({
+      selectedCapabilities: { "web-search": true },
+      webSearchProvider: "tavily",
+      webSearchProviderDescriptor: TAVILY_PROVIDER_DESCRIPTOR,
+    });
+    const plan: PiRunnerReviewPlan = {
+      ready: true,
+      diagnostics: [],
+      groups: {
+        automaticInstalls: [],
+        manualSteps: [],
+        configWrites: [
+          { id: "capability.web-search.deck-config", kind: "write-deck-config", title: "Persist Web Search selection", capabilityId: "web-search", status: "ready" },
+          { id: "capability.web-search.mcp-config", kind: "write-pi-mcp-config", title: "Configure Web Search MCP", capabilityId: "web-search", status: "ready" },
+        ],
+        teamApplications: [],
+        validations: [],
+      },
+    };
+    try {
+      const results = await runRunnerReviewPlan(plan, {
+        projectRoot,
+        dashboardState: state,
+        webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
+        writeMcpConfig: async (options) => {
+          mcpWrites.push(options as Record<string, unknown>);
+          return { ok: true, path: join(projectRoot, "mcp.json"), diagnostics: [] };
+        },
+      });
+
+      const resultsById = new Map(results.map((result) => [result.actionId, result]));
+      expect(resultsById.get("capability.web-search.deck-config")).toMatchObject({ status: "executed" });
+      expect(resultsById.get("capability.web-search.mcp-config")).toMatchObject({ status: "executed" });
+      const persisted = readDeckConfig(projectRoot);
+      expect(persisted.webSearch).toEqual({ enabled: true, provider: "tavily" });
+      expect(getEnabledCapabilityInstructionIds(persisted, "pi")).toContain("web-search");
+      expect(buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(persisted, "pi")).instructions.some((fragment) => fragment.packageId === "web-search")).toBe(true);
+      expect(mcpWrites).toHaveLength(1);
+      expect(mcpWrites[0]).toMatchObject({
+        serverName: "web-search",
+        webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
+        command: ["npx", "-y", "tavily-mcp@0.2.22"],
+      });
+      expect(readFileSync(join(projectRoot, ".deck", "config.json"), "utf8")).not.toContain("TAVILY_API_KEY");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("materializes OpenCode Web Search from disabled inventory through readiness reinspection", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-web-search-e2e-"));
+    const configPath = join(projectRoot, "opencode.json");
+    const state = createDefaultRunnerDashboardState({
+      runnerScope: "opencode",
+      selectedCapabilities: {
+        "context-mode": false,
+        "codebase-memory-mcp": false,
+        "codebase-memory": false,
+        rtk: false,
+        serena: false,
+        context7: false,
+        "web-search": true,
+      },
+      webSearchProvider: "tavily",
+      webSearchProviderDescriptor: TAVILY_PROVIDER_DESCRIPTOR,
+    });
+    const disabledInventory = buildOpenCodeRunnerCapabilityInventory(undefined, { runnerScope: "opencode" });
+    expect(disabledInventory["web-search"]).toMatchObject({ status: "disabled", installed: false });
+
+    const plan = buildOpenCodeRunnerReviewPlan(
+      { runnerScope: "opencode", selectedCapabilities: { "web-search": true }, webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR },
+      disabledInventory,
+    );
+    const webSearchActions = plan.groups.configWrites.filter((action) => action.capabilityId === "web-search");
+    expect(webSearchActions.map((action) => action.id)).toEqual([
+      "capability.web-search.deck-config",
+      "capability.web-search.mcp-config",
+    ]);
+
+    try {
+      const results = await runRunnerReviewPlan(plan, {
+        projectRoot,
+        dashboardState: state,
+        webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
+        writeMcpConfig: async (options) => {
+          const result = writeOpenCodeWebSearchMcpConfig({ configPath, provider: options.webSearchProvider });
+          return { ok: result.ok, path: result.path, diagnostics: [...result.diagnostics] };
+        },
+      });
+
+      const resultsById = new Map(results.map((result) => [result.actionId, result]));
+      expect(resultsById.get("capability.web-search.deck-config")).toMatchObject({ status: "executed" });
+      expect(resultsById.get("capability.web-search.mcp-config")).toMatchObject({ status: "executed" });
+      const persisted = readDeckConfig(projectRoot);
+      expect(persisted.webSearch).toEqual({ enabled: true, provider: "tavily" });
+      const instructionIds = getEnabledCapabilityInstructionIds(persisted, "opencode");
+      expect(instructionIds).toContain("web-search");
+      expect(buildCapabilityInstructionBundle(instructionIds).instructions.some((fragment) => fragment.packageId === "web-search")).toBe(true);
+
+      const inspected = inspectOpenCodeWebSearchMcpConfig(configPath, TAVILY_PROVIDER_DESCRIPTOR);
+      expect(inspected).toEqual({ configured: true, conflict: false });
+      const readiness = resolveOpenCodeWebSearchReadiness({
+        enabled: persisted.webSearch.enabled,
+        provider: TAVILY_PROVIDER_DESCRIPTOR,
+        credentialEnvironment: { [TAVILY_PROVIDER_DESCRIPTOR.credentialEnvVar]: "synthetic-e2e-credential" },
+        executableAvailable: true,
+        mcpConfigured: inspected.configured,
+        mcpConfigConflict: inspected.conflict,
+      });
+      expect(readiness.readiness).toMatchObject({ state: "ready", code: "ready" });
+      const enabledInventory = buildOpenCodeRunnerCapabilityInventory(undefined, {
+        runnerScope: "opencode",
+        webSearch: {
+          provider: TAVILY_PROVIDER_DESCRIPTOR,
+          readiness: readiness.readiness,
+          evidence: {
+            enabled: true,
+            providerConfigured: true,
+            credentialAvailable: true,
+            executableAvailable: true,
+            mcpConfigured: true,
+            mcpConfigConflict: false,
+          },
+        },
+      });
+      expect(enabledInventory["web-search"]).toMatchObject({ status: "ready", installed: true });
+      expect(JSON.stringify({ results, persisted })).not.toContain("synthetic-e2e-credential");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("materializes Pi Web Search from disabled inventory through readiness reinspection", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-pi-web-search-e2e-"));
+    const configPath = join(projectRoot, "pi-mcp.json");
+    const state = createDefaultRunnerDashboardState({
+      runnerScope: "pi",
+      selectedCapabilities: {
+        "context-mode": false,
+        "codebase-memory-mcp": false,
+        "codebase-memory": false,
+        rtk: false,
+        serena: false,
+        context7: false,
+        "web-search": true,
+      },
+      webSearchProvider: "tavily",
+      webSearchProviderDescriptor: TAVILY_PROVIDER_DESCRIPTOR,
+    });
+    const disabledInventory = buildPiRunnerCapabilityInventory(undefined, undefined, { runnerScope: "pi" });
+    expect(disabledInventory["web-search"]).toMatchObject({ status: "disabled", installed: false });
+
+    const plan = buildPiRunnerReviewPlan(
+      {
+        runnerScope: "pi",
+        selectedCapabilities: { "web-search": true },
+        webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
+      },
+      disabledInventory,
+    );
+    const webSearchActions = plan.groups.configWrites.filter((action) => action.capabilityId === "web-search");
+    expect(webSearchActions.map((action) => action.id)).toEqual([
+      "capability.web-search.deck-config",
+      "capability.web-search.mcp-config",
+    ]);
+
+    try {
+      const results = await runRunnerReviewPlan(plan, {
+        projectRoot,
+        dashboardState: state,
+        webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
+        writeMcpConfig: async (options) => {
+          const result = writePiWebSearchMcpConfig({
+            configPath,
+            provider: options.webSearchProvider,
+            credentialEnvironment: { [TAVILY_PROVIDER_DESCRIPTOR.credentialEnvVar]: "synthetic-e2e-credential" },
+          });
+          return { ok: result.ok, path: result.path, diagnostics: result.diagnostics.map((diagnostic) => diagnostic.message) };
+        },
+      });
+
+      const resultsById = new Map(results.map((result) => [result.actionId, result]));
+      expect(resultsById.get("capability.web-search.deck-config")).toMatchObject({ status: "executed" });
+      expect(resultsById.get("capability.web-search.mcp-config")).toMatchObject({ status: "executed" });
+      const persisted = readDeckConfig(projectRoot);
+      expect(persisted.webSearch).toEqual({ enabled: true, provider: "tavily" });
+      const instructionIds = getEnabledCapabilityInstructionIds(persisted, "pi");
+      expect(instructionIds).toContain("web-search");
+      expect(buildCapabilityInstructionBundle(instructionIds).instructions.some((fragment) => fragment.packageId === "web-search")).toBe(true);
+
+      const inspected = inspectPiWebSearchMcpConfig(configPath, TAVILY_PROVIDER_DESCRIPTOR);
+      expect(inspected).toEqual({ configured: true, conflict: false });
+      const readiness = resolvePiWebSearchReadiness({
+        enabled: persisted.webSearch.enabled,
+        provider: TAVILY_PROVIDER_DESCRIPTOR,
+        credentialEnvironment: { [TAVILY_PROVIDER_DESCRIPTOR.credentialEnvVar]: "synthetic-e2e-credential" },
+        executableAvailable: true,
+        mcpConfigured: inspected.configured,
+        mcpConfigConflict: inspected.conflict,
+      });
+      expect(readiness.readiness).toMatchObject({ state: "ready", code: "ready" });
+      const enabledInventory = buildPiRunnerCapabilityInventory(undefined, undefined, {
+        runnerScope: "pi",
+        webSearch: {
+          provider: TAVILY_PROVIDER_DESCRIPTOR,
+          readiness: readiness.readiness,
+          evidence: {
+            enabled: true,
+            providerConfigured: true,
+            credentialAvailable: true,
+            executableAvailable: true,
+            mcpConfigured: true,
+            mcpConfigConflict: false,
+          },
+        },
+      });
+      expect(enabledInventory["web-search"]).toMatchObject({ status: "ready", installed: true });
+      expect(readFileSync(configPath, "utf8")).toContain("$TAVILY_API_KEY");
+      expect(readFileSync(configPath, "utf8")).not.toContain("synthetic-e2e-credential");
+      expect(JSON.stringify({ results, persisted })).not.toContain("synthetic-e2e-credential");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("persists only canonical package instructions and keeps code-economy enabled", async () => {
     const plan: PiRunnerReviewPlan = {
       ready: true,

@@ -87,7 +87,7 @@ import {
   type NormalizedDeckConfig,
   type PackageInstructionConfigurationMetadata,
 } from "@deck/core/config/deck-config";
-import { buildCapabilityInstructionBundle, getEnabledPackageInstructionIds, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
+import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds, getEnabledPackageInstructionIds, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
 import type {
   RunnerModelDiscoveryRequest,
   RunnerModelInventory,
@@ -151,6 +151,8 @@ import { getToggleablePackageInstructionIds } from "./runner-dashboard/selectors
 import { createDefaultRunnerDashboardState, createRunnerReviewPlanFailure, loadRunnerPackageInstructionsFromConfig, runnerRequiresExternalSupermemoryToken, type RunnerDashboardState, type RunnerOperationIdentity, type RunnerReviewPlan } from "./runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 import { getAdapter, createDefaultAdapterRegistry } from "../runner-adapters";
+import { getWebSearchProviderDescriptor } from "../web-search-provider";
+import { persistWebSearchCredentialAndEnable, type WebSearchSetupResult } from "../web-search-setup";
 import { HomeScreen } from "./screens/home-screen";
 import { DoctorScreen } from "./screens/doctor-screen";
 import { createOpenCodeDiscoveryCoordinator, getOpenCodeDiscoveryAction, type OpenCodeDiscoveryCoordinator } from "./opencode-discovery";
@@ -196,6 +198,7 @@ type Screen =
   | "no-providers"
   | "memory-provider-selection"
   | "supermemory-token"
+  | "web-search-credential"
   // Removed: userId/teamId/orgId screens — token-only config
   | "developer-team-review"
   | "developer-team-installing"
@@ -244,6 +247,7 @@ export async function runSerenaAdapterAction(
     operationId: context.operationId,
     serenaAuthorization: context.serenaAuthorization,
     serenaReadiness: context.serenaReadiness,
+    webSearchProvider: context.webSearchProvider,
     signal: context.signal,
     runnerCommand,
     dashboardState,
@@ -691,6 +695,14 @@ function getEnabledSupportedPackageInstructionIds(
     .map((entry) => entry.id);
 }
 
+function getEnabledSupportedCapabilityInstructionIds(
+  adapter: Pick<RunnerAdapter, "packageInstructionIds"> | null | undefined,
+  enabledIds: readonly string[],
+) {
+  const supported = getEnabledSupportedPackageInstructionIds(adapter, enabledIds);
+  return (enabledIds as readonly string[]).includes("web-search") ? [...supported, "web-search" as const] : supported;
+}
+
 function packageInstructionTogglesFromConfig(
   supportedMetadata: readonly PackageInstructionConfigurationMetadata[],
   configured: Readonly<Record<string, boolean>>,
@@ -806,6 +818,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [supermemoryError, setSupermemoryError] = useState<string | undefined>(undefined);
   const [memoryStatus, setMemoryStatus] = useState<string | undefined>(undefined);
   const [dashboardSupermemorySetupActive, setDashboardSupermemorySetupActive] = useState(false);
+  // The Tavily value is kept only while the masked entry screen is active.
+  // It is never copied into dashboard state, plans, config, diagnostics, or logs.
+  const [dashboardWebSearchCredentialEntryActive, setDashboardWebSearchCredentialEntryActive] = useState(false);
+  const [webSearchCredential, setWebSearchCredential] = useState("");
+  const [webSearchCredentialError, setWebSearchCredentialError] = useState<string | undefined>(undefined);
   const [dashboardCompletionStatus, setDashboardCompletionStatus] = useState<string | undefined>(undefined);
   const [dashboardState, setDashboardState] = useState<RunnerDashboardState>(() => createDefaultRunnerDashboardState());
   const [dashboardInventory, setDashboardInventory] = useState<CapabilityInventory | null>(null);
@@ -981,11 +998,13 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           selectedCapabilities: Object.fromEntries(
             Object.entries(state.selectedCapabilities).map(([capabilityId, selected]) => [capabilityId, selected === true]),
           ),
-          explicitlySelectedCapabilities: Object.fromEntries(
-            Object.entries(state.explicitlySelectedCapabilities).map(([capabilityId, selected]) => [capabilityId, selected === true]),
-          ),
-          operationId: state.operationId,
-          adaptiveMemory: state.adaptiveMemory,
+           explicitlySelectedCapabilities: Object.fromEntries(
+             Object.entries(state.explicitlySelectedCapabilities).map(([capabilityId, selected]) => [capabilityId, selected === true]),
+           ),
+           operationId: state.operationId,
+           webSearchProvider: state.webSearchProvider,
+           webSearchProviderDescriptor: state.webSearchProviderDescriptor,
+           adaptiveMemory: state.adaptiveMemory,
           packageInstructions: Object.fromEntries(
             Object.entries(state.packageInstructions).map(([packageId, enabled]) => [packageId, enabled === true]),
           ),
@@ -1031,8 +1050,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }, []);
 
   useInput((input, key) => {
-    try { appendFileSync("/tmp/deck-debug.txt", `useInput TOP: input="${input}" key=${JSON.stringify(key)} screen=${screen}\n`); } catch {}
+    try { appendFileSync("/tmp/deck-debug.txt", `useInput TOP: key=${JSON.stringify(key)} screen=${screen}\n`); } catch {}
     try {
+    if (screen === "web-search-credential") {
+      handleWebSearchCredentialInput(input, key);
+      return;
+    }
     if (screen === "pi-runner-dashboard") {
       handleDashboardInput(input, key);
       return;
@@ -1061,6 +1084,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
 
     if (key.escape) {
+      if (dashboardWebSearchCredentialEntryActive) {
+        clearDashboardWebSearchCredential();
+        setDashboardWebSearchCredentialEntryActive(false);
+        resetCursor("pi-runner-dashboard");
+        return;
+      }
       if (dashboardSupermemorySetupActive) {
         clearDashboardSupermemoryEphemeralState();
         setDashboardSupermemorySetupActive(false);
@@ -1280,11 +1309,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         },
         runnerAction: runSerenaAction,
         supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
-        memoryProvider: resolvedMemoryProvider,
-        resolvedMemoryProvider,
-        writeMcpConfig: async (options: { serverName: string; token?: string; type?: "local" | "remote"; command?: string[]; url?: string; headers?: Record<string, string> }, serenaContext?: RunnerSerenaActionContext) => {
+         memoryProvider: resolvedMemoryProvider,
+         resolvedMemoryProvider,
+         webSearchProvider: dashboardState.webSearchProviderDescriptor,
+         writeMcpConfig: async (options: { serverName: string; token?: string; type?: "local" | "remote"; command?: string[]; url?: string; headers?: Record<string, string>; webSearchProvider?: import("@deck/core").WebSearchProviderDescriptorV1 }, serenaContext?: RunnerSerenaActionContext) => {
           // For Pi runner, use the adapter's runAction for write-pi-mcp-config to write ALL MCP configs
-          if (dashboardState.runnerScope === "pi" && (options.serverName === "context-mode" || options.serverName === "codebase-memory-mcp" || options.serverName === "serena" || options.serverName === "context7" || options.serverName === "codebase-memory")) {
+           if (dashboardState.runnerScope === "pi" && (options.serverName === "context-mode" || options.serverName === "codebase-memory-mcp" || options.serverName === "serena" || options.serverName === "context7" || options.serverName === "codebase-memory" || options.serverName === options.webSearchProvider?.semanticServerId)) {
             const action = {
               id: `capability.${options.serverName}.mcp-config`,
               kind: "write-pi-mcp-config" as const,
@@ -1307,7 +1337,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
               currentOperation: serenaContext?.currentOperation,
               operationId: serenaContext?.operationId,
               serenaAuthorization: serenaContext?.serenaAuthorization,
-              serenaReadiness: serenaContext?.serenaReadiness,
+               serenaReadiness: serenaContext?.serenaReadiness,
+               webSearchProvider: options.webSearchProvider,
               signal: serenaContext?.signal ?? controller.signal,
               runnerCommand: dashboardState.runtime.runnerCommand,
               dashboardState,
@@ -1319,7 +1350,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             };
           }
           // Fall back to default behavior for OpenCode or supermemory
-          return adapter.writeMcpConfig?.(options) ?? { ok: false, path: "", diagnostics: ["No MCP config writer available"] };
+           return adapter.writeMcpConfig?.(options) ?? { ok: false, path: "", diagnostics: ["No MCP config writer available"] };
         },
         installPackages: async (runnerCommand: string | undefined, packages: Array<{ id: string; name: string; source: string }>, onResult: (result: RunnerPackageInstallResult) => void): Promise<RunnerPackageInstallResult[]> => {
           // For Pi runner, delegate to the adapter's existing action path; keep its behavior unchanged.
@@ -1434,9 +1465,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         installTeamBundle: async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments; capabilityIds?: readonly string[] }) => {
           // Build capability instructions through the active adapter's registered runner ID.
           const deckConfig = readDeckConfig(projectRoot);
-          const enabledIds = getEnabledPackageInstructionIds(deckConfig, adapter.runnerId);
+          const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, adapter.runnerId);
           const capabilityInstructions = buildCapabilityInstructionBundle(
-            getEnabledSupportedPackageInstructionIds(adapter, enabledIds),
+            getEnabledSupportedCapabilityInstructionIds(adapter, enabledIds),
           );
 
           const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
@@ -1705,7 +1736,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
       // Build capability instructions and standalone skills (only used by OpenCode, Pi ignores them)
       const deckConfig = readDeckConfig(projectRoot);
-      const enabledIds = getEnabledPackageInstructionIds(deckConfig, "opencode");
+      const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, "opencode");
       const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
       const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
 
@@ -1824,6 +1855,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         return true;
       }
       const dashboardCapabilityInventory = normalizedInventory.inventory;
+      const webSearchInventoryEntry = dashboardCapabilityInventory.capabilities.find((entry) => entry.capabilityId === "web-search");
+      const webSearchProviderDescriptor = webSearchInventoryEntry?.webSearchProvider
+        ?? getWebSearchProviderDescriptor(config.webSearch.provider);
+      const webSearchEvidence = webSearchInventoryEntry?.webSearchEvidence;
+      const webSearchReadiness = webSearchInventoryEntry?.webSearchReadiness;
       const projectInspection = isRunnerProjectInspection(inspection) ? inspection : undefined;
       const selectedTeamIds = new Set(adapter.ui?.dashboard?.defaultSelectedTeamIds ?? []);
       const teams = Object.fromEntries(adapter.getTeams(environmentId).map((team) => [team.id, {
@@ -1857,6 +1893,17 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         runnerScope: adapter.runnerId,
         runnerDisplayName: adapter.displayName,
         runnerUi: adapter.ui,
+         selectedCapabilities: { "web-search": config.webSearch.enabled },
+         webSearchProvider: config.webSearch.provider,
+         webSearchProviderDescriptor,
+         webSearch: {
+           provider: config.webSearch.provider,
+           credentialAvailable: webSearchEvidence?.credentialAvailable ?? false,
+           runnerSupported: webSearchEvidence?.runnerSupported ?? false,
+           mcpConfigured: webSearchEvidence?.mcpConfigured ?? false,
+           mcpConfigConflict: webSearchEvidence?.mcpConfigConflict ?? false,
+           readiness: webSearchReadiness?.state ?? "disabled",
+         },
         runtime: {
           runnerCommand: runtimes.find((runtime) => runtime.isAvailable)?.runtimeId ?? runtimes[0]?.runtimeId ?? adapter.runnerId,
           preflight: inspection,
@@ -2217,9 +2264,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         const environmentId = adapter.environmentIds[0];
         if (!environmentId) throw new Error(`Runner ${configurePackagesRunner} does not declare an environment.`);
 
-        const bundle = buildCapabilityInstructionBundle(
-          getConfiguredPackageInstructionIds(configurePackageMetadata, configurePackagesToggles),
-        );
+        const configuredInstructionIds = [
+          ...getConfiguredPackageInstructionIds(configurePackageMetadata, configurePackagesToggles),
+          ...(existingConfig.webSearch.enabled ? ["web-search" as const] : []),
+        ] as Parameters<typeof buildCapabilityInstructionBundle>[0];
+        const bundle = buildCapabilityInstructionBundle(configuredInstructionIds);
 
         // Generar y aplicar plan vía adapter (el adapter lee assignments internamente)
         const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
@@ -2557,6 +2606,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         return;
       }
       clearDashboardSupermemoryEphemeralState();
+      clearDashboardWebSearchCredential();
       exit();
       return;
     }
@@ -2569,6 +2619,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       }
       if (dashboardState.screen === "dashboard") {
         clearDashboardSupermemoryEphemeralState();
+        clearDashboardWebSearchCredential();
         resetCursor("environment-selection");
       } else {
         setDashboardState((current) => reduceRunnerDashboard(current, { type: "back" }, dashboardPlanBuilder));
@@ -2604,6 +2655,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }
 
   function toggleDashboardCurrent() {
+    if (dashboardState.screen === "web-search-detail") {
+      void continueDashboardCurrent();
+      return;
+    }
     const action = getDashboardToggleAction(dashboardState, dashboardCapabilityResolver);
     if (action) setDashboardState((current) => reduceRunnerDashboard(current, action, dashboardPlanBuilder));
   }
@@ -2640,6 +2695,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           clearDashboardSupermemoryEphemeralState();
         }
         safeDispatch(effect.action);
+        return;
+      case "open-web-search-credential":
+        clearDashboardWebSearchCredential();
+        setDashboardWebSearchCredentialEntryActive(true);
+        resetCursor("web-search-credential");
         return;
       case "select-supermemory-and-open-setup":
         safeDispatch(effect.action);
@@ -2721,6 +2781,65 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
   function isSupermemoryInputScreen(value: Screen): value is "supermemory-token" {
     return value === "supermemory-token";
+  }
+
+  function clearDashboardWebSearchCredential() {
+    setWebSearchCredential("");
+  }
+
+  function handleWebSearchCredentialInput(
+    input: string,
+    key: { return?: boolean; backspace?: boolean; delete?: boolean; escape?: boolean },
+  ) {
+    if (key.escape) {
+      clearDashboardWebSearchCredential();
+      setWebSearchCredentialError(undefined);
+      setDashboardWebSearchCredentialEntryActive(false);
+      resetCursor("pi-runner-dashboard");
+      return;
+    }
+    if (key.backspace || key.delete) {
+      setWebSearchCredential((current) => [...current].slice(0, -1).join(""));
+      return;
+    }
+    if (key.return) {
+      const result = persistWebSearchCredentialAndEnable({
+        credential: webSearchCredential,
+        projectRoot: localResolvedProjectRoot ?? process.cwd(),
+      });
+      clearDashboardWebSearchCredential();
+      if (!result.ok) {
+        setWebSearchCredentialError(webSearchCredentialSetupError(result));
+        return;
+      }
+
+      setWebSearchCredentialError(undefined);
+      setDashboardWebSearchCredentialEntryActive(false);
+      setDashboardState((current) => reduceRunnerDashboard({
+        ...current,
+        webSearchProvider: "tavily",
+        webSearchProviderDescriptor: getWebSearchProviderDescriptor("tavily"),
+        webSearch: {
+          ...current.webSearch,
+          provider: "tavily",
+          credentialAvailable: true,
+          readiness: current.webSearch.mcpConfigConflict ? "configured-but-not-materialized" : "configured-but-not-materialized",
+        },
+      }, {
+        type: "set-capability",
+        capabilityId: "web-search",
+        selected: true,
+      }, dashboardPlanBuilder));
+      resetCursor("pi-runner-dashboard");
+      return;
+    }
+
+    if (input.length > 0 && !/[\u0000-\u001f\u007f-\u009f]/u.test(input)) {
+      setWebSearchCredential((current) => {
+        const next = `${current}${input}`;
+        return Buffer.byteLength(next, "utf8") <= 4096 ? next : current;
+      });
+    }
   }
 
   function supermemoryFieldForScreen(value: Screen): keyof SupermemorySetupValues | undefined {
@@ -2986,7 +3105,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
 
     const deckConfig = readDeckConfig(projectRoot);
-    const enabledIds = getEnabledPackageInstructionIds(deckConfig, modelConfigRuntime);
+    const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, modelConfigRuntime);
     const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
     const standaloneSkills = modelConfigRuntime === "opencode"
       ? getStandaloneSkills().map((skill: { skillId: string }) => ({ skillId: skill.skillId, body: getStandaloneSkillBody(skill.skillId)! }))
@@ -3391,6 +3510,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       {isSupermemoryInputScreen(screen) ? (
         <SupermemorySetupScreen screen={screen} values={supermemorySetup} error={supermemoryError} runtime={dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope} />
       ) : null}
+      {screen === "web-search-credential" ? (
+        <WebSearchCredentialScreen value={webSearchCredential} error={webSearchCredentialError} />
+      ) : null}
       {screen === "developer-team-review" ? (
         // Use require: true for backward compatibility - prop expects string
         <DeveloperTeamReviewScreen projectRoot={projectRootFor({ require: true })!} cursor={developerTeamCursor} dashboardContext={dashboardDeveloperTeamContext()} />
@@ -3446,6 +3568,7 @@ function screenTitle(screen: Screen, runnerLabel?: string): string {
     "memory-provider-selection": "Adaptive memory provider",
     // Removed: userId/teamId/orgId screens — token-only config
     "supermemory-token": "Supermemory MCP token",
+    "web-search-credential": "Tavily credential",
     "developer-team-review": "Developer Team",
     "developer-team-installing": "Installing Developer Team",
     "opencode-preflight-checking": "Checking OpenCode environment",
@@ -3871,4 +3994,38 @@ export function CompleteScreen({ results, developerTeamResults, status }: { resu
       </Box>
     </Box>
   );
+}
+
+/** Masked, ephemeral Tavily entry screen. It never renders the entered value. */
+export function WebSearchCredentialScreen({ value, error }: { value: string; error?: string }) {
+  const mask = value.length > 0 ? "•".repeat(Math.min([...value].length, 64)) : "…";
+  return (
+    <Box flexDirection="column">
+      <Text bold>Tavily credential</Text>
+      <Text dimColor>Enter TAVILY_API_KEY. With your explicit choice, Deck writes it as plaintext only to the active .bashrc or .zshrc profile.</Text>
+      <Text dimColor>The value is masked here and never stored in Deck config, MCP config, review plans, logs, or diagnostics.</Text>
+      <Box marginTop={1}>
+        <Text>Credential: {mask}</Text>
+      </Box>
+      {error ? <Text color="red">{error}</Text> : null}
+      <Box marginTop={1}>
+        <Text dimColor>Press Enter to save and enable Web Search. Escape cancels without writing.</Text>
+      </Box>
+    </Box>
+  );
+}
+
+/** Render a redacted, actionable result for the masked credential screen. */
+export function webSearchCredentialSetupError(result: WebSearchSetupResult): string {
+  if (result.profileStatus === "manual-cleanup-required") {
+    const message = result.message ?? "Credential may remain because safe profile rollback could not be confirmed.";
+    const guidance = result.guidance
+      ?? "Inspect the reported profile path and, if necessary, remove only the exact Deck-owned Web Search block before retrying.";
+    const path = result.profilePath ? ` Profile: ${result.profilePath}.` : "";
+    return `${message} ${guidance}${path}`;
+  }
+  if (result.diagnosticCodes.includes("deck-config-write-failed")) {
+    return "Credential was not enabled because Deck configuration could not be saved. Retry after resolving the project configuration.";
+  }
+  return "Credential could not be saved to the active shell profile. Check the selected shell and profile ownership, then retry.";
 }

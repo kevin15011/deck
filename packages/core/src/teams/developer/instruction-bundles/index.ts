@@ -16,6 +16,8 @@ import { buildCodeEconomyInstructionBundle } from "./code-economy";
 import { buildContextModeInstructionBundle } from "./context-mode";
 import { buildRtkInstructionBundle } from "./rtk";
 import { buildSerenaInstructionBundle, getSerenaToolPolicy } from "./serena";
+import { buildWebSearchInstructionBundle } from "./web-search";
+export { buildWebSearchInstructionBundle } from "./web-search";
 import type { NormalizedDeckConfig } from "../../../config/deck-config";
 import type { PackageInstructionRunnerId, PackageInstructionPackageId } from "../../../config/deck-config";
 
@@ -25,7 +27,7 @@ import type { PackageInstructionRunnerId, PackageInstructionPackageId } from "..
 
 export type CapabilityInstructionSurface = "session" | "agent" | "skill";
 
-export type CapabilityInstructionPackageId = "adaptive-memory" | "codebase-memory" | "code-economy" | "context-mode" | "rtk" | "serena";
+export type CapabilityInstructionPackageId = "adaptive-memory" | "codebase-memory" | "code-economy" | "context-mode" | "rtk" | "serena" | "web-search";
 
 export type CapabilityInstructionFragment = {
   packageId: CapabilityInstructionPackageId;
@@ -45,6 +47,8 @@ export type CapabilityInstructionCompositionContext = {
   teamId?: string;
   agentId?: string;
   skillId?: string;
+  /** Optional compatibility aliases for historical runner skill identifiers. */
+  skillIds?: readonly string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -124,6 +128,7 @@ const PACKAGE_BUILDERS: Record<CapabilityInstructionPackageId, () => CapabilityI
   rtk: buildRtkInstructionBundle,
   "adaptive-memory": buildAdaptiveMemoryInstructionBundle,
   serena: buildSerenaInstructionBundle,
+  "web-search": buildWebSearchInstructionBundle,
 };
 
 // Canonical package order — used for deterministic bundle ordering
@@ -134,6 +139,7 @@ const PACKAGE_ORDER: CapabilityInstructionPackageId[] = [
   "rtk",
   "adaptive-memory",
   "serena",
+  "web-search",
 ];
 
 // ---------------------------------------------------------------------------
@@ -153,10 +159,25 @@ export function getEnabledPackageInstructionIds(
 
   const enabled: CapabilityInstructionPackageId[] = [];
   for (const pkg of PACKAGE_ORDER) {
+    if (pkg === "web-search") continue;
     if (runnerConfig[pkg] === true) {
       enabled.push(pkg);
     }
   }
+  return enabled;
+}
+
+/**
+ * Resolve all configured instruction IDs, including the capability-scoped Web
+ * Search contract. Web Search is controlled by `webSearch.enabled`, not by the
+ * legacy package toggle map, so old configuration shapes remain unchanged.
+ */
+export function getEnabledCapabilityInstructionIds(
+  config: NormalizedDeckConfig,
+  runner: PackageInstructionRunnerId,
+): CapabilityInstructionPackageId[] {
+  const enabled = getEnabledPackageInstructionIds(config, runner);
+  if (config.webSearch.enabled) enabled.push("web-search");
   return enabled;
 }
 
@@ -218,8 +239,8 @@ export function composeCapabilityInstructions(
     // Surface must match
     if (fragment.surface !== context.surface) return false;
 
-    // Team filter — only apply when context.teamId is defined
-    if (fragment.teamId !== undefined && context.teamId !== undefined && fragment.teamId !== context.teamId) return false;
+    // Team filter — team-scoped fragments require an explicit matching team context.
+    if (fragment.teamId !== undefined && fragment.teamId !== context.teamId) return false;
 
     // Agent filter
     if (fragment.agentIds !== undefined && fragment.agentIds.length > 0) {
@@ -230,7 +251,9 @@ export function composeCapabilityInstructions(
 
     // Skill filter
     if (fragment.skillIds !== undefined && fragment.skillIds.length > 0) {
-      if (context.skillId === undefined || !fragment.skillIds.includes(context.skillId)) {
+      const contextSkillIds = [context.skillId, ...(context.skillIds ?? [])]
+        .filter((skillId): skillId is string => typeof skillId === "string" && skillId.length > 0);
+      if (contextSkillIds.length === 0 || !contextSkillIds.some((skillId) => fragment.skillIds!.includes(skillId))) {
         return false;
       }
     }

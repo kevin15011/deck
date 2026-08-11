@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { buildOpenCodeRunnerReviewPlan } from "./capability-plan";
 import type { OpenCodeRunnerCapabilityInventory } from "./capability-inventory";
+import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
 
 const operation = {
   runner: "opencode" as const,
@@ -124,5 +125,69 @@ describe("buildOpenCodeRunnerReviewPlan Serena authorization", () => {
 
     expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({ capabilityId: "context7" }));
     expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({ capabilityId: "serena" }));
+  });
+});
+
+describe("buildOpenCodeRunnerReviewPlan Web Search materialization", () => {
+  test("plans native MCP configuration for an enabled but incomplete capability", () => {
+    const plan = buildOpenCodeRunnerReviewPlan(
+      { runnerScope: "opencode", selectedCapabilities: { "web-search": true }, webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR },
+      {
+        "web-search": {
+          capabilityId: "web-search",
+          status: "enabled-unconfigured",
+          runnerScope: "opencode",
+          installed: false,
+          source: "tavily-mcp",
+          webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
+          diagnostics: ["credential-missing"],
+        },
+      },
+    );
+
+    expect(plan.groups.configWrites).toContainEqual(expect.objectContaining({
+      id: "capability.web-search.mcp-config",
+      kind: "write-mcp-config",
+      capabilityId: "web-search",
+    }));
+  });
+
+  test("plans Web Search materialization when enabled selection replaces disabled inventory", () => {
+    const plan = buildOpenCodeRunnerReviewPlan(
+      { runnerScope: "opencode", selectedCapabilities: { "web-search": true }, webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR },
+      {
+        "web-search": {
+          capabilityId: "web-search",
+          status: "disabled",
+          runnerScope: "opencode",
+          installed: false,
+          diagnostics: ["Web Search is disabled; no provider or runner setup is required."],
+        },
+      },
+    );
+
+    expect(plan.groups.configWrites.map((action) => action.id)).toEqual([
+      "capability.web-search.deck-config",
+      "capability.web-search.mcp-config",
+    ]);
+    expect(plan.groups.configWrites.every((action) => action.status === "ready")).toBe(true);
+  });
+
+  test("does not schedule Web Search MCP writes without a selected supported provider", () => {
+    const plan = buildOpenCodeRunnerReviewPlan(
+      { runnerScope: "opencode", selectedCapabilities: { "web-search": true } },
+      {
+        "web-search": {
+          capabilityId: "web-search",
+          status: "enabled-unconfigured",
+          runnerScope: "opencode",
+          installed: false,
+          diagnostics: ["provider-unconfigured"],
+        },
+      },
+    );
+
+    expect(plan.groups.configWrites.some((action) => action.capabilityId === "web-search")).toBe(false);
+    expect(plan.diagnostics).toContainEqual(expect.objectContaining({ code: "WEB_SEARCH_PROVIDER_UNAVAILABLE" }));
   });
 });

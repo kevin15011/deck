@@ -2,11 +2,16 @@
  * User-facing capability IDs for the OpenCode runner dashboard.
  * These map to canonical capability IDs in the Core registry.
  */
-export type OpenCodeCapabilityId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "opencode-mermaid" | "serena";
+export type OpenCodeCapabilityId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "opencode-mermaid" | "serena" | "web-search";
+
+import {
+  TAVILY_IMPLEMENTATION_ID,
+  TAVILY_MCP_SERVER_ID,
+} from "@deck/provider-tavily";
 
 export type OpenCodeRunnerScope = "opencode" | "all";
 
-export type OpenCodeCapabilityStatus = "ready" | "missing" | "manual" | "pending" | "blocked";
+export type OpenCodeCapabilityStatus = "ready" | "missing" | "manual" | "pending" | "blocked" | "disabled" | "unsupported" | "enabled-unconfigured" | "configured-but-not-materialized";
 
 export type OpenCodeCapabilityInstallKind =
   | "opencode-plugin" // OpenCode plugin (in-process) added to plugin array in opencode.json
@@ -31,8 +36,9 @@ export type CanonicalCapabilityId =
   | "serena"
   | "supermemory-tool-bindings"
   | "pi-orchestrator-prompt-persistence"
-  | "opencode-primary-orchestrator"
-  | "deck-setup";
+   | "opencode-primary-orchestrator"
+   | "deck-setup"
+   | "web-search";
 
 export type OpenCodeCapabilityToolMapping = {
   capabilityId: OpenCodeCapabilityId;
@@ -51,6 +57,7 @@ export type OpenCodeCapabilityToolMapping = {
     mcpServerNames?: string[];
     note?: string;
   };
+  implementationId?: string;
   /** When true, this capability is internal and must not appear in user-facing selectors. */
   isInternal?: boolean;
 };
@@ -120,6 +127,19 @@ const FULL_OPENCODE_CAPABILITY_CATALOG: Record<OpenCodeCapabilityId, OpenCodeCap
     installKind: "mcp-server",
     detector: { mcpServerNames: ["context7"] },
   },
+  "web-search": {
+    capabilityId: "web-search",
+    canonicalCapabilityId: "web-search",
+    label: "Web Search",
+    description: "Optional compact web search and point extraction through native MCP configuration.",
+    runnerScope: "all",
+    requirementLevel: "configurable",
+    toolId: "web-search",
+    source: TAVILY_IMPLEMENTATION_ID,
+    implementationId: TAVILY_IMPLEMENTATION_ID,
+    installKind: "mcp-server",
+    detector: { commands: ["npx"], mcpServerNames: [TAVILY_MCP_SERVER_ID] },
+  },
   "opencode-mermaid": {
     capabilityId: "opencode-mermaid",
     canonicalCapabilityId: "opencode-mermaid",
@@ -149,6 +169,7 @@ export const OPENCODE_RUNNER_CAPABILITY_CATALOG: Record<
   rtk: FULL_OPENCODE_CAPABILITY_CATALOG.rtk as OpenCodeCapabilityToolMapping,
   serena: FULL_OPENCODE_CAPABILITY_CATALOG.serena as OpenCodeCapabilityToolMapping,
   context7: FULL_OPENCODE_CAPABILITY_CATALOG.context7 as OpenCodeCapabilityToolMapping,
+  "web-search": FULL_OPENCODE_CAPABILITY_CATALOG["web-search"] as OpenCodeCapabilityToolMapping,
 } as const satisfies Record<Exclude<OpenCodeCapabilityId, "opencode-mermaid">, OpenCodeCapabilityToolMapping>;
 
 export const OPENCODE_RUNNER_CAPABILITY_IDS = Object.keys(OPENCODE_RUNNER_CAPABILITY_CATALOG) as Exclude<OpenCodeCapabilityId, "opencode-mermaid">[];
@@ -250,6 +271,7 @@ export const OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityCon
     { capabilityId: "rtk", runnerId: "opencode", status: "shared", adapterSource: "rtk", installKind: "shared-binary", provisionMode: "shared-binary", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall"] },
     { capabilityId: "serena", runnerId: "opencode", status: "supported", adapterSource: "serena", installKind: "python-tool", provisionMode: "python-tool", detectors: { commands: ["serena"], mcpServerNames: ["serena"] }, parityChecks: ["binary-usable", "mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "context7", runnerId: "opencode", status: "supported", adapterSource: "@upstash/context7-mcp", installKind: "mcp-server", provisionMode: "mcp-server", detectors: { mcpServerNames: ["context7"] }, parityChecks: ["mcp-config-present"] },
+    { capabilityId: "web-search", runnerId: "opencode", status: "supported", adapterSource: "@deck/provider-tavily", installKind: "native-mcp", provisionMode: "native-mcp", implementationId: TAVILY_IMPLEMENTATION_ID, detectors: { mcpServerNames: [TAVILY_MCP_SERVER_ID] }, parityChecks: ["mcp-config-present", "instruction-bundle-present"] },
     { capabilityId: "supermemory-tool-bindings", runnerId: "opencode", status: "supported", adapterSource: "supermemory", installKind: "mcp-server", provisionMode: "mcp-server", detectors: { mcpServerNames: ["supermemory"] }, parityChecks: ["mcp-config-present"] },
     { capabilityId: "opencode-primary-orchestrator", runnerId: "opencode", status: "supported", adapterSource: "opencode-primary-orchestrator", installKind: "opencode-plugin", provisionMode: "opencode-plugin" },
     { capabilityId: "opencode-mermaid", runnerId: "opencode", status: "runner-specific", adapterSource: "opencode-mermaid-renderer", installKind: "internal-required", provisionMode: "internal-required" },

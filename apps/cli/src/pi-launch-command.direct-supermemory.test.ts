@@ -109,7 +109,7 @@ describe("runPiLaunch direct Supermemory dashboard config", () => {
       if (result.status === "ready") {
         const diagnosticText = JSON.stringify(result.memoryDiagnostics);
         expect(diagnosticText).toContain("memory_provider_unavailable");
-        expect(diagnosticText).toContain("Deck config may not store Supermemory credentials.");
+        expect(diagnosticText).toContain("Deck config may not store credentials or secret-shaped fields.");
         expect(diagnosticText).not.toContain(SENTINEL_TOKEN);
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
         expect(systemPrompt).not.toContain("Supermemory MCP Adaptive Memory");

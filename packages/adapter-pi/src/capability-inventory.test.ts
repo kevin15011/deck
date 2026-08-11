@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { buildPiRunnerCapabilityInventory } from "./capability-inventory";
 import type { PiRequiredToolsReview } from "./required-tools";
 import { createToolStatus } from "./tool-status";
+import { resolveWebSearchReadiness } from "@deck/core";
 
 function makeReview(installedPackages: string[] = []): PiRequiredToolsReview {
   const names = ["sub-agents", "MCP packages", "context-mode", "codebase-memory", "RTK", "Context7", "Engram memory"];
@@ -44,6 +45,24 @@ describe("buildPiRunnerCapabilityInventory — user-facing capabilities", () => 
     expect(piInventory["pi-hud"]?.status).toBe("pending-source");
     expect(piInventory["pi-hud"]?.installed).toBe(false);
     expect(opencodeInventory["pi-hud"]).toBeUndefined();
+  });
+
+  test("projects Web Search readiness without provider values", () => {
+    const evidence = {
+      enabled: true,
+      runnerSupported: true,
+      providerConfigured: true,
+      credentialAvailable: true,
+      executableAvailable: true,
+      mcpConfigured: true,
+    } as const;
+    const readiness = resolveWebSearchReadiness(evidence);
+    const inventory = buildPiRunnerCapabilityInventory(makeReview(), undefined, {
+      webSearch: { readiness, evidence },
+    });
+
+    expect(inventory["web-search"]).toMatchObject({ installed: true, status: "ready" });
+    expect(inventory["web-search"]?.webSearchReadiness).toMatchObject({ state: "ready" });
   });
 });
 

@@ -3,6 +3,7 @@ import {
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   normalizeSupportedPackageInstructionSelection,
   type PackageInstructionPackageId,
+  type WebSearchProviderDescriptorV1,
 } from "@deck/core";
 
 /**
@@ -17,6 +18,7 @@ export type RunnerDashboardScreen =
   | "dashboard"
   | "packages-detail"
   | "adaptive-memory-detail"
+  | "web-search-detail"
   | "teams-detail"
   | "developer-team-detail"
   | "review-plan"
@@ -27,6 +29,7 @@ export const RUNNER_DASHBOARD_SCREENS: RunnerDashboardScreen[] = [
   "dashboard",
   "packages-detail",
   "adaptive-memory-detail",
+  "web-search-detail",
   "teams-detail",
   "developer-team-detail",
   "review-plan",
@@ -46,6 +49,16 @@ export type SupermemorySetupValues = {
 export type SupermemorySetupState = SupermemorySetupValues & {
   configured: boolean;
   diagnostics: string[];
+};
+
+/** Non-secret Web Search facts projected from adapter inventory for the dashboard. */
+export type WebSearchDashboardState = {
+  provider?: string;
+  credentialAvailable: boolean;
+  runnerSupported: boolean;
+  mcpConfigured: boolean;
+  mcpConfigConflict: boolean;
+  readiness: import("@deck/core").WebSearchReadinessState;
 };
 
 export type RunnerTeamState = {
@@ -136,6 +149,12 @@ export type RunnerDashboardState = {
   explicitlySelectedCapabilities: Partial<Record<CapabilityId, boolean>>;
   operationId?: string;
   currentOperation?: RunnerOperationIdentity;
+  /** Opaque provider selection persisted with the dashboard state. */
+  webSearchProvider?: string;
+  /** Runtime-only descriptor selected by CLI composition. */
+  webSearchProviderDescriptor?: WebSearchProviderDescriptorV1;
+  /** Presentation/readiness facts only; credentials never enter dashboard state. */
+  webSearch: WebSearchDashboardState;
   capabilityStatuses: Partial<Record<CapabilityId, CapabilityStatus>>;
   adaptiveMemory: {
     provider: AdaptiveMemoryProviderChoice;
@@ -251,7 +270,7 @@ export const DEFAULT_RUNNER_REVIEW_PLAN: RunnerReviewPlan = {
 /**
  * Default state for the runner dashboard.
  *
- * Dashboard sections: Packages, Adaptive Memory, Teams, Review & Install.
+ * Dashboard sections: Packages, Adaptive Memory, Web Search, Teams, Review & Install.
  */
 export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   screen: "dashboard",
@@ -270,6 +289,13 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
   explicitlySelectedCapabilities: {},
   operationId: undefined,
   currentOperation: undefined,
+  webSearch: {
+    credentialAvailable: false,
+    runnerSupported: false,
+    mcpConfigured: false,
+    mcpConfigConflict: false,
+    readiness: "disabled",
+  },
   capabilityStatuses: {},
   adaptiveMemory: {
     provider: "none",
@@ -305,6 +331,10 @@ export function createDefaultRunnerDashboardState(
     },
     operationId: overrides.operationId,
     currentOperation: overrides.currentOperation,
+    webSearch: {
+      ...DEFAULT_RUNNER_DASHBOARD_STATE.webSearch,
+      ...overrides.webSearch,
+    },
     capabilityStatuses: {
       ...DEFAULT_RUNNER_DASHBOARD_STATE.capabilityStatuses,
       ...overrides.capabilityStatuses,

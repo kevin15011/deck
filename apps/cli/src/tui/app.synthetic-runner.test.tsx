@@ -279,7 +279,7 @@ describe("DeckApp synthetic runner production flow", () => {
       await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r");
       await waitForOutput(instance, harness.output, "Atlas Runner Setup Dashboard");
-      for (let index = 0; index < 3; index++) {
+       for (let index = 0; index < 4; index++) {
         harness.input("j");
         await instance.waitUntilRenderFlush();
       }
@@ -364,7 +364,7 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(planBuildCalls).toBe(0);
       expect(applyCalls).toBe(0);
 
-      for (let index = 0; index < 3; index++) {
+       for (let index = 0; index < 4; index++) {
         harness.input("j");
         await instance.waitUntilRenderFlush();
       }
@@ -380,7 +380,7 @@ describe("DeckApp synthetic runner production flow", () => {
       const dashboardBoundary = harness.output().length;
       harness.input("\u001b");
       await waitForFreshOutput(instance, harness.output, dashboardBoundary, "Atlas Runner Setup Dashboard");
-      for (let index = 0; index < 3; index++) {
+       for (let index = 0; index < 4; index++) {
         harness.input("j");
         await instance.waitUntilRenderFlush();
       }
@@ -476,7 +476,7 @@ describe("DeckApp synthetic runner production flow", () => {
       await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r");
       await waitForOutput(instance, harness.output, "Atlas Runner Setup Dashboard");
-      for (let index = 0; index < 3; index++) {
+       for (let index = 0; index < 4; index++) {
         harness.input("j");
         await instance.waitUntilRenderFlush();
       }
@@ -493,12 +493,12 @@ describe("DeckApp synthetic runner production flow", () => {
       const dashboardBoundary = harness.output().length;
       harness.input("\u001b");
       await waitForFreshOutput(instance, harness.output, dashboardBoundary, "Atlas Runner Setup Dashboard");
-      for (let index = 0; index < 3; index++) {
+      for (let index = 0; index < 4; index++) {
         harness.input("j");
         await instance.waitUntilRenderFlush();
       }
-      const retryBoundary = harness.output().length;
-      harness.input("\r");
+       const retryBoundary = harness.output().length;
+       harness.input("\r");
       await waitForFreshOutput(instance, harness.output, retryBoundary, "Run install");
       expect(planBuildCalls).toBe(2);
       expect(applyCalls).toBe(0);

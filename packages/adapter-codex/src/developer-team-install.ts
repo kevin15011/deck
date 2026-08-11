@@ -10,6 +10,7 @@ import {
   type DeveloperTeamModelAssignments,
   type DeveloperTeamThinkingAssignments,
   type RunnerDiagnostic,
+  type WebSearchProviderDescriptorV1,
   parseSkillDescriptor,
 } from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
@@ -38,6 +39,11 @@ export type BuildCodexInstallPlanInput = {
   serenaLauncherAvailable?: boolean;
   /** The effective `deck` executable has confirmed portable Serena proxy support. */
   serenaProxyAvailable?: boolean;
+  webSearchProviderSupported?: boolean;
+  webSearchProviderConfigured?: boolean;
+  webSearchProvider?: WebSearchProviderDescriptorV1;
+  webSearchCredentialAvailable?: boolean;
+  webSearchExecutableAvailable?: boolean;
   confirmedModels?: readonly string[];
   confirmedReasoningByModel?: Readonly<Record<string, readonly string[]>>;
 };
@@ -270,6 +276,11 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         memoryProvider: input.memoryProvider ?? "none",
         serenaLauncherAvailable: input.serenaLauncherAvailable,
         serenaProxyAvailable: input.serenaProxyAvailable,
+        webSearchProviderSupported: input.webSearchProviderSupported,
+        webSearchProviderConfigured: input.webSearchProviderConfigured,
+        webSearchProvider: input.webSearchProvider,
+        webSearchCredentialAvailable: input.webSearchCredentialAvailable,
+        webSearchExecutableAvailable: input.webSearchExecutableAvailable,
       });
       for (const gap of desiredMcp.gaps) {
         if (gap === "serena-launcher-not-ready") {
@@ -285,7 +296,16 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
             code: gap,
             severity: "error",
             message: "Serena is selected but the effective `deck` command cannot serve the portable proxy. Update Deck on PATH, then rerun the full Codex install.",
-          });
+            });
+        } else if (gap === "web-search-provider-unsupported") {
+          blocked = true;
+          diagnostics.push({ code: gap, severity: "error", message: "Web Search is enabled with an unsupported provider selection; no Codex MCP entry was written." });
+        } else if (gap === "web-search-provider-unconfigured") {
+          diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but no provider is configured; configure a supported provider before materializing Codex MCP." });
+        } else if (gap === "web-search-credential-missing") {
+          diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but its process credential is unavailable; no credential was persisted." });
+        } else if (gap === "web-search-executable-missing") {
+          diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but its configured MCP executable prerequisite is unavailable." });
         } else {
           diagnostics.push({ code: gap, severity: "warning", message: "Engram has no verified Codex provider contract and remains deferred." });
         }

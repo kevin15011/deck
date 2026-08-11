@@ -9,7 +9,7 @@ import { OPENCODE_INSTALLABLE_TOOLS } from "./installation-plan";
 import type { OpenCodeRunnerCapabilityInventory } from "./capability-inventory";
 import type { OpenCodeToolsReview } from "./required-tools";
 import type { CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
-import type { SerenaOperationIdentity } from "@deck/core";
+import { isWebSearchProviderDescriptor, type SerenaOperationIdentity, type WebSearchProviderDescriptorV1 } from "@deck/core";
 import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
 import { appendFileSync } from "node:fs";
 import { resolveRunnerParity, type ParityReport, type ParityRuntimeHints } from "@deck/core";
@@ -75,6 +75,8 @@ export type BuildOpenCodeRunnerReviewPlanState = {
   runtime?: { toolsReview?: OpenCodeToolsReview };
   /** Package instruction toggles per runner scope. */
   packageInstructions?: Partial<Record<string, CapabilityInstructionBundle>>;
+  /** Reviewed provider descriptor selected by the CLI composition root. */
+  webSearchProvider?: WebSearchProviderDescriptorV1;
 };
 
 export function buildOpenCodeRunnerReviewPlan(
@@ -145,12 +147,57 @@ function addCapabilityActions(
   inventory: OpenCodeRunnerCapabilityInventory,
 ): void {
   const selectedCapabilities = state.selectedCapabilities ?? {};
+  if (selectedCapabilities["web-search"] === false) {
+    groups.configWrites.push({
+      id: "capability.web-search.deck-config",
+      kind: "write-deck-config",
+      title: "Persist Web Search selection",
+      description: "Persist the current Web Search enabled/provider selection.",
+      capabilityId: "web-search",
+      status: "ready",
+      required: false,
+    });
+  }
 
   for (const [capabilityId, selected] of Object.entries(selectedCapabilities) as [OpenCodeCapabilityId, boolean][]) {
     if (!selected) continue;
     const entry = inventory[capabilityId];
     const capability = getUserFacingOpenCodeCapability(capabilityId);
     if (!capability) continue;
+
+    if (capabilityId === "web-search") {
+      if (!entry || entry.status === "ready" || entry.status === "unsupported") continue;
+      if (!isWebSearchProviderDescriptor(state.webSearchProvider)) {
+        diagnostics.push({
+          code: "WEB_SEARCH_PROVIDER_UNAVAILABLE",
+          severity: "warning",
+          capabilityId,
+          message: "Web Search provider selection is unavailable; no MCP write was scheduled.",
+        });
+        continue;
+      }
+      groups.configWrites.push({
+        id: "capability.web-search.deck-config",
+        kind: "write-deck-config",
+        title: "Persist Web Search selection",
+        description: "Persist the current Web Search enabled/provider selection before native MCP materialization.",
+        capabilityId,
+        status: "ready",
+        required: false,
+      });
+      groups.configWrites.push({
+        id: "capability.web-search.mcp-config",
+        kind: "write-mcp-config",
+        title: "Configure Web Search MCP",
+        description: "Writes the reviewed provider MCP command while leaving the credential process-provided.",
+        capabilityId,
+        toolId: capability.toolId,
+        source: capability.source,
+        status: entry.webSearchReadiness?.code === "mcp-config-conflict" ? "blocked" : "ready",
+        diagnostics: entry.diagnostics,
+      });
+      continue;
+    }
 
     // Serena is the only capability with a current-operation authorization
     // gate.  Defaults, inventory, and persisted package instructions do not
@@ -578,6 +625,7 @@ function getUnresolvedTeamCapabilities(inventory: OpenCodeRunnerCapabilityInvent
 function buildRuntimeHintsFromInventory(inventory: OpenCodeRunnerCapabilityInventory): ParityRuntimeHints | undefined {
   const binaries: string[] = [];
   const mcpServers: string[] = [];
+  const webSearch = inventory["web-search"]?.webSearchEvidence;
 
   for (const [capabilityId, entry] of Object.entries(inventory)) {
     if (entry.status === "ready") {
@@ -592,7 +640,7 @@ function buildRuntimeHintsFromInventory(inventory: OpenCodeRunnerCapabilityInven
   }
 
   // Return undefined if no binaries are available (no point resolving parity)
-  if (binaries.length === 0 && mcpServers.length === 0) {
+  if (binaries.length === 0 && mcpServers.length === 0 && !webSearch) {
     return undefined;
   }
 
@@ -600,5 +648,6 @@ function buildRuntimeHintsFromInventory(inventory: OpenCodeRunnerCapabilityInven
     binariesInPath: binaries.length > 0 ? binaries : undefined,
     mcpServersConfigured: mcpServers.length > 0 ? mcpServers : undefined,
     projectIndexVerified: true, // OpenCode always has verified index
+    ...(webSearch ? { webSearch } : {}),
   };
 }

@@ -13,6 +13,8 @@ import { createNodeCodexFileEffects } from "./node-effects";
 import { CURRENT_CODEX_MODELS_FIXTURE } from "./__fixtures__/codex/models";
 import { parseCodexModels } from "./codex-model-discovery";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
+import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
+import { writeDeckConfig } from "@deck/core";
 
 setDefaultTimeout(30_000);
 
@@ -235,6 +237,82 @@ describe("Codex RunnerAdapter production composition", () => {
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("plans, applies, and re-inspects an ordinary missing Web Search MCP entry without treating it as a collision", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-web-search-project-"));
+    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-web-search-journal-"));
+    const executableRoot = await mkdtemp(join(tmpdir(), "deck-codex-web-search-bin-"));
+    const previousCredential = process.env.TAVILY_API_KEY;
+    const previousPath = process.env.PATH;
+    process.env.TAVILY_API_KEY = "codex-web-search-test-secret";
+    await writeFile(join(executableRoot, "npx"), "#!/bin/sh\nexit 0\n", "utf8");
+    await chmod(join(executableRoot, "npx"), 0o755);
+    process.env.PATH = `${executableRoot}${previousPath ? `:${previousPath}` : ""}`;
+    try {
+      writeDeckConfig(projectRoot, { webSearch: { enabled: true, provider: "tavily" } });
+      const adapter = createCodexRunnerAdapter({
+        journalRoot,
+        webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
+        preflight: {
+          probe: async () => ({ found: true, version: "0.146.0", help: "Usage: codex\nexec\nresume", execHelp: "Usage: codex exec", resumeHelp: "Usage: codex resume [SESSION_ID]" }),
+          inspectTrust: async () => "trusted",
+          readProject: async (root) => ({
+            config: await readFile(join(root, ".codex", "config.toml"), "utf8").catch(() => null),
+            roles: [],
+            skills: [],
+            agentsInstructions: false,
+          }),
+        },
+        serenaReadinessResolver: async () => ({ state: "missing", diagnostic: { code: "missing", message: "Serena is not selected for this test." } }),
+      });
+
+      const before = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
+      expect(before.capabilities).toContainEqual(expect.objectContaining({
+        capabilityId: "web-search",
+        isInstalled: false,
+        isBlocked: false,
+        webSearchReadiness: expect.objectContaining({ code: "mcp-not-materialized" }),
+      }));
+
+      const review = adapter.buildReviewPlan({
+        runnerId: "codex",
+        environmentId: "codex-development",
+        selectedCapabilities: { "web-search": true },
+        webSearchProviderDescriptor: TAVILY_PROVIDER_DESCRIPTOR,
+        packageInstructions: {},
+        adaptiveMemory: { provider: "none" },
+      }, before);
+      expect(review.groups.configWrites).toContainEqual(expect.objectContaining({ capabilityId: "web-search", id: "codex-config:web-search" }));
+      expect(review.groups.manualSteps).not.toContainEqual(expect.objectContaining({ capabilityId: "web-search", status: "blocked" }));
+
+      const plan = adapter.buildDeveloperTeamInstallPlan({
+        projectRoot,
+        environmentId: "codex-development",
+        capabilityIds: ["web-search"],
+      });
+      expect(plan.blocked).toBe(false);
+      expect(plan.files).toContainEqual(expect.objectContaining({ path: ".codex/config.toml" }));
+
+      await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
+      expect(await adapter.verifyDeveloperTeamInstall(plan)).toMatchObject({ valid: true });
+
+      const after = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
+      expect(after.capabilities).toContainEqual(expect.objectContaining({
+        capabilityId: "web-search",
+        isInstalled: true,
+        isBlocked: false,
+        webSearchReadiness: expect.objectContaining({ state: "ready", code: "ready" }),
+      }));
+    } finally {
+      if (previousCredential === undefined) delete process.env.TAVILY_API_KEY;
+      else process.env.TAVILY_API_KEY = previousCredential;
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(journalRoot, { recursive: true, force: true });
+      await rm(executableRoot, { recursive: true, force: true });
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
     }
   });
 

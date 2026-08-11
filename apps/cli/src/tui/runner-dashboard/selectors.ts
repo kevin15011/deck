@@ -24,6 +24,7 @@ import { getConfigurablePackageInstructionMetadata, type PackageInstructionPacka
 export type DashboardSectionId =
   | "packages"
   | "adaptive-memory"
+  | "web-search"
   | "teams"
   | "review-install"
   | "package-instructions";
@@ -58,6 +59,16 @@ export type AdaptiveMemorySummary = {
   detail: string;
 };
 
+export type WebSearchSummary = {
+  enabled: boolean;
+  provider: string;
+  credentialAvailable: boolean;
+  runnerSupported: boolean;
+  mcpConfigured: boolean;
+  mcpConfigConflict: boolean;
+  readiness: import("@deck/core").WebSearchReadinessState;
+};
+
 export type PlanActionCounts = {
   automatic: number;
   manual: number;
@@ -83,8 +94,9 @@ type SectionSignals = {
   actions: number;
 };
 
-const DASHBOARD_SECTION_COUNT = 4;
+const DASHBOARD_SECTION_COUNT = 5;
 const ADAPTIVE_MEMORY_OPTION_COUNT = 4; // none, engram, supermemory, back
+const WEB_SEARCH_OPTION_COUNT = 3; // enable/disable, update credential, back
 const TEAMS_OPTION_COUNT = 3; // Developer Team, Developer Team detail, back
 const DEVELOPER_TEAM_DETAIL_OPTION_COUNT = 3; // configure models, use current/defaults, back
 const REVIEW_PLAN_OPTION_COUNT = 2; // run, dashboard
@@ -99,6 +111,8 @@ export function getCursorLimit(state: RunnerDashboardState, packageCount: number
       return packageCount + 1; // capabilities + back
     case "adaptive-memory-detail":
       return ADAPTIVE_MEMORY_OPTION_COUNT;
+    case "web-search-detail":
+      return WEB_SEARCH_OPTION_COUNT;
     case "teams-detail":
       return TEAMS_OPTION_COUNT;
     case "developer-team-detail":
@@ -146,6 +160,7 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
   const packageInstructionIds = capabilityOptions.map((option) => option.capabilityId);
   const packagesSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("package-instructions.")));
   const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.") || (action.capabilityId === "codebase-memory" && state.adaptiveMemory.provider === "engram")));
+  const webSearchSignals = signalsForActions(actionsMatching(state.plan, (action) => action.capabilityId === "web-search" || action.id.startsWith("capability.web-search.")));
   const teamSignals = signalsForActions(state.plan?.groups.teamApplications ?? []);
 
   return [
@@ -168,6 +183,16 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
       totalCount: 1,
       actionCount: adaptiveSignals.actions,
       detail: `Provider selected: ${state.adaptiveMemory.provider}; ${formatSignals(adaptiveSignals)}.`,
+    },
+    {
+      id: "web-search",
+      title: "Web Search",
+      screen: "web-search-detail",
+      readiness: readinessForWebSearch(state, webSearchSignals),
+      selectedCount: state.selectedCapabilities["web-search"] ? 1 : 0,
+      totalCount: 1,
+      actionCount: webSearchSignals.actions,
+      detail: `Tavily ${state.selectedCapabilities["web-search"] ? "enabled" : "disabled"}; ${state.webSearch.credentialAvailable ? "credential detected" : "credential missing"}; ${formatSignals(webSearchSignals)}.`,
     },
     {
       id: "teams",
@@ -238,6 +263,18 @@ export function getAdaptiveMemorySummary(state: RunnerDashboardState): AdaptiveM
   };
 }
 
+export function getWebSearchSummary(state: RunnerDashboardState): WebSearchSummary {
+  return {
+    enabled: state.selectedCapabilities["web-search"] === true,
+    provider: state.webSearch.provider ?? "tavily",
+    credentialAvailable: state.webSearch.credentialAvailable,
+    runnerSupported: state.webSearch.runnerSupported,
+    mcpConfigured: state.webSearch.mcpConfigured,
+    mcpConfigConflict: state.webSearch.mcpConfigConflict,
+    readiness: state.webSearch.readiness,
+  };
+}
+
 /**
  * Returns the capability consumption profile for a team.
  */
@@ -278,6 +315,13 @@ function signalsForActions(actions: RunnerAction[]): SectionSignals {
 
 function readinessForAdaptiveMemory(state: RunnerDashboardState, signals: SectionSignals): SectionReadiness {
   if (state.adaptiveMemory.provider === "supermemory" && !state.adaptiveMemory.supermemory?.configured) return "pending";
+  return readinessFromSignals(signals);
+}
+
+function readinessForWebSearch(state: RunnerDashboardState, signals: SectionSignals): SectionReadiness {
+  if (!state.selectedCapabilities["web-search"]) return "pending";
+  if (state.webSearch.mcpConfigConflict || !state.webSearch.runnerSupported) return "blocked";
+  if (!state.webSearch.credentialAvailable || !state.webSearch.mcpConfigured) return "attention";
   return readinessFromSignals(signals);
 }
 

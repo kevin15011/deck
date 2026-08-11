@@ -64,7 +64,7 @@ describe("OpenCode Registry Consumption", () => {
     it("should contain all expected capability IDs", () => {
       const expectedIds = ["context-mode", "codebase-memory", "rtk", "serena", "context7"];
       expect(OPENCODE_RUNNER_CAPABILITY_IDS).toEqual(expect.arrayContaining(expectedIds));
-      expect(OPENCODE_RUNNER_CAPABILITY_IDS).toHaveLength(5);
+      expect(OPENCODE_RUNNER_CAPABILITY_IDS).toHaveLength(6);
     });
   });
 

@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@deck/core": "workspace:*",
+    "@deck/provider-tavily": "workspace:*",
     "@deck/adapter-supermemory": "workspace:*",
     "@deck/sdd-runtime": "workspace:*"
   }

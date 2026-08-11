@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { buildOpenCodeRunnerCapabilityInventory } from "./capability-inventory";
 import type { OpenCodeToolsReview } from "./required-tools";
+import { resolveWebSearchReadiness } from "@deck/core";
 
 function review(overrides: Partial<OpenCodeToolsReview> = {}): OpenCodeToolsReview {
   return {
@@ -58,5 +59,23 @@ describe("buildOpenCodeRunnerCapabilityInventory", () => {
     expect(inventory["codebase-memory"]?.status).toBe("ready");
     expect(inventory["context-mode"]?.installed).toBe(false);
     expect(inventory._internal?.["opencode-mermaid"]?.status).toBe("ready");
+  });
+
+  test("projects Web Search readiness without provider values", () => {
+    const evidence = {
+      enabled: true,
+      runnerSupported: true,
+      providerConfigured: true,
+      credentialAvailable: true,
+      executableAvailable: true,
+      mcpConfigured: true,
+    } as const;
+    const readiness = resolveWebSearchReadiness(evidence);
+    const inventory = buildOpenCodeRunnerCapabilityInventory(review(), {
+      webSearch: { readiness, evidence },
+    });
+
+    expect(inventory["web-search"]).toMatchObject({ installed: true, status: "ready" });
+    expect(inventory["web-search"]?.webSearchReadiness).toMatchObject({ state: "ready" });
   });
 });

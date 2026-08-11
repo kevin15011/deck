@@ -12,6 +12,7 @@ import { INTERNAL_SERENA_MCP_PROBE_TOKEN, runInternalSerenaMcp } from "./interna
 import { DeckApp } from "./tui/app";
 import { ScreenFrame } from "./tui/screen-frame";
 import { HomeScreen } from "./tui/screens/home-screen";
+import { inspectStandaloneWebSearchReadiness, isStandaloneWebSearchSmokeSuccessful } from "./standalone-web-search-smoke";
 
 // One authoritative operational registry is shared by direct commands and the TUI.
 const adapterRegistry = createDefaultAdapterRegistry();
@@ -23,6 +24,18 @@ const parsed = parseArgs(userArgs);
 if (parsed.command === "error") {
   console.error(parsed.message);
   process.exit(1);
+}
+
+// Deliberately opt-in runtime hook for release verification. It is exercised
+// from an isolated directory after `bun build --compile`; no provider call or
+// MCP installation is performed.
+if (process.env.DECK_STANDALONE_WEB_SEARCH_SMOKE === "1") {
+  const report = await inspectStandaloneWebSearchReadiness({
+    projectRoot: resolveProjectRoot() ?? process.cwd(),
+    adapters: adapterRegistry.list(),
+  });
+  console.log(JSON.stringify(report));
+  process.exit(isStandaloneWebSearchSmokeSuccessful(report) ? 0 : 1);
 }
 
 if (parsed.command === "internal-serena-mcp") {

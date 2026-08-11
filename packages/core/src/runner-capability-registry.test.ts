@@ -144,15 +144,16 @@ describe("Runner Capability Registry", () => {
   });
 
   describe("Support Statuses", () => {
-    it("should have all 7 support statuses defined", () => {
+    it("should have all 8 support statuses defined", () => {
       expect(SUPPORT_STATUSES).toContain("supported");
       expect(SUPPORT_STATUSES).toContain("runner-specific");
       expect(SUPPORT_STATUSES).toContain("shared");
       expect(SUPPORT_STATUSES).toContain("manual-verified");
       expect(SUPPORT_STATUSES).toContain("gap");
       expect(SUPPORT_STATUSES).toContain("blocked");
+      expect(SUPPORT_STATUSES).toContain("unsupported");
       expect(SUPPORT_STATUSES).toContain("not-applicable");
-      expect(SUPPORT_STATUSES.length).toBe(7);
+      expect(SUPPORT_STATUSES.length).toBe(8);
     });
   });
 
