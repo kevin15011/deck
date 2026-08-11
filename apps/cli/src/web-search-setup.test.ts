@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readDeckConfig } from "@deck/core";
+import { createDeckConfigStore } from "./deck-config-store";
 import { writeTavilyCredentialToActiveShellProfileTransaction } from "./web-search-shell-profile";
 import { persistWebSearchCredentialAndEnable } from "./web-search-setup";
 
@@ -12,6 +12,10 @@ function temporaryRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "deck-web-search-setup-"));
   roots.push(root);
   return root;
+}
+
+function testStore(root: string, projectRoot = join(root, "project")) {
+  return createDeckConfigStore({ homeDir: join(root, "home-config"), xdgConfigHome: join(root, "xdg-config"), projectRoot });
 }
 
 afterEach(() => {
@@ -25,20 +29,50 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const projectRoot = join(root, "project");
     const environment: Record<string, string | undefined> = {};
     const credential = "quoted'value";
+    const configStore = testStore(root, projectRoot);
     mkdirSync(home);
 
     const result = persistWebSearchCredentialAndEnable({
       credential,
       projectRoot,
+      configStore,
       environment,
       writeProfile: (value) => writeTavilyCredentialToActiveShellProfileTransaction(value, { home, shell: "/bin/bash" }),
     });
 
     expect(result).toMatchObject({ ok: true, profileStatus: "created" });
-    expect(readDeckConfig(projectRoot).webSearch).toEqual({ enabled: true, provider: "tavily" });
+    expect(configStore.read().webSearch).toEqual({ enabled: true, provider: "tavily" });
     expect(environment.TAVILY_API_KEY).toBe(credential);
     expect(readFileSync(join(home, ".bashrc"), "utf8").includes("export TAVILY_API_KEY=")).toBe(true);
     expect(JSON.stringify(result).includes(credential)).toBe(false);
+  });
+
+  test("preserves config changes committed after profile write and before Web Search persistence", () => {
+    const root = temporaryRoot();
+    const home = join(root, "home");
+    const projectRoot = join(root, "project");
+    const environment: Record<string, string | undefined> = {};
+    const configStore = testStore(root, projectRoot);
+    mkdirSync(home);
+    configStore.write({ adaptiveMemory: { activeProvider: "none" }, packageInstructions: { codex: { serena: true } } });
+
+    const result = persistWebSearchCredentialAndEnable({
+      credential: "interleaved-value",
+      projectRoot,
+      configStore,
+      environment,
+      writeProfile: (value) => {
+        const transaction = writeTavilyCredentialToActiveShellProfileTransaction(value, { home, shell: "/bin/bash" });
+        configStore.patch((current) => ({ ...current, orchestratorPersonality: "guia" }));
+        return transaction;
+      },
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    const config = configStore.read();
+    expect(config.webSearch).toEqual({ enabled: true, provider: "tavily" });
+    expect(config.orchestratorPersonality).toBe("guia");
+    expect(config.packageInstructions.codex.serena).toBe(true);
   });
 
   test("rolls back a newly created profile and restores the exact previous environment when Deck config persistence fails", () => {
@@ -51,6 +85,7 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const result = persistWebSearchCredentialAndEnable({
       credential,
       projectRoot: join(root, "project"),
+      configStore: testStore(root),
       environment,
       writeProfile: (value) => writeTavilyCredentialToActiveShellProfileTransaction(value, { home, shell: "/bin/bash" }),
       writeConfig: () => {
@@ -74,11 +109,13 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const result = persistWebSearchCredentialAndEnable({
       credential,
       projectRoot: join(root, "project"),
+      configStore: testStore(root),
       environment,
       writeProfile: (value) => writeTavilyCredentialToActiveShellProfileTransaction(value, { home, shell: "/bin/bash" }),
       readConfig: () => {
         throw new Error("test-only");
       },
+      writeConfig: () => {},
     });
 
     expect(result).toMatchObject({ ok: false, credentialPresent: false, diagnosticCodes: ["deck-config-write-failed"] });
@@ -102,6 +139,7 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const result = persistWebSearchCredentialAndEnable({
       credential,
       projectRoot: join(root, "project"),
+      configStore: testStore(root),
       environment,
       writeProfile: (value) => writeTavilyCredentialToActiveShellProfileTransaction(value, {
         home,
@@ -139,6 +177,7 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const result = persistWebSearchCredentialAndEnable({
       credential,
       projectRoot: join(root, "project"),
+      configStore: testStore(root),
       environment,
       writeProfile: (value) => writeTavilyCredentialToActiveShellProfileTransaction(value, { home, shell: "/bin/bash" }),
       writeConfig: () => {
@@ -173,6 +212,7 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const result = persistWebSearchCredentialAndEnable({
       credential,
       projectRoot: join(root, "project"),
+      configStore: testStore(root),
       environment,
       writeProfile: (value) => writeTavilyCredentialToActiveShellProfileTransaction(value, { home, shell: "/bin/bash" }),
       writeConfig: () => {
@@ -208,6 +248,7 @@ describe("persistWebSearchCredentialAndEnable", () => {
     const result = persistWebSearchCredentialAndEnable({
       credential,
       projectRoot: join(root, "project"),
+      configStore: testStore(root),
       environment,
       writeProfile: (value) => writeTavilyCredentialToActiveShellProfileTransaction(value, {
         home,

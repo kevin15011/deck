@@ -7,6 +7,7 @@ import {
 import type { RunnerAdapter } from "./runner-adapter";
 import { SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA } from "./skill-discovery";
 import type { SkillDiscoverySourceProviderV1 } from "./skill-discovery";
+import { getDefaultDeckConfig } from "./config/deck-config";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -182,6 +183,7 @@ describe("RunnerAdapter dynamic model discovery contract", () => {
     const installInput: Parameters<RunnerAdapter["buildDeveloperTeamInstallPlan"]>[0] = {
       projectRoot: "/workspace",
       environmentId: "opencode-development",
+      deckConfig: getDefaultDeckConfig(),
       changedAgentIds: ["general"],
       validatedInventoryFingerprint: "fixture-fingerprint",
     };

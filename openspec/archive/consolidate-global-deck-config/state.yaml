@@ -1,0 +1,65 @@
+schema: spec-registry-v1
+changeId: consolidate-global-deck-config
+name: Consolidate Global Deck Configuration
+currentPhase: archive
+status: archived
+artifacts:
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+  archive_report: archive-report.md
+provenance:
+  - phase: proposal
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Defined XDG global configuration as the single active preference source after a cross-repository scope audit."
+  - phase: spec
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Specified global ownership, target-root separation, migration safety, and binary independence."
+  - phase: design
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Selected a CLI-owned XDG store, caller-resolved adapter inputs, and non-destructive conflict-aware migration."
+  - phase: tasks
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Prepared one-session implementation and verification tasks."
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Apply authorized by the user's explicit correction request."
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Full suite, typecheck, production audit, standalone multi-project smoke, and real-config sentinels passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: deferred-reconciled
+    note: "Independent adversarial review approved after required-config, path, transaction, lock, rollback, Doctor, migration, and user-authorized legacy-cleanup repairs."
+  - phase: archive
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Archived after user acceptance, canonical XDG repair, legacy cleanup, and final Quality approval."
+next_action: "Committed closure is the final action."

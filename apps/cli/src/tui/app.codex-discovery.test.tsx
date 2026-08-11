@@ -10,6 +10,7 @@ import { render } from "ink";
 import { createCodexRunnerAdapter } from "@deck/adapter-codex";
 import { DeckApp, resolveDashboardMemoryProviderForInstall, shouldUseLegacySupermemoryTokenRoute } from "./app";
 import { createDefaultAdapterRegistry } from "../runner-adapters";
+import { createDeckConfigStore } from "../deck-config-store";
 
 setDefaultTimeout(30_000);
 
@@ -47,6 +48,12 @@ async function waitFor(instance: { waitUntilRenderFlush(): Promise<unknown> }, p
 
 async function waitForFresh(instance: { waitUntilRenderFlush(): Promise<unknown> }, output: () => string, boundary: number, text: string) {
   await waitFor(instance, () => output().slice(boundary).includes(text), `fresh ${text}`);
+}
+
+function testConfigStore(projectRoot: string) {
+  const store = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
+  store.write({});
+  return store;
 }
 
 describe("DeckApp Codex discovery composition", () => {
@@ -107,7 +114,7 @@ describe("DeckApp Codex discovery composition", () => {
     };
     const harness = createInkHarness();
     const instance = render(
-      <DeckApp getAdapter={() => adapter as any} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      <DeckApp getAdapter={() => adapter as any} configStore={testConfigStore(projectRoot)} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
     );
 
@@ -190,7 +197,7 @@ describe("DeckApp Codex discovery composition", () => {
 
     const harness = createInkHarness();
     const instance = render(
-      <DeckApp adapterRegistry={registry} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      <DeckApp adapterRegistry={registry} configStore={testConfigStore(projectRoot)} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
     );
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { createPiRunnerAdapter } from "@deck/adapter-pi";
-import { writeDeckConfig } from "@deck/core";
+import { validateDeckConfig } from "@deck/core";
 import type { CapabilityInventory } from "@deck/core";
 import { normalizeDashboardCapabilityInventory } from "./inventory";
 
@@ -57,11 +57,12 @@ describe("normalizeDashboardCapabilityInventory", () => {
 
     try {
       for (const enabled of [false, true]) {
-        writeDeckConfig(projectRoot, { webSearch: enabled ? { enabled: true, provider: "tavily" } : { enabled: false } });
+        const deckConfig = validateDeckConfig({ webSearch: enabled ? { enabled: true, provider: "tavily" } : { enabled: false } });
         const inventory = await adapter.getCapabilityInventory({
           projectRoot,
           runnerId: "opencode",
           environmentId: "opencode-development",
+          deckConfig,
         });
 
         expect(normalizeDashboardCapabilityInventory(inventory, "opencode", "opencode-development")).toMatchObject({ ok: true });
@@ -82,11 +83,12 @@ describe("normalizeDashboardCapabilityInventory", () => {
 
     try {
       for (const enabled of [false, true]) {
-        writeDeckConfig(projectRoot, { webSearch: enabled ? { enabled: true, provider: "tavily" } : { enabled: false } });
+        const deckConfig = validateDeckConfig({ webSearch: enabled ? { enabled: true, provider: "tavily" } : { enabled: false } });
         const inventory = await adapter.getCapabilityInventory({
           projectRoot,
           runnerId: "pi",
           environmentId: "pi-development",
+          deckConfig,
         });
 
         expect(inventory.capabilities).toEqual(expect.arrayContaining([

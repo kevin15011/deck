@@ -112,7 +112,7 @@ export type CanonicalInstructionPackageId = Exclude<PackageInstructionPackageId,
 
 /**
  * Loads package instructions from a deck config for a specific runner scope.
- * Used to initialize dashboard state from existing .deck/config.json.
+ * Used to initialize dashboard state from existing Deck config.
  */
 export function loadRunnerPackageInstructionsFromConfig(
   config: { packageInstructions?: Record<string, Record<string, boolean>> },

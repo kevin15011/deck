@@ -8,7 +8,7 @@ import {
   type MemoryInjectionBundle,
 } from "@deck/core/memory/adaptive-memory";
 import { renderSddContextSections } from "@deck/core/memory/adaptive-context-renderer";
-import { readDeckConfig } from "@deck/core/config/deck-config";
+import { DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
 import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import type { MemoryDiagnostic } from "./developer-team-install";
 import { buildTeamProfileDir } from "./pi-team-launch";
@@ -35,7 +35,7 @@ export type MaterializeTeamProfileOptions = {
   writeFile?: (path: string, data: string, encoding?: BufferEncoding) => void;
   readFile?: (path: string, encoding?: BufferEncoding) => string;
   exists?: (path: string) => boolean;
-  /** Optional orchestrator personality. When absent, falls back to config or default. */
+  /** Optional orchestrator personality. When absent, falls back to default. */
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
   /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
   promptProfileActivation?: PromptProfileActivationV1;
@@ -67,9 +67,9 @@ export type BuildTeamSystemPromptOptions = {
   memoryProvider?: AdaptiveMemoryProvider;
   memoryUnavailableReason?: string;
   supportedMemoryProviderIds?: Iterable<string>;
-  /** Optional orchestrator personality override. When absent, falls back to config or default. */
+  /** Optional orchestrator personality override. When absent, falls back to default. */
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
-  /** Project root for resolving config. Required when using config-based personality fallback. */
+  /** Project root used only for project artifact materialization. */
   projectRoot?: string;
   /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
   promptProfileActivation?: PromptProfileActivationV1;
@@ -94,9 +94,7 @@ export function buildTeamSystemPrompt(
 ): BuildTeamSystemPromptResult {
   validateTeamForProfile(teamId);
 
-  // Resolve personality: explicit option > config > default
-  const configPath = options?.projectRoot ?? ".";
-  const personality = options?.orchestratorPersonality ?? readDeckConfig(configPath).orchestratorPersonality;
+  const personality = options?.orchestratorPersonality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
   const promptProfile = "compact" as const;
   const instructions = getTeamSessionInstructions(teamId, {
     personality,

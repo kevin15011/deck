@@ -70,12 +70,12 @@ import type {
   SerenaOperationIdentity,
   SerenaReadinessEvidence,
   SerenaReadinessRevalidator,
+  NormalizedDeckConfig,
 } from "@deck/core";
 
 import {
   getModelCatalog,
   getRunnerCapabilityMapping,
-  readDeckConfig,
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   buildCapabilityInstructionBundle,
   getEnabledCapabilityInstructionIds,
@@ -93,6 +93,11 @@ import {
   hasWebSearchProviderCredential,
   isWebSearchProviderDescriptor,
 } from "@deck/core";
+
+function requireDeckConfig(config: NormalizedDeckConfig | undefined, context: string): NormalizedDeckConfig {
+  if (!config) throw new Error(`OpenCode ${context} requires caller-resolved global Deck config.`);
+  return config;
+}
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import type { WebSearchProviderDescriptorV1 } from "@deck/core";
 
@@ -817,7 +822,7 @@ class OpenCodeRunnerAdapterImpl {
     };
     const toolsReview = this.getToolsReview(actionContext);
     const runnerScope = "opencode";
-    const deckConfig = readDeckConfig(input.projectRoot);
+    const deckConfig = requireDeckConfig(input.deckConfig, "capability inventory");
     const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
     const webSearchConfigPath = join(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"), "opencode.json");
     const webSearchMcp = inspectOpenCodeWebSearchMcpConfig(webSearchConfigPath, webSearchProvider);
@@ -1551,7 +1556,7 @@ class OpenCodeRunnerAdapterImpl {
     const thinkingAssignments = input.thinkingAssignments ?? {};
     const capabilityInstructions = input.capabilityInstructions ?? (() => {
       try {
-        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(readDeckConfig(input.projectRoot), "opencode"));
+        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(requireDeckConfig(input.deckConfig, "developer team install"), "opencode"));
       } catch {
         return undefined;
       }
@@ -1568,6 +1573,7 @@ class OpenCodeRunnerAdapterImpl {
       memoryProvider: input.memoryProvider as any,
       supportedMemoryProviderIds: ["engram", "supermemory"],
       capabilityInstructions,
+      personality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,
       standaloneSkills,
     });
     const configDir = this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode");

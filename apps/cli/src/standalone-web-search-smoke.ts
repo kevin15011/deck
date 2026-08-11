@@ -1,4 +1,4 @@
-import { readDeckConfig, type CapabilityCatalogEntry, type RunnerAdapter, type WebSearchReadinessCode, type WebSearchReadinessState } from "@deck/core";
+import { type CapabilityCatalogEntry, type NormalizedDeckConfig, type RunnerAdapter, type WebSearchReadinessCode, type WebSearchReadinessState } from "@deck/core";
 import { normalizeDashboardCapabilityInventory } from "./tui/runner-dashboard/inventory";
 import { getWebSearchProviderDescriptor } from "./web-search-provider";
 
@@ -35,8 +35,10 @@ export type StandaloneWebSearchSmokeReport = Readonly<{
 export async function inspectStandaloneWebSearchReadiness(options: Readonly<{
   projectRoot: string;
   adapters: readonly Pick<RunnerAdapter, "runnerId" | "environmentIds" | "getCapabilityInventory">[];
+  deckConfig: NormalizedDeckConfig;
 }>): Promise<StandaloneWebSearchSmokeReport> {
-  const config = readDeckConfig(options.projectRoot);
+  if (!options.deckConfig) throw new Error("Standalone Web Search smoke requires caller-resolved Deck config.");
+  const config = options.deckConfig;
   const provider = getWebSearchProviderDescriptor(config.webSearch.provider);
   const runners: Record<string, { state: string; code: string }> = {};
 
@@ -56,6 +58,7 @@ export async function inspectStandaloneWebSearchReadiness(options: Readonly<{
         projectRoot: options.projectRoot,
         runnerId,
         environmentId,
+        deckConfig: config,
       });
       const normalized = normalizeDashboardCapabilityInventory(inventory, runnerId, environmentId);
       const webSearch = normalized.ok

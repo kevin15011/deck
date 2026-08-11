@@ -296,7 +296,7 @@ function updateSupermemory(
     ...state,
     adaptiveMemory: {
       provider: "supermemory",
-      status: "Supermemory selected; secrets remain outside .deck/config.json.",
+          status: "Supermemory selected; secrets remain outside Deck config.",
       supermemory: {
         ...current,
         ...values,

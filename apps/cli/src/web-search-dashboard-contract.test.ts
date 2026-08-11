@@ -7,6 +7,7 @@ import { createPiRunnerAdapter } from "@deck/adapter-pi";
 import { getWebSearchProviderDescriptor } from "./web-search-provider";
 import { writeTavilyCredentialToActiveShellProfileTransaction } from "./web-search-shell-profile";
 import { persistWebSearchCredentialAndEnable } from "./web-search-setup";
+import { createDeckConfigStore } from "./deck-config-store";
 
 const roots: string[] = [];
 
@@ -40,9 +41,11 @@ describe("Web Search dashboard contract", () => {
         mkdirSync(home, { recursive: true });
         mkdirSync(projectRoot, { recursive: true });
         const credential = `${runner}-credential`;
+        const configStore = createDeckConfigStore({ homeDir: join(runnerRoot, "config-home"), xdgConfigHome: join(runnerRoot, "xdg"), projectRoot });
         const persisted = persistWebSearchCredentialAndEnable({
           credential,
           projectRoot,
+          configStore,
           environment: process.env,
           writeProfile: (value) => writeTavilyCredentialToActiveShellProfileTransaction(value, { home, shell: "/bin/bash" }),
         });
@@ -52,7 +55,8 @@ describe("Web Search dashboard contract", () => {
           ? createPiRunnerAdapter({ homeDirectory: home, webSearchProviderResolver: getWebSearchProviderDescriptor })
           : createOpenCodeRunnerAdapter({ developerTeamConfigDir: join(home, ".config", "opencode"), webSearchProviderResolver: getWebSearchProviderDescriptor });
         const environmentId = runner === "pi" ? "pi-development" : "opencode-development";
-        const inventory = await adapter.getCapabilityInventory({ projectRoot, runnerId: runner, environmentId });
+        const deckConfig = configStore.read();
+        const inventory = await adapter.getCapabilityInventory({ projectRoot, runnerId: runner, environmentId, deckConfig });
         const descriptor = getWebSearchProviderDescriptor("tavily");
         const state = {
           runnerId: runner,
@@ -76,7 +80,7 @@ describe("Web Search dashboard contract", () => {
         } as never);
         expect(result.status).toBe("executed");
 
-        const ready = await adapter.getCapabilityInventory({ projectRoot, runnerId: runner, environmentId });
+        const ready = await adapter.getCapabilityInventory({ projectRoot, runnerId: runner, environmentId, deckConfig });
         const webSearch = ready.capabilities.find((entry) => entry.capabilityId === "web-search");
         expect(webSearch).toMatchObject({ isInstalled: true, webSearchReadiness: { state: "ready" } });
         expect(JSON.stringify(plan).includes(credential)).toBe(false);

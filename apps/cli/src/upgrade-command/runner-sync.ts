@@ -177,6 +177,7 @@ export async function runRunnerSync(
     const plan: RunnerDeveloperTeamInstallPlan = await safeBuildPlan(adapter, {
       projectRoot,
       environmentId: (adapter.environmentIds[0] ?? "opencode-development") as never,
+      deckConfig: config,
       capabilityInstructions: bundle,
       materializationScope: "content-only",
     });
@@ -338,6 +339,7 @@ async function safeBuildPlan(
   input: {
     projectRoot: string;
     environmentId: never;
+    deckConfig: NormalizedDeckConfig;
     capabilityInstructions: CapabilityInstructionBundle;
     materializationScope: "content-only";
   },

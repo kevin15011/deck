@@ -11,11 +11,11 @@ import { stripVTControlCharacters } from "node:util";
 import {
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   normalizeSupportedPackageInstructionSelection,
-  readDeckConfig,
-  writeDeckConfig,
+  validateDeckConfig,
   type NormalizedDeckConfig,
   type PackageInstructionPackageId,
 } from "@deck/core/config/deck-config";
+import type { DeckConfigStore } from "../../deck-config-store";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import {
   validateSerenaOperationAuthorization,
@@ -186,7 +186,8 @@ export type RunnerActionRunnerDependencies = {
   installTeamBundle?: TeamBundleInstallerFn;
   writeMcpConfig?: McpConfigWriterFn;
   validateMcpConfig?: McpConfigValidatorFn;
-  writeDeckConfig?: typeof writeDeckConfig;
+  configStore?: DeckConfigStore;
+  writeDeckConfig?: (projectRoot: string, config: unknown) => NormalizedDeckConfig;
   onActionResult?: (result: RunnerActionRunResult) => void;
   onInstallResult?: (result: RunnerPackageInstallResult) => void;
   /** Current-operation Serena authorization and the single operation signal. */
@@ -1242,18 +1243,17 @@ function writeDeckConfigAction(
 ): RunnerActionRunResult {
   const projectRoot = dependencies.projectRoot;
   if (!projectRoot) {
-    return skippedResult(action, "Project root is required to write .deck/config.json.");
+    return skippedResult(action, "Project root is required to update global Deck preferences.");
   }
 
   const state = dependencies.dashboardState;
   if (!state) {
-    return skippedResult(action, "Dashboard state is required to write .deck/config.json.");
+    return skippedResult(action, "Dashboard state is required to update global Deck preferences.");
   }
   const provider = state.adaptiveMemory.provider ?? "none";
-  const supermemory = state.adaptiveMemory.supermemory;
 
-  // Read existing config to preserve OTHER runner's packageInstructions
-  const existingConfig = readDeckConfig(projectRoot);
+  const store = dependencies.configStore;
+  if (!store && !dependencies.writeDeckConfig) return skippedResult(action, "Global Deck config store is required to update Deck preferences.");
 
   // Preserve every registered runner's config and update only the active runner.
   const currentRunner = state?.runnerScope && state.runnerScope !== "all" ? state.runnerScope : "pi";
@@ -1261,46 +1261,42 @@ function writeDeckConfigAction(
     state.packageInstructions,
     dependencies.packageInstructionIds ?? PACKAGE_INSTRUCTION_PACKAGE_IDS,
   );
-  const updatedPackageInstructions: NormalizedDeckConfig["packageInstructions"] = {
-    ...existingConfig.packageInstructions,
-    [currentRunner]: {
-      ...currentPackageInstructions,
-    },
-  };
   const selectedWebSearch = state.selectedCapabilities["web-search"];
-  const webSearchEnabled = selectedWebSearch === undefined
-    ? existingConfig.webSearch.enabled
-    : selectedWebSearch === true;
-  const webSearchProvider = state.webSearchProvider ?? existingConfig.webSearch.provider;
-
-  const config: NormalizedDeckConfig = {
-    version: 1,
-    adaptiveMemory: provider === "supermemory"
-      ? {
-          activeProvider: "supermemory" as const,
-          supermemory: {},
-        }
-      : provider === "engram"
-        ? { activeProvider: "engram" as const }
-        : { activeProvider: "none" as const },
-    webSearch: {
-      enabled: webSearchEnabled,
-      ...(webSearchProvider ? { provider: webSearchProvider } : {}),
-    },
-    packageInstructions: updatedPackageInstructions,
-    orchestratorPersonality: existingConfig.orchestratorPersonality,
-    developerTeamExecution: existingConfig.developerTeamExecution,
-    profiles: existingConfig.profiles,
-    activeProfile: existingConfig.activeProfile,
+  const buildConfig = (current: NormalizedDeckConfig): NormalizedDeckConfig => {
+    const webSearchEnabled = selectedWebSearch === undefined
+      ? current.webSearch.enabled
+      : selectedWebSearch === true;
+    const webSearchProvider = state.webSearchProvider ?? current.webSearch.provider;
+    return {
+      ...current,
+      adaptiveMemory: provider === "supermemory"
+        ? {
+            activeProvider: "supermemory" as const,
+            supermemory: current.adaptiveMemory.supermemory ?? {},
+          }
+        : provider === "engram"
+          ? { activeProvider: "engram" as const }
+          : { activeProvider: "none" as const },
+      webSearch: {
+        enabled: webSearchEnabled,
+        ...(webSearchProvider ? { provider: webSearchProvider } : {}),
+      },
+      packageInstructions: {
+        ...current.packageInstructions,
+        [currentRunner]: {
+          ...currentPackageInstructions,
+        },
+      },
+    };
   };
 
-  const writer = dependencies.writeDeckConfig ?? writeDeckConfig;
-  writer(projectRoot, config);
+  const config = store ? store.patch(buildConfig) : buildConfig(validateDeckConfig({}));
+  if (dependencies.writeDeckConfig) dependencies.writeDeckConfig(projectRoot, config);
 
   return {
     actionId: action.id,
     status: "executed",
-    message: `Wrote .deck/config.json with adaptive memory provider: ${provider}.`,
+    message: `Updated global Deck preferences with adaptive memory provider: ${provider}.`,
     diagnostics: redactDiagnostics(action.diagnostics ?? []),
     raw: redactRaw(config),
   };

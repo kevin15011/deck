@@ -45,13 +45,13 @@ export type RunPiLaunchOptions = {
   };
   /** Legacy/pre-constructed memory provider. Prefer cliMemoryProvider/config resolution for launch paths. */
   memoryProvider?: AdaptiveMemoryProvider;
-  /** Explicit CLI provider override from --memory. Precedence: CLI > .deck/config.json > none. */
+  /** Explicit CLI provider override from --memory. Precedence: CLI > global Deck config > none. */
   cliMemoryProvider?: string;
-  /** Optional in-memory Deck config override for tests. Defaults to reading .deck/config.json from projectRoot. */
-  deckConfig?: unknown;
-  /** Direct dashboard selection; normalized through the same safe config path as .deck/config.json. */
+  /** Optional in-memory Deck config override for tests and production composition. */
+  deckConfig: unknown;
+  /** Direct dashboard selection; normalized through the same safe config path as global Deck config. */
   activeProvider?: AdaptiveMemoryActiveProvider;
-  /** Non-secret Supermemory config from dashboard/.deck/config.json. Never include tokens here. */
+  /** Non-secret Supermemory config from dashboard/global Deck config. Never include tokens here. */
   supermemory?: DeckSupermemoryConfig;
   /** Provider IDs accepted by this launch surface. Defaults to Pi-supported providers. */
   supportedMemoryProviderIds?: Iterable<string>;
@@ -94,15 +94,15 @@ export type ResolvedPiAdaptiveMemoryProvider = {
 export type ResolvePiAdaptiveMemoryProviderOptions = {
   /** Preconstructed provider from an install/dashboard flow. Cannot be combined with config resolution. */
   memoryProvider?: AdaptiveMemoryProvider;
-  /** CLI override; precedence remains CLI > .deck/config.json > none for launch. */
+  /** CLI override; precedence remains CLI > Deck config > none for launch. */
   cliMemoryProvider?: string;
-  /** Project root used to read .deck/config.json when deckConfig is not provided. */
+  /** Project root used for diagnostics and runner-native materialization; not a preference source. */
   projectRoot?: string;
-  /** In-memory Deck config, useful for TUI/dashboard install before launch. */
+  /** Required in production launch paths; tests may use the explicit legacy-compatibility wrapper. */
   deckConfig?: unknown;
   /** Direct dashboard selection; enables immediate provider construction without writing secrets to Deck config. */
   activeProvider?: AdaptiveMemoryActiveProvider;
-  /** Non-secret Supermemory config from dashboard/.deck/config.json. Never include tokens here. */
+  /** Non-secret Supermemory config from dashboard/global Deck config. Never include tokens here. */
   supermemory?: DeckSupermemoryConfig;
   supportedMemoryProviderIds?: Iterable<string>;
   piMcpConfigPath?: string;
@@ -122,12 +122,19 @@ type ResolvedLaunchMemory = ResolvedPiAdaptiveMemoryProvider;
 /**
  * Prepares and optionally launches a Pi session for a Deck team.
  *
- * Memory provider resolution uses CLI > .deck/config.json > none and constructs
+ * Memory provider resolution uses CLI > Deck config > none and constructs
  * exactly one provider. Supermemory injection is fail-closed: missing/incomplete
  * non-secret config, missing/malformed Pi MCP config, or failing provider health
  * launches without adaptive-memory injection and returns redacted diagnostics.
  */
 export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunchResult> {
+  if (options.deckConfig === undefined && !options.memoryProvider) {
+    return {
+      status: "error",
+      memoryDiagnostics: [{ code: "memory_provider_unavailable", message: "Global Deck config is not ready: DECK_CONFIG_REQUIRED at config." }],
+      message: "Pi launch requires a valid caller-resolved global Deck config.",
+    };
+  }
   const { teamId, projectRoot, flags, dryRun = false } = options;
   const commandExists = options.commandExists ?? defaultCommandExists;
   const piCommand = options.piCommand ?? "pi";
@@ -187,6 +194,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
 
   return { status: "launched", plan, memoryDiagnostics };
 }
+
 
 async function resolveLaunchMemoryProvider(options: RunPiLaunchOptions): Promise<ResolvedLaunchMemory> {
   const diagnostics: MemoryProviderDiagnostic[] = [];
@@ -300,8 +308,7 @@ function resolveActiveProviderInput(options: ResolvePiAdaptiveMemoryProviderOpti
   try {
     resolved = resolveActiveMemoryProvider({
       cliProvider: options.cliMemoryProvider,
-      projectRoot: options.projectRoot,
-      ...(options.deckConfig !== undefined ? { config: options.deckConfig } : {}),
+      ...(options.deckConfig !== undefined ? { config: options.deckConfig } : { projectRoot: options.projectRoot }),
     });
   } catch (error) {
     return {
@@ -328,7 +335,7 @@ function hasConfigResolutionInput(options: ResolvePiAdaptiveMemoryProviderOption
 /**
  * Shared Pi adaptive-memory provider resolver for TUI install paths.
  * It has no import-time side effects and never persists Supermemory tokens to
- * `.deck/config.json`; callers must hand off credentials through Pi MCP config.
+ * Deck config; callers must hand off credentials through Pi MCP config.
  */
 export async function resolvePiAdaptiveMemoryProvider(
   options: ResolvePiAdaptiveMemoryProviderOptions,

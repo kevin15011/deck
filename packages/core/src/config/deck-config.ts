@@ -1,23 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { chmodSync, closeSync, existsSync, fsyncSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, parse, relative, resolve } from "node:path";
 
 import type { AdapterRegistry } from "../adapter-registry";
-
-// Import global config path resolver from T5
-// Lazy import to avoid circular dependencies
-let globalPaths: typeof import("../../../../apps/cli/src/runtime/paths.js") | null = null;
-
-async function getGlobalPaths() {
-  if (!globalPaths) {
-    try {
-      globalPaths = await import("../../../../apps/cli/src/runtime/paths.js");
-    } catch {
-      // Global paths module not available (e.g., in tests or before paths.ts is built)
-      globalPaths = null;
-    }
-  }
-  return globalPaths;
-}
 
 export const DECK_CONFIG_VERSION = 1;
 export const DECK_CONFIG_RELATIVE_PATH = join(".deck", "config.json");
@@ -120,7 +105,7 @@ export function validateRunnerKeys(keys: string[], registry: AdapterRegistry): v
       const registered = registry.list().map((a) => a.runnerId);
       throw new DeckConfigError(
         "DECK_CONFIG_UNKNOWN_FIELD",
-        `Unknown runner key '${key}'. Registered runners: [${registered.join(", ")}].`,
+        `Unknown runner key in packageInstructions. Registered runners: [${registered.join(", ")}].`,
         { fieldPath: `packageInstructions.${key}` },
       );
     }
@@ -222,7 +207,9 @@ export type DeckConfigErrorCode =
   | "DECK_CONFIG_SECRET_FIELD"
   | "SUPERMEMORY_USER_ID_REQUIRED"
   | "SUPERMEMORY_CONFIG_INVALID"
-  | "WEB_SEARCH_CONFIG_INVALID";
+  | "WEB_SEARCH_CONFIG_INVALID"
+  | "DECK_CONFIG_UNSAFE_PATH"
+  | "DECK_CONFIG_CONCURRENT_MODIFICATION";
 
 export class DeckConfigError extends Error {
   readonly code: DeckConfigErrorCode;
@@ -305,8 +292,66 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
   };
 }
 
-export function readDeckConfig(projectRoot: string): NormalizedDeckConfig {
-  const configPath = getDeckConfigPath(projectRoot);
+export type DeckConfigFilePatch = (existing: NormalizedDeckConfig) => unknown;
+
+export type DeckConfigFilePreimage = Readonly<{
+  path: string;
+  exists: boolean;
+  digest: string | null;
+}>;
+
+type DeckConfigFilePreimageBytes = Readonly<{
+  exists: boolean;
+  bytes: Buffer | null;
+  mode: number | null;
+  digest: string | null;
+}>;
+
+export type DeckConfigWriteReceipt = Readonly<{
+  path: string;
+  preimageDigest: string | null;
+  postimageDigest: string;
+  rollback: () => void;
+}>;
+
+export type DeckConfigFileReadOptions = Readonly<{
+  containmentRoot?: string;
+}>;
+
+export type DeckConfigFileWriteOptions = Readonly<{
+  containmentRoot?: string;
+  expectedDigest?: string | null;
+  afterRenameForTest?: () => void;
+}>;
+
+export type DeckConfigFilePatchOptions = DeckConfigFileWriteOptions & Readonly<{
+  maxRetries?: number;
+}>;
+
+type DeckConfigFileLockState = Readonly<{
+  path: string;
+  pid: number;
+  nonce: string;
+  dev: number;
+  ino: number;
+}>;
+
+const DECK_CONFIG_LOCK_STALE_MS = 30_000;
+
+export function readDeckConfigFilePreimage(configPath: string, options: DeckConfigFileReadOptions = {}): DeckConfigFilePreimage {
+  validateSafeConfigPathForRead(configPath, options.containmentRoot);
+  if (!existsSync(configPath)) return { path: configPath, exists: false, digest: null };
+  const stat = lstatSync(configPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) return { path: configPath, exists: true, digest: null };
+  return {
+    path: configPath,
+    exists: true,
+    digest: createHash("sha256").update(readFileSync(configPath)).digest("hex"),
+  };
+}
+
+export function readDeckConfigFile(configPath: string, options: DeckConfigFileReadOptions = {}): NormalizedDeckConfig {
+  validateSafeConfigPathForRead(configPath, options.containmentRoot);
   if (!existsSync(configPath)) {
     return getDefaultDeckConfig();
   }
@@ -323,6 +368,352 @@ export function readDeckConfig(projectRoot: string): NormalizedDeckConfig {
   }
 
   return validateDeckConfig(parsed, { configPath });
+}
+
+function readPreimageBytes(configPath: string, containmentRoot?: string): DeckConfigFilePreimageBytes {
+  validateSafeConfigPathForRead(configPath, containmentRoot);
+  if (!existsSync(configPath)) return { exists: false, bytes: null, mode: null, digest: null };
+  const stat = lstatSync(configPath);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config target must be a real regular file.", { configPath });
+  }
+  const bytes = readFileSync(configPath);
+  return { exists: true, bytes, mode: stat.mode & 0o777, digest: createHash("sha256").update(bytes).digest("hex") };
+}
+
+function assertOwnedByCurrentUser(path: string, owner: number | undefined, configPath: string): void {
+  if (owner === undefined) return;
+  const stat = lstatSync(path);
+  if (stat.uid !== owner) {
+    throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config path ancestry must be owned by the current user.", { configPath });
+  }
+}
+
+function assertContained(child: string, root: string, configPath: string): void {
+  const rel = relative(root, child);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return;
+  throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config path must remain inside the configured XDG root.", { configPath });
+}
+
+function assertExistingAncestorChainSafe(path: string, configPath: string): void {
+  const absolute = resolve(path);
+  const parsed = parse(absolute);
+  let cursor = parsed.root;
+  const parts = relative(parsed.root, absolute).split(/[\\/]+/).filter(Boolean);
+  for (const part of parts) {
+    cursor = join(cursor, part);
+    if (!existsSync(cursor)) return;
+    const stat = lstatSync(cursor);
+    if (stat.isSymbolicLink()) {
+      throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config ancestry must not contain symbolic links.", { configPath });
+    }
+  }
+}
+
+function validateSafeConfigPathForRead(configPath: string, containmentRoot?: string): void {
+  if (containmentRoot) {
+    assertExistingAncestorChainSafe(containmentRoot, configPath);
+    const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+    if (existsSync(containmentRoot)) {
+      const rootStat = lstatSync(containmentRoot);
+      if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+        throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config XDG root must be a real directory.", { configPath });
+      }
+      assertOwnedByCurrentUser(containmentRoot, uid, configPath);
+    }
+    const rootReal = existsSync(containmentRoot) ? realpathSync(containmentRoot) : resolve(containmentRoot);
+    assertContained(resolve(configPath), resolve(containmentRoot), configPath);
+    const parent = dirname(resolve(configPath));
+    if (existsSync(parent)) assertContained(realpathSync(parent), rootReal, configPath);
+    const relParts = relative(resolve(containmentRoot), parent).split(/[\\/]+/).filter(Boolean);
+    let cursor = resolve(containmentRoot);
+    for (const part of relParts) {
+      cursor = join(cursor, part);
+      if (!existsSync(cursor)) break;
+      const stat = lstatSync(cursor);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config parent ancestry must contain only real directories.", { configPath });
+      assertOwnedByCurrentUser(cursor, uid, configPath);
+    }
+  }
+  assertExistingAncestorChainSafe(dirname(configPath), configPath);
+  if (!existsSync(configPath)) return;
+  const stat = lstatSync(configPath);
+  if (stat.isSymbolicLink()) {
+    throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config target must not be a symbolic link.", { configPath });
+  }
+  if (!stat.isFile()) {
+    throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config target must be a regular file.", { configPath });
+  }
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  assertOwnedByCurrentUser(configPath, uid, configPath);
+}
+
+function ensureSafeParentAncestry(configPath: string, containmentRoot?: string): void {
+  if (!containmentRoot) {
+    mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
+    return;
+  }
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  const root = resolve(containmentRoot);
+  assertExistingAncestorChainSafe(dirname(root), configPath);
+  if (!existsSync(root)) mkdirSync(root, { recursive: true, mode: 0o700 });
+  const rootStat = lstatSync(root);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config XDG root must be a real directory.", { configPath });
+  }
+  assertOwnedByCurrentUser(root, uid, configPath);
+  const rootReal = realpathSync(root);
+  const parentParts = relative(root, dirname(resolve(configPath))).split(/[\\/]+/).filter(Boolean);
+  if (parentParts[0] === "..") {
+    throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config path must be inside the configured XDG root.", { configPath });
+  }
+  let cursor = root;
+  for (const part of parentParts) {
+    cursor = join(cursor, part);
+    if (!existsSync(cursor)) mkdirSync(cursor, { mode: 0o700 });
+    const stat = lstatSync(cursor);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new DeckConfigError("DECK_CONFIG_UNSAFE_PATH", "Deck config parent ancestry must contain only real directories.", { configPath });
+    }
+    assertOwnedByCurrentUser(cursor, uid, configPath);
+  }
+  assertContained(realpathSync(dirname(configPath)), rootReal, configPath);
+}
+
+function assertExpectedDigest(configPath: string, expectedDigest: string | null | undefined): void {
+  if (expectedDigest === undefined) return;
+  const actual = readDeckConfigFilePreimage(configPath).digest;
+  if (actual !== expectedDigest) {
+    throw new DeckConfigError("DECK_CONFIG_CONCURRENT_MODIFICATION", "Deck config changed before write; retry with a fresh preimage.", { configPath });
+  }
+}
+
+function createDeckConfigLockContent(nonce: string): string {
+  return `${JSON.stringify({ version: 1, pid: process.pid, nonce, createdAtMs: Date.now() })}\n`;
+}
+
+function parseDeckConfigLockContent(content: string): { version: number; pid: number; nonce: string; createdAtMs: number } | null {
+  try {
+    const parsed = JSON.parse(content) as { version?: unknown; pid?: unknown; nonce?: unknown; createdAtMs?: unknown };
+    if (parsed.version !== 1 || typeof parsed.pid !== "number" || typeof parsed.nonce !== "string" || typeof parsed.createdAtMs !== "number") return null;
+    return { version: parsed.version, pid: parsed.pid, nonce: parsed.nonce, createdAtMs: parsed.createdAtMs };
+  } catch {
+    return null;
+  }
+}
+
+function processIsRunning(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+    return code === "EPERM";
+  }
+}
+
+function tryAcquireDeckConfigFileLock(lockPath: string): DeckConfigFileLockState | undefined {
+  const nonce = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let fd: number | undefined;
+  try {
+    fd = openSync(lockPath, "wx", 0o600);
+    writeFileSync(fd, createDeckConfigLockContent(nonce), "utf-8");
+    fsyncSync(fd);
+    const stat = fstatSync(fd);
+    return { path: lockPath, pid: process.pid, nonce, dev: stat.dev, ino: stat.ino };
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+    if (code === "EEXIST") return undefined;
+    throw error;
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* best effort */ }
+    }
+  }
+}
+
+function releaseDeckConfigFileLock(lock: DeckConfigFileLockState): void {
+  try {
+    const stat = lstatSync(lock.path);
+    if (stat.dev !== lock.dev || stat.ino !== lock.ino || !stat.isFile()) return;
+    const parsed = parseDeckConfigLockContent(readFileSync(lock.path, "utf8"));
+    if (!parsed || parsed.pid !== lock.pid || parsed.nonce !== lock.nonce) return;
+    unlinkSync(lock.path);
+  } catch {
+    // Best effort: never delete a lock unless its inode and nonce match ours.
+  }
+}
+
+function recoverStaleDeckConfigFileLock(lockPath: string): void {
+  let stat;
+  let content: string;
+  try {
+    stat = lstatSync(lockPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) return;
+    content = readFileSync(lockPath, "utf8");
+  } catch {
+    return;
+  }
+  const parsed = parseDeckConfigLockContent(content);
+  const ageMs = Date.now() - (parsed ? parsed.createdAtMs : stat.mtimeMs);
+  if (ageMs < DECK_CONFIG_LOCK_STALE_MS) return;
+  if (parsed && processIsRunning(parsed.pid)) return;
+  try {
+    const latestStat = lstatSync(lockPath);
+    if (latestStat.dev !== stat.dev || latestStat.ino !== stat.ino || !latestStat.isFile()) return;
+    if (readFileSync(lockPath, "utf8") !== content) return;
+    unlinkSync(lockPath);
+  } catch {
+    // Another process may have acquired or removed the stale lock.
+  }
+}
+
+function withDeckConfigFileLock<T>(configPath: string, containmentRoot: string | undefined, fn: () => T): T {
+  ensureSafeParentAncestry(configPath, containmentRoot);
+  const lockPath = join(dirname(configPath), ".config.json.lock");
+  let lock: DeckConfigFileLockState | undefined;
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    lock = tryAcquireDeckConfigFileLock(lockPath);
+    if (lock) break;
+    if (attempt % 10 === 9) recoverStaleDeckConfigFileLock(lockPath);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+  if (!lock) {
+    throw new DeckConfigError("DECK_CONFIG_CONCURRENT_MODIFICATION", "Deck config is locked by another process; retry later.", { configPath });
+  }
+  try {
+    return fn();
+  } finally {
+    releaseDeckConfigFileLock(lock);
+  }
+}
+
+function assertConfigPathIsSafeForWrite(configPath: string): void {
+  if (!existsSync(configPath)) return;
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(configPath);
+  } catch {
+    return;
+  }
+  if (stat.isSymbolicLink()) {
+    throw new DeckConfigError(
+      "DECK_CONFIG_INVALID_SHAPE",
+      "Deck config path must not be a symbolic link.",
+      { configPath },
+    );
+  }
+  if (!stat.isFile()) {
+    throw new DeckConfigError(
+      "DECK_CONFIG_INVALID_SHAPE",
+      "Deck config path must be a regular file.",
+      { configPath },
+    );
+  }
+  const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
+  assertOwnedByCurrentUser(configPath, uid, configPath);
+}
+
+function writeFilePrivateAtomic(configPath: string, content: string, options: DeckConfigFileWriteOptions = {}): DeckConfigWriteReceipt {
+  ensureSafeParentAncestry(configPath, options.containmentRoot);
+  assertConfigPathIsSafeForWrite(configPath);
+  assertExpectedDigest(configPath, options.expectedDigest);
+  const preimage = readPreimageBytes(configPath, options.containmentRoot);
+  const postimageDigest = createHash("sha256").update(content).digest("hex");
+  const tmpPath = join(dirname(configPath), `.config.json.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
+  let fd: number | undefined;
+  let renamed = false;
+  const rollback = () => {
+    const current = readPreimageBytes(configPath, options.containmentRoot);
+    if (current.digest !== postimageDigest) return;
+    if (preimage.exists && preimage.bytes) {
+      writeFilePrivateAtomic(configPath, preimage.bytes.toString("utf8"), { containmentRoot: options.containmentRoot, expectedDigest: postimageDigest });
+      if (preimage.mode !== null) chmodSync(configPath, preimage.mode);
+    } else {
+      unlinkSync(configPath);
+    }
+  };
+  try {
+    fd = openSync(tmpPath, "wx", 0o600);
+    writeFileSync(fd, content, "utf-8");
+    chmodSync(tmpPath, 0o600);
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    ensureSafeParentAncestry(configPath, options.containmentRoot);
+    assertConfigPathIsSafeForWrite(configPath);
+    assertExpectedDigest(configPath, options.expectedDigest);
+    renameSync(tmpPath, configPath);
+    renamed = true;
+    options.afterRenameForTest?.();
+    try {
+      const dirFd = openSync(dirname(configPath), "r");
+      try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+    } catch {
+      // Directory fsync is best-effort across platforms/filesystems.
+    }
+    return { path: configPath, preimageDigest: preimage.digest, postimageDigest, rollback };
+  } catch (error) {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* best effort */ }
+    }
+    try { unlinkSync(tmpPath); } catch { /* best effort */ }
+    if (renamed) {
+      try { rollback(); } catch { /* best effort; caller still receives failure */ }
+    }
+    throw error;
+  }
+}
+
+export function writeDeckConfigFileAtomic(configPath: string, config: unknown, options: DeckConfigFileWriteOptions = {}): NormalizedDeckConfig {
+  return withDeckConfigFileLock(configPath, options.containmentRoot, () => writeDeckConfigFileAtomicUnlocked(configPath, config, options));
+}
+
+function writeDeckConfigFileAtomicUnlocked(configPath: string, config: unknown, options: DeckConfigFileWriteOptions = {}): NormalizedDeckConfig {
+  const normalized = validateDeckConfig(config, { configPath });
+  writeFilePrivateAtomic(configPath, `${JSON.stringify(normalized, null, 2)}\n`, options);
+  return normalized;
+}
+
+export function writeDeckConfigFileAtomicWithReceipt(configPath: string, config: unknown, options: DeckConfigFileWriteOptions = {}): { config: NormalizedDeckConfig; receipt: DeckConfigWriteReceipt } {
+  const normalized = validateDeckConfig(config, { configPath });
+  const receipt = withDeckConfigFileLock(configPath, options.containmentRoot, () => writeFilePrivateAtomic(configPath, `${JSON.stringify(normalized, null, 2)}\n`, options));
+  return {
+    config: normalized,
+    receipt: {
+      ...receipt,
+      rollback: () => withDeckConfigFileLock(configPath, options.containmentRoot, receipt.rollback),
+    },
+  };
+}
+
+export function patchDeckConfigFile(configPath: string, patch: DeckConfigFilePatch, options: DeckConfigFilePatchOptions = {}): NormalizedDeckConfig {
+  return withDeckConfigFileLock(configPath, options.containmentRoot, () => {
+    const retries = Math.max(0, Math.min(options.maxRetries ?? 3, 10));
+    let lastConflict: DeckConfigError | undefined;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const preimage = readDeckConfigFilePreimage(configPath, { containmentRoot: options.containmentRoot });
+    const existing = readDeckConfigFile(configPath, { containmentRoot: options.containmentRoot });
+    try {
+      return writeDeckConfigFileAtomicUnlocked(configPath, patch(existing), {
+        containmentRoot: options.containmentRoot,
+        expectedDigest: options.expectedDigest !== undefined ? options.expectedDigest : preimage.digest,
+      });
+    } catch (error) {
+      if (error instanceof DeckConfigError && error.code === "DECK_CONFIG_CONCURRENT_MODIFICATION" && options.expectedDigest === undefined) {
+        lastConflict = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+    throw lastConflict ?? new DeckConfigError("DECK_CONFIG_CONCURRENT_MODIFICATION", "Deck config changed before write; retry with a fresh preimage.", { configPath });
+  });
+}
+
+export function readDeckConfig(projectRoot: string): NormalizedDeckConfig {
+  return readDeckConfigFile(getDeckConfigPath(projectRoot));
 }
 
 // ============================================================================
@@ -353,98 +744,72 @@ export class GlobalConfigError extends Error {
 /**
  * Get the global Deck config file path.
  *
- * Uses the path resolver from Task 5 (apps/cli/src/runtime/paths.ts).
+ * Core does not resolve process-global paths; callers provide the CLI-resolved
+ * XDG config path.
  *
  * @returns Full path to global config.json
  * @throws {GlobalConfigError} If path resolution fails
  */
-export async function getGlobalDeckConfigPath(): Promise<string> {
-  const paths = await getGlobalPaths();
-  if (!paths) {
-    throw new GlobalConfigError(
-      "GLOBAL_CONFIG_PATH_RESOLUTION_FAILED",
-      "Cannot resolve global config path: path resolver not available",
-    );
-  }
-  return paths.getGlobalDeckConfigPath();
+export async function getGlobalDeckConfigPath(configPath?: string): Promise<string> {
+  if (configPath && configPath.trim().length > 0) return configPath;
+  throw new GlobalConfigError(
+    "GLOBAL_CONFIG_PATH_RESOLUTION_FAILED",
+    "Core no longer resolves global Deck config paths. Pass a caller-resolved config path from the CLI composition root.",
+  );
 }
 
 /**
  * Read the global Deck config.
  *
- * Reads from the global config file at $XDG_CONFIG_HOME/.deck/config.json
- * (or fallback locations). Returns default config if no global config exists.
+ * Reads from the caller-provided global config file path. Returns default config
+ * if no path/global config exists.
  *
  * @returns Normalized global Deck config
  * @throws {GlobalConfigError} If read fails
  */
-export async function readGlobalDeckConfig(): Promise<NormalizedDeckConfig> {
-  const paths = await getGlobalPaths();
-  if (!paths) {
-    // Return default if path resolver not available
-    return getDefaultDeckConfig();
-  }
-
-  const configPath = await paths.getGlobalDeckConfigPath();
-
-  if (!existsSync(configPath)) {
-    return getDefaultDeckConfig();
-  }
-
-  let parsed: unknown;
+export async function readGlobalDeckConfig(configPath?: string): Promise<NormalizedDeckConfig> {
+  if (!configPath) return getDefaultDeckConfig();
   try {
-    parsed = JSON.parse(readFileSync(configPath, "utf-8"));
+    return readDeckConfigFile(configPath);
   } catch (error) {
+    if (error instanceof DeckConfigError) throw error;
     throw new GlobalConfigError(
       "GLOBAL_CONFIG_READ_ERROR",
-      `Global config is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to read global config: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-
-  return validateDeckConfig(parsed, { configPath });
 }
 
 /**
  * Write the global Deck config.
  *
- * Writes to the global config file at $XDG_CONFIG_HOME/.deck/config.json
- * (or default location). Creates directories as needed.
+ * Writes to the caller-provided global config file path. Creates directories as
+ * needed.
  *
  * @param config - Config object to write
  * @returns Normalized config that was written
  * @throws {GlobalConfigError} If write fails
  */
-export async function writeGlobalDeckConfig(config: unknown): Promise<NormalizedDeckConfig> {
-  const paths = await getGlobalPaths();
-  if (!paths) {
+export async function writeGlobalDeckConfig(config: unknown, configPath?: string): Promise<NormalizedDeckConfig> {
+  if (!configPath) {
     throw new GlobalConfigError(
       "GLOBAL_CONFIG_WRITE_ERROR",
-      "Cannot write global config: path resolver not available",
+      "Core no longer resolves global Deck config paths. Pass a caller-resolved config path from the CLI composition root.",
     );
   }
-
-  const configPath = await paths.getGlobalDeckConfigPath();
-  const normalized = validateDeckConfig(config, { configPath });
-
   try {
-    mkdirSync(dirname(configPath), { recursive: true });
-    writeFileSync(configPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
+    return writeDeckConfigFileAtomic(configPath, config);
   } catch (error) {
+    if (error instanceof DeckConfigError) throw error;
     throw new GlobalConfigError(
       "GLOBAL_CONFIG_WRITE_ERROR",
       `Failed to write global config: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-
-  return normalized;
 }
 
 export function writeDeckConfig(projectRoot: string, config: unknown): NormalizedDeckConfig {
-  const configPath = getDeckConfigPath(projectRoot);
-  const normalized = validateDeckConfig(config, { configPath });
-  mkdirSync(dirname(configPath), { recursive: true });
-  writeFileSync(configPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
-  return normalized;
+  return writeDeckConfigFileAtomic(getDeckConfigPath(projectRoot), config);
 }
 
 export function validateDeckConfig(
@@ -463,7 +828,7 @@ export function validateDeckConfig(
   if (version !== DECK_CONFIG_VERSION) {
     throw new DeckConfigError(
       "DECK_CONFIG_UNSUPPORTED_VERSION",
-      `Unsupported Deck config version: ${String(version)}. Expected ${DECK_CONFIG_VERSION}.`,
+      `Unsupported Deck config version. Expected ${DECK_CONFIG_VERSION}.`,
       { configPath: options?.configPath, fieldPath: "version" },
     );
   }
@@ -774,7 +1139,7 @@ function normalizePackageInstructionConfig(
       if (!PACKAGE_INSTRUCTION_PACKAGE_FIELDS.has(pkgKey as PackageInstructionPackageId)) {
         throw new DeckConfigError(
           "DECK_CONFIG_UNKNOWN_FIELD",
-          `Unknown Deck config field: packageInstructions.${runner}.${pkgKey}`,
+          `Unknown Deck config field under packageInstructions.${runner}.`,
           { configPath, fieldPath: `packageInstructions.${runner}.${pkgKey}` },
         );
       }
@@ -878,7 +1243,7 @@ function normalizeProfiles(
     if (seenNames.has(p.name)) {
       throw new DeckConfigError(
         "DECK_CONFIG_INVALID_SHAPE",
-        `Duplicate profile name: "${p.name}"`,
+        "Duplicate profile name.",
         { configPath, fieldPath: "profiles" },
       );
     }
@@ -899,7 +1264,7 @@ function normalizeProfiles(
         if (!SDD_PHASES.includes(phaseKey as SDDPhase)) {
           throw new DeckConfigError(
             "DECK_CONFIG_UNKNOWN_FIELD",
-            `Unknown phase: "${phaseKey}". Valid phases: ${SDD_PHASES.join(", ")}.`,
+            `Unknown profile phase override. Valid phases: ${SDD_PHASES.join(", ")}.`,
             { configPath, fieldPath: `profiles.phaseOverrides.${phaseKey}` },
           );
         }
@@ -936,7 +1301,7 @@ function assertValidActiveProfile(activeProfile: string, profiles: Profile[], co
   if (!profileNames.includes(activeProfile)) {
     throw new DeckConfigError(
       "DECK_CONFIG_INVALID_SHAPE",
-      `Unknown profile: "${activeProfile}". Available profiles: ${profileNames.join(", ")}`,
+      `Unknown active profile. Available profiles count: ${profileNames.length}`,
       { configPath, fieldPath: "activeProfile" },
     );
   }
@@ -950,7 +1315,7 @@ function parseActiveProvider(
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new DeckConfigError(
       "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER",
-      `Unsupported adaptive-memory provider: ${String(value)}.`,
+      "Unsupported adaptive-memory provider value.",
       { configPath, fieldPath },
     );
   }
@@ -962,7 +1327,7 @@ function normalizeSearchMode(value: unknown, configPath?: string): SupermemorySe
   if (typeof value !== "string" || !SUPERMEMORY_SEARCH_MODES.includes(value as SupermemorySearchMode)) {
     throw new DeckConfigError(
       "SUPERMEMORY_CONFIG_INVALID",
-      `Invalid Supermemory searchMode: ${String(value)}.`,
+      `Invalid Supermemory searchMode. Expected one of: ${SUPERMEMORY_SEARCH_MODES.join(", ")}.`,
       { configPath, fieldPath: "adaptiveMemory.supermemory.searchMode" },
     );
   }
@@ -1026,7 +1391,7 @@ function assertKnownFields(
     if (!allowedFields.has(key)) {
       throw new DeckConfigError(
         "DECK_CONFIG_UNKNOWN_FIELD",
-        `Unknown Deck config field: ${fieldPath}.${key}`,
+        `Unknown Deck config field under ${fieldPath}.`,
         { configPath, fieldPath: `${fieldPath}.${key}` },
       );
     }

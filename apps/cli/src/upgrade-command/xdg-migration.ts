@@ -29,7 +29,7 @@ import {
   getDeckConfigDir,
   getDeckCacheDir,
   getDeckStateDir,
-  getLegacyDeckConfigDir,
+  getDeckConfigMigrationCandidateDir,
 } from "../runtime/paths.js";
 
 // ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ export function isMigrationComplete(markerPath: string = getMigrationMarkerPath(
  * `undefined`. Used to short-circuit migration when no legacy data exists.
  */
 export function detectLegacyDeckConfig(): string | undefined {
-  const legacyDir = getLegacyDeckConfigDir();
+  const legacyDir = getDeckConfigMigrationCandidateDir();
   return existsSync(legacyDir) ? legacyDir : undefined;
 }
 
@@ -237,7 +237,7 @@ export function migrateLegacyDeckConfig(
   const newConfigDir = getDeckConfigDir();
   const newStateDir = getDeckStateDir();
   const newCacheDir = getDeckCacheDir();
-  const legacyDir = getLegacyDeckConfigDir();
+  const legacyDir = getDeckConfigMigrationCandidateDir();
 
   // Idempotency: marker wins.
   if (!options.force && existsSync(markerPath)) {

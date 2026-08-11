@@ -1,0 +1,62 @@
+schema: spec-registry-events-v1
+events:
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: preconditions.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-08-11"
+    actor: deck-quality
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Final approval includes canonical XDG repair, deletion of both user-authorized legacy files/directories, ignored project config, and 4,502 passing tests."
+  - phase: archive
+    status: archived
+    event: archive.archived
+    artifact: archive-report.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Archive target: openspec/archive/consolidate-global-deck-config"

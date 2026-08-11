@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { runPiLaunch } from "./pi-launch-command";
+import { getDefaultDeckConfig } from "@deck/core";
+import { runPiLaunch as runPiLaunchProduction } from "./pi-launch-command";
+import { runPiLaunchLegacyCompatibility as runPiLaunch } from "./pi-launch-command-legacy-compatibility.test-support";
 
 function createTempDir(prefix = "deck-test-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -27,6 +29,28 @@ function writeOrchestratorAssignment(projectRoot: string, model = "openai-codex/
 }
 
 describe("runPiLaunch", () => {
+  test("production launch fails closed when caller omits global Deck config", async () => {
+    const projectRoot = createTempDir();
+    try {
+      const result = await runPiLaunchProduction({ teamId: "developer-team", projectRoot, flags: {}, commandExists: () => true, dryRun: true } as never);
+      expect(result.status).toBe("error");
+      expect(JSON.stringify(result)).toContain("DECK_CONFIG_REQUIRED");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("production launch uses only the injected global provider selection", async () => {
+    const projectRoot = createTempDir();
+    try {
+      const result = await runPiLaunchProduction({ teamId: "developer-team", projectRoot, flags: {}, commandExists: () => true, dryRun: true, deckConfig: getDefaultDeckConfig() });
+      expect(result.status).toBe("ready");
+      if (result.status === "ready") expect(result.memoryDiagnostics).toEqual([]);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("returns error when pi command is not found", async () => {
     const result = await runPiLaunch({
       teamId: "developer-team",

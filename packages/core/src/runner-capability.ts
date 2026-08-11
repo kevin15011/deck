@@ -111,6 +111,7 @@ export type RunnerToolInstallInput = {
 
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles/index";
 import type { RunnerCapabilitySupportStatus } from "./runner-capability-registry";
+import type { NormalizedDeckConfig } from "./config/deck-config";
 
 export type DeveloperTeamManifestInput = {
   projectRoot: string;
@@ -119,6 +120,8 @@ export type DeveloperTeamManifestInput = {
   memoryProviderId?: string;
   /** Optional capability instruction bundle for the manifest */
   capabilityInstructions?: CapabilityInstructionBundle;
+  /** Caller-resolved global Deck preferences. */
+  deckConfig: NormalizedDeckConfig;
 };
 
 export type DeveloperTeamModelAssignmentInput = {
@@ -197,6 +200,7 @@ export type DeveloperTeamInstallPlanInput = {
   manifest: DeveloperTeamManifest;
   environmentId: RunnerEnvironmentId;
   capabilityInstructions?: import("./teams/developer/instruction-bundles/index").CapabilityInstructionBundle;
+  deckConfig: NormalizedDeckConfig;
 };
 
 export type RunnerDeveloperTeamInstallPlan = {

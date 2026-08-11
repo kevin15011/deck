@@ -1,8 +1,12 @@
 import React from "react";
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { render } from "ink";
+import { createDeckConfigStore } from "../deck-config-store";
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
 
@@ -148,9 +152,14 @@ async function mountDiscovery(discover: (request: any) => Promise<any>, resolveP
     getModelInventory: discover,
   };
   const harness = createInkHarness();
+  const projectRoot = resolveProjectRoot();
+  const configRoot = mkdtempSync(join(tmpdir(), "deck-opencode-discovery-config-"));
+  const configStore = createDeckConfigStore({ homeDir: join(configRoot, "home"), xdgConfigHome: join(configRoot, "xdg"), projectRoot });
+  configStore.write({});
   const instance = render(
     <DeckApp
       getAdapter={() => adapter as any}
+      configStore={configStore}
       resolveProjectRoot={resolveProjectRoot as any}
       runReleaseCheck={async () => ({ kind: "none" })}
     />,

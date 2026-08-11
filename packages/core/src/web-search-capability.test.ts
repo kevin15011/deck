@@ -19,8 +19,8 @@ import {
   getAgentContent,
   getTeamSessionInstructions,
 } from "./index";
-import { validateDeckConfig, writeDeckConfig } from "./config/deck-config";
-import { mkdtempSync, readFileSync as readFile, rmSync } from "node:fs";
+import { validateDeckConfig, writeDeckConfigFileAtomic } from "./config/deck-config";
+import { mkdirSync, mkdtempSync, readFileSync as readFile, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -271,8 +271,11 @@ describe("web-search configuration", () => {
     const root = mkdtempSync(join(tmpdir(), "deck-web-search-config-"));
     try {
       expect(() => validateDeckConfig({ webSearch: { enabled: true, apiKey: "do-not-store" } })).toThrow();
-      const normalized = writeDeckConfig(root, { webSearch: { enabled: true, provider: "tavily" } });
-      const snapshot = readFile(join(root, ".deck", "config.json"));
+      const xdg = join(root, "xdg");
+      const configPath = join(xdg, "deck", "config.json");
+      mkdirSync(join(xdg, "deck"), { recursive: true });
+      const normalized = writeDeckConfigFileAtomic(configPath, { webSearch: { enabled: true, provider: "tavily" } }, { containmentRoot: xdg, expectedDigest: null });
+      const snapshot = readFile(configPath);
       expect(snapshot).not.toContain("TAVILY_API_KEY");
       expect(snapshot).not.toContain("do-not-store");
       expect(normalized.webSearch).toEqual({ enabled: true, provider: "tavily" });

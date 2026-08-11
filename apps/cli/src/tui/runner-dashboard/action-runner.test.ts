@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -32,9 +32,14 @@ import {
 } from "./action-runner";
 import { createDefaultPiRunnerDashboardState, createDefaultRunnerDashboardState, type PiRunnerReviewPlan } from "./state";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
-import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds, readDeckConfig } from "@deck/core";
+import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds } from "@deck/core";
+import { createDeckConfigStore } from "../../deck-config-store";
 
 const TOKEN_SENTINEL = "sk-sm-test-SHOULD-NOT-LEAK";
+
+function testConfigStore(projectRoot: string) {
+  return createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
+}
 
 const supermemoryPlan: PiRunnerReviewPlan = {
   ready: true,
@@ -81,6 +86,7 @@ const SERENA_EVIDENCE = {
 describe("Pi Runner dashboard action runner Supermemory safety", () => {
   test("round-trips Web Search selection before native materialization", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-dashboard-web-search-"));
+    const configStore = testConfigStore(projectRoot);
     const mcpWrites: Array<Record<string, unknown>> = [];
     const state = createDefaultPiRunnerDashboardState({
       selectedCapabilities: { "web-search": true },
@@ -104,6 +110,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
     try {
       const results = await runRunnerReviewPlan(plan, {
         projectRoot,
+        configStore,
         dashboardState: state,
         webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
         writeMcpConfig: async (options) => {
@@ -115,7 +122,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
       const resultsById = new Map(results.map((result) => [result.actionId, result]));
       expect(resultsById.get("capability.web-search.deck-config")).toMatchObject({ status: "executed" });
       expect(resultsById.get("capability.web-search.mcp-config")).toMatchObject({ status: "executed" });
-      const persisted = readDeckConfig(projectRoot);
+      const persisted = configStore.read();
       expect(persisted.webSearch).toEqual({ enabled: true, provider: "tavily" });
       expect(getEnabledCapabilityInstructionIds(persisted, "pi")).toContain("web-search");
       expect(buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(persisted, "pi")).instructions.some((fragment) => fragment.packageId === "web-search")).toBe(true);
@@ -125,7 +132,8 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
         webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
         command: ["npx", "-y", "tavily-mcp@0.2.22"],
       });
-      expect(readFileSync(join(projectRoot, ".deck", "config.json"), "utf8")).not.toContain("TAVILY_API_KEY");
+      expect(existsSync(join(projectRoot, ".deck", "config.json"))).toBe(false);
+      expect(readFileSync(configStore.paths.canonicalPath, "utf8")).not.toContain("TAVILY_API_KEY");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -133,6 +141,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
 
   test("materializes OpenCode Web Search from disabled inventory through readiness reinspection", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-web-search-e2e-"));
+    const configStore = testConfigStore(projectRoot);
     const configPath = join(projectRoot, "opencode.json");
     const state = createDefaultRunnerDashboardState({
       runnerScope: "opencode",
@@ -164,6 +173,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
     try {
       const results = await runRunnerReviewPlan(plan, {
         projectRoot,
+        configStore,
         dashboardState: state,
         webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
         writeMcpConfig: async (options) => {
@@ -175,7 +185,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
       const resultsById = new Map(results.map((result) => [result.actionId, result]));
       expect(resultsById.get("capability.web-search.deck-config")).toMatchObject({ status: "executed" });
       expect(resultsById.get("capability.web-search.mcp-config")).toMatchObject({ status: "executed" });
-      const persisted = readDeckConfig(projectRoot);
+      const persisted = configStore.read();
       expect(persisted.webSearch).toEqual({ enabled: true, provider: "tavily" });
       const instructionIds = getEnabledCapabilityInstructionIds(persisted, "opencode");
       expect(instructionIds).toContain("web-search");
@@ -216,6 +226,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
 
   test("materializes Pi Web Search from disabled inventory through readiness reinspection", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-pi-web-search-e2e-"));
+    const configStore = testConfigStore(projectRoot);
     const configPath = join(projectRoot, "pi-mcp.json");
     const state = createDefaultRunnerDashboardState({
       runnerScope: "pi",
@@ -251,6 +262,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
     try {
       const results = await runRunnerReviewPlan(plan, {
         projectRoot,
+        configStore,
         dashboardState: state,
         webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
         writeMcpConfig: async (options) => {
@@ -266,7 +278,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
       const resultsById = new Map(results.map((result) => [result.actionId, result]));
       expect(resultsById.get("capability.web-search.deck-config")).toMatchObject({ status: "executed" });
       expect(resultsById.get("capability.web-search.mcp-config")).toMatchObject({ status: "executed" });
-      const persisted = readDeckConfig(projectRoot);
+      const persisted = configStore.read();
       expect(persisted.webSearch).toEqual({ enabled: true, provider: "tavily" });
       const instructionIds = getEnabledCapabilityInstructionIds(persisted, "pi");
       expect(instructionIds).toContain("web-search");
@@ -350,6 +362,38 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
       serena: false,
     });
     expect(writes[0]!.packageInstructions.codex).not.toHaveProperty("pi-hud");
+  });
+
+  test("global preference write derives from the locked current config and preserves unrelated runner settings", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-action-runner-config-"));
+    try {
+      const store = testConfigStore(projectRoot);
+      store.write({
+        adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "custom-sm", searchMode: "documents" } },
+        packageInstructions: { opencode: { "context-mode": true } },
+        orchestratorPersonality: "guia",
+      });
+      const state = createDefaultPiRunnerDashboardState({
+        runnerScope: "codex",
+        adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, diagnostics: [] } },
+        packageInstructions: { "codebase-memory": true, serena: true } as any,
+      });
+
+      await runRunnerAction({ id: "package-instructions.codex.deck-config", kind: "write-deck-config", title: "Write package instructions", status: "ready" }, {
+        projectRoot,
+        dashboardState: state,
+        packageInstructionIds: getAdapter("codex").packageInstructionIds,
+        configStore: store,
+      });
+
+      const config = store.read();
+      expect(config.adaptiveMemory.supermemory).toEqual(expect.objectContaining({ mcpServerName: "custom-sm", searchMode: "documents" }));
+      expect(config.packageInstructions.opencode["context-mode"]).toBe(true);
+      expect(config.packageInstructions.codex["codebase-memory"]).toBe(true);
+      expect(config.orchestratorPersonality).toBe("guia");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 
   test("bloquea Review & Install cuando Supermemory no tiene configuración completa", async () => {

@@ -1,5 +1,12 @@
 import { describe, expect, test, vi } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DoctorDiagnosticsResult } from "../doctor-command/types";
+import { createDeckConfigStore } from "../deck-config-store";
+import { installGlobalConfigRealEnvSentinel } from "../../../../packages/core/src/config/global-config-real-env-sentinel.test-helper";
+
+installGlobalConfigRealEnvSentinel();
 
 // Store mock functions at module scope so each test can configure them.
 // This avoids vi.mocked() which is not available in Bun's vitest.
@@ -64,7 +71,11 @@ function fabOkMcpResult() {
 
 
 function fabDependencies() {
+  const root = mkdtempSync(join(tmpdir(), "deck-doctor-config-"));
+  const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: join(root, "xdg"), projectRoot: join(root, "repo") });
+  configStore.write({});
   return {
+    configStore,
     runDeckChecks: vi.fn(async () => ({ deck: [], binary: [], runnerConfig: [] })),
     fetchReleaseDescriptor: vi.fn(() => ({
       kind: "legacy" as const,
@@ -387,6 +398,7 @@ describe("runDoctorDiagnostics dependency seam", () => {
     const result = await runDoctorDiagnostics(dependencies);
 
     expect(Object.keys(dependencies).sort()).toEqual([
+      "configStore",
       "fetchReleaseDescriptor",
       "inspectCodex",
       "memoryBinaryAvailable",

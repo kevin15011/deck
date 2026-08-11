@@ -28,7 +28,7 @@ import type {
   WebSearchReadinessEvidence,
   WebSearchReadinessResult,
 } from "./web-search-capability";
-import type { PackageInstructionPackageId } from "./config/deck-config";
+import type { NormalizedDeckConfig, PackageInstructionPackageId } from "./config/deck-config";
 import type { SkillDiscoverySourceProviderV1 } from "./skill-discovery/contracts";
 import type {
   SerenaBootstrapAuthorization,
@@ -169,6 +169,8 @@ export type RunnerLaunchBase = {
   teamId: string;
   modelId?: string;
   reasoningLevel?: string;
+  /** Caller-resolved global Deck preferences. Project root remains execution scope only. */
+  deckConfig: NormalizedDeckConfig;
 };
 
 export const MAX_RUNNER_STDIN_PAYLOAD_BYTES = 64 * 1024;
@@ -267,6 +269,8 @@ export type CapabilityInventoryInput = {
   projectRoot: string;
   environmentId: RunnerEnvironmentId;
   runnerId: RunnerId;
+  /** Caller-resolved global Deck preferences. Adapters must not re-read project-local Deck preferences. */
+  deckConfig: NormalizedDeckConfig;
 };
 
 /**
@@ -561,6 +565,8 @@ export type DeveloperTeamAdapterInstallInput = {
   standaloneSkills?: readonly { skillId: string; body: string; files?: Record<string, string> }[];
   /** Best-effort exact exclusion of new, untracked, fully owned files. */
   localOnly?: boolean;
+  /** Caller-resolved global Deck preferences. */
+  deckConfig: NormalizedDeckConfig;
 };
 
 // ---------------------------------------------------------------------------
@@ -693,7 +699,7 @@ export interface RunnerAdapter {
   inspectProject?(projectRoot: string): Promise<RunnerProjectInspection>;
 
   /** Adapter-owned, read-only doctor projection for runner-native state. */
-  diagnoseProject?(projectRoot: string): Promise<readonly RunnerDoctorCheck[]>;
+  diagnoseProject?(projectRoot: string, deckConfig: NormalizedDeckConfig): Promise<readonly RunnerDoctorCheck[]>;
 
   /** Adapter-owned launch planning. The CLI remains the sole process owner. */
   buildLaunchPlan?(input: RunnerLaunchInput): Promise<RunnerLaunchResult> | RunnerLaunchResult;

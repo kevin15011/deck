@@ -3,13 +3,18 @@ import { EventEmitter } from "node:events";
 
 import { createNodeRunnerProcessEffects, executeRunnerLaunchPlan } from "./runner-launch-command";
 import { runRunnerLaunch } from "./runner-launch-command";
-import type { RunnerAdapter } from "@deck/core";
+import { getDefaultDeckConfig, type RunnerAdapter, type RunnerLaunchInput } from "@deck/core";
 import { createPiRunnerAdapter } from "@deck/adapter-pi";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { buildCodexLaunchPlan, createCodexRunnerAdapter } from "@deck/adapter-codex";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+const withDeckConfig = <T extends Omit<RunnerLaunchInput, "deckConfig">>(input: T): T & Pick<RunnerLaunchInput, "deckConfig"> => ({
+  ...input,
+  deckConfig: getDefaultDeckConfig(),
+});
 
 describe("executeRunnerLaunchPlan", () => {
   test("merges an allowlisted overlay, redacts diagnostics, and propagates exit", async () => {
@@ -91,7 +96,7 @@ describe("executeRunnerLaunchPlan", () => {
 
   test("executes a normalized Codex inherit-stdin caller plan through the generic executor", async () => {
     const launch = buildCodexLaunchPlan(
-      { projectRoot: "/project", teamId: "developer-team", mode: "exec", prompt: ["safe"], stdin: "inherit", stdinPayload: { type: "utf8", content: "safe" } },
+      withDeckConfig({ projectRoot: "/project", teamId: "developer-team", mode: "exec", prompt: ["safe"], stdin: "inherit", stdinPayload: { type: "utf8", content: "safe" } }),
       { interactive: true, exec: true, resumeById: true, resumeLatest: true },
     );
     expect(launch.status).toBe("ready");
@@ -130,7 +135,7 @@ describe("runRunnerLaunch consent and status", () => {
     const events: string[] = [];
     const result = await runRunnerLaunch({
       adapter: adapter({ applyDeveloperTeamInstall: async () => { events.push("apply"); throw new Error("must not apply"); } }),
-      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }),
       interactive: false,
       presentPreview: async (preview) => { events.push(`preview:${preview}`); },
       processEffects: { spawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
@@ -148,7 +153,7 @@ describe("runRunnerLaunch consent and status", () => {
         applyDeveloperTeamInstall: async () => { events.push("apply"); return { results: [], changedCount: 1, unchangedCount: 0 }; },
         buildLaunchPlan: () => ({ status: "unsupported", code: "no-resume", diagnostics: [{ code: "no-resume", severity: "error", message: "unsupported" }] }),
       }),
-      launch: { projectRoot: "/p", teamId: "developer-team", mode: "resume-latest" },
+      launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "resume-latest" }),
       interactive: false,
       yes: true,
       presentPreview: async () => { events.push("preview"); },
@@ -169,7 +174,7 @@ describe("runRunnerLaunch consent and status", () => {
         },
         buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
       }),
-      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }),
       dryRun: true,
       interactive: false,
       presentPreview: async (value) => { preview = value; },
@@ -195,7 +200,7 @@ describe("runRunnerLaunch consent and status", () => {
           throw new Error("install-only must not plan a Codex launch");
         },
       }),
-      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }),
       installOnly: true,
       interactive: false,
       presentPreview: async () => {},
@@ -227,7 +232,7 @@ describe("runRunnerLaunch consent and status", () => {
           throw new Error("install-only must not plan a launch");
         },
       }),
-      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }),
       installOnly: true,
       dryRun: true,
       interactive: false,
@@ -245,7 +250,7 @@ describe("runRunnerLaunch consent and status", () => {
   });
 
   test("real Pi and OpenCode adapters expose generic interactive compatibility plans", async () => {
-    const input = { projectRoot: "/tmp/deck-generic-launch", teamId: "developer-team", mode: "interactive" as const };
+    const input = withDeckConfig({ projectRoot: "/tmp/deck-generic-launch", teamId: "developer-team", mode: "interactive" as const });
     expect(await createPiRunnerAdapter().buildLaunchPlan?.(input)).toMatchObject({ status: "ready", plan: { command: "pi", stdio: "inherit" } });
     expect(await createOpenCodeRunnerAdapter().buildLaunchPlan?.(input)).toMatchObject({ status: "ready", plan: { command: "opencode", stdio: "inherit" } });
   });
@@ -263,7 +268,7 @@ describe("runRunnerLaunch consent and status", () => {
         let preview = "";
         const result = await runRunnerLaunch({
           adapter: runner,
-          launch: { projectRoot: join(root, runner.runnerId), teamId: "developer-team", mode: "interactive" },
+          launch: withDeckConfig({ projectRoot: join(root, runner.runnerId), teamId: "developer-team", mode: "interactive" }),
           interactive: true,
           presentPreview: async (value) => { preview = value; events.push("preview"); },
           confirm: async () => { events.push("consent"); return true; },
@@ -290,7 +295,7 @@ describe("runRunnerLaunch consent and status", () => {
           return { files: [], mutationPreview: [] };
         },
       }),
-      launch: { projectRoot: "/project", teamId: "developer-team", mode: "interactive" },
+      launch: withDeckConfig({ projectRoot: "/project", teamId: "developer-team", mode: "interactive" }),
       interactive: false,
       yes: true,
       presentPreview: async () => {},
@@ -321,10 +326,10 @@ describe("runRunnerLaunch consent and status", () => {
         },
       });
       const routes = [
-        { launch: { projectRoot, teamId: "developer-team", mode: "interactive" as const }, newSession: true },
-        { launch: { projectRoot, teamId: "developer-team", mode: "exec" as const, prompt: [], stdin: "closed" as const }, newSession: true },
-        { launch: { projectRoot, teamId: "developer-team", mode: "resume-by-id" as const, sessionId: "session-1" }, args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "session-1"] },
-        { launch: { projectRoot, teamId: "developer-team", mode: "resume-latest" as const }, args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "--last"] },
+        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "interactive" as const }), newSession: true },
+        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "exec" as const, prompt: [], stdin: "closed" as const }), newSession: true },
+        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-by-id" as const, sessionId: "session-1" }), args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "session-1"] },
+        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-latest" as const }), args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "--last"] },
       ];
       for (const route of routes) {
         const events: string[] = [];
@@ -383,7 +388,7 @@ describe("runRunnerLaunch consent and status", () => {
 
     const result = await runRunnerLaunch({
       adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }) }),
-      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }),
       interactive: false,
       yes: true,
       presentPreview: async () => {},
@@ -411,7 +416,7 @@ describe("runRunnerLaunch consent and status", () => {
           return { status: "rolled-back", conflicts: [], diagnostics: [] };
         },
       }),
-      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }),
       interactive: false,
       yes: true,
       presentPreview: async () => {},
@@ -438,7 +443,7 @@ describe("runRunnerLaunch consent and status", () => {
       adapter.verifyDeveloperTeamInstall = () => ({ valid: false, diagnostics: ["forced semantic mismatch"] });
       const result = await runRunnerLaunch({
         adapter,
-        launch: { projectRoot, teamId: "developer-team", mode: "interactive" },
+        launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "interactive" }),
         interactive: false,
         yes: true,
         presentPreview: async () => {},
@@ -461,7 +466,7 @@ describe("runRunnerLaunch consent and status", () => {
     };
     const run = (rollbackDeveloperTeamFiles: RunnerAdapter["rollbackDeveloperTeamFiles"]) => runRunnerLaunch({
       adapter: adapter({ ...base, rollbackDeveloperTeamFiles }),
-      launch: { projectRoot: "/p", teamId: "developer-team", mode: "interactive" },
+      launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }),
       interactive: false,
       yes: true,
       presentPreview: async () => {},

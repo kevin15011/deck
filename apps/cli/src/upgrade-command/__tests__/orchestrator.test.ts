@@ -393,7 +393,7 @@ describe("orchestrator", () => {
     });
     const targets = await collectRunnerBackupTargets({
       projectRoot: "/tmp",
-      readDeckConfig: () => makeConfig({ opencode: { rtk: true } }),
+      readGlobalDeckConfig: () => makeConfig({ opencode: { rtk: true } }),
       adapterRegistry: makeRegistry([adapter]),
     } as OrchestratorDeps);
 
@@ -416,7 +416,7 @@ describe("orchestrator", () => {
 
     const targets = await collectRunnerBackupTargets({
       projectRoot: "/tmp/project",
-      readDeckConfig: () => config,
+      readGlobalDeckConfig: () => config,
       adapterRegistry: makeRegistry([adapter]),
     } as OrchestratorDeps);
 
@@ -479,7 +479,7 @@ describe("orchestrator", () => {
       },
       adapterRegistry: makeRegistry([]),
       projectRoot: workDir,
-      readDeckConfig: () => makeConfig(),
+      readGlobalDeckConfig: () => makeConfig(),
       currentBinaryPath: binaryPath,
       installKind: "binary",
       ...overrides,
@@ -1156,7 +1156,7 @@ describe("orchestrator", () => {
         currentVersion: "1.4.0",
         deps: makeDeps({
           adapterRegistry: makeRegistry([adapter]),
-          readDeckConfig: () => makeConfig({ opencode: { "codebase-memory": true } }),
+          readGlobalDeckConfig: () => makeConfig({ opencode: { "codebase-memory": true } }),
         }),
       });
       // The sync should be "completed" (not skipped).

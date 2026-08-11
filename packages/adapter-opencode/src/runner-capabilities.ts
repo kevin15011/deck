@@ -254,10 +254,8 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
   const capabilityInstructions = input.capabilityInstructions;
   const resolvedCapabilityInstructions = capabilityInstructions ?? (() => {
     try {
-      const { readDeckConfig } = require("@deck/core/config/deck-config");
        const { getEnabledCapabilityInstructionIds, buildCapabilityInstructionBundle } = require("@deck/core/teams/developer/instruction-bundles/index");
-       const config = readDeckConfig(input.projectRoot);
-       const enabledIds = getEnabledCapabilityInstructionIds(config, "opencode");
+       const enabledIds = getEnabledCapabilityInstructionIds(input.deckConfig, "opencode");
       return enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
     } catch {
       return undefined;

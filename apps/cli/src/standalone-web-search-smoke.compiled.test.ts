@@ -35,38 +35,46 @@ describe("compiled Web Search smoke", () => {
 
     const isolated = join(root, "isolated");
     const release = join(isolated, "release");
-    const project = join(isolated, "project");
+    const firstProject = join(isolated, "project-a");
+    const secondProject = join(isolated, "project-b");
     const home = join(isolated, "home");
+    const xdgConfig = join(isolated, "xdg-config");
     const binary = join(release, "deck");
-    mkdirSync(join(project, ".deck"), { recursive: true });
+    mkdirSync(firstProject, { recursive: true });
+    mkdirSync(secondProject, { recursive: true });
     mkdirSync(home, { recursive: true });
+    mkdirSync(join(xdgConfig, "deck"), { recursive: true });
     mkdirSync(release, { recursive: true });
     copyFileSync(compiled, binary);
-    writeFileSync(join(project, ".deck", "config.json"), `${JSON.stringify({ version: 1, webSearch: { enabled: true, provider: "tavily" } })}\n`);
+    writeFileSync(join(xdgConfig, "deck", "config.json"), `${JSON.stringify({ version: 1, webSearch: { enabled: true, provider: "tavily" } })}\n`);
 
-    const runtime = spawnSync(binary, [], {
-      cwd: project,
-      encoding: "utf8",
-      env: {
+    for (const project of [firstProject, secondProject]) {
+      const runtime = spawnSync(binary, [], {
+        cwd: project,
+        encoding: "utf8",
+        env: {
         HOME: home,
+        XDG_CONFIG_HOME: xdgConfig,
         // Empty PATH guarantees no npx/Tavily command can be launched. The
         // standalone executable has no runtime workspace dependency.
         PATH: "",
         DECK_STANDALONE_WEB_SEARCH_SMOKE: "1",
-      },
-    });
+        },
+      });
 
-    expect(existsSync(join(isolated, "node_modules"))).toBe(false);
-    expect(existsSync(join(project, "node_modules"))).toBe(false);
-    expect(runtime.status).toBe(0);
-    const report = JSON.parse(runtime.stdout) as {
-      provider: string | null;
-      runners: Record<string, { state: string; code: string }>;
-    };
-    expect(report.provider).toBe("tavily");
-    expect(report.runners.pi).toBeDefined();
-    expect(report.runners.opencode).toBeDefined();
-    expect(report.runners.pi?.code).not.toBe("inventory-unavailable");
-    expect(report.runners.opencode?.code).not.toBe("inventory-unavailable");
+      expect(existsSync(join(project, ".deck", "config.json"))).toBe(false);
+      expect(existsSync(join(isolated, "node_modules"))).toBe(false);
+      expect(existsSync(join(project, "node_modules"))).toBe(false);
+      expect(runtime.status).toBe(0);
+      const report = JSON.parse(runtime.stdout) as {
+        provider: string | null;
+        runners: Record<string, { state: string; code: string }>;
+      };
+      expect(report.provider).toBe("tavily");
+      expect(report.runners.pi).toBeDefined();
+      expect(report.runners.opencode).toBeDefined();
+      expect(report.runners.pi?.code).not.toBe("inventory-unavailable");
+      expect(report.runners.opencode?.code).not.toBe("inventory-unavailable");
+    }
   }, 120_000);
 });

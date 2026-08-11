@@ -463,7 +463,7 @@ function addAdaptiveMemoryActions(
     id: "adaptive-memory.supermemory.deck-config",
     kind: "write-deck-config",
     title: "Write Supermemory non-secret Deck config",
-    description: "Records Supermemory as the selected Adaptive Memory provider without storing tokens in .deck/config.json.",
+    description: "Records Supermemory as the selected Adaptive Memory provider without storing tokens in Deck config.",
     status: configured ? "ready" : "pending",
     required: true,
     diagnostics: ["Supermemory tokens must be handed off through Pi MCP config, not Deck config."],
@@ -650,7 +650,7 @@ function normalizeName(value: string): string {
  *
  * When any package instruction toggle is enabled for the pi runner scope,
  * a write-deck-config action is added to persist the packageInstructions
- * field to .deck/config.json.
+ * field to Deck config.
  *
  * This is separate from package installation — toggling instruction injection
  * does NOT install or uninstall packages.
@@ -668,7 +668,7 @@ function addPackageInstructionActions(
     id: "package-instructions.pi.deck-config",
     kind: "write-deck-config",
     title: "Write package instruction configuration",
-    description: "Persists per-runner package instruction toggles to .deck/config.json. This controls prompt instruction injection, not package installation.",
+    description: "Persists per-runner package instruction toggles to Deck config. This controls prompt instruction injection, not package installation.",
     status: "ready",
     required: false,
     diagnostics: [

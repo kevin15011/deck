@@ -10,8 +10,6 @@ import {
 import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import {
-  resolveActiveMemoryProvider,
-  readDeckConfig,
   validateDeckConfig,
   type AdaptiveMemoryActiveProvider,
 } from "@deck/core/config/deck-config";
@@ -40,7 +38,7 @@ export type RunOpenCodeLaunchOptions = {
   projectRoot: string;
   memoryProvider?: AdaptiveMemoryProvider;
   cliMemoryProvider?: string;
-  deckConfig?: unknown;
+  deckConfig: unknown;
   activeProvider?: AdaptiveMemoryActiveProvider;
   supportedMemoryProviderIds?: Iterable<string>;
   commandExists?: (command: string) => boolean;
@@ -215,8 +213,24 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
 
   // 3. Build capability instructions from config
   let capabilityInstructions: CapabilityInstructionBundle | undefined;
+  if (options.deckConfig === undefined) {
+    return {
+      status: "error",
+      memoryDiagnostics: [{ code: "memory_provider_unavailable", message: "Global Deck config is not ready: DECK_CONFIG_REQUIRED at config." }],
+      message: "OpenCode launch requires a valid caller-resolved global Deck config.",
+    };
+  }
+  let deckConfig;
   try {
-    const deckConfig = readDeckConfig(projectRoot);
+    deckConfig = validateDeckConfig(options.deckConfig);
+  } catch (error) {
+    return {
+      status: "error",
+      memoryDiagnostics: [{ code: "memory_provider_unavailable", message: redactedConfigErrorMessage(error) }],
+      message: "OpenCode launch requires a valid caller-resolved global Deck config.",
+    };
+  }
+  try {
     const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, "opencode");
     if (enabledIds.length > 0) {
       capabilityInstructions = buildCapabilityInstructionBundle(enabledIds);
@@ -236,6 +250,7 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     memoryProvider: resolvedMemory.provider,
     supportedMemoryProviderIds: options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS,
     capabilityInstructions,
+    personality: deckConfig.orchestratorPersonality,
     standaloneSkills,
     promptProfileActivation: options.promptProfileActivation,
   });
@@ -261,6 +276,12 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   }
 
   return { status: "launched", plan, memoryDiagnostics: allDiagnostics };
+}
+
+function redactedConfigErrorMessage(error: unknown): string {
+  const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "DECK_CONFIG_INVALID";
+  const field = typeof error === "object" && error !== null && "fieldPath" in error ? String((error as { fieldPath?: unknown }).fieldPath ?? "config") : "config";
+  return `Global Deck config is not ready: ${code} at ${field}.`;
 }
 
 function defaultCommandExists(command: string): boolean {

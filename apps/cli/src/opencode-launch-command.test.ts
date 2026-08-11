@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runOpenCodeLaunch } from "./opencode-launch-command";
-import { getDefaultDeckConfig, writeDeckConfig } from "@deck/core";
+import { getDefaultDeckConfig } from "@deck/core";
 
 // Mock imports before importing the module under test
 const mockGetSupportedProviderIds = mock(() => ["engram", "supermemory"]);
@@ -71,6 +71,23 @@ describe("fail-open behavior", () => {
 });
 
 describe("production prompt activation", () => {
+  test("blocks when caller omits global Deck config", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-missing-config-"));
+    try {
+      const result = await runOpenCodeLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        configDir: join(projectRoot, ".config", "opencode"),
+        commandExists: () => true,
+        dryRun: true,
+      } as never);
+      expect(result.status).toBe("error");
+      expect(JSON.stringify(result)).toContain("DECK_CONFIG_REQUIRED");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("installs compact prompts without a rollout receipt", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-rollout-"));
     const configDir = join(projectRoot, ".config", "opencode");
@@ -80,6 +97,7 @@ describe("production prompt activation", () => {
         teamId: "developer-team",
         projectRoot,
         configDir,
+        deckConfig: getDefaultDeckConfig(),
         commandExists: () => true,
         dryRun: true,
       });
@@ -104,15 +122,16 @@ describe("production prompt activation", () => {
     const configDir = join(projectRoot, ".config", "opencode");
     try {
       mkdirSync(configDir, { recursive: true });
-      writeDeckConfig(projectRoot, {
+      const deckConfig = {
         ...getDefaultDeckConfig(),
         webSearch: { enabled: true, provider: "tavily" },
-      });
+      };
 
       const result = await runOpenCodeLaunch({
         teamId: "developer-team",
         projectRoot,
         configDir,
+        deckConfig,
         commandExists: () => true,
         dryRun: true,
       });

@@ -116,7 +116,7 @@ export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status
       <Text bold>Select adaptive-memory provider</Text>
       <Text dimColor>{isCodex
         ? "Codex uses credential-free configuration. Deck shows the user-owned native OAuth next step only after verified install."
-        : "Exactly one provider can be active. Supermemory credentials are never written to .deck/config.json."}</Text>
+            : "Exactly one provider can be active. Supermemory credentials are never written to Deck config."}</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}

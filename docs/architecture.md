@@ -11,6 +11,8 @@
 
 Adapter families translate these neutral concepts for their environments: `packages/adapter-pi` and `packages/adapter-opencode` handle runner materialization, while memory-provider adapters such as `adapter-engram` and `adapter-supermemory` isolate provider integration. `apps/cli` is the composition and user-interaction boundary; it selects capabilities and presents CLI/TUI workflows.
 
+Deck user and runner preferences have one active source: `$XDG_CONFIG_HOME/deck/config.json`, or `~/.config/deck/config.json` when `XDG_CONFIG_HOME` is unset. Core exposes path-parameterized config read/validate/atomic patch/write primitives only; the CLI owns XDG resolution, migration-only legacy discovery, conflict reporting, and the `DeckConfigStore` composition used by TUI, Doctor, launch, upgrade, and sync paths. Project roots remain execution and materialization targets. A repository `.deck/` directory may still host OpenSpec/runtime/runner-native project artifacts or migration-only legacy inputs, but Deck no longer creates or updates `<project>/.deck/config.json` for user preferences.
+
 ## Agent skill discovery boundary
 
 The agent skill registry is a **local, discovery-only index**, not a runtime rules catalog or prompt source. Discovery combines the generic project roots with source declarations from the **active runner** only; exclusive roots belonging to other runners are not aggregated.

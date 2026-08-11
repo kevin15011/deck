@@ -72,7 +72,6 @@ import {
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
 import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
-import { readDeckConfig } from "@deck/core/config/deck-config";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
 import type { CapabilityInstructionBundle } from "@deck/core";
 import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
@@ -543,7 +542,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     configModelOverrides?: Record<string, string>;
     reasoningEffortOverrides?: Record<string, string>;
     changedAgentIds?: readonly string[];
-    /** Optional personality override; when absent, reads from .deck/config.json */
+    /** Optional personality override; when absent, uses the default personality. */
     personality?: OrchestratorPersonality;
     /**
      * Optional modification authorization for apply agents.
@@ -582,15 +581,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
         )
       : undefined;
 
-  // Resolve personality: use explicit option or read from config
-  const resolvedPersonality: OrchestratorPersonality = options?.personality ?? (() => {
-    try {
-      const config = readDeckConfig(projectRoot);
-      return config.orchestratorPersonality;
-    } catch {
-      return DEFAULT_ORCHESTRATOR_PERSONALITY;
-    }
-  })();
+  const resolvedPersonality: OrchestratorPersonality = options?.personality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
   const promptProfile = "compact" as const;
 
   // Build agent entries for opencode.json

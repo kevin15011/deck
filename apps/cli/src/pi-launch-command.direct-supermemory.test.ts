@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { runPiLaunch } from "./pi-launch-command";
+import { runPiLaunchLegacyCompatibility as runPiLaunch } from "./pi-launch-command-legacy-compatibility.test-support";
 
 const SENTINEL_TOKEN = "direct-supermemory-token-should-not-appear";
 
@@ -144,7 +144,7 @@ describe("runPiLaunch direct Supermemory dashboard config", () => {
       if (result.status === "ready") {
         const diagnosticText = JSON.stringify(result.memoryDiagnostics);
         expect(diagnosticText).toContain("memory_provider_unavailable");
-        expect(diagnosticText).toContain("Unknown Deck config field: adaptiveMemory.supermemory.extraField");
+        expect(diagnosticText).toContain("Unknown Deck config field under adaptiveMemory.supermemory");
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
         expect(systemPrompt).not.toContain("Supermemory MCP Adaptive Memory");
       }

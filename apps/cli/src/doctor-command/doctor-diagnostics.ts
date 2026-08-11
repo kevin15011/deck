@@ -27,6 +27,8 @@ import { getBuildInfo } from "../runtime/build-info.js";
 import { getDeckXdgPaths } from "../runtime/paths.js";
 import { runDeckChecks } from "./doctor-checks";
 import { decideReleaseAvailability, fetchReleaseDescriptor } from "../upgrade-command/github-release.js";
+import type { DeckConfigStore } from "../deck-config-store";
+import type { NormalizedDeckConfig } from "@deck/core";
 import type {
   DoctorCategoryResult,
   DoctorCheckItem,
@@ -422,7 +424,8 @@ type DoctorDiagnosticsDependencies = Readonly<{
   fetchReleaseDescriptor: typeof fetchReleaseDescriptor;
   memoryBinaryAvailable: typeof memoryBinaryAvailable;
   readOpenCodeMcpSection: typeof readOpenCodeMcpSection;
-  inspectCodex: (projectRoot: string) => Promise<ReadonlyArray<{ category: string; status: DoctorStatus; message: string; suggestion?: string }>>;
+  configStore?: DeckConfigStore;
+  inspectCodex: (projectRoot: string, deckConfig: NormalizedDeckConfig) => Promise<ReadonlyArray<{ category: string; status: DoctorStatus; message: string; suggestion?: string }>>;
 }>;
 
 const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
@@ -430,12 +433,64 @@ const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
   fetchReleaseDescriptor,
   memoryBinaryAvailable,
   readOpenCodeMcpSection,
-  inspectCodex: async (projectRoot) => {
+  inspectCodex: async (projectRoot, deckConfig) => {
     const { getAdapter } = await import("../runner-adapters");
     const adapter = getAdapter("codex");
-    return adapter.diagnoseProject?.(projectRoot) ?? [];
+    return adapter.diagnoseProject?.(projectRoot, deckConfig) ?? [];
   },
 };
+
+function buildGlobalConfigDoctorCheck(store: DeckConfigStore | undefined): { config?: NormalizedDeckConfig; category: DoctorCategoryResult } {
+  if (!store) {
+    return {
+      category: {
+        category: "Global Deck Config",
+        status: "error",
+        items: [{ status: "error", message: "Doctor requires caller-resolved global Deck config store.", suggestion: "Run doctor through the CLI composition root." }],
+      },
+    };
+  }
+  try {
+    const discovery = store.discover();
+    if (discovery.conflict) {
+      return {
+        category: {
+          category: "Global Deck Config",
+          status: "error",
+          items: [{ status: "error", message: `Global Deck config migration conflict at canonical path. Candidates: ${discovery.conflict.candidates.length}. Invalid: ${discovery.conflict.invalidCandidates.length}.`, suggestion: "Choose one legacy config to adopt before running diagnostics." }],
+        },
+      };
+    }
+    if (!discovery.canonicalExists) {
+      return {
+        category: {
+          category: "Global Deck Config",
+          status: "error",
+          items: [{ status: "error", message: "Canonical global Deck config is missing.", suggestion: "Create the canonical global config before running diagnostics." }],
+        },
+      };
+    }
+    const config = store.readRequired();
+    return {
+      config,
+      category: {
+        category: "Global Deck Config",
+        status: "ok",
+        items: [{ status: "ok", message: "Canonical global Deck config is ready." }],
+      },
+    };
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "DECK_CONFIG_READ_FAILED";
+    const field = typeof error === "object" && error !== null && "fieldPath" in error ? String((error as { fieldPath?: unknown }).fieldPath ?? "config") : "config";
+    return {
+      category: {
+        category: "Global Deck Config",
+        status: "error",
+        items: [{ status: "error", message: `Global Deck config is not ready: ${code} at ${field}.`, suggestion: "Fix or migrate the global Deck config before running diagnostics." }],
+      },
+    };
+  }
+}
 
 function redactCodexDoctorValue(value: string): string {
   return redact(value).replace(/\b(token|secret|credential|api[-_]?key|password)=\S+/gi, "$1=[REDACTED]");
@@ -443,10 +498,9 @@ function redactCodexDoctorValue(value: string): string {
 
 async function buildBinaryUpgradeCheck(
   fetchDescriptor: typeof fetchReleaseDescriptor,
+  globalConfig: Readonly<{ dir: string; exists: boolean }>,
 ): Promise<DoctorBinaryResult> {
   const buildInfo = getBuildInfo();
-  const xdg = getDeckXdgPaths();
-
   let upgradeAvailable = false;
   let latestVersion: string | undefined;
   let latestCommit: string | undefined;
@@ -487,8 +541,8 @@ async function buildBinaryUpgradeCheck(
       channel: buildInfo.channel,
     },
     executablePath: process.execPath ?? null,
-    globalConfigDir: xdg.configDir,
-    globalConfigExists: false,
+    globalConfigDir: globalConfig.dir,
+    globalConfigExists: globalConfig.exists,
     bundledSkillCount: 0,
     upgradeAvailable,
     latestVersion,
@@ -565,10 +619,12 @@ export async function runDoctorDiagnostics(
     fetchReleaseDescriptor: overrides.fetchReleaseDescriptor ?? defaultDoctorDiagnosticsDependencies.fetchReleaseDescriptor,
     memoryBinaryAvailable: overrides.memoryBinaryAvailable ?? defaultDoctorDiagnosticsDependencies.memoryBinaryAvailable,
     readOpenCodeMcpSection: overrides.readOpenCodeMcpSection ?? defaultDoctorDiagnosticsDependencies.readOpenCodeMcpSection,
+    configStore: overrides.configStore,
     inspectCodex: overrides.inspectCodex ?? defaultDoctorDiagnosticsDependencies.inspectCodex,
   };
   const runtimes: DoctorRuntimeResult[] = [];
   let memoryCritical = false;
+  const globalConfigCheck = buildGlobalConfigDoctorCheck(dependencies.configStore);
 
   // 1. Runtime detection
   let runtimeStatuses: Awaited<ReturnType<typeof detectSelectedRuntimes>> = [];
@@ -610,7 +666,8 @@ export async function runDoctorDiagnostics(
       runtimes.push(checkOpenCodeRuntime(status.command!));
     } else if (status.runtime === "codex") {
       try {
-        const checks = await dependencies.inspectCodex(process.cwd());
+        if (!globalConfigCheck.config) throw new Error("missing global config");
+        const checks = await dependencies.inspectCodex(process.cwd(), globalConfigCheck.config);
         runtimes.push({
           runtimeId: "codex",
           name: "Codex",
@@ -654,12 +711,13 @@ export async function runDoctorDiagnostics(
   let runnerConfigResults: DoctorCategoryResult[] = [];
   try {
     const deckChecks = await dependencies.runDeckChecks();
-    deckResults = deckChecks.deck;
+    deckResults = [globalConfigCheck.category, ...deckChecks.deck];
     binaryResults = deckChecks.binary;
     runnerConfigResults = deckChecks.runnerConfig;
   } catch (err) {
     // If deck checks fail entirely, add error category
     deckResults = [
+      globalConfigCheck.category,
       {
         category: "Deck Checks",
         status: "error",
@@ -671,7 +729,10 @@ export async function runDoctorDiagnostics(
   // 6. Binary upgrade availability check (commit-aware)
   let binaryResult: DoctorBinaryResult;
   try {
-    binaryResult = await buildBinaryUpgradeCheck(dependencies.fetchReleaseDescriptor);
+    binaryResult = await buildBinaryUpgradeCheck(dependencies.fetchReleaseDescriptor, {
+      dir: dependencies.configStore?.paths.canonicalDir ?? getDeckXdgPaths().configDir,
+      exists: globalConfigCheck.category.status === "ok",
+    });
   } catch (err) {
     binaryResult = {
       buildInfo: null,

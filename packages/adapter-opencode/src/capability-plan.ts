@@ -382,7 +382,7 @@ function addAdaptiveMemoryActions(
     id: "adaptive-memory.supermemory.deck-config",
     kind: "write-deck-config",
     title: "Write Supermemory non-secret Deck config",
-    description: "Records Supermemory as the selected Adaptive Memory provider without storing tokens in .deck/config.json.",
+    description: "Records Supermemory as the selected Adaptive Memory provider without storing tokens in Deck config.",
     status: configured ? "ready" : "pending",
     required: true,
     diagnostics: ["OpenCode owns Supermemory OAuth credentials outside Deck and project configuration."],
@@ -452,11 +452,11 @@ function addValidationActions(groups: OpenCodeRunnerReviewPlan["groups"]): void 
 /**
  * Adds a config-write action when package instruction injection is enabled for a runner scope.
  *
- * Package instruction injection is toggled per-runner via .deck/config.json's `packageInstructions`
+ * Package instruction injection is toggled per-runner via Deck config's `packageInstructions`
  * field. When a runner scope has at least one instruction enabled, we persist that config so it
  * survives across `deck-setup` readiness repair runs.
  *
- * This writes to .deck/config.json's `packageInstructions` field, NOT the same config key used by
+ * This writes to Deck config's `packageInstructions` field, NOT the same config key used by
  * internal-runner packages. They are independent.
  */
 function addPackageInstructionActions(
@@ -472,7 +472,7 @@ function addPackageInstructionActions(
     id: "package-instructions.opencode.deck-config",
     kind: "write-deck-config",
     title: "Write package instruction configuration",
-    description: "Persists per-runner package instruction toggles to .deck/config.json. This controls prompt instruction injection, not package installation.",
+    description: "Persists per-runner package instruction toggles to Deck config. This controls prompt instruction injection, not package installation.",
     status: "ready",
     required: false,
     diagnostics: [

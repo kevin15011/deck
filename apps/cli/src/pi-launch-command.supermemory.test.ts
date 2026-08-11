@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { validateSupermemoryPiMcpRuntime } from "@deck/adapter-pi";
+import { validateDeckConfig } from "@deck/core";
 import { runPiLaunch } from "./pi-launch-command";
 
 const SENTINEL_TOKEN = "supermemory-test-token-should-not-appear";
@@ -57,36 +58,25 @@ function failedRuntimeValidation(code: "unauthenticated" | "timeout", message: s
   });
 }
 
-function writeDeckConfig(projectRoot: string, activeProvider: "none" | "engram" | "supermemory") {
-  mkdirSync(join(projectRoot, ".deck"), { recursive: true });
-  writeFileSync(
-    join(projectRoot, ".deck", "config.json"),
-    `${JSON.stringify(
-      {
-        version: 1,
-        adaptiveMemory: {
-          activeProvider,
-          supermemory: {
-            mcpServerName: "supermemory",
-            userId: "kevin",
-            searchMode: "memories",
-            maxMemoriesPerSession: 7,
-          },
-        },
+function deckConfig(activeProvider: "none" | "engram" | "supermemory" = "none") {
+  return validateDeckConfig({
+    version: 1,
+    adaptiveMemory: {
+      activeProvider,
+      supermemory: {
+        mcpServerName: "supermemory",
+        searchMode: "memories",
+        maxMemoriesPerSession: 7,
       },
-      null,
-      2,
-    )}\n`,
-    "utf-8",
-  );
+    },
+  });
 }
 
 describe("runPiLaunch Supermemory provider resolution", () => {
-  test("uses .deck/config.json when no CLI memory flag is supplied but enables Supermemory after authenticated runtime validation", async () => {
+  test("uses injected global Deck config when no CLI memory flag is supplied and enables Supermemory after authenticated runtime validation", async () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
-      writeDeckConfig(projectRoot, "supermemory");
       writePiMcpConfig(piMcpConfigPath);
 
       const result = await runPiLaunch({
@@ -95,6 +85,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
@@ -122,7 +113,6 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
-      writeDeckConfig(projectRoot, "supermemory");
       writePiMcpConfig(piMcpConfigPath);
 
       const first = await runPiLaunch({
@@ -131,6 +121,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
@@ -143,6 +134,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
         supermemoryRuntimeValidator: () => failedRuntimeValidation("unauthenticated", `bad token ${SENTINEL_TOKEN}`),
       });
@@ -164,11 +156,10 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     }
   });
 
-  test("CLI provider overrides .deck/config.json and does not double-inject providers", async () => {
+  test("CLI provider overrides injected global Deck config and does not double-inject providers", async () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
-      writeDeckConfig(projectRoot, "supermemory");
       writePiMcpConfig(piMcpConfigPath);
 
       const result = await runPiLaunch({
@@ -177,6 +168,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         cliMemoryProvider: "engram",
         piMcpConfigPath,
       });
@@ -200,14 +192,13 @@ describe("runPiLaunch Supermemory provider resolution", () => {
   test("CLI none overrides active Supermemory config", async () => {
     const projectRoot = createTempDir();
     try {
-      writeDeckConfig(projectRoot, "supermemory");
-
       const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         cliMemoryProvider: "none",
       });
 
@@ -227,14 +218,13 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
-      writeDeckConfig(projectRoot, "supermemory");
-
       const result = await runPiLaunch({
         teamId: "developer-team",
         projectRoot,
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
       });
 
@@ -262,7 +252,6 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
-      writeDeckConfig(projectRoot, "supermemory");
       mkdirSync(join(piMcpConfigPath, ".."), { recursive: true });
       writeFileSync(piMcpConfigPath, `{ "headers": { "x-supermemory-api-key": "${SENTINEL_TOKEN}" }`, "utf-8");
 
@@ -272,6 +261,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
       });
 
@@ -294,7 +284,6 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
-      writeDeckConfig(projectRoot, "supermemory");
       writePiMcpConfig(piMcpConfigPath);
 
       const result = await runPiLaunch({
@@ -303,6 +292,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
         supermemoryRuntimeValidator: () => failedRuntimeValidation("unauthenticated", `bad token ${SENTINEL_TOKEN}`),
       });
@@ -322,7 +312,6 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
-      writeDeckConfig(projectRoot, "supermemory");
       writePiMcpConfig(piMcpConfigPath);
 
       const result = await runPiLaunch({
@@ -331,6 +320,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
         supermemoryRuntimeValidator: (options) => validateSupermemoryPiMcpRuntime({
           ...options,
@@ -353,7 +343,6 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
-      writeDeckConfig(projectRoot, "supermemory");
       writePiMcpConfig(piMcpConfigPath);
 
       const result = await runPiLaunch({
@@ -362,6 +351,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
         supermemoryRuntimeValidator: () => failedRuntimeValidation("timeout", "Supermemory runtime validation timed out."),
       });
@@ -375,18 +365,11 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     }
   });
 
-  test("incomplete Supermemory Deck config launches without adaptive-memory injection", async () => {
+  test("incomplete injected Supermemory Deck config launches without adaptive-memory injection", async () => {
     const projectRoot = createTempDir();
     try {
-      mkdirSync(join(projectRoot, ".deck"), { recursive: true });
-      writeFileSync(
-        join(projectRoot, ".deck", "config.json"),
-        JSON.stringify({ version: 1, adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }),
-        "utf-8",
-      );
-
       // Use piMcpHomeDir to point to a fake home so the Pi MCP config doesn't exist,
-      // isolating the test to the incomplete Supermemory config in .deck/config.json.
+      // isolating the test to the incomplete injected Supermemory config.
       const fakeHome = join(projectRoot, ".fake-pi-home");
 
       const result = await runPiLaunch({
@@ -395,6 +378,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }),
         piMcpHomeDir: fakeHome,
       });
 
@@ -418,6 +402,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
+        deckConfig: deckConfig("none"),
         cliMemoryProvider: "engram",
         memoryProvider: {
           id: "supermemory",

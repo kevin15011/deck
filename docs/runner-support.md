@@ -5,7 +5,7 @@
 > **Maintainer:** Deck maintainers.
 > **Evidence:** [`@deck/adapter-codex`](../packages/adapter-codex/src), [capability registry](../packages/core/src/runner-capability-registry.ts), and [Developer Team execution](developer-team-execution.md).
 
-Use this page to decide what Deck can configure and what still requires runner-native setup.
+Use this page to decide what Deck can configure and what still requires runner-native setup. Deck preferences are global: active settings live in `$XDG_CONFIG_HOME/deck/config.json` (or `~/.config/deck/config.json`). Project `.deck/` paths may still contain OpenSpec/runtime artifacts or legacy migration inputs, but preference changes in the dashboard, Doctor, launch, upgrade, and sync flows do not create or update `<project>/.deck/config.json`.
 
 ## Codex quick path
 
@@ -48,7 +48,7 @@ Codex CLI 0.146 does not provide an OpenCode-style root custom-agent selector or
 
 ## Optional Web Search
 
-Web Search is disabled by default. Enable it in the project-local `.deck/config.json` without storing a credential:
+Web Search is disabled by default. Enable it in the global Deck config without storing a credential:
 
 ```json
 {
@@ -61,7 +61,7 @@ Web Search is disabled by default. Enable it in the project-local `.deck/config.
 
 The Setup Dashboard has a first-class **Web Search** section beside Packages, Adaptive Memory, Teams, and Review & Install. It shows enablement, Tavily provider selection, credential presence (never its value), runner support, MCP materialization/conflicts, and readiness.
 
-When enabling Web Search with no current `TAVILY_API_KEY`, Deck opens masked entry. With your explicit choice, it persists the plaintext value only in an exact Deck-owned block in the active shell profile: `$SHELL` must resolve to bash (`~/.bashrc`) or zsh (`~/.zshrc`). Unsupported or ambiguous shells fail without guessing or writing. The profile update is idempotent and preserves unrelated profile content; it does not place the value in `.deck/config.json`, MCP configuration, argv, generated assets, review plans, or prompts.
+When enabling Web Search with no current `TAVILY_API_KEY`, Deck opens masked entry. With your explicit choice, it persists the plaintext value only in an exact Deck-owned block in the active shell profile: `$SHELL` must resolve to bash (`~/.bashrc`) or zsh (`~/.zshrc`). Unsupported or ambiguous shells fail without guessing or writing. The profile update is idempotent and preserves unrelated profile content; it does not place the value in Deck config, MCP configuration, argv, generated assets, review plans, or prompts.
 
 After a successful profile write and Deck-config update, Deck sets `TAVILY_API_KEY` only in the current Deck process so a runner launched by that process can inherit it immediately. A directly launched runner, or a runner started in a future shell, receives the value only after that shell loads its `.bashrc` or `.zshrc`. Disabling Web Search only records `enabled: false`; it deliberately does **not** delete the saved profile credential. Deck writes the provider-selected native command; a first MCP launch may cause `npx` to retrieve that package, so enabling Web Search is an explicit user choice. Unsupported or absent provider selections are reported without scheduling an MCP write.
 

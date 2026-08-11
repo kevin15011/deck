@@ -11,6 +11,7 @@ import {
   verifyOpenCodeDeveloperTeamInstall,
 } from "./developer-team-install";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { getDefaultDeckConfig } from "@deck/core";
 import { getStandaloneSkill, STANDALONE_SKILLS } from "@deck/core/skills/external";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { createOpenCodeRunnerAdapter } from "./runner-adapter";
@@ -1545,8 +1546,8 @@ describe("adapter plan binding isolation", () => {
       const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir, inventoryDiscovery: async () => inventory }) as any;
       await adapter.getModelInventory({ projectRoot: root });
       const changedAgentIds = ["deck-lead"];
-      const planA = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, modelAssignments: { "deck-lead": "openai/exact" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
-      const planB = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, modelAssignments: { "deck-lead": "openai/zero" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
+      const planA = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, deckConfig: getDefaultDeckConfig(), modelAssignments: { "deck-lead": "openai/exact" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
+      const planB = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, deckConfig: getDefaultDeckConfig(), modelAssignments: { "deck-lead": "openai/zero" }, changedAgentIds, validatedInventoryFingerprint: "fixture" });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, plan: planB });
       expect(JSON.parse(readFileSync(join(configDir, "opencode.json"), "utf-8")).agent["deck-lead"].model).toBe("openai/zero");
       expect(readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf-8")).toContain("Adaptive Developer Team Contract");

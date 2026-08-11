@@ -161,6 +161,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     projectRoot: input.launch.projectRoot,
     environmentId: input.adapter.environmentIds[0]!,
     localOnly: input.localOnly,
+    deckConfig: input.launch.deckConfig,
     ...(codexAssignments ? codexAssignments : {}),
   };
   const { preparationDiagnostics, plan } = await prepareAndBuildDeveloperTeamInstallPlan(input.adapter, installInput);

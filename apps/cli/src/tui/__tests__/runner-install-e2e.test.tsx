@@ -16,6 +16,7 @@ import type { RunnerActionRunResult } from "../runner-dashboard/action-runner";
 import { createDefaultRunnerDashboardState } from "../runner-dashboard/state";
 import type { PiPreflightResult } from "@deck/adapter-pi";
 import type { OpenCodePreflightResult } from "@deck/adapter-opencode";
+import { getDefaultDeckConfig } from "@deck/core";
 import { getAdapter } from "../../runner-adapters";
 import { createCodexRunnerAdapter } from "@deck/adapter-codex";
 import { getToggleablePackageInstructionIds } from "../runner-dashboard/selectors";
@@ -399,7 +400,7 @@ describe("Codex adapter-driven render-only states", () => {
       codebaseIndexReadiness: () => true,
       supermemoryOAuthStatus: async () => ({ state: "authenticated" }),
     });
-    const inventory = await adapter.getCapabilityInventory({ projectRoot: "/tmp/deck-codex-tui-parity", environmentId: "codex-development", runnerId: "codex" });
+    const inventory = await adapter.getCapabilityInventory({ projectRoot: "/tmp/deck-codex-tui-parity", environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
     const plan = adapter.buildReviewPlan({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: {}, packageInstructions: {}, adaptiveMemory: { provider: "none" } }, inventory);
     const capabilityStatuses = Object.fromEntries(inventory.capabilities.map((capability) => [capability.capabilityId, capability.isBlocked ? "blocked" as const : capability.isInstalled ? "ready" as const : "missing" as const]));
     const resolver = {

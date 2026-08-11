@@ -171,7 +171,7 @@ describe("validateDeckConfig - developerTeamExecution", () => {
   });
 
   test("rejects Codex invocation-required configuration while the public runner is static-compatible", () => {
-    expect(() => validateDeckConfig({ developerTeamExecution: { invocationAuthorization: { codex: "invocation-required" } } })).toThrow("codex");
+    expect(() => validateDeckConfig({ developerTeamExecution: { invocationAuthorization: { codex: "invocation-required" } } })).toThrow("developerTeamExecution.invocationAuthorization");
   });
 
   test("accepts the authorization control key without weakening secret rejection", () => {
@@ -942,8 +942,8 @@ describe("Profile validation", () => {
         }),
       "DECK_CONFIG_INVALID_SHAPE",
     );
-    expect(error.message).toContain("nonexistent");
-    expect(error.message).toContain("fast");
+    expect(error.message).toContain("Unknown active profile");
+    expect(error.message).toContain("Available profiles count: 1");
   });
 
   test("activeProfile 'default' is valid even with empty profiles array", () => {

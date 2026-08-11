@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeDeckConfig, type RunnerAdapter } from "@deck/core";
+import { validateDeckConfig, type RunnerAdapter } from "@deck/core";
 import { inspectStandaloneWebSearchReadiness, isStandaloneWebSearchSmokeSuccessful } from "./standalone-web-search-smoke";
 
 const roots: string[] = [];
@@ -20,7 +20,7 @@ afterEach(() => {
 describe("inspectStandaloneWebSearchReadiness", () => {
   test("resolves the bundled Tavily descriptor and produces a secret-free Pi/OpenCode readiness report", async () => {
     const projectRoot = temporaryRoot();
-    writeDeckConfig(projectRoot, { webSearch: { enabled: true, provider: "tavily" } });
+    const deckConfig = validateDeckConfig({ webSearch: { enabled: true, provider: "tavily" } });
     const adapters = ["pi", "opencode"].map((runnerId) => ({
       runnerId,
       environmentIds: [`${runnerId}-development`],
@@ -51,6 +51,7 @@ describe("inspectStandaloneWebSearchReadiness", () => {
     const report = await inspectStandaloneWebSearchReadiness({
       projectRoot,
       adapters,
+      deckConfig,
     });
 
     expect(report).toEqual({

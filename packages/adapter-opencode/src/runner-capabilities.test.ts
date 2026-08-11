@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { createOpenCodeRunnerCapabilities } from "./runner-capabilities";
 import { buildOpenCodeDeveloperTeamInstallPlan } from "./developer-team-install";
+import { getDefaultDeckConfig } from "@deck/core";
 import { buildDeveloperTeamManifest } from "../../core/src/teams/developer/manifest";
 import type { CapabilityInstructionBundle } from "../../core/src/teams/developer/instruction-bundles/index";
 
@@ -124,6 +125,7 @@ describe("buildDeveloperTeamManifest — memoryBundle flow", () => {
     const manifest = capabilities.teams.buildDeveloperTeamManifest({
       projectRoot: "/tmp/test-project",
       environmentId: "opencode-development",
+      deckConfig: getDefaultDeckConfig(),
       capabilityInstructions: undefined,
       modelAssignments: [],
     });
@@ -147,6 +149,7 @@ describe("buildDeveloperTeamManifest — memoryBundle flow", () => {
     const manifest = capabilities.teams.buildDeveloperTeamManifest({
       projectRoot: "/tmp/test-project",
       environmentId: "opencode-development",
+      deckConfig: getDefaultDeckConfig(),
       capabilityInstructions: undefined,
       modelAssignments: [],
     });
@@ -177,6 +180,7 @@ describe("buildDeveloperTeamManifest — memoryBundle flow", () => {
     const manifest = capabilities.teams.buildDeveloperTeamManifest({
       projectRoot: "/tmp/test-project",
       environmentId: "opencode-development",
+      deckConfig: getDefaultDeckConfig(),
       capabilityInstructions: undefined,
       modelAssignments: [],
     });
@@ -228,6 +232,7 @@ describe("verify reuse of built plan", () => {
     const result = capabilities.teams.buildDeveloperTeamInstallPlan({
       projectRoot: "/tmp/test-standalone-packages",
       environmentId: "opencode-development",
+      deckConfig: getDefaultDeckConfig(),
       manifest,
     });
 

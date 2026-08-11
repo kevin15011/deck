@@ -93,12 +93,12 @@ import type {
   SerenaReadinessEvidence,
   SerenaReadinessRevalidator,
   WebSearchProviderDescriptorV1,
+  NormalizedDeckConfig,
 } from "@deck/core";
 import {
   getModelCatalog as getCoreModelCatalog,
   getCanonicalCapability,
   getRunnerCapabilityMapping,
-  readDeckConfig,
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   buildCapabilityInstructionBundle,
   getEnabledCapabilityInstructionIds,
@@ -111,6 +111,11 @@ import {
   SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
   SKILL_DISCOVERY_SOURCE_SCHEMA,
 } from "@deck/core";
+
+function requireDeckConfig(config: NormalizedDeckConfig | undefined, context: string): NormalizedDeckConfig {
+  if (!config) throw new Error(`Pi ${context} requires caller-resolved global Deck config.`);
+  return config;
+}
 
 // ---------------------------------------------------------------------------
 // Adapter constants
@@ -603,7 +608,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   async getCapabilityInventory(input: CapabilityInventoryInput): Promise<CapabilityInventory> {
     const review = this.#requiredToolsReview();
     const runnerScope = input.runnerId as "pi" | "opencode" | "all";
-    const deckConfig = readDeckConfig(input.projectRoot);
+    const deckConfig = requireDeckConfig(input.deckConfig, "capability inventory");
     const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
     const webSearchMcp = inspectPiWebSearchMcpConfig(join(this.#homeDirectory, ".pi", "agent", "mcp.json"), webSearchProvider);
     const webSearchEvidence = {
@@ -1087,7 +1092,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
     const capabilityInstructions = input.capabilityInstructions ?? (() => {
       try {
-        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(readDeckConfig(input.projectRoot), "pi"));
+        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(requireDeckConfig(input.deckConfig, "developer team install"), "pi"));
       } catch {
         return undefined;
       }
@@ -1097,6 +1102,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       thinkingAssignments: input.thinkingAssignments,
       memoryProvider: input.memoryProvider,
       capabilityInstructions,
+      orchestratorPersonality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,
       standaloneSkills: input.standaloneSkills,
     });
     this.#lastNativePlan = nativePlan;

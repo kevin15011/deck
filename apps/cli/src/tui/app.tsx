@@ -78,15 +78,11 @@ import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import {
   getConfigurablePackageInstructionMetadata,
   PACKAGE_INSTRUCTION_CONFIGURATION_METADATA,
-  readDeckConfig,
-  writeDeckConfig,
-  readGlobalDeckConfig,
-  writeGlobalDeckConfig,
-  getDefaultDeckConfig,
   type AdaptiveMemoryActiveProvider,
   type NormalizedDeckConfig,
   type PackageInstructionConfigurationMetadata,
 } from "@deck/core/config/deck-config";
+import type { DeckConfigStore } from "../deck-config-store";
 import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds, getEnabledPackageInstructionIds, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
 import type {
   RunnerModelDiscoveryRequest,
@@ -267,51 +263,25 @@ type MemoryProviderChoice = AdaptiveMemoryActiveProvider;
 // ============================================================================
 
 /**
- * Resolve Deck config from project root or global config.
- *
- * This allows the TUI to work from any directory — when inside a Deck monorepo,
- * it uses project-local config; otherwise, it uses global config.
+ * Resolve Deck config from the caller-provided global config store.
  *
  * @param projectRoot - Resolved project root (may be null)
  * @returns Config object
  */
-async function resolveDeckConfig(projectRoot: string | null): Promise<NormalizedDeckConfig> {
-  if (projectRoot) {
-    try {
-      return readDeckConfig(projectRoot);
-    } catch {
-      // Fall through to global config
-    }
-  }
-  // Use global config when project root is unavailable
-  try {
-    return await readGlobalDeckConfig();
-  } catch {
-    return getDefaultDeckConfig();
-  }
+async function resolveDeckConfig(projectRoot: string | null, store: DeckConfigStore): Promise<NormalizedDeckConfig> {
+  void projectRoot;
+  return store.readRequired();
 }
 
 /**
- * Write Deck config to project root or global config.
+ * Write Deck config to the caller-provided global config store.
  *
  * @param config - Config to write
  * @param projectRoot - Resolved project root (may be null)
  */
-async function persistDeckConfig(config: NormalizedDeckConfig, projectRoot: string | null): Promise<void> {
-  if (projectRoot) {
-    try {
-      writeDeckConfig(projectRoot, config);
-      return;
-    } catch {
-      // Fall through to global config
-    }
-  }
-  // Use global config when project root is unavailable
-  try {
-    await writeGlobalDeckConfig(config);
-  } catch {
-    // Silently fail — UI should not crash on config write errors
-  }
+async function persistDeckConfig(config: NormalizedDeckConfig, projectRoot: string | null, store: DeckConfigStore): Promise<void> {
+  void projectRoot;
+  store.write(config);
 }
 
 function redactSecret(value: string): string {
@@ -662,6 +632,7 @@ export type DeckAppDependencies = {
   adapterRegistry?: import("@deck/core").AdapterRegistry;
   resolveProjectRoot?: typeof resolveProjectRoot;
   runReleaseCheck?: typeof runReleaseCheckWithTimeout;
+  configStore?: DeckConfigStore;
 };
 
 async function rollbackOrThrow(adapter: import("@deck/core").RunnerAdapter, backup: unknown): Promise<void> {
@@ -738,6 +709,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const environmentOptions = buildEnvironmentMenuOptions(adapterRegistry, getEnvironmentOptions());
   const projectRootFor = dependencies.resolveProjectRoot ?? resolveProjectRoot;
   const releaseCheckFor = dependencies.runReleaseCheck ?? runReleaseCheckWithTimeout;
+  const configStore = dependencies.configStore;
+  if (!configStore) throw new Error("DeckApp requires caller-resolved global Deck config store.");
+  const requiredConfigStore: DeckConfigStore = configStore;
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [screen, setScreen] = useState<Screen>("home");
@@ -765,7 +739,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     (adapterRegistry.tryGet("pi")?.getTeams("pi-development") ?? []).map((team: any) => team.id),
   );
 
-  // Project root resolved once at startup (can be null for global config fallback)
+  // Project root resolved once at startup; global preferences are injected separately.
   const [localResolvedProjectRoot] = useState<string | null>(() => projectRootFor());
 
   // Model configuration state
@@ -856,14 +830,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
   // Personality selection state
   const [selectedPersonality, setSelectedPersonality] = useState<"guia" | "pragmatica">(() => {
-    // Use resolvedProjectRoot from state, which can be null
     try {
-      if (localResolvedProjectRoot) {
-        const config = readDeckConfig(localResolvedProjectRoot);
-        return config.orchestratorPersonality;
-      }
-      // Fallback to default when outside monorepo
-      return "pragmatica";
+      return requiredConfigStore.readRequired().orchestratorPersonality;
     } catch {
       return "pragmatica";
     }
@@ -1464,7 +1432,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         },
         installTeamBundle: async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments; capabilityIds?: readonly string[] }) => {
           // Build capability instructions through the active adapter's registered runner ID.
-          const deckConfig = readDeckConfig(projectRoot);
+          const deckConfig = requiredConfigStore.readRequired();
           const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, adapter.runnerId);
           const capabilityInstructions = buildCapabilityInstructionBundle(
             getEnabledSupportedCapabilityInstructionIds(adapter, enabledIds),
@@ -1478,6 +1446,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             memoryProvider: options?.memoryProvider,
             capabilityInstructions,
             capabilityIds: options?.capabilityIds,
+            deckConfig,
           });
 
           const backup = adapter.backupDeveloperTeamFiles(plan);
@@ -1622,20 +1591,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     const run = async () => {
       try {
         const currentVersion = getBuildInfo().version;
-        // T11: Use real registry and config (not placeholders)
+        // T11: Use real registry and caller-resolved global config (not placeholders)
         const realRegistry = createDefaultAdapterRegistry();
-        // Resolve config synchronously before passing to orchestrator
-        // (readDeckConfig is sync, readGlobalDeckConfig is async)
-        let resolvedConfig: NormalizedDeckConfig;
-        try {
-          if (localResolvedProjectRoot) {
-            resolvedConfig = readDeckConfig(localResolvedProjectRoot);
-          } else {
-            resolvedConfig = await readGlobalDeckConfig();
-          }
-        } catch {
-          resolvedConfig = getDefaultDeckConfig();
-        }
+        const resolvedConfig = requiredConfigStore.readRequired();
         await stageReleaseAssets(upgradeDescriptor);
         const result = await runUpgradeOrchestrator({
           descriptor: upgradeDescriptor,
@@ -1651,7 +1609,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             // T11: Real registry with real adapters (pi, opencode)
             adapterRegistry: realRegistry,
             // T11: Real config (not default placeholder)
-            readDeckConfig: () => resolvedConfig,
+            readGlobalDeckConfig: () => resolvedConfig,
           },
         });
         if (cancelled) return;
@@ -1735,7 +1693,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const adapter = adapterFor(environmentId);
 
       // Build capability instructions and standalone skills (only used by OpenCode, Pi ignores them)
-      const deckConfig = readDeckConfig(projectRoot);
+      const deckConfig = requiredConfigStore.readRequired();
       const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, "opencode");
       const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
       const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
@@ -1748,6 +1706,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         memoryProvider,
         capabilityInstructions,
         standaloneSkills,
+        deckConfig,
       });
 
       const backup = adapter.backupDeveloperTeamFiles(plan);
@@ -1829,7 +1788,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     if (!adapter) return false;
 
     const projectRoot = projectRootFor({ require: true }) ?? process.cwd();
-    const config = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
+    const config = requiredConfigStore.readRequired();
     setDashboardError(null);
 
     try {
@@ -1837,7 +1796,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         adapter.detectRuntimes({ projectRoot, environmentId }),
         adapter.inspectProject ? adapter.inspectProject(projectRoot) : adapter.inspectEnvironment(),
         adapter.reviewTools(),
-        adapter.getCapabilityInventory({ projectRoot, environmentId, runnerId: adapter.runnerId }),
+        adapter.getCapabilityInventory({ projectRoot, environmentId, runnerId: adapter.runnerId, deckConfig: config }),
       ]);
       const normalizedInventory = normalizeDashboardCapabilityInventory(inventory, adapter.runnerId, environmentId);
       if (!normalizedInventory.ok) {
@@ -2186,13 +2145,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       if (!selected) return;
       setSelectedPersonality(selected.id);
       try {
-        // Use require: true for backward compatibility - writes need a path
-        const projectRoot = projectRootFor({ require: true }) ?? process.cwd();
-        const existingConfig = readDeckConfig(projectRoot);
-        writeDeckConfig(projectRoot, {
-          ...existingConfig,
-          orchestratorPersonality: selected.id,
-        });
+        requiredConfigStore.patch((existingConfig) => ({ ...existingConfig, orchestratorPersonality: selected.id }));
       } catch (error) {
         // Log config errors with error code only (no sensitive details)
         const errCode = error instanceof Error ? (error as { code?: string }).code : undefined;
@@ -2217,8 +2170,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         resetCursor("home");
         return;
       }
-      // Use resolvedProjectRoot from state, which can be null - fall back to default config
-      const config = localResolvedProjectRoot ? readDeckConfig(localResolvedProjectRoot) : getDefaultDeckConfig();
+      const config = requiredConfigStore.readRequired();
       const instructions = loadRunnerPackageInstructionsFromConfig(config, runner, adapter.packageInstructionIds);
       const supportedMetadata = getSupportedPackageInstructionMetadata(adapter);
       setConfigurePackagesRunner(runner);
@@ -2247,26 +2199,23 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       if (selected.id === "apply" && configurePackagesRunner) {
         const adapter = configurePackagesAdapter;
         if (!adapter) return;
-        // Use require: true for backward compatibility - writes need a path
         const projectRoot = projectRootFor({ require: true }) ?? process.cwd();
-        const existingConfig = readDeckConfig(projectRoot);
-        const newPackageInstructions = {
-          ...existingConfig.packageInstructions,
-          [configurePackagesRunner]: {
-            ...packageInstructionConfigForPersistence(configurePackageMetadata, configurePackagesToggles),
+        const updatedConfig = requiredConfigStore.patch((current) => ({
+          ...current,
+          packageInstructions: {
+            ...current.packageInstructions,
+            [configurePackagesRunner]: {
+              ...packageInstructionConfigForPersistence(configurePackageMetadata, configurePackagesToggles),
+            },
           },
-        };
-        writeDeckConfig(projectRoot, {
-          ...existingConfig,
-          packageInstructions: newPackageInstructions,
-        });
+        }));
 
         const environmentId = adapter.environmentIds[0];
         if (!environmentId) throw new Error(`Runner ${configurePackagesRunner} does not declare an environment.`);
 
         const configuredInstructionIds = [
           ...getConfiguredPackageInstructionIds(configurePackageMetadata, configurePackagesToggles),
-          ...(existingConfig.webSearch.enabled ? ["web-search" as const] : []),
+          ...(updatedConfig.webSearch.enabled ? ["web-search" as const] : []),
         ] as Parameters<typeof buildCapabilityInstructionBundle>[0];
         const bundle = buildCapabilityInstructionBundle(configuredInstructionIds);
 
@@ -2277,6 +2226,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           environmentId,
           capabilityInstructions: bundle,
           standaloneSkills,
+          deckConfig: updatedConfig,
         });
 
         try {
@@ -2806,6 +2756,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const result = persistWebSearchCredentialAndEnable({
         credential: webSearchCredential,
         projectRoot: localResolvedProjectRoot ?? process.cwd(),
+        configStore: requiredConfigStore,
       });
       clearDashboardWebSearchCredential();
       if (!result.ok) {
@@ -2979,8 +2930,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       }
 
       const config = buildMemoryProviderConfig(choice, values);
-      // Use require: true for backward compatibility - writes need a path
-      writeDeckConfig(projectRootFor({ require: true })!, config);
+      requiredConfigStore.patch((existing) => ({ ...existing, ...config }));
       setMemoryProvider(createMemoryProviderForSelection(choice, values));
       if (choice === "supermemory") {
         setMemoryStatus("Active adaptive-memory provider: Supermemory MCP. Token: [redacted]. Pi MCP config: ~/.pi/agent/mcp.json.");
@@ -3104,7 +3054,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       validatedInventoryFingerprint = validation.fingerprint;
     }
 
-    const deckConfig = readDeckConfig(projectRoot);
+    const deckConfig = requiredConfigStore.readRequired();
     const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, modelConfigRuntime);
     const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
     const standaloneSkills = modelConfigRuntime === "opencode"
@@ -3123,6 +3073,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       memoryProvider,
       capabilityInstructions,
       standaloneSkills,
+      deckConfig,
     });
     const backup = adapter.backupDeveloperTeamFiles(plan);
 

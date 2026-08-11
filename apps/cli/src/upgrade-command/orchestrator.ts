@@ -256,11 +256,8 @@ export type OrchestratorDeps = {
    * `process.cwd()`.
    */
   projectRoot: string;
-  /**
-   * Read the normalized Deck config. Defaults to `readGlobalDeckConfig`
-   * from `@deck/core` but tests inject a hand-rolled value.
-   */
-  readDeckConfig: () => import("@deck/core").NormalizedDeckConfig;
+  /** Read the caller-resolved normalized global Deck config. Tests inject a hand-rolled value. */
+  readGlobalDeckConfig: () => import("@deck/core").NormalizedDeckConfig;
   /**
    * Provide the current binary path. Used for the atomic replace step.
    * Defaults to `process.argv[0]`.
@@ -332,17 +329,9 @@ export type OrchestratorResult = {
  * Tests can override these dependencies.
  */
 export async function buildDefaultOrchestratorDeps(): Promise<OrchestratorDeps> {
-  // Lazy load the config reader - uses default config synchronously
-  // For production config, consumers should use readDeckConfig with proper async handling
-  const readDeckConfig = (): import("@deck/core").NormalizedDeckConfig => {
-    try {
-      // Try to get default config (synchronous)
-      const { getDefaultDeckConfig } = require("@deck/core") as typeof import("@deck/core");
-      return getDefaultDeckConfig();
-    } catch {
-      // If even default config fails, throw to signal the error
-      throw new Error("Could not load default deck config");
-    }
+  const readGlobalDeckConfig = (): import("@deck/core").NormalizedDeckConfig => {
+    const { createDeckConfigStoreFromEnvironment } = require("../deck-config-store.js") as typeof import("../deck-config-store.js");
+    return createDeckConfigStoreFromEnvironment({ projectRoot: process.cwd() }).readRequired();
   };
 
   // Lazy load the adapter registry
@@ -456,7 +445,7 @@ export async function buildDefaultOrchestratorDeps(): Promise<OrchestratorDeps> 
     },
     adapterRegistry,
     projectRoot: process.cwd(),
-    readDeckConfig,
+    readGlobalDeckConfig,
     // Use process.execPath to correctly identify installed binary path.
     // In compiled Bun binaries, process.argv[0] can be "bun" while
     // process.execPath contains the actual binary path.
@@ -1102,7 +1091,7 @@ async function runContentItem(
   });
   writeState(state);
 
-  const config = deps.readDeckConfig();
+  const config = deps.readGlobalDeckConfig();
   const syncResult = await runRunnerSync({
     config,
     registry: deps.adapterRegistry,
@@ -1185,7 +1174,7 @@ export async function collectRunnerBackupTargets(
     kind: "config" | "prompt" | "skill" | "subagent" | "mcp" | "state" | "manifest";
   }> = [];
 
-  const config = deps.readDeckConfig();
+  const config = deps.readGlobalDeckConfig();
   const runnerIds = deps.adapterRegistry.list().map((a) => a.runnerId);
 
   for (const runnerId of runnerIds) {

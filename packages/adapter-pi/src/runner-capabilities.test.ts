@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { createPiRunnerCapabilities } from "./runner-capabilities";
 import { resolvePiRunnerParity } from "./capability-parity";
+import { getDefaultDeckConfig } from "@deck/core";
 import { buildDeveloperTeamManifest } from "../../core/src/teams/developer/manifest";
 
 describe("Pi RunnerCapabilities factory", () => {
@@ -135,6 +136,7 @@ describe("Pi RunnerCapabilities factory", () => {
     const result = capabilities.teams.buildDeveloperTeamInstallPlan({
       projectRoot: "/tmp/test-standalone-packages",
       environmentId: "pi-development",
+      deckConfig: getDefaultDeckConfig(),
       manifest,
     });
 

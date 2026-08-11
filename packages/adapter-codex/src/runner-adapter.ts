@@ -11,7 +11,7 @@ import {
   getConfigurablePackageInstructionMetadata,
   buildCapabilityInstructionBundle,
   getEnabledCapabilityInstructionIds,
-  readDeckConfig,
+  getDefaultDeckConfig,
   checkSharedBinaryUsability,
   getCanonicalCapability,
   getRunnerCapabilityMapping,
@@ -52,9 +52,15 @@ import {
   type SerenaBootstrapRequest,
   type SerenaBootstrapResult,
   type SerenaExistingReadinessResult,
+  type NormalizedDeckConfig,
   parseSkillDescriptor,
   type WebSearchProviderDescriptorV1,
 } from "@deck/core";
+
+function requireDeckConfig(config: NormalizedDeckConfig | undefined, context: string): NormalizedDeckConfig {
+  if (!config) throw new Error(`Codex ${context} requires caller-resolved global Deck config.`);
+  return config;
+}
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 
 import { buildCodexDeveloperTeamInstallPlan } from "./developer-team-install";
@@ -752,7 +758,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   ): Promise<CapabilityInventory> {
     const inspection = await this.inspectProject(input.projectRoot);
     const config = inspection.evidence.projectConfig === true ? defaultProjectSnapshot(input.projectRoot).config ?? "" : "";
-    const deckConfig = readDeckConfig(input.projectRoot);
+    const deckConfig = requireDeckConfig(input.deckConfig, "operation");
     const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
     const mcp = new Set(inspectCodexMcpServerIds(config));
     const commands = ["context-mode", "codebase-memory-mcp", "rtk"] as const;
@@ -1019,7 +1025,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   }
   async prepareDeveloperTeamInstall(input: DeveloperTeamAdapterInstallInput) {
     if (input.materializationScope === "content-only") return [];
-    const config = readDeckConfig(input.projectRoot);
+    const config = requireDeckConfig(input.deckConfig, "operation");
     const capabilityInstructions = input.capabilityInstructions
       ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "codex"));
     const existingConfig = readExistingPlanFiles(input.projectRoot).files.get(".codex/config.toml") ?? "";
@@ -1136,7 +1142,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput) {
     const materializationScope = input.materializationScope ?? "full";
     const existing = readExistingPlanFiles(input.projectRoot, materializationScope);
-    const config = readDeckConfig(input.projectRoot);
+    const config = requireDeckConfig(input.deckConfig, "operation");
     const webSearchProvider = this.resolveWebSearchProvider(config.webSearch.provider);
     const capabilityInstructions = input.capabilityInstructions
       ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "codex"));
@@ -1370,17 +1376,18 @@ class CodexRunnerAdapter implements RunnerAdapter {
     return { installed: managedPaths.length > 0, managedPaths: [...new Set(managedPaths)].sort(), diagnostics };
   }
 
-  async diagnoseProject(projectRoot: string): Promise<ReadonlyArray<{ category: string; status: "ok" | "warning" | "error"; message: string; suggestion?: string }>> {
+  async diagnoseProject(projectRoot: string, deckConfig: NormalizedDeckConfig): Promise<ReadonlyArray<{ category: string; status: "ok" | "warning" | "error"; message: string; suggestion?: string }>> {
+    requireDeckConfig(deckConfig, "doctor diagnostics");
     const inspection = await this.inspectProject(projectRoot);
     const install = await this.detectDeckInstall({ projectRoot });
-    const installInput = { projectRoot, environmentId: "codex-development" as const };
+    const installInput = { projectRoot, environmentId: "codex-development" as const, deckConfig };
     await this.prepareDeveloperTeamInstall(installInput);
     const preparedSerena = this.#pendingSerenaPreparationByProject.get(resolve(projectRoot));
     const plan = this.buildDeveloperTeamInstallPlan(installInput);
     const freshReadiness = preparedSerena?.readiness ?? await this.#resolveSerenaReadiness();
     const freshProxy = preparedSerena?.proxy ?? (freshReadiness.state === "ready" ? await this.#serenaProxyProbe() : undefined);
     const inventory = await this.#getCapabilityInventory(
-      { projectRoot, environmentId: "codex-development", runnerId: "codex" },
+      { projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig },
       freshReadiness,
       freshProxy,
     );
@@ -1432,10 +1439,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
     }
     for (const mode of ["interactive", "exec", "resume-by-id", "resume-latest"] as const) {
       const launchInput: RunnerLaunchInput = mode === "exec"
-        ? { projectRoot, teamId: "developer-team", mode, prompt: [], stdin: "closed" }
+        ? { projectRoot, teamId: "developer-team", mode, prompt: [], stdin: "closed", deckConfig }
         : mode === "resume-by-id"
-          ? { projectRoot, teamId: "developer-team", mode, sessionId: "doctor-session" }
-          : { projectRoot, teamId: "developer-team", mode };
+          ? { projectRoot, teamId: "developer-team", mode, sessionId: "doctor-session", deckConfig }
+          : { projectRoot, teamId: "developer-team", mode, deckConfig };
       const launch = await this.buildLaunchPlan(launchInput);
       checks.push({ category: `Execution route: ${mode}`, status: launch.status === "ready" ? "warning" : launch.status === "unsupported" ? "warning" : "error", message: launch.status === "ready" ? `${mode}: static-compatible.` : `${mode}: ${launch.status} (${launch.code}).`, suggestion: launch.status === "ready" ? "No shipped authenticated Codex host lifecycle is available; continue only with the documented static-compatible controls." : undefined });
     }
@@ -1519,13 +1526,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
         if (proxy.state !== "ready") problems.push("The effective `deck` command can no longer serve the portable Serena proxy after configuration.");
       } catch {
         problems.push("Serena launcher reachability could not be verified after configuration.");
-      }
-    }
-    const webSearchProvider = this.resolveWebSearchProvider(readDeckConfig(native.projectRoot).webSearch.provider);
-    const webSearchConfig = native.expectedFiles.find((expected) => expected.kind === "config");
-    if (webSearchProvider && webSearchConfig && webSearchConfig.content.includes(`[mcp_servers.${webSearchProvider.semanticServerId}]`)) {
-      if (!isCodexWebSearchMcpConfigured(webSearchConfig.content, webSearchProvider)) {
-        problems.push("Web Search MCP provider configuration is missing or drifted.");
       }
     }
     const local = this.#localPlans.get(plan as object);

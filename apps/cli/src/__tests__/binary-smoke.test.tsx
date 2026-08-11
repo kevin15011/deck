@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { getBuildInfo } from "../runtime/build-info";
 import { spawn as bunSpawn } from "bun";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, relative, sep } from "node:path";
 
@@ -373,6 +373,8 @@ function createCliSandbox(): CliSandbox {
   const cache = join(root, "cache");
   const temp = join(root, "tmp");
   for (const path of [home, bin, config, state, cache, temp]) mkdirSync(path, { recursive: true });
+  mkdirSync(join(config, "deck"), { recursive: true });
+  writeFileSync(join(config, "deck", "config.json"), JSON.stringify({ version: 1 }));
 
   const releaseVersion = "9.9.9-test";
   const releaseFixture = join(root, "release.json");
@@ -475,13 +477,41 @@ function snapshotFiles(root: string): Record<string, string> {
 
 type OutsideSandboxInventory = Record<string, string>;
 
+type FileBoundarySnapshot = Readonly<{
+  path: string;
+  exists: boolean;
+  type: "missing" | "file" | "directory" | "symlink" | "other";
+  size: number | null;
+  mode: number | null;
+  digest: string | null;
+}>;
+
+function snapshotBoundaryFile(root: string, file: string): FileBoundarySnapshot {
+  const path = join(root, file);
+  if (!existsSync(path)) return { path: file, exists: false, type: "missing", size: null, mode: null, digest: null };
+  const stat = lstatSync(path);
+  const type = stat.isSymbolicLink()
+    ? "symlink"
+    : stat.isFile()
+      ? "file"
+      : stat.isDirectory()
+        ? "directory"
+        : "other";
+  return {
+    path: file,
+    exists: true,
+    type,
+    size: stat.size,
+    mode: stat.mode & 0o777,
+    digest: stat.isFile() ? createHash("sha256").update(readFileSync(path)).digest("hex") : null,
+  };
+}
+
 function hashFiles(root: string, files: string[]): string {
   const hash = createHash("sha256");
   for (const file of files) {
-    hash.update(file);
-    hash.update("\0");
-    hash.update(readFileSync(join(root, file)));
-    hash.update("\0");
+    hash.update(JSON.stringify(snapshotBoundaryFile(root, file)));
+    hash.update("\n");
   }
   return hash.digest("hex");
 }
@@ -600,6 +630,13 @@ describe("Binary smoke tests", () => {
     } finally {
       sandbox.cleanup();
     }
+  });
+
+  test("repository containment snapshots treat absent local Deck config as stable metadata", () => {
+    const repoRoot = process.cwd();
+    expect(existsSync(join(repoRoot, ".deck", "config.json"))).toBe(false);
+    expect(() => hashFiles(repoRoot, [".deck/config.json"])).not.toThrow();
+    expect(hashFiles(repoRoot, [".deck/config.json"])).toBe(hashFiles(repoRoot, [".deck/config.json"]));
   });
 
   test("doctor runs and reports diagnostics", async () => {

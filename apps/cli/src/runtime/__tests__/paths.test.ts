@@ -2,12 +2,12 @@
  * Unit tests for runtime/paths.ts
  *
  * Tests XDG split path resolution, defaults, env-variable overrides, and
- * legacy path fallback. Uses Bun's `bun:test` runner.
+ * migration-only legacy candidate paths. Uses Bun's `bun:test` runner.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
 describe("runtime/paths.ts", () => {
   type Module = typeof import("../paths");
@@ -121,24 +121,25 @@ describe("runtime/paths.ts", () => {
     });
   });
 
-  // --- Legacy compat ----------------------------------------------------
+  // --- Migration-only legacy candidates ---------------------------------
 
-  describe("getLegacyDeckConfigDir", () => {
+  describe("getDeckConfigMigrationCandidateDir", () => {
     it("returns ~/.config/.deck when XDG_CONFIG_HOME is unset", () => {
       setEnv("XDG_CONFIG_HOME", undefined);
-      const dir = mod.getLegacyDeckConfigDir();
+      const dir = mod.getDeckConfigMigrationCandidateDir();
       expect(dir.endsWith(".config/.deck")).toBe(true);
     });
 
     it("respects XDG_CONFIG_HOME when set to an absolute path", () => {
       setEnv("XDG_CONFIG_HOME", "/tmp/custom-xdg-config");
-      const dir = mod.getLegacyDeckConfigDir();
+      const dir = mod.getDeckConfigMigrationCandidateDir();
       expect(dir).toBe("/tmp/custom-xdg-config/.deck");
     });
   });
 
   describe("getGlobalDeckConfigDir", () => {
     it("now resolves to the new XDG config dir (post-migration target)", () => {
+      setEnv("XDG_CONFIG_HOME", undefined);
       const dir = mod.getGlobalDeckConfigDir();
       expect(dir.endsWith(".config/deck")).toBe(true);
     });
@@ -164,20 +165,21 @@ describe("runtime/paths.ts", () => {
     });
   });
 
-  describe("getAllConfigPaths", () => {
-    it("returns an array of config paths", () => {
-      const paths = mod.getAllConfigPaths();
+  describe("getDeckConfigMigrationCandidatePaths", () => {
+    it("returns only migration candidates, not the canonical path", () => {
+      const paths = mod.getDeckConfigMigrationCandidatePaths();
       expect(Array.isArray(paths)).toBe(true);
-      expect(paths.length).toBeGreaterThanOrEqual(3);
+      expect(paths.length).toBeGreaterThanOrEqual(2);
+      expect(paths.map((path) => path.configPath)).not.toContain(mod.getGlobalDeckConfigPath());
     });
 
-    it("puts the new XDG path first (preferred read order)", () => {
-      const paths = mod.getAllConfigPaths();
-      expect(paths[0]?.configDir.endsWith(".config/deck")).toBe(true);
+    it("labels candidate kind as migration metadata", () => {
+      const paths = mod.getDeckConfigMigrationCandidatePaths();
+      expect(paths.map((path) => path.kind)).toEqual(expect.arrayContaining(["home-config-dot-deck", "home-dot-deck"]));
     });
 
     it("each path has configDir and configPath", () => {
-      const paths = mod.getAllConfigPaths();
+      const paths = mod.getDeckConfigMigrationCandidatePaths();
       for (const p of paths) {
         expect(typeof p.configDir).toBe("string");
         expect(typeof p.configPath).toBe("string");
@@ -185,17 +187,30 @@ describe("runtime/paths.ts", () => {
     });
   });
 
-  describe("globalDeckConfigExists", () => {
-    it("returns boolean", () => {
-      const exists = mod.globalDeckConfigExists();
+  describe("canonicalGlobalDeckConfigExists", () => {
+    it("checks only the canonical global config path", () => {
+      setEnv("XDG_CONFIG_HOME", join(tmpDir, "xdg-empty"));
+      mod._resetDeckPathCache();
+      mkdirSync(join(tmpDir, ".deck"), { recursive: true });
+      writeFileSync(join(tmpDir, ".deck", "config.json"), "{}\n");
+
+      const exists = mod.canonicalGlobalDeckConfigExists();
       expect(typeof exists).toBe("boolean");
+      expect(exists).toBe(false);
     });
   });
 
-  describe("resolveExistingGlobalConfigPath", () => {
-    it("returns string or undefined", () => {
-      const path = mod.resolveExistingGlobalConfigPath();
-      expect(path === undefined || typeof path === "string").toBe(true);
+  describe("resolveExistingDeckConfigMigrationCandidatePath", () => {
+    it("returns only existing legacy migration candidates", () => {
+      setEnv("XDG_CONFIG_HOME", join(tmpDir, "xdg-empty"));
+      mod._resetDeckPathCache();
+      mkdirSync(join(tmpDir, ".config", "deck"), { recursive: true });
+      mkdirSync(join(tmpDir, ".deck"), { recursive: true });
+      writeFileSync(join(tmpDir, ".config", "deck", "config.json"), "{}\n");
+      writeFileSync(join(tmpDir, ".deck", "config.json"), "{}\n");
+
+      const path = mod.resolveExistingDeckConfigMigrationCandidatePath();
+      expect(path).toBe(join(tmpDir, ".deck", "config.json"));
     });
   });
 });

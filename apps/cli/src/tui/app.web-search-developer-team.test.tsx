@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { render } from "ink";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
-import { createAdapterRegistry, getDefaultDeckConfig, writeDeckConfig } from "@deck/core";
+import { createAdapterRegistry, getDefaultDeckConfig } from "@deck/core";
+import { createDeckConfigStore } from "../deck-config-store";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import { WEB_SEARCH_ROLE_POLICY_V1 } from "@deck/core/web-search-capability";
 import { DeckApp } from "./app";
@@ -66,7 +67,8 @@ describe("DeckApp Web Search Developer Team materialization", () => {
     const configDir = join(root, "home", ".config", "opencode");
     const config = getDefaultDeckConfig();
     config.webSearch = { enabled: true, provider: "tavily" };
-    writeDeckConfig(projectRoot, config);
+    const configStore = createDeckConfigStore({ homeDir: join(root, "home-config"), xdgConfigHome: join(root, "xdg"), projectRoot });
+    configStore.write(config);
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, "opencode.json"), "{}\n", { encoding: "utf8", mode: 0o600 });
 
@@ -79,7 +81,7 @@ describe("DeckApp Web Search Developer Team materialization", () => {
     registry.register("opencode", adapter);
     const harness = createInkHarness();
     const instance = render(
-      <DeckApp adapterRegistry={registry} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      <DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
     );
 

@@ -14,6 +14,7 @@ sdd/
 .deck/pi/profiles/
 .deck/pi/sessions/
 .deck/runtime/
+.deck/config.json
 apps/cli/install
 
 # ── Generated artifacts ───────────────────────────────────────────────────────

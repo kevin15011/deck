@@ -14,7 +14,7 @@ import { CURRENT_CODEX_MODELS_FIXTURE } from "./__fixtures__/codex/models";
 import { parseCodexModels } from "./codex-model-discovery";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
-import { writeDeckConfig } from "@deck/core";
+import { getDefaultDeckConfig, validateDeckConfig } from "@deck/core";
 
 setDefaultTimeout(30_000);
 
@@ -143,7 +143,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(adapter.getCapability("pi-hud")).toMatchObject({ supportStatus: "not-applicable" });
       expect(adapter.getCapability("opencode-mermaid-renderer")).toMatchObject({ supportStatus: "not-applicable" });
 
-      const inventory = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
+      const inventory = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
       for (const capabilityId of protectedIds) expect(inventory.capabilities).toContainEqual(expect.objectContaining({ capabilityId, isBlocked: true, requirementLevel: "required" }));
       expect(inventory.capabilities).toContainEqual(expect.objectContaining({ capabilityId: "engram", isBlocked: true }));
       expect(inventory.capabilities).toContainEqual(expect.objectContaining({ capabilityId: "pi-hud", supportStatus: "not-applicable", isInstalled: false, isBlocked: false }));
@@ -163,7 +163,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(staleSelectionReview.groups.configWrites).not.toContainEqual(expect.objectContaining({ capabilityId: "pi-hud" }));
       expect(staleSelectionReview.groups.configWrites).not.toContainEqual(expect.objectContaining({ capabilityId: "opencode-mermaid-renderer" }));
 
-      const doctor = await adapter.diagnoseProject?.(projectRoot);
+      const doctor = await adapter.diagnoseProject?.(projectRoot, getDefaultDeckConfig());
       for (const capabilityId of protectedIds) {
         const label = capabilityId.split("-").map((part) => `${part[0]!.toUpperCase()}${part.slice(1)}`).join(" ");
         expect(doctor).toContainEqual(expect.objectContaining({ category: `Capability: ${label}`, status: "error" }));
@@ -207,7 +207,7 @@ describe("Codex RunnerAdapter production composition", () => {
       },
     });
     await adapter.inspectProject?.("/tmp/codex-feature-gate");
-    expect(await adapter.buildLaunchPlan?.({ projectRoot: "/tmp/codex-feature-gate", teamId: "developer-team", mode: "resume-latest" })).toMatchObject({
+    expect(await adapter.buildLaunchPlan?.({ projectRoot: "/tmp/codex-feature-gate", teamId: "developer-team", mode: "resume-latest", deckConfig: getDefaultDeckConfig() })).toMatchObject({
       status: "unsupported",
       code: "codex-resume-latest-unsupported",
     });
@@ -218,7 +218,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-journal-"));
     try {
       const adapter = createCodexRunnerAdapter({ journalRoot });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development" });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       expect(plan.files.length).toBeGreaterThan(40);
       expect(plan.diagnostics).toContainEqual(expect.stringContaining("renameat2/openat"));
       const result = await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
@@ -230,7 +230,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(await adapter.verifyDeveloperTeamInstall(plan)).toMatchObject({ valid: false, diagnostics: [expect.stringContaining("Mode drifted")] });
       await chmod(join(projectRoot, ".codex", "agents", "deck-lead.toml"), 0o644);
 
-      const unchangedPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development" });
+      const unchangedPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       expect(unchangedPlan.files).toHaveLength(0);
       await Bun.write(join(projectRoot, ".agents", "skills", "idea-refine", "examples.md"), "tampered");
       expect((await adapter.verifyDeveloperTeamInstall(unchangedPlan)).valid).toBe(false);
@@ -251,7 +251,7 @@ describe("Codex RunnerAdapter production composition", () => {
     await chmod(join(executableRoot, "npx"), 0o755);
     process.env.PATH = `${executableRoot}${previousPath ? `:${previousPath}` : ""}`;
     try {
-      writeDeckConfig(projectRoot, { webSearch: { enabled: true, provider: "tavily" } });
+      const deckConfig = validateDeckConfig({ webSearch: { enabled: true, provider: "tavily" } });
       const adapter = createCodexRunnerAdapter({
         journalRoot,
         webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
@@ -268,7 +268,7 @@ describe("Codex RunnerAdapter production composition", () => {
         serenaReadinessResolver: async () => ({ state: "missing", diagnostic: { code: "missing", message: "Serena is not selected for this test." } }),
       });
 
-      const before = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
+      const before = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig });
       expect(before.capabilities).toContainEqual(expect.objectContaining({
         capabilityId: "web-search",
         isInstalled: false,
@@ -290,6 +290,7 @@ describe("Codex RunnerAdapter production composition", () => {
       const plan = adapter.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig,
         capabilityIds: ["web-search"],
       });
       expect(plan.blocked).toBe(false);
@@ -298,7 +299,7 @@ describe("Codex RunnerAdapter production composition", () => {
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
       expect(await adapter.verifyDeveloperTeamInstall(plan)).toMatchObject({ valid: true });
 
-      const after = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
+      const after = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig });
       expect(after.capabilities).toContainEqual(expect.objectContaining({
         capabilityId: "web-search",
         isInstalled: true,
@@ -334,7 +335,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(detected?.managedPaths).toEqual([join(projectRoot, ".codex", "deck-manifest.json")]);
       expect(detected?.diagnostics).toContainEqual(expect.stringContaining("unsafe managed path"));
 
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development" });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       expect(plan.files).not.toContainEqual(expect.objectContaining({ path: "escape/secret.txt" }));
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -358,10 +359,10 @@ describe("Codex RunnerAdapter production composition", () => {
           }),
         },
       });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development" });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
 
-      const launch = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive" });
+      const launch = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });
       expect(launch?.status).toBe("ready");
       expect(launch?.diagnostics).toContainEqual(expect.objectContaining({ code: "materialized-but-inactive", severity: "warning" }));
     } finally {
@@ -382,17 +383,17 @@ describe("Codex RunnerAdapter production composition", () => {
           readProject: async (root) => ({ config: await readFile(join(root, ".codex", "config.toml"), "utf8").catch(() => null), roles: [], skills: [], agentsInstructions: true }),
         },
       });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development" });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
       expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(false);
       expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).not.toContain("deck-codex-hook-v1");
       expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).not.toContain("dangerously-bypass-approvals-and-sandbox");
 
       const launches = await Promise.all([
-        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive" }),
-        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "exec", prompt: [], stdin: "closed" }),
-        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "session-1" }),
-        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "resume-latest" }),
+        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() }),
+        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "exec", prompt: [], stdin: "closed", deckConfig: getDefaultDeckConfig() }),
+        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "session-1", deckConfig: getDefaultDeckConfig() }),
+        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "resume-latest", deckConfig: getDefaultDeckConfig() }),
       ]);
       for (const launch of launches) {
         expect(launch).toMatchObject({ status: "ready", plan: { executionClass: "static-compatible" } });
@@ -428,11 +429,11 @@ describe("Codex RunnerAdapter production composition", () => {
           token: async () => "one-use-external-token",
         } } as Record<string, unknown>),
       });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development" });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
       expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(false);
 
-      const interactive = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive" });
+      const interactive = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });
       expect(interactive).toMatchObject({ status: "ready", plan: { executionClass: "static-compatible" } });
       if (interactive?.status === "ready") expect(interactive.plan.bridgeBinding).toBeUndefined();
     } finally {
@@ -459,6 +460,7 @@ describe("Codex RunnerAdapter production composition", () => {
       const plan = adapter.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
         modelAssignments: { "deck-lead": "openai-codex/gpt-5.6-terra", "deck-apply-fast": "unknown/model" },
         thinkingAssignments: { "deck-lead": "ultra", "deck-apply-fast": "invented" },
       });
@@ -471,6 +473,7 @@ describe("Codex RunnerAdapter production composition", () => {
       const perModelPlan = adapter.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
         modelAssignments: { "deck-apply-fast": "openai-codex/gpt-5.6-luna" },
         thinkingAssignments: { "deck-apply-fast": "ultra" },
       });
@@ -500,6 +503,7 @@ describe("Codex RunnerAdapter production composition", () => {
       const plan = adapter.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
         modelAssignments,
         thinkingAssignments,
       });
@@ -538,7 +542,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(adapter.readThinkingAssignments(projectRoot)).toEqual({});
       expect(adapter.readModelAssignments("")).toEqual({});
 
-      const diagnostics = await adapter.diagnoseProject?.(projectRoot) ?? [];
+      const diagnostics = await adapter.diagnoseProject?.(projectRoot, getDefaultDeckConfig()) ?? [];
       expect(diagnostics).toContainEqual(expect.objectContaining({
         category: "Model assignments",
         status: "warning",
@@ -574,7 +578,7 @@ describe("Codex RunnerAdapter production composition", () => {
         return;
       }
       expect(adapter.readModelAssignments(projectRoot)).toEqual({});
-      expect(await adapter.diagnoseProject?.(projectRoot)).toContainEqual(expect.objectContaining({
+      expect(await adapter.diagnoseProject?.(projectRoot, getDefaultDeckConfig())).toContainEqual(expect.objectContaining({
         category: "Model assignments",
         status: "warning",
         message: expect.stringContaining("could not be read safely"),
@@ -590,7 +594,7 @@ describe("Codex RunnerAdapter production composition", () => {
         return;
       }
       expect(adapter.readModelAssignments(projectRoot)).toEqual({});
-      expect(await adapter.diagnoseProject?.(projectRoot)).toContainEqual(expect.objectContaining({
+      expect(await adapter.diagnoseProject?.(projectRoot, getDefaultDeckConfig())).toContainEqual(expect.objectContaining({
         category: "Model assignments",
         status: "warning",
         message: expect.stringContaining("could not be read safely"),
@@ -621,11 +625,11 @@ describe("Codex RunnerAdapter production composition", () => {
         },
         inventoryDiscovery: async () => ({ state: "ready", source: "live", discoveredAt: 1, fingerprint: "current-codex", inventory: parsed.inventory }),
       });
-      const interactive = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive" });
-      const exec = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "exec", prompt: ["--flag", "quoted\nline"], stdin: "closed", stdinPayload: { type: "utf8", content: "--flag quoted\nline" } });
-      const override = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", modelId: "openai-codex/gpt-5.6-luna", reasoningLevel: "medium" });
-      const invalidOverride = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", modelId: "unknown/model", reasoningLevel: "invented" });
-      const resume = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "session-1", modelId: "openai-codex/gpt-5.6-luna", reasoningLevel: "medium" });
+      const interactive = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });
+      const exec = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "exec", prompt: ["--flag", "quoted\nline"], stdin: "closed", stdinPayload: { type: "utf8", content: "--flag quoted\nline" }, deckConfig: getDefaultDeckConfig() });
+      const override = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", modelId: "openai-codex/gpt-5.6-luna", reasoningLevel: "medium", deckConfig: getDefaultDeckConfig() });
+      const invalidOverride = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", modelId: "unknown/model", reasoningLevel: "invented", deckConfig: getDefaultDeckConfig() });
+      const resume = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "session-1", modelId: "openai-codex/gpt-5.6-luna", reasoningLevel: "medium", deckConfig: getDefaultDeckConfig() });
 
       if (interactive.status === "ready") {
         const args = [...interactive.plan.args];
@@ -674,19 +678,19 @@ describe("Codex RunnerAdapter production composition", () => {
         'model_reasoning_effort = "--other-option"\n',
       ]) {
         await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), assignment);
-        await expect(adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive" })).resolves.toMatchObject({
+        await expect(adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() })).resolves.toMatchObject({
           status: "blocked",
           code: "codex-invalid-launch-scalar",
         });
       }
       await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "high"\n');
-      await expect(adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive" })).resolves.toMatchObject({
+      await expect(adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() })).resolves.toMatchObject({
         status: "ready",
         plan: { args: expect.arrayContaining(["--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="high"']) },
       });
       for (const input of [
-        { projectRoot, teamId: "developer-team", mode: "interactive" as const, modelId: "--dangerously-bypass-approvals-and-sandbox" },
-        { projectRoot, teamId: "developer-team", mode: "interactive" as const, reasoningLevel: "--other-option" },
+        { projectRoot, teamId: "developer-team", mode: "interactive" as const, modelId: "--dangerously-bypass-approvals-and-sandbox", deckConfig: getDefaultDeckConfig() },
+        { projectRoot, teamId: "developer-team", mode: "interactive" as const, reasoningLevel: "--other-option", deckConfig: getDefaultDeckConfig() },
       ]) {
         await expect(adapter.buildLaunchPlan!(input)).resolves.toMatchObject({
           status: "blocked",
@@ -743,12 +747,14 @@ describe("Codex RunnerAdapter production composition", () => {
       await adapter.prepareDeveloperTeamInstall!({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
         memoryProvider: { id: "supermemory", displayName: "Supermemory", buildInjection: () => ({ instructions: [], toolBindings: [] }) },
         capabilityInstructions: serenaInstructions,
       });
       const plan = adapter.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
         memoryProvider: { id: "supermemory", displayName: "Supermemory", buildInjection: () => ({ instructions: [], toolBindings: [] }) },
         capabilityInstructions: serenaInstructions,
       });
@@ -771,7 +777,7 @@ describe("Codex RunnerAdapter production composition", () => {
        expect(driftedVerification).toMatchObject({ valid: false });
        expect(driftedVerification).not.toHaveProperty("postInstallFollowUps");
        await writeFile(join(projectRoot, ".codex", "config.toml"), config);
-       const inventory = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
+       const inventory = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
       for (const id of ["context-mode", "codebase-memory", "rtk", "serena", "context7"]) {
         expect(inventory.capabilities.find((capability) => capability.capabilityId === id)?.isInstalled).toBe(true);
       }
@@ -820,11 +826,13 @@ describe("Codex RunnerAdapter production composition", () => {
       await ready.prepareDeveloperTeamInstall!({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
         capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
       });
       const readyPlan = ready.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
         capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
       });
       const readyConfig = readyPlan.files.find((file) => file.path === ".codex/config.toml")?.content ?? "";
@@ -834,7 +842,7 @@ describe("Codex RunnerAdapter production composition", () => {
        expect(readyConfig).toContain('env_vars = ["HOME", "PATH", "XDG_DATA_HOME"]');
        expect(readyConfig).not.toContain(executable);
       await ready.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan: readyPlan });
-      expect((await ready.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" })).capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({
+      expect((await ready.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() })).capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({
         isInstalled: true,
         diagnostics: expect.arrayContaining([expect.stringContaining("executable reused"), expect.stringContaining("MCP configured"), expect.stringContaining("MCP ready")]),
       });
@@ -853,8 +861,8 @@ describe("Codex RunnerAdapter production composition", () => {
           serenaReadinessResolver: async () => readySerenaReadiness(),
            serenaProxyProbe: readySerenaProxy,
         } as never);
-        await legacy.prepareDeveloperTeamInstall!({ projectRoot: legacyProjectRoot, environmentId: "codex-development" });
-        const legacyPlan = legacy.buildDeveloperTeamInstallPlan({ projectRoot: legacyProjectRoot, environmentId: "codex-development" });
+        await legacy.prepareDeveloperTeamInstall!({ projectRoot: legacyProjectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+        const legacyPlan = legacy.buildDeveloperTeamInstallPlan({ projectRoot: legacyProjectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
         expect(legacyPlan.files.find((file) => file.path === ".codex/config.toml")?.content ?? "").toContain('command = "deck"');
       } finally {
         await rm(legacyProjectRoot, { recursive: true, force: true });
@@ -874,8 +882,8 @@ describe("Codex RunnerAdapter production composition", () => {
           serenaProxyProbe: readySerenaProxy,
         } as never);
         const instructions = (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]);
-        await staleBeforeApply.prepareDeveloperTeamInstall!({ projectRoot: preApplyProjectRoot, environmentId: "codex-development", capabilityInstructions: instructions });
-        const stalePlan = staleBeforeApply.buildDeveloperTeamInstallPlan({ projectRoot: preApplyProjectRoot, environmentId: "codex-development", capabilityInstructions: instructions });
+        await staleBeforeApply.prepareDeveloperTeamInstall!({ projectRoot: preApplyProjectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), capabilityInstructions: instructions });
+        const stalePlan = staleBeforeApply.buildDeveloperTeamInstallPlan({ projectRoot: preApplyProjectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), capabilityInstructions: instructions });
         await expect(staleBeforeApply.applyDeveloperTeamInstall({ projectRoot: preApplyProjectRoot, environmentId: "codex-development", plan: stalePlan })).rejects.toThrow("no longer reachable");
         expect(await Bun.file(join(preApplyProjectRoot, ".codex", "config.toml")).exists()).toBe(false);
       } finally {
@@ -889,11 +897,13 @@ describe("Codex RunnerAdapter production composition", () => {
       await missing.prepareDeveloperTeamInstall!({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
         capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
       });
       const missingPlan = missing.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
         capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
       });
       expect(missingPlan.blocked).toBe(true);
@@ -919,6 +929,7 @@ describe("Codex RunnerAdapter production composition", () => {
       const input = {
         projectRoot,
         environmentId: "codex-development" as const,
+        deckConfig: getDefaultDeckConfig(),
         capabilityInstructions: (await import("@deck/core")).buildCapabilityInstructionBundle(["serena"]),
       };
 
@@ -985,7 +996,7 @@ describe("Codex RunnerAdapter production composition", () => {
       codebaseIndexReadiness: async () => false,
        supermemoryOAuthStatus: async () => ({ state: "not-authenticated" }),
     });
-    const inventory = await adapter.getCapabilityInventory({ projectRoot: "/project", environmentId: "codex-development", runnerId: "codex" });
+    const inventory = await adapter.getCapabilityInventory({ projectRoot: "/project", environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
     const byId = new Map(inventory.capabilities.map((capability) => [capability.capabilityId, capability]));
     expect(byId.get("context-mode")).toMatchObject({ isInstalled: false, isBlocked: false, diagnostics: expect.arrayContaining([expect.stringContaining("missing")]) });
     expect(byId.get("codebase-memory")).toMatchObject({ isInstalled: false, isBlocked: true, diagnostics: expect.arrayContaining([expect.stringContaining("unusable"), expect.stringContaining("index not ready")]) });
@@ -1027,15 +1038,11 @@ describe("Codex RunnerAdapter production composition", () => {
       const plan = ready.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
+        deckConfig: validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }),
         memoryProvider: { id: "supermemory", displayName: "Supermemory", buildInjection: () => ({ instructions: [], toolBindings: [] }) },
       });
       await ready.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
-      await mkdir(join(projectRoot, ".deck"), { recursive: true });
-      await writeFile(join(projectRoot, ".deck", "config.json"), JSON.stringify({
-        version: 1,
-        adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } },
-      }));
-      const healthy = await ready.diagnoseProject?.(projectRoot) ?? [];
+      const healthy = await ready.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } })) ?? [];
       expect(healthy).toContainEqual(expect.objectContaining({ category: "Binary and version", status: "ok" }));
       expect(healthy).toContainEqual(expect.objectContaining({ category: "Managed content", status: "ok" }));
       expect(healthy).toContainEqual(expect.objectContaining({
@@ -1058,7 +1065,7 @@ describe("Codex RunnerAdapter production composition", () => {
         codebaseIndexReadiness: async () => true,
         supermemoryOAuthStatus: async () => ({ state: "not-authenticated" }),
       });
-      expect(await unauthorized.diagnoseProject?.(projectRoot)).toContainEqual(expect.objectContaining({
+      expect(await unauthorized.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({
         category: "Capability: Supermemory",
         status: "warning",
         message: expect.stringContaining("pending user authorization"),
@@ -1075,7 +1082,7 @@ describe("Codex RunnerAdapter production composition", () => {
         sharedBinaryUsability,
         codebaseIndexReadiness: async () => true,
       });
-      expect(await brokenSupermemory.diagnoseProject?.(projectRoot)).toContainEqual(expect.objectContaining({
+      expect(await brokenSupermemory.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({
         category: "Capability: Supermemory",
         status: "error",
         message: expect.stringContaining("reviewed streamable HTTP configuration"),
@@ -1086,24 +1093,24 @@ describe("Codex RunnerAdapter production composition", () => {
         preflight: { probe, inspectTrust: async () => "untrusted", readProject: async () => ({ config: "[features]\nmulti_agent = true\n", roles: [], skills: [], agentsInstructions: true }) },
         sharedBinaryUsability,
       });
-      expect(await untrusted.diagnoseProject?.(projectRoot)).toContainEqual(expect.objectContaining({ category: "Trust activation", status: "warning" }));
+      expect(await untrusted.diagnoseProject?.(projectRoot, getDefaultDeckConfig())).toContainEqual(expect.objectContaining({ category: "Trust activation", status: "warning" }));
 
       await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), "user drift", "utf8");
-      expect(await ready.diagnoseProject?.(projectRoot)).toContainEqual(expect.objectContaining({ category: "Managed content", status: "error", message: expect.stringContaining("ownership evidence") }));
+      expect(await ready.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({ category: "Managed content", status: "error", message: expect.stringContaining("ownership evidence") }));
 
       const blocked = createCodexRunnerAdapter({
         journalRoot,
         preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config: "[broken", roles: [], skills: [], agentsInstructions: true }) },
         sharedBinaryUsability,
       });
-      expect(await blocked.diagnoseProject?.(projectRoot)).toContainEqual(expect.objectContaining({ category: "Binary and version", status: "error" }));
+      expect(await blocked.diagnoseProject?.(projectRoot, getDefaultDeckConfig())).toContainEqual(expect.objectContaining({ category: "Binary and version", status: "error" }));
 
       const unsupported = createCodexRunnerAdapter({
         journalRoot,
         preflight: { probe: async () => ({ found: true, version: "0.100.0", help: "" }) },
         sharedBinaryUsability,
       });
-      const unsupportedChecks = await unsupported.diagnoseProject?.(projectRoot) ?? [];
+      const unsupportedChecks = await unsupported.diagnoseProject?.(projectRoot, getDefaultDeckConfig()) ?? [];
       expect(unsupportedChecks).toContainEqual(expect.objectContaining({ category: "Binary and version", status: "error", message: expect.stringContaining("0.100.0") }));
       expect(unsupportedChecks).toContainEqual(expect.objectContaining({ category: "Execution route: interactive", status: "warning", message: expect.stringContaining("unsupported") }));
     } finally {
@@ -1139,8 +1146,8 @@ describe("Codex RunnerAdapter production composition", () => {
         },
         serenaProxyProbe: readySerenaProxy,
       } as never);
-      const first = await readyThenMissing.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
-      const second = await readyThenMissing.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
+      const first = await readyThenMissing.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
+      const second = await readyThenMissing.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
       expect(first.capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({ isInstalled: true });
       expect(second.capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({ isInstalled: false, diagnostics: expect.arrayContaining([expect.stringContaining("executable missing")]) });
       expect(readyThenMissingCalls).toBe(2);
@@ -1157,8 +1164,8 @@ describe("Codex RunnerAdapter production composition", () => {
         },
         serenaProxyProbe: readySerenaProxy,
       } as never);
-      const missing = await missingThenReady.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
-      const ready = await missingThenReady.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex" });
+      const missing = await missingThenReady.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
+      const ready = await missingThenReady.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
       expect(missing.capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({ isInstalled: false });
       expect(ready.capabilities.find((capability) => capability.capabilityId === "serena")).toMatchObject({ isInstalled: true });
       expect(missingThenReadyCalls).toBe(2);
@@ -1177,7 +1184,7 @@ describe("Codex RunnerAdapter production composition", () => {
           return { state: "ready" as const };
         },
       } as never);
-      const checks = await doctor.diagnoseProject!(projectRoot);
+      const checks = await doctor.diagnoseProject!(projectRoot, getDefaultDeckConfig());
       expect(checks).not.toContainEqual(expect.objectContaining({ category: "Managed content", status: "error" }));
       expect(checks).toContainEqual(expect.objectContaining({ category: "Capability: Serena", status: "ok", message: expect.stringContaining("Deck-owned executable reused") }));
       expect(doctorCalls).toBe(1);
@@ -1192,7 +1199,7 @@ describe("Codex RunnerAdapter production composition", () => {
           return { state: "missing" as const, diagnostic: { code: "serena-not-ready", message: "Serena is unavailable." } };
         },
       } as never);
-      const missingChecks = await missingDoctor.diagnoseProject!(projectRoot);
+      const missingChecks = await missingDoctor.diagnoseProject!(projectRoot, getDefaultDeckConfig());
       expect(missingChecks).toContainEqual(expect.objectContaining({ category: "Managed content", status: "error", message: expect.stringContaining("no healthy Deck-owned launcher") }));
       expect(missingChecks).toContainEqual(expect.objectContaining({
         category: "Capability: Serena",
@@ -1245,7 +1252,7 @@ describe("Codex RunnerAdapter production composition", () => {
               : { state: "indeterminate" as const, message: "The effective `deck` proxy probe timed out." };
         },
       });
-      const input = { projectRoot, environmentId: "codex-development" as const, runnerId: "codex" as const };
+      const input = { projectRoot, environmentId: "codex-development" as const, runnerId: "codex" as const, deckConfig: getDefaultDeckConfig() };
       const ready = await adapter.getCapabilityInventory(input);
       const unsupported = await adapter.getCapabilityInventory(input);
       const missing = await adapter.getCapabilityInventory(input);
@@ -1274,7 +1281,7 @@ describe("Codex RunnerAdapter production composition", () => {
           isTracked: (_root, relativePath) => relativePath === "AGENTS.md",
         },
       });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", localOnly: true });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), localOnly: true });
       expect(plan.files.some((file) => file.path.startsWith("git-info-exclude:"))).toBe(true);
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
       const exclude = await readFile(excludePath, "utf8");
@@ -1284,7 +1291,7 @@ describe("Codex RunnerAdapter production composition", () => {
       const journals = (await readdir(journalRoot)).filter((name) => name.endsWith(".json"));
       expect(journals).toHaveLength(2);
       expect(new Set(journals).size).toBe(2);
-      const unchanged = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", localOnly: true });
+      const unchanged = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), localOnly: true });
       expect(unchanged.files).toHaveLength(0);
       expect(await adapter.verifyDeveloperTeamInstall(unchanged)).toMatchObject({ valid: true });
       await Bun.write(excludePath, "# independently changed\n");
@@ -1319,7 +1326,7 @@ describe("Codex RunnerAdapter production composition", () => {
           isTracked: (_projectRoot, relativePath) => relativePath === "AGENTS.md",
         },
       });
-      const firstPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: firstRoot, environmentId: "codex-development", localOnly: true });
+      const firstPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: firstRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), localOnly: true });
       const firstBackup = adapter.backupDeveloperTeamFiles(firstPlan);
       const firstApply = await adapter.applyDeveloperTeamInstall({ projectRoot: firstRoot, environmentId: "codex-development", plan: firstPlan });
       const firstReceipt = firstBackup.payload as NonNullable<typeof firstApply.operation>;
@@ -1334,7 +1341,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(await Bun.file(firstRole).exists()).toBe(true);
       expect(await readFile(firstExclude, "utf8")).toContain("/.codex/agents/deck-lead.toml");
 
-      const secondPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: secondRoot, environmentId: "codex-development" });
+      const secondPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: secondRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       const secondBackup = adapter.backupDeveloperTeamFiles(secondPlan);
       const secondApply = await adapter.applyDeveloperTeamInstall({ projectRoot: secondRoot, environmentId: "codex-development", plan: secondPlan });
       expect(journalPersistCount).toBe(9);
@@ -1363,7 +1370,7 @@ describe("Codex RunnerAdapter production composition", () => {
     try {
       await Promise.all(roots.map((projectRoot) => mkdir(projectRoot, { recursive: true })));
       const adapter = createCodexRunnerAdapter({ journalRoot: join(root, "journals") });
-      const plans = roots.map((projectRoot) => adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development" }));
+      const plans = roots.map((projectRoot) => adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() }));
       const backups = plans.map((plan) => adapter.backupDeveloperTeamFiles(plan));
       const applied = await Promise.all(plans.map((plan, index) => adapter.applyDeveloperTeamInstall({ projectRoot: roots[index]!, environmentId: "codex-development", plan })));
       expect(new Set(applied.map((result) => result.operation?.operationId)).size).toBe(2);

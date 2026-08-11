@@ -81,7 +81,7 @@ import {
   type MemoryDiagnostic as CoreMemoryDiagnostic,
   type MemoryInjectionBundle,
 } from "@deck/core/memory/adaptive-memory";
-import { readDeckConfig, DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
+import { DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
 import type { CapabilityInstructionBundle } from "@deck/core";
 import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import type { DeveloperTeamAgent } from "./developer-team-catalog";
@@ -403,8 +403,6 @@ export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
    * Optional orchestrator personality override. When provided, this value is
    * passed to the content registry to select the appropriate prompt variant.
    * When absent, falls back to `DEFAULT_ORCHESTRATOR_PERSONALITY`.
-   * If the caller also needs the resolved config, pass `orchestratorPersonality`
-   * explicitly after calling `readDeckConfig(projectRoot)`.
    */
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
   /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
@@ -541,14 +539,7 @@ export function buildDeveloperTeamInstallPlan(
 
   const capabilityInstructions = options?.capabilityInstructions;
 
-  // Resolve orchestrator personality from options or fall back to config
-  const personality = options?.orchestratorPersonality ?? (() => {
-    try {
-      return readDeckConfig(projectRoot).orchestratorPersonality;
-    } catch {
-      return DEFAULT_ORCHESTRATOR_PERSONALITY;
-    }
-  })();
+  const personality = options?.orchestratorPersonality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
   const promptProfile = "compact" as const;
 
   const agents: PlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {

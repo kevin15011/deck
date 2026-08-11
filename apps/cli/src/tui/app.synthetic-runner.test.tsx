@@ -11,10 +11,9 @@ import {
   createAdapterRegistry,
   getDefaultDeckConfig,
   getEnabledPackageInstructionIds,
-  readDeckConfig,
   type RunnerAdapter,
-  writeDeckConfig,
 } from "@deck/core";
+import { createDeckConfigStore } from "../deck-config-store";
 import { DeckApp } from "./app";
 
 setDefaultTimeout(15_000);
@@ -70,9 +69,10 @@ async function waitForCondition(instance: { waitUntilRenderFlush(): Promise<unkn
 describe("DeckApp synthetic runner production flow", () => {
   test("uses only selected-adapter package metadata throughout the dashboard and Home Configure Packages flows", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-synthetic-runner-"));
+    const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
     const calls: string[] = [];
     const initialConfig = getDefaultDeckConfig();
-    writeDeckConfig(projectRoot, {
+    configStore.write({
       ...initialConfig,
       packageInstructions: {
         ...initialConfig.packageInstructions,
@@ -127,7 +127,7 @@ describe("DeckApp synthetic runner production flow", () => {
     registry.register(adapter.runnerId, adapter);
     const harness = createInkHarness();
     const instance = render(
-      <DeckApp adapterRegistry={registry} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      <DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
     );
 
@@ -184,7 +184,7 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input("\r");
       await waitForFreshOutput(instance, harness.output, boundary, "Package instructions applied.");
 
-      const persisted = readDeckConfig(projectRoot);
+      const persisted = configStore.read();
       expect(getEnabledPackageInstructionIds(persisted, "atlas")).toEqual(["code-economy", "context-mode"]);
       expect(persisted.packageInstructions.atlas).toMatchObject({
         "code-economy": true,
@@ -203,8 +203,9 @@ describe("DeckApp synthetic runner production flow", () => {
 
   test("filters stale package configuration at the final dashboard team-install boundary", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-synthetic-dashboard-"));
+    const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
     const initialConfig = getDefaultDeckConfig();
-    writeDeckConfig(projectRoot, {
+    configStore.write({
       ...initialConfig,
       packageInstructions: {
         ...initialConfig.packageInstructions,
@@ -261,7 +262,7 @@ describe("DeckApp synthetic runner production flow", () => {
     registry.register(adapter.runnerId, adapter);
     const harness = createInkHarness();
     const instance = render(
-      <DeckApp adapterRegistry={registry} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      <DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
     );
 
@@ -288,7 +289,7 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input("\r");
       await waitForCondition(instance, () => capturedBundle !== undefined, "the Atlas team bundle");
 
-      expect(getEnabledPackageInstructionIds(readDeckConfig(projectRoot), "atlas")).toEqual(["code-economy", "rtk", "serena"]);
+      expect(getEnabledPackageInstructionIds(configStore.read(), "atlas")).toEqual(["code-economy", "rtk", "serena"]);
       expect(capturedBundle).toEqual(buildCapabilityInstructionBundle(["code-economy"]));
     } finally {
       instance.unmount();
@@ -335,9 +336,11 @@ describe("DeckApp synthetic runner production flow", () => {
     } as unknown as RunnerAdapter;
     const registry = createAdapterRegistry();
     registry.register(adapter.runnerId, adapter);
+    const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
+    configStore.write({});
     const harness = createInkHarness();
     const instance = render(
-      <DeckApp adapterRegistry={registry} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      <DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
     );
 
@@ -452,9 +455,11 @@ describe("DeckApp synthetic runner production flow", () => {
     } as unknown as RunnerAdapter;
     const registry = createAdapterRegistry();
     registry.register(adapter.runnerId, adapter);
+    const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
+    configStore.write({});
     const harness = createInkHarness();
     const instance = render(
-      <DeckApp adapterRegistry={registry} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      <DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
     );
 

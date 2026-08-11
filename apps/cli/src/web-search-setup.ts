@@ -1,4 +1,5 @@
-import { readDeckConfig, writeDeckConfig, type NormalizedDeckConfig } from "@deck/core";
+import type { NormalizedDeckConfig } from "@deck/core";
+import type { DeckConfigStore } from "./deck-config-store";
 import {
   writeTavilyCredentialToActiveShellProfileTransaction,
   type ShellProfileDiagnosticCode,
@@ -30,11 +31,12 @@ export type WebSearchSetupResult = Readonly<{
 
 export type PersistWebSearchCredentialOptions = Readonly<{
   credential: string;
-  projectRoot: string;
+  projectRoot?: string;
+  configStore?: DeckConfigStore;
   environment?: Record<string, string | undefined>;
   writeProfile?: (credential: string) => ShellProfileWriteTransaction;
-  readConfig?: (projectRoot: string) => NormalizedDeckConfig;
-  writeConfig?: (projectRoot: string, config: NormalizedDeckConfig) => unknown;
+  readConfig?: () => NormalizedDeckConfig;
+  writeConfig?: (config: NormalizedDeckConfig) => unknown;
 }>;
 
 /**
@@ -63,11 +65,17 @@ export function persistWebSearchCredentialAndEnable(
 
   try {
     environment.TAVILY_API_KEY = options.credential;
-    const existing = (options.readConfig ?? readDeckConfig)(options.projectRoot);
-    (options.writeConfig ?? writeDeckConfig)(options.projectRoot, {
-      ...existing,
+    const store = options.configStore;
+    if (!store) throw new Error("Global Deck config store is required to configure Web Search.");
+    const updateConfig = (current: NormalizedDeckConfig): NormalizedDeckConfig => ({
+      ...current,
       webSearch: { enabled: true, provider: "tavily" },
     });
+    if (options.writeConfig) {
+      options.writeConfig(updateConfig((options.readConfig ?? (() => store.read()))()));
+    } else {
+      store.patch(updateConfig);
+    }
   } catch {
     restoreEnvironmentValue(environment, "TAVILY_API_KEY", previousEnvironment);
     const rollback = profileTransaction.rollback();

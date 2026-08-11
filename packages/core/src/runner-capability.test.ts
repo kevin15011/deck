@@ -18,6 +18,7 @@ import type {
   DeveloperTeamDefaultModelAssignment,
   DeveloperTeamManifestInput,
 } from "./runner-capability";
+import { getDefaultDeckConfig } from "./config/deck-config";
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles/index";
 
 describe("RunnerCapabilities core types", () => {
@@ -102,6 +103,7 @@ describe("RunnerCapabilities core types", () => {
       const input: DeveloperTeamManifestInput = {
         projectRoot: "/tmp",
         environmentId: "test-env",
+        deckConfig: getDefaultDeckConfig(),
         capabilityInstructions: bundle,
       };
 
@@ -114,6 +116,7 @@ describe("RunnerCapabilities core types", () => {
       const input: DeveloperTeamManifestInput = {
         projectRoot: "/tmp",
         environmentId: "test-env",
+        deckConfig: getDefaultDeckConfig(),
       };
 
       expect(input.capabilityInstructions).toBeUndefined();

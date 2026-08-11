@@ -228,7 +228,7 @@ describe("runner-sync", () => {
     const journalRoot = join(root, "journals");
     try {
       const adapter = createCodexRunnerAdapter({ journalRoot });
-      const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development" });
+      const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
       const paths = [
         ".codex/agents/deck-lead.toml",
@@ -266,7 +266,7 @@ describe("runner-sync", () => {
     const root = await mkdtemp(join(tmpdir(), "deck-codex-sync-current-"));
     try {
       const adapter = createCodexRunnerAdapter({ journalRoot: join(root, "journals") });
-      const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", capabilityInstructions: { instructions: [] } });
+      const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), capabilityInstructions: { instructions: [] } });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
       const config = getDefaultDeckConfig();
       for (const key of Object.keys(config.packageInstructions.codex)) config.packageInstructions.codex[key as keyof typeof config.packageInstructions.codex] = false;
@@ -309,7 +309,7 @@ describe("runner-sync", () => {
           return { outcome: "failed", diagnostic: { code: "unexpected", message: "bootstrap must not run" } } as never;
         },
       });
-      const installInput = { projectRoot: root, environmentId: "codex-development" as const };
+      const installInput = { projectRoot: root, environmentId: "codex-development" as const, deckConfig: getDefaultDeckConfig() };
       const initial = await prepareAndBuildDeveloperTeamInstallPlan(adapter, installInput);
       expect(initial.plan.blocked).toBe(false);
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial.plan });

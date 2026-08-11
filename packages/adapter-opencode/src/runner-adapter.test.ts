@@ -7,7 +7,7 @@ import { createOpenCodeRunnerAdapter } from "./runner-adapter";
 import type { OpenCodeToolsReview } from "./required-tools";
 import { getStandaloneSkills } from "@deck/core/skills/external";
 import { discoverSkillsFromProvider } from "../../core/src/skill-discovery/discovery";
-import type { SerenaBootstrapEffects, SerenaReadinessEvidence } from "@deck/core";
+import { getDefaultDeckConfig, type SerenaBootstrapEffects, type SerenaReadinessEvidence } from "@deck/core";
 
 const FRONTEND_SKILL_IDS = [
   "ui-skills-root",
@@ -59,6 +59,7 @@ describe("OpenCode RunnerAdapter developer team install plan", () => {
     const plan = adapter.buildDeveloperTeamInstallPlan({
       projectRoot: "/tmp/deck-opencode-runner-adapter-test",
       environmentId: "opencode-development",
+      deckConfig: getDefaultDeckConfig(),
     });
 
     const standaloneFiles = plan.files.filter((file) => file.kind === "standalone-skill");
@@ -299,6 +300,7 @@ describe("OpenCode RunnerAdapter developer team install plan", () => {
       projectRoot: "/tmp/t4-project",
       runnerId: "opencode",
       environmentId: "opencode-development",
+      deckConfig: getDefaultDeckConfig(),
     });
 
     expect(projectRoots).toEqual(["/tmp/t4-project"]);

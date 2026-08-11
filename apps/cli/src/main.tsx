@@ -13,6 +13,7 @@ import { DeckApp } from "./tui/app";
 import { ScreenFrame } from "./tui/screen-frame";
 import { HomeScreen } from "./tui/screens/home-screen";
 import { inspectStandaloneWebSearchReadiness, isStandaloneWebSearchSmokeSuccessful } from "./standalone-web-search-smoke";
+import { createDeckConfigStoreFromEnvironment } from "./deck-config-store";
 
 // One authoritative operational registry is shared by direct commands and the TUI.
 const adapterRegistry = createDefaultAdapterRegistry();
@@ -20,6 +21,7 @@ const adapterRegistry = createDefaultAdapterRegistry();
 // Drop the runtime/script args — Bun passes them as argv[0] and argv[1]
 const userArgs = process.argv.slice(2);
 const parsed = parseArgs(userArgs);
+const configStore = createDeckConfigStoreFromEnvironment({ projectRoot: resolveProjectRoot() ?? process.cwd() });
 
 if (parsed.command === "error") {
   console.error(parsed.message);
@@ -33,6 +35,7 @@ if (process.env.DECK_STANDALONE_WEB_SEARCH_SMOKE === "1") {
   const report = await inspectStandaloneWebSearchReadiness({
     projectRoot: resolveProjectRoot() ?? process.cwd(),
     adapters: adapterRegistry.list(),
+    deckConfig: configStore.readRequired(),
   });
   console.log(JSON.stringify(report));
   process.exit(isStandaloneWebSearchSmokeSuccessful(report) ? 0 : 1);
@@ -54,7 +57,7 @@ if (parsed.command === "internal-serena-mcp") {
 if (parsed.command === "doctor") {
   try {
     const { runDoctorDiagnostics, renderDoctorReport, shouldExitWithError } = await import("./doctor-command");
-    const result = await runDoctorDiagnostics();
+    const result = await runDoctorDiagnostics({ configStore });
     renderDoctorReport(result);
     process.exit(shouldExitWithError(result) ? 1 : 0);
   } catch (err) {
@@ -177,8 +180,9 @@ if (
 
 if (parsed.command === "runner-launch") {
   const projectRoot = resolveProjectRoot() ?? process.cwd();
+  const deckConfig = configStore.readRequired();
   const adapter = adapterRegistry.get(parsed.runnerId);
-  const launch = { ...parsed.launch, projectRoot, teamId: parsed.teamId };
+  const launch = { ...parsed.launch, projectRoot, teamId: parsed.teamId, deckConfig };
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
   const result = await runRunnerLaunch({
     adapter,
@@ -227,6 +231,7 @@ if (parsed.command === "runner-launch") {
     projectRoot,
     flags: parsed.flags,
     cliMemoryProvider: parsed.memoryProvider,
+    deckConfig: configStore.readRequired(),
   });
 
   if (result.status === "error") {
@@ -254,7 +259,7 @@ if (parsed.command === "runner-launch") {
   });
   process.exit(exitCode);
 } else if (process.stdin.isTTY) {
-  render(<DeckApp adapterRegistry={adapterRegistry} />, {
+  render(<DeckApp adapterRegistry={adapterRegistry} configStore={configStore} />, {
     alternateScreen: true,
     exitOnCtrlC: true,
     incrementalRendering: true,
