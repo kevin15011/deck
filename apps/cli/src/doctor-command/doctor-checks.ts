@@ -5,11 +5,14 @@
  * All helpers are pure functions with injectable dependencies for testability.
  */
 
-import { existsSync, statSync, accessSync, constants } from "node:fs";
+import { existsSync, statSync, accessSync, constants, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnImpl } from "node:child_process";
-import { redact, validateSupermemoryPiMcpConfig } from "@deck/adapter-pi";
+import { defaultPiMcpConfigPath, redact, validateSupermemoryPiMcpConfig } from "@deck/adapter-pi";
 import { validateSupermemoryOpenCodeMcpConfig } from "@deck/adapter-opencode";
+import { SUPERMEMORY_MCP_SERVER_URL } from "@deck/adapter-supermemory";
+import { diagnoseDeckConfigDeprecations } from "@deck/core";
 
 import { readManifest, detectManifestDrift } from "../upgrade-command/manifest-store";
 import { readState } from "../upgrade-command/state-store";
@@ -39,6 +42,8 @@ export type DoctorCheckDeps = {
   redact: (msg: string) => string;
   /** Redact path (fold home-relative paths) */
   redactPath: (msg: string) => string;
+  /** Optional text reader for config diagnostics; tests omit it to avoid ambient file I/O. */
+  readText?: (path: string) => string;
 };
 
 /** Default dependencies using Node.js built-ins */
@@ -118,6 +123,7 @@ export const defaultDoctorCheckDeps: DoctorCheckDeps = {
   getDeckVersion: () => process.env.DECK_VERSION ?? "unknown",
   redact,
   redactPath: defaultRedactPath,
+  readText: (path: string) => readFileSync(path, "utf8"),
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +134,27 @@ function deriveStatus(items: DoctorCheckItem[]): DoctorStatus {
   if (items.some((i) => i.status === "error")) return "error";
   if (items.some((i) => i.status === "warning")) return "warning";
   return "ok";
+}
+
+function safeScopeFingerprint(scope: string | undefined): string {
+  if (!scope) return "missing";
+  return `smfp_${createHash("sha256").update(scope, "utf8").digest("hex").slice(0, 16)}`;
+}
+
+function readSupermemoryScopeFromJsonConfig(path: string, shape: "opencode" | "pi"): string | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    const servers = shape === "opencode" ? parsed.mcp : parsed.mcpServers;
+    if (!servers || typeof servers !== "object" || Array.isArray(servers)) return undefined;
+    const server = (servers as Record<string, unknown>).supermemory;
+    if (!server || typeof server !== "object" || Array.isArray(server)) return undefined;
+    const headers = (server as Record<string, unknown>).headers;
+    if (!headers || typeof headers !== "object" || Array.isArray(headers)) return undefined;
+    const scope = (headers as Record<string, unknown>)["x-sm-project"];
+    return typeof scope === "string" && scope.trim() ? scope.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +349,20 @@ export function checkDeckConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps):
           status: "ok",
           message: `Config directory exists and is readable: ${deps.redactPath(xdgPaths.configDir)}`,
         });
+        if (deps.readText && deps.exists(xdgPaths.configPath)) {
+          try {
+            const rawConfig = JSON.parse(deps.readText(xdgPaths.configPath)) as unknown;
+            for (const diagnostic of diagnoseDeckConfigDeprecations(rawConfig)) {
+              items.push({
+                status: diagnostic.severity,
+                message: diagnostic.message,
+                suggestion: `Remove ${diagnostic.fieldPath}; Supermemory no longer uses semantic memory quotas.`,
+              });
+            }
+          } catch {
+            // Syntax/readability problems are reported by the dedicated config parser path.
+          }
+        }
       } else {
         items.push({
           status: "error",
@@ -471,6 +512,11 @@ export type CheckRunnerConfigResult = DoctorCategoryResult;
 export function checkRunnerConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps): CheckRunnerConfigResult {
   const items: DoctorCheckItem[] = [];
 
+  items.push({
+    status: "ok",
+    message: `Supermemory contract: endpoint ${SUPERMEMORY_MCP_SERVER_URL}; auth readiness is runner-native; conversation-capture: unsupported/static-compatible until a trusted MCP execution boundary is available; endpoint and x-sm-project scope are inspected per runner below.`,
+  });
+
     const home = homedir();
 
     // OpenCode config validation
@@ -484,9 +530,10 @@ export function checkRunnerConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps
       });
 
       if (validation.ok) {
+        const fingerprint = safeScopeFingerprint(readSupermemoryScopeFromJsonConfig(opencodeConfigPath, "opencode"));
         items.push({
           status: "ok",
-          message: "OpenCode config validated successfully",
+          message: `OpenCode Supermemory config validated successfully; canonical scope fingerprint: ${fingerprint}; auth readiness: native OAuth.`,
         });
       } else {
         // Report specific validation diagnostics (not errors)
@@ -514,7 +561,7 @@ export function checkRunnerConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps
 
   // Pi config validation (if Pi is installed)
   try {
-    const piConfigPath = `${home}/.config/supermemory/pi/config.json`.replace(/^\/+/, "/");
+    const piConfigPath = defaultPiMcpConfigPath(home);
     if (deps.exists(piConfigPath)) {
       // Use adapter validation to check actual config content
       const validation = validateSupermemoryPiMcpConfig({
@@ -523,9 +570,10 @@ export function checkRunnerConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps
       });
 
       if (validation.ok) {
+        const fingerprint = safeScopeFingerprint(readSupermemoryScopeFromJsonConfig(piConfigPath, "pi"));
         items.push({
           status: "ok",
-          message: "Pi config validated successfully",
+          message: `Pi Supermemory config validated successfully; canonical scope fingerprint: ${fingerprint}; auth readiness: API key handoff redacted.`,
         });
       } else {
         const diagMessages = validation.diagnostics?.map((d: { message: string }) => d.message).join("; ") ?? "Unknown validation issue";

@@ -47,7 +47,7 @@ describe("path-parameterized Deck config file primitives", () => {
       activeProfile: "legacy-local",
     });
 
-    expect(written.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents", maxMemoriesPerSession: 5 });
+    expect(written.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents" });
     expect(readDeckConfigFile(configPath).activeProfile).toBe("legacy-local");
     expect(readFileSync(configPath, "utf8")).toContain('"mcpServerName": "custom-sm"');
     expect(existsSync(join(root, "deck", ".config.json.tmp"))).toBe(false);
@@ -70,7 +70,7 @@ describe("path-parameterized Deck config file primitives", () => {
     }));
 
     expect(patched.webSearch).toEqual({ enabled: true, provider: "tavily" });
-    expect(patched.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents", maxMemoriesPerSession: 4 });
+    expect(patched.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents" });
     expect(patched.packageInstructions.opencode["context-mode"]).toBe(true);
     expect(patched.orchestratorPersonality).toBe("guia");
     expect(patched.activeProfile).toBe("legacy-local");

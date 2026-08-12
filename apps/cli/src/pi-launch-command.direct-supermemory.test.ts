@@ -20,8 +20,8 @@ function writePiMcpConfig(configPath: string) {
         mcpServers: {
           supermemory: {
             transport: "http",
-            url: "https://supermemory-new.stlmcp.com",
-            headers: { "x-supermemory-api-key": SENTINEL_TOKEN },
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": SENTINEL_TOKEN },
           },
         },
       },
@@ -77,7 +77,7 @@ describe("runPiLaunch direct Supermemory dashboard config", () => {
         // Token-only contract: when runtime validation fails, the orchestrator file is still
         // created (with a "memory unavailable" note) rather than being omitted entirely.
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
-        expect(systemPrompt).not.toContain("Supermemory MCP Adaptive Memory");
+        expect(systemPrompt).not.toContain("Supermemory MCP Conversation Memory");
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -112,7 +112,7 @@ describe("runPiLaunch direct Supermemory dashboard config", () => {
         expect(diagnosticText).toContain("Deck config may not store credentials or secret-shaped fields.");
         expect(diagnosticText).not.toContain(SENTINEL_TOKEN);
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
-        expect(systemPrompt).not.toContain("Supermemory MCP Adaptive Memory");
+        expect(systemPrompt).not.toContain("Supermemory MCP Conversation Memory");
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -146,7 +146,7 @@ describe("runPiLaunch direct Supermemory dashboard config", () => {
         expect(diagnosticText).toContain("memory_provider_unavailable");
         expect(diagnosticText).toContain("Unknown Deck config field under adaptiveMemory.supermemory");
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
-        expect(systemPrompt).not.toContain("Supermemory MCP Adaptive Memory");
+        expect(systemPrompt).not.toContain("Supermemory MCP Conversation Memory");
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

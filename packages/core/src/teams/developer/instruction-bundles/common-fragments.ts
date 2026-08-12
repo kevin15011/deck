@@ -23,16 +23,9 @@ import type { CapabilityInstructionSurface } from "./index";
  * Used by agent and skill surfaces.
  */
 export function adaptiveMemoryContainerTagConventions(): string {
-  return `### Container Tag Conventions
+  return `### Canonical Supermemory Scope
 
-Use the appropriate container tag for the scope of what you're saving:
-
-| Prefix | Scope | Example |
-|--------|-------|---------|
-| \`u:\` | User — personal learnings, preferences, corrections | \`u:kevin\` |
-| \`t:\` | Team — team conventions, decisions, shared patterns | \`t:developer-team\` |
-| \`o:\` | Organization — org-wide standards | \`o:GCO\` |
-| \`p:\` | Project — project-specific heuristics, conventions, retrospectives | \`p:deck\` |`;
+Do not choose or type container tags manually. Deck owns the canonical project scope and installs it through the runner configuration. Provider account identity remains external to Deck configuration and is never written into prompts.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -43,12 +36,9 @@ Use the appropriate container tag for the scope of what you're saving:
  * Returns the Save Format markdown for adaptive-memory.
  */
 export function adaptiveMemorySaveFormat(): string {
-  return `### Save Format
+  return `### Explicit User-Requested Memory
 
-- **What**: One sentence — what was done
-- **Why**: What motivated it (user request, bug, performance, etc.)
-- **Where**: Files or paths affected (omit if none)
-- **Learned**: Gotchas, edge cases, things that surprised you (omit if none)`;
+If the user explicitly asks to save or forget information, pass only the user-approved content through the runner-exposed memory tool. Do not add hidden topic keys, quotas, credentials, raw logs, provider responses, or OpenSpec artifacts.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,17 +77,11 @@ If the memory provider is unavailable, tools are missing, or operations error: c
  * Returns the "When to Save" markdown for adaptive-memory.
  */
 export function adaptiveMemoryWhenToSave(): string {
-  return `### When to Save (proactive)
+  return `### Conversation Capture
 
-Call the memory save operation IMMEDIATELY after any of these (don't wait to be asked):
+Provider-native conversation capture is not production-wired on unsupported/static-compatible runner paths. Agents must not run a manual proactive-save lifecycle, invent topic keys, chase a semantic quota, or create routine memory summaries.
 
-- Architecture or design decision made
-- Bug fix completed (include root cause)
-- Non-obvious discovery about the codebase
-- Configuration change or environment setup
-- Pattern established (naming, structure, convention)
-- User preference or constraint learned
-- Gotcha, edge case, or unexpected behavior found`;
+Use explicit memory writes only when the user directly asks to remember or forget something and the runner-exposed provider tool supports that action.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,16 +107,9 @@ Proactive: when starting work that might overlap with past sessions, or the user
  * Returns the Session Close markdown for adaptive-memory.
  */
 export function adaptiveMemorySessionClose(): string {
-  return `### Session Close
+  return `### Session Lifecycle
 
-Before ending a session, write a brief summary covering:
-
-- Goal: what was the session about
-- Instructions: user preferences or constraints discovered
-- Discoveries: technical findings, gotchas, non-obvious learnings
-- Accomplished: completed items with key details
-- Next Steps: what remains for the next session
-- Relevant Files: paths and what they do`;
+The conversation capture contract is tied to the runner session's stable customId only when a real executing transport is available. Do not write a mandatory end-of-session memory summary; normal final responses are enough unless the user explicitly asks to remember something.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,9 +120,9 @@ Before ending a session, write a brief summary covering:
  * Returns the Topic Keys markdown for adaptive-memory.
  */
 export function adaptiveMemoryTopicKeys(): string {
-  return `### Topic Keys
+  return `### Provider-Native Learning
 
-For evolving topics (architecture decisions, ongoing features), reuse the same topic key to update a single memory instead of creating duplicates. Different topics must never overwrite each other.`;
+Supermemory owns extraction, relationship building, profiles, ranking, temporal updates, and deduplication. Do not duplicate that model with agent-authored topic keys.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -156,9 +133,9 @@ For evolving topics (architecture decisions, ongoing features), reuse the same t
  * Returns the Session Limit markdown for adaptive-memory.
  */
 export function adaptiveMemorySessionLimit(): string {
-  return `### Session Limit
+  return `### Context Bounds
 
-Soft maximum of 7 memories per session. Prefer saving fewer high-quality observations over many low-value ones.`;
+Recall remains demand-driven, scoped to the canonical project container, limited to five results and about 1,500 tokens by default. There is no per-session semantic write quota.`;
 }
 
 // ---------------------------------------------------------------------------

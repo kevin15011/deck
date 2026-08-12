@@ -71,14 +71,14 @@ describe("adaptive memory governance", () => {
     expect(issueCodes(result)).toContain("ADAPTIVE_MEMORY_LOW_SIGNAL");
   });
 
-  test("REQ-AMG-006 limits session commits to no more than seven learnings", () => {
+  test("REQ-SM-016 ignores the legacy session quota as behavioral policy", () => {
     const result = validateAdaptiveMemoryCommitRequest({
       candidates: Array.from({ length: 8 }, (_, index) =>
         candidate({ containerTag: `u:user-1:${index}` }),
       ),
     });
 
-    expect(issueCodes(result)).toContain("ADAPTIVE_MEMORY_COMMIT_LIMIT_EXCEEDED");
+    expect(issueCodes(result)).not.toContain("ADAPTIVE_MEMORY_COMMIT_LIMIT_EXCEEDED");
   });
 
   test("REQ-AMG-007 rejects forbidden content categories", () => {

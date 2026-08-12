@@ -119,4 +119,34 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(tampered.diagnostics.some((diagnostic) => diagnostic.code === "stale-managed-file-collision")).toBe(true);
     expect(tampered.mutations.some((mutation) => mutation.operation === "delete" && mutation.relativePath.includes("deck-retired"))).toBe(false);
   });
+
+  test("blocks invalid Supermemory project scopes with provider-specific diagnostics", () => {
+    const missing = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map(),
+      memoryProvider: "supermemory",
+      supermemoryProjectScope: " ",
+    });
+    expect(missing.blocked).toBe(true);
+    expect(missing.diagnostics).toContainEqual(expect.objectContaining({
+      code: "supermemory-project-scope-missing",
+      severity: "error",
+    }));
+    expect(JSON.stringify(missing.diagnostics)).not.toContain("Engram");
+
+    const invalid = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map(),
+      memoryProvider: "supermemory",
+      supermemoryProjectScope: "raw/project/name",
+    });
+    expect(invalid.blocked).toBe(true);
+    expect(invalid.diagnostics).toContainEqual(expect.objectContaining({
+      code: "supermemory-project-scope-invalid",
+      severity: "error",
+    }));
+    expect(JSON.stringify(invalid.diagnostics)).toContain("redacted");
+    expect(JSON.stringify(invalid.diagnostics)).not.toContain("raw/project/name");
+    expect(JSON.stringify(invalid.diagnostics)).not.toContain("Engram");
+  });
 });

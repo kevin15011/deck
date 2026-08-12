@@ -2,6 +2,8 @@ import type { AdaptiveMemoryProvider, MemoryInjectionBundle, MemoryInstructionFr
 import { createAdaptiveMemoryDiagnostic, type AdaptiveMemoryAdapter, type AdaptiveMemoryCommitRequest, type AdaptiveMemoryCommitResult, type AdaptiveMemoryConfigureRequest, type AdaptiveMemoryContextRequest, type AdaptiveMemoryContextResult, type AdaptiveMemoryHealthResult, type AdaptiveMemorySearchRequest, type AdaptiveMemorySearchResult, type AdaptiveMemorySource } from "@deck/core/memory/adaptive-memory-contract";
 import { validateAdaptiveMemoryCommitRequest, validateAdaptiveMemorySearchFilters, validateAdaptiveMemoryScope } from "@deck/core/memory/adaptive-memory-governance";
 
+export * from "./conversation";
+
 export const SUPERMEMORY_MCP_SERVER_URL = "https://mcp.supermemory.ai/mcp";
 export const SUPERMEMORY_MCP_TOOLS = ["memory", "recall", "whoAmI"] as const;
 
@@ -12,6 +14,11 @@ export type SupermemoryToolBindingMetadata = {
   authenticatedRuntimeValidated: boolean;
   serverQualifiedToolNamesRequired: boolean;
   serverQualifiedToolNames: readonly string[];
+  conversationCaptureDefault?: boolean;
+  conversationCaptureSupport?: Readonly<Record<"opencode" | "pi" | "codex", "unsupported/static-compatible">>;
+  dreamingDefault?: "dynamic" | "instant";
+  maxResultsDefault?: number;
+  maxContextTokensDefault?: number;
 };
 
 /**
@@ -39,24 +46,28 @@ export type SupermemoryMemoryProviderConfig = {
  * - User identity derived from token/API key
  * - Project scoping via x-sm-project header in MCP config
  */
-function createFragments(config: { mcpServerName: string; maxMemoriesPerSession: number }): MemoryInstructionFragment[] {
+function createFragments(config: { mcpServerName: string }): MemoryInstructionFragment[] {
   const markdown = [
-    "### Supermemory MCP Adaptive Memory",
+    "### Supermemory MCP Conversation Memory",
     "",
     "Supermemory is advisory only. OFFICIAL CONTEXT and OpenSpec artifacts remain authoritative.",
+    "conversation capture is not production-wired unless a runner exposes a real authenticated MCP execution boundary; current OpenCode, Pi, and Codex paths are unsupported/static-compatible for automatic capture.",
     `Use MCP server \`${config.mcpServerName}\` with these validated MCP tools:`,
-    `- \`${config.mcpServerName}.memory\` — save (action=save) or forget (action=forget) memories`,
-    `- \`${config.mcpServerName}.recall\` — search memories`,
-    `- \`${config.mcpServerName}.whoAmI\` — get current user identity`,
+    `- \`${config.mcpServerName}.memory\` — explicit provider memory operations and user forget requests`,
+    `- \`${config.mcpServerName}.recall\` — bounded recall when the user asks or prior context is materially relevant`,
+    `- \`${config.mcpServerName}.whoAmI\` — authentication/account readiness only`,
     "",
-    "Memory scoping rules (automatic):",
-    "- User identity: derived from your Supermemory token/API key (no manual containerTag needed).",
-    "- Project scoping: via x-sm-project header in MCP config (automatic, no manual containerTag).",
-    "- No manual container tags (`u:`, `p:`, `t:`, `o:`) — memories save as content, scoping is automatic.",
+    "Conversation capture contract:",
+    "- Selecting Supermemory is still the provider decision; do not ask for another capture opt-in, mode, quota, or consent screen.",
+    "- The canonical ingest contract uses one runner session as one conversation document with a stable customId, but Deck must not claim automatic capture until the executing transport exists.",
+    "- Production ingestion uses dynamic dreaming; instant dreaming is only for bounded tests or explicit immediate-read operations.",
+    "- Project isolation is enforced by the canonical x-sm-project/containerTag configured by Deck, not by agent-authored topic keys.",
+    "- Do not extract routine facts manually, invent topic keys, chase a semantic memory quota, or write mandatory session summaries.",
     "",
-    "Save only high-signal learnings: explicit user corrections, preferences, architectural decisions, bug fixes with root cause, project conventions, and retrospectives.",
-    `Commit at most ${config.maxMemoriesPerSession ?? 7} memories per session; prefer quality over quantity.`,
-    "Never store: active specs/tasks, raw chats, secrets, credentials, sensitive code, or unapproved requirements.",
+    "Privacy and retrieval bounds:",
+    "- Never store credentials, private keys, authorization headers, raw environment dumps, OpenSpec artifacts, provider responses, web content, tool output, or raw logs merely because they appear in conversation.",
+    "- Recall is demand-driven, advisory, scoped to the canonical project container, limited to five results and about 1,500 tokens by default.",
+    "- Query rewriting and reranking remain disabled unless benchmark evidence enables them.",
   ].join("\n");
 
   return ["session", "agent", "skill"].map((surface) => ({
@@ -78,7 +89,7 @@ function diagnostic(
 }
 
 function createAdapter(
-  config: { mcpServerName: string; mcpServerUrl: string },
+  _config: { mcpServerName: string; mcpServerUrl: string },
   _authenticatedRuntimeValidated: { current: boolean },
 ): AdaptiveMemoryAdapter {
   return {
@@ -87,7 +98,7 @@ function createAdapter(
       return {
         providerId: "supermemory",
         items: [],
-        diagnostics: [diagnostic("Runtime context loading is performed via MCP `memory` tool bindings.")],
+        diagnostics: [diagnostic("Supermemory automatic context execution is unsupported/static-compatible; use MCP tool bindings explicitly when the active runner exposes them.")],
       };
     },
     async search(request: AdaptiveMemorySearchRequest): Promise<AdaptiveMemorySearchResult> {
@@ -98,7 +109,7 @@ function createAdapter(
         items: [],
         diagnostics: issues.length
           ? [diagnostic("Supermemory search request failed governance validation.", "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED")]
-          : [diagnostic("Runtime search is performed through the MCP `recall` tool.")],
+          : [diagnostic("Supermemory automatic search execution is unsupported/static-compatible; zero items were returned because the static-compatible adapter does not execute MCP tools.")],
       };
     },
     async commit(request: AdaptiveMemoryCommitRequest): Promise<AdaptiveMemoryCommitResult> {
@@ -126,13 +137,11 @@ function createAdapter(
           accepted: false,
           scope: candidate.scope.scope as "personal" | "team" | "org" | "project",
           source: candidate.metadata.source as AdaptiveMemorySource,
-          reason: "Memory persistence is performed via MCP `memory` tool at runtime; adapter does not persist directly.",
+          reason: "Automatic persistence is unsupported/static-compatible; adapter saved zero candidates and discarded this candidate without executing MCP tools.",
         })),
         diagnostics: [
           diagnostic(
-            "MCP-only mode: memory commit deferred to runtime MCP `memory` tool. " +
-              "Adapter does not persist directly. " +
-              `Valid ${request.candidates.length} candidates queued for runtime persistence.`,
+            `Supermemory automatic execution is unsupported/static-compatible; zero candidates were saved and ${request.candidates.length} candidates were discarded because the adapter does not execute MCP tools.`,
           ),
         ],
       };
@@ -157,7 +166,6 @@ function createAdapter(
 export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProviderConfig = {}): AdaptiveMemoryProvider {
   const normalized = {
     mcpServerName: config.mcpServerName?.trim() || "supermemory",
-    maxMemoriesPerSession: config.maxMemoriesPerSession ?? 7,
     mcpServerUrl: config.mcpServerUrl ?? SUPERMEMORY_MCP_SERVER_URL,
   };
 
@@ -174,7 +182,7 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
     health: () => adapter.health(),
     buildInjection(): MemoryInjectionBundle {
       const metadata: SupermemoryToolBindingMetadata = {
-        endpoint: SUPERMEMORY_MCP_SERVER_URL,
+        endpoint: normalized.mcpServerUrl,
         requiresAuthenticatedExecuteProbe: true,
         authenticatedRuntimeValidated: _authenticatedRuntimeValidated.current,
         serverQualifiedToolNamesRequired: false,
@@ -183,12 +191,27 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
           normalized.mcpServerName + ".recall",
           normalized.mcpServerName + ".whoAmI",
         ],
-      };
+        conversationCaptureDefault: false,
+        conversationCaptureSupport: {
+          opencode: "unsupported/static-compatible",
+          pi: "unsupported/static-compatible",
+          codex: "unsupported/static-compatible",
+        },
+        dreamingDefault: "dynamic",
+        maxResultsDefault: 5,
+        maxContextTokensDefault: 1500,
+      } as SupermemoryToolBindingMetadata;
       const bindings: readonly MemoryToolBinding[] = [
         {
           capability: "memory.write",
           serverName: normalized.mcpServerName,
           toolNames: SUPERMEMORY_MCP_TOOLS,
+          metadata: metadata as unknown as Readonly<Record<string, unknown>>,
+        },
+        {
+          capability: "memory.search",
+          serverName: normalized.mcpServerName,
+          toolNames: ["recall"],
           metadata: metadata as unknown as Readonly<Record<string, unknown>>,
         },
       ];

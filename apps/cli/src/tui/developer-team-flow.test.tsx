@@ -358,7 +358,7 @@ describe("Developer Team TUI screens", () => {
       try {
         const result = handOffSupermemoryCredentialToPiMcp(
           { token },
-          { configPath },
+          { configPath, projectScope: "sm_project_v1_kevin15011_deck" },
         );
 
         expect(result.success).toBe(true);
@@ -367,7 +367,7 @@ describe("Developer Team TUI screens", () => {
         expect(result.message).not.toContain(token);
 
         const externalConfig = JSON.parse(readFileSync(configPath, "utf-8"));
-        expect(externalConfig.mcpServers.supermemory.url).toBe("https://supermemory-new.stlmcp.com");
+        expect(externalConfig.mcpServers.supermemory.url).toBe("https://mcp.supermemory.ai/mcp");
         expect(externalConfig.mcpServers.supermemory.headers["x-supermemory-api-key"]).toBe(token);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -394,6 +394,7 @@ describe("Developer Team TUI screens", () => {
               },
             ],
           }),
+          projectScope: "sm_project_v1_kevin15011_deck",
         },
       );
 
@@ -401,6 +402,14 @@ describe("Developer Team TUI screens", () => {
       expect(result.message).toContain("Unable to configure Supermemory");
       expect(result.message).toContain("[REDACTED]");
       expect(result.message).not.toContain(token);
+    });
+
+    test("Pi Supermemory setup path does not fall back to ambient process.cwd", () => {
+      const source = readFileSync(new URL("./app.tsx", import.meta.url), "utf8");
+      const setupSlice = source.slice(source.indexOf("function persistMemoryProviderSelection"), source.indexOf("function detectPiProvidersForTui"));
+
+      expect(setupSlice).not.toContain("process.cwd()");
+      expect(setupSlice).toContain("localResolvedProjectRoot");
     });
   });
 

@@ -12,7 +12,7 @@ import {
 } from "@deck/core";
 
 export const SUPERMEMORY_MCP_SERVER_NAME = "supermemory";
-export const SUPERMEMORY_MCP_URL = "https://supermemory-new.stlmcp.com";
+export const SUPERMEMORY_MCP_URL = "https://mcp.supermemory.ai/mcp";
 export const SUPERMEMORY_API_KEY_HEADER = "x-supermemory-api-key";
 
 // Standard MCP server names for Pi capabilities
@@ -75,7 +75,11 @@ export type WriteSupermemoryPiMcpConfigOptions = {
   configPath?: string;
   /** Override home directory used to resolve the default path. */
   homeDir?: string;
+  /** Canonical non-secret Supermemory project scope for x-sm-project. */
+  projectScope: string;
 };
+
+const CANONICAL_SUPERMEMORY_PROJECT_SCOPE = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -93,6 +97,7 @@ export function writeSupermemoryPiMcpConfig(
   const configPath = options.configPath ?? defaultPiMcpConfigPath(options.homeDir);
   const serverName = normalizeServerName(options.serverName);
   const token = options.token.trim();
+  const projectScope = options.projectScope?.trim();
 
   if (!token) {
     return failedResult(configPath, serverName, [
@@ -106,7 +111,19 @@ export function writeSupermemoryPiMcpConfig(
     ]);
   }
 
-  const merged = readAndMergeConfig(configPath, serverName, token);
+  if (!projectScope || !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(projectScope)) {
+    return failedResult(configPath, serverName, [
+      {
+        code: "PI_MCP_CONFIG_CONFLICT",
+        severity: "error",
+        path: configPath,
+        serverName,
+        message: "Canonical x-sm-project scope is required to configure the Supermemory Pi MCP server.",
+      },
+    ]);
+  }
+
+  const merged = readAndMergeConfig(configPath, serverName, token, projectScope);
   if (!merged.ok) {
     return failedResult(configPath, serverName, merged.diagnostics);
   }
@@ -157,8 +174,8 @@ export function writeSupermemoryPiMcpConfig(
     infoDiagnostic(
       merged.existed ? "PI_MCP_CONFIG_UPDATED" : "PI_MCP_CONFIG_CREATED",
       merged.existed
-        ? "Updated Supermemory Pi MCP server entry; credential value is redacted."
-        : "Created Pi MCP config with Supermemory server entry; credential value is redacted.",
+        ? "Updated Supermemory Pi MCP server entry with canonical project scope when available; credential value is redacted."
+        : "Created Pi MCP config with Supermemory server entry and canonical project scope when available; credential value is redacted.",
       configPath,
       serverName,
     ),
@@ -265,6 +282,15 @@ export function validateSupermemoryPiMcpConfig(
     };
   }
 
+  if (typeof server.headers["x-sm-project"] !== "string" || !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(server.headers["x-sm-project"].trim())) {
+    return {
+      ok: false,
+      path: configPath,
+      serverName,
+      diagnostics: [errorDiagnostic("PI_MCP_CONFIG_CONFLICT", `Pi MCP server '${serverName}' is missing canonical x-sm-project scope; Supermemory tools were not injected.`, configPath, serverName)],
+    };
+  }
+
   return {
     ok: true,
     path: configPath,
@@ -298,7 +324,7 @@ export function redactPiMcpConfigDiagnosticText(value: string): string {
   return redact(value);
 }
 
-function readAndMergeConfig(configPath: string, serverName: string, token: string): MergeOutcome {
+function readAndMergeConfig(configPath: string, serverName: string, token: string, projectScope?: string): MergeOutcome {
   const existed = existsSync(configPath);
   let config: JsonRecord = {};
 
@@ -368,12 +394,14 @@ function readAndMergeConfig(configPath: string, serverName: string, token: strin
     };
   }
 
+  const scopedHeaders: JsonRecord = projectScope ? { "x-sm-project": projectScope } : {};
   const nextServer: JsonRecord = {
     ...previousServer,
     transport: "http",
     url: SUPERMEMORY_MCP_URL,
     headers: {
       ...((previousHeaders as JsonRecord | undefined) ?? {}),
+      ...scopedHeaders,
       [SUPERMEMORY_API_KEY_HEADER]: token,
     },
   };

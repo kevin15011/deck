@@ -11,7 +11,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
 
   test("buildInjection produces bindings with memory/recall/whoAmI tools", () => {
     const bundle = createSupermemoryMemoryProvider().buildInjection({ teamId: "developer-team" });
-    expect(bundle.toolBindings).toHaveLength(1);
+    expect(bundle.toolBindings).toHaveLength(2);
     expect(bundle.toolBindings[0]!.toolNames).toEqual(SUPERMEMORY_MCP_TOOLS);
     const tools = bundle.toolBindings.flatMap((binding) => [...binding.toolNames]);
     expect(tools).toContain("memory");
@@ -21,13 +21,12 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     expect(tools).not.toContain("search_docs");
   });
 
-  test("NO containerTag manual - instruction shows automatic scoping", () => {
+  test("NO arbitrary containerTag manual - instruction shows canonical Deck scoping", () => {
     const bundle = createSupermemoryMemoryProvider().buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
-    // NEW: instructions explain automatic scoping (NO container tags)
-    expect(text).toContain("User identity: derived from your Supermemory token");
-    expect(text).toContain("Project scoping: via x-sm-project header");
-    expect(text).toContain("No manual container tags");
+    expect(text).toContain("canonical x-sm-project/containerTag configured by Deck");
+    expect(text).toContain("stable customId");
+    expect(text).toContain("do not ask for another capture opt-in");
     // Can mention u: in the negative but not as live scopes
     expect(text).not.toMatch(/\bu:[a-z0-9]/i); // No actual u: username
   });
@@ -47,7 +46,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     expect(health.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_HEALTH_UNKNOWN");
     const bundle = provider.buildInjection({ teamId: "developer-team" });
     expect(bundle.instructions).toHaveLength(3);
-    expect(bundle.toolBindings).toHaveLength(1);
+    expect(bundle.toolBindings).toHaveLength(2);
     expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ authenticatedRuntimeValidated: false });
   });
 
@@ -76,16 +75,35 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     expect(SUPERMEMORY_MCP_SERVER_URL).toBe("https://mcp.supermemory.ai/mcp");
   });
 
-  test("maintains maxMemoriesPerSession default", () => {
+  test("deprecates maxMemoriesPerSession and does not emit a semantic quota", () => {
     const bundle = createSupermemoryMemoryProvider().buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
-    expect(text).toContain("at most 7");
+    expect(text).not.toMatch(/at most \d+/i);
+    expect(text).toContain("conversation capture");
   });
 
-  test("custom maxMemoriesPerSession", () => {
+  test("does not claim automatic production conversation capture without a runner MCP execution boundary", () => {
+    const bundle = createSupermemoryMemoryProvider().buildInjection({});
+    const text = bundle.instructions.map((f) => f.markdown).join("\n");
+    const metadata = ((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata;
+
+    expect(metadata).toMatchObject({
+      conversationCaptureDefault: false,
+      conversationCaptureSupport: {
+        opencode: "unsupported/static-compatible",
+        pi: "unsupported/static-compatible",
+        codex: "unsupported/static-compatible",
+      },
+    });
+    expect(text).toContain("conversation capture is not production-wired");
+    expect(text).not.toContain("Selecting Supermemory enables recommended conversation capture by default");
+  });
+
+  test("ignores custom maxMemoriesPerSession compatibility input", () => {
     const bundle = createSupermemoryMemoryProvider({ maxMemoriesPerSession: 3 }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
-    expect(text).toContain("at most 3");
+    expect(text).not.toContain("at most 3");
+    expect(text).toContain("stable customId");
   });
 });
 
@@ -96,7 +114,7 @@ describe("MCP-only behavior: commit operations deferred to runtime", () => {
       candidates: [{
         content: "Test memory",
         highSignal: true,
-        scope: { scope: "personal" },
+        scope: { scope: "personal", userId: "user" },
         containerTag: "test",
         metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
       }],
@@ -106,27 +124,35 @@ describe("MCP-only behavior: commit operations deferred to runtime", () => {
     expect(result.savedCount).toBe(0);
     // Decision should indicate not persisted by adapter
     expect(result.decisions[0].accepted).toBe(false);
+    expect(result.discardedCount).toBe(1);
+    expect(result.diagnostics?.[0].message).toContain("automatic execution is unsupported/static-compatible");
+    expect(result.diagnostics?.[0].message).toContain("zero candidates were saved");
+    expect(result.diagnostics?.[0].message).not.toContain("queued");
+    expect(result.diagnostics?.[0].message).not.toContain("deferred");
   });
 
   test("search returns empty items - MCP-only defers to runtime", async () => {
     const provider = createSupermemoryMemoryProvider({ authenticatedRuntimeValidated: true });
     const result = await provider.adapter!.search({
-      scopes: [{ scope: "personal" }],
+      scopes: [{ scope: "personal", userId: "user" }],
       query: "test query",
     });
 
     // MCP-only returns empty - defers to runtime MCP
     expect(result.items).toHaveLength(0);
+    expect(result.diagnostics?.[0].message).toContain("automatic search execution is unsupported/static-compatible");
+    expect(result.diagnostics?.[0].message).not.toContain("performed through");
   });
 
   test("loadContext returns diagnostic that context is via MCP tool", async () => {
     const provider = createSupermemoryMemoryProvider({ authenticatedRuntimeValidated: true });
     const result = await provider.adapter!.loadContext({
-      scopes: [{ scope: "personal" }],
+      scopes: [{ scope: "personal", userId: "user" }],
     });
 
     expect(result.items).toHaveLength(0);
-    expect(result.diagnostics?.[0].message).toContain("MCP");
+    expect(result.diagnostics?.[0].message).toContain("automatic context execution is unsupported/static-compatible");
+    expect(result.diagnostics?.[0].message).not.toContain("performed via");
   });
 });
 
@@ -152,7 +178,7 @@ describe("no REST/fetch path in adapter", () => {
       candidates: [{
         content: "Should not trigger fetch",
         highSignal: true,
-        scope: { scope: "personal" },
+        scope: { scope: "personal", userId: "user" },
         containerTag: "test",
         metadata: { source: "preference", scope: "personal", type: "preference", confidence: 0.8, createdBy: "user" },
       }],

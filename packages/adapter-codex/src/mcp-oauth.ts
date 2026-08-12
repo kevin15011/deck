@@ -13,6 +13,8 @@ export type CodexSupermemoryOAuthState =
 
 export type CodexSupermemoryOAuthStatus = { state: CodexSupermemoryOAuthState };
 
+const CANONICAL_SUPERMEMORY_PROJECT_SCOPE = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
+
 export type CodexMcpStatusCommandRequest = {
   file: "codex";
   args: readonly ["mcp", "list", "--json"];
@@ -56,8 +58,11 @@ export function parseCodexSupermemoryOAuthStatus(stdout: string): CodexSupermemo
   const transport = entry.transport;
   if (!isRecord(transport) || transport.type !== "streamable_http" || transport.url !== CODEX_SUPERMEMORY_MCP_URL
     || transport.bearer_token_env_var !== null && transport.bearer_token_env_var !== undefined
-    || transport.env_http_headers !== null && transport.env_http_headers !== undefined
-    || transport.http_headers !== null && transport.http_headers !== undefined) {
+    || transport.env_http_headers !== null && transport.env_http_headers !== undefined) {
+    return { state: "not-configured" };
+  }
+  const httpHeaders = transport.http_headers;
+  if (!isRecord(httpHeaders) || typeof httpHeaders["x-sm-project"] !== "string" || !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(httpHeaders["x-sm-project"].trim())) {
     return { state: "not-configured" };
   }
   switch (entry.auth_status) {

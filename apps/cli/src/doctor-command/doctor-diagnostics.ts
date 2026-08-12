@@ -613,6 +613,7 @@ function calculateSummary(
  */
 export async function runDoctorDiagnostics(
   overrides: Partial<DoctorDiagnosticsDependencies> = {},
+  projectRoot?: string,
 ): Promise<DoctorDiagnosticsResult> {
   const dependencies: DoctorDiagnosticsDependencies = {
     runDeckChecks: overrides.runDeckChecks ?? defaultDoctorDiagnosticsDependencies.runDeckChecks,
@@ -666,8 +667,11 @@ export async function runDoctorDiagnostics(
       runtimes.push(checkOpenCodeRuntime(status.command!));
     } else if (status.runtime === "codex") {
       try {
+        if (!projectRoot) {
+          throw new Error("verified project root unavailable");
+        }
         if (!globalConfigCheck.config) throw new Error("missing global config");
-        const checks = await dependencies.inspectCodex(process.cwd(), globalConfigCheck.config);
+        const checks = await dependencies.inspectCodex(projectRoot, globalConfigCheck.config);
         runtimes.push({
           runtimeId: "codex",
           name: "Codex",
@@ -675,7 +679,7 @@ export async function runDoctorDiagnostics(
           checks: checks.map((check) => ({ category: check.category, status: check.status, items: [{ status: check.status, message: redactCodexDoctorValue(check.message), ...(check.suggestion ? { suggestion: redactCodexDoctorValue(check.suggestion) } : {}) }] })),
         });
       } catch {
-        runtimes.push({ runtimeId: "codex", name: "Codex", installed: true, checks: [{ category: "Runtime", status: "error", items: [{ status: "error", message: "Codex diagnostics failed safely.", suggestion: "Retry doctor with a readable project configuration." }] }] });
+        runtimes.push({ runtimeId: "codex", name: "Codex", installed: true, checks: [{ category: "Runtime", status: "error", items: [{ status: "error", message: "Codex diagnostics require a verified project root.", suggestion: "Run Deck Doctor from a recognized Deck project with readable configuration." }] }] });
       }
     } else if (status.runtime === "claude") {
       runtimes.push(checkClaudeOrCodexRuntime(status.runtime, status.installed));

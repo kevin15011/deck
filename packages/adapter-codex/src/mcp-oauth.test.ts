@@ -16,7 +16,7 @@ describe("Codex Supermemory OAuth inspection", () => {
               name: "supermemory",
               enabled: true,
               auth_status: "oauth",
-              transport: { type: "streamable_http", url: "https://mcp.supermemory.ai/mcp", bearer_token_env_var: null },
+              transport: { type: "streamable_http", url: "https://mcp.supermemory.ai/mcp", bearer_token_env_var: null, http_headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" } },
             }]),
             stderr: "",
           };
@@ -43,13 +43,13 @@ describe("Codex Supermemory OAuth inspection", () => {
       name: "supermemory",
       enabled: true,
       auth_status: "not_logged_in",
-      transport: { type: "streamable_http", url: "https://mcp.supermemory.ai/mcp" },
+      transport: { type: "streamable_http", url: "https://mcp.supermemory.ai/mcp", http_headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" } },
     }]))).resolves.toEqual({ state: "not-authenticated" });
     await expect(inspect(JSON.stringify([{
       name: "supermemory",
       enabled: true,
       auth_status: "logged_in",
-      transport: { type: "streamable_http", url: "https://mcp.supermemory.ai/mcp" },
+      transport: { type: "streamable_http", url: "https://mcp.supermemory.ai/mcp", http_headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" } },
     }]))).resolves.toEqual({ state: "not-authenticated" });
     await expect(inspect(JSON.stringify([{
       name: "supermemory",
@@ -76,5 +76,27 @@ describe("Codex Supermemory OAuth inspection", () => {
       },
     }]))).resolves.toEqual({ state: "not-configured" });
     await expect(inspect("not json")).resolves.toEqual({ state: "unknown" });
+  });
+
+  test("rejects legacy/default x-sm-project scopes as not configured", async () => {
+    const result = await inspectCodexSupermemoryOAuth({
+      projectRoot: "/fixture",
+      commandRunner: {
+        async run() {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([{
+              name: "supermemory",
+              enabled: true,
+              auth_status: "oauth",
+              transport: { type: "streamable_http", url: "https://mcp.supermemory.ai/mcp", http_headers: { "x-sm-project": "sm_project_default" } },
+            }]),
+            stderr: "",
+          };
+        },
+      },
+    });
+
+    expect(result).toEqual({ state: "not-configured" });
   });
 });

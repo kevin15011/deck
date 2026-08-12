@@ -123,9 +123,8 @@ describe("adaptive memory contract", () => {
     expect((await adapter.health()).status).toBe("available");
   });
 
-  test("merges commit policy defaults with caller overrides", () => {
+  test("ignores the deprecated maxMemoriesPerSession policy while preserving non-quota defaults", () => {
     expect(mergeAdaptiveMemoryCommitPolicy({ maxMemoriesPerSession: 3 })).toEqual({
-      maxMemoriesPerSession: 3,
       preferredMinimumHighSignalMemories: 3,
       requireHighSignal: true,
     });

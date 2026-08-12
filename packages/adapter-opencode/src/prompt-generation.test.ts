@@ -131,7 +131,7 @@ describe("adaptive memory provider filtering", () => {
       }));
       const detected = buildPromptGenerationPlan({ configDir, projectRoot: root });
       expect(detected).toHaveLength(7);
-      expect(detected.map(({ content }) => content).join("\n")).toContain("`recall`");
+      expect(detected.map(({ content }) => content).join("\n")).toContain("bounded recall");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

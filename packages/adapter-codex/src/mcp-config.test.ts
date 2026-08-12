@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { buildCodexMcpServers, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
+import { buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
 
 describe("Codex MCP semantic configuration", () => {
   test("writes Supermemory as a credential-free native OAuth streamable HTTP server", () => {
-    const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory", "serena", "context7"], memoryProvider: "supermemory" });
+    const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory", "serena", "context7"], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_v1_kevin15011_deck" });
     const merged = mergeCodexMcpServers("[mcp_servers.user]\ncommand = \"user-mcp\"\n", desired.servers);
     expect(merged.status).toBe("updated");
     expect(merged.content).toContain("[mcp_servers.context-mode]");
     expect(merged.content).toContain('url = "https://mcp.supermemory.ai/mcp"');
+    expect(merged.content).toContain('"x-sm-project" = "sm_project_v1_kevin15011_deck"');
     expect(merged.content).not.toContain("bearer_token_env_var");
     expect(merged.content).not.toContain("SUPERMEMORY_API_KEY");
     expect(merged.content).not.toContain("secret-value");
@@ -81,5 +82,24 @@ describe("Codex MCP semantic configuration", () => {
 
     expect(merged).toMatchObject({ status: "blocked" });
     expect(JSON.stringify(merged)).not.toContain("SUPERMEMORY_API_KEY");
+  });
+
+  test("rejects invalid Supermemory project scopes instead of serializing legacy/default containers", () => {
+    const desired = buildCodexMcpServers({ packageIds: [], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_default" });
+
+    expect(desired.servers).toEqual([]);
+    expect(desired.gaps).toContain("supermemory-project-scope-invalid");
+  });
+
+  test("classifies Codex Supermemory scope failures with provider-specific blocking codes", () => {
+    expect(inspectCodexSupermemoryMcpState(`
+[mcp_servers.supermemory]
+url = "https://mcp.supermemory.ai/mcp"
+http_headers = { "x-sm-project" = "sm_project_default" }
+`)).toMatchObject({ ok: false, code: "supermemory-project-scope-invalid" });
+    expect(inspectCodexSupermemoryMcpState(`
+[mcp_servers.supermemory]
+url = "https://mcp.supermemory.ai/mcp"
+`)).toMatchObject({ ok: false, code: "supermemory-project-scope-missing" });
   });
 });

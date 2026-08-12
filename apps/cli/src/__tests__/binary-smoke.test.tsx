@@ -404,15 +404,15 @@ function createCliSandbox(): CliSandbox {
     mcpServers: {
       supermemory: {
         transport: "http",
-        url: "https://supermemory-new.stlmcp.com",
-        headers: { "x-supermemory-api-key": "fixture-not-a-secret" },
+        url: "https://mcp.supermemory.ai/mcp",
+        headers: { "x-sm-project": "sm_project_v1_fixture_deck", "x-supermemory-api-key": "fixture-not-a-secret" },
       },
     },
   }));
 
   const openCodeConfig = {
     mcp: {
-      supermemory: { type: "remote", url: "https://example.invalid/supermemory" },
+      supermemory: { type: "remote", url: "https://mcp.supermemory.ai/mcp", headers: { "x-sm-project": "sm_project_v1_fixture_deck" } },
       "codebase-memory-mcp": { command: [join(bin, process.platform === "win32" ? "deck.cmd" : "deck")] },
       serena: { command: [join(bin, process.platform === "win32" ? "serena.cmd" : "serena")] },
     },

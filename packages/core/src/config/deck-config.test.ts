@@ -13,6 +13,7 @@ import {
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   getConfigurablePackageInstructionMetadata,
   normalizeSupportedPackageInstructionSelection,
+  diagnoseDeckConfigDeprecations,
 
   readDeckConfig,
   resolveActiveMemoryProvider,
@@ -1081,6 +1082,20 @@ describe("deprecated config fields migration", () => {
     expect((config.adaptiveMemory.supermemory as { teamId?: unknown }).teamId).toBeUndefined();
     expect((config.adaptiveMemory.supermemory as { orgId?: unknown }).orgId).toBeUndefined();
     expect((config.adaptiveMemory.supermemory as { projectId?: unknown }).projectId).toBeUndefined();
+  });
+
+  test("emits a deprecation diagnostic for valid legacy maxMemoriesPerSession", () => {
+    const diagnostics = diagnoseDeckConfigDeprecations({
+      adaptiveMemory: {
+        activeProvider: "supermemory",
+        supermemory: { maxMemoriesPerSession: 7 },
+      },
+    });
+
+    expect(diagnostics).toContainEqual(expect.objectContaining({
+      code: "SUPERMEMORY_CONFIG_DEPRECATED",
+      fieldPath: "adaptiveMemory.supermemory.maxMemoriesPerSession",
+    }));
   });
 
   test("write then read produces clean output without deprecated fields", () => {

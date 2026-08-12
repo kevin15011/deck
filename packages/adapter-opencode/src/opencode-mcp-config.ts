@@ -1,15 +1,17 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, renameSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { execSync } from "node:child_process";
 import {
   SERENA_MCP_ARGS,
+  resolveCanonicalSupermemoryProjectScope,
   validateSerenaReadinessEvidence,
   type SerenaReadinessEvidence,
   type SerenaMcpWriteStatus,
 } from "@deck/core";
+import { execSync } from "node:child_process";
 
 export const SUPERMEMORY_MCP_SERVER_NAME = "supermemory";
 export const SUPERMEMORY_MCP_URL = "https://mcp.supermemory.ai/mcp";
+const CANONICAL_SUPERMEMORY_PROJECT_SCOPE = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
 export type OpenCodeMcpConfigValidationResult = {
   ok: boolean;
@@ -165,12 +167,12 @@ export function validateSupermemoryOpenCodeMcpConfig(
   }
 
   const projectHeader = headers["x-sm-project"];
-  if (typeof projectHeader !== "string" || !projectHeader.trim()) {
+  if (typeof projectHeader !== "string" || !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(projectHeader.trim())) {
     return {
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' must include a non-empty 'x-sm-project' header; Supermemory tools were not injected.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' must include a canonical 'x-sm-project' header; Supermemory tools were not injected.`],
     };
   }
 
@@ -243,42 +245,30 @@ export function appendSupermemoryEnvToShellConfig(
  * - Fallback to directory: sm_project_{sanitized-dirname}
  * - For explicit override, use value directly (e.g., "my-custom-project" NOT "p:my-custom-project")
  */
-function deriveSmProjectIdentifier(cwd?: string): { projectId: string; derived: boolean; diagnostic?: string } {
-  const workDir = cwd ?? process.cwd();
+function deriveSmProjectIdentifier(cwd?: string): { projectId?: string; derived: boolean; diagnostic?: string } {
+  const workDir = cwd;
+  if (!workDir) {
+    return {
+      derived: false,
+      diagnostic: "Verified project root is required; Supermemory scope was not derived from ambient cwd.",
+    };
+  }
 
-  // Try to get git remote URL
   try {
     const remoteUrl = execSync("git remote get-url origin", {
       cwd: workDir,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "ignore"],
     }).trim();
-
-    if (remoteUrl) {
-      // Normalize: extract org/repo from various git URL formats
-      let normalized = remoteUrl
-        .replace(/^.*github\.com[/:]/, "")
-        .replace(/\.git$/, "")
-        .replace(/^:/, "");
-
-      const parts = normalized.split("/");
-      if (parts.length >= 2) {
-        // REQ-R26: Use sm_project_ prefix, NOT legacy p:
-        // e.g., "gentleman-programming-deck" -> "sm_project_gentleman-programming-deck"
-        const projectId = `sm_project_${parts[0]}-${parts[1]}`.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-        return { projectId, derived: true };
-      }
-    }
+    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: workDir, remotes: remoteUrl ? [remoteUrl] : [] });
+    if (resolved.ok) return { projectId: resolved.scope, derived: true };
+    return { derived: false, diagnostic: resolved.diagnostics.map((diagnostic) => diagnostic.message).join(" ") };
   } catch {
-    // Ignore - will fall back to path-based derivation
+    return {
+      derived: false,
+      diagnostic: "Could not resolve canonical x-sm-project from Git remote; Supermemory MCP configuration was not written.",
+    };
   }
-
-  // Fall back to directory name
-  // REQ-R26: Allow underscore in project names (sm_project_<name>)
-  const dirName = workDir.split(/[/\\]/).pop()?.toLowerCase().replace(/[^a-z0-9_]/g, "-") || "unknown";
-  // REQ-R26: Use sm_project_ prefix, NOT legacy p:
-  const diagnostic = `Could not derive x-sm-project from git remote; using directory name '${dirName}'.`;
-  return { projectId: `sm_project_${dirName}`, derived: false, diagnostic };
 }
 
 /**
@@ -297,11 +287,10 @@ export function writeSupermemoryOpenCodeMcpConfig(
     serverName?: string;
     configPath?: string;
     homeDir?: string;
-    /**
-     * Optional explicit project ID override for x-sm-project.
-     * REQ-R26: Use value directly WITHOUT p: prefix (e.g., "my-project" NOT "p:my-project")
-     */
+    /** @deprecated Tests may pass a pre-resolved canonical scope; production should pass projectRoot. */
     explicitProjectId?: string;
+    /** Verified project root used for canonical repository identity. */
+    projectRoot?: string;
   },
 ): WriteSupermemoryOpenCodeMcpConfigResult {
   const homeDir = options.homeDir ?? process.env.HOME ?? "/home/user";
@@ -309,19 +298,18 @@ export function writeSupermemoryOpenCodeMcpConfig(
   const serverName = (options.serverName ?? SUPERMEMORY_MCP_SERVER_NAME).trim() || SUPERMEMORY_MCP_SERVER_NAME;
   const diagnostics: string[] = [];
 
-  // REQ-R26: Determine x-sm-project value
-  let smProjectHeader: string;
-  if (options.explicitProjectId !== undefined && options.explicitProjectId.trim() !== "") {
-    // Use explicit override value directly (NO p: prefix)
-    smProjectHeader = options.explicitProjectId.trim();
-  } else {
-    // Derive from git remote or directory (NO p: prefix)
-    const projectDerivation = deriveSmProjectIdentifier();
-    if (projectDerivation.diagnostic) {
-      diagnostics.push(projectDerivation.diagnostic);
-    }
-    smProjectHeader = projectDerivation.projectId;
+  const projectDerivation = options.explicitProjectId?.trim()
+    ? { projectId: options.explicitProjectId.trim(), derived: true }
+    : deriveSmProjectIdentifier(options.projectRoot);
+  if (projectDerivation.diagnostic) diagnostics.push(projectDerivation.diagnostic);
+  if (!projectDerivation.projectId) {
+    return { ok: false, path: configPath, serverName, diagnostics };
   }
+  if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(projectDerivation.projectId)) {
+    diagnostics.push("Canonical x-sm-project scope is required; Supermemory MCP configuration was not written.");
+    return { ok: false, path: configPath, serverName, diagnostics };
+  }
+  const smProjectHeader = projectDerivation.projectId;
 
   let config: Record<string, unknown> = {};
   if (existsSync(configPath)) {
@@ -336,7 +324,6 @@ export function writeSupermemoryOpenCodeMcpConfig(
 
   const mcpSection = (config.mcp ?? {}) as Record<string, unknown>;
 
-  // ALWAYS include x-sm-project header (REQUIRED per contract)
   mcpSection[serverName] = {
     type: "remote",
     url: SUPERMEMORY_MCP_URL,

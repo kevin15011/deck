@@ -225,6 +225,14 @@ describe("parseArgs", () => {
     expect(result).toEqual<ParsedArgs>({ command: "doctor" });
   });
 
+  test("parses Supermemory migration inventory dry-run without copy or delete flags", () => {
+    expect(parseArgs(["supermemory", "migrate", "--dry-run", "--destination-scope", "sm_project_v1_kevin15011_deck", "--inventory", "/tmp/inventory.json"])).toEqual<ParsedArgs>({
+      command: "supermemory-migration-dry-run",
+      flags: { destinationScope: "sm_project_v1_kevin15011_deck", inventoryPath: "/tmp/inventory.json" },
+    });
+    expect(parseArgs(["supermemory", "migrate", "--delete"])).toMatchObject({ command: "error" });
+  });
+
   test("parses 'deck doctor --fix' as error with no extra args message", () => {
     const result = parseArgs(["doctor", "--fix"]);
     expect(result).toEqual<ParsedArgs>({

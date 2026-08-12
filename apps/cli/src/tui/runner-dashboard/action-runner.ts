@@ -150,6 +150,8 @@ export type TeamBundleInstallerFn = (
 export type McpConfigWriterFn = (options: {
   /** Server name (used by all types) */
   serverName: string;
+  /** Verified project root for canonical non-secret project scope derivation. */
+  projectRoot?: string;
   /** Optional token for runners that use API-key authentication. */
   token?: string;
   /** MCP server type: local (npx command) or remote (URL) */
@@ -1491,6 +1493,7 @@ async function writeMcpConfigAction(
 
   const result = await writer({
     serverName: "supermemory",
+    projectRoot: dependencies.projectRoot,
     ...(nativeOAuth ? {} : { token: token!.trim() }),
   });
   if (!result.ok) {

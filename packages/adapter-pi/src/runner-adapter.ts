@@ -12,6 +12,7 @@
 import { inspectPiEnvironment, type PiPreflightResult } from "./preflight";
 import { accessSync, constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { buildPiRunnerCapabilityInventory, type PiRunnerCapabilityInventory, type PiRunnerFullCapabilityInventory } from "./capability-inventory";
@@ -105,6 +106,7 @@ import {
   getConfigurablePackageInstructionMetadata,
   runEvidenceGatedSerenaWriter,
   SERENA_MCP_ARGS,
+  resolveCanonicalSupermemoryProjectScope,
   validateSerenaOperationAuthorization,
   hasWebSearchProviderCredential,
   isWebSearchProviderDescriptor,
@@ -1154,6 +1156,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     const result = writeSupermemoryPiMcpConfig({
       token: input.token ?? "",
       serverName: input.serverName,
+      projectScope: resolvePiSupermemoryProjectScope(input.projectRoot ?? "") ?? "",
       configPath: undefined,
       homeDir: undefined,
     });
@@ -1331,6 +1334,20 @@ function inferSerenaOwnedRoot(executablePath: string): string | undefined {
     : undefined;
 }
 
+function resolvePiSupermemoryProjectScope(projectRoot: string): string | undefined {
+  try {
+    const remote = execSync("git remote get-url origin", {
+      cwd: projectRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: remote ? [remote] : [] });
+    return resolved.ok ? resolved.scope : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function writeNamedPiMcpConfig(
   capabilityId: string,
   context: RunnerActionContext,
@@ -1364,7 +1381,7 @@ async function writeNamedPiMcpConfig(
           diagnostics: [],
         };
       }
-      return writeSupermemoryPiMcpConfig({ token, configPath, homeDir });
+      return writeSupermemoryPiMcpConfig({ token, configPath, homeDir, projectScope: resolvePiSupermemoryProjectScope(context.projectRoot) ?? "" });
     }
     default:
       return {

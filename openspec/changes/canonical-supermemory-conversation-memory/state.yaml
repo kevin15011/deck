@@ -1,0 +1,56 @@
+schema: spec-registry-v1
+changeId: canonical-supermemory-conversation-memory
+name: Canonical Supermemory Conversation Memory
+currentPhase: apply
+status: in_progress
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+provenance:
+  - phase: explore
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Traced current runner scope drift, prompt-level quota bypass, contaminated spaces, and official Supermemory production guidance."
+  - phase: proposal
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Proposed canonical project isolation and provider-native conversation learning without additional installation choices."
+  - phase: spec
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Defined normative identity, ingestion, privacy, retrieval, runner parity, diagnostics, and migration requirements."
+  - phase: design
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Separated Supermemory learning authority from Deck boundary enforcement and made transport selection capability-driven."
+  - phase: tasks
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Prepared one vertical implementation owner, strict TDD, runner parity, migration safety, and verification phases."
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "User approved implementation and clarified that selecting Supermemory is the capture decision."
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-11"
+    registryWrite: non-deferred
+    note: "Implemented and independently approved the safe partial candidate; automatic provider execution remains explicitly unsupported and the change stays in Apply."

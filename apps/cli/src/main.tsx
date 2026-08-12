@@ -57,13 +57,24 @@ if (parsed.command === "internal-serena-mcp") {
 if (parsed.command === "doctor") {
   try {
     const { runDoctorDiagnostics, renderDoctorReport, shouldExitWithError } = await import("./doctor-command");
-    const result = await runDoctorDiagnostics({ configStore });
+    const result = await runDoctorDiagnostics({ configStore }, resolveProjectRoot() ?? undefined);
     renderDoctorReport(result);
     process.exit(shouldExitWithError(result) ? 1 : 0);
   } catch (err) {
     console.error("deck doctor failed:", err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
+}
+
+if (parsed.command === "supermemory-migration-dry-run") {
+  const { runSupermemoryMigrationDryRun } = await import("./supermemory-migration-command");
+  const result = runSupermemoryMigrationDryRun({
+    destinationScope: parsed.flags.destinationScope,
+    inventoryPath: parsed.flags.inventoryPath,
+  });
+  const write = result.exitCode === 0 ? console.log : console.error;
+  write(result.output);
+  process.exit(result.exitCode);
 }
 
 if (parsed.command === "version") {

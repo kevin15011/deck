@@ -47,7 +47,7 @@ export type SupermemoryRuntimeValidationOptions = ValidateSupermemoryPiMcpConfig
 type JsonRecord = Record<string, unknown>;
 
 const DEFAULT_TIMEOUT_MS = 3000;
-const REQUIRED_TOOLS = ["execute", "search_docs"] as const;
+const REQUIRED_TOOLS = ["memory", "recall"] as const;
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 const MCP_CLIENT_INFO = { name: "deck-pi-runtime-validation", version: "0.0.0" } as const;
 

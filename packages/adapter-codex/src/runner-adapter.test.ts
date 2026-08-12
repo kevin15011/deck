@@ -41,6 +41,24 @@ function readySerenaProxy() {
   return Promise.resolve({ state: "ready" as const });
 }
 
+async function writeGitOrigin(projectRoot: string): Promise<void> {
+  await mkdir(join(projectRoot, ".git", "objects", "info"), { recursive: true });
+  await mkdir(join(projectRoot, ".git", "objects", "pack"), { recursive: true });
+  await mkdir(join(projectRoot, ".git", "refs", "heads"), { recursive: true });
+  await writeFile(join(projectRoot, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+  await writeFile(join(projectRoot, ".git", "config"), [
+    "[core]",
+    "\trepositoryformatversion = 0",
+    "\tfilemode = true",
+    "\tbare = false",
+    "\tlogallrefupdates = true",
+    "[remote \"origin\"]",
+    "\turl = git@github.com:kevin15011/deck.git",
+    "\tfetch = +refs/heads/*:refs/remotes/origin/*",
+    "",
+  ].join("\n"), "utf8");
+}
+
 
 describe("Deck Serena proxy probe", () => {
   test("accepts a delayed proxy under the bounded startup timeout and reports a hung proxy as indeterminate", async () => {
@@ -734,6 +752,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-readiness-project-"));
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-readiness-journal-"));
     try {
+      await writeGitOrigin(projectRoot);
       const adapter = createCodexRunnerAdapter({
         journalRoot,
         mcpCapabilityIds: ["context7"],
@@ -1024,6 +1043,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const probe = async () => ({ found: true as const, version: "0.146.1", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" });
     const sharedBinaryUsability = async (command: string) => ({ status: "ready" as const, command, version: "test" });
     try {
+      await writeGitOrigin(projectRoot);
       const ready = createCodexRunnerAdapter({
         journalRoot,
         preflight: {

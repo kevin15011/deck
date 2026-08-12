@@ -18,6 +18,13 @@ import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, type RunnerStdinPayload } from "@deck/c
 export type ParsedArgs =
   | { command: "tui" }
   | { command: "doctor" }
+  | {
+      command: "supermemory-migration-dry-run";
+      flags: {
+        destinationScope: string;
+        inventoryPath: string;
+      };
+    }
   | { command: "version" }
   | { command: "internal-serena-mcp"; probe: boolean }
   | {
@@ -198,6 +205,43 @@ export function parseArgs(argv: string[]): ParsedArgs {
       };
     }
     return { command: "doctor" };
+  }
+
+  if (first === "supermemory") {
+    if (rest[0] !== "migrate" || rest[1] !== "--dry-run") {
+      return {
+        command: "error",
+        message: "Usage: deck supermemory migrate --dry-run --destination-scope <scope> --inventory <path>",
+      };
+    }
+    let destinationScope: string | undefined;
+    let inventoryPath: string | undefined;
+    for (let i = 2; i < rest.length; i += 1) {
+      const flag = rest[i]!;
+      if (flag === "--destination-scope") {
+        destinationScope = rest[i + 1];
+        i += 1;
+      } else if (flag.startsWith("--destination-scope=")) {
+        destinationScope = flag.slice("--destination-scope=".length);
+      } else if (flag === "--inventory") {
+        inventoryPath = rest[i + 1];
+        i += 1;
+      } else if (flag.startsWith("--inventory=")) {
+        inventoryPath = flag.slice("--inventory=".length);
+      } else {
+        return { command: "error", message: `Unknown Supermemory migration flag: ${flag}` };
+      }
+    }
+    if (!destinationScope?.trim() || !inventoryPath?.trim()) {
+      return {
+        command: "error",
+        message: "Usage: deck supermemory migrate --dry-run --destination-scope <scope> --inventory <path>",
+      };
+    }
+    return {
+      command: "supermemory-migration-dry-run",
+      flags: { destinationScope: destinationScope.trim(), inventoryPath: inventoryPath.trim() },
+    };
   }
 
   if (first === "version") {

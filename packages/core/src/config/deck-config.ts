@@ -9,7 +9,7 @@ export const DECK_CONFIG_RELATIVE_PATH = join(".deck", "config.json");
 
 export type AdaptiveMemoryActiveProvider = "none" | (string & {});
 
-export const SUPERMEMORY_SEARCH_MODES = ["memories", "documents"] as const;
+export const SUPERMEMORY_SEARCH_MODES = ["memories", "documents", "hybrid"] as const;
 export type SupermemorySearchMode = (typeof SUPERMEMORY_SEARCH_MODES)[number];
 
 export type DeckSupermemoryConfig = {
@@ -197,6 +197,13 @@ export type NormalizedDeckConfig = {
   profiles: Profile[];
   activeProfile: string;
 };
+
+export type DeckConfigDiagnostic = Readonly<{
+  code: "SUPERMEMORY_CONFIG_DEPRECATED";
+  severity: "warning";
+  message: string;
+  fieldPath: string;
+}>;
 
 export type DeckConfigErrorCode =
   | "DECK_CONFIG_INVALID_JSON"
@@ -875,6 +882,21 @@ export function validateDeckConfig(
   };
 }
 
+export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckConfigDiagnostic[] {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return [];
+  const adaptiveMemory = (config as Record<string, unknown>).adaptiveMemory;
+  if (!adaptiveMemory || typeof adaptiveMemory !== "object" || Array.isArray(adaptiveMemory)) return [];
+  const supermemory = (adaptiveMemory as Record<string, unknown>).supermemory;
+  if (!supermemory || typeof supermemory !== "object" || Array.isArray(supermemory)) return [];
+  if (!Object.prototype.hasOwnProperty.call(supermemory, "maxMemoriesPerSession")) return [];
+  return [{
+    code: "SUPERMEMORY_CONFIG_DEPRECATED",
+    severity: "warning",
+    fieldPath: "adaptiveMemory.supermemory.maxMemoriesPerSession",
+    message: "Deprecated Supermemory maxMemoriesPerSession is accepted for compatibility but ignored; conversation capture uses provider-native extraction instead.",
+  }];
+}
+
 function normalizeWebSearchConfig(
   value: unknown,
   configPath?: string,
@@ -1054,8 +1076,7 @@ function normalizeSupermemoryConfig(
     if (activeProvider === "supermemory") {
       return {
         mcpServerName: "supermemory",
-        searchMode: "memories",
-        maxMemoriesPerSession: 7,
+        searchMode: "documents",
       };
     }
     return undefined;
@@ -1063,12 +1084,15 @@ function normalizeSupermemoryConfig(
 
   assertPlainObject(value, "adaptiveMemory.supermemory", configPath);
 
-  // Strip deprecated fields BEFORE assertKnownFields to avoid "unknown field" rejection
   stripDeprecatedSupermemoryFields(value);
-
   assertKnownFields(value, SUPERMEMORY_FIELDS, "adaptiveMemory.supermemory", configPath);
 
-  const normalized: DeckSupermemoryConfig = {
+  // maxMemoriesPerSession is accepted for compatibility but ignored as a behavioral control.
+  if (value.maxMemoriesPerSession !== undefined) {
+    normalizeDeprecatedMaxMemoriesPerSession(value.maxMemoriesPerSession, configPath);
+  }
+
+  return {
     mcpServerName: normalizeOptionalString(
       value.mcpServerName,
       "adaptiveMemory.supermemory.mcpServerName",
@@ -1076,13 +1100,7 @@ function normalizeSupermemoryConfig(
       { defaultValue: "supermemory" },
     ),
     searchMode: normalizeSearchMode(value.searchMode, configPath),
-    maxMemoriesPerSession: normalizeMaxMemoriesPerSession(
-      value.maxMemoriesPerSession,
-      configPath,
-    ),
   };
-
-  return normalized;
 }
 
 function normalizePackageInstructionConfig(
@@ -1323,7 +1341,7 @@ function parseActiveProvider(
 }
 
 function normalizeSearchMode(value: unknown, configPath?: string): SupermemorySearchMode {
-  if (value === undefined) return "memories";
+  if (value === undefined) return "hybrid";
   if (typeof value !== "string" || !SUPERMEMORY_SEARCH_MODES.includes(value as SupermemorySearchMode)) {
     throw new DeckConfigError(
       "SUPERMEMORY_CONFIG_INVALID",
@@ -1334,16 +1352,15 @@ function normalizeSearchMode(value: unknown, configPath?: string): SupermemorySe
   return value as SupermemorySearchMode;
 }
 
-function normalizeMaxMemoriesPerSession(value: unknown, configPath?: string): number {
-  if (value === undefined) return 7;
-  if (!Number.isInteger(value) || typeof value !== "number" || value < 1 || value > 7) {
+function normalizeDeprecatedMaxMemoriesPerSession(value: unknown, configPath?: string): void {
+  if (value === undefined) return;
+  if (!Number.isInteger(value) || typeof value !== "number" || value < 1) {
     throw new DeckConfigError(
       "SUPERMEMORY_CONFIG_INVALID",
-      "Supermemory maxMemoriesPerSession must be an integer from 1 to 7.",
+      "Deprecated Supermemory maxMemoriesPerSession must be a positive integer when present; it is ignored for behavior.",
       { configPath, fieldPath: "adaptiveMemory.supermemory.maxMemoriesPerSession" },
     );
   }
-  return value;
 }
 
 function normalizeOptionalString(

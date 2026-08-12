@@ -573,6 +573,18 @@ test("OpenCode invocation-required hook redacts trusted-provider failures", asyn
 
 const HOST_CONTEXT_SYMBOL = Symbol.for("deck.developer-team.execution-context.v1");
 
+test("OpenCode production execution plugin does not expose dead Supermemory capture hooks", () => {
+  const configDir = mkdtempSync(join(tmpdir(), "deck-opencode-no-dead-capture-"));
+  try {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/deck-project", { configDir });
+    applyOpenCodeDeveloperTeamInstall(plan, { configDir });
+    const pluginContent = readFileSync(plan.executionPlugin!.absolutePath, "utf8");
+    expect(pluginContent).not.toContain("captureSupermemoryConversationTurn");
+  } finally {
+    rmSync(configDir, { recursive: true, force: true });
+  }
+});
+
 test("D-REACH-22 OpenCode plugin captures resolver at init; late global installation has no effect", async () => {
   const fixture = createRunnerHostFixtureV1("opencode", createOpenCodeDeveloperTeamExecutionBridgeV1);
   let bridgeCalls = 0;

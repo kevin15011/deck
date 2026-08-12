@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { validateSupermemoryPiMcpRuntime } from "./pi-mcp-runtime-validation";
 
 const SENTINEL_TOKEN = "sm_runtime_secret_DO_NOT_LEAK";
-const ENDPOINT = "https://supermemory-new.stlmcp.com";
+const ENDPOINT = "https://mcp.supermemory.ai/mcp";
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "deck-runtime-validation-"));
@@ -20,7 +20,7 @@ function writeConfig(path: string, token = SENTINEL_TOKEN) {
         supermemory: {
           transport: "http",
           url: ENDPOINT,
-          headers: { "x-supermemory-api-key": token },
+          headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": token },
         },
       },
     }),
@@ -151,7 +151,7 @@ describe("validateSupermemoryPiMcpRuntime", () => {
           calls += 1;
           return calls === 1
             ? jsonResponse({ jsonrpc: "2.0", id: "initialize", result: {} })
-            : jsonResponse({ jsonrpc: "2.0", id: "tools/list", result: { tools: [{ name: "execute" }] } });
+            : jsonResponse({ jsonrpc: "2.0", id: "tools/list", result: { tools: [{ name: "memory" }] } });
         }) as unknown as typeof fetch,
       });
       expect(result.ok).toBe(false);
@@ -176,7 +176,7 @@ describe("validateSupermemoryPiMcpRuntime", () => {
           expect(JSON.stringify(init?.headers)).toContain(SENTINEL_TOKEN);
           return body.method === "initialize"
             ? jsonResponse({ jsonrpc: "2.0", id: body.id, result: {} })
-            : jsonResponse({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "execute" }, { name: "search_docs" }] } });
+            : jsonResponse({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "memory" }, { name: "recall" }] } });
         }) as unknown as typeof fetch,
       });
       expect(bodies.map((body) => (body as { method?: string }).method)).toEqual(["initialize", "tools/list"]);
@@ -187,7 +187,7 @@ describe("validateSupermemoryPiMcpRuntime", () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.authenticatedRuntimeValidated).toBe(true);
-        expect(result.toolNames).toEqual(["execute", "search_docs"]);
+        expect(result.toolNames).toEqual(["memory", "recall"]);
       }
       assertNoSecret(result);
     } finally {

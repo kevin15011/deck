@@ -1,0 +1,66 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Repository behavior, live space fragmentation, and official Supermemory guidance were investigated."
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Defined canonical project isolation and provider-native conversation ingestion."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Specified RFC 2119 requirements and Given/When/Then acceptance scenarios."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Selected provider-native learning with Deck-owned identity, privacy, transport validation, and runner parity boundaries."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Prepared phased TDD implementation and protected verification gates."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Implementation authorized; no secondary conversation-capture option will be introduced."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-08-11"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Safe partial candidate passed 4,507 tests, TypeScript, OpenSpec validation, and independent Quality review."
+      - "Automatic conversation capture, profile loading, query execution, and remote copy remain explicitly blocked; no false support claim ships."

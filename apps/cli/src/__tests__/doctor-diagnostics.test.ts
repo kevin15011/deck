@@ -113,6 +113,30 @@ describe("runDoctorDiagnostics", () => {
     expect(result.hasCriticalErrors).toBe(true);
   });
 
+  test("passes caller-verified project root to Codex diagnostics", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([fabCodexStatus()]);
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
+    const dependencies = fabDependencies();
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-doctor-verified-root-"));
+
+    await runDoctorDiagnostics(dependencies, projectRoot);
+
+    expect(dependencies.inspectCodex).toHaveBeenCalledWith(projectRoot, expect.any(Object));
+  });
+
+  test("fails closed for Codex diagnostics when no verified project root is available", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([fabCodexStatus()]);
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
+    const dependencies = fabDependencies();
+
+    const result = await runDoctorDiagnostics(dependencies);
+
+    expect(dependencies.inspectCodex).not.toHaveBeenCalled();
+    expect(result.runtimes[0]?.checks[0]?.status).toBe("error");
+    expect(result.runtimes[0]?.checks[0]?.items[0]?.message).toContain("verified project root");
+    expect(result.hasCriticalErrors).toBe(true);
+  });
+
   // ── Pi installed with all packages OK ─────────────────────────────────────
 
   test("Pi with all packages OK → runtime and packages show ok status", async () => {
@@ -201,7 +225,8 @@ describe("runDoctorDiagnostics", () => {
       { category: "Execution route: exec", status: "warning", message: "exec: static-compatible." },
       { category: "Rollback and recovery", status: "error", message: "One transaction contains conflicts." },
     ]);
-    const result = await runDoctorDiagnostics(dependencies);
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-doctor-codex-root-"));
+    const result = await runDoctorDiagnostics(dependencies, projectRoot);
     const codex = result.runtimes.find((runtime) => runtime.runtimeId === "codex")!;
     expect(codex.checks.map((check) => check.category)).toEqual(["Trust activation", "Managed content", "Execution route: exec", "Rollback and recovery"]);
     expect(JSON.stringify(codex)).not.toContain("secret-value");

@@ -201,6 +201,18 @@ test("Pi static-compatible hook preserves legacy delegation when its provider fa
 
 const HOST_CONTEXT_SYMBOL = Symbol.for("deck.developer-team.execution-context.v1");
 
+test("Pi production extension does not expose dead Supermemory capture hooks", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "deck-pi-no-dead-capture-"));
+  try {
+    materializeTeamProfile({ teamId: "developer-team", projectRoot });
+    const plan = buildPiTeamLaunchPlan({ teamId: "developer-team", projectRoot });
+    const extensionContent = readFileSync(plan.extensionPath, "utf8");
+    expect(extensionContent).not.toContain("captureSupermemoryConversationTurn");
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});
+
 test("D-REACH-22-Pi extension captures resolver at init; late global installation has no effect", async () => {
   const fixture = createRunnerHostFixtureV1("pi", createPiDeveloperTeamExecutionBridgeV1);
   let bridgeCalls = 0;

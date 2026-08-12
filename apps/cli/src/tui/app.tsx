@@ -82,6 +82,7 @@ import {
   type NormalizedDeckConfig,
   type PackageInstructionConfigurationMetadata,
 } from "@deck/core/config/deck-config";
+import { resolveCanonicalSupermemoryProjectScope } from "@deck/core/memory/canonical-supermemory-project";
 import type { DeckConfigStore } from "../deck-config-store";
 import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds, getEnabledPackageInstructionIds, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
 import type {
@@ -334,19 +335,22 @@ export function createMemoryProviderForSelection(choice: MemoryProviderChoice, v
 }
 
 
-type SupermemoryPiMcpWriter = (options: { token: string; serverName?: string; configPath?: string; homeDir?: string }) => PiMcpConfigWriteResult;
+type SupermemoryPiMcpWriter = (options: { token: string; serverName?: string; configPath?: string; homeDir?: string; projectScope: string }) => PiMcpConfigWriteResult;
 
 export function handOffSupermemoryCredentialToPiMcp(
   values: SupermemorySetupValues,
-  options?: { writer?: SupermemoryPiMcpWriter; configPath?: string; homeDir?: string },
+  options?: { writer?: SupermemoryPiMcpWriter; configPath?: string; homeDir?: string; projectScope?: string },
 ): { success: boolean; message: string; path?: string } {
   const token = values.token.trim();
   if (!token) {
     return { success: false, message: "Supermemory token is required and must be stored outside Deck config." };
   }
+  if (!options?.projectScope) {
+    return { success: false, message: "Canonical x-sm-project scope is required to configure Supermemory in Pi MCP config." };
+  }
 
   const writer = options?.writer ?? writeSupermemoryPiMcpConfig;
-  const result = writer({ token, serverName: "supermemory", configPath: options?.configPath, homeDir: options?.homeDir });
+  const result = writer({ token, serverName: "supermemory", configPath: options?.configPath, homeDir: options?.homeDir, projectScope: options.projectScope });
   const diagnosticText = redactPiMcpConfigDiagnosticText(result.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
 
   if (!result.ok) {
@@ -2919,7 +2923,22 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         return false;
       }
       if (choice === "supermemory") {
-        const result = writeSupermemoryPiMcpConfig({ token: values.token.trim(), serverName: "supermemory" });
+        if (!localResolvedProjectRoot) {
+          const message = "Unable to resolve verified project root; Supermemory MCP setup was not written.";
+          setMemoryProvider(undefined);
+          setSupermemoryError(message);
+          setMemoryStatus(`Supermemory MCP setup failed: ${message}`);
+          return false;
+        }
+        const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: localResolvedProjectRoot, remotes: [] });
+        if (!resolved.ok) {
+          const message = "Unable to resolve canonical x-sm-project scope from the current Git origin; Supermemory MCP setup was not written.";
+          setMemoryProvider(undefined);
+          setSupermemoryError(message);
+          setMemoryStatus(`Supermemory MCP setup failed: ${message}`);
+          return false;
+        }
+        const result = writeSupermemoryPiMcpConfig({ token: values.token.trim(), serverName: "supermemory", projectScope: resolved.scope });
         if (!result.ok) {
           const message = `Unable to configure Supermemory in Pi MCP config at ${result.path}. Check file permissions and existing MCP config JSON, then try again.`;
           setMemoryProvider(undefined);

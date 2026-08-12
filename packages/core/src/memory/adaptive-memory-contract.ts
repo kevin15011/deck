@@ -124,13 +124,13 @@ export type AdaptiveMemoryCandidate = {
 };
 
 export type AdaptiveMemoryCommitPolicy = {
-  maxMemoriesPerSession: number;
+  /** @deprecated Supermemory owns extraction and quota behavior; accepted only for legacy config compatibility. */
+  maxMemoriesPerSession?: number;
   preferredMinimumHighSignalMemories?: number;
   requireHighSignal: boolean;
 };
 
 export const DEFAULT_ADAPTIVE_MEMORY_COMMIT_POLICY: AdaptiveMemoryCommitPolicy = {
-  maxMemoriesPerSession: 7,
   preferredMinimumHighSignalMemories: 3,
   requireHighSignal: true,
 };
@@ -228,9 +228,10 @@ export function createAdaptiveMemoryDiagnostic(
 export function mergeAdaptiveMemoryCommitPolicy(
   policy?: Partial<AdaptiveMemoryCommitPolicy>,
 ): AdaptiveMemoryCommitPolicy {
+  const { maxMemoriesPerSession: _deprecatedMaxMemoriesPerSession, ...activePolicy } = policy ?? {};
   return {
     ...DEFAULT_ADAPTIVE_MEMORY_COMMIT_POLICY,
-    ...policy,
+    ...activePolicy,
   };
 }
 

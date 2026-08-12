@@ -32,6 +32,7 @@ describe("writeSupermemoryOpenCodeMcpConfig - x-sm-project REQUIRED (Repair 2026
         token: "sm_test_token_123",
         configPath,
         homeDir: dir,
+          explicitProjectId: "sm_project_v1_test_project",
       });
 
       expect(result.ok).toBe(true);
@@ -48,7 +49,7 @@ describe("writeSupermemoryOpenCodeMcpConfig - x-sm-project REQUIRED (Repair 2026
     }
   });
 
-  test("accepts explicit projectId override WITHOUT p: prefix", () => {
+  test("accepts explicit canonical projectId override WITHOUT p: prefix", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -57,14 +58,31 @@ describe("writeSupermemoryOpenCodeMcpConfig - x-sm-project REQUIRED (Repair 2026
         token: "sm_test_token_123",
         configPath,
         homeDir: dir,
-        explicitProjectId: "my-custom-project",  // NOT "p:my-custom-project"
+        explicitProjectId: "sm_project_v1_my_custom_project",  // NOT "p:my-custom-project"
       });
 
       expect(result.ok).toBe(true);
       
       const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
       // Value should be stored as-provided (no p: prefix added)
-      expect(config.mcp.supermemory.headers["x-sm-project"]).toBe("my-custom-project");
+      expect(config.mcp.supermemory.headers["x-sm-project"]).toBe("sm_project_v1_my_custom_project");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("rejects invalid explicit projectId overrides without writing config", () => {
+    const dir = createTempDir();
+    try {
+      const configPath = join(dir, "opencode.json");
+      const result = writeSupermemoryOpenCodeMcpConfig({
+        configPath,
+        homeDir: dir,
+        explicitProjectId: "sm_project_default",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.diagnostics.join(" ")).toContain("Canonical x-sm-project");
     } finally {
       cleanup(dir);
     }
@@ -82,7 +100,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - URL validation", () => {
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              "x-sm-project": "sm_project_test",
+              "x-sm-project": "sm_project_v1_test_project",
             },
           },
         },
@@ -181,7 +199,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () =>
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              "x-sm-project": "sm_project_test",
+              "x-sm-project": "sm_project_v1_test_project",
             },
           },
         },
@@ -195,7 +213,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () =>
     }
   });
 
-  test("accepts x-sm-project header for project scoping", () => {
+  test("accepts canonical x-sm-project header for project scoping", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -205,7 +223,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () =>
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              "x-sm-project": "my-repo",
+              "x-sm-project": "sm_project_v1_my_repo",
             },
           },
         },
@@ -250,7 +268,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () =>
             url: SUPERMEMORY_MCP_URL,
             headers: {
               Authorization: "Bearer {env:SUPERMEMORY_API_KEY}",
-              "x-sm-project": "sm_project_test",
+              "x-sm-project": "sm_project_v1_test_project",
             },
           },
         },
@@ -275,7 +293,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () =>
             url: SUPERMEMORY_MCP_URL,
             oauth: false,
             headers: {
-              "x-sm-project": "sm_project_test",
+              "x-sm-project": "sm_project_v1_test_project",
             },
           },
         },
@@ -301,7 +319,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - Server name handling", () => {
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              "x-sm-project": "sm_project_test",
+              "x-sm-project": "sm_project_v1_test_project",
             },
           },
         },
@@ -325,7 +343,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - Server name handling", () => {
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
             headers: {
-              "x-sm-project": "sm_project_test",
+              "x-sm-project": "sm_project_v1_test_project",
             },
           },
         },
@@ -583,6 +601,7 @@ describe("deriveSmProjectIdentifier - git remote derivation with sm_project_ pre
         token: "test-token",
         configPath,
         homeDir: dir,
+        projectRoot: dir,
       });
 
       expect(result.ok).toBe(true);
@@ -618,14 +637,14 @@ describe("deriveSmProjectIdentifier - git remote derivation with sm_project_ pre
         token: "test-token",
         configPath,
         homeDir: dir,
+        projectRoot: dir,
       });
 
       expect(result.ok).toBe(true);
       
       const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
       const xSmProject = config.mcp.supermemory.headers["x-sm-project"];
-      // Should be sm_project_my-org-my-project NOT sm-project-my-org-my-project
-      expect(xSmProject).toMatch(/^sm_project_/);
+      expect(xSmProject).toBe("sm_project_v1_my_org_my_project");
       expect(xSmProject).not.toMatch(/^sm-/);
     } finally {
       cleanup(dir);

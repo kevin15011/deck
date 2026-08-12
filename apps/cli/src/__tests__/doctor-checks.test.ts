@@ -129,6 +129,19 @@ describe("checkDeckConfig", () => {
     expect(result.category).toBe("Deck Config");
     expect(result.status).toBe("ok");
   });
+
+  test("reports deprecated Supermemory maxMemoriesPerSession when raw config is readable", () => {
+    const mockDeps = createMockDeps({
+      exists: vi.fn().mockReturnValue(true),
+      access: vi.fn().mockReturnValue(true),
+      readText: vi.fn().mockReturnValue(JSON.stringify({ adaptiveMemory: { supermemory: { maxMemoriesPerSession: 7 } } })),
+    });
+
+    const result = checkDeckConfig(mockDeps);
+
+    expect(result.status).toBe("warning");
+    expect(JSON.stringify(result)).toContain("maxMemoriesPerSession");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -185,6 +198,18 @@ describe("checkRunnerConfig", () => {
 
     expect(result.category).toBe("Runner Config");
     expect(result.items).toBeDefined();
+  });
+
+  test("reports canonical Supermemory scope and endpoint readiness without raw scope or credentials", () => {
+    const result = checkRunnerConfig(createMockDeps({ exists: vi.fn().mockReturnValue(false) }));
+    const text = JSON.stringify(result);
+
+    expect(text).toContain("x-sm-project scope");
+    expect(text).toContain("auth readiness");
+    expect(text).not.toContain("runner parity requires");
+    expect(text).toContain("conversation-capture: unsupported/static-compatible");
+    expect(text).not.toContain("sm_project_v1_kevin15011_deck");
+    expect(text).not.toContain("Authorization");
   });
 });
 

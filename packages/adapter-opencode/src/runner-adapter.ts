@@ -1687,6 +1687,7 @@ class OpenCodeRunnerAdapterImpl {
       const { writeSupermemoryOpenCodeMcpConfig } = require("./opencode-mcp-config");
       const result = writeSupermemoryOpenCodeMcpConfig({
         serverName: input.serverName,
+        projectRoot: input.projectRoot,
       });
       const diagnosticsList: string[] = [];
       if (result.diagnostics) {

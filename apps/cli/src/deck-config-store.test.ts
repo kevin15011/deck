@@ -163,7 +163,7 @@ describe("DeckConfigStore", () => {
     const updated = store.write({ webSearch: { enabled: true, provider: "tavily" } });
 
     expect(updated.webSearch).toEqual({ enabled: true, provider: "tavily" });
-    expect(updated.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents", maxMemoriesPerSession: 6 });
+    expect(updated.adaptiveMemory.supermemory).toEqual({ mcpServerName: "custom-sm", searchMode: "documents" });
   });
 
   test("reports invalid config values without echoing attacker-controlled values", () => {

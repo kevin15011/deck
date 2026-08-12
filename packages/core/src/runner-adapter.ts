@@ -575,6 +575,7 @@ export type DeveloperTeamAdapterInstallInput = {
 
 export type RunnerMcpConfigInput = {
   serverName: string;
+  projectRoot?: string;
   token?: string;
   type?: "local" | "remote";
   command?: readonly string[];

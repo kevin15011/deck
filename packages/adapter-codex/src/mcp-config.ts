@@ -16,7 +16,7 @@ export type CodexMcpServerId = (typeof CODEX_MCP_SERVER_IDS)[number];
 
 export type CodexMcpServer =
   | { id: CodexMcpServerId; transport: "stdio"; command: string; args?: readonly string[]; envVars?: readonly string[] }
-  | { id: CodexMcpServerId; transport: "streamable-http"; url: string; bearerTokenEnvVar?: string; envHttpHeaders?: Readonly<Record<string, string>> };
+  | { id: CodexMcpServerId; transport: "streamable-http"; url: string; bearerTokenEnvVar?: string; envHttpHeaders?: Readonly<Record<string, string>>; httpHeaders?: Readonly<Record<string, string>> };
 
 export type CodexMcpMergeResult =
   | { status: "unchanged" | "updated"; content: string; configured: readonly CodexMcpServerId[] }
@@ -24,6 +24,7 @@ export type CodexMcpMergeResult =
 
 const SECRET = /(?:token|secret|password|credential|api[-_]?key)/i;
 const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
+const CANONICAL_SUPERMEMORY_PROJECT_SCOPE = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
 
 function quote(value: string): string { return JSON.stringify(value); }
 
@@ -38,6 +39,7 @@ function normalized(server: CodexMcpServer): object {
       url: server.url,
       ...(server.bearerTokenEnvVar ? { bearer_token_env_var: server.bearerTokenEnvVar } : {}),
       ...(server.envHttpHeaders ? { env_http_headers: Object.fromEntries(Object.entries(server.envHttpHeaders).sort()) } : {}),
+      ...(server.httpHeaders ? { http_headers: Object.fromEntries(Object.entries(server.httpHeaders).sort()) } : {}),
     };
 }
 
@@ -76,15 +78,32 @@ export function inspectCodexMcpServerIds(source: string): readonly string[] {
   try { return [...existingServers(source).keys()].sort(); } catch { return []; }
 }
 
+export type CodexSupermemoryMcpState =
+  | Readonly<{ ok: true; scope: string }>
+  | Readonly<{ ok: false; code: "supermemory-mcp-missing" | "supermemory-endpoint-invalid" | "supermemory-project-scope-missing" | "supermemory-project-scope-invalid" | "supermemory-mcp-unmanaged" }>;
+
+export function inspectCodexSupermemoryMcpState(source: string): CodexSupermemoryMcpState {
+  try {
+    const server = existingServers(source).get("supermemory") as Record<string, unknown> | undefined;
+    if (!server) return { ok: false, code: "supermemory-mcp-missing" };
+    if (server.url !== CODEX_SUPERMEMORY_MCP_URL) return { ok: false, code: "supermemory-endpoint-invalid" };
+    if (server.bearer_token_env_var !== undefined || server.env_http_headers !== undefined) return { ok: false, code: "supermemory-mcp-unmanaged" };
+    const scope = server.http_headers && typeof server.http_headers === "object"
+      ? (server.http_headers as Record<string, unknown>)["x-sm-project"]
+      : undefined;
+    if (typeof scope !== "string" || !scope.trim()) return { ok: false, code: "supermemory-project-scope-missing" };
+    if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(scope.trim())) return { ok: false, code: "supermemory-project-scope-invalid" };
+    const expected = normalized({ id: "supermemory", transport: "streamable-http", url: CODEX_SUPERMEMORY_MCP_URL, httpHeaders: { "x-sm-project": scope.trim() } });
+    if (JSON.stringify(canonical(server)) !== JSON.stringify(canonical(expected))) return { ok: false, code: "supermemory-mcp-unmanaged" };
+    return { ok: true, scope: scope.trim() };
+  } catch {
+    return { ok: false, code: "supermemory-mcp-unmanaged" };
+  }
+}
+
 /** Confirms the exact credential-free Supermemory table that Deck is allowed to use. */
 export function isCodexSupermemoryMcpConfigured(source: string): boolean {
-  try {
-    const server = existingServers(source).get("supermemory");
-    const expected = normalized({ id: "supermemory", transport: "streamable-http", url: CODEX_SUPERMEMORY_MCP_URL });
-    return server !== undefined && JSON.stringify(canonical(server)) === JSON.stringify(canonical(expected));
-  } catch {
-    return false;
-  }
+  return inspectCodexSupermemoryMcpState(source).ok;
 }
 
 /** Confirms the exact portable Deck proxy contract. */
@@ -136,9 +155,15 @@ function validate(server: CodexMcpServer): void {
     if (server.id === "supermemory" && (server.bearerTokenEnvVar || server.envHttpHeaders)) {
       throw new Error("Supermemory must use Codex native OAuth without bearer or header credentials.");
     }
+    if (server.id === "supermemory" && !server.httpHeaders?.["x-sm-project"]) {
+      throw new Error("Supermemory requires canonical x-sm-project scope.");
+    }
     if (server.bearerTokenEnvVar && !ENV_NAME.test(server.bearerTokenEnvVar)) throw new Error(`Invalid bearer token environment name for ${server.id}.`);
     for (const [header, envName] of Object.entries(server.envHttpHeaders ?? {})) {
       if (!header || !ENV_NAME.test(envName)) throw new Error(`Invalid external header environment mapping for ${server.id}.`);
+    }
+    for (const [header, value] of Object.entries(server.httpHeaders ?? {})) {
+      if (!header || /authorization/i.test(header) || SECRET.test(value)) throw new Error(`Invalid literal HTTP header for ${server.id}.`);
     }
   }
   const serialized = JSON.stringify(server);
@@ -157,6 +182,10 @@ function render(server: CodexMcpServer): string {
     if (server.envHttpHeaders && Object.keys(server.envHttpHeaders).length > 0) {
       const entries = Object.entries(server.envHttpHeaders).sort().map(([header, env]) => `${quote(header)} = ${quote(env)}`);
       lines.push(`env_http_headers = { ${entries.join(", ")} }`);
+    }
+    if (server.httpHeaders && Object.keys(server.httpHeaders).length > 0) {
+      const entries = Object.entries(server.httpHeaders).sort().map(([header, value]) => `${quote(header)} = ${quote(value)}`);
+      lines.push(`http_headers = { ${entries.join(", ")} }`);
     }
   }
   return `${lines.join("\n")}\n`;
@@ -221,6 +250,7 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
 export function buildCodexMcpServers(input: {
   packageIds: readonly string[];
   memoryProvider: "none" | "supermemory" | "engram";
+  supermemoryProjectScope?: string;
   /** A fresh Core probe confirmed the Deck-owned Serena launcher. */
   serenaLauncherAvailable?: boolean;
   /** The effective `deck` command has confirmed the hidden Serena proxy route. */
@@ -257,7 +287,16 @@ export function buildCodexMcpServers(input: {
     }
   }
   if (selected.has("context7")) servers.push({ id: "context7", transport: "streamable-http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } });
-  if (input.memoryProvider === "supermemory") servers.push({ id: "supermemory", transport: "streamable-http", url: CODEX_SUPERMEMORY_MCP_URL });
+  if (input.memoryProvider === "supermemory") {
+    const scope = input.supermemoryProjectScope?.trim();
+    if (!scope) {
+      gaps.push("supermemory-project-scope-missing");
+    } else if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(scope)) {
+      gaps.push("supermemory-project-scope-invalid");
+    } else {
+      servers.push({ id: "supermemory", transport: "streamable-http", url: CODEX_SUPERMEMORY_MCP_URL, httpHeaders: { "x-sm-project": scope } });
+    }
+  }
   if (selected.has(WEB_SEARCH_CAPABILITY_ID)) {
     if (input.webSearchProviderConfigured !== true) {
       gaps.push("web-search-provider-unconfigured");

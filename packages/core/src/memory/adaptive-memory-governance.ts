@@ -5,14 +5,12 @@ import {
   ADAPTIVE_MEMORY_SOURCES,
   ADAPTIVE_MEMORY_TYPES,
   type AdaptiveMemoryCandidate,
-  type AdaptiveMemoryCommitPolicy,
   type AdaptiveMemoryCommitRequest,
   type AdaptiveMemoryContainerTag,
   type AdaptiveMemoryMetadata,
   type AdaptiveMemoryScope,
   type AdaptiveMemoryScopeRef,
   type AdaptiveMemorySearchFilters,
-  mergeAdaptiveMemoryCommitPolicy,
 } from "./adaptive-memory-contract";
 
 export const MAX_ADAPTIVE_MEMORY_CONTAINER_TAG_LENGTH = 100;
@@ -286,19 +284,13 @@ export function validateAdaptiveMemoryCandidate(
 
 export function validateAdaptiveMemoryCommitRequest(
   request: AdaptiveMemoryCommitRequest,
-  policy?: Partial<AdaptiveMemoryCommitPolicy>,
+  _policy?: Partial<import("./adaptive-memory-contract").AdaptiveMemoryCommitPolicy>,
 ): AdaptiveMemoryGovernanceResult {
-  const resolvedPolicy = mergeAdaptiveMemoryCommitPolicy({ ...request.policy, ...policy });
   const issues: AdaptiveMemoryGovernanceIssue[] = [];
 
-  if (request.candidates.length > resolvedPolicy.maxMemoriesPerSession) {
-    issues.push({
-      code: "ADAPTIVE_MEMORY_COMMIT_LIMIT_EXCEEDED",
-      message: `Session memory commit may save at most ${resolvedPolicy.maxMemoriesPerSession} learnings.`,
-      field: "candidates",
-    });
-  }
-
+  // REQ-SM-016: maxMemoriesPerSession is a deprecated compatibility field.
+  // It no longer limits behavior; Supermemory owns extraction and deduplication
+  // from coherent conversation documents.
   for (const [index, candidate] of request.candidates.entries()) {
     const candidateIssues = validateAdaptiveMemoryCandidate(candidate).issues;
     for (const issue of candidateIssues) {

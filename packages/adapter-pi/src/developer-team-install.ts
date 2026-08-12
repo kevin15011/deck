@@ -504,7 +504,7 @@ function buildPiToolsLine(baseTools: string, toolBindings: readonly import("@dec
 }
 
 function toPiMemoryToolName(serverName: string | undefined, toolName: string): string {
-  if (serverName && (toolName === "execute" || toolName === "search_docs")) {
+  if (serverName && (toolName === "execute" || toolName === "search_docs" || toolName === "memory" || toolName === "recall")) {
     return `${serverName}.${toolName}`;
   }
   return toolName;

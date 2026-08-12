@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execSync } from "node:child_process";
 import { posix } from "node:path";
 
 import {
@@ -12,6 +13,7 @@ import {
   type RunnerDiagnostic,
   type WebSearchProviderDescriptorV1,
   parseSkillDescriptor,
+  resolveCanonicalSupermemoryProjectScope,
 } from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 
@@ -32,6 +34,7 @@ export type BuildCodexInstallPlanInput = {
   thinkingAssignments?: DeveloperTeamThinkingAssignments;
   capabilityInstructions?: CapabilityInstructionBundle;
   memoryProvider?: "none" | "supermemory" | "engram";
+  supermemoryProjectScope?: string;
   mcpCapabilityIds?: readonly string[];
   /** Full materialization may change runner config; content-only refreshes Deck content only. */
   materializationScope?: "full" | "content-only";
@@ -123,6 +126,20 @@ function ensureNativeSkillFrontmatter(content: string, skillId: string): string 
     "---",
     body,
   ].join("\n");
+}
+
+function resolveCodexSupermemoryProjectScope(projectRoot: string): string | undefined {
+  try {
+    const remote = execSync("git remote get-url origin", {
+      cwd: projectRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: remote ? [remote] : [] });
+    return resolved.ok ? resolved.scope : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanInput): CodexMutationPlan {
@@ -274,6 +291,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       const desiredMcp = buildCodexMcpServers({
         packageIds: input.mcpCapabilityIds ?? [],
         memoryProvider: input.memoryProvider ?? "none",
+        supermemoryProjectScope: input.supermemoryProjectScope ?? resolveCodexSupermemoryProjectScope(input.projectRoot),
         serenaLauncherAvailable: input.serenaLauncherAvailable,
         serenaProxyAvailable: input.serenaProxyAvailable,
         webSearchProviderSupported: input.webSearchProviderSupported,
@@ -306,8 +324,14 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but its process credential is unavailable; no credential was persisted." });
         } else if (gap === "web-search-executable-missing") {
           diagnostics.push({ code: gap, severity: "warning", message: "Web Search is enabled but its configured MCP executable prerequisite is unavailable." });
+        } else if (gap === "supermemory-project-scope-missing") {
+          blocked = true;
+          diagnostics.push({ code: gap, severity: "error", message: "Supermemory Codex MCP configuration is blocked because no canonical x-sm-project scope was resolved." });
+        } else if (gap === "supermemory-project-scope-invalid") {
+          blocked = true;
+          diagnostics.push({ code: gap, severity: "error", message: "Supermemory Codex MCP configuration is blocked because the resolved x-sm-project scope fingerprint is invalid/redacted." });
         } else {
-          diagnostics.push({ code: gap, severity: "warning", message: "Engram has no verified Codex provider contract and remains deferred." });
+          diagnostics.push({ code: gap, severity: "warning", message: "Optional provider configuration remains deferred because no verified Codex provider contract is available." });
         }
       }
       const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers);

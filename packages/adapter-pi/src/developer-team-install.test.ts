@@ -1288,8 +1288,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
         mcpServers: {
           supermemory: {
             transport: "http",
-            url: "https://supermemory-new.stlmcp.com",
-            headers: { "x-supermemory-api-key": "sentinel-token-install" },
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": "sentinel-token-install" },
           },
         },
       }), "utf-8");
@@ -1303,7 +1303,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
             { surface: "skill", markdown: "Use validated Supermemory MCP tools only.", teamId: "developer-team" },
           ],
           toolBindings: [
-            { capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"] },
+            { capability: "memory.search", serverName: "supermemory", toolNames: ["memory", "recall"] },
           ],
         }),
       };
@@ -1314,8 +1314,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
 
       expect(plan.memoryDiagnostics).toHaveLength(0);
       expect(explorer.content).toContain("Use Supermemory MCP as advisory context only.");
-      expect(explorer.content).toContain("supermemory.execute");
-      expect(explorer.content).toContain("supermemory.search_docs");
+      expect(explorer.content).toContain("supermemory.memory");
+      expect(explorer.content).toContain("supermemory.recall");
       expect(explorer.content).not.toContain("tools: read,write,bash,execute");
       expect(explorer.content).not.toContain("context,recall,memory");
       expect(explorer.content).not.toContain("sentinel-token-install");
@@ -1333,8 +1333,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
         mcpServers: {
           customSupermemory: {
             transport: "http",
-            url: "https://supermemory-new.stlmcp.com",
-            headers: { "x-supermemory-api-key": "sentinel-token-install" },
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": "sentinel-token-install" },
           },
         },
       }), "utf-8");
@@ -1344,7 +1344,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
         displayName: "Supermemory MCP",
         buildInjection: () => ({
           instructions: [{ surface: "agent", markdown: "Use custom Supermemory MCP server.", teamId: "developer-team" }],
-          toolBindings: [{ capability: "memory.search", serverName: "customSupermemory", toolNames: ["execute", "search_docs"] }],
+          toolBindings: [{ capability: "memory.search", serverName: "customSupermemory", toolNames: ["memory", "recall"] }],
         }),
       };
 
@@ -1353,8 +1353,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
       const explorer = plan.agents.find((a) => a.agent.id === "deck-investigate")!;
 
       expect(plan.memoryDiagnostics).toHaveLength(0);
-      expect(explorer.content).toContain("customSupermemory.execute");
-      expect(explorer.content).toContain("customSupermemory.search_docs");
+      expect(explorer.content).toContain("customSupermemory.memory");
+      expect(explorer.content).toContain("customSupermemory.recall");
       expect(explorer.content).not.toContain("tools: read,write,bash,execute");
     } finally {
       cleanup(projectRoot);
@@ -1372,8 +1372,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
         mcpServers: {
           customSupermemory: {
             transport: "http",
-            url: "https://supermemory-new.stlmcp.com",
-            headers: { "x-supermemory-api-key": "sentinel-token-install" },
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": "sentinel-token-install" },
           },
         },
       }), "utf-8");
@@ -1384,7 +1384,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
         buildInjection: () => ({
           instructions: [{ surface: "agent", markdown: "Use Supermemory MCP tools.", teamId: "developer-team" }],
           // No authenticatedRuntimeValidated in metadata - previously this would block injection
-          toolBindings: [{ capability: "memory.search", serverName: "customSupermemory", toolNames: ["execute", "search_docs"] }],
+          toolBindings: [{ capability: "memory.search", serverName: "customSupermemory", toolNames: ["memory", "recall"] }],
         }),
       };
 
@@ -1396,8 +1396,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
       expect(plan.memoryDiagnostics).toHaveLength(0);
       // Memory content is injected in non-orchestrator agents
       expect(explorer.content).toContain("Use Supermemory MCP tools.");
-      expect(explorer.content).toContain("customSupermemory.execute");
-      expect(explorer.content).toContain("customSupermemory.search_docs");
+      expect(explorer.content).toContain("customSupermemory.memory");
+      expect(explorer.content).toContain("customSupermemory.recall");
     } finally {
       cleanup(projectRoot);
     }
@@ -1411,7 +1411,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
         displayName: "Supermemory MCP",
         buildInjection: () => ({
           instructions: [{ surface: "agent", markdown: "Should not be injected.", teamId: "developer-team" }],
-          toolBindings: [{ capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"] }],
+          toolBindings: [{ capability: "memory.search", serverName: "supermemory", toolNames: ["memory", "recall"] }],
         }),
       };
 

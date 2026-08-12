@@ -45,6 +45,12 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^"adaptiveMemory\.supermemory(?:\.[\w]+)?"$/, reason: "config path in deck-config schema" },
   { pattern: /^"Supermemory[^"]*"$/, reason: "named provider reference in config/validation messages" },
   { pattern: /`Invalid Supermemory[^`]*`/, reason: "named provider reference in error message template" },
+  { pattern: /Supermemory effects are disabled/, reason: "canonical provider scope fail-closed diagnostic" },
+  { pattern: /Deprecated Supermemory maxMemoriesPerSession/, reason: "provider config deprecation diagnostic" },
+  { pattern: /canonical-supermemory-project/, reason: "provider-neutral canonical scope resolver module path" },
+  { pattern: /When Supermemory is selected/, reason: "adaptive memory instruction content" },
+  { pattern: /Canonical Supermemory Scope/, reason: "adaptive memory instruction content" },
+  { pattern: /Supermemory owns extraction/, reason: "adaptive memory instruction content" },
   // Forbidden content reason string — explains why engram migration content is banned
   { pattern: /^"Engram migration payloads"$/, reason: "content classification label in governance rules" },
   // Provider labels in adaptive memory instruction content
