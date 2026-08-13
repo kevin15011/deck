@@ -17,9 +17,9 @@ export type DeckSupermemoryConfig = {
   mcpServerName?: string;
   /** @deprecated - user identity derived from token automatically */
   userId?: never;
-  /** @deprecated - project scoping via x-sm-project header */
+  /** @deprecated - project scoping uses Deck's canonical scope binding; do not configure manually */
   projectId?: never;
-  /** @deprecated - project scoping via x-sm-project header */
+  /** @deprecated - project scoping uses Deck's canonical scope binding; do not configure manually */
   teamId?: never;
   /** @deprecated - no longer used */
   orgId?: never;

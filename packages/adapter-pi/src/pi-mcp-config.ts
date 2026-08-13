@@ -208,6 +208,7 @@ export type PiMcpConfigValidationResult = {
   ok: boolean;
   path: string;
   serverName: string;
+  projectScope?: string;
   diagnostics: PiMcpConfigDiagnostic[];
 };
 
@@ -295,6 +296,7 @@ export function validateSupermemoryPiMcpConfig(
     ok: true,
     path: configPath,
     serverName,
+    projectScope: server.headers["x-sm-project"].trim(),
     diagnostics: [infoDiagnostic("PI_MCP_CONFIG_UNCHANGED", "Supermemory Pi MCP server entry is present; credential value is redacted.", configPath, serverName)],
   };
 }

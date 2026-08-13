@@ -9,7 +9,9 @@ import {
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import {
   buildCapabilityInstructionBundle,
+  bindAdaptiveMemoryInstructionBundle,
   buildCapabilityToolPolicyBundle,
+  composeCapabilityInstructions,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
 // import { verifyOrchestratorInvariantPresence, type OrchestratorInvariantSurface } from "@deck/core/teams/developer/orchestrator-invariants";
@@ -73,8 +75,9 @@ import { type ModificationAuthorization } from "../../core/src/teams/developer/o
 import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
 import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
-import type { CapabilityInstructionBundle } from "@deck/core";
+import { resolveCanonicalSupermemoryProjectScope, type CapabilityInstructionBundle } from "@deck/core";
 import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
+import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 
 import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
 import { buildCommandGenerationPlan, applyCommandGeneration } from "./command-generation";
@@ -221,11 +224,15 @@ function validateStandalonePackagePath(filePath: string): void {
 function buildStandaloneSkillFiles(
   skillsDir: string,
   standaloneSkills: readonly { skillId: string; body: string; files?: Record<string, string> }[],
+  capabilityInstructions?: CapabilityInstructionBundle,
 ): OpenCodePlannedStandaloneSkillFile[] {
   const planned: OpenCodePlannedStandaloneSkillFile[] = [];
   for (const skill of standaloneSkills) {
     validateStandaloneSkillId(skill.skillId);
-    const packageFiles: Record<string, string> = { "SKILL.md": skill.body, ...(skill.files ?? {}) };
+    const packageFiles: Record<string, string> = {
+      "SKILL.md": composeCapabilityInstructions(skill.body, capabilityInstructions, { surface: "skill", teamId: "developer-team", skillId: skill.skillId }),
+      ...(skill.files ?? {}),
+    };
     for (const [packagePath, content] of Object.entries(packageFiles)) {
       validateStandalonePackagePath(packagePath);
       planned.push({
@@ -308,10 +315,31 @@ function validateMemoryBundleTools(
 function resolveOpenCodeMemoryInjection(
   options?: MemoryInjectionOptions,
   configDir?: string,
+  projectRoot?: string,
 ): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
+  let memoryProvider = options?.memoryProvider;
+  let scopeDiagnostic: MemoryDiagnostic | undefined;
+  if (memoryProvider?.id === "supermemory") {
+    const derived = projectRoot ? resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] }) : undefined;
+    const validation = validateSupermemoryOpenCodeMcpConfig({ configPath: configDir ? join(configDir, "opencode.json") : undefined });
+    if (derived?.ok && validation.ok && validation.projectScope === derived.scope) {
+      memoryProvider = createSupermemoryMemoryProvider({
+        mcpServerName: validation.serverName,
+        projectScope: derived.scope,
+        configuredProjectScope: validation.projectScope,
+      });
+    } else {
+      memoryProvider = undefined;
+      scopeDiagnostic = {
+        code: "memory_provider_unavailable",
+        providerId: "supermemory",
+        message: "Supermemory OpenCode MCP scope is missing or mismatched; omitted adaptive-memory injection with redacted diagnostics.",
+      };
+    }
+  }
   const result = resolveMemoryInjection({
     memoryInjection: options?.memoryInjection,
-    memoryProvider: options?.memoryProvider,
+    memoryProvider,
     supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS,
     buildContext: { teamId: "developer-team" },
   });
@@ -338,7 +366,7 @@ function resolveOpenCodeMemoryInjection(
 
   // Add validation diagnostics
   const validationDiags = validateMemoryBundleTools(memoryBundle, providerId);
-  const allDiagnostics = [...diagnostics, ...validationDiags];
+  const allDiagnostics = [...diagnostics, ...(scopeDiagnostic ? [scopeDiagnostic] : []), ...validationDiags];
 
   return { bundle: memoryBundle, diagnostics: allDiagnostics };
 }
@@ -569,9 +597,20 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     content: readFileSync(typeof executionPluginAssetPath === "string" ? executionPluginAssetPath : new URL("../assets/opencode/plugins/developer-team-execution.generated.js", import.meta.url), "utf-8"),
   };
 
-  const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options, configDir);
+  const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options, configDir, projectRoot);
 
-  const capabilityInstructions = options?.capabilityInstructions;
+  const derivedSupermemoryProjectScope = (() => {
+    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
+    return resolved.ok ? resolved.scope : undefined;
+  })();
+  const configuredSupermemoryProjectScope = (() => {
+    const validation = validateSupermemoryOpenCodeMcpConfig({ configPath: join(configDir, "opencode.json") });
+    return validation.ok ? validation.projectScope : undefined;
+  })();
+  const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(options?.capabilityInstructions, {
+    supermemoryProjectScope: derivedSupermemoryProjectScope,
+    configuredSupermemoryProjectScope,
+  });
 
   // Build tool policies from capability instructions for dynamic tool resolution
   const toolPolicyBundle =
@@ -607,13 +646,13 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
 
   // Build standalone skill package files (verbatim, no generated frontmatter).
   const standaloneSkills = [
-    ...buildStandaloneSkillFiles(skillsDir, options?.standaloneSkills ?? []),
+    ...buildStandaloneSkillFiles(skillsDir, options?.standaloneSkills ?? [], capabilityInstructions),
     ...getBootstrapSkillFiles().map((skill): OpenCodePlannedStandaloneSkillFile => ({
       skillId: skill.skillId,
       packagePath: "SKILL.md",
       relativePath: `skills/${skill.skillId}/SKILL.md`,
       absolutePath: join(skillsDir, skill.skillId, "SKILL.md"),
-      content: skill.content,
+      content: composeCapabilityInstructions(skill.content, capabilityInstructions, { surface: "skill", teamId: "developer-team", skillId: skill.skillId }),
     })),
   ];
 

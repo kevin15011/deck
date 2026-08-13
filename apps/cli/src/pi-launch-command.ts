@@ -22,8 +22,14 @@ import {
   type AdaptiveMemoryActiveProvider,
   type DeckSupermemoryConfig,
 } from "@deck/core/config/deck-config";
+import { resolveCanonicalSupermemoryProjectScope } from "@deck/core";
 import type { AdaptiveMemoryProvider, MemoryDiagnostic, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
+import {
+  buildCapabilityInstructionBundle,
+  getEnabledCapabilityInstructionIds,
+  type CapabilityInstructionBundle,
+} from "@deck/core/teams/developer/instruction-bundles";
 
 // --- Types ---
 
@@ -150,6 +156,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
 
   const resolvedMemory = await resolveLaunchMemoryProvider(options);
   const allDiagnostics: MemoryProviderDiagnostic[] = [...resolvedMemory.diagnostics];
+  const capabilityInstructions = buildPiLaunchCapabilityInstructions(options);
 
   const profileDiagnostics = materializeTeamProfile({
     teamId,
@@ -158,6 +165,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
     ...(resolvedMemory.memoryInjection ? { memoryInjection: resolvedMemory.memoryInjection } : {}),
     ...(resolvedMemory.provider ? { memoryProvider: resolvedMemory.provider } : {}),
     ...(resolvedMemory.memoryUnavailableReason ? { memoryUnavailableReason: resolvedMemory.memoryUnavailableReason } : {}),
+    ...(capabilityInstructions ? { capabilityInstructions } : {}),
     promptProfileActivation: options.promptProfileActivation,
   });
 
@@ -176,6 +184,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
       modelAssignments,
       thinkingAssignments,
       preserveMissingThinkingAssignments: true,
+      ...(capabilityInstructions ? { capabilityInstructions } : {}),
       standaloneSkills,
       piMcpConfigPath: options.piMcpConfigPath,
       piMcpHomeDir: options.piMcpHomeDir,
@@ -193,6 +202,30 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
   }
 
   return { status: "launched", plan, memoryDiagnostics };
+}
+
+function buildPiLaunchCapabilityInstructions(options: RunPiLaunchOptions): CapabilityInstructionBundle | undefined {
+  try {
+    const deckConfig = validateDeckConfig(options.deckConfig);
+    const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, "pi");
+    const activeProvider = options.activeProvider ?? deckConfig.adaptiveMemory.activeProvider;
+    if (activeProvider === "supermemory" && !enabledIds.includes("adaptive-memory")) {
+      enabledIds.push("adaptive-memory");
+    }
+    if (enabledIds.length === 0) return undefined;
+    const derived = resolveCanonicalSupermemoryProjectScope({ projectRoot: options.projectRoot, remotes: [] });
+    const mcpValidation = validateSupermemoryPiMcpConfig({
+      serverName: deckConfig.adaptiveMemory.supermemory?.mcpServerName ?? "supermemory",
+      configPath: options.piMcpConfigPath,
+      homeDir: options.piMcpHomeDir,
+    });
+    return buildCapabilityInstructionBundle(enabledIds, {
+      supermemoryProjectScope: derived.ok ? derived.scope : undefined,
+      configuredSupermemoryProjectScope: mcpValidation.ok ? mcpValidation.projectScope : undefined,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 
@@ -261,10 +294,21 @@ async function resolveLaunchMemoryProvider(options: RunPiLaunchOptions): Promise
     }
 
     try {
+      const mcpValidation = validateSupermemoryPiMcpConfig({
+        serverName: runtimeValidation.serverName,
+        configPath: options.piMcpConfigPath,
+        homeDir: options.piMcpHomeDir,
+      });
+      const derived = resolveCanonicalSupermemoryProjectScope({ projectRoot: options.projectRoot, remotes: [] });
+      if (!mcpValidation.ok || !derived.ok || mcpValidation.projectScope !== derived.scope) {
+        const message = "Supermemory Pi MCP scope is missing or mismatched; launched without adaptive-memory injection.";
+        return { diagnostics: [{ code: "memory_provider_unavailable", providerId: "supermemory", message }], memoryUnavailableReason: message };
+      }
       const provider = createSupermemoryMemoryProvider({
-        // Token-only: user identity derived from token, project via x-sm-project
         mcpServerName: runtimeValidation.serverName,
         authenticatedRuntimeValidated: true,
+        projectScope: derived.scope,
+        configuredProjectScope: mcpValidation.projectScope,
       });
       return { memoryInjection: provider.buildInjection({}), diagnostics };
     } catch (error) {
@@ -401,11 +445,23 @@ export async function resolvePiAdaptiveMemoryProvider(
       );
     }
 
+    const derived = options.projectRoot
+      ? resolveCanonicalSupermemoryProjectScope({ projectRoot: options.projectRoot, remotes: [] })
+      : undefined;
+    if (!derived?.ok || derived.scope !== mcpValidation.projectScope) {
+      return unavailable(
+        "supermemory",
+        `Supermemory Pi MCP config scope is unavailable or does not match the canonical project scope; ${context === "install" ? "installed" : "launched"} without adaptive-memory injection.`,
+      );
+    }
+
     try {
       const provider = createSupermemoryMemoryProvider({
-        // Token-only: user identity derived from token, project via x-sm-project
+        // Token-only: user identity derived from token; project scope requires header + explicit per-operation containerTag.
         mcpServerName: mcpValidation.serverName,
         authenticatedRuntimeValidated: true,
+        projectScope: derived.scope,
+        configuredProjectScope: mcpValidation.projectScope,
       });
       return { provider, diagnostics };
     } catch (error) {

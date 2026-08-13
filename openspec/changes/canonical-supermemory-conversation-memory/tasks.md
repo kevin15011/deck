@@ -21,9 +21,10 @@
 - Remove ambient `process.cwd()` identity derivation.
 - Preserve native OAuth and never persist Authorization headers.
 
-### 1.3 Complete one OpenCode conversation capture/retrieval vertical
-- Use the capability-proven transport, canonical scope, stable session `customId`, dynamic ingestion, profile load, and bounded query retrieval.
-- Add deterministic provider fakes; no test network.
+### 1.3 Complete one OpenCode scoped automatic save/recall vertical
+- Materialize the canonical scope into Lead, specialist, delegation, and relevant skill instructions.
+- Require explicit `containerTag` for every scoped Supermemory tool call even when `x-sm-project` is configured.
+- Add deterministic prompt/tool-contract tests; no test network.
 
 ## Phase 2: Runner parity
 
@@ -35,7 +36,7 @@
 - Preserve native OAuth ownership and project-local config safety.
 
 ### 2.3 Add cross-runner semantic contract tests
-- Assert scope, endpoint, tool semantics, missing-scope failure, redaction, and no credential persistence.
+- Assert identical materialized scope, explicit tool arguments, endpoint, missing/mismatched-scope failure, active-space exclusion, and no credential persistence.
 
 ## Phase 3: Conversation and retrieval policy
 
@@ -44,8 +45,9 @@
 - Add a migration diagnostic and tests.
 
 ### 3.2 Replace adaptive-memory instructions
-- Remove immediate manual-save triggers, topic-key tables, subagent persistence guidance, and mandatory session summaries.
-- Explain automatic conversation capture, advisory authority, bounded recall, and explicit user forget behavior.
+- Preserve automatic high-signal agent saves and materially relevant recall while removing quotas, topic-key management, and mandatory session summaries.
+- Embed the exact repository-derived `containerTag` and prohibit default/active-space fallback.
+- Explain advisory authority, scoped tool classes, bounded recall, and explicit user forget behavior.
 - Remove duplicate provider guidance across surfaces.
 
 ### 3.3 Enforce privacy and bounded context
@@ -59,6 +61,7 @@
 
 ### 4.2 Add truthful UI and Doctor status
 - Show provider, auth readiness, scope fingerprint, endpoint, parity, and legacy/unmanaged entries.
+- Detect repository/config scope mismatch and stale unbound prompt materialization.
 - Never expose credentials or raw scope identifiers in telemetry.
 
 ## Phase 5: Non-destructive migration

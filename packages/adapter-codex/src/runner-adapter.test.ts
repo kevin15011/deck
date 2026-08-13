@@ -14,7 +14,7 @@ import { CURRENT_CODEX_MODELS_FIXTURE } from "./__fixtures__/codex/models";
 import { parseCodexModels } from "./codex-model-discovery";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
-import { getDefaultDeckConfig, validateDeckConfig } from "@deck/core";
+import { buildCapabilityInstructionBundle, getDefaultDeckConfig, validateDeckConfig } from "@deck/core";
 
 setDefaultTimeout(30_000);
 
@@ -39,6 +39,26 @@ function readySerenaReadiness(): Extract<import("@deck/core").SerenaExistingRead
 
 function readySerenaProxy() {
   return Promise.resolve({ state: "ready" as const });
+}
+
+function supermemoryDeckConfig() {
+  return validateDeckConfig({
+    adaptiveMemory: {
+      activeProvider: "supermemory",
+      supermemory: { mcpServerName: "supermemory" },
+    },
+  });
+}
+
+function supermemoryProvider(): import("@deck/core").AdaptiveMemoryProvider {
+  return {
+    id: "supermemory",
+    displayName: "Supermemory",
+    buildInjection: (context) => ({
+      instructions: [{ surface: "agent", teamId: "developer-team", markdown: `provider scope ${context.supermemoryProjectScope}` }],
+      toolBindings: [],
+    }),
+  };
 }
 
 async function writeGitOrigin(projectRoot: string): Promise<void> {
@@ -1319,6 +1339,79 @@ describe("Codex RunnerAdapter production composition", () => {
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("content-only Supermemory guidance follows the existing Codex MCP scope instead of trusting the derived scope", async () => {
+    const matchingRoot = await mkdtemp(join(tmpdir(), "deck-codex-sm-matching-"));
+    const mismatchedRoot = await mkdtemp(join(tmpdir(), "deck-codex-sm-mismatched-"));
+    try {
+      for (const root of [matchingRoot, mismatchedRoot]) {
+        await writeGitOrigin(root);
+        await mkdir(join(root, ".codex"), { recursive: true });
+      }
+      await writeFile(join(matchingRoot, ".codex", "config.toml"), '[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\nhttp_headers = { "x-sm-project" = "sm_project_v1_kevin15011_deck" }\n');
+      await writeFile(join(mismatchedRoot, ".codex", "config.toml"), '[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\nhttp_headers = { "x-sm-project" = "sm_project_v1_other_repo" }\n');
+      const adapter = createCodexRunnerAdapter();
+      const input = (projectRoot: string) => ({
+        projectRoot,
+        environmentId: "codex-development" as const,
+        deckConfig: supermemoryDeckConfig(),
+        memoryProvider: supermemoryProvider(),
+        materializationScope: "content-only" as const,
+      });
+
+      const matchingPlan = adapter.buildDeveloperTeamInstallPlan(input(matchingRoot));
+      const mismatchedPlan = adapter.buildDeveloperTeamInstallPlan(input(mismatchedRoot));
+      const matchingLead = matchingPlan.files.find((file) => file.path === ".codex/agents/deck-lead.toml")?.content ?? "";
+      const mismatchedLead = mismatchedPlan.files.find((file) => file.path === ".codex/agents/deck-lead.toml")?.content ?? "";
+
+      expect(matchingLead.includes('containerTag: "sm_project_v1_kevin15011_deck"') || matchingLead.includes('containerTag: \\"sm_project_v1_kevin15011_deck\\"')).toBe(true);
+      expect(matchingLead).toContain("supermemory_add_memory");
+      expect(mismatchedPlan.blocked).toBe(false);
+      expect(mismatchedLead).toContain("Adaptive-memory project operations are disabled");
+      expect(mismatchedLead).toContain("scope mismatch");
+      expect(mismatchedLead).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(mismatchedLead).not.toContain("sm_project_default");
+    } finally {
+      await rm(matchingRoot, { recursive: true, force: true });
+      await rm(mismatchedRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("content-only Supermemory guidance rebinds caller-supplied adaptive-memory fragments while preserving unrelated package instructions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-codex-sm-rebind-"));
+    try {
+      await writeGitOrigin(root);
+      await mkdir(join(root, ".codex"), { recursive: true });
+      await writeFile(join(root, ".codex", "config.toml"), '[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\nhttp_headers = { "x-sm-project" = "sm_project_v1_kevin15011_deck" }\n');
+      const adapter = createCodexRunnerAdapter();
+      const callerBundle = {
+        instructions: [
+          { packageId: "adaptive-memory", surface: "agent", markdown: "No manual containerTag required", teamId: "developer-team" },
+          { packageId: "adaptive-memory", surface: "skill", markdown: "stale q example supermemory_search_memory({ q, containerTag: \"sm_project_default\" })", teamId: "developer-team" },
+          { packageId: "code-economy", surface: "agent", markdown: "caller-unrelated-marker", teamId: "developer-team" },
+        ],
+      } as const;
+
+      const plan = adapter.buildDeveloperTeamInstallPlan({
+        projectRoot: root,
+        environmentId: "codex-development",
+        deckConfig: supermemoryDeckConfig(),
+        memoryProvider: supermemoryProvider(),
+        materializationScope: "content-only",
+        capabilityInstructions: callerBundle,
+      });
+      const lead = plan.files.find((file) => file.path === ".codex/agents/deck-lead.toml")?.content ?? "";
+
+      expect(lead).toContain('containerTag: \\"sm_project_v1_kevin15011_deck\\"');
+      expect(lead).toContain('supermemory_search_memory({ query, containerTag: \\"sm_project_v1_kevin15011_deck\\" })');
+      expect(lead).toContain("caller-unrelated-marker");
+      expect(lead).not.toContain("No manual containerTag required");
+      expect(lead).not.toContain("sm_project_default");
+      expect(lead).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 

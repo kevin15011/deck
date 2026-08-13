@@ -373,6 +373,21 @@ function createCliSandbox(): CliSandbox {
   const cache = join(root, "cache");
   const temp = join(root, "tmp");
   for (const path of [home, bin, config, state, cache, temp]) mkdirSync(path, { recursive: true });
+  mkdirSync(join(root, ".git", "objects", "info"), { recursive: true });
+  mkdirSync(join(root, ".git", "objects", "pack"), { recursive: true });
+  mkdirSync(join(root, ".git", "refs", "heads"), { recursive: true });
+  writeFileSync(join(root, ".git", "HEAD"), "ref: refs/heads/main\n");
+  writeFileSync(join(root, ".git", "config"), [
+    "[core]",
+    "\trepositoryformatversion = 0",
+    "\tfilemode = true",
+    "\tbare = false",
+    "\tlogallrefupdates = true",
+    "[remote \"origin\"]",
+    "\turl = https://github.com/fixture/deck.git",
+    "\tfetch = +refs/heads/*:refs/remotes/origin/*",
+    "",
+  ].join("\n"));
   mkdirSync(join(config, "deck"), { recursive: true });
   writeFileSync(join(config, "deck", "config.json"), JSON.stringify({ version: 1 }));
 
@@ -405,14 +420,14 @@ function createCliSandbox(): CliSandbox {
       supermemory: {
         transport: "http",
         url: "https://mcp.supermemory.ai/mcp",
-        headers: { "x-sm-project": "sm_project_v1_fixture_deck", "x-supermemory-api-key": "fixture-not-a-secret" },
+        headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": "fixture-not-a-secret" },
       },
     },
   }));
 
   const openCodeConfig = {
     mcp: {
-      supermemory: { type: "remote", url: "https://mcp.supermemory.ai/mcp", headers: { "x-sm-project": "sm_project_v1_fixture_deck" } },
+      supermemory: { type: "remote", url: "https://mcp.supermemory.ai/mcp", headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" } },
       "codebase-memory-mcp": { command: [join(bin, process.platform === "win32" ? "deck.cmd" : "deck")] },
       serena: { command: [join(bin, process.platform === "win32" ? "serena.cmd" : "serena")] },
     },

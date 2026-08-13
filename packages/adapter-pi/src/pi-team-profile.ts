@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getTeamSessionInstructions } from "@deck/core/teams/developer/content-registry";
+import { composeCapabilityInstructions, type CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 import {
   composeAdaptiveMemory,
   resolveMemoryInjection,
@@ -28,6 +29,8 @@ export type MaterializeTeamProfileOptions = {
   memoryProvider?: AdaptiveMemoryProvider;
   /** Launch-owned reason to render explicit adaptive-context unavailability without resolving a provider. */
   memoryUnavailableReason?: string;
+  /** Capability instructions to compose into the launch system prompt when provider effects are unavailable. */
+  capabilityInstructions?: CapabilityInstructionBundle;
   /** Provider IDs accepted by this adapter/caller registry. */
   supportedMemoryProviderIds?: Iterable<string>;
   /** Injected fs functions for testability */
@@ -66,6 +69,7 @@ export type BuildTeamSystemPromptOptions = {
   memoryInjection?: MemoryInjectionBundle;
   memoryProvider?: AdaptiveMemoryProvider;
   memoryUnavailableReason?: string;
+  capabilityInstructions?: CapabilityInstructionBundle;
   supportedMemoryProviderIds?: Iterable<string>;
   /** Optional orchestrator personality override. When absent, falls back to default. */
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
@@ -107,6 +111,10 @@ export function buildTeamSystemPrompt(
     "You are operating within a Deck team session.",
     "",
   ].join("\n");
+  const baseWithCapabilityInstructions = composeCapabilityInstructions(base, options?.capabilityInstructions, {
+    surface: "session",
+    teamId,
+  });
 
   // Resolve memory injection using adapter/caller-owned provider ID validation.
   const { bundle, diagnostics } = resolveMemoryInjection({
@@ -120,7 +128,7 @@ export function buildTeamSystemPrompt(
     if (options?.memoryUnavailableReason && !options?.memoryInjection) {
       const reason = `Adaptive context was not loaded: ${options.memoryUnavailableReason}`;
       return {
-        content: `${renderSddContextSections({ officialContext: base, adaptiveContextUnavailableReason: reason })}
+        content: `${renderSddContextSections({ officialContext: baseWithCapabilityInstructions, adaptiveContextUnavailableReason: reason })}
 `,
         memoryDiagnostics: diagnostics,
       };
@@ -130,16 +138,16 @@ export function buildTeamSystemPrompt(
         ? `Adaptive context was not loaded: ${diagnostics.map((diagnostic) => diagnostic.message).join("; ")}`
         : "Adaptive context was not loaded; continue with official OpenSpec context only.";
       return {
-        content: `${renderSddContextSections({ officialContext: base, adaptiveContextUnavailableReason: reason })}
+        content: `${renderSddContextSections({ officialContext: baseWithCapabilityInstructions, adaptiveContextUnavailableReason: reason })}
 `,
         memoryDiagnostics: diagnostics,
       };
     }
-    return { content: base, memoryDiagnostics: diagnostics };
+    return { content: baseWithCapabilityInstructions, memoryDiagnostics: diagnostics };
   }
 
   // Compose session-surface memory into the system prompt
-  const result = composeAdaptiveMemory(base, bundle, {
+  const result = composeAdaptiveMemory(baseWithCapabilityInstructions, bundle, {
     surface: "session",
     teamId,
   });
@@ -178,6 +186,7 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
     memoryProvider: options.memoryProvider,
     supportedMemoryProviderIds: options.supportedMemoryProviderIds,
     memoryUnavailableReason: options.memoryUnavailableReason,
+    capabilityInstructions: options.capabilityInstructions,
     orchestratorPersonality: options.orchestratorPersonality,
     promptProfileActivation: options.promptProfileActivation,
     projectRoot: options.projectRoot,

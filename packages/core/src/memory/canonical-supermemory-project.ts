@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export type CanonicalSupermemoryProjectScope = `sm_project_v1_${string}_${string}`;
 
@@ -18,6 +20,11 @@ export type SupermemoryProjectScopeResult =
   | Readonly<{ ok: false; diagnostics: readonly SupermemoryProjectScopeDiagnostic[] }>;
 
 const GITHUB_HOST_ALIASES = new Set(["github.com", "github-p"]);
+const CANONICAL_SUPERMEMORY_PROJECT_SCOPE = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
+
+export function isCanonicalSupermemoryProjectScope(value: string): value is CanonicalSupermemoryProjectScope {
+  return CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(value.trim()) && value.trim() !== "sm_project_default";
+}
 
 export function resolveCanonicalSupermemoryProjectScope(input: {
   projectRoot: string;
@@ -90,14 +97,26 @@ function readGitOriginRemote(projectRoot: string): string | undefined {
   const cwd = projectRoot.trim();
   if (!cwd) return undefined;
   try {
-    return execFileSync("git", ["remote", "get-url", "origin"], {
+    const config = readFileSync(join(cwd, ".git", "config"), "utf8");
+    const origin = config.match(/^\[remote\s+"origin"\]\s*$(?<body>(?:\n[ \t]+[^\n]*)*)/m)?.groups?.body;
+    const url = origin?.match(/^\s*url\s*=\s*(?<url>.+?)\s*$/m)?.groups?.url.trim();
+    if (url) return url;
+  } catch {
+    // Fall through to git for worktrees and non-standard git directories.
+  }
+  try {
+    const { GIT_DIR: _gitDir, GIT_WORK_TREE: _gitWorkTree, GIT_CONFIG: _gitConfig, ...env } = process.env;
+    const origin = execFileSync("git", ["remote", "get-url", "origin"], {
       cwd,
+      env,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
+    if (origin) return origin;
   } catch {
-    return undefined;
+    // No origin could be resolved.
   }
+  return undefined;
 }
 
 function isFilesystemLikeRemote(value: string): boolean {

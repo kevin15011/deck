@@ -17,6 +17,7 @@ export type OpenCodeMcpConfigValidationResult = {
   ok: boolean;
   path: string;
   serverName: string;
+  projectScope?: string;
   diagnostics: string[];
 };
 
@@ -180,6 +181,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
     ok: true,
     path: configPath,
     serverName,
+    projectScope: projectHeader.trim(),
     diagnostics: [],
   };
 }

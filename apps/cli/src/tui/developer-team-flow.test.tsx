@@ -312,7 +312,7 @@ describe("Developer Team TUI screens", () => {
   });
 
   describe("SupermemorySetupScreen", () => {
-    test("token-only: redacts token, shows automatic scoping info", () => {
+    test("token-only: redacts token and explains header plus per-operation scope", () => {
       const output = renderToString(
         <SupermemorySetupScreen
           screen="supermemory-token"
@@ -328,6 +328,9 @@ describe("Developer Team TUI screens", () => {
       // Token-only verification
       expect(output).toContain("User identity is derived automatically");
       expect(output).toContain("x-sm-project header");
+      expect(output).toContain("canonical");
+      expect(output).toContain("containerTag on each project-memory operation");
+      expect(output).not.toContain("Project scoping handled via x-sm-project header");
     });
 
     test("token-only: builds config without userId/teamId/orgId", () => {

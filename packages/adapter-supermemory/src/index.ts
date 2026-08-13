@@ -1,11 +1,20 @@
 import type { AdaptiveMemoryProvider, MemoryInjectionBundle, MemoryInstructionFragment, MemoryToolBinding } from "@deck/core/memory/adaptive-memory";
 import { createAdaptiveMemoryDiagnostic, type AdaptiveMemoryAdapter, type AdaptiveMemoryCommitRequest, type AdaptiveMemoryCommitResult, type AdaptiveMemoryConfigureRequest, type AdaptiveMemoryContextRequest, type AdaptiveMemoryContextResult, type AdaptiveMemoryHealthResult, type AdaptiveMemorySearchRequest, type AdaptiveMemorySearchResult, type AdaptiveMemorySource } from "@deck/core/memory/adaptive-memory-contract";
 import { validateAdaptiveMemoryCommitRequest, validateAdaptiveMemorySearchFilters, validateAdaptiveMemoryScope } from "@deck/core/memory/adaptive-memory-governance";
+import { isCanonicalSupermemoryProjectScope, renderProjectBoundAdaptiveMemoryInstructions } from "@deck/core";
 
 export * from "./conversation";
 
 export const SUPERMEMORY_MCP_SERVER_URL = "https://mcp.supermemory.ai/mcp";
-export const SUPERMEMORY_MCP_TOOLS = ["memory", "recall", "whoAmI"] as const;
+export const SUPERMEMORY_MCP_TOOLS = [
+  "supermemory_add_memory",
+  "supermemory_search_memory",
+  "supermemory_listMemories",
+  "supermemory_listDocuments",
+  "supermemory_fetch-graph-data",
+  "supermemory_memory-graph",
+  "supermemory_save-memory",
+] as const;
 
 /** Specific metadata shape used by Supermemory tool bindings. */
 export type SupermemoryToolBindingMetadata = {
@@ -19,15 +28,19 @@ export type SupermemoryToolBindingMetadata = {
   dreamingDefault?: "dynamic" | "instant";
   maxResultsDefault?: number;
   maxContextTokensDefault?: number;
+  scopedTools?: readonly string[];
+  accountOnlyTools?: readonly string[];
+  activeSpaceOnlyToolsForbidden?: readonly string[];
+  documentIdToolsRequireScopedPredecessor?: readonly string[];
 };
 
 /**
  * Supermemory MCP-only Memory Provider Configuration.
  *
  * CONTRACT (Repair 2026-05-29):
- * - No userId/teamId/orgId manual: el usuario se deriva del token/API key.
- * - No containerTag manual: el scoping es automático (token → usuario, x-sm-project → proyecto).
- * - Solo token/API key es input manual.
+ * - No userId/teamId/orgId manual: user identity is derived from the token/OAuth account.
+ * - Project memory requires Deck's canonical containerTag argument on every scoped tool call.
+ * - x-sm-project is diagnostic/transport metadata only and never supplies omitted tool arguments.
  */
 export type SupermemoryMemoryProviderConfig = {
   /** Optional MCP server name. Defaults to "supermemory". */
@@ -38,36 +51,70 @@ export type SupermemoryMemoryProviderConfig = {
   apiKey?: string;
   /** Override for the Supermemory MCP server URL. Defaults to SUPERMEMORY_MCP_SERVER_URL. */
   mcpServerUrl?: string;
+  /** Repository-derived canonical project scope materialized by Deck. */
+  projectScope?: string;
+  /** Scope observed in configured MCP transport; when present it must match projectScope. */
+  configuredProjectScope?: string;
 };
 
 /**
  * Creates memory instruction fragments for Supermemory MCP.
- * CONTRACT: No container tags. Scoping is automatic:
- * - User identity derived from token/API key
- * - Project scoping via x-sm-project header in MCP config
+ * CONTRACT: Project memory is scoped by Deck's canonical containerTag argument.
+ * x-sm-project is transport diagnostics/config parity only.
  */
-function createFragments(config: { mcpServerName: string }): MemoryInstructionFragment[] {
+function createFragments(config: { mcpServerName: string; projectScope?: string; configuredProjectScope?: string }): MemoryInstructionFragment[] {
+  const scopeAuthorized = Boolean(
+    config.projectScope &&
+      config.configuredProjectScope &&
+      isCanonicalSupermemoryProjectScope(config.projectScope) &&
+      isCanonicalSupermemoryProjectScope(config.configuredProjectScope) &&
+      config.configuredProjectScope === config.projectScope,
+  );
   const markdown = [
     "### Supermemory MCP Conversation Memory",
     "",
-    "Supermemory is advisory only. OFFICIAL CONTEXT and OpenSpec artifacts remain authoritative.",
-    "conversation capture is not production-wired unless a runner exposes a real authenticated MCP execution boundary; current OpenCode, Pi, and Codex paths are unsupported/static-compatible for automatic capture.",
-    `Use MCP server \`${config.mcpServerName}\` with these validated MCP tools:`,
-    `- \`${config.mcpServerName}.memory\` — explicit provider memory operations and user forget requests`,
-    `- \`${config.mcpServerName}.recall\` — bounded recall when the user asks or prior context is materially relevant`,
-    `- \`${config.mcpServerName}.whoAmI\` — authentication/account readiness only`,
+    renderProjectBoundAdaptiveMemoryInstructions({
+      supermemoryProjectScope: config.projectScope,
+      configuredSupermemoryProjectScope: config.configuredProjectScope,
+    }),
+    "Use these active runner-exposed Supermemory tools when available:",
+    "- `supermemory_add_memory` — explicit durable memory save; pass the canonical `containerTag` argument",
+    "- `supermemory_search_memory` — bounded recall/search; pass the canonical `containerTag` argument",
+    "- `supermemory_listMemories` and `supermemory_listDocuments` — scoped list operations; pass the canonical `containerTag` argument when the schema accepts it",
+    "- `supermemory_fetch-graph-data` and `supermemory_memory-graph` — scoped graph operations; pass the canonical `containerTag` argument when the schema accepts it",
+    "- `supermemory_save-memory` — save-equivalent scoped operation; pass the canonical `containerTag` argument",
+    "- `supermemory_getDocument` — document fetch only after the document id came from a scoped predecessor in the same workflow",
+    "- Supermemory account/active-space tools are for account readiness only and must not be used as project isolation.",
     "",
-    "Conversation capture contract:",
-    "- Selecting Supermemory is still the provider decision; do not ask for another capture opt-in, mode, quota, or consent screen.",
-    "- The canonical ingest contract uses one runner session as one conversation document with a stable customId, but Deck must not claim automatic capture until the executing transport exists.",
-    "- Production ingestion uses dynamic dreaming; instant dreaming is only for bounded tests or explicit immediate-read operations.",
-    "- Project isolation is enforced by the canonical x-sm-project/containerTag configured by Deck, not by agent-authored topic keys.",
-    "- Do not extract routine facts manually, invent topic keys, chase a semantic memory quota, or write mandatory session summaries.",
+    "Tool examples:",
+    scopeAuthorized
+      ? `- supermemory_add_memory({ content, containerTag: \"${config.projectScope}\" })`
+      : "- supermemory_add_memory is disabled until Deck provides a canonical containerTag.",
+    scopeAuthorized
+      ? `- supermemory_search_memory({ query, containerTag: \"${config.projectScope}\" })`
+      : "- supermemory_search_memory is disabled until Deck provides a canonical containerTag.",
+    scopeAuthorized
+      ? `- supermemory_listMemories({ containerTag: \"${config.projectScope}\" })`
+      : "- supermemory_listMemories is disabled until Deck provides a canonical containerTag.",
+    scopeAuthorized
+      ? `- supermemory_listDocuments({ containerTag: \"${config.projectScope}\" })`
+      : "- supermemory_listDocuments is disabled until Deck provides a canonical containerTag.",
+    scopeAuthorized
+      ? `- supermemory_fetch-graph-data({ containerTag: \"${config.projectScope}\" })`
+      : "- supermemory_fetch-graph-data is disabled until Deck provides a canonical containerTag.",
+    scopeAuthorized
+      ? `- supermemory_memory-graph({ containerTag: \"${config.projectScope}\" })`
+      : "- supermemory_memory-graph is disabled until Deck provides a canonical containerTag.",
+    scopeAuthorized
+      ? `- supermemory_save-memory({ content, containerTag: \"${config.projectScope}\" })`
+      : "- supermemory_save-memory is disabled until Deck provides a canonical containerTag.",
+    "- supermemory_getDocument({ documentId }) only after a scoped predecessor returned that document id.",
     "",
-    "Privacy and retrieval bounds:",
-    "- Never store credentials, private keys, authorization headers, raw environment dumps, OpenSpec artifacts, provider responses, web content, tool output, or raw logs merely because they appear in conversation.",
-    "- Recall is demand-driven, advisory, scoped to the canonical project container, limited to five results and about 1,500 tokens by default.",
-    "- Query rewriting and reranking remain disabled unless benchmark evidence enables them.",
+    "Tool semantics:",
+    "- add/search/list memory, document, graph, and save equivalents are project-scoped only when the exposed schema accepts `containerTag` and the exact Deck value is passed.",
+    "- Account-readiness tools are account-only and exempt from project scope only for non-memory effects.",
+    "- Never use active-space-only tools for automatic memory; active space is not project isolation.",
+    "- Use document fetch only after the document id came from a scoped predecessor in the same workflow.",
   ].join("\n");
 
   return ["session", "agent", "skill"].map((surface) => ({
@@ -167,8 +214,9 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
   const normalized = {
     mcpServerName: config.mcpServerName?.trim() || "supermemory",
     mcpServerUrl: config.mcpServerUrl ?? SUPERMEMORY_MCP_SERVER_URL,
+    projectScope: config.projectScope?.trim(),
+    configuredProjectScope: config.configuredProjectScope?.trim(),
   };
-
   const _authenticatedRuntimeValidated = { current: config.authenticatedRuntimeValidated ?? false };
   const adapter = createAdapter(
     normalized,
@@ -180,17 +228,22 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
     displayName: "Supermemory MCP",
     adapter,
     health: () => adapter.health(),
-    buildInjection(): MemoryInjectionBundle {
+    buildInjection(context = {}): MemoryInjectionBundle {
+      const projectScope = normalized.projectScope ?? context.supermemoryProjectScope?.trim();
+      const configuredProjectScope = normalized.configuredProjectScope ?? context.configuredSupermemoryProjectScope?.trim();
+      const scopeAuthorized = Boolean(
+        projectScope &&
+          configuredProjectScope &&
+          isCanonicalSupermemoryProjectScope(projectScope) &&
+          isCanonicalSupermemoryProjectScope(configuredProjectScope) &&
+          configuredProjectScope === projectScope,
+      );
       const metadata: SupermemoryToolBindingMetadata = {
         endpoint: normalized.mcpServerUrl,
         requiresAuthenticatedExecuteProbe: true,
         authenticatedRuntimeValidated: _authenticatedRuntimeValidated.current,
         serverQualifiedToolNamesRequired: false,
-        serverQualifiedToolNames: [
-          normalized.mcpServerName + ".memory",
-          normalized.mcpServerName + ".recall",
-          normalized.mcpServerName + ".whoAmI",
-        ],
+        serverQualifiedToolNames: [...SUPERMEMORY_MCP_TOOLS],
         conversationCaptureDefault: false,
         conversationCaptureSupport: {
           opencode: "unsupported/static-compatible",
@@ -200,8 +253,12 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
         dreamingDefault: "dynamic",
         maxResultsDefault: 5,
         maxContextTokensDefault: 1500,
+        scopedTools: [...SUPERMEMORY_MCP_TOOLS],
+        accountOnlyTools: ["supermemory account/active-space readiness tools"],
+        activeSpaceOnlyToolsForbidden: ["active-space mutation or selection tools"],
+        documentIdToolsRequireScopedPredecessor: ["document fetch tools"],
       } as SupermemoryToolBindingMetadata;
-      const bindings: readonly MemoryToolBinding[] = [
+      const bindings: readonly MemoryToolBinding[] = scopeAuthorized ? [
         {
           capability: "memory.write",
           serverName: normalized.mcpServerName,
@@ -211,11 +268,11 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
         {
           capability: "memory.search",
           serverName: normalized.mcpServerName,
-          toolNames: ["recall"],
+          toolNames: ["supermemory_search_memory"],
           metadata: metadata as unknown as Readonly<Record<string, unknown>>,
         },
-      ];
-      return { instructions: createFragments(normalized), toolBindings: bindings };
+      ] : [];
+      return { instructions: createFragments({ ...normalized, projectScope, configuredProjectScope }), toolBindings: bindings };
     },
   };
 }

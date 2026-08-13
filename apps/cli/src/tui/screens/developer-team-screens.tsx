@@ -96,7 +96,7 @@ export type SupermemorySetupValues = {
   token: string;
   /** @deprecated - no longer used. User is derived from token */
   userId?: never;
-  /** @deprecated - no longer used. Project scoping via x-sm-project header */
+  /** @deprecated - no longer used. Deck derives one canonical project scope. */
   teamId?: never;
   /** @deprecated - no longer used */
   orgId?: never;
@@ -161,7 +161,7 @@ export function SupermemorySetupScreen({ screen, values, error, runtime = "pi" }
       <Text bold>{label} {required ? "(required)" : ""}</Text>
       <Text dimColor>
         {runtime === "pi"
-          ? "Token is written only to Pi's global MCP config (~/.pi/agent/mcp.json) and is never stored in Deck config. User identity is derived automatically from token. Project scoping handled via x-sm-project header."
+          ? "Token is written only to Pi's global MCP config (~/.pi/agent/mcp.json) and is never stored in Deck config. User identity is derived automatically from token. Deck configures the x-sm-project header and requires the same canonical containerTag on each project-memory operation."
           : "Token remains external to Deck project configuration and is handled by the active OpenCode provider flow."}
       </Text>
       <Box marginTop={1}>

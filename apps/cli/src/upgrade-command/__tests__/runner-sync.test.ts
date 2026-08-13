@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 
 import { getDefaultDeckConfig, prepareAndBuildDeveloperTeamInstallPlan, type RunnerAdapter } from "@deck/core";
 import { createCodexRunnerAdapter } from "@deck/adapter-codex";
+import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
+import { createPiRunnerAdapter } from "@deck/adapter-pi";
 
 import {
   applyRunnerSyncToManifest,
@@ -122,6 +124,56 @@ function makeRegistry(adapters: RunnerAdapter[]): RunnerSyncAdapterRegistry {
   };
 }
 
+async function initCanonicalRemote(projectRoot: string): Promise<void> {
+  await mkdir(join(projectRoot, ".git", "objects", "info"), { recursive: true });
+  await mkdir(join(projectRoot, ".git", "objects", "pack"), { recursive: true });
+  await mkdir(join(projectRoot, ".git", "refs", "heads"), { recursive: true });
+  await writeFile(join(projectRoot, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+  await writeFile(join(projectRoot, ".git", "config"), [
+    "[core]",
+    "\trepositoryformatversion = 0",
+    "\tfilemode = true",
+    "\tbare = false",
+    "\tlogallrefupdates = true",
+    "[remote \"origin\"]",
+    "\turl = https://github.com/kevin15011/deck.git",
+    "\tfetch = +refs/heads/*:refs/remotes/origin/*",
+    "",
+  ].join("\n"), "utf8");
+}
+
+async function writeOpenCodeSupermemoryConfig(configDir: string, projectScope: string): Promise<void> {
+  await mkdir(configDir, { recursive: true });
+  await writeFile(join(configDir, "opencode.json"), `${JSON.stringify({
+    mcp: {
+      supermemory: {
+        type: "remote",
+        url: "https://mcp.supermemory.ai/mcp",
+        headers: { "x-sm-project": projectScope },
+      },
+    },
+  }, null, 2)}\n`, "utf8");
+}
+
+async function writePiSupermemoryConfig(configPath: string, projectScope: string): Promise<void> {
+  await mkdir(join(configPath, ".."), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({
+    mcpServers: {
+      supermemory: {
+        transport: "http",
+        url: "https://mcp.supermemory.ai/mcp",
+        headers: { "x-sm-project": projectScope, "x-supermemory-api-key": "redacted-test-token" },
+      },
+    },
+  }, null, 2)}\n`, "utf8");
+}
+
+function supermemorySyncConfig(runner: "opencode" | "pi") {
+  const config = makeConfig({ [runner]: { "adaptive-memory": true, "codebase-memory": true } });
+  config.adaptiveMemory = { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } };
+  return config;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -221,6 +273,146 @@ describe("runner-sync", () => {
 
     expect(result.outcomes[0]?.status).toBe("synced");
     expect(capturedPackageIds).toContain("web-search");
+  });
+
+  it("OpenCode content-only sync preserves scoped Supermemory guidance and unrelated package fragments when configured scope matches", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-opencode-sync-supermemory-"));
+    const configDir = join(root, ".config", "opencode");
+    try {
+      await initCanonicalRemote(root);
+      await writeOpenCodeSupermemoryConfig(configDir, "sm_project_v1_kevin15011_deck");
+      const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir });
+      const result = await runRunnerSync({
+        config: supermemorySyncConfig("opencode"),
+        registry: makeRegistry([adapter]),
+        projectRoot: root,
+        deckVersion: "next",
+        runnerIds: ["opencode"],
+      });
+
+      expect(result.outcomes[0]?.status).toBe("synced");
+      const content = [
+        await readFile(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8"),
+        await readFile(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8"),
+        await readFile(join(configDir, "skills", "deck-onboard", "SKILL.md"), "utf8"),
+      ].join("\n");
+      expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(content).toContain("Codebase Memory Package");
+      expect(content).not.toContain("Adaptive-memory project operations are disabled");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("OpenCode content-only sync fails closed for mismatched/default Supermemory scopes while preserving unrelated package fragments", async () => {
+    for (const [name, projectScope, expectedReason] of [
+      ["mismatch", "sm_project_v1_other_repo", "scope mismatch"],
+      ["default", "sm_project_default", "configured scope missing"],
+    ] as const) {
+      const root = await mkdtemp(join(tmpdir(), `deck-opencode-sync-supermemory-${name}-`));
+      const configDir = join(root, ".config", "opencode");
+      try {
+        await initCanonicalRemote(root);
+        await writeOpenCodeSupermemoryConfig(configDir, projectScope);
+        const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir });
+        const result = await runRunnerSync({
+          config: supermemorySyncConfig("opencode"),
+          registry: makeRegistry([adapter]),
+          projectRoot: root,
+          deckVersion: "next",
+          runnerIds: ["opencode"],
+        });
+
+        expect(result.outcomes[0]?.status).toBe("synced");
+        const content = [
+          await readFile(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8"),
+          await readFile(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8"),
+          await readFile(join(configDir, "skills", "deck-onboard", "SKILL.md"), "utf8"),
+        ].join("\n");
+        expect(content).toContain("Adaptive-memory project operations are disabled");
+        if (expectedReason === "scope mismatch") {
+          expect(content).toMatch(/scope mismatch|configured scope missing/);
+        } else {
+          expect(content).toContain(expectedReason);
+        }
+        expect(content).toContain("Codebase Memory Package");
+        expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(content).not.toContain(projectScope);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("Pi content-only sync preserves scoped Supermemory guidance and unrelated package fragments when configured scope matches", async () => {
+      const root = await mkdtemp(join(tmpdir(), "deck-pi-sync-supermemory-"));
+      const home = join(root, "home");
+      try {
+        await initCanonicalRemote(root);
+        await writePiSupermemoryConfig(join(home, ".pi", "agent", "mcp.json"), "sm_project_v1_kevin15011_deck");
+        const adapter = createPiRunnerAdapter({ homeDirectory: home });
+      const detectedAdapter = Object.assign(adapter, { detectDeckInstall: async () => ({ installed: true, managedPaths: [join(home, ".pi", "agent", "mcp.json")] }) }) as RunnerAdapter;
+      const result = await runRunnerSync({
+        config: supermemorySyncConfig("pi"),
+        registry: makeRegistry([detectedAdapter]),
+        projectRoot: root,
+        deckVersion: "next",
+        runnerIds: ["pi"],
+      });
+
+      expect(result.outcomes[0]?.status).toBe("synced");
+      const content = [
+        await readFile(join(home, ".pi", "agent", "agents", "deck-lead.md"), "utf8"),
+        await readFile(join(home, ".pi", "agent", "skills", "deck-apply-fast", "SKILL.md"), "utf8"),
+        await readFile(join(home, ".pi", "agent", "skills", "deck-onboard", "SKILL.md"), "utf8"),
+      ].join("\n");
+      expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(content).toContain("Codebase Memory Package");
+      expect(content).not.toContain("Adaptive-memory project operations are disabled");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("Pi content-only sync fails closed for mismatched/default Supermemory scopes while preserving unrelated package fragments", async () => {
+    for (const [name, projectScope, expectedReason] of [
+      ["mismatch", "sm_project_v1_other_repo", "scope mismatch"],
+      ["default", "sm_project_default", "configured scope missing"],
+    ] as const) {
+      const root = await mkdtemp(join(tmpdir(), `deck-pi-sync-supermemory-${name}-`));
+      const home = join(root, "home");
+      try {
+        await initCanonicalRemote(root);
+        await writePiSupermemoryConfig(join(home, ".pi", "agent", "mcp.json"), projectScope);
+        const adapter = createPiRunnerAdapter({ homeDirectory: home });
+        const detectedAdapter = Object.assign(adapter, { detectDeckInstall: async () => ({ installed: true, managedPaths: [join(home, ".pi", "agent", "mcp.json")] }) }) as RunnerAdapter;
+        const result = await runRunnerSync({
+          config: supermemorySyncConfig("pi"),
+          registry: makeRegistry([detectedAdapter]),
+          projectRoot: root,
+          deckVersion: "next",
+          runnerIds: ["pi"],
+        });
+
+        expect(result.outcomes[0]?.status).toBe("synced");
+        const content = [
+          await readFile(join(home, ".pi", "agent", "agents", "deck-lead.md"), "utf8"),
+          await readFile(join(home, ".pi", "agent", "skills", "deck-apply-fast", "SKILL.md"), "utf8"),
+          await readFile(join(home, ".pi", "agent", "skills", "deck-onboard", "SKILL.md"), "utf8"),
+        ].join("\n");
+        expect(content).toContain("Adaptive-memory project operations are disabled");
+        if (expectedReason === "scope mismatch") {
+          expect(content).toMatch(/scope mismatch|configured scope missing/);
+        } else {
+          expect(content).toContain(expectedReason);
+        }
+        expect(content).toContain("Codebase Memory Package");
+        expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(content).not.toContain(projectScope);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
   });
 
   it("Codex content-only sync repairs owned roles, support files, and bootstrap content with no optional selections", async () => {

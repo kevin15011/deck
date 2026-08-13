@@ -20,7 +20,8 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 
 import { inspectPiEnvironment, redact, redactDiagnostic, reviewPiRequiredTools, validateSupermemoryPiMcpConfig } from "@deck/adapter-pi";
-import { inspectOpenCodeEnvironment, reviewOpenCodeTools } from "@deck/adapter-opencode";
+import { inspectOpenCodeEnvironment, reviewOpenCodeTools, validateSupermemoryOpenCodeMcpConfig } from "@deck/adapter-opencode";
+import { inspectCodexSupermemoryMcpState } from "@deck/adapter-codex";
 
 import { detectSelectedRuntimes, type EnvironmentId } from "../runtime-detection";
 import { getBuildInfo } from "../runtime/build-info.js";
@@ -28,7 +29,7 @@ import { getDeckXdgPaths } from "../runtime/paths.js";
 import { runDeckChecks } from "./doctor-checks";
 import { decideReleaseAvailability, fetchReleaseDescriptor } from "../upgrade-command/github-release.js";
 import type { DeckConfigStore } from "../deck-config-store";
-import type { NormalizedDeckConfig } from "@deck/core";
+import { resolveCanonicalSupermemoryProjectScope, type NormalizedDeckConfig } from "@deck/core";
 import type {
   DoctorCategoryResult,
   DoctorCheckItem,
@@ -110,7 +111,10 @@ function readOpenCodeMcpSection(): Record<string, unknown> | null {
 // Runtime checks
 // ---------------------------------------------------------------------------
 
-function checkPiRuntime(command: string): DoctorRuntimeResult {
+function checkPiRuntime(
+  command: string,
+  dependencies: Pick<DoctorDiagnosticsDependencies, "inspectPiEnvironment" | "reviewPiRequiredTools">,
+): DoctorRuntimeResult {
   const result: DoctorRuntimeResult = {
     runtimeId: "pi",
     name: "Pi",
@@ -120,7 +124,7 @@ function checkPiRuntime(command: string): DoctorRuntimeResult {
 
   // Version + config directory
   try {
-    const inspection = inspectPiEnvironment({ command });
+    const inspection = dependencies.inspectPiEnvironment({ command });
     result.version = inspection.version;
     result.checks.push({
       category: "Runtime",
@@ -145,7 +149,7 @@ function checkPiRuntime(command: string): DoctorRuntimeResult {
 
   // Package review
   try {
-    const review = reviewPiRequiredTools({ command });
+    const review = dependencies.reviewPiRequiredTools({ command });
     if (review.error) {
       result.checks.push({
         category: "Packages",
@@ -175,7 +179,10 @@ function checkPiRuntime(command: string): DoctorRuntimeResult {
   return result;
 }
 
-function checkOpenCodeRuntime(command: string): DoctorRuntimeResult {
+function checkOpenCodeRuntime(
+  command: string,
+  dependencies: Pick<DoctorDiagnosticsDependencies, "inspectOpenCodeEnvironment" | "reviewOpenCodeTools">,
+): DoctorRuntimeResult {
   const result: DoctorRuntimeResult = {
     runtimeId: "opencode",
     name: "OpenCode",
@@ -185,7 +192,7 @@ function checkOpenCodeRuntime(command: string): DoctorRuntimeResult {
 
   // Version + config directory
   try {
-    const inspection = inspectOpenCodeEnvironment({ command });
+    const inspection = dependencies.inspectOpenCodeEnvironment({ command });
     result.version = inspection.version;
     result.checks.push({
       category: "Runtime",
@@ -210,7 +217,7 @@ function checkOpenCodeRuntime(command: string): DoctorRuntimeResult {
 
   // Package review
   try {
-    const review = reviewOpenCodeTools();
+    const review = dependencies.reviewOpenCodeTools();
     if (review.error) {
       result.checks.push({
         category: "Packages",
@@ -335,9 +342,11 @@ function checkMemoryProviders(
 // MCP validation
 // ---------------------------------------------------------------------------
 
-function checkPiMcp(): DoctorCategoryResult {
+function checkPiMcp(
+  validateSupermemoryPiMcpConfigFn: typeof validateSupermemoryPiMcpConfig,
+): DoctorCategoryResult {
   try {
-    const validation = validateSupermemoryPiMcpConfig();
+    const validation = validateSupermemoryPiMcpConfigFn();
     const items: DoctorCheckItem[] = validation.diagnostics.map((d) => ({
       status: d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "ok",
       message: redactDiagnostic(d).message,
@@ -411,6 +420,73 @@ function checkOpenCodeMcp(
   };
 }
 
+export function checkSupermemoryProjectScopeAgreement(input: {
+  derivedScope?: string;
+  configuredScopes?: Readonly<Record<string, string | undefined>>;
+}): DoctorCategoryResult {
+  const items: DoctorCheckItem[] = [];
+  const scopePattern = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
+  const derived = input.derivedScope?.trim();
+  const derivedAvailable = !!derived && scopePattern.test(derived);
+
+  if (!derivedAvailable) {
+    items.push({
+      status: "warning",
+      message: "Supermemory canonical project scope is missing or invalid; adaptive-memory project operations fail closed.",
+      suggestion: "Run Doctor from a verified Git repository to compare runner MCP scopes; no default project scope is used.",
+    });
+  }
+
+  for (const [runner, configuredValue] of Object.entries(input.configuredScopes ?? {})) {
+    const configured = configuredValue?.trim();
+    if (!configured) {
+      items.push({
+        status: "warning",
+        message: `Supermemory ${runner} MCP scope is missing; project memory operations are not authorized for that runner.`,
+      });
+      continue;
+    }
+    if (configured === "sm_project_default" || !scopePattern.test(configured)) {
+      items.push({
+        status: "error",
+        message: `Supermemory ${runner} MCP scope is invalid or legacy/default; project memory operations are not authorized.`,
+      });
+      continue;
+    }
+    if (!derivedAvailable) {
+      items.push({
+        status: "warning",
+        message: `Supermemory ${runner} MCP scope is present but could not be compared to a repository-derived scope; project memory operations remain fail-closed until verified.`,
+      });
+      continue;
+    }
+    if (configured !== derived) {
+      items.push({
+        status: "error",
+        message: `Supermemory ${runner} MCP scope does not match the repository-derived scope; project memory operations are not authorized.`,
+      });
+      continue;
+    }
+    items.push({
+      status: "ok",
+      message: `Supermemory ${runner} MCP scope matches the repository-derived scope fingerprint.`,
+    });
+  }
+
+  if (items.length === 0) {
+    items.push({
+      status: "warning",
+      message: "No Supermemory MCP scope materialization was found; adaptive-memory project operations remain disabled.",
+    });
+  }
+
+  return {
+    category: "Supermemory Project Scope",
+    status: deriveCategoryStatus(items),
+    items,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Helper: Build binary upgrade availability check
 // ---------------------------------------------------------------------------
@@ -420,6 +496,13 @@ function checkOpenCodeMcp(
  * Uses decideReleaseAvailability for commit-aware comparison.
  */
 type DoctorDiagnosticsDependencies = Readonly<{
+  detectSelectedRuntimes: typeof detectSelectedRuntimes;
+  inspectPiEnvironment: typeof inspectPiEnvironment;
+  reviewPiRequiredTools: typeof reviewPiRequiredTools;
+  validateSupermemoryPiMcpConfig: typeof validateSupermemoryPiMcpConfig;
+  inspectOpenCodeEnvironment: typeof inspectOpenCodeEnvironment;
+  reviewOpenCodeTools: typeof reviewOpenCodeTools;
+  validateSupermemoryOpenCodeMcpConfig: typeof validateSupermemoryOpenCodeMcpConfig;
   runDeckChecks: typeof runDeckChecks;
   fetchReleaseDescriptor: typeof fetchReleaseDescriptor;
   memoryBinaryAvailable: typeof memoryBinaryAvailable;
@@ -429,6 +512,13 @@ type DoctorDiagnosticsDependencies = Readonly<{
 }>;
 
 const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
+  detectSelectedRuntimes,
+  inspectPiEnvironment,
+  reviewPiRequiredTools,
+  validateSupermemoryPiMcpConfig,
+  inspectOpenCodeEnvironment,
+  reviewOpenCodeTools,
+  validateSupermemoryOpenCodeMcpConfig,
   runDeckChecks,
   fetchReleaseDescriptor,
   memoryBinaryAvailable,
@@ -616,6 +706,13 @@ export async function runDoctorDiagnostics(
   projectRoot?: string,
 ): Promise<DoctorDiagnosticsResult> {
   const dependencies: DoctorDiagnosticsDependencies = {
+    detectSelectedRuntimes: overrides.detectSelectedRuntimes ?? defaultDoctorDiagnosticsDependencies.detectSelectedRuntimes,
+    inspectPiEnvironment: overrides.inspectPiEnvironment ?? defaultDoctorDiagnosticsDependencies.inspectPiEnvironment,
+    reviewPiRequiredTools: overrides.reviewPiRequiredTools ?? defaultDoctorDiagnosticsDependencies.reviewPiRequiredTools,
+    validateSupermemoryPiMcpConfig: overrides.validateSupermemoryPiMcpConfig ?? defaultDoctorDiagnosticsDependencies.validateSupermemoryPiMcpConfig,
+    inspectOpenCodeEnvironment: overrides.inspectOpenCodeEnvironment ?? defaultDoctorDiagnosticsDependencies.inspectOpenCodeEnvironment,
+    reviewOpenCodeTools: overrides.reviewOpenCodeTools ?? defaultDoctorDiagnosticsDependencies.reviewOpenCodeTools,
+    validateSupermemoryOpenCodeMcpConfig: overrides.validateSupermemoryOpenCodeMcpConfig ?? defaultDoctorDiagnosticsDependencies.validateSupermemoryOpenCodeMcpConfig,
     runDeckChecks: overrides.runDeckChecks ?? defaultDoctorDiagnosticsDependencies.runDeckChecks,
     fetchReleaseDescriptor: overrides.fetchReleaseDescriptor ?? defaultDoctorDiagnosticsDependencies.fetchReleaseDescriptor,
     memoryBinaryAvailable: overrides.memoryBinaryAvailable ?? defaultDoctorDiagnosticsDependencies.memoryBinaryAvailable,
@@ -630,7 +727,7 @@ export async function runDoctorDiagnostics(
   // 1. Runtime detection
   let runtimeStatuses: Awaited<ReturnType<typeof detectSelectedRuntimes>> = [];
   try {
-    runtimeStatuses = detectSelectedRuntimes(ALL_ENVIRONMENT_IDS);
+    runtimeStatuses = dependencies.detectSelectedRuntimes(ALL_ENVIRONMENT_IDS);
   } catch {
     runtimeStatuses = [];
   }
@@ -662,9 +759,9 @@ export async function runDoctorDiagnostics(
     }
 
     if (status.runtime === "pi") {
-      runtimes.push(checkPiRuntime(status.command!));
+      runtimes.push(checkPiRuntime(status.command!, dependencies));
     } else if (status.runtime === "opencode") {
-      runtimes.push(checkOpenCodeRuntime(status.command!));
+      runtimes.push(checkOpenCodeRuntime(status.command!, dependencies));
     } else if (status.runtime === "codex") {
       try {
         if (!projectRoot) {
@@ -705,9 +802,48 @@ export async function runDoctorDiagnostics(
   }
 
   // 4. MCP validation (synchronous, called directly)
-  const piMcpResult = checkPiMcp();
-  const opencodeMcpResult = checkOpenCodeMcp(dependencies.readOpenCodeMcpSection);
-  const mcpResults: DoctorCategoryResult[] = [piMcpResult, opencodeMcpResult];
+  const piMcpResult = checkPiMcp(dependencies.validateSupermemoryPiMcpConfig);
+  let openCodeMcpSection: Record<string, unknown> | null = null;
+  const opencodeMcpResult = checkOpenCodeMcp(() => {
+    openCodeMcpSection = dependencies.readOpenCodeMcpSection();
+    return openCodeMcpSection;
+  });
+  const configuredScopes: Record<string, string | undefined> = {};
+  if (piMcpResult.status !== "warning") {
+    try {
+      const piValidation = dependencies.validateSupermemoryPiMcpConfig();
+      configuredScopes.Pi = piValidation.projectScope;
+    } catch {
+      configuredScopes.Pi = undefined;
+    }
+  }
+  if (openCodeMcpSection !== null) {
+    try {
+      const openCodeValidation = dependencies.validateSupermemoryOpenCodeMcpConfig();
+      configuredScopes.OpenCode = openCodeValidation.projectScope;
+    } catch {
+      configuredScopes.OpenCode = undefined;
+    }
+  }
+  if (projectRoot) {
+    try {
+      const codexConfigPath = join(projectRoot, ".codex", "config.toml");
+      if (existsSync(codexConfigPath)) {
+        const codexState = inspectCodexSupermemoryMcpState(readFileSync(codexConfigPath, "utf-8"));
+        configuredScopes.Codex = codexState.ok ? codexState.scope : undefined;
+      }
+    } catch {
+      configuredScopes.Codex = undefined;
+    }
+  }
+  const derivedScope = projectRoot
+    ? (() => {
+        const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
+        return resolved.ok ? resolved.scope : undefined;
+      })()
+    : undefined;
+  const scopeAgreementResult = checkSupermemoryProjectScopeAgreement({ derivedScope, configuredScopes });
+  const mcpResults: DoctorCategoryResult[] = [piMcpResult, opencodeMcpResult, scopeAgreementResult];
 
   // 5. Deck-owned checks (manifest, state, config, binaries, runner config)
   let deckResults: DoctorCategoryResult[] = [];

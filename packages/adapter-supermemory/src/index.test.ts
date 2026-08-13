@@ -9,30 +9,45 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     expect(provider.id).toBe("supermemory");
   });
 
-  test("buildInjection produces bindings with memory/recall/whoAmI tools", () => {
-    const bundle = createSupermemoryMemoryProvider().buildInjection({ teamId: "developer-team" });
+  test("buildInjection produces bindings with active runner-exposed Supermemory tools", () => {
+    const bundle = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    }).buildInjection({ teamId: "developer-team" });
     expect(bundle.toolBindings).toHaveLength(2);
     expect(bundle.toolBindings[0]!.toolNames).toEqual(SUPERMEMORY_MCP_TOOLS);
     const tools = bundle.toolBindings.flatMap((binding) => [...binding.toolNames]);
-    expect(tools).toContain("memory");
-    expect(tools).toContain("recall");
-    expect(tools).toContain("whoAmI");
+    expect(tools).toContain("supermemory_add_memory");
+    expect(tools).toContain("supermemory_search_memory");
+    expect(tools).toContain("supermemory_listMemories");
+    expect(tools).toContain("supermemory_listDocuments");
+    expect(tools).toContain("supermemory_fetch-graph-data");
+    expect(tools).toContain("supermemory_memory-graph");
+    expect(tools).toContain("supermemory_save-memory");
+    expect(tools).not.toContain("memory");
+    expect(tools).not.toContain("recall");
     expect(tools).not.toContain("execute");
     expect(tools).not.toContain("search_docs");
   });
 
   test("NO arbitrary containerTag manual - instruction shows canonical Deck scoping", () => {
-    const bundle = createSupermemoryMemoryProvider().buildInjection({});
+    const bundle = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
-    expect(text).toContain("canonical x-sm-project/containerTag configured by Deck");
+    expect(text).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
     expect(text).toContain("stable customId");
-    expect(text).toContain("do not ask for another capture opt-in");
+    expect(text).toContain("do not add or ask for a second capture toggle");
     // Can mention u: in the negative but not as live scopes
     expect(text).not.toMatch(/\bu:[a-z0-9]/i); // No actual u: username
   });
 
   test("NO container tag values (patterns) in prompts", () => {
-    const bundle = createSupermemoryMemoryProvider().buildInjection({});
+    const bundle = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     // Explicitly verify NO container tag values like u:kevin, p:myrepo
     expect(text).not.toMatch(/\bu:\w+/);
@@ -44,7 +59,10 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     const health = await provider.health!();
     expect(health.status).toBe("degraded");
     expect(health.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_HEALTH_UNKNOWN");
-    const bundle = provider.buildInjection({ teamId: "developer-team" });
+    const bundle = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    }).buildInjection({ teamId: "developer-team" });
     expect(bundle.instructions).toHaveLength(3);
     expect(bundle.toolBindings).toHaveLength(2);
     expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ authenticatedRuntimeValidated: false });
@@ -58,32 +76,111 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
   });
 
   test("tool binding metadata includes serverQualifiedToolNames with new tools", () => {
-    const bundle = createSupermemoryMemoryProvider().buildInjection({});
-    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ serverQualifiedToolNames: ["supermemory.memory", "supermemory.recall", "supermemory.whoAmI"] });
+    const bundle = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    }).buildInjection({});
+    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ serverQualifiedToolNames: [...SUPERMEMORY_MCP_TOOLS] });
+  });
+
+  test("documents current scoped Supermemory tool semantics and forbids active-space automatic memory", () => {
+    const bundle = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    }).buildInjection({});
+    const text = bundle.instructions.map((f) => f.markdown).join("\n");
+    const metadata = ((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata;
+
+    expect(metadata.scopedTools).toEqual(expect.arrayContaining([
+      "supermemory_add_memory",
+      "supermemory_search_memory",
+      "supermemory_listMemories",
+      "supermemory_listDocuments",
+      "supermemory_fetch-graph-data",
+      "supermemory_memory-graph",
+      "supermemory_save-memory",
+    ]));
+    expect(metadata.accountOnlyTools).toEqual(expect.arrayContaining(["supermemory account/active-space readiness tools"]));
+    expect(metadata.activeSpaceOnlyToolsForbidden).toEqual(expect.arrayContaining(["active-space mutation or selection tools"]));
+    expect(metadata.documentIdToolsRequireScopedPredecessor).toEqual(expect.arrayContaining(["document fetch tools"]));
+    expect(text).toContain('supermemory_add_memory({ content, containerTag: "sm_project_v1_kevin15011_deck" })');
+    expect(text).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+    expect(text).toContain('supermemory_listMemories({ containerTag: "sm_project_v1_kevin15011_deck" })');
+    expect(text).toContain('supermemory_listDocuments({ containerTag: "sm_project_v1_kevin15011_deck" })');
+    expect(text).toContain('supermemory_fetch-graph-data({ containerTag: "sm_project_v1_kevin15011_deck" })');
+    expect(text).toContain('supermemory_memory-graph({ containerTag: "sm_project_v1_kevin15011_deck" })');
+    expect(text).toContain('supermemory_save-memory({ content, containerTag: "sm_project_v1_kevin15011_deck" })');
+    expect(text).toContain('supermemory_getDocument({ documentId })');
+    expect(text).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
+    expect(text).toContain("document fetch only after the document id came from a scoped predecessor");
+    expect(text).toContain("Never use active-space-only tools");
+    expect(text).not.toContain("sm_project_default");
+  });
+
+  test("fails closed for automatic memory instructions when configured scope does not match derived scope", () => {
+    const bundle = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_other_repo",
+    }).buildInjection({});
+    const text = bundle.instructions.map((f) => f.markdown).join("\n");
+
+    expect(bundle.toolBindings).toHaveLength(0);
+    expect(text).toContain("Adaptive-memory project operations are disabled");
+    expect(text).toContain("scope mismatch");
+    expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+    expect(text).not.toContain("sm_project_default");
+  });
+
+  test("fails closed when configured MCP scope is absent, default, or invalid", () => {
+    for (const configuredProjectScope of [undefined, "sm_project_default", "not-a-scope"]) {
+      const bundle = createSupermemoryMemoryProvider({
+        projectScope: "sm_project_v1_kevin15011_deck",
+        configuredProjectScope,
+      }).buildInjection({});
+      const text = bundle.instructions.map((f) => f.markdown).join("\n");
+
+      expect(bundle.toolBindings).toHaveLength(0);
+      expect(text).toContain("Adaptive-memory project operations are disabled");
+      expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      if (configuredProjectScope) expect(text).not.toContain(configuredProjectScope);
+    }
   });
 
   test("buildInjection with custom server name", () => {
-    const bundle = createSupermemoryMemoryProvider({ mcpServerName: "custom" }).buildInjection({});
+    const bundle = createSupermemoryMemoryProvider({
+      mcpServerName: "custom",
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    }).buildInjection({});
     expect(bundle.toolBindings[0]!.serverName).toBe("custom");
-    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ serverQualifiedToolNames: ["custom.memory", "custom.recall", "custom.whoAmI"] });
+    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ serverQualifiedToolNames: [...SUPERMEMORY_MCP_TOOLS] });
   });
 
   test("default URL is MCP v4 endpoint", () => {
-    const provider = createSupermemoryMemoryProvider();
+    const provider = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    });
     const bundle = provider.buildInjection({});
     expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ endpoint: SUPERMEMORY_MCP_SERVER_URL });
     expect(SUPERMEMORY_MCP_SERVER_URL).toBe("https://mcp.supermemory.ai/mcp");
   });
 
   test("deprecates maxMemoriesPerSession and does not emit a semantic quota", () => {
-    const bundle = createSupermemoryMemoryProvider().buildInjection({});
+    const bundle = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     expect(text).not.toMatch(/at most \d+/i);
     expect(text).toContain("conversation capture");
   });
 
   test("does not claim automatic production conversation capture without a runner MCP execution boundary", () => {
-    const bundle = createSupermemoryMemoryProvider().buildInjection({});
+    const bundle = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      configuredProjectScope: "sm_project_v1_kevin15011_deck",
+    }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     const metadata = ((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata;
 

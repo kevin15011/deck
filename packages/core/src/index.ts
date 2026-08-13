@@ -108,6 +108,7 @@ export {
 // Instruction bundle helpers (capability instruction injection)
 export {
   buildCapabilityInstructionBundle,
+  bindAdaptiveMemoryInstructionBundle,
   getEnabledPackageInstructionIds,
   getEnabledCapabilityInstructionIds,
   composeCapabilityInstructions,
@@ -117,7 +118,9 @@ export {
   type CapabilityInstructionBundle,
   type CapabilityInstructionCompositionContext,
   buildWebSearchInstructionBundle,
+  type CapabilityInstructionBuildOptions,
 } from "./teams/developer/instruction-bundles/index";
+export { renderProjectBoundAdaptiveMemoryInstructions } from "./teams/developer/instruction-bundles/adaptive-memory";
 
 // Deck project config contracts
 export * from "./config/deck-config";

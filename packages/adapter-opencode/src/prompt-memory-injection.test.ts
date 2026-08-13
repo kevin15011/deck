@@ -73,15 +73,15 @@ describe("Task 10: prompt/instrucciones + regresión Engram", () => {
 			expect(combinedMarkdown).not.toMatch(/\| `o:/);
 		});
 
-test("prompt usa automatic scoping (token + x-sm-project)", () => {
+test("prompt fails closed without exact Deck-materialized scope", () => {
 		const bundle = buildAdaptiveMemoryInstructionBundle();
 
 		const combinedMarkdown = bundle.instructions.map((f) => f.markdown).join("\n");
 
-		// Debe explicar automatic scoping sin tags manuales
-		expect(combinedMarkdown).toMatch(/automatic scoping/i);
+		expect(combinedMarkdown).toMatch(/configured scope missing/i);
+		expect(combinedMarkdown).toMatch(/fail closed for memory/i);
 		expect(combinedMarkdown).toMatch(/Supermemory token/i);
-		expect(combinedMarkdown).toMatch(/x-sm-project/i);
+		expect(combinedMarkdown).not.toMatch(/No manual containerTag required/i);
 	});
 
 		test("prompt establece jerarquía OpenSpec OFFICIAL CONTEXT > adaptive", () => {

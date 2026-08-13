@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 
 import { validateSupermemoryPiMcpRuntime } from "@deck/adapter-pi";
 import { validateDeckConfig } from "@deck/core";
@@ -13,7 +14,12 @@ function createTempDir(prefix = "deck-supermemory-launch-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
-function writePiMcpConfig(configPath: string, token = SENTINEL_TOKEN) {
+function initCanonicalRemote(projectRoot: string) {
+  execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
+}
+
+function writePiMcpConfig(configPath: string, token = SENTINEL_TOKEN, projectScope = "sm_project_v1_kevin15011_deck") {
   mkdirSync(join(configPath, ".."), { recursive: true });
   writeFileSync(
     configPath,
@@ -23,7 +29,7 @@ function writePiMcpConfig(configPath: string, token = SENTINEL_TOKEN) {
           supermemory: {
             transport: "http",
             url: "https://mcp.supermemory.ai/mcp",
-            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": token },
+            headers: { "x-sm-project": projectScope, "x-supermemory-api-key": token },
           },
         },
       },
@@ -77,6 +83,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
+      initCanonicalRemote(projectRoot);
       writePiMcpConfig(piMcpConfigPath);
 
       const result = await runPiLaunch({
@@ -97,12 +104,26 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         expect(diagnosticText).not.toContain(SENTINEL_TOKEN);
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
         expect(systemPrompt).toContain("Supermemory MCP Conversation Memory");
+        expect(systemPrompt).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(systemPrompt).toContain("supermemory_search_memory");
+        expect(systemPrompt).not.toContain("supermemory.memory");
+        expect(systemPrompt).not.toContain("memory` (action");
         expect(existsSync(join(projectRoot, ".pi", "agents", "deck-lead.md"))).toBe(true);
         const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8");
         expect(orchestrator).toContain("Supermemory MCP Conversation Memory");
-        expect(orchestrator).toContain("supermemory.memory");
+        expect(orchestrator).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(orchestrator).toContain("supermemory_add_memory");
+        expect(orchestrator).not.toContain("supermemory.memory");
         expect(orchestrator).not.toContain(SENTINEL_TOKEN);
         expect(orchestrator).not.toContain("x-supermemory-api-key");
+        const standaloneSkill = readFileSync(join(projectRoot, ".pi", "skills", "api-and-interface-design", "SKILL.md"), "utf-8");
+        const bootstrapSkill = readFileSync(join(projectRoot, ".pi", "skills", "deck-onboard", "SKILL.md"), "utf-8");
+        for (const content of [standaloneSkill, bootstrapSkill]) {
+          expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+          expect(content).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+          expect(content).not.toContain("No manual containerTag required");
+          expect(content).not.toContain("sm_project_default");
+        }
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -113,6 +134,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
+      initCanonicalRemote(projectRoot);
       writePiMcpConfig(piMcpConfigPath);
 
       const first = await runPiLaunch({
@@ -126,7 +148,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
       expect(first.status).toBe("ready");
-      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8")).toContain("supermemory.memory");
+      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8")).toContain("supermemory_add_memory");
 
       const second = await runPiLaunch({
         teamId: "developer-team",
@@ -150,6 +172,88 @@ describe("runPiLaunch Supermemory provider resolution", () => {
           expect(content).not.toContain("supermemory.execute");
           expect(content).not.toContain("supermemory.search_docs");
         }
+      }
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("configured Pi MCP scope mismatch fails closed for system prompt, agents, standalone skills, and bootstrap skills", async () => {
+    const projectRoot = createTempDir();
+    const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
+    try {
+      initCanonicalRemote(projectRoot);
+      writePiMcpConfig(piMcpConfigPath, SENTINEL_TOKEN, "sm_project_v1_other_repo");
+
+      const result = await runPiLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        flags: {},
+        commandExists: () => true,
+        dryRun: true,
+        deckConfig: deckConfig("supermemory"),
+        piMcpConfigPath,
+        supermemoryRuntimeValidator: successfulRuntimeValidation,
+      });
+
+      expect(result.status).toBe("ready");
+      if (result.status === "ready") {
+        expect(result.memoryDiagnostics.some((diagnostic) => diagnostic.providerId === "supermemory")).toBe(true);
+        const samples = [
+          readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8"),
+          readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8"),
+          readFileSync(join(projectRoot, ".pi", "skills", "api-and-interface-design", "SKILL.md"), "utf-8"),
+          readFileSync(join(projectRoot, ".pi", "skills", "deck-onboard", "SKILL.md"), "utf-8"),
+        ];
+        for (const content of samples.slice(1)) {
+          expect(content).toContain("Adaptive-memory project operations are disabled");
+          expect(content).toContain("scope mismatch");
+          expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+          expect(content).not.toContain("sm_project_v1_other_repo");
+        }
+        expect(samples[0]).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(samples[0]).not.toContain("sm_project_v1_other_repo");
+      }
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("configured Pi MCP default scope fails closed for system prompt, agents, standalone skills, and bootstrap skills", async () => {
+    const projectRoot = createTempDir();
+    const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
+    try {
+      initCanonicalRemote(projectRoot);
+      writePiMcpConfig(piMcpConfigPath, SENTINEL_TOKEN, "sm_project_default");
+
+      const result = await runPiLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        flags: {},
+        commandExists: () => true,
+        dryRun: true,
+        deckConfig: deckConfig("supermemory"),
+        piMcpConfigPath,
+        supermemoryRuntimeValidator: successfulRuntimeValidation,
+      });
+
+      expect(result.status).toBe("ready");
+      if (result.status === "ready") {
+        expect(result.memoryDiagnostics.some((diagnostic) => diagnostic.providerId === "supermemory")).toBe(true);
+        const samples = [
+          readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8"),
+          readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8"),
+          readFileSync(join(projectRoot, ".pi", "skills", "api-and-interface-design", "SKILL.md"), "utf-8"),
+          readFileSync(join(projectRoot, ".pi", "skills", "deck-onboard", "SKILL.md"), "utf-8"),
+        ];
+        for (const content of samples.slice(1)) {
+          expect(content).toContain("Adaptive-memory project operations are disabled");
+          expect(content).toContain("configured scope missing");
+          expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+          expect(content).not.toContain("sm_project_default");
+        }
+        expect(samples[0]).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(samples[0]).not.toContain("sm_project_default");
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

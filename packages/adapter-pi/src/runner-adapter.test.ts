@@ -8,6 +8,7 @@ import { describe, expect, test, beforeEach, spyOn } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 
 import {
   readDeveloperTeamModelAssignments,
@@ -71,6 +72,31 @@ describe("Pi optional Web Search readiness", () => {
 });
 
 describe("Pi active-runner skill discovery provider", () => {
+  test("does not fabricate configured Supermemory scope in the generic install adapter path", () => {
+    const projectRoot = tempHome();
+    try {
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
+      const adapter = createPiRunnerAdapter();
+
+      const plan = adapter.buildDeveloperTeamInstallPlan({
+        projectRoot,
+        environmentId: "pi-development",
+        deckConfig: validateDeckConfig({}),
+        capabilityInstructions: {
+          instructions: [{ packageId: "adaptive-memory", surface: "agent", markdown: "stale unscoped memory", teamId: "developer-team" }],
+        },
+      });
+      const text = plan.files.map((file) => file.content).join("\n");
+
+      expect(text).toContain("Adaptive-memory project operations are disabled");
+      expect(text).toContain("configured scope missing");
+      expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
   test("attaches deterministic Pi-only filesystem source declarations", async () => {
     const home = tempHome();
     const projectRoot = join(home, "project");

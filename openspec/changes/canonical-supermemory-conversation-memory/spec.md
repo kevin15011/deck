@@ -8,33 +8,43 @@
 
 **REQ-SM-002 (MUST):** Equivalent Git HTTPS, SSH, SCP-style, and SSH-host-alias remotes for the same owner/repository path MUST resolve to the same scope.
 
-**REQ-SM-003 (MUST):** Every Deck-managed Supermemory write, profile request, and search MUST include the canonical project scope as `containerTag` or the transport's equivalent immutable project header.
+**REQ-SM-003 (MUST):** Every Deck-directed Supermemory operation whose exposed schema accepts `containerTag` MUST explicitly pass the canonical project scope in that argument. An MCP `x-sm-project` header MUST NOT be treated as supplying an omitted tool argument.
 
 **REQ-SM-004 (MUST):** Missing or invalid project identity MUST disable adaptive-memory effects for that runner and emit a redacted diagnostic. Deck MUST NOT fall back to `sm_project_default`, a directory basename, or an unrelated legacy scope.
 
 **REQ-SM-005 (MUST):** Provider authentication MUST remain independent from project scope, and Deck MUST NOT persist provider credentials in Deck configuration or generated prompts.
 
-### Conversation ingestion
+**REQ-SM-006 (MUST):** Deck MUST derive the scope from the verified current repository and materialize the same immutable value into Lead/session, specialist/agent, delegation, and relevant skill instructions.
 
-**REQ-SM-010 (MUST):** Selecting Supermemory MUST enable conversation capture without an additional installation option or confirmation step.
+**REQ-SM-007 (MUST):** Agents MUST NOT derive, choose, rewrite, or accept an arbitrary replacement for the Deck-materialized canonical scope.
 
-**REQ-SM-011 (MUST):** Deck MUST model one runner session as one conversation document identified by a stable, non-secret `customId`.
+### Agent-mediated automatic memory
 
-**REQ-SM-012 (MUST):** Subsequent captured turns from the same session MUST reuse the same `customId` and canonical project scope.
+**REQ-SM-010 (MUST):** Selecting Supermemory MUST preserve Deck's agent-mediated automatic save and materially relevant recall policy without adding UI, a per-call scope choice, or a second consent decision.
 
-**REQ-SM-013 (MUST):** Production ingestion MUST use Supermemory dynamic dreaming unless a bounded test or explicit immediate-read operation requires instant dreaming.
+**REQ-SM-011 (MUST):** Until a trusted authenticated execution boundary or native runner plugin exists, Deck MUST describe this behavior as agent-mediated tool use, not automatic whole-conversation ingestion, stable-session document capture, or guaranteed dynamic dreaming.
 
-**REQ-SM-014 (MUST):** Conversation ingestion MUST be asynchronous and fail open for the coding session while surfacing a redacted health diagnostic.
+**REQ-SM-012 (MUST):** Every automatic save or recall attempted by an agent MUST use a project-scoped operation with the explicit canonical `containerTag`; otherwise the operation MUST be skipped.
 
-**REQ-SM-015 (MUST):** Deck MUST NOT ask agents to extract routine facts, create topic keys, fill a semantic quota, or write a mandatory session summary when conversation capture is active.
+**REQ-SM-013 (MUST):** Deck MUST continue to allow high-signal automatic agent saves and proactive recall when prior project context is materially relevant.
+
+**REQ-SM-014 (MUST):** Failure to resolve or apply project scope MUST fail open for coding work and fail closed for the memory operation, with only a redacted diagnostic.
+
+**REQ-SM-015 (MUST):** Deck MUST NOT require agents to fill a semantic quota, create manual topic keys, or write a mandatory session summary. Agents MAY automatically preserve high-signal durable information through the scoped MCP tools.
 
 **REQ-SM-016 (MUST):** Deck MUST deprecate `maxMemoriesPerSession` as a behavioral control. Any remaining compatibility parser MUST ignore it safely and report deprecation without treating it as an ingestion target.
 
+**REQ-SM-017 (MUST):** Account/readiness operations that do not accept project scope MAY be used only for non-memory effects such as authentication status.
+
+**REQ-SM-018 (MUST):** Active-space-only interactive operations MUST NOT participate in automatic project save or recall, and agents MUST NOT change active space as a substitute for explicit `containerTag`.
+
+**REQ-SM-019 (MUST):** A document-ID operation without `containerTag` MAY be used only with an ID obtained through a canonically scoped operation in the same workflow.
+
 ### Privacy and authority
 
-**REQ-SM-020 (MUST):** Deck MUST reject or redact recognized credentials, private keys, authorization headers, and raw environment dumps before remote ingestion.
+**REQ-SM-020 (MUST):** Agents MUST NOT save credentials, private keys, authorization headers, raw environment dumps, or other secrets through automatic memory operations.
 
-**REQ-SM-021 (MUST):** Deck MUST NOT automatically ingest OpenSpec artifacts, provider responses, web content, tool output, or raw logs merely because they appear in the conversation.
+**REQ-SM-021 (MUST):** Agents MUST NOT automatically save OpenSpec artifacts, provider responses, web content, tool output, or raw logs merely because they appear in the conversation.
 
 **REQ-SM-022 (MUST):** Adaptive-memory context MUST remain advisory and MUST NOT override OpenSpec, source, tests, or current runner evidence.
 
@@ -42,9 +52,9 @@
 
 ### Retrieval
 
-**REQ-SM-030 (MUST):** Deck MUST load bounded project-profile context once when starting or resuming a session when the provider is healthy.
+**REQ-SM-030 (MUST):** Agents SHOULD load bounded project-profile context once when starting or resuming a session when the provider is healthy and the exposed operation can be explicitly scoped.
 
-**REQ-SM-031 (MUST):** Deck MUST execute query search only when prior context is materially relevant or the user requests recall; it MUST NOT perform unconditional search on every turn.
+**REQ-SM-031 (MUST):** Agents MUST execute query search only when prior context is materially relevant or the user requests recall; they MUST NOT perform unconditional search on every turn.
 
 **REQ-SM-032 (SHOULD):** General contextual retrieval SHOULD use hybrid mode, at most five results, and a maximum default injected-context budget of 1,500 tokens.
 
@@ -54,7 +64,7 @@
 
 ### Runner installation and diagnostics
 
-**REQ-SM-040 (MUST):** OpenCode, Pi, and Codex MUST implement the same semantic Supermemory contract; adapter differences MAY be limited to native configuration serialization, authentication handoff, and verified project-root plumbing.
+**REQ-SM-040 (MUST):** OpenCode, Pi, and Codex materializations MUST contain the same canonical scope value and operation rules across session, agent, delegation, and relevant skill surfaces; adapter differences MAY be limited to native configuration serialization, authentication handoff, and verified project-root plumbing.
 
 **REQ-SM-041 (MUST):** Deck MUST stop emitting the deprecated Pi Supermemory endpoint.
 
@@ -92,19 +102,54 @@
 **And** Deck reports a redacted project-scope diagnostic
 **And** Deck does not emit `sm_project_default`
 
-### Scenario: selecting Supermemory captures conversations without another choice
+### Scenario: selecting Supermemory preserves automatic agent memory without another choice
 
 **Given** the user selects Supermemory in Review & Install
 **When** Deck builds and applies the installation plan
-**Then** conversation capture is configured by default
-**And** no additional capture mode, opt-in, or confirmation row is shown
+**Then** high-signal automatic agent save and materially relevant recall instructions are configured by default
+**And** no additional mode, project-space choice, opt-in, or confirmation row is shown
 
-### Scenario: one session reuses one document identity
+### Scenario: transport header is not trusted as a tool default
 
-**Given** an authenticated runner starts a Deck session
-**When** multiple eligible conversation turns are captured
-**Then** each write uses the same canonical project scope and stable session `customId`
-**And** production writes request dynamic dreaming
+**Given** the runner has the correct `x-sm-project` header
+**When** Deck materializes automatic Supermemory save and recall behavior
+**Then** every scoped tool example and instruction still passes the exact canonical `containerTag`
+**And** no instruction claims that the header supplies an omitted tool argument
+
+### Scenario: all prompt surfaces receive one immutable scope
+
+**Given** canonical scope `sm_project_v1_kevin15011_deck`
+**When** OpenCode, Pi, and Codex materialize Developer Team content
+**Then** Lead, specialists, delegations, and relevant skills contain that exact scope
+**And** no other project tag or default-space fallback appears
+
+### Scenario: automatic save is explicitly scoped
+
+**Given** the agent identifies high-signal durable project information
+**When** it invokes `supermemory_add_memory`
+**Then** it passes `containerTag: "sm_project_v1_kevin15011_deck"`
+**And** it does not rely on active space or `sm_project_default`
+
+### Scenario: automatic recall is explicitly scoped
+
+**Given** prior project context is materially relevant
+**When** the agent invokes `supermemory_search_memory`
+**Then** it passes `containerTag: "sm_project_v1_kevin15011_deck"`
+**And** results from personal, default, or legacy spaces are not requested
+
+### Scenario: configured scope mismatch fails closed
+
+**Given** the repository-derived scope differs from the configured MCP scope
+**When** Deck prepares adaptive-memory instructions
+**Then** no project save or recall operation is authorized
+**And** Deck reports a redacted mismatch diagnostic
+
+### Scenario: active space is not an isolation mechanism
+
+**Given** Supermemory has a different active space or no active space
+**When** automatic project save or recall occurs
+**Then** the agent neither changes nor relies on active space
+**And** it passes the canonical project tag directly
 
 ### Scenario: sensitive content is not ingested
 

@@ -232,6 +232,10 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   }
   try {
     const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, "opencode");
+    const activeProvider = options.activeProvider ?? deckConfig.adaptiveMemory.activeProvider;
+    if (activeProvider === "supermemory" && !enabledIds.includes("adaptive-memory")) {
+      enabledIds.push("adaptive-memory");
+    }
     if (enabledIds.length > 0) {
       capabilityInstructions = buildCapabilityInstructionBundle(enabledIds);
     }

@@ -171,14 +171,16 @@ export async function runRunnerSync(
       getEnabledCapabilityInstructionIds(config, runnerId);
     // 3. Build the capability instruction bundle. An empty selection still
     // synchronizes base roles, skills, bootstrap content, and instructions.
-    const bundle: CapabilityInstructionBundle = buildCapabilityInstructionBundle(enabledIds);
+    const capabilityInstructions = enabledIds.includes("adaptive-memory")
+      ? undefined
+      : buildCapabilityInstructionBundle(enabledIds);
 
     // 4. Plan → backup → apply → verify.
     const plan: RunnerDeveloperTeamInstallPlan = await safeBuildPlan(adapter, {
       projectRoot,
       environmentId: (adapter.environmentIds[0] ?? "opencode-development") as never,
       deckConfig: config,
-      capabilityInstructions: bundle,
+      capabilityInstructions,
       materializationScope: "content-only",
     });
 
@@ -340,7 +342,7 @@ async function safeBuildPlan(
     projectRoot: string;
     environmentId: never;
     deckConfig: NormalizedDeckConfig;
-    capabilityInstructions: CapabilityInstructionBundle;
+    capabilityInstructions?: CapabilityInstructionBundle;
     materializationScope: "content-only";
   },
 ): Promise<RunnerDeveloperTeamInstallPlan> {

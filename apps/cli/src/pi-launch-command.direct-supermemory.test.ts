@@ -50,7 +50,7 @@ describe("runPiLaunch direct Supermemory dashboard config", () => {
         supermemory: {
           mcpServerName: "supermemory",
           // userId/teamId/orgId removed — these fields are `never` in DeckSupermemoryConfig
-          // (token-only: user identity derived from token, project via x-sm-project header)
+          // (token-only: user identity derived from token; project scope requires header + explicit canonical containerTag)
           searchMode: "memories",
           maxMemoriesPerSession: 7,
         },

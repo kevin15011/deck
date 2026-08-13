@@ -7,6 +7,8 @@ import { DEVELOPER_TEAM_LEGACY_AGENT_IDS } from "@deck/core/teams/developer/cata
 import { migrateLegacyDeveloperTeamAssignments } from "@deck/core/teams/developer/model-migration";
 import {
   buildCapabilityInstructionBundle,
+  bindAdaptiveMemoryInstructionBundle,
+  composeCapabilityInstructions,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
 import { materializeTeamProfile } from "./pi-team-profile";
@@ -82,7 +84,7 @@ import {
   type MemoryInjectionBundle,
 } from "@deck/core/memory/adaptive-memory";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY } from "@deck/core/config/deck-config";
-import type { CapabilityInstructionBundle } from "@deck/core";
+import { resolveCanonicalSupermemoryProjectScope, type CapabilityInstructionBundle } from "@deck/core";
 import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import type { DeveloperTeamAgent } from "./developer-team-catalog";
 import { DEVELOPER_TEAM_AGENTS } from "./developer-team-catalog";
@@ -166,11 +168,15 @@ function validateStandalonePackagePath(filePath: string): void {
 function buildStandaloneSkillFiles(
   projectRoot: string,
   standaloneSkills: readonly { skillId: string; body: string; files?: Record<string, string> }[],
+  capabilityInstructions?: CapabilityInstructionBundle,
 ): PlannedStandaloneSkillFile[] {
   const planned: PlannedStandaloneSkillFile[] = [];
   for (const skill of standaloneSkills) {
     validateStandaloneSkillId(skill.skillId);
-    const packageFiles: Record<string, string> = { "SKILL.md": skill.body, ...(skill.files ?? {}) };
+    const packageFiles: Record<string, string> = {
+      "SKILL.md": composeCapabilityInstructions(skill.body, capabilityInstructions, { surface: "skill", teamId: "developer-team", skillId: skill.skillId }),
+      ...(skill.files ?? {}),
+    };
     for (const [packagePath, content] of Object.entries(packageFiles)) {
       validateStandalonePackagePath(packagePath);
       const relativePath = `.pi/skills/${skill.skillId}/${packagePath}`;
@@ -416,12 +422,17 @@ export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
 
 function resolvePiMemoryInjection(
   options?: MemoryInjectionOptions,
+  projectRoot?: string,
 ): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
+  const derived = projectRoot ? resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] }) : undefined;
   const resolved = resolveMemoryInjection({
     memoryInjection: options?.memoryInjection,
     memoryProvider: options?.memoryProvider,
     supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_MEMORY_PROVIDER_IDS,
-    buildContext: { teamId: "developer-team" },
+    buildContext: {
+      teamId: "developer-team",
+      supermemoryProjectScope: derived?.ok ? derived.scope : undefined,
+    },
   });
 
   // Pi behaves like OpenCode: inject memory tools when MCP config is structurally valid
@@ -438,7 +449,19 @@ function resolvePiMemoryInjection(
 
   // If MCP config is structurally valid, inject tools (no Pi-only gate)
   if (mcpValidation.ok) {
-    return resolved;
+    if (derived?.ok && mcpValidation.projectScope === derived.scope) {
+      const scoped = resolveMemoryInjection({
+        memoryInjection: options?.memoryInjection,
+        memoryProvider: options?.memoryProvider,
+        supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_MEMORY_PROVIDER_IDS,
+        buildContext: {
+          teamId: "developer-team",
+          supermemoryProjectScope: derived.scope,
+          configuredSupermemoryProjectScope: mcpValidation.projectScope,
+        },
+      });
+      return scoped;
+    }
   }
 
   // Config invalid or missing — fail-closed with diagnostic
@@ -535,9 +558,23 @@ export function buildDeveloperTeamInstallPlan(
     supportedMemoryProviderIds: options?.supportedMemoryProviderIds,
     piMcpConfigPath: options?.piMcpConfigPath,
     piMcpHomeDir: options?.piMcpHomeDir,
-  });
+  }, projectRoot);
 
-  const capabilityInstructions = options?.capabilityInstructions;
+  const derivedSupermemoryProjectScope = (() => {
+    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
+    return resolved.ok ? resolved.scope : undefined;
+  })();
+  const configuredSupermemoryProjectScope = (() => {
+    const validation = validateSupermemoryPiMcpConfig({
+      configPath: options?.piMcpConfigPath,
+      homeDir: options?.piMcpHomeDir,
+    });
+    return validation.ok ? validation.projectScope : undefined;
+  })();
+  const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(options?.capabilityInstructions, {
+    supermemoryProjectScope: derivedSupermemoryProjectScope,
+    configuredSupermemoryProjectScope,
+  });
 
   const personality = options?.orchestratorPersonality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
   const promptProfile = "compact" as const;
@@ -584,7 +621,7 @@ export function buildDeveloperTeamInstallPlan(
   });
 
   // Build standalone skill package files (verbatim, no generated frontmatter).
-  const standaloneSkills = buildStandaloneSkillFiles(projectRoot, options?.standaloneSkills ?? []);
+  const standaloneSkills = buildStandaloneSkillFiles(projectRoot, options?.standaloneSkills ?? [], capabilityInstructions);
 
   // Build standalone lifecycle skill files.
   const sddSkillFiles: PlannedSDDSkillFile[] = getBootstrapSkillFiles().map((skill) => ({
@@ -1146,7 +1183,7 @@ function buildSkillFileContent(
 
 function buildBootstrapSkillFileContent(
   skill: { skillId: string; content: string },
-  _capabilityInstructions: CapabilityInstructionBundle | undefined,
+  capabilityInstructions: CapabilityInstructionBundle | undefined,
   _personality: import("@deck/core/config/deck-config").OrchestratorPersonality,
   _promptProfile: DeveloperTeamPromptProfileV1,
 ): string {
@@ -1154,7 +1191,8 @@ function buildBootstrapSkillFileContent(
   if (frontmatterEnd < 0) {
     throw new Error(`Invalid bootstrap skill content for ${skill.skillId}.`);
   }
-  return skill.content.endsWith("\n") ? skill.content : `${skill.content}\n`;
+  const content = composeCapabilityInstructions(skill.content, capabilityInstructions, { surface: "skill", teamId: "developer-team", skillId: skill.skillId });
+  return content.endsWith("\n") ? content : `${content}\n`;
 }
 
 const DEVELOPER_ORCHESTRATOR_AGENT_ID = "deck-lead";

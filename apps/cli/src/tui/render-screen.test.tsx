@@ -1,11 +1,38 @@
 import React from "react";
 import { describe, expect, test } from "bun:test";
-import { renderToString } from "ink";
+import { render, renderToString } from "ink";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 
 import type { AgentApplyResult } from "@deck/adapter-pi";
 import { ScreenFrame } from "./screen-frame";
 import { CompleteScreen } from "./app";
 import { HomeScreen } from "./screens/home-screen";
+import { DoctorScreen } from "./screens/doctor-screen";
+import type { DoctorDiagnosticsResult } from "../doctor-command/types";
+
+function createInkHarness() {
+  const chunks: Array<Buffer | null> = [];
+  const stdin = new EventEmitter() as EventEmitter & { isTTY: boolean; setRawMode: () => void; setEncoding: () => void; read: () => Buffer | null; ref: () => void; unref: () => void };
+  stdin.isTTY = true;
+  stdin.setRawMode = () => {};
+  stdin.setEncoding = () => {};
+  stdin.read = () => chunks.shift() ?? null;
+  stdin.ref = () => {};
+  stdin.unref = () => {};
+  const stdout = new PassThrough() as PassThrough & { columns: number; rows: number; isTTY: boolean };
+  stdout.columns = 100;
+  stdout.rows = 30;
+  stdout.isTTY = true;
+  let output = "";
+  stdout.on("data", (chunk) => { output += chunk.toString(); });
+  return {
+    stdin,
+    stdout,
+    output: () => output,
+    close() { stdin.removeAllListeners(); stdout.removeAllListeners(); stdout.end(); stdout.destroy(); },
+  };
+}
 
 describe("page based TUI screens", () => {
   test("renders a framed home screen without transcript-style previous output", () => {
@@ -86,5 +113,44 @@ describe("page based TUI screens", () => {
     expect(output).toContain("Developer Team");
     expect(output).toContain("Verification failed");
     expect(output).toContain("Details");
+  });
+
+  test("DoctorScreen passes the verified project root to diagnostics instead of falling back to cwd", async () => {
+    const harness = createInkHarness();
+    const calls: Array<{ projectRoot?: string }> = [];
+    const result: DoctorDiagnosticsResult = {
+      runtimes: [],
+      memory: [],
+      mcp: [{ category: "Supermemory Project Scope", status: "ok", items: [{ status: "ok", message: "scope checked" }] }],
+      hasCriticalErrors: false,
+      deck: [],
+      binaryCheck: [],
+      runnerConfig: [],
+      summary: { ok: 1, warning: 0, error: 0, sections: ["Supermemory Project Scope"] },
+    };
+    const instance = render(
+      <DoctorScreen
+        projectRoot="/verified/project"
+        runDiagnostics={async (_overrides, projectRoot) => {
+          calls.push({ projectRoot });
+          return result;
+        }}
+      />,
+      { stdin: harness.stdin as never, stdout: harness.stdout as never, debug: false, exitOnCtrlC: false, patchConsole: false },
+    );
+
+    try {
+      const deadline = Date.now() + 5_000;
+      while (calls.length === 0 || !harness.output().includes("scope checked")) {
+        if (Date.now() >= deadline) throw new Error("Timed out waiting for DoctorScreen diagnostics call");
+        await instance.waitUntilRenderFlush();
+      }
+
+      expect(calls[0]).toEqual({ projectRoot: "/verified/project" });
+      expect(harness.output()).toContain("scope checked");
+    } finally {
+      instance.unmount();
+      harness.close();
+    }
   });
 });

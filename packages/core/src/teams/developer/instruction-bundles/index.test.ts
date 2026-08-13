@@ -8,6 +8,7 @@ import {
 import {
   buildCapabilityInstructionBundle,
   buildCapabilityToolPolicyBundle,
+  bindAdaptiveMemoryInstructionBundle,
   composeCapabilityInstructions,
   getEnabledCapabilityInstructionIds,
   getEnabledPackageInstructionIds,
@@ -174,6 +175,49 @@ describe("buildCapabilityInstructionBundle", () => {
     for (const fragment of bundle.instructions) {
       expect(fragment).not.toHaveProperty("toolBindings");
     }
+  });
+
+  test("rebinds caller-supplied adaptive-memory fragments while preserving unrelated package fragments", () => {
+    const callerBundle: CapabilityInstructionBundle = {
+      instructions: [
+        { packageId: "code-economy", surface: "agent", markdown: "preserve code economy", teamId: "developer-team" },
+        { packageId: "adaptive-memory", surface: "agent", markdown: "stale unscoped adaptive memory", teamId: "developer-team" },
+        { packageId: "adaptive-memory", surface: "skill", markdown: "No manual containerTag required", teamId: "developer-team" },
+        { packageId: "serena", surface: "agent", markdown: "preserve serena", teamId: "developer-team" },
+      ],
+    };
+
+    const rebound = bindAdaptiveMemoryInstructionBundle(callerBundle, {
+      supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+      configuredSupermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+    });
+    expect(rebound).toBeDefined();
+    const text = rebound!.instructions.map((fragment) => fragment.markdown).join("\n");
+
+    expect(text).toContain("preserve code economy");
+    expect(text).toContain("preserve serena");
+    expect(text).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+    expect(text).toContain("supermemory_add_memory({ content, containerTag: \"sm_project_v1_kevin15011_deck\" })");
+    expect(text).toContain("supermemory_search_memory({ query, containerTag: \"sm_project_v1_kevin15011_deck\" })");
+    expect(text).not.toContain("stale unscoped adaptive memory");
+    expect(text).not.toContain("No manual containerTag required");
+  });
+
+  test("can add fail-closed adaptive-memory guidance when a memory provider is active but scopes are not verified", () => {
+    const callerBundle = buildCapabilityInstructionBundle(["code-economy"]);
+
+    const rebound = bindAdaptiveMemoryInstructionBundle(callerBundle, {
+      supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+      configuredSupermemoryProjectScope: "sm_project_default",
+      includeWhenMissing: true,
+    });
+    expect(rebound).toBeDefined();
+    const text = rebound!.instructions.map((fragment) => fragment.markdown).join("\n");
+
+    expect(text).toContain("Anti-Overengineering Rules");
+    expect(text).toContain("Adaptive-memory project operations are disabled");
+    expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+    expect(text).not.toContain("sm_project_default");
   });
 });
 

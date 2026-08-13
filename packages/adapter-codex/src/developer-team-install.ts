@@ -147,6 +147,9 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   const manifestPath = ".codex/deck-manifest.json";
   const diagnostics: RunnerDiagnostic[] = [];
   const capabilityInstructions = translateCodexCapabilityInstructions(input.capabilityInstructions);
+  const derivedSupermemoryProjectScope = input.memoryProvider === "supermemory"
+    ? (input.supermemoryProjectScope ?? resolveCodexSupermemoryProjectScope(input.projectRoot))
+    : undefined;
   if (capabilityInstructions) {
     for (const message of validateCodexInstructionTranslation(capabilityInstructions)) diagnostics.push({ code: "codex-instruction-translation-invalid", severity: "error", message });
   }
@@ -291,7 +294,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       const desiredMcp = buildCodexMcpServers({
         packageIds: input.mcpCapabilityIds ?? [],
         memoryProvider: input.memoryProvider ?? "none",
-        supermemoryProjectScope: input.supermemoryProjectScope ?? resolveCodexSupermemoryProjectScope(input.projectRoot),
+        supermemoryProjectScope: derivedSupermemoryProjectScope,
         serenaLauncherAvailable: input.serenaLauncherAvailable,
         serenaProxyAvailable: input.serenaProxyAvailable,
         webSearchProviderSupported: input.webSearchProviderSupported,

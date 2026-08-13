@@ -28,9 +28,9 @@ function hash(s: string): number {
  */
 const BASELINE_HASHES: Record<string, Record<string, number>> = {
   "adaptive-memory": {
-    agent: -1146083561, // unsupported/static-compatible Supermemory conversation capture guidance
-    session: -1146083561, // unsupported/static-compatible Supermemory conversation capture guidance
-    skill: -1146083561, // unsupported/static-compatible Supermemory conversation capture guidance
+    agent: 91548203, // project scope binding now requires observed configured scope; missing/default/invalid/mismatch fail closed
+    session: 91548203, // project scope binding now requires observed configured scope; missing/default/invalid/mismatch fail closed
+    skill: 91548203, // project scope binding now requires observed configured scope; missing/default/invalid/mismatch fail closed
   },
   "codebase-memory": {
     agent: 392768171,

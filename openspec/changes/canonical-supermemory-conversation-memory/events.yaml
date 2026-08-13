@@ -64,3 +64,23 @@ events:
     notes:
       - "Safe partial candidate passed 4,507 tests, TypeScript, OpenSpec validation, and independent Quality review."
       - "Automatic conversation capture, profile loading, query execution, and remote copy remain explicitly blocked; no false support claim ships."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-08-12"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Fresh-session runtime evidence showed unscoped add_memory writes to sm_project_default despite the correct x-sm-project header."
+      - "Explicit canonical containerTag routing succeeded; implementation direction now preserves agent-mediated automatic behavior with exact per-project tool arguments."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-08-13"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Explicit per-operation containerTag propagation passed 4,541 tests, TypeScript, OpenSpec validation, and independent Quality review."
+      - "The change remains Apply/in_progress because hard transport enforcement and remote migration copy are still unavailable."

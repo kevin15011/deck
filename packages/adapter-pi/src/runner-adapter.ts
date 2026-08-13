@@ -47,6 +47,7 @@ import {
   writeSerenaMcpConfig,
   writeContext7McpConfig,
   defaultPiMcpConfigPath,
+  validateSupermemoryPiMcpConfig,
   type PiMcpConfigFileSystem,
   type PiMcpConfigWriteResult,
   type WriteSerenaMcpConfigOptions,
@@ -102,6 +103,7 @@ import {
   getRunnerCapabilityMapping,
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   buildCapabilityInstructionBundle,
+  bindAdaptiveMemoryInstructionBundle,
   getEnabledCapabilityInstructionIds,
   getConfigurablePackageInstructionMetadata,
   runEvidenceGatedSerenaWriter,
@@ -1092,13 +1094,30 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
-    const capabilityInstructions = input.capabilityInstructions ?? (() => {
+    const derivedSupermemoryProjectScope = (() => {
+      const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
+      return resolved.ok ? resolved.scope : undefined;
+    })();
+    const configuredSupermemoryProjectScope = (() => {
+      const validation = validateSupermemoryPiMcpConfig({
+        configPath: defaultPiMcpConfigPath(this.#homeDirectory),
+        homeDir: this.#homeDirectory,
+      });
+      return validation.ok ? validation.projectScope : undefined;
+    })();
+    const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions ?? (() => {
       try {
-        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(requireDeckConfig(input.deckConfig, "developer team install"), "pi"));
+        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(requireDeckConfig(input.deckConfig, "developer team install"), "pi"), {
+          supermemoryProjectScope: derivedSupermemoryProjectScope,
+          configuredSupermemoryProjectScope,
+        });
       } catch {
         return undefined;
       }
-    })();
+    })(), {
+      supermemoryProjectScope: derivedSupermemoryProjectScope,
+      configuredSupermemoryProjectScope,
+    });
     const nativePlan = buildPiDeveloperTeamInstallPlan(input.projectRoot, {
       modelAssignments: input.modelAssignments,
       thinkingAssignments: input.thinkingAssignments,
@@ -1106,6 +1125,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       capabilityInstructions,
       orchestratorPersonality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,
       standaloneSkills: input.standaloneSkills,
+      piMcpConfigPath: defaultPiMcpConfigPath(this.#homeDirectory),
+      piMcpHomeDir: this.#homeDirectory,
     });
     this.#lastNativePlan = nativePlan;
     const configDir = join(this.#homeDirectory, ".pi", "agent");

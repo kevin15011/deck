@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,6 +16,8 @@ import {
   cleanupLegacySddAgentFiles,
 } from "./developer-team-install";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
+import { buildCapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
+import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import { getStandaloneSkill, STANDALONE_SKILLS } from "@deck/core/skills/external";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } from "./model-config";
 
@@ -189,6 +192,102 @@ describe("buildDeveloperTeamInstallPlan", () => {
       const headingMatch = registryContent.skillBody.match(/^# .+$/m);
       expect(headingMatch).toBeTruthy();
       expect(planned.content).toContain(headingMatch![0]);
+    }
+  });
+
+  test("Pi agents, skills, standalone skills, and bootstrap skills receive exact scoped Supermemory guidance", () => {
+    const projectRoot = createTempProject();
+    try {
+      ensurePiDirs(projectRoot);
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
+      const mcpPath = join(projectRoot, "mcp.json");
+      writeFileSync(mcpPath, JSON.stringify({
+        mcpServers: {
+          supermemory: {
+            transport: "http",
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: {
+              "x-supermemory-api-key": "redacted-test-token",
+              "x-sm-project": "sm_project_v1_kevin15011_deck",
+            },
+          },
+        },
+      }));
+      const plan = buildDeveloperTeamInstallPlan(projectRoot, {
+        memoryProvider: createSupermemoryMemoryProvider({
+          projectScope: "sm_project_v1_kevin15011_deck",
+          configuredProjectScope: "sm_project_v1_kevin15011_deck",
+        }),
+        piMcpConfigPath: mcpPath,
+        capabilityInstructions: buildCapabilityInstructionBundle(["adaptive-memory"], {
+          supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+          configuredSupermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+        }),
+        standaloneSkills: completeStandaloneSkills,
+      });
+      const samples = [
+        plan.agents.find((planned) => planned.agent.id === "deck-lead")!.content,
+        plan.agents.find((planned) => planned.agent.id === "deck-investigate")!.content,
+        plan.skills.find((planned) => planned.agent.id === "deck-apply-deep")!.content,
+        plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("api-and-interface-design/SKILL.md"))!.content,
+        plan.sddSkillFiles.find((planned) => planned.skillId === "deck-onboard")!.content,
+      ];
+
+      for (const content of samples) {
+        expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(content).toContain("supermemory_add_memory");
+        expect(content).toContain("x-sm-project is diagnostic/transport metadata only");
+        expect(content).not.toContain("No manual containerTag required");
+        expect(content).not.toContain("sm_project_default");
+      }
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("rebinds caller-supplied adaptive-memory capability fragments to the configured canonical Pi MCP scope", () => {
+    const projectRoot = createTempProject();
+    try {
+      ensurePiDirs(projectRoot);
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
+      const mcpPath = join(projectRoot, "mcp.json");
+      writeFileSync(mcpPath, JSON.stringify({
+        mcpServers: {
+          supermemory: {
+            transport: "http",
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-supermemory-api-key": "redacted-test-token", "x-sm-project": "sm_project_v1_kevin15011_deck" },
+          },
+        },
+      }));
+      const callerBundle = {
+        instructions: [
+          { packageId: "adaptive-memory", surface: "agent", markdown: "No manual containerTag required", teamId: "developer-team" },
+          { packageId: "adaptive-memory", surface: "skill", markdown: "stale q example supermemory_search_memory({ q, containerTag: \"sm_project_default\" })", teamId: "developer-team" },
+          { packageId: "code-economy", surface: "agent", markdown: "caller-unrelated-marker", teamId: "developer-team" },
+        ],
+      } as const;
+
+      const plan = buildDeveloperTeamInstallPlan(projectRoot, {
+        piMcpConfigPath: mcpPath,
+        capabilityInstructions: callerBundle,
+        standaloneSkills: completeStandaloneSkills,
+      });
+      const combined = [
+        plan.agents.find((planned) => planned.agent.id === "deck-investigate")!.content,
+        plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("api-and-interface-design/SKILL.md"))!.content,
+      ].join("\n");
+
+      expect(combined).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(combined).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(combined).toContain("caller-unrelated-marker");
+      expect(combined).not.toContain("No manual containerTag required");
+      expect(combined).not.toContain("sm_project_default");
+      expect(combined).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
+    } finally {
+      cleanup(projectRoot);
     }
   });
 
@@ -1282,6 +1381,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
   test("plan with Supermemory provider validates Pi MCP config before injecting execute/search_docs", () => {
     const projectRoot = createTempProject();
     try {
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
       const mcpPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
       mkdirSync(join(projectRoot, "home", ".pi", "agent"), { recursive: true });
       writeFileSync(mcpPath, JSON.stringify({
@@ -1327,6 +1428,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
   test("plan with Supermemory provider qualifies generic tools with custom server name", () => {
     const projectRoot = createTempProject();
     try {
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
       const mcpPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
       mkdirSync(join(projectRoot, "home", ".pi", "agent"), { recursive: true });
       writeFileSync(mcpPath, JSON.stringify({
@@ -1366,6 +1469,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
     // With valid MCP config, Supermemory tools are injected regardless of authenticatedRuntimeValidated
     const projectRoot = createTempProject();
     try {
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
       const mcpPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
       mkdirSync(join(projectRoot, "home", ".pi", "agent"), { recursive: true });
       writeFileSync(mcpPath, JSON.stringify({

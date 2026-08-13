@@ -95,6 +95,13 @@ describe("Codex MCP semantic configuration", () => {
     expect(inspectCodexSupermemoryMcpState(`
 [mcp_servers.supermemory]
 url = "https://mcp.supermemory.ai/mcp"
+
+[mcp_servers.supermemory.http_headers]
+x-sm-project = "sm_project_v1_kevin15011_deck"
+`)).toMatchObject({ ok: true, scope: "sm_project_v1_kevin15011_deck" });
+    expect(inspectCodexSupermemoryMcpState(`
+[mcp_servers.supermemory]
+url = "https://mcp.supermemory.ai/mcp"
 http_headers = { "x-sm-project" = "sm_project_default" }
 `)).toMatchObject({ ok: false, code: "supermemory-project-scope-invalid" });
     expect(inspectCodexSupermemoryMcpState(`

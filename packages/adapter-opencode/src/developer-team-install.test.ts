@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 
 import {
   buildOpenCodeDeveloperTeamInstallPlan,
@@ -11,7 +12,7 @@ import {
   verifyOpenCodeDeveloperTeamInstall,
 } from "./developer-team-install";
 import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
-import { getDefaultDeckConfig } from "@deck/core";
+import { buildCapabilityInstructionBundle, getDefaultDeckConfig } from "@deck/core";
 import { getStandaloneSkill, STANDALONE_SKILLS } from "@deck/core/skills/external";
 import { DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { createOpenCodeRunnerAdapter } from "./runner-adapter";
@@ -101,6 +102,11 @@ function createTempProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "deck-opencode-test-"));
   mkdirSync(join(dir, ".opencode", "skills"), { recursive: true });
   return dir;
+}
+
+function initCanonicalGitRemote(projectRoot: string): void {
+  execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
 }
 
 function createTempConfigDir(projectRoot: string): string {
@@ -929,10 +935,98 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
     expect(plan.memoryBundle).toBeUndefined();
   });
 
-  test("returns memoryBundle even when auth probe fails (advisory only)", () => {
-    // When Supermemory provider is present but the OpenCode MCP config validation fails,
-    // the resolveOpenCodeMemoryInjection still returns the bundle (auth probe is advisory only).
-    // No diagnostic is emitted - the probe result doesn't affect bundle injection.
+  test("propagates scoped adaptive-memory instructions into OpenCode prompts, agent skills, standalone skills, and bootstrap skills", () => {
+    const projectRoot = createTempProject();
+    const configDir = createTempConfigDir(projectRoot);
+    try {
+      initCanonicalGitRemote(projectRoot);
+      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
+          },
+        },
+      }));
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+        configDir,
+        memoryProvider: {
+          id: "supermemory",
+          displayName: "Supermemory",
+          buildInjection: (context) => ({
+            instructions: [{ surface: "agent", markdown: `provider scope ${context.supermemoryProjectScope}`, teamId: "developer-team" }],
+            toolBindings: [],
+          }),
+        },
+        capabilityInstructions: buildCapabilityInstructionBundle(["adaptive-memory"], {
+          supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+          configuredSupermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+        }),
+        standaloneSkills: completeStandaloneSkills,
+      });
+      const samples = [
+        plan.promptGenerationPlan.find((planned) => planned.agent.id === "deck-lead")!.content,
+        plan.skills.find((planned) => planned.agent.id === "deck-apply-deep")!.content,
+        plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("api-and-interface-design/SKILL.md"))!.content,
+        plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("deck-onboard/SKILL.md"))!.content,
+      ];
+
+      for (const content of samples) {
+        expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(content).toContain("supermemory_add_memory");
+        expect(content).not.toContain("No manual containerTag required");
+        expect(content).not.toContain("sm_project_default");
+      }
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("rebinds caller-supplied adaptive-memory capability fragments to the configured canonical OpenCode MCP scope", () => {
+    const projectRoot = createTempProject();
+    const configDir = createTempConfigDir(projectRoot);
+    try {
+      initCanonicalGitRemote(projectRoot);
+      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
+          },
+        },
+      }));
+      const callerBundle = {
+        instructions: [
+          { packageId: "adaptive-memory", surface: "agent", markdown: "No manual containerTag required", teamId: "developer-team" },
+          { packageId: "adaptive-memory", surface: "skill", markdown: "stale q example supermemory_search_memory({ q, containerTag: \"sm_project_default\" })", teamId: "developer-team" },
+          { packageId: "code-economy", surface: "agent", markdown: "caller-unrelated-marker", teamId: "developer-team" },
+        ],
+      } as const;
+
+      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
+        configDir,
+        capabilityInstructions: callerBundle,
+        standaloneSkills: completeStandaloneSkills,
+      });
+      const combined = [
+        plan.promptGenerationPlan.find((planned) => planned.agent.id === "deck-lead")!.content,
+        plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("api-and-interface-design/SKILL.md"))!.content,
+      ].join("\n");
+
+      expect(combined).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(combined).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(plan.capabilityInstructions?.instructions.some((fragment) => fragment.markdown === "caller-unrelated-marker")).toBe(true);
+      expect(combined).not.toContain("No manual containerTag required");
+      expect(combined).not.toContain("sm_project_default");
+      expect(combined).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
+    } finally {
+      cleanup(projectRoot);
+    }
+  });
+
+  test("fails closed for Supermemory memory injection when configured scope is missing", () => {
     const mockIdentity: AdaptiveMemoryProviderIdentity = {
       id: "supermemory",
       displayName: "Supermemory",
@@ -959,18 +1053,16 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
       }),
     };
 
-    // With no opencode.json present at the expected path, the auth probe would fail.
-    // But auth probe is advisory only - bundle is still returned.
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       memoryProvider: provider,
       configDir: "/nonexistent/.config/opencode",
     });
 
-    // Auth probe no longer blocks bundle injection
-    expect(plan.memoryBundle).toBeDefined();
-    expect(plan.memoryBundle?.toolBindings).toHaveLength(1);
-    // No memory diagnostics emitted - auth probe is advisory
-    expect(plan.memoryDiagnostics).toHaveLength(0);
+    expect(plan.memoryBundle).toBeUndefined();
+    expect(plan.memoryDiagnostics).toContainEqual(expect.objectContaining({
+      code: "memory_provider_unavailable",
+      providerId: "supermemory",
+    }));
   });
 });
 

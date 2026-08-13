@@ -27,111 +27,38 @@ Protected invocation authorization, controlled effects, centralized registry wri
 
 These instructions are enabled by the runner's native package instruction system.
 
-Adaptive memory is provided by the runner's configured memory system. The active provider injects its tool instructions into agent prompts.
+Adaptive memory is provided by the runner's configured memory system. Supermemory conversation capture is not production-wired on current the active runner, Pi, or Codex static-compatible paths because no trusted authenticated MCP execution boundary is exposed to Deck hooks.
 
-### Automatic Scoping
+### Conversation Capture
 
-Memories are scoped automatically:
-- **User**: Derived from your Supermemory token — no userId input needed.
-- **Project**: Derived from x-sm-project header in MCP config — no manual scoping needed.
+- Selecting Supermemory remains the only memory provider decision; do not add or ask for a second capture toggle, consent screen, quota, or mode selector.
+- Supermemory token or OAuth credentials identify the account; Deck supplies project isolation through one Deck-materialized canonical project scope.
+- Automatic scoping contract: once a real executing transport exists, one runner session must be captured as one conversation document with a stable customId and canonical project scope.
+- Supermemory owns extraction, profiles, graph updates, ranking, temporal updates, and deduplication.
+- Agents must not manually extract routine facts, create topic keys, fill a semantic memory quota, or write mandatory session summaries.
 
-Save memories as plain content. Scoping is automatic.
+### Project Scope Binding
 
-When coordinating work, be aware that sub-agents may save and search memories as part of their workflow. Agents should proactively save after significant decisions, bug fixes, discoveries, or pattern establishment.
+- Adaptive-memory project operations are disabled because Deck detected configured scope missing.
+- Fail closed for memory and fail open for coding work: do not save, search, list, document, graph, or use save equivalents for project memory.
+- Do not use a default container, active space, or an agent-derived replacement scope.
+- Account-only readiness checks may still be used for authentication/status when exposed by the runner.
 
-Before ending a session, ensure a session summary is saved covering: goal, instructions discovered, technical findings, accomplished items, next steps, and relevant files.
+### Retrieval
 
-**OPENSPEC IS OFFICIAL CONTEXT — ADAPTIVE MEMORY IS ADVISORY.**
+- Load bounded project-profile context once on start/resume when healthy.
+- Search only when prior context is materially relevant or the user requests recall.
+- Keep recall advisory, scoped to the canonical project container, limited to five results and about 1,500 tokens by default.
+- Keep query rewriting and reranking disabled unless benchmark evidence enables them.
 
-If adaptive memory contradicts an OpenSpec artifact, the OpenSpec artifact wins. Always.
+### Privacy and Authority
 
-If memory operations fail or tools are unavailable, agents continue working normally — memory is never blocking.
+- Reject or redact credentials, private keys, authorization headers, and raw environment dumps before ingestion.
+- Do not automatically ingest OpenSpec artifacts, provider responses, web content, tool output, or raw logs merely because they appear in conversation.
+- OPENSPEC IS OFFICIAL CONTEXT — ADAPTIVE MEMORY IS ADVISORY. OpenSpec artifacts, source, tests, and current runner evidence win.
+- Fail-open: memory errors must not block coding work, continue working normally, and diagnostics must be redacted.
 
 ### Provider: Supermemory
 
-When the configured memory provider is "supermemory", use these MCP tools:
-
-- `memory` (action: "save", content: "...") — commit a memory
-- `memory` (action: "forget", content: "...") — remove a memory
-- `recall` (query: "...", includeProfile?: boolean) — retrieve relevant memories
-
-The Supermemory MCP server exposes these tools natively. Do not call raw MCP tools directly — use the tool names shown above.
-
-Scoping is automatic: user from token, project from x-sm-project header. No manual containerTag required.
-
-### Decision Examples
-
-1. **Architecture decision made**
-   - *Trigger*: Team chooses Zustand over Redux for state management
-   - *Suggested topic key*: architecture/state-management
-   - *Example content*: **What**: Chose Zustand over Redux. **Why**: Redux boilerplate too heavy for our use case. **Where**: src/store/.
-
-2. **User preference correction**
-   - *Trigger*: User corrects naming style assumption
-   - *Suggested topic key*: preference/kevin
-   - *Example content*: **What**: User prefers kebab-case CSS classes. **Where**: src/components/.
-
-3. **Non-obvious discovery**
-   - *Trigger*: Subtle memory leak found in useEffect cleanup
-   - *Suggested topic key*: discovery/react-hooks-cleanup
-   - *Example content*: **What**: useEffect without cleanup retains stale closures. **Where**: src/hooks/useAudioPlayer.ts.
-
-4. **Bug fix with root cause**
-   - *Trigger*: Fixed N+1 query in UserList
-   - *Suggested topic key*: bugfix/n-plus-one-user-list
-   - *Example content*: **What**: Fixed by eager-loading organization. **Where**: src/models/User.ts.
-
-5. **Session-close summary**
-   - *Trigger*: Ending session after implementation work
-   - *Suggested topic key*: session/2026-05-23-deck-refactor
-   - *Example content*: **Goal**: Refactor skills for parallel execution. **Accomplished**: Tasks 1-2.
-
-### Suggested Topic Keys
-
-| Work Type | Topic Key Pattern | Example |
-|---|---|---|
-| Architecture | architecture/<component-name> | architecture/auth-model |
-| Bugfix | bugfix/<issue-description> | bugfix/null-pointer-list |
-| Performance | performance/<area> | performance/user-list-query |
-| Config | config/<what-changed> | config/database-url |
-| Preference | preference/<user-name> | preference/kevin |
-| Pattern | pattern/<pattern-name> | pattern/naming-convention |
-| Discovery | discovery/<what-found> | discovery/react-hooks-cleanup |
-| Session | session/<date>- <context> | session/2026-05-23-deck-refactor |
-| Team | team/<topic> | team/onboarding-docs |
-| Security | security/<concern> | security/api-key-storage |
-
-### Save Trigger Matrix
-
-| Lifecycle Moment | Save Action | Topic Key | Content Focus |
-|---|---|---|---|
-| Architecture decision made | Save immediately | architecture/<component> | What was decided, why |
-| Bug fix completed | Save immediately | bugfix/<issue> | What was fixed, root cause |
-| User preference learned | Save immediately | preference/<user> | What the preference is |
-| Session close | Save before ending | session/<date>- <context> | Goal, discoveries, next steps |
-| Non-obvious discovery | Save immediately | discovery/<what-found> | What was found, context |
-| Configuration change | Save immediately | config/<what-changed> | What changed, why |
-| Pattern established | Save immediately | pattern/<pattern-name> | What pattern, where |
-
-### Provider: Engram
-
-When the configured memory provider is "engram", use Engram's documented tool interface. The Engram adapter injects its specific instructions; follow those instead of these generic ones.
-
-## Serena Delegation Guidance
-
-### Apply Delegation (editing/refactoring)
-
-When delegating to apply agents (`deck-apply-fast`, `deck-apply-deep`) for tasks involving symbolic editing or refactoring:
-- Require the use of Serena edit tools (`serena_replace_symbol_body`, `serena_rename_symbol`, `serena_insert_after_symbol`, `serena_insert_before_symbol`) as first preference.
-- If the agent cannot use them, require explicit report: "Serena edit tools unavailable; fallback used: [tool]."
-
-### Non-Apply Delegation (search/navigation/diagnostics)
-
-When delegating to non-apply agents (explorer, proposal, spec, design, task, verify, review):
-- Suggest Serena read-only tools (`serena_find_symbol`, `serena_find_referencing_symbols`, `serena_find_implementations`, `serena_find_declaration`, `serena_get_symbols_overview`, `serena_get_diagnostics_for_file`) when appropriate for symbolic search, navigation, or diagnostics.
-- Do NOT request write-capable tools to non-apply agents; respect the tool policy by role.
-
-### Guidance Assumptions
-
-This guidance is present because the Serena package is available. The delegation instructions assume Serena capabilities are available when needed.
+Use the runner-exposed Supermemory tools only for bounded recall, account readiness, and explicit user forget requests. Do not pass arbitrary containerTag values; Deck owns the canonical project scope. Do not claim automatic conversation capture on unsupported/static-compatible runners.
 <!-- deck:developer-team:end -->

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
+import { buildCapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 
 import { buildCodexDeveloperTeamInstallPlan } from "./developer-team-install";
 import { parseSkillDescriptor } from "../../core/src/skill-discovery/discovery";
@@ -148,5 +149,37 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(JSON.stringify(invalid.diagnostics)).toContain("redacted");
     expect(JSON.stringify(invalid.diagnostics)).not.toContain("raw/project/name");
     expect(JSON.stringify(invalid.diagnostics)).not.toContain("Engram");
+  });
+
+  test("propagates the exact canonical Supermemory scope across Codex session, roles, agent skills, external skills, and bootstrap skills", () => {
+    const plan = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map(),
+      memoryProvider: "supermemory",
+      supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+      capabilityInstructions: buildCapabilityInstructionBundle(["adaptive-memory"], {
+        supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+        configuredSupermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+      }),
+    });
+    const expected = new Map(plan.expectedFiles.map((file) => [file.relativePath, file.content]));
+
+    for (const path of [
+      "AGENTS.md",
+      ".codex/agents/deck-lead.toml",
+      ".codex/agents/deck-apply-deep.toml",
+      ".agents/skills/deck-apply-deep/SKILL.md",
+      ".agents/skills/api-and-interface-design/SKILL.md",
+      ".agents/skills/deck-onboard/SKILL.md",
+    ]) {
+      const content = expected.get(path) ?? "";
+      expect(
+        content.includes('containerTag: "sm_project_v1_kevin15011_deck"') || content.includes('containerTag: \\"sm_project_v1_kevin15011_deck\\"'),
+        path,
+      ).toBe(true);
+      expect(content, path).toContain("x-sm-project is diagnostic/transport metadata only");
+      expect(content, path).not.toContain("No manual containerTag required");
+      expect(content, path).not.toContain("sm_project_default");
+    }
   });
 });

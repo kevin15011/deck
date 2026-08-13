@@ -2,6 +2,7 @@ import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { runOpenCodeLaunch } from "./opencode-launch-command";
 import { getDefaultDeckConfig } from "@deck/core";
 
@@ -143,6 +144,137 @@ describe("production prompt activation", () => {
       expect(content).toContain("Web Search Capability (provider-neutral)");
       expect(content).toContain("Use short direct research only when it materially reduces uncertainty");
       expect(content).not.toMatch(/Tavily|tavily_|TAVILY_API_KEY/);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenCode launch binds Supermemory guidance to validated MCP scope across prompts and skills", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-supermemory-launch-"));
+    const configDir = join(projectRoot, ".config", "opencode");
+    try {
+      mkdirSync(configDir, { recursive: true });
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
+      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
+          },
+        },
+      }));
+      const deckConfig = {
+        ...getDefaultDeckConfig(),
+        adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } },
+      };
+
+      const result = await runOpenCodeLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        configDir,
+        deckConfig,
+        commandExists: () => true,
+        dryRun: true,
+      });
+      const leadPrompt = readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8");
+      const standaloneSkill = readFileSync(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8");
+      const bootstrapSkill = readFileSync(join(configDir, "skills", "deck-onboard", "SKILL.md"), "utf8");
+      const combined = [leadPrompt, standaloneSkill, bootstrapSkill].join("\n");
+
+      expect(result.status).toBe("ready");
+      expect(combined).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(combined).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(combined).not.toContain("No manual containerTag required");
+      expect(combined).not.toContain("sm_project_default");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenCode launch fails closed for Supermemory guidance when configured MCP scope mismatches derived scope", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-supermemory-mismatch-"));
+    const configDir = join(projectRoot, ".config", "opencode");
+    try {
+      mkdirSync(configDir, { recursive: true });
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
+      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-sm-project": "sm_project_v1_other_repo" },
+          },
+        },
+      }));
+      const deckConfig = {
+        ...getDefaultDeckConfig(),
+        adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } },
+      };
+
+      const result = await runOpenCodeLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        configDir,
+        deckConfig,
+        commandExists: () => true,
+        dryRun: true,
+      });
+      const leadPrompt = readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8");
+      const standaloneSkill = readFileSync(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8");
+      const combined = [leadPrompt, standaloneSkill].join("\n");
+
+      expect(result.status).toBe("ready");
+      expect(combined).toContain("Adaptive-memory project operations are disabled");
+      expect(combined).toContain("scope mismatch");
+      expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(combined).not.toContain("sm_project_v1_other_repo");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenCode launch fails closed for Supermemory guidance when configured MCP scope is the default scope", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-supermemory-default-"));
+    const configDir = join(projectRoot, ".config", "opencode");
+    try {
+      mkdirSync(configDir, { recursive: true });
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
+      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: "https://mcp.supermemory.ai/mcp",
+            headers: { "x-sm-project": "sm_project_default" },
+          },
+        },
+      }));
+      const deckConfig = {
+        ...getDefaultDeckConfig(),
+        adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } },
+      };
+
+      const result = await runOpenCodeLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        configDir,
+        deckConfig,
+        commandExists: () => true,
+        dryRun: true,
+      });
+      const leadPrompt = readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8");
+      const standaloneSkill = readFileSync(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8");
+      const bootstrapSkill = readFileSync(join(configDir, "skills", "deck-onboard", "SKILL.md"), "utf8");
+      const combined = [leadPrompt, standaloneSkill, bootstrapSkill].join("\n");
+
+      expect(result.status).toBe("ready");
+      expect(combined).toContain("Adaptive-memory project operations are disabled");
+      expect(combined).toContain("configured scope missing");
+      expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(combined).not.toContain("sm_project_default");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }

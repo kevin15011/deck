@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DoctorDiagnosticsResult } from "../doctor-command/types";
@@ -15,32 +15,8 @@ const mockReviewPiRequiredTools = vi.fn();
 const mockValidateSupermemoryPiMcpConfig = vi.fn();
 const mockInspectOpenCodeEnvironment = vi.fn();
 const mockReviewOpenCodeTools = vi.fn();
+const mockValidateSupermemoryOpenCodeMcpConfig = vi.fn();
 const mockDetectSelectedRuntimes = vi.fn();
-
-vi.mock("@deck/adapter-pi", () => ({
-  inspectPiEnvironment: mockInspectPiEnvironment,
-  reviewPiRequiredTools: mockReviewPiRequiredTools,
-  validateSupermemoryPiMcpConfig: mockValidateSupermemoryPiMcpConfig,
-  redact: vi.fn((v: string) => v.replace(/Bearer\s+[\w.-]+/gi, "Bearer ***").replace(/sk-[\w.-]+/gi, "***")),
-  redactDiagnostic: vi.fn((d: unknown) => {
-    if (typeof d === "object" && d !== null && "message" in d) {
-      const diag = d as { message?: string };
-      if (diag.message) {
-        diag.message = diag.message.replace(/Bearer\s+[\w.-]+/gi, "Bearer ***").replace(/sk-[\w.-]+/gi, "***");
-      }
-    }
-    return d;
-  }),
-}));
-
-vi.mock("@deck/adapter-opencode", () => ({
-  inspectOpenCodeEnvironment: mockInspectOpenCodeEnvironment,
-  reviewOpenCodeTools: mockReviewOpenCodeTools,
-}));
-
-vi.mock("../runtime-detection", () => ({
-  detectSelectedRuntimes: mockDetectSelectedRuntimes,
-}));
 
 import { runDoctorDiagnostics } from "../doctor-command/doctor-diagnostics";
 
@@ -75,6 +51,13 @@ function fabDependencies() {
   const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: join(root, "xdg"), projectRoot: join(root, "repo") });
   configStore.write({});
   return {
+    detectSelectedRuntimes: mockDetectSelectedRuntimes,
+    inspectPiEnvironment: mockInspectPiEnvironment,
+    reviewPiRequiredTools: mockReviewPiRequiredTools,
+    validateSupermemoryPiMcpConfig: mockValidateSupermemoryPiMcpConfig,
+    inspectOpenCodeEnvironment: mockInspectOpenCodeEnvironment,
+    reviewOpenCodeTools: mockReviewOpenCodeTools,
+    validateSupermemoryOpenCodeMcpConfig: mockValidateSupermemoryOpenCodeMcpConfig,
     configStore,
     runDeckChecks: vi.fn(async () => ({ deck: [], binary: [], runnerConfig: [] })),
     fetchReleaseDescriptor: vi.fn(() => ({
@@ -122,6 +105,40 @@ describe("runDoctorDiagnostics", () => {
     await runDoctorDiagnostics(dependencies, projectRoot);
 
     expect(dependencies.inspectCodex).toHaveBeenCalledWith(projectRoot, expect.any(Object));
+  });
+
+  test("reports Supermemory project scope agreement in top-level MCP diagnostics", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([]);
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue({
+      ...fabOkMcpResult(),
+      projectScope: "sm_project_v1_kevin15011_deck",
+    });
+    const dependencies = fabDependencies();
+    dependencies.readOpenCodeMcpSection.mockReturnValue({
+      supermemory: {
+        type: "remote",
+        url: "https://mcp.supermemory.ai/mcp",
+        headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
+      },
+    });
+    mockValidateSupermemoryOpenCodeMcpConfig.mockReturnValue({
+      ...fabOkMcpResult(),
+      projectScope: "sm_project_v1_kevin15011_deck",
+    });
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-doctor-sm-scope-"));
+    mkdirSync(join(projectRoot, ".git", "objects", "info"), { recursive: true });
+    mkdirSync(join(projectRoot, ".git", "objects", "pack"), { recursive: true });
+    mkdirSync(join(projectRoot, ".git", "refs", "heads"), { recursive: true });
+    writeFileSync(join(projectRoot, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(join(projectRoot, ".git", "config"), '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+
+    const result = await runDoctorDiagnostics(dependencies, projectRoot);
+
+    expect(result.mcp).toContainEqual(expect.objectContaining({
+      category: "Supermemory Project Scope",
+      status: "ok",
+    }));
+    expect(result.summary?.sections).toContain("Supermemory Project Scope");
   });
 
   test("fails closed for Codex diagnostics when no verified project root is available", async () => {
@@ -424,11 +441,18 @@ describe("runDoctorDiagnostics dependency seam", () => {
 
     expect(Object.keys(dependencies).sort()).toEqual([
       "configStore",
+      "detectSelectedRuntimes",
       "fetchReleaseDescriptor",
       "inspectCodex",
+      "inspectOpenCodeEnvironment",
+      "inspectPiEnvironment",
       "memoryBinaryAvailable",
       "readOpenCodeMcpSection",
+      "reviewOpenCodeTools",
+      "reviewPiRequiredTools",
       "runDeckChecks",
+      "validateSupermemoryOpenCodeMcpConfig",
+      "validateSupermemoryPiMcpConfig",
     ]);
     expect(dependencies.runDeckChecks).toHaveBeenCalledTimes(1);
     expect(dependencies.fetchReleaseDescriptor).toHaveBeenCalledTimes(1);

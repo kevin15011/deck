@@ -13,7 +13,6 @@ import { dirname, join } from "node:path";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import { getAgentContent, getTeamSessionInstructions, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
-import { buildAdaptiveMemoryInstructionBundle } from "../../core/src/teams/developer/instruction-bundles/adaptive-memory";
 import type { CapabilityInstructionBundle } from "@deck/core";
 import { type OrchestratorPersonality } from "@deck/core/config/deck-config";
 import { type MemoryInjectionBundle, ADAPTIVE_MEMORY_SECTION_HEADING, ADAPTIVE_MEMORY_AUXILIARY_POLICY } from "@deck/core/memory/adaptive-memory";
@@ -407,11 +406,7 @@ export function buildPromptGenerationPlan(
   const explicitProvider =
     options.activeMemoryProviderFromConfig ?? detectSupermemoryProviderFromConfig(configDir);
 
-  // R31: If a provider is detected but no memoryBundle is provided,
-  // use the default instruction bundle so prompts include tool references.
-  // This ensures Supermemory prompts have `memory`/`recall` even without explicit bundle.
-  // Note: buildAdaptiveMemoryInstructionBundle returns CapabilityInstructionBundle, not MemoryInjectionBundle.
-  const effectiveCapabilityInstructions = capabilityInstructions ?? (explicitProvider ? buildAdaptiveMemoryInstructionBundle() : undefined);
+  const effectiveCapabilityInstructions = capabilityInstructions;
 
   const promptsDir = join(configDir, "prompts", "deck-team");
 

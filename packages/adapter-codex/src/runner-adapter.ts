@@ -10,6 +10,7 @@ import {
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   getConfigurablePackageInstructionMetadata,
   buildCapabilityInstructionBundle,
+  bindAdaptiveMemoryInstructionBundle,
   getEnabledCapabilityInstructionIds,
   getDefaultDeckConfig,
   checkSharedBinaryUsability,
@@ -18,6 +19,7 @@ import {
   resolveWebSearchReadiness,
   hasWebSearchProviderCredential,
   isWebSearchProviderDescriptor,
+  resolveCanonicalSupermemoryProjectScope,
   bootstrapSerena,
   resolveExistingSerenaReadiness,
   type SharedBinaryUsabilityResult,
@@ -65,14 +67,14 @@ import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 
 import { buildCodexDeveloperTeamInstallPlan } from "./developer-team-install";
 import { CODEX_CAPABILITY_CATALOG, CODEX_RUNNER_CAPABILITY_CONTRIBUTION } from "./capability-catalog";
-import { mergeCodexProjectConfig } from "./codex-config";
+import { mergeCodexProjectConfig, mergeCodexTrustedHookConfig } from "./codex-config";
 import {
   CODEX_DEVELOPER_BYPASS_DIAGNOSTIC,
   buildCodexLaunchPlan,
   isSafeCodexLaunchScalar,
 } from "./launch";
 import { composeLocalOnlyExclude } from "./local-only";
-import { inspectCodexMcpServerIds, isCodexSerenaMcpConfigured, isCodexSupermemoryMcpConfigured, isCodexWebSearchMcpConfigured, isDeckManagedCodexMcpServer } from "./mcp-config";
+import { buildCodexMcpServers, inspectCodexMcpServerIds, inspectCodexSupermemoryMcpState, isCodexSerenaMcpConfigured, isCodexSupermemoryMcpConfigured, isCodexWebSearchMcpConfigured, isDeckManagedCodexMcpServer, mergeCodexMcpServers } from "./mcp-config";
 import { inspectCodexSupermemoryOAuth, type CodexSupermemoryOAuthStatus } from "./mcp-oauth";
 import { createNodeCodexFileEffects } from "./node-effects";
 import {
@@ -666,6 +668,39 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#pendingSerenaPreparationByProject.set(resolve(projectRoot), preparation);
   }
 
+  #inspectEffectiveConfiguredSupermemoryProjectScope(input: {
+    existingCodexConfig: string;
+    deckConfig: NormalizedDeckConfig;
+    memoryProviderId: "none" | "supermemory" | "engram";
+    derivedSupermemoryProjectScope?: string;
+    mcpCapabilityIds: readonly string[];
+    serenaPreparation?: PendingSerenaPreparation;
+  }): string | undefined {
+    const existing = inspectCodexSupermemoryMcpState(input.existingCodexConfig);
+    const existingScope = existing.ok ? existing.scope : undefined;
+    const config = mergeCodexProjectConfig(input.existingCodexConfig, { multiAgent: true });
+    if (config.status === "blocked") return existingScope;
+    const webSearchProvider = this.resolveWebSearchProvider(input.deckConfig.webSearch.provider);
+    const desiredMcp = buildCodexMcpServers({
+      packageIds: input.mcpCapabilityIds,
+      memoryProvider: input.memoryProviderId,
+      supermemoryProjectScope: input.derivedSupermemoryProjectScope,
+      serenaLauncherAvailable: input.serenaPreparation?.readiness.state === "ready",
+      serenaProxyAvailable: input.serenaPreparation?.readiness.state === "ready" && input.serenaPreparation.proxy.state === "ready",
+      webSearchProviderSupported: webSearchProvider !== undefined,
+      webSearchProviderConfigured: input.deckConfig.webSearch.provider !== undefined,
+      webSearchProvider,
+      webSearchCredentialAvailable: hasWebSearchProviderCredential(webSearchProvider, process.env),
+      webSearchExecutableAvailable: webSearchProvider ? commandAvailable(webSearchProvider.command[0]!) : false,
+    });
+    const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers);
+    if (mcp.status === "blocked") return existingScope;
+    const hooks = mergeCodexTrustedHookConfig(mcp.content, false);
+    if (hooks.status === "blocked") return existingScope;
+    const planned = inspectCodexSupermemoryMcpState(hooks.content);
+    return planned.ok ? planned.scope : existingScope;
+  }
+
   #selectedMcpCapabilityIds(
     input: DeveloperTeamAdapterInstallInput,
     capabilityInstructions: ReturnType<typeof buildCapabilityInstructionBundle> | undefined,
@@ -1026,9 +1061,21 @@ class CodexRunnerAdapter implements RunnerAdapter {
   async prepareDeveloperTeamInstall(input: DeveloperTeamAdapterInstallInput) {
     if (input.materializationScope === "content-only") return [];
     const config = requireDeckConfig(input.deckConfig, "operation");
-    const capabilityInstructions = input.capabilityInstructions
-      ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "codex"));
     const existingConfig = readExistingPlanFiles(input.projectRoot).files.get(".codex/config.toml") ?? "";
+    const derivedSupermemoryProjectScope = (() => {
+      const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
+      return resolved.ok ? resolved.scope : undefined;
+    })();
+    const existingSupermemory = inspectCodexSupermemoryMcpState(existingConfig);
+    const configuredSupermemoryProjectScope = existingSupermemory.ok ? existingSupermemory.scope : undefined;
+    const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions
+      ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "codex"), {
+        supermemoryProjectScope: derivedSupermemoryProjectScope,
+        configuredSupermemoryProjectScope,
+      }), {
+      supermemoryProjectScope: derivedSupermemoryProjectScope,
+      configuredSupermemoryProjectScope,
+    });
     if (!this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingConfig, config.webSearch.enabled).includes("serena")) return [];
     const preparation = await this.#prepareSerena(input.projectRoot);
     if (preparation.readiness.state !== "ready") {
@@ -1144,14 +1191,52 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const existing = readExistingPlanFiles(input.projectRoot, materializationScope);
     const config = requireDeckConfig(input.deckConfig, "operation");
     const webSearchProvider = this.resolveWebSearchProvider(config.webSearch.provider);
-    const capabilityInstructions = input.capabilityInstructions
-      ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "codex"));
+    const derivedSupermemoryProjectScope = (() => {
+      const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
+      return resolved.ok ? resolved.scope : undefined;
+    })();
+    const existingCodexConfig = existing.files.get(".codex/config.toml") ?? "";
+    const existingConfiguredSupermemoryProjectScope = (() => {
+      const inspected = inspectCodexSupermemoryMcpState(existingCodexConfig);
+      return inspected.ok ? inspected.scope : undefined;
+    })();
+    const memoryProviderId = (input.memoryProvider?.id ?? config.adaptiveMemory.activeProvider) as "none" | "supermemory" | "engram";
+    const enabledCapabilityInstructionIds = getEnabledCapabilityInstructionIds(config, "codex");
+    if (memoryProviderId !== "none" && !enabledCapabilityInstructionIds.includes("adaptive-memory")) {
+      enabledCapabilityInstructionIds.push("adaptive-memory");
+    }
+    const selectionCapabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions
+      ?? buildCapabilityInstructionBundle(enabledCapabilityInstructionIds, {
+        supermemoryProjectScope: derivedSupermemoryProjectScope,
+        configuredSupermemoryProjectScope: existingConfiguredSupermemoryProjectScope,
+      }), {
+      supermemoryProjectScope: derivedSupermemoryProjectScope,
+      configuredSupermemoryProjectScope: existingConfiguredSupermemoryProjectScope,
+    });
     const mcpCapabilityIds = materializationScope === "full"
-      ? this.#selectedMcpCapabilityIds(input, capabilityInstructions, existing.files.get(".codex/config.toml") ?? "", config.webSearch.enabled)
+      ? this.#selectedMcpCapabilityIds(input, selectionCapabilityInstructions, existingCodexConfig, config.webSearch.enabled)
       : [];
     const serenaPreparation = mcpCapabilityIds.includes("serena")
       ? this.#takePendingSerenaPreparation(input.projectRoot)
       : undefined;
+    const configuredSupermemoryProjectScope = materializationScope === "full"
+      ? this.#inspectEffectiveConfiguredSupermemoryProjectScope({
+        existingCodexConfig,
+        deckConfig: config,
+        memoryProviderId,
+        derivedSupermemoryProjectScope,
+        mcpCapabilityIds,
+        serenaPreparation,
+      })
+      : existingConfiguredSupermemoryProjectScope;
+    const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions
+      ?? buildCapabilityInstructionBundle(enabledCapabilityInstructionIds, {
+        supermemoryProjectScope: derivedSupermemoryProjectScope,
+        configuredSupermemoryProjectScope,
+      }), {
+      supermemoryProjectScope: derivedSupermemoryProjectScope,
+      configuredSupermemoryProjectScope,
+    });
     let native = buildCodexDeveloperTeamInstallPlan({
       projectRoot: input.projectRoot,
       existingFiles: existing.files,
@@ -1159,7 +1244,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
       modelAssignments: input.modelAssignments,
       thinkingAssignments: input.thinkingAssignments,
       capabilityInstructions,
-      memoryProvider: (input.memoryProvider?.id ?? config.adaptiveMemory.activeProvider) as "none" | "supermemory" | "engram",
+      memoryProvider: memoryProviderId,
+      supermemoryProjectScope: derivedSupermemoryProjectScope,
       mcpCapabilityIds,
        webSearchProviderSupported: webSearchProvider !== undefined,
        webSearchProviderConfigured: config.webSearch.provider !== undefined,

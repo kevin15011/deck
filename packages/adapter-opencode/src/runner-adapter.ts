@@ -78,8 +78,10 @@ import {
   getRunnerCapabilityMapping,
   PACKAGE_INSTRUCTION_PACKAGE_IDS,
   buildCapabilityInstructionBundle,
+  bindAdaptiveMemoryInstructionBundle,
   getEnabledCapabilityInstructionIds,
   getConfigurablePackageInstructionMetadata,
+  resolveCanonicalSupermemoryProjectScope,
   SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
   SKILL_DISCOVERY_SOURCE_SCHEMA,
   SKILL_DISCOVERY_V1_BOUNDS,
@@ -1554,13 +1556,21 @@ class OpenCodeRunnerAdapterImpl {
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
     const modelAssignments = input.modelAssignments ?? {};
     const thinkingAssignments = input.thinkingAssignments ?? {};
-    const capabilityInstructions = input.capabilityInstructions ?? (() => {
+    const derivedSupermemoryProjectScope = (() => {
+      const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
+      return resolved.ok ? resolved.scope : undefined;
+    })();
+    const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions ?? (() => {
       try {
-        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(requireDeckConfig(input.deckConfig, "developer team install"), "opencode"));
+        return buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(requireDeckConfig(input.deckConfig, "developer team install"), "opencode"), {
+          supermemoryProjectScope: derivedSupermemoryProjectScope,
+        });
       } catch {
         return undefined;
       }
-    })();
+    })(), {
+      supermemoryProjectScope: derivedSupermemoryProjectScope,
+    });
     const standaloneSkills = input.standaloneSkills ?? getStandaloneSkills().map(({ skillId }) => {
       const bundle = getStandaloneSkill(skillId);
       return { skillId, body: bundle.SKILL, files: bundle.files };

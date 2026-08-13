@@ -12,6 +12,8 @@ export type MemoryCapability =
 
 export type AdaptiveMemoryBuildContext = {
   teamId?: string;
+  supermemoryProjectScope?: string;
+  configuredSupermemoryProjectScope?: string;
 };
 
 export type AdaptiveMemoryCompositionContext = {

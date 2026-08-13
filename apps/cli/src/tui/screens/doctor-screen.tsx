@@ -6,7 +6,8 @@ import { formatDoctorResult, formatExecutiveSummary } from "../../doctor-command
 import type { DoctorCategoryResult, DoctorCheckItem, DoctorDiagnosticsResult, DoctorRuntimeResult, DoctorStatus, DoctorPresentationModel } from "../../doctor-command/types";
 
 type DoctorScreenProps = {
-  // No props — standalone screen
+  projectRoot?: string | null;
+  runDiagnostics?: typeof runDoctorDiagnostics;
 };
 
 const STATUS_ICON: Record<DoctorStatus, string> = {
@@ -166,7 +167,7 @@ function DiagnosticsReport({ result }: { result: DoctorDiagnosticsResult }) {
   );
 }
 
-export function DoctorScreen(_props: DoctorScreenProps) {
+export function DoctorScreen({ projectRoot, runDiagnostics = runDoctorDiagnostics }: DoctorScreenProps) {
   const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<DoctorDiagnosticsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -174,7 +175,7 @@ export function DoctorScreen(_props: DoctorScreenProps) {
   useEffect(() => {
     let cancelled = false;
 
-    runDoctorDiagnostics()
+    runDiagnostics({}, projectRoot ?? undefined)
       .then((diagnostics) => {
         if (cancelled) return;
         setResult(diagnostics);
@@ -189,7 +190,7 @@ export function DoctorScreen(_props: DoctorScreenProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [projectRoot, runDiagnostics]);
 
   // Compute executive summary for display
   const summaryText = result

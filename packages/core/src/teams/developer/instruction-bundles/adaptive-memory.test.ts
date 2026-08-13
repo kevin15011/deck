@@ -5,6 +5,10 @@ import type { CapabilityInstructionSurface } from "./index";
 
 describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversation policy", () => {
   const bundle = buildAdaptiveMemoryInstructionBundle();
+  const scopedBundle = buildAdaptiveMemoryInstructionBundle({
+    supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+    configuredSupermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+  });
   const surfaces: CapabilityInstructionSurface[] = ["agent", "session", "skill"];
 
   for (const surface of surfaces) {
@@ -27,5 +31,63 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
       expect(markdown).not.toContain("Deck configures provider-native conversation capture automatically");
       expect(markdown).not.toContain("Save Trigger Matrix");
     });
+
+    test(`${surface} surface binds automatic memory to the exact canonical containerTag`, () => {
+      const markdown = scopedBundle.instructions.find((fragment) => fragment.surface === surface)?.markdown ?? "";
+
+      expect(markdown).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(markdown).toContain('supermemory_add_memory({ content, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(markdown).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(markdown).toContain('supermemory_listMemories({ containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(markdown).toContain('supermemory_listDocuments({ containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(markdown).toContain('supermemory_fetch-graph-data({ containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(markdown).toContain('supermemory_memory-graph({ containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(markdown).toContain('supermemory_save-memory({ content, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(markdown).toContain("supermemory_getDocument");
+      expect(markdown).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
+      expect(markdown).toContain("Agents MUST NOT derive, replace, or omit this value");
+      expect(markdown).toContain("x-sm-project is diagnostic/transport metadata only");
+      expect(markdown).toContain("skip the memory operation");
+      expect(markdown).not.toContain("sm_project_default");
+      expect(markdown).not.toContain("No manual containerTag required");
+      expect(markdown).not.toContain("x-sm-project header supplies an omitted tool argument");
+    });
   }
+
+  test("missing or mismatched canonical scope renders fail-closed memory guidance", () => {
+    const markdown = buildAdaptiveMemoryInstructionBundle({
+      supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+      configuredSupermemoryProjectScope: "sm_project_v1_other_repo",
+    }).instructions.map((fragment) => fragment.markdown).join("\n");
+
+    expect(markdown).toContain("Adaptive-memory project operations are disabled");
+    expect(markdown).toContain("scope mismatch");
+    expect(markdown).toContain("fail open for coding work");
+    expect(markdown).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+    expect(markdown).not.toContain("sm_project_default");
+  });
+
+  test("derived scope without observed configured MCP scope fails closed", () => {
+    const markdown = buildAdaptiveMemoryInstructionBundle({
+      supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+    }).instructions.map((fragment) => fragment.markdown).join("\n");
+
+    expect(markdown).toContain("Adaptive-memory project operations are disabled");
+    expect(markdown).toContain("configured scope missing");
+    expect(markdown).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+  });
+
+  test("default or invalid configured MCP scope fails closed without echoing the value", () => {
+    for (const configuredSupermemoryProjectScope of ["sm_project_default", "not-a-scope"]) {
+      const markdown = buildAdaptiveMemoryInstructionBundle({
+        supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+        configuredSupermemoryProjectScope,
+      }).instructions.map((fragment) => fragment.markdown).join("\n");
+
+      expect(markdown).toContain("Adaptive-memory project operations are disabled");
+      expect(markdown).toContain("scope invalid");
+      expect(markdown).not.toContain(configuredSupermemoryProjectScope);
+      expect(markdown).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+    }
+  });
 });

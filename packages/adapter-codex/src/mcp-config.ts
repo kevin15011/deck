@@ -67,9 +67,18 @@ function existingServers(source: string): Map<string, object> {
   const ast = parseTOML(source, { tomlVersion: "1.0.0" });
   const result = new Map<string, object>();
   for (const node of ast.body[0]?.body ?? []) {
-    if (node.type !== "TOMLTable" || node.resolvedKey.length !== 2 || node.resolvedKey[0] !== "mcp_servers") continue;
+    if (node.type !== "TOMLTable" || node.resolvedKey.length < 2 || node.resolvedKey[0] !== "mcp_servers") continue;
     const fields = Object.fromEntries(node.body.map((entry) => [entry.key.keys.map((key) => key.type === "TOMLBare" ? key.name : key.value).join("."), scalar(entry.value)]));
-    result.set(String(node.resolvedKey[1]), fields);
+    const serverId = String(node.resolvedKey[1]);
+    if (node.resolvedKey.length === 2) {
+      result.set(serverId, { ...(result.get(serverId) ?? {}), ...fields });
+      continue;
+    }
+    if (node.resolvedKey.length === 3) {
+      const server = { ...(result.get(serverId) ?? {}) } as Record<string, unknown>;
+      server[String(node.resolvedKey[2])] = fields;
+      result.set(serverId, server);
+    }
   }
   return result;
 }

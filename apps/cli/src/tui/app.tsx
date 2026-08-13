@@ -291,7 +291,8 @@ function redactSecret(value: string): string {
 
 export function buildSupermemoryDeckConfig(values: SupermemorySetupValues) {
   // Token-only config: no userId/teamId/orgId stored
-  // User identity derived from token, project via x-sm-project header in MCP config
+  // User identity is token-derived. Deck binds one canonical project scope to
+  // both the MCP header and every project-memory operation instruction.
   return {
     version: 1,
     adaptiveMemory: {
@@ -398,7 +399,7 @@ export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupVal
       configured: true,
       hasToken: true,
       // userId no longer stored: derived from token automatically
-      // teamId/orgId removed: project scoping via x-sm-project header
+      // teamId/orgId removed: Deck derives one canonical project scope.
       diagnostics: [runtime === "pi"
         ? "Supermemory token captured ephemerally for Review & Install; no Pi MCP config was written yet."
         : "Supermemory token captured ephemerally for Review & Install; no Deck or OpenCode project file contains the credential."],
@@ -3392,7 +3393,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           {...(rollbackStatus.reason ? { reason: rollbackStatus.reason } : {})}
         />
       ) : null}
-      {screen === "doctor" ? <DoctorScreen /> : null}
+      {screen === "doctor" ? <DoctorScreen projectRoot={localResolvedProjectRoot} /> : null}
       {screen === "model-environment-selection" ? <ModelEnvironmentSelectionScreen cursor={modelEnvironmentCursor} options={environmentOptions} /> : null}
       {screen === "model-team-selection" && selectedModelEnvironment ? (
         <ModelTeamSelectionScreen cursor={modelTeamCursor} environment={selectedModelEnvironment} teams={adapterFor(selectedModelEnvironment).getTeams(selectedModelEnvironment) as any[]} />

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 
 import { createOpenCodeRunnerAdapter } from "./runner-adapter";
 import type { OpenCodeToolsReview } from "./required-tools";
@@ -93,6 +94,33 @@ describe("OpenCode RunnerAdapter developer team install plan", () => {
       packagePath: "DESIGN_PRINCIPLES.md",
       path: "skills/design-lab/DESIGN_PRINCIPLES.md",
     }));
+  });
+
+  test("does not fabricate configured Supermemory scope in the generic install adapter path", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-opencode-scope-"));
+    try {
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
+      const configDir = join(projectRoot, "opencode-config");
+      await mkdir(configDir, { recursive: true });
+      const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir });
+
+      const plan = adapter.buildDeveloperTeamInstallPlan({
+        projectRoot,
+        environmentId: "opencode-development",
+        deckConfig: getDefaultDeckConfig(),
+        capabilityInstructions: {
+          instructions: [{ packageId: "adaptive-memory", surface: "agent", markdown: "stale unscoped memory", teamId: "developer-team" }],
+        },
+      });
+      const text = plan.files.map((file) => file.content).join("\n");
+
+      expect(text).toContain("Adaptive-memory project operations are disabled");
+      expect(text).toContain("configured scope missing");
+      expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 
   test("attaches active OpenCode source declarations without Pi roots", async () => {
