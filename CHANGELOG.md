@@ -9,9 +9,19 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-14
+
 ### Added
 
 - Added a `static-compatible` Codex CLI runner beta with native Developer Team roles and skills, project-local transactional materialization, MCP/shared-binary readiness, Supermemory integration, targeted TUI and doctor flows, and content-only upgrade synchronization. The public adapter installs no trusted-hook surface and marks host authorization, dossier, controlled-effect, registry, and bound-verification controls as explicit gaps.
+- Added runner-neutral web search capability so package instructions can expose bounded search and point extraction consistently across supported runners.
+- Added product documentation entry points, CLI and support references, operational guides, and Deck brand assets for the public documentation set.
+
+### Changed
+
+- Consolidated Deck preferences into the XDG configuration path and migrated runner setup away from the legacy project-local `.deck/config.json` preference file.
+- Canonicalized Supermemory project scoping so every scoped memory operation uses Deck's materialized project container consistently across runner instructions and launch composition.
+- Hardened Codex launch composition with a portable Serena proxy and clearer static-compatible runner wiring.
 
 ### Security
 
@@ -19,7 +29,6 @@ All notable release changes to Deck are recorded here. Current release procedure
 - Every non-install-only Codex Developer Team launch now uses Codex's `--dangerously-bypass-approvals-and-sandbox` flag. The launch preview and Doctor report that sandboxing and command approvals are disabled; the per-launch flag is never persisted.
 - Codex rollback is operation-scoped by exact native/local-only transaction IDs, and semantic verification failure now awaits rollback before returning.
 - Codex package instructions preserve canonical metadata and tool policy while translating runner-specific OpenCode/Claude wording to verified Codex behavior.
-
 
 ## [0.2.6] - 2026-08-05
 
@@ -71,7 +80,8 @@ All notable release changes to Deck are recorded here. Current release procedure
 - OpenCode model selection now uses the model inventory resolved by the active runner.
 - Streamlined project documentation and strengthened contributor, architecture, release, and documentation-governance guidance.
 
-[Unreleased]: https://github.com/kevin15011/deck/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/kevin15011/deck/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/kevin15011/deck/releases/tag/v0.3.0
 [0.2.6]: https://github.com/kevin15011/deck/releases/tag/v0.2.6
 [0.2.5]: https://github.com/kevin15011/deck/releases/tag/v0.2.5
 [0.2.4]: https://github.com/kevin15011/deck/releases/tag/v0.2.4
