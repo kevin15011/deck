@@ -1,0 +1,16 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: apply
+    status: started
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-08-06"
+    actor: deck-lead
+    registry_write: non-deferred

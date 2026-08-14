@@ -25,7 +25,7 @@ The root [package metadata](package.json) is authoritative for scripts:
 | `bun run deck:run` | Build and run the local debug CLI. |
 | `bun run test` | Run the repository test suite. |
 
-Direct supported forms are `bun test tests/documentation-governance.test.ts`, `bunx tsc --noEmit`, and `bun run scripts/prepare-release.ts`. Use `deck --help` or `./dist/cli/deck --help` after installation/build for the current CLI surface.
+Direct supported forms are `bun test tests/documentation-governance.test.ts`, `bunx tsc --noEmit`, and `bun run scripts/prepare-release.ts`. Use `deck version` and the [CLI reference](docs/reference/cli.md) for the current parser-backed CLI surface.
 
 ## Verification tiers
 
