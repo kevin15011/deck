@@ -66,9 +66,8 @@ describe("Codex MCP semantic configuration", () => {
     expect(collision).toMatchObject({ status: "blocked", collisions: ["context-mode"] });
   });
 
-  test("keeps Engram explicit and redacts credential-like diagnostics", () => {
+  test("keeps disabled memory explicit and redacts credential-like diagnostics", () => {
     expect(buildCodexMcpServers({ packageIds: [], memoryProvider: "none" })).toEqual({ servers: [], gaps: [] });
-    expect(buildCodexMcpServers({ packageIds: [], memoryProvider: "engram" }).gaps).toEqual(["engram-codex-deferred"]);
     expect(redactCodexMcpDiagnostic("token=very-secret-value failed")).toBe("token=[REDACTED] failed");
   });
 

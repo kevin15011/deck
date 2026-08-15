@@ -199,6 +199,29 @@ test("Pi static-compatible hook preserves legacy delegation when its provider fa
   expect(String(hookResult)).not.toContain("SECRET_PROVIDER_SENTINEL");
 });
 
+test("Pi memory loopback advisory reaches top-level and role inputs", async () => {
+  const events: unknown[] = [];
+  const handlers = new Map<string, (event: any, context: any) => Promise<unknown>>();
+  createPiDeveloperTeamExecutionExtensionV1({
+    memoryLoopback: {
+      endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
+      token: "loopback-token",
+      post: async (_endpoint, _token, body) => {
+        events.push(JSON.parse(body));
+        return { ok: true, advisoryText: "<DECK_ADAPTIVE_CONTEXT_JSON_V1>safe</DECK_ADAPTIVE_CONTEXT_JSON_V1>" };
+      },
+    },
+  })({ on: (event, handler) => handlers.set(event, handler) });
+  const context = { sessionManager: { getSessionId: () => "pi-native-session" } };
+  const top = await handlers.get("input")?.({ text: "Remember that Pi role recall is bounded." }, context);
+  expect(top).toMatchObject({ advisoryText: expect.stringContaining("DECK_ADAPTIVE_CONTEXT_JSON_V1") });
+  const input: Record<string, unknown> = { agent: "deck-apply-deep" };
+  const roleTop = await handlers.get("tool_call")?.({ toolName: "subagent", toolCallId: "pi-call", input }, context);
+  expect(roleTop).toMatchObject({ advisoryText: expect.stringContaining("DECK_ADAPTIVE_CONTEXT_JSON_V1") });
+  expect(input).not.toHaveProperty("deckAdaptiveMemoryContext");
+  expect(events).toContainEqual(expect.objectContaining({ event: "role_start", role: "apply-deep", eventId: expect.any(String), timestamp: expect.any(Number) }));
+});
+
 const HOST_CONTEXT_SYMBOL = Symbol.for("deck.developer-team.execution-context.v1");
 
 test("Pi production extension does not expose dead Supermemory capture hooks", () => {

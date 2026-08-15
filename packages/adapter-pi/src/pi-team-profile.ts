@@ -18,7 +18,7 @@ import executionExtensionAssetPath from "../assets/pi/extensions/developer-team-
 
 // --- Types ---
 
-const SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
+const SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
 
 export type MaterializeTeamProfileOptions = {
   teamId: string;

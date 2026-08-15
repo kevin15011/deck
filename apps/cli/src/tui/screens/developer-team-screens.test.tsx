@@ -90,7 +90,7 @@ describe("Developer Team screens dashboard context regression", () => {
         cursor={1}
         dashboardContext={{
           source: "dashboard",
-          adaptiveMemoryProvider: "engram",
+          adaptiveMemoryProvider: "supermemory",
           capabilityStatuses: { "context-mode": "ready" },
           returnLabel: "Volver a Teams",
         }}
@@ -100,7 +100,7 @@ describe("Developer Team screens dashboard context regression", () => {
     expect(dashboardOutput).toContain("Install Developer Team now");
     expect(dashboardOutput).toContain("Volver a Teams");
     expect(dashboardOutput).toContain("Dashboard context");
-    expect(dashboardOutput).toContain("Adaptive Memory selected in dashboard: engram");
+    expect(dashboardOutput).toContain("Adaptive Memory selected in dashboard: supermemory");
     expect(dashboardOutput).toContain("Capability states: context-mode=ready");
   });
 

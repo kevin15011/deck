@@ -52,8 +52,8 @@ test("D-REACH-08 public runners reach trusted composition while Codex bridge fix
   expect(codexHost).toContain("AUTHZ_REPLAY");
   expect(codexIndex).not.toContain('export * from "./codex-hook-host"');
   expect(codexIndex).not.toContain('export * from "./developer-team-execution-bridge"');
-  expect(codexInstall).not.toContain("developer-team-execution.generated.js");
-  expect(codexInstall).not.toContain("trustedBridgeHook");
+  expect(codexInstall).toContain("developer-team-execution.generated.js");
+  expect(codexInstall).toContain("mergeCodexTrustedHookConfig(mcp.content, true)");
   expect(sharedBridge).toContain("composeDeveloperTeamExecutionV1");
   expect(sharedBridge).toContain("executeTargetedRepairV1");
 });

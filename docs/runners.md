@@ -14,9 +14,9 @@ Deck is runner-aware rather than runner-agnostic. The CLI registers operational 
 | Pi | **Supported** | Detects the binary, runs preflight, reviews packages and MCP, configures capabilities, materializes the Developer Team, and can launch `deck pi developer`. |
 | OpenCode | **Supported** | Detects the binary, reads runner configuration and package evidence, configures capabilities, and materializes the Developer Team through the TUI. |
 | Claude | **Detection only** | Deck can observe the `claude` command in `PATH`; no operational adapter is registered. |
-| Codex | **Detection only** | Deck can observe the `codex` command in `PATH`; no operational adapter is registered. |
+| Codex | **Supported with route limits** | Deck can configure and launch the Developer Team for Codex. Deck-supervised launches bind the Supermemory runtime through the same ephemeral loopback bridge used by runner hooks; protected execution controls remain static-compatible. |
 
-Detection is not parity. A detected binary does not imply that Deck can install packages, write runner configuration, launch a team, or verify runner-specific effects for that runtime.
+Detection is not parity. A detected binary does not imply that Deck can install packages, write runner configuration, launch a team, or verify runner-specific effects for that runtime. Codex has a Developer Team adapter and a Deck-supervised memory loopback, but it still does not claim first-class protected execution controls.
 
 ## Pi
 
@@ -25,7 +25,7 @@ Pi preflight reads the Pi version and searches the supported configuration candi
 Pi-specific setup can include:
 
 - required package review, including sub-agents and MCP packages;
-- shared `context-mode`, Codebase Memory, RTK, Context7, and Engram evidence;
+- shared `context-mode`, Codebase Memory, RTK, Context7, and Supermemory evidence;
 - MCP configuration for shared services;
 - model/provider discovery from Pi settings, `pi --list-models`, and configured environment variables;
 - per-agent model and thinking assignments;
@@ -37,7 +37,7 @@ Pi's standalone launch path is explicit:
 deck pi developer
 deck pi developer --continue
 deck pi developer --resume
-deck pi developer --memory=engram
+deck pi developer --memory=supermemory
 deck pi developer --memory=supermemory
 deck pi developer --memory=none
 ```

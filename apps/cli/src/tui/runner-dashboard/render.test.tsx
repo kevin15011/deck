@@ -70,6 +70,26 @@ const plan: PiRunnerReviewPlan = {
 };
 
 describe("Pi Runner dashboard render", () => {
+  test("DECK_DEBUG ready Supermemory runtime diagnostic is not rendered as a blocker", () => {
+    const readyPlan: PiRunnerReviewPlan = {
+      ready: true,
+      diagnostics: [],
+      groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
+    };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      screen: "review-plan",
+      cursor: 0,
+      plan: readyPlan,
+      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: true, ephemeralTokenAvailable: false, diagnostics: [] } },
+    });
+    const output = renderToString(<RunnerDashboardScreens state={state} canRunPlan runBlockDiagnostics={[]} />);
+
+    expect(output).toContain("Run install");
+    expect(output).not.toContain("Blocked:");
+    expect(output).not.toContain("Supermemory runtime readiness");
+  });
+
   test("dashboard principal muestra las cuatro secciones con estados y contadores", () => {
     const state = createDefaultPiRunnerDashboardState({ plan });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
@@ -126,16 +146,16 @@ describe("Pi Runner dashboard render", () => {
     expect(output).toContain("Back to dashboard");
   });
 
-  test("Adaptive Memory detail muestra None Engram Supermemory", () => {
+  test("Adaptive Memory detail muestra Disabled y Enabled", () => {
     const state = createDefaultPiRunnerDashboardState({ screen: "adaptive-memory-detail" });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);
 
     expect(output).toContain("Adaptive Memory");
-    expect(output).toContain("None");
-    expect(output).toContain("Engram");
-    expect(output).toContain("Supermemory");
+    expect(output).toContain("Disabled");
+    expect(output).not.toContain("Engram");
+    expect(output).toContain("Enabled");
     expect(output).toContain("Back to dashboard");
-    expect(output).toContain("No adaptive memory active by default");
+    expect(output).toContain("Adaptive Memory disabled");
   });
 
   test("Teams detail muestra Developer Team y back", () => {

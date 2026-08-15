@@ -25,7 +25,7 @@ describe("released Codex compatibility fixtures", () => {
         "static-compatible",
         "static-compatible",
       ]);
-      expect(result.trustedBridge.reason).toContain("not bound");
+      expect(result.trustedBridge.reason).toContain("adaptive memory");
     }
   });
 

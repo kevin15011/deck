@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { posix } from "node:path";
+import executionHookAssetPath from "../assets/codex/hooks/developer-team-execution.generated.js" with { type: "file" };
 
 import {
   DEVELOPER_TEAM,
@@ -33,7 +35,7 @@ export type BuildCodexInstallPlanInput = {
   modelAssignments?: DeveloperTeamModelAssignments;
   thinkingAssignments?: DeveloperTeamThinkingAssignments;
   capabilityInstructions?: CapabilityInstructionBundle;
-  memoryProvider?: "none" | "supermemory" | "engram";
+  memoryProvider?: "none" | "supermemory";
   supermemoryProjectScope?: string;
   mcpCapabilityIds?: readonly string[];
   /** Full materialization may change runner config; content-only refreshes Deck content only. */
@@ -65,7 +67,7 @@ function safeRelativePath(path: string): string {
 
 
 function isPreservedRuntimePath(path: string): boolean {
-  return path === ".codex/config.toml";
+  return path === ".codex/config.toml" || path === ".codex/hooks/developer-team-execution.js";
 }
 
 function tomlString(value: string): string {
@@ -189,11 +191,6 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   });
   const built = buildDeveloperTeamManifest({ team: DEVELOPER_TEAM, modelAssignments });
   diagnostics.push(...built.warnings.map((message) => ({ code: "manifest-warning", severity: "warning" as const, message })));
-  diagnostics.push({
-    code: "trusted-bridge-unavailable",
-    severity: "warning",
-    message: "Production launch routes are static-compatible because the shipped Codex composition has no authenticated host lifecycle.",
-  });
   blocked ||= built.errors.length > 0;
 
   const shadowingInstructions = [...input.existingFiles.keys()].filter((path) =>
@@ -285,6 +282,13 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   }
 
   if (materializationScope === "full") {
+    add(
+      ".codex/hooks/developer-team-execution.js",
+      readFileSync(typeof executionHookAssetPath === "string" ? executionHookAssetPath : new URL("../assets/codex/hooks/developer-team-execution.generated.js", import.meta.url), "utf-8"),
+      "bridge-hook",
+      "deck-file",
+      "deck-codex-hook-v1",
+    );
     const configSource = input.existingFiles.get(".codex/config.toml") ?? "";
     const config = mergeCodexProjectConfig(configSource, { multiAgent: true });
     if (config.status === "blocked") {
@@ -342,7 +346,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         blocked = true;
         diagnostics.push(...mcp.diagnostics.map((message) => ({ code: "mcp-config-collision", severity: "error" as const, message })));
       } else {
-        const hooks = mergeCodexTrustedHookConfig(mcp.content, false);
+        const hooks = mergeCodexTrustedHookConfig(mcp.content, true);
         if (hooks.status === "blocked") {
           blocked = true;
           diagnostics.push(...hooks.diagnostics.map((message) => ({ code: "trusted-hook-config-collision", severity: "error" as const, message })));

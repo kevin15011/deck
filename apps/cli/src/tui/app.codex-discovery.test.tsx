@@ -57,7 +57,7 @@ function testConfigStore(projectRoot: string) {
 }
 
 describe("DeckApp Codex discovery composition", () => {
-  test("uses the dashboard Supermemory selection for Codex installation without a token route", () => {
+  test("uses dashboard Supermemory selection for Codex while keeping Pi MCP handoff separate", () => {
     const provider = resolveDashboardMemoryProviderForInstall("codex", "supermemory", undefined);
     expect(provider?.id).toBe("supermemory");
     expect(JSON.stringify(provider)).not.toContain("token");

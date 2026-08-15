@@ -406,12 +406,12 @@ function createCliSandbox(): CliSandbox {
   const shim = (name: string) => {
     const path = join(bin, process.platform === "win32" ? `${name}.cmd` : name);
     const content = process.platform === "win32"
-      ? `@echo off\r\nif "%~1"=="--version" if "%~2"=="" (\r\n  echo ${name} 1.0.0\r\n  exit /b 0\r\n)\r\n>&2 echo Unexpected ${name} invocation: %*\r\nexit /b 64\r\n`
-      : `#!/bin/sh\nif [ "$#" -eq 1 ] && [ "$1" = "--version" ]; then\n  echo '${name} 1.0.0'\n  exit 0\nfi\nprintf 'Unexpected ${name} invocation: %s\\n' "$*" >&2\nexit 64\n`;
+      ? `@echo off\r\nif "%~1"=="--version" if "%~2"=="" (\r\n  echo ${name} 1.0.0\r\n  exit /b 0\r\n)\r\nif "${name}"=="pi" if "%~1"=="list" if "%~2"=="" (\r\n  echo sub-agents\r\n  echo mcp\r\n  echo context-mode\r\n  echo codebase-memory\r\n  echo rtk\r\n  echo context7\r\n  exit /b 0\r\n)\r\n>&2 echo Unexpected ${name} invocation: %*\r\nexit /b 64\r\n`
+      : `#!/bin/sh\nif [ "$#" -eq 1 ] && [ "$1" = "--version" ]; then\n  echo '${name} 1.0.0'\n  exit 0\nfi\nif [ '${name}' = 'pi' ] && [ "$#" -eq 1 ] && [ "$1" = "list" ]; then\n  printf '%s\\n' sub-agents mcp context-mode codebase-memory rtk context7\n  exit 0\nfi\nprintf 'Unexpected ${name} invocation: %s\\n' "$*" >&2\nexit 64\n`;
     writeFileSync(path, content);
     if (process.platform !== "win32") chmodSync(path, 0o755);
   };
-  for (const name of ["deck", "opencode", "pi", "engram", "supermemory", "serena"]) shim(name);
+  for (const name of ["deck", "opencode", "pi", "supermemory", "serena"]) shim(name);
 
   const piMcpPath = join(home, ".pi", "agent", "mcp.json");
   mkdirSync(dirname(piMcpPath), { recursive: true });
@@ -420,7 +420,7 @@ function createCliSandbox(): CliSandbox {
       supermemory: {
         transport: "http",
         url: "https://mcp.supermemory.ai/mcp",
-        headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": "fixture-not-a-secret" },
+        headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
       },
     },
   }));
@@ -660,6 +660,11 @@ describe("Binary smoke tests", () => {
       const result = await runDeckCommand(["doctor"], sandbox.env);
       expect(result).toMatchObject({ code: 0, timedOut: false, cleanupConfirmed: true });
       expect(result.stdout).toContain("Doctor Report");
+      expect(result.stdout).toContain("Deck-supervised native loopback route matrix");
+      expect(result.stdout).toContain("No Supermemory CLI package is required");
+      expect(result.stdout).not.toContain("Install Supermemory");
+      expect(result.stdout).not.toContain("Supermemory not found in PATH");
+      expect(result.stdout).not.toContain("supported only on Deck-supervised exec paths");
     } finally {
       sandbox.cleanup();
     }

@@ -90,7 +90,7 @@ describe("Pi active-runner skill discovery provider", () => {
       const text = plan.files.map((file) => file.content).join("\n");
 
       expect(text).toContain("Adaptive-memory project operations are disabled");
-      expect(text).toContain("configured scope missing");
+      expect(text).toContain("scope mismatch");
       expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
     } finally {
       cleanup(projectRoot);

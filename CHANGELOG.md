@@ -9,6 +9,10 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+### Changed
+
+- Supermemory Adaptive Memory now distinguishes Deck-supervised runtime behavior from optional MCP recall, avoids mixed stdout capture, and keeps Pi credentials in Deck's secret store instead of runner MCP config.
+
 ## [0.3.0] - 2026-08-14
 
 ### Added
@@ -54,7 +58,7 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ### Fixed
 
-- OpenCode now uses native OAuth for Supermemory without persisting an API key, while Pi retains its explicit API-key handoff.
+- OpenCode now uses native OAuth for Supermemory without persisting an API key, while Pi setup keeps its runtime credential out of Deck project config.
 - OpenCode QA delegation recognizes the native `task` tool as well as the legacy `delegate` name, preventing resumed sessions from failing with `invalid-evidence` before Verify or Review starts.
 
 ## [0.2.4] - 2026-07-22

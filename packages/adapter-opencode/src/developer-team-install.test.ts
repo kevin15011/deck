@@ -974,7 +974,8 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
 
       for (const content of samples) {
         expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-        expect(content).toContain("supermemory_add_memory");
+        expect(content).not.toContain("supermemory_add_memory");
+        expect(content).toContain("explicit remember are routed through the Deck runtime");
         expect(content).not.toContain("No manual containerTag required");
         expect(content).not.toContain("sm_project_default");
       }

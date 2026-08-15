@@ -59,7 +59,7 @@ The TUI follows this shape:
 5. Review the planned actions.
 6. Apply the plan and inspect the completion diagnostics.
 
-Deck keeps runner differences visible. Pi and OpenCode have operational adapters. Claude and Codex are detected when their binaries are present, but they do not have an operational Deck adapter or setup flow.
+Deck keeps runner differences visible. Claude is detection-only when its binary is present and has no operational Deck adapter or setup flow. Pi, OpenCode, and Codex have operational adapters. Codex protected execution controls remain route-limited, while Deck-supervised adaptive memory uses the runner hook loopback.
 
 The no-argument command is interactive. In a non-interactive terminal Deck renders a compact home view instead of attempting to drive the TUI.
 
@@ -71,7 +71,7 @@ Run diagnostics after the first setup:
 deck doctor
 ```
 
-The report checks Deck state and manifest data, detected runtimes, runner configuration, memory-provider visibility, MCP configuration, binary information, and release information. Errors include an actionable suggestion; paths and credential-like values are redacted.
+The report checks Deck state and manifest data, detected runtimes, runner configuration, Supermemory runtime readiness, optional MCP configuration, binary information, and release information. Errors include an actionable suggestion; paths and credential-like values are redacted.
 
 Use [Runners](runners.md) to understand a Pi/OpenCode result, [Configuration](configuration.md) to change persisted choices, and [Troubleshooting](troubleshooting.md) when a check is blocked.
 

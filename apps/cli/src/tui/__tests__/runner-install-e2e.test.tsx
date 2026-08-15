@@ -407,7 +407,7 @@ describe("Codex adapter-driven render-only states", () => {
       getSupportedPackageInstructionIds: () => ["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"] as const,
     };
     const packages = renderToString(<RunnerDashboardScreens state={createDefaultRunnerDashboardState({ runnerScope: "codex", runnerDisplayName: adapter.displayName, runnerUi: adapter.ui, screen: "packages-detail", capabilityStatuses })} capabilityResolver={resolver} />);
-    for (const label of ["Trusted Runner Host Bridge", "Invocation Authorization", "Execution Dossier", "Controlled Effects", "Registry Coordination", "Bound Verification", "Engram", "Context7", "Pi HUD"]) {
+    for (const label of ["Trusted Runner Host Bridge", "Invocation Authorization", "Execution Dossier", "Controlled Effects", "Registry Coordination", "Bound Verification", "Context7", "Pi HUD"]) {
       expect(packages).not.toContain(label);
     }
     const dashboardState = createDefaultRunnerDashboardState({ runnerScope: "codex", runnerDisplayName: adapter.displayName, runnerUi: adapter.ui, screen: "packages-detail", capabilityStatuses });
@@ -569,17 +569,14 @@ describe("Codex adapter-driven render-only states", () => {
     expect(output).toContain("resume-latest: blocked");
   });
 
-  test("renders none and Supermemory normally while exposing the Codex Engram gap", () => {
+  test("renders none and Supermemory normally without a provider selector", () => {
     const none = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState({ screen: "adaptive-memory-detail", adaptiveMemory: { provider: "none" } })} />);
-    expect(none).toContain("No adaptive memory active by default");
+    expect(none).toContain("Adaptive Memory disabled");
 
     const supermemory = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState({ screen: "adaptive-memory-detail", adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true, diagnostics: [] } } })} />);
     expect(supermemory).toContain("without authorizing it");
     expect(supermemory).not.toContain("mcp login supermemory");
-
-    const engram = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState({ screen: "adaptive-memory-detail", adaptiveMemory: { provider: "engram" } })} />);
-    expect(engram).toContain("Engram (deferred for Codex)");
-    expect(engram).toContain("no verified Codex provider contract");
+    expect(supermemory).not.toContain("Engram");
   });
 
   test("renders Codex preview confirmation, install progress, failure, and completion through generic screens", () => {

@@ -42,9 +42,12 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   // Supermemory is a named adaptive memory provider; any string referencing it as
   // the named provider (not importing from it) is allowed in the config schema.
   { pattern: /^"supermemory"$/, reason: "named provider key in deck-config schema" },
+  { pattern: /^"supermemory-api-key"$/, reason: "Deck secret-store key for Supermemory credential" },
   { pattern: /^"adaptiveMemory\.supermemory(?:\.[\w]+)?"$/, reason: "config path in deck-config schema" },
   { pattern: /^"Supermemory[^"]*"$/, reason: "named provider reference in config/validation messages" },
   { pattern: /`Invalid Supermemory[^`]*`/, reason: "named provider reference in error message template" },
+  { pattern: /Engram has been removed/, reason: "legacy provider migration diagnostic" },
+  { pattern: /supports only disabled or Supermemory/, reason: "adaptive memory config validation diagnostic" },
   { pattern: /Supermemory effects are disabled/, reason: "canonical provider scope fail-closed diagnostic" },
   { pattern: /Deprecated Supermemory maxMemoriesPerSession/, reason: "provider config deprecation diagnostic" },
   { pattern: /canonical-supermemory-project/, reason: "provider-neutral canonical scope resolver module path" },
@@ -55,12 +58,9 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /^"Engram migration payloads"$/, reason: "content classification label in governance rules" },
   // Provider labels in adaptive memory instruction content
   { pattern: /^"Provider: Supermemory"$/, reason: "provider label in adaptive memory instruction content" },
-  { pattern: /^"Provider: Engram"$/, reason: "provider label in adaptive memory instruction content" },
   // Tool names in adaptive memory instruction content
   { pattern: /supermemory_memory/, reason: "Supermemory tool name in adaptive memory instruction content" },
   { pattern: /supermemory_recall/, reason: "Supermemory tool name in adaptive memory instruction content" },
-  // Engram provider reference in adaptive memory instruction content
-  { pattern: /`engram`/i, reason: "Engram provider reference in instruction content" },
   // OpenCode references in RTK instruction content about OpenCode hook
   { pattern: /--opencode/, reason: "RTK OpenCode hook flag in instruction content" },
   // Runner ID const arrays in deck-config.ts

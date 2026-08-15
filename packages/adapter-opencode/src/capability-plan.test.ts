@@ -191,3 +191,38 @@ describe("buildOpenCodeRunnerReviewPlan Web Search materialization", () => {
     expect(plan.diagnostics).toContainEqual(expect.objectContaining({ code: "WEB_SEARCH_PROVIDER_UNAVAILABLE" }));
   });
 });
+
+describe("buildOpenCodeRunnerReviewPlan Supermemory auth UX", () => {
+  test("stored Deck runtime credential is ready and native OAuth is optional", () => {
+    const plan = buildOpenCodeRunnerReviewPlan(
+      state({
+        adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: true, mcpOAuthReady: false } },
+        selectedCapabilities: {},
+        explicitlySelectedCapabilities: {},
+      }),
+      {},
+    );
+
+    expect(plan.ready).toBe(true);
+    expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "ready" }));
+    expect(JSON.stringify(plan)).toContain("Deck runtime API credential is validated and stored");
+    expect(JSON.stringify(plan)).toContain("OpenCode native OAuth is optional");
+    expect(JSON.stringify(plan)).not.toContain("uses OpenCode native OAuth; no API key or package install action is generated");
+  });
+
+  test("missing Deck runtime credential blocks with runtime wording", () => {
+    const plan = buildOpenCodeRunnerReviewPlan(
+      state({
+        adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, mcpOAuthReady: true } },
+        selectedCapabilities: {},
+        explicitlySelectedCapabilities: {},
+      }),
+      {},
+    );
+
+    expect(plan.ready).toBe(false);
+    expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "pending" }));
+    expect(JSON.stringify(plan)).toContain("Deck runtime API key must be validated and stored");
+    expect(JSON.stringify(plan)).toContain("does not satisfy Deck runtime readiness");
+  });
+});

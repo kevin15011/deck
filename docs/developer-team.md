@@ -56,7 +56,7 @@ The memory choice is also explicit for that launch path:
 
 ```sh
 deck pi developer --memory=none
-deck pi developer --memory=engram
+deck pi developer --memory=supermemory
 deck pi developer --memory=supermemory
 ```
 

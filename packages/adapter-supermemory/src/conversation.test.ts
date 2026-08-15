@@ -13,12 +13,12 @@ describe("Supermemory conversation contract", () => {
     const first = buildSupermemoryConversationIngest({
       canonicalScope: "sm_project_v1_kevin15011_deck",
       sessionId: "session-123",
-      turn: { role: "user", content: "Please implement the change." },
+      turn: { role: "user", source: "trusted-user-prompt", content: "Please implement the change." },
     });
     const second = buildSupermemoryConversationIngest({
       canonicalScope: "sm_project_v1_kevin15011_deck",
       sessionId: "session-123",
-      turn: { role: "assistant", content: "Done." },
+      turn: { role: "assistant", source: "trusted-final-assistant", content: "Done." },
     });
 
     expect(first.ok).toBe(true);
@@ -55,7 +55,7 @@ describe("Supermemory conversation contract", () => {
     const result = buildSupermemoryConversationIngest({
       canonicalScope: "sm_project_default",
       sessionId: "session-1",
-      turn: { role: "user", content: "hello" },
+      turn: { role: "user", source: "trusted-user-prompt", content: "hello" },
     });
 
     expect(result.ok).toBe(false);

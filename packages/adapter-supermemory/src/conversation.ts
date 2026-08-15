@@ -19,12 +19,14 @@ export const OFFICIAL_SUPERMEMORY_TRANSPORT_CAPABILITIES = Object.freeze({
 } as const);
 
 export type SupermemoryConversationRole = "user" | "assistant" | "system" | "tool";
+export type SupermemoryConversationSource = "trusted-user-prompt" | "trusted-final-assistant" | "explicit-remember";
+export type SupermemoryConversationDependency = "automatic" | "explicit-recall" | "explicit-remember" | "unobservable-external-mcp";
 
 export type SupermemoryConversationIngestRequest = Readonly<{
   containerTag: string;
   customId: string;
   content: string;
-  metadata: Readonly<{ role: SupermemoryConversationRole; capturedAt: string }>;
+  metadata: Readonly<{ role: SupermemoryConversationRole; capturedAt: string; source: SupermemoryConversationSource; dependency: SupermemoryConversationDependency; correlationId: string }>;
   dreaming: "dynamic" | "instant";
 }>;
 
@@ -63,7 +65,7 @@ export function redactSupermemoryConversationContent(content: string): { safe: b
 export function buildSupermemoryConversationIngest(input: {
   canonicalScope: string;
   sessionId: string;
-  turn: Readonly<{ role: SupermemoryConversationRole; content: string; capturedAt?: string }>;
+  turn: Readonly<{ role: SupermemoryConversationRole; content: string; source: SupermemoryConversationSource; capturedAt?: string; dependency?: SupermemoryConversationDependency; correlationId?: string }>;
   dreaming?: "dynamic" | "instant";
 }): SupermemoryConversationIngestResult {
   const canonicalScope = input.canonicalScope.trim();
@@ -77,7 +79,13 @@ export function buildSupermemoryConversationIngest(input: {
       containerTag: canonicalScope,
       customId: `deck_conversation_${stableDigest(`${canonicalScope}:${sessionId}`)}`,
       content: redacted.content,
-      metadata: { role: input.turn.role, capturedAt: input.turn.capturedAt ?? new Date(0).toISOString() },
+      metadata: {
+        role: input.turn.role,
+        capturedAt: input.turn.capturedAt ?? new Date(0).toISOString(),
+        source: input.turn.source,
+        dependency: input.turn.dependency ?? "automatic",
+        correlationId: input.turn.correlationId ?? stableDigest(`${sessionId}:${input.turn.source}:${redacted.content}`),
+      },
       dreaming: input.dreaming ?? "dynamic",
     },
     diagnostics: redacted.diagnostics,

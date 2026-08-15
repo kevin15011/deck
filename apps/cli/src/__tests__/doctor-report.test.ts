@@ -85,7 +85,7 @@ describe("renderDoctorReport", () => {
 
     test("renders Memory Providers section when memory providers are present", () => {
       const result = fabResult({
-        memory: [fabCategory({ category: "Engram", status: "ok", items: [fabItem("ok", "Engram binary found")] })],
+        memory: [fabCategory({ category: "Supermemory Runtime", status: "ok", items: [fabItem("ok", "Supermemory API connectivity succeeded")] })],
       });
 
       const output = captureStdout(() => renderDoctorReport(result));
@@ -148,9 +148,9 @@ describe("renderDoctorReport", () => {
       const result = fabResult({
         memory: [
           fabCategory({
-            category: "Supermemory",
+            category: "Supermemory Runtime",
             status: "warning",
-            items: [fabItem("warning", "Supermemory binary not found", "Install Supermemory")],
+            items: [fabItem("warning", "Supermemory runtime credential missing", "Run Deck's Supermemory setup to store a runtime credential")],
           }),
         ],
       });
@@ -165,15 +165,15 @@ describe("renderDoctorReport", () => {
       const result = fabResult({
         memory: [
           fabCategory({
-            category: "Supermemory",
+            category: "Supermemory Runtime",
             status: "warning",
-            items: [fabItem("warning", "Supermemory not found", "Install Supermemory or ensure it is on your PATH")],
+            items: [fabItem("warning", "Supermemory runtime credential missing", "Run Deck's Supermemory setup to store a runtime credential")],
           }),
         ],
       });
 
       const output = captureStdout(() => renderDoctorReport(result));
-      expect(output).toContain("Install Supermemory or ensure it is on your PATH");
+      expect(output).toContain("Run Deck's Supermemory setup to store a runtime credential");
     });
 
     test("shows suggestion for error items", () => {
@@ -202,9 +202,9 @@ describe("renderDoctorReport", () => {
       const result = fabResult({
         memory: [
           fabCategory({
-            category: "Engram",
-            status: "ok",
-            items: [fabItem("ok", "Engram binary found in PATH")],
+          category: "Supermemory Runtime",
+          status: "ok",
+          items: [fabItem("ok", "Supermemory API connectivity succeeded")],
           }),
         ],
       });
@@ -224,9 +224,9 @@ describe("renderDoctorReport", () => {
       const result = fabResult({
         memory: [
           fabCategory({
-            category: "Engram",
+            category: "Supermemory Runtime",
             status: "ok",
-            items: [fabItem("ok", "Engram binary found")],
+            items: [fabItem("ok", "Supermemory API connectivity succeeded")],
           }),
         ],
       });
@@ -275,9 +275,9 @@ describe("shouldExitWithError", () => {
       hasCriticalErrors: false,
       memory: [
         fabCategory({
-          category: "Supermemory",
+          category: "Supermemory Runtime",
           status: "warning",
-          items: [fabItem("warning", "Supermemory not found in PATH", "Install Supermemory")],
+          items: [fabItem("warning", "Supermemory runtime credential missing", "Run Deck's Supermemory setup")],
         }),
       ],
     });

@@ -581,10 +581,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
         selectionStatus: "Supermemory selected; Review & Install configures and verifies the server without authorizing it.",
         configuredDiagnostics: ["Codex will configure Supermemory without a token. Authorization remains user-owned."],
       },
-      engram: {
-        label: "Engram (deferred for Codex)",
-        detail: "Engram is unavailable because there is no verified Codex provider contract.",
-      },
     },
   } as const;
   readonly #preflight: CodexPreflightEffects;
@@ -671,7 +667,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   #inspectEffectiveConfiguredSupermemoryProjectScope(input: {
     existingCodexConfig: string;
     deckConfig: NormalizedDeckConfig;
-    memoryProviderId: "none" | "supermemory" | "engram";
+    memoryProviderId: "none" | "supermemory";
     derivedSupermemoryProjectScope?: string;
     mcpCapabilityIds: readonly string[];
     serenaPreparation?: PendingSerenaPreparation;
@@ -902,7 +898,6 @@ class CodexRunnerAdapter implements RunnerAdapter {
       capability("context7", "Context7", undefined, "context7"),
       webSearch,
       supermemory,
-      { ...capability("engram", "Engram"), isInstalled: false, isBlocked: true, diagnostics: ["Engram Codex integration is deferred."] },
     ];
     const existing = new Set(capabilities.map((entry) => entry.capabilityId));
     for (const entry of CODEX_CAPABILITY_CATALOG) {
@@ -1020,11 +1015,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
         configWrites.push({ id: `codex-config:${capabilityId}`, kind: "codex-config-preview", title: `Configure ${capability.label} through the reviewed Codex plan`, capabilityId, status: "ready" });
       }
     }
-    if (state.adaptiveMemory.provider === "engram") {
-      const engram = byId.get("engram");
-      if (engram) addBlockedCapability(engram);
-      else manualSteps.push({ id: "codex-gap:engram", kind: "pending-source", title: "Engram is not available for Codex", capabilityId: "engram", status: "blocked", diagnostics: ["Engram Codex integration is deferred; no verified provider contract exists."] });
-    } else if (state.adaptiveMemory.provider === "supermemory" && !byId.get("supermemory-tool-bindings")?.isInstalled) {
+    if (state.adaptiveMemory.provider === "supermemory" && !byId.get("supermemory-tool-bindings")?.isInstalled) {
       configWrites.push({ id: "codex-config:supermemory", kind: "codex-config-preview", title: "Configure Supermemory through the reviewed Codex plan", capabilityId: "supermemory-tool-bindings", status: "ready" });
     }
     const teamApplications: RunnerAction[] = [{ id: "codex-developer-team", kind: "apply-team-bundle", title: "Apply and verify Codex Developer Team content", capabilityId: "developer-team", status: "ready", required: true }];
@@ -1200,7 +1191,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       const inspected = inspectCodexSupermemoryMcpState(existingCodexConfig);
       return inspected.ok ? inspected.scope : undefined;
     })();
-    const memoryProviderId = (input.memoryProvider?.id ?? config.adaptiveMemory.activeProvider) as "none" | "supermemory" | "engram";
+    const memoryProviderId = (input.memoryProvider?.id ?? config.adaptiveMemory.activeProvider) as "none" | "supermemory";
     const enabledCapabilityInstructionIds = getEnabledCapabilityInstructionIds(config, "codex");
     if (memoryProviderId !== "none" && !enabledCapabilityInstructionIds.includes("adaptive-memory")) {
       enabledCapabilityInstructionIds.push("adaptive-memory");

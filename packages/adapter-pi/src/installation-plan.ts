@@ -12,8 +12,7 @@ export type InstallablePiToolId =
   | "codebase-memory-mcp"
   | "rtk"
   | "serena"
-  | "context7"
-  | "engram-memory";
+  | "context7";
 
 export type InstallablePiTool = {
   id: InstallablePiToolId;
@@ -73,10 +72,6 @@ export const PI_INSTALLABLE_TOOLS: InstallablePiTool[] = [
     installKind: "npm-package-plus-mcp",
     capabilityId: "context7",
   },
-  // Legacy technical tool kept for backward compatibility. The capability dashboard must not
-  // expose Engram as a global selectable capability; engram-memory is only derived when
-  // Adaptive Memory provider === "engram".
-  { id: "engram-memory", name: "Engram memory", source: "Gentleman-Programming/engram", required: false, installKind: "external" },
 ];
 
 // ---------------------------------------------------------------------------

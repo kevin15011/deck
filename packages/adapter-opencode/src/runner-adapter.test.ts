@@ -54,6 +54,42 @@ describe("OpenCode package instruction boundary", () => {
   });
 });
 
+describe("OpenCode RunnerAdapter Supermemory readiness mapping", () => {
+  test("forwards stored runtime credential readiness from generic dashboard state", () => {
+    const adapter = createOpenCodeRunnerAdapter();
+    const plan = adapter.buildReviewPlan({
+      runnerId: "opencode",
+      environmentId: "opencode-development",
+      selectedCapabilities: {},
+      explicitlySelectedCapabilities: {},
+      packageInstructions: {},
+      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: true, ephemeralTokenAvailable: false, mcpOAuthReady: false } },
+    } as any, { runnerId: "opencode", environmentId: "opencode-development", capabilities: [] } as any);
+
+    expect(plan.ready).toBe(true);
+    expect(plan.groups.configWrites).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.deck-config", status: "ready" }));
+    expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "ready" }));
+    expect(JSON.stringify(plan)).toContain("Deck runtime API credential is validated and stored");
+  });
+
+  test("does not treat optional MCP OAuth as Deck runtime credential readiness", () => {
+    const adapter = createOpenCodeRunnerAdapter();
+    const plan = adapter.buildReviewPlan({
+      runnerId: "opencode",
+      environmentId: "opencode-development",
+      selectedCapabilities: {},
+      explicitlySelectedCapabilities: {},
+      packageInstructions: {},
+      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, mcpOAuthReady: true } },
+    } as any, { runnerId: "opencode", environmentId: "opencode-development", capabilities: [] } as any);
+
+    expect(plan.ready).toBe(false);
+    expect(plan.groups.configWrites).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.deck-config", status: "pending" }));
+    expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "pending" }));
+    expect(JSON.stringify(plan)).toContain("does not satisfy Deck runtime readiness");
+  });
+});
+
 describe("OpenCode RunnerAdapter developer team install plan", () => {
   test("includes complete standalone external skills by default", () => {
     const adapter = createOpenCodeRunnerAdapter();

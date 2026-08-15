@@ -113,17 +113,16 @@ export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status
   const isCodex = runtime === "codex";
   return (
     <Box flexDirection="column">
-      <Text bold>Select adaptive-memory provider</Text>
+      <Text bold>Adaptive Memory</Text>
       <Text dimColor>{isCodex
-        ? "Codex uses credential-free configuration. Deck shows the user-owned native OAuth next step only after verified install."
-            : "Exactly one provider can be active. Supermemory credentials are never written to Deck config."}</Text>
+        ? "Codex uses one Deck flow: a runtime API token is validated into Deck's secret store, while optional MCP OAuth remains separate."
+            : "Enable or disable Adaptive Memory. Supermemory is the only durable backend and credentials are never written to Deck config."}</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
           items={[
             { id: "none", label: "None", hint: selectedProvider === "none" ? "active" : "disable adaptive memory" },
-            { id: "engram", label: "Engram", hint: selectedProvider === "engram" ? "active" : "existing provider" },
-            { id: "supermemory", label: "Supermemory MCP", hint: selectedProvider === "supermemory" ? "active" : isCodex ? "credential-free native OAuth" : "requires token only" },
+            { id: "supermemory", label: "Supermemory", hint: selectedProvider === "supermemory" ? "active" : isCodex ? "requires Deck runtime token; MCP OAuth separate" : "requires Deck secret-store token" },
           ]}
         />
       </Box>
@@ -140,18 +139,9 @@ type SupermemorySetupScreenProps = {
 };
 
 export function SupermemorySetupScreen({ screen, values, error, runtime = "pi" }: SupermemorySetupScreenProps) {
-  if (runtime === "codex") {
-    return (
-      <Box flexDirection="column">
-        <Text bold>Supermemory native OAuth</Text>
-        <Text dimColor>Codex configures Supermemory without a token. After Deck applies and verifies the MCP configuration, it will show the user-owned native OAuth next step.</Text>
-        <Text dimColor>Deck never asks for, stores, or displays a Supermemory token for Codex.</Text>
-      </Box>
-    );
-  }
   // Token-only config: no userId/teamId/orgId fields
   const field = "token";
-  const label = "Supermemory token";
+  const label = "Supermemory API key (Deck Runtime)";
   const required = true;
   const value = values[field];
   const displayValue = value.length > 0 ? "[redacted]" : "";
@@ -161,8 +151,8 @@ export function SupermemorySetupScreen({ screen, values, error, runtime = "pi" }
       <Text bold>{label} {required ? "(required)" : ""}</Text>
       <Text dimColor>
         {runtime === "pi"
-          ? "Token is written only to Pi's global MCP config (~/.pi/agent/mcp.json) and is never stored in Deck config. User identity is derived automatically from token. Deck configures the x-sm-project header and requires the same canonical containerTag on each project-memory operation."
-          : "Token remains external to Deck project configuration and is handled by the active OpenCode provider flow."}
+          ? "API key is validated now and stored only in Deck's owner-only secret store. Pi MCP receives only credential-free endpoint/canonical scope config; user identity is derived from the key at runtime."
+          : "API key is validated now and stored only in Deck's owner-only secret store. Optional runner MCP OAuth is configured separately and does not replace this runtime credential."}
       </Text>
       <Box marginTop={1}>
         <Text>{label}: <Text color="cyan">{displayValue}</Text></Text>

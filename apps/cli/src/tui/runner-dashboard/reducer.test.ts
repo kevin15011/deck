@@ -84,9 +84,9 @@ describe("Pi Runner dashboard reducer", () => {
       backStack: ["dashboard"],
     }), { type: "select-adaptive-memory", provider: "supermemory" });
 
-    expect(state.screen).toBe("dashboard");
-    expect(state.adaptiveMemory.supermemory).toMatchObject({ configured: true, hasToken: false });
-    expect(state.adaptiveMemory.status).toContain("OAuth");
+    expect(state.screen).toBe("adaptive-memory-detail");
+    expect(state.adaptiveMemory.supermemory).toMatchObject({ configured: false, hasToken: false });
+    expect(state.adaptiveMemory.status).toContain("runtime API token");
   });
 
   test("keeps Serena explicit authorization separate from defaults and config state", () => {
@@ -199,10 +199,10 @@ describe("Pi Runner dashboard reducer", () => {
 
     state = reduce(state, { type: "navigate", screen: "adaptive-memory-detail" });
     state = reduce(state, { type: "cursor", cursor: 99 });
-    expect(state.cursor).toBe(3);
+    expect(state.cursor).toBe(2);
 
     state = reduce(state, { type: "cursor-up" });
-    expect(state.cursor).toBe(2);
+    expect(state.cursor).toBe(1);
 
     state = reduce(state, { type: "cursor", cursor: -10 });
     expect(state.cursor).toBe(0);
@@ -246,7 +246,7 @@ describe("Pi Runner dashboard reducer", () => {
     expect(ids.some((id) => id.includes("supermemory"))).toBe(false);
   });
 
-  test("Adaptive Memory es single-choice y cambiar provider limpia configuración previa", () => {
+  test("Adaptive Memory can be disabled after Supermemory and clears configuration", () => {
     let state = createDefaultPiRunnerDashboardState();
 
     state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
@@ -257,38 +257,13 @@ describe("Pi Runner dashboard reducer", () => {
     expect(state.adaptiveMemory.provider).toBe("supermemory");
     expect(state.adaptiveMemory.supermemory?.hasToken).toBe(true);
 
-    state = reduce(state, { type: "select-adaptive-memory", provider: "engram" });
-    expect(state.adaptiveMemory.provider).toBe("engram");
-    expect(state.adaptiveMemory.supermemory).toBeUndefined();
-
-    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
-    expect(allActionIds(state.plan).some((id) => id.includes("engram"))).toBe(true);
-    expect(allActionIds(state.plan).some((id) => id.includes("supermemory"))).toBe(false);
-
     state = reduce(state, { type: "select-adaptive-memory", provider: "none" });
     state = reduce(state, { type: "regenerate-plan", inventory }, piPlanBuilder);
     expect(state.adaptiveMemory.provider).toBe("none");
     expect(allActionIds(state.plan).some((id) => id.includes("engram") || id.includes("supermemory"))).toBe(false);
   });
 
-  test("cambiar de Engram a Supermemory remueve Engram y prepara Supermemory", () => {
-    let state = createDefaultPiRunnerDashboardState();
-    state = reduce(state, { type: "select-adaptive-memory", provider: "engram" });
-    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
-    expect(allActionIds(state.plan).some((id) => id.includes("engram"))).toBe(true);
-
-    state = reduce(state, { type: "back" });
-    state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
-    state = reduce(state, { type: "enter-review", inventory }, piPlanBuilder);
-
-    const ids = allActionIds(state.plan);
-    expect(state.adaptiveMemory.provider).toBe("supermemory");
-    expect(state.adaptiveMemory.supermemory).toMatchObject({ configured: false, hasToken: false });
-    expect(ids.some((id) => id.includes("engram"))).toBe(false);
-    expect(ids.some((id) => id.includes("supermemory"))).toBe(true);
-  });
-
-  test("OpenCode prepara Supermemory para OAuth nativo y vuelve al dashboard", () => {
+  test("OpenCode requires runtime token setup before optional MCP OAuth", () => {
     let state = createDefaultPiRunnerDashboardState({
       runnerScope: "opencode",
       runnerUi: getAdapter("opencode").ui,
@@ -298,13 +273,13 @@ describe("Pi Runner dashboard reducer", () => {
 
     state = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
 
-    expect(state.screen).toBe("dashboard");
+    expect(state.screen).toBe("adaptive-memory-detail");
     expect(state.adaptiveMemory.provider).toBe("supermemory");
     expect(state.adaptiveMemory.supermemory).toMatchObject({
-      configured: true,
+      configured: false,
       hasToken: false,
     });
-    expect(state.adaptiveMemory.status).toContain("OAuth");
+    expect(state.adaptiveMemory.status).toContain("runtime API token");
   });
 
   test("Developer Team se selecciona y deselecciona; el plan lo refleja", () => {

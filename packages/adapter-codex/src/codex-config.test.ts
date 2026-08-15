@@ -56,6 +56,10 @@ describe("mergeCodexTrustedHookConfig", () => {
     expect(first.status).toBe("updated");
     expect(first.content).toContain("[[hooks.SessionStart]]");
     expect(first.content).toContain("[[hooks.PreToolUse]]");
+    expect(first.content).toContain("[[hooks.SubagentStart]]");
+    expect(first.content).toContain("[[hooks.Stop]]");
+    expect(first.content).toContain('command = "deck internal codex-memory-hook"');
+    expect(first.content).not.toContain("bun .codex/hooks/developer-team-execution.js");
     expect(mergeCodexTrustedHookConfig(first.content, true).status).toBe("unchanged");
     const disabled = mergeCodexTrustedHookConfig(first.content, false);
     expect(disabled.status).toBe("updated");

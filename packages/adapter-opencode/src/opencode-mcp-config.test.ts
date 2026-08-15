@@ -386,15 +386,14 @@ describe("validateSupermemoryOpenCodeMcpConfig - Security", () => {
 });
 
 describe("provider IDs consistency", () => {
-  test("engram and supermemory are supported IDs", () => {
-    const SUPPORTED = ["engram", "supermemory"];
-    expect(SUPPORTED).toContain("engram");
-    expect(SUPPORTED).toContain("supermemory");
+  test("Supermemory is the only supported durable provider ID", () => {
+    const SUPPORTED = ["supermemory"];
+    expect(SUPPORTED).toEqual(["supermemory"]);
   });
 
   test("none is also a valid provider value", () => {
     const cliMemoryProvider = "none";
-    const supported = ["engram", "supermemory", "none"];
+    const supported = ["supermemory", "none"];
     expect(supported).toContain(cliMemoryProvider);
   });
 });

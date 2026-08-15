@@ -179,7 +179,7 @@ async function inspectEnvironment(input: RunnerEnvironmentInspectInput): Promise
 function buildInstallationPlan(input: RunnerInstallationInput) {
   const { buildCapabilityInstallationPlan } = require("./capability-plan");
   const requiredTools = getRequiredToolStatuses();
-  const selectedOptionalToolIds: Array<"sub-agents" | "mcp-packages" | "context-mode" | "codebase-memory" | "rtk" | "context7" | "engram-memory"> = ["sub-agents", "mcp-packages"];
+  const selectedOptionalToolIds: Array<"sub-agents" | "mcp-packages" | "context-mode" | "codebase-memory" | "rtk" | "context7"> = ["sub-agents", "mcp-packages"];
 
   return buildCapabilityInstallationPlan({ requiredTools, selectedOptionalToolIds });
 }
@@ -197,7 +197,7 @@ async function installTools(input: RunnerToolInstallInput): Promise<RunnerToolIn
   const installableTools: InstallablePiTool[] = plan.steps
     .filter((step: { action: string }) => step.action === "install")
     .map((step: { tool: string }) => ({
-      id: step.tool as "sub-agents" | "mcp-packages" | "context-mode" | "codebase-memory" | "rtk" | "context7" | "engram-memory",
+      id: step.tool as "sub-agents" | "mcp-packages" | "context-mode" | "codebase-memory" | "rtk" | "context7",
       name: step.tool,
       source: step.tool,
       required: true,
@@ -383,7 +383,7 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
   const plan = buildDeveloperTeamInstallPlan(input.projectRoot, {
     modelAssignments,
     thinkingAssignments,
-    supportedMemoryProviderIds: ["engram", "supermemory"],
+    supportedMemoryProviderIds: ["supermemory"],
     capabilityInstructions: resolvedCapabilityInstructions,
   });
 
@@ -548,7 +548,7 @@ function getProviders(_input: import("@deck/core").RunnerMemoryProviderInput): r
 }
 
 function getSupportedProviderIds(): readonly string[] {
-  return ["engram", "supermemory"];
+  return ["supermemory"];
 }
 
 // ---------------------------------------------------------------------------

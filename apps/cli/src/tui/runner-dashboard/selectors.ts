@@ -95,7 +95,7 @@ type SectionSignals = {
 };
 
 const DASHBOARD_SECTION_COUNT = 5;
-const ADAPTIVE_MEMORY_OPTION_COUNT = 4; // none, engram, supermemory, back
+const ADAPTIVE_MEMORY_OPTION_COUNT = 3; // none, supermemory, back
 const WEB_SEARCH_OPTION_COUNT = 3; // enable/disable, update credential, back
 const TEAMS_OPTION_COUNT = 3; // Developer Team, Developer Team detail, back
 const DEVELOPER_TEAM_DETAIL_OPTION_COUNT = 3; // configure models, use current/defaults, back
@@ -159,7 +159,7 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
   const selectedTeams = Object.values(state.teams).filter((team) => team.selected).length;
   const packageInstructionIds = capabilityOptions.map((option) => option.capabilityId);
   const packagesSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("package-instructions.")));
-  const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.") || (action.capabilityId === "codebase-memory" && state.adaptiveMemory.provider === "engram")));
+  const adaptiveSignals = signalsForActions(actionsMatching(state.plan, (action) => action.id.startsWith("adaptive-memory.")));
   const webSearchSignals = signalsForActions(actionsMatching(state.plan, (action) => action.capabilityId === "web-search" || action.id.startsWith("capability.web-search.")));
   const teamSignals = signalsForActions(state.plan?.groups.teamApplications ?? []);
 
@@ -245,21 +245,17 @@ export function getAdaptiveMemorySummary(state: RunnerDashboardState): AdaptiveM
   const provider = state.adaptiveMemory.provider;
   const configured = provider !== "supermemory" || Boolean(state.adaptiveMemory.supermemory?.configured);
   const supermemoryUi = state.runnerUi?.adaptiveMemory?.supermemory;
-  const engramUi = state.runnerUi?.adaptiveMemory?.engram;
 
   return {
     provider,
     configured,
     options: [
-      { provider: "none", selected: provider === "none", label: "None" },
-      { provider: "engram", selected: provider === "engram", label: engramUi?.label ?? "Engram" },
-      { provider: "supermemory", selected: provider === "supermemory", label: "Supermemory" },
+      { provider: "none", selected: provider === "none", label: "Disabled" },
+      { provider: "supermemory", selected: provider === "supermemory", label: "Enabled" },
     ],
     detail: provider === "none"
-      ? "No adaptive memory active by default."
-      : provider === "engram"
-        ? engramUi?.detail ?? "Engram enables the derived engram-memory technical action."
-        : supermemoryUi?.selectionStatus ?? "Supermemory uses non-secret config and redacted MCP credentials.",
+      ? "Adaptive Memory disabled."
+      : supermemoryUi?.selectionStatus ?? "Supermemory uses non-secret config and redacted MCP credentials.",
   };
 }
 

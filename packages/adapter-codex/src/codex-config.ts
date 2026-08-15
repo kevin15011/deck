@@ -14,7 +14,8 @@ export type CodexConfigMergeResult =
   | { status: "blocked"; content: string; diagnostics: readonly string[]; ownedRanges: readonly [] };
 
 const CODEX_HOOK_MARKER = "# deck-codex-hook-v1";
-const CODEX_HOOK_BLOCK = `${CODEX_HOOK_MARKER}\n[[hooks.SessionStart]]\nmatcher = "*"\nhooks = [{ type = "command", command = "bun .codex/hooks/developer-team-execution.js" }]\n\n[[hooks.UserPromptSubmit]]\nmatcher = "*"\nhooks = [{ type = "command", command = "bun .codex/hooks/developer-team-execution.js" }]\n\n[[hooks.PreToolUse]]\nmatcher = "*"\nhooks = [{ type = "command", command = "bun .codex/hooks/developer-team-execution.js" }]\n\n[[hooks.PostToolUse]]\nmatcher = "*"\nhooks = [{ type = "command", command = "bun .codex/hooks/developer-team-execution.js" }]\n`;
+const CODEX_HOOK_COMMAND = "deck internal codex-memory-hook";
+const CODEX_HOOK_BLOCK = `${CODEX_HOOK_MARKER}\n[[hooks.SessionStart]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.UserPromptSubmit]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.PreToolUse]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.PostToolUse]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.SubagentStart]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n\n[[hooks.Stop]]\nmatcher = "*"\nhooks = [{ type = "command", command = "${CODEX_HOOK_COMMAND}" }]\n`;
 
 export function mergeCodexTrustedHookConfig(source: string, enabled: boolean): CodexConfigMergeResult {
   let ast: AST.TOMLProgram;
@@ -29,7 +30,7 @@ export function mergeCodexTrustedHookConfig(source: string, enabled: boolean): C
   }
   if (source.includes(CODEX_HOOK_MARKER)) {
     const markerCount = source.split(CODEX_HOOK_MARKER).length - 1;
-    return markerCount === 1 && source.includes(CODEX_HOOK_BLOCK) && hookTables.length === 4
+    return markerCount === 1 && source.includes(CODEX_HOOK_BLOCK) && hookTables.length === 6
       ? { status: "unchanged", content: source, ownedRanges: [] }
       : { status: "blocked", content: source, diagnostics: ["Deck Codex trusted-hook configuration is tampered or ambiguous."], ownedRanges: [] };
   }

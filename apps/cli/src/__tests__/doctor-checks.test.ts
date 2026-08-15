@@ -207,7 +207,7 @@ describe("checkRunnerConfig", () => {
     expect(text).toContain("x-sm-project scope");
     expect(text).toContain("auth readiness");
     expect(text).not.toContain("runner parity requires");
-    expect(text).toContain("conversation-capture: unsupported/static-compatible");
+    expect(text).toContain("automatic recall/capture uses Deck-supervised native loopback hooks");
     expect(text).not.toContain("sm_project_v1_kevin15011_deck");
     expect(text).not.toContain("Authorization");
   });

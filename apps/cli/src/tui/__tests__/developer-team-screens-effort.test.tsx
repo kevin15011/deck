@@ -212,28 +212,27 @@ describe("Codex normalized model and reasoning presentation", () => {
     expect(output).toContain("thinking xhigh");
   });
 
-  test("defers user-owned Codex Supermemory authorization guidance until verified installation", () => {
+  test("distinguishes Codex runtime token from optional MCP OAuth", () => {
     const providerPicker = renderToString(<MemoryProviderSelectionScreen cursor={2} selectedProvider="none" runtime="codex" />);
-    expect(providerPicker).toContain("credential-free configuration");
-    expect(providerPicker).toMatch(/user-owned native OAuth\s+next step only after verified install/);
-    expect(providerPicker).not.toContain("requires token only");
-    const output = renderToString(<SupermemorySetupScreen screen="supermemory-token" values={{ token: "secret" }} runtime="codex" />);
-    expect(output).toContain("native OAuth");
-    expect(output).toMatch(/After Deck applies and verifies\s+the MCP configuration/);
+    expect(providerPicker).toContain("runtime API token");
+    expect(providerPicker).toContain("MCP OAuth remains separate");
+    const output = renderToString(<SupermemorySetupScreen screen="supermemory-token" values={{ token: "secret-value-do-not-leak" }} runtime="codex" />);
+    expect(output).toContain("Supermemory API key (Deck Runtime)");
+    expect(output).toContain("secret store");
     expect(output).not.toMatch(/codex\s+mcp login\s+supermemory/);
-    expect(output).not.toMatch(/Review.*Install.*runs/i);
     expect(output).not.toContain("SUPERMEMORY_API_KEY");
     expect(output).not.toContain("~/.pi");
     expect(output).not.toContain("Pi MCP");
-    expect(output).not.toContain("secret");
+    expect(output).not.toContain("secret-value-do-not-leak");
     const setup = buildDashboardSupermemorySetupUpdate({ token: "secret" }, "codex");
     expect(setup.ok).toBe(true);
     if (setup.ok) {
-      expect(setup.status).toContain("after it applies and verifies the MCP configuration");
+      expect(setup.status).toContain("runtime credential is stored");
+      expect(setup.status).toContain("MCP OAuth remains a separate optional native step");
       expect(setup.status).not.toMatch(/codex\s+mcp login\s+supermemory/);
-      expect(setup.values).toMatchObject({ configured: true, hasToken: false });
+      expect(setup.values).toMatchObject({ configured: true, runtimeCredentialStored: true, ephemeralTokenAvailable: false });
       expect(setup.status).not.toContain("Pi MCP");
-      expect(setup.status).not.toContain("secret");
+      expect(setup.status).not.toContain("secret-value-do-not-leak");
     }
   });
 });

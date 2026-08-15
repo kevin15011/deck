@@ -7,7 +7,6 @@ import {
   type MemoryDiagnostic,
   type PromptProfileActivationV1,
 } from "@deck/adapter-opencode";
-import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import {
   validateDeckConfig,
@@ -20,6 +19,7 @@ import {
   buildCapabilityInstructionBundle,
   type CapabilityInstructionBundle,
 } from "@deck/core/teams/developer/instruction-bundles";
+import { createSupermemoryRuntimeHost } from "./supermemory-runtime-host";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,11 +27,11 @@ import {
 
 /**
  * Default supported memory provider IDs for OpenCode launch.
- * Derived from installer/config - includes both engram and supermemory.
+ * Derived from installer/config; Supermemory is the only durable backend.
  * The launch will accept any provider that's been selected in the installer.
  * Providers not selected/configured will fail-open with a diagnostic.
  */
-const DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
+const DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
 
 export type RunOpenCodeLaunchOptions = {
   teamId: string;
@@ -61,7 +61,7 @@ export type OpenCodeLaunchPlan = {
 };
 
 export type MemoryProviderDiagnostic = {
-  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers";
+  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers" | "supermemory_runtime";
   message: string;
   providerId?: string;
 };
@@ -109,13 +109,6 @@ function resolveOpenCodeMemory(options: RunOpenCodeLaunchOptions): ResolvedMemor
         ],
       };
     }
-    if (options.activeProvider === "engram") {
-      try {
-        return { provider: createEngramMemoryProvider(), diagnostics };
-      } catch {
-        return providerUnavailable("engram");
-      }
-    }
     if (options.activeProvider === "supermemory") {
       try {
         // Token-only config: user identity derived from token
@@ -139,13 +132,6 @@ function resolveOpenCodeMemory(options: RunOpenCodeLaunchOptions): ResolvedMemor
           },
         ],
       };
-    }
-    if (options.cliMemoryProvider === "engram") {
-      try {
-        return { provider: createEngramMemoryProvider(), diagnostics };
-      } catch {
-        return providerUnavailable("engram");
-      }
     }
     if (options.cliMemoryProvider === "supermemory") {
       try {
@@ -232,8 +218,8 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   }
   try {
     const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, "opencode");
-    const activeProvider = options.activeProvider ?? deckConfig.adaptiveMemory.activeProvider;
-    if (activeProvider === "supermemory" && !enabledIds.includes("adaptive-memory")) {
+    const activeMemoryEnabled = options.activeProvider === "supermemory" || deckConfig.adaptiveMemory.enabled === true;
+    if (activeMemoryEnabled && !enabledIds.includes("adaptive-memory")) {
       enabledIds.push("adaptive-memory");
     }
     if (enabledIds.length > 0) {
@@ -243,6 +229,29 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     // Config not available or invalid — continue without capability instructions
   }
 
+  const runtimeHost = await createSupermemoryRuntimeHost({
+    projectRoot,
+    deckConfig: options.cliMemoryProvider === "none"
+      ? { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: false, activeProvider: "none" as const } }
+      : options.cliMemoryProvider === "supermemory"
+        ? { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: true, activeProvider: "supermemory" as const } }
+        : deckConfig,
+    runnerId: "opencode",
+    role: "lead",
+    launchMode: "interactive",
+  });
+  allDiagnostics.push(...runtimeHost.diagnostics.filter((diagnostic) => diagnostic.severity !== "info").map((diagnostic) => ({
+    code: "supermemory_runtime" as const,
+    providerId: "supermemory",
+    message: diagnostic.message,
+  })));
+  const runtimeMemoryInjection: MemoryInjectionBundle | undefined = runtimeHost.advisoryText
+    ? {
+        instructions: [{ surface: "session", markdown: runtimeHost.advisoryText, teamId }],
+        toolBindings: [],
+      }
+    : undefined;
+
   // 4. Build install plan
   const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => {
     const bundle = getStandaloneSkill(s.skillId);
@@ -250,7 +259,7 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   });
   const installPlan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
     configDir,
-    memoryInjection: resolvedMemory.memoryInjection,
+    memoryInjection: runtimeMemoryInjection ?? resolvedMemory.memoryInjection,
     memoryProvider: resolvedMemory.provider,
     supportedMemoryProviderIds: options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS,
     capabilityInstructions,

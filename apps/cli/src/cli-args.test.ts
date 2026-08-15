@@ -16,6 +16,7 @@ describe("parseArgs", () => {
   test("parses only the hidden Serena proxy route and its bounded capability probe", () => {
     expect(parseArgs(["internal", "serena-mcp"])).toEqual({ command: "internal-serena-mcp", probe: false });
     expect(parseArgs(["internal", "serena-mcp", "--probe"])).toEqual({ command: "internal-serena-mcp", probe: true });
+    expect(parseArgs(["internal", "codex-memory-hook"])).toEqual({ command: "internal-codex-memory-hook" });
     expect(parseArgs(["internal", "serena-mcp", "--anything"])).toMatchObject({ command: "error" });
   });
 
@@ -149,13 +150,11 @@ describe("parseArgs", () => {
     });
   });
 
-  test("parses --memory=engram as memory provider", () => {
+  test("rejects removed Engram memory provider", () => {
     const result = parseArgs(["pi", "developer", "--memory=engram"]);
     expect(result).toEqual<ParsedArgs>({
-      command: "pi-launch",
-      teamId: "developer-team",
-      flags: {},
-      memoryProvider: "engram",
+      command: "error",
+      message: expect.stringContaining("Unsupported memory provider: engram"),
     });
   });
 
@@ -169,12 +168,13 @@ describe("parseArgs", () => {
     });
   });
 
-  test("parses --memory=none as no memory provider", () => {
+  test("parses --memory=none as an explicit memory-disable override", () => {
     const result = parseArgs(["pi", "developer", "--memory=none"]);
     expect(result).toEqual<ParsedArgs>({
       command: "pi-launch",
       teamId: "developer-team",
       flags: {},
+      memoryProvider: "none",
     });
   });
 
@@ -186,13 +186,11 @@ describe("parseArgs", () => {
     });
   });
 
-  test("combines --memory=engram with --continue flag", () => {
+  test("rejects removed Engram memory provider even with --continue flag", () => {
     const result = parseArgs(["pi", "developer", "--continue", "--memory=engram"]);
     expect(result).toEqual<ParsedArgs>({
-      command: "pi-launch",
-      teamId: "developer-team",
-      flags: { continue: true },
-      memoryProvider: "engram",
+      command: "error",
+      message: expect.stringContaining("Unsupported memory provider: engram"),
     });
   });
 

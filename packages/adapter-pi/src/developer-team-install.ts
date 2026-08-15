@@ -366,7 +366,7 @@ export type ReadDeveloperTeamModelAssignmentsOptions = {
 /** Re-export MemoryDiagnostic from core for backward compatibility. */
 export type MemoryDiagnostic = CoreMemoryDiagnostic;
 
-const SUPPORTED_PI_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
+const SUPPORTED_PI_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
 
 /** Options for memory injection during Developer Team install. */
 export type MemoryInjectionOptions = {

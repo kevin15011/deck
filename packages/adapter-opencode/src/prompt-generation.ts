@@ -21,7 +21,6 @@ import type { ModificationAuthorization } from "../../core/src/teams/developer/o
 
 // Provider IDs for isolation - ensure prompts don't mix tools from different providers
 const VALID_SUPERMEMORY_TOOL_NAMES = ["memory", "recall", "whoAmI"];
-const VALID_ENGRAM_TOOL_NAMES = ["mem_save", "mem_recall", "mem_context", "mem_search", "mem_get_observation"];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,14 +41,14 @@ export type GeneratePromptFilesOptions = {
   personality?: OrchestratorPersonality;
   /** Effective profile selected by the rollout gate. Defaults to legacy. */
   promptProfile?: DeveloperTeamPromptProfileV1;
-  /** Optional memory injection bundle for provider-specific instructions (supermemory/engram). */
+  /** Optional memory injection bundle for Supermemory instructions. */
   memoryBundle?: MemoryInjectionBundle;
   /**
    * Detected active memory provider from MCP config.
    * Used for provider filtering when memoryBundle is undefined (REQ-R25).
-   * Pass "supermemory" or "engram" if MCP config has Supermemory server enabled.
+   * Pass "supermemory" if MCP config has Supermemory server enabled.
    */
-  activeMemoryProviderFromConfig?: "supermemory" | "engram";
+  activeMemoryProviderFromConfig?: "supermemory";
   /**
    * Optional modification authorization for apply agents.
    * When provided for apply agents (general/backend/frontend), the authorization card
@@ -95,11 +94,10 @@ function buildSkillLoadingGate(skillId: string, skillPath: string): string {
 }
 
 /**
- * Determine the active memory provider from tool bindings or explicit config.
- * Returns "supermemory" or "engram" based on the tools present or explicit config.
+ * Determine whether Supermemory is the active memory provider from tool bindings or explicit config.
  *
  * REQ-R25 (2026-05-29): When memoryBundle is undefined but MCP config has Supermemory
- * enabled, use the explicit provider for filtering to prevent Engram leak.
+ * enabled, use the explicit provider for filtering.
  *
  * R31 FIX: When explicitProvider is provided, prioritize it over bundle.toolBindings check.
  * This ensures provider detection works when we're injecting the default instruction bundle
@@ -107,10 +105,10 @@ function buildSkillLoadingGate(skillId: string, skillPath: string): string {
  */
 function determineActiveProvider(
   bundle: MemoryInjectionBundle | undefined,
-  explicitProvider?: "supermemory" | "engram",
-): "supermemory" | "engram" | "unknown" {
+  explicitProvider?: "supermemory",
+): "supermemory" | "unknown" {
   // R31 FIX: Priority is explicitProvider > bundle.tools check
-  if (explicitProvider === "supermemory" || explicitProvider === "engram") {
+  if (explicitProvider === "supermemory") {
     return explicitProvider;
   }
 
@@ -126,15 +124,6 @@ function determineActiveProvider(
     }
   }
 
-  // Supermemory has memory + recall (Engram has listProjects)
-  if (toolNames.has("memory") && toolNames.has("recall") && !toolNames.has("listProjects")) {
-    return "supermemory";
-  }
-  if (toolNames.has("listProjects") || toolNames.has("mem_save")) {
-    return "engram";
-  }
-
-  // Fallback: assume Supermemory if memory+recall present
   if (toolNames.has("memory") && toolNames.has("recall")) {
     return "supermemory";
   }
@@ -152,13 +141,13 @@ function determineActiveProvider(
  */
 function filterProviderSections(
   markdown: string,
-  activeProvider: "supermemory" | "engram" | "unknown",
+  activeProvider: "supermemory" | "unknown",
 ): string {
   if (activeProvider === "unknown") {
     return markdown;
   }
 
-  const inactiveProvider = activeProvider === "supermemory" ? "engram" : "supermemory";
+  const inactiveProvider = "legacy";
 
   // Split into lines for easier processing
   const lines = markdown.split("\n");
@@ -187,14 +176,13 @@ function filterProviderSections(
 
 /**
  * Filter tool bindings to only include validated tools for the active provider.
- * This prevents cross-contamination between providers (e.g., Engram shouldn't receive Supermemory tools).
+ * This prevents obsolete provider tool bindings from leaking into prompts.
  */
 function filterToolBindingsByProvider(
   bundle: MemoryInjectionBundle,
   providerId: string,
 ): MemoryInjectionBundle["toolBindings"] {
-  const validToolNames =
-    providerId === "supermemory" ? VALID_SUPERMEMORY_TOOL_NAMES : VALID_ENGRAM_TOOL_NAMES;
+  const validToolNames = providerId === "supermemory" ? VALID_SUPERMEMORY_TOOL_NAMES : [];
 
   return bundle.toolBindings.filter((binding) =>
     binding.toolNames.every((toolName) => validToolNames.includes(toolName)),
@@ -209,7 +197,7 @@ function filterToolBindingsByProvider(
 function buildProviderAdaptiveMemorySection(
   bundle: MemoryInjectionBundle | undefined,
   surface: "session" | "agent" | "skill",
-  explicitProvider?: "supermemory" | "engram",
+  explicitProvider?: "supermemory",
 ): string {
   if (!bundle || bundle.instructions.length === 0) {
     return "";
@@ -276,7 +264,7 @@ function buildPromptContent(
   personality: OrchestratorPersonality | undefined,
   promptProfile: DeveloperTeamPromptProfileV1,
   memoryBundle?: MemoryInjectionBundle,
-  explicitProvider?: "supermemory" | "engram",
+  explicitProvider?: "supermemory",
   authorization?: ModificationAuthorization,
 ): string {
   const content = getAgentContent(agent.id, capabilityInstructions
@@ -347,7 +335,7 @@ function buildPromptContent(
  * Returns "supermemory" if supermemory server entry exists with valid config.
  * This enables provider filtering even when memoryBundle is undefined (REQ-R25).
  */
-function detectSupermemoryProviderFromConfig(configDir: string): "supermemory" | "engram" | null {
+function detectSupermemoryProviderFromConfig(configDir: string): "supermemory" | null {
   try {
     const configPath = join(configDir, "opencode.json");
     if (!existsSync(configPath)) {
@@ -391,7 +379,7 @@ export function buildPromptGenerationPlan(
      * Used for filtering when memoryBundle is undefined (REQ-R25).
      * Auto-detects from opencode.json if not provided.
      */
-    activeMemoryProviderFromConfig?: "supermemory" | "engram";
+    activeMemoryProviderFromConfig?: "supermemory";
     /**
      * Optional modification authorization for apply agents.
      * When provided, authorization card is injected into apply-agent prompts (REQ-OA-005).

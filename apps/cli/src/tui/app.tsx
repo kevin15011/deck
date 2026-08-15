@@ -72,8 +72,8 @@ import {
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/external";
 
-import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
+import { createSupermemoryRuntime, createSupermemoryHttpTransport } from "@deck/adapter-supermemory/runtime";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import {
   getConfigurablePackageInstructionMetadata,
@@ -84,7 +84,7 @@ import {
 } from "@deck/core/config/deck-config";
 import { resolveCanonicalSupermemoryProjectScope } from "@deck/core/memory/canonical-supermemory-project";
 import type { DeckConfigStore } from "../deck-config-store";
-import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds, getEnabledPackageInstructionIds, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
+import { buildCapabilityInstructionBundle, createOwnerOnlyFileSecretStore, getEnabledCapabilityInstructionIds, getEnabledPackageInstructionIds, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
 import type {
   RunnerModelDiscoveryRequest,
   RunnerModelInventory,
@@ -129,6 +129,8 @@ import {
   type SupermemorySetupValues,
 } from "./screens/developer-team-screens";
 import {
+  validateAndStoreSupermemoryRuntimeCredential,
+  resolveSupermemoryRuntimeCredentialReadiness,
   runRunnerReviewPlan,
   type RunnerActionRunResult,
   type RunnerPackageInstallResult,
@@ -296,6 +298,7 @@ export function buildSupermemoryDeckConfig(values: SupermemorySetupValues) {
   return {
     version: 1,
     adaptiveMemory: {
+      enabled: true,
       activeProvider: "supermemory" as const,
       supermemory: {
         mcpServerName: "supermemory",
@@ -325,7 +328,6 @@ export function shouldUseLegacySupermemoryTokenRoute(selectedEnvironments: reado
 }
 
 export function createMemoryProviderForSelection(choice: MemoryProviderChoice, values?: SupermemorySetupValues): AdaptiveMemoryProvider | undefined {
-  if (choice === "engram") return createEngramMemoryProvider();
   if (choice === "supermemory" && values) {
     return createSupermemoryMemoryProvider({
       // Token-only: no userId/teamId/orgId — user derived from token
@@ -336,22 +338,18 @@ export function createMemoryProviderForSelection(choice: MemoryProviderChoice, v
 }
 
 
-type SupermemoryPiMcpWriter = (options: { token: string; serverName?: string; configPath?: string; homeDir?: string; projectScope: string }) => PiMcpConfigWriteResult;
+type SupermemoryPiMcpWriter = (options: { token?: string; serverName?: string; configPath?: string; homeDir?: string; projectScope: string }) => PiMcpConfigWriteResult;
 
 export function handOffSupermemoryCredentialToPiMcp(
   values: SupermemorySetupValues,
   options?: { writer?: SupermemoryPiMcpWriter; configPath?: string; homeDir?: string; projectScope?: string },
 ): { success: boolean; message: string; path?: string } {
-  const token = values.token.trim();
-  if (!token) {
-    return { success: false, message: "Supermemory token is required and must be stored outside Deck config." };
-  }
   if (!options?.projectScope) {
     return { success: false, message: "Canonical x-sm-project scope is required to configure Supermemory in Pi MCP config." };
   }
 
   const writer = options?.writer ?? writeSupermemoryPiMcpConfig;
-  const result = writer({ token, serverName: "supermemory", configPath: options?.configPath, homeDir: options?.homeDir, projectScope: options.projectScope });
+  const result = writer({ serverName: "supermemory", configPath: options?.configPath, homeDir: options?.homeDir, projectScope: options.projectScope });
   const diagnosticText = redactPiMcpConfigDiagnosticText(result.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
 
   if (!result.ok) {
@@ -365,25 +363,32 @@ export function handOffSupermemoryCredentialToPiMcp(
   return {
     success: true,
     path: result.path,
-    message: `Supermemory MCP server '${result.serverName}' configured in Pi MCP config at ${result.path}; credential value is ${redactSecret(token)}.`,
+    message: `Supermemory MCP server '${result.serverName}' configured in Pi MCP config at ${result.path}; bearer credentials remain only in Deck's secret store or runner-native auth.`,
   };
 }
 
-export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupValues, runtime: RunnerId = "pi"):
-  | { ok: true; values: { configured: true; hasToken: boolean; diagnostics: string[] }; status: string }
-  | { ok: false; message: string } {
-  if (runtime === "codex") {
-    return {
-      ok: true,
-      values: {
-        configured: true,
-        hasToken: false,
-        diagnostics: ["Codex Supermemory authorization is user-owned after the reviewed MCP configuration is applied."],
-      },
-      status: "Dashboard Adaptive Memory: Supermemory configuration is ready. Deck will show the user-owned native OAuth next step after it applies and verifies the MCP configuration.",
-    };
-  }
+async function validateSupermemoryRuntimeCredentialReadOnly(options: { apiKey: string; projectRoot?: string }): Promise<{ ok: boolean; diagnostics?: string[] }> {
+  if (!options.projectRoot) return { ok: false, diagnostics: ["Project root is required for canonical Supermemory scope validation."] };
+  const scope = resolveCanonicalSupermemoryProjectScope({ projectRoot: options.projectRoot, remotes: [] });
+  if (!scope.ok) return { ok: false, diagnostics: scope.diagnostics.map((diagnostic) => diagnostic.message) };
+  const runtime = createSupermemoryRuntime({
+    canonicalScope: scope.scope,
+    sessionId: "deck-tui-supermemory-validation",
+    runnerId: "tui-setup",
+    transport: createSupermemoryHttpTransport({ apiKey: options.apiKey, timeoutMs: 3_000 }),
+  });
+  const health = await runtime.health({ dependency: "explicit-recall" });
+  if (!health.ok) return { ok: false, diagnostics: [...health.diagnostics] };
+  const profile = await runtime.profile({ role: "setup", dependency: "explicit-recall" });
+  if (!profile.ok && profile.reason !== "role_policy_skip") return { ok: false, diagnostics: [...profile.diagnostics] };
+  const search = await runtime.search({ role: "setup", query: "Deck TUI Supermemory read-only validation", dependency: "explicit-recall" });
+  if (!search.ok && search.reason !== "empty_query") return { ok: false, diagnostics: [...search.diagnostics] };
+  return { ok: true };
+}
 
+export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupValues, runtime: RunnerId = "pi"):
+  | { ok: true; values: { configured: true; hasToken: boolean; runtimeCredentialStored: boolean; ephemeralTokenAvailable: boolean; diagnostics: string[] }; status: string }
+  | { ok: false; message: string } {
   const normalizedValues = {
     token: values.token.trim(),
   };
@@ -397,16 +402,18 @@ export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupVal
     ok: true,
     values: {
       configured: true,
-      hasToken: true,
+      hasToken: false,
+      runtimeCredentialStored: true,
+      ephemeralTokenAvailable: false,
       // userId no longer stored: derived from token automatically
       // teamId/orgId removed: Deck derives one canonical project scope.
       diagnostics: [runtime === "pi"
-        ? "Supermemory token captured ephemerally for Review & Install; no Pi MCP config was written yet."
-        : "Supermemory token captured ephemerally for Review & Install; no Deck or OpenCode project file contains the credential."],
+        ? "Supermemory Deck runtime API credential validated and stored; Pi MCP config remains credential-free."
+        : "Supermemory Deck runtime API credential validated and stored. Runner MCP OAuth is optional and separate."],
     },
     status: runtime === "pi"
-      ? "Dashboard Adaptive Memory: Supermemory ready for Review & Install. Token: [redacted]; Pi MCP config will include x-sm-project header."
-      : "Dashboard Adaptive Memory: Supermemory ready for OpenCode Review & Install. Token: [redacted]; provider credentials remain external.",
+      ? "Dashboard Adaptive Memory: Supermemory runtime credential is stored. Pi MCP config remains credential-free."
+      : "Dashboard Adaptive Memory: Supermemory runtime credential is stored. Runner MCP OAuth remains a separate optional native step.",
   };
 }
 
@@ -638,7 +645,86 @@ export type DeckAppDependencies = {
   resolveProjectRoot?: typeof resolveProjectRoot;
   runReleaseCheck?: typeof runReleaseCheckWithTimeout;
   configStore?: DeckConfigStore;
+  secretStore?: import("@deck/core").DeckSecretStore;
+  validateSupermemoryReadOnlyApi?: typeof validateSupermemoryRuntimeCredentialReadOnly;
+  initialScreen?: Screen;
+  initialSelectedEnvironments?: EnvironmentId[];
+  initialMemoryProvider?: AdaptiveMemoryProvider;
+  initialSupermemorySetup?: SupermemorySetupValues;
+  initialDashboardSupermemorySetupActive?: boolean;
+  initialDashboardState?: RunnerDashboardState;
 };
+
+export function hydrateDashboardAdaptiveMemoryState(
+  config: NormalizedDeckConfig,
+  secretStore: Pick<import("@deck/core").DeckSecretStore, "read">,
+): RunnerDashboardState["adaptiveMemory"] {
+  const activeProvider = config.adaptiveMemory.enabled === true ? config.adaptiveMemory.activeProvider : "none";
+  if (activeProvider !== "supermemory") {
+    return { provider: "none", supermemory: { configured: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] } };
+  }
+
+  try {
+    const stored = secretStore.read("supermemory-api-key")?.trim();
+    if (stored) {
+      return {
+        provider: "supermemory",
+        supermemory: {
+          configured: true,
+          hasToken: false,
+          runtimeCredentialStored: true,
+          ephemeralTokenAvailable: false,
+          diagnostics: ["Supermemory Deck runtime API credential is stored in Deck's owner-only secret store."],
+        },
+        status: "Supermemory runtime credential is stored. Runner MCP OAuth remains optional and separate.",
+      };
+    }
+  } catch (error) {
+    return {
+      provider: "supermemory",
+      supermemory: {
+        configured: false,
+        hasToken: false,
+        runtimeCredentialStored: false,
+        ephemeralTokenAvailable: false,
+        diagnostics: [redactSecret(error instanceof Error ? error.message : String(error))],
+      },
+      status: "Supermemory runtime credential could not be read from Deck's owner-only secret store.",
+    };
+  }
+
+  return {
+    provider: "supermemory",
+    supermemory: {
+      configured: false,
+      hasToken: false,
+      runtimeCredentialStored: false,
+      ephemeralTokenAvailable: false,
+      diagnostics: ["Supermemory Deck runtime API credential is not stored; enter the Deck Runtime API key to enable Adaptive Memory."],
+    },
+    status: "Supermemory runtime credential is not ready.",
+  };
+}
+
+export function withAuthoritativeSupermemoryRuntimeReadiness(
+  adaptiveMemory: RunnerDashboardState["adaptiveMemory"],
+  secretStore: Pick<import("@deck/core").DeckSecretStore, "read">,
+): RunnerDashboardState["adaptiveMemory"] {
+  if (adaptiveMemory.provider !== "supermemory") return adaptiveMemory;
+  const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup: adaptiveMemory.supermemory, secretStore });
+  return {
+    ...adaptiveMemory,
+    supermemory: {
+      ...adaptiveMemory.supermemory,
+      configured: adaptiveMemory.supermemory?.configured === true || readiness.ready,
+      runtimeCredentialStored: readiness.ready,
+      ephemeralTokenAvailable: false,
+      diagnostics: readiness.ready
+        ? adaptiveMemory.supermemory?.diagnostics ?? []
+        : [...(adaptiveMemory.supermemory?.diagnostics ?? []), ...readiness.diagnostics],
+    },
+  };
+}
 
 async function rollbackOrThrow(adapter: import("@deck/core").RunnerAdapter, backup: unknown): Promise<void> {
   const result = await adapter.rollbackDeveloperTeamFiles(backup);
@@ -717,9 +803,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const configStore = dependencies.configStore;
   if (!configStore) throw new Error("DeckApp requires caller-resolved global Deck config store.");
   const requiredConfigStore: DeckConfigStore = configStore;
+  const deckSecretStore = dependencies.secretStore ?? createOwnerOnlyFileSecretStore({ configHome: process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config") });
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const [screen, setScreen] = useState<Screen>("home");
+  const [screen, setScreen] = useState<Screen>(dependencies.initialScreen ?? "home");
   const [logs, setLogs] = useState<string[]>([]);
 
   // Helper to add logs (keeps last 20)
@@ -728,7 +815,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }
   const [cursor, setCursor] = useState(0);
   const [homeCursor, setHomeCursor] = useState(0);
-  const [selectedEnvironments, setSelectedEnvironments] = useState<EnvironmentId[]>([]);
+  const [selectedEnvironments, setSelectedEnvironments] = useState<EnvironmentId[]>(dependencies.initialSelectedEnvironments ?? []);
   const [runtimeStatuses, setRuntimeStatuses] = useState<RuntimeStatus[]>([]);
   const [piPreflight, setPiPreflight] = useState<PiPreflightResult | null>(null);
   const [toolsReview, setToolsReview] = useState<PiRequiredToolsReview | null>(null);
@@ -791,19 +878,19 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       loadingState: { kind: "loading" },
     });
   }
-  const [memoryProvider, setMemoryProvider] = useState<AdaptiveMemoryProvider | undefined>(undefined);
+  const [memoryProvider, setMemoryProvider] = useState<AdaptiveMemoryProvider | undefined>(dependencies.initialMemoryProvider);
   const [memoryProviderChoice, setMemoryProviderChoice] = useState<MemoryProviderChoice>("none");
-  const [supermemorySetup, setSupermemorySetup] = useState<SupermemorySetupValues>(() => ({ token: "" }));
+  const [supermemorySetup, setSupermemorySetup] = useState<SupermemorySetupValues>(() => dependencies.initialSupermemorySetup ?? ({ token: "" }));
   const [supermemoryError, setSupermemoryError] = useState<string | undefined>(undefined);
   const [memoryStatus, setMemoryStatus] = useState<string | undefined>(undefined);
-  const [dashboardSupermemorySetupActive, setDashboardSupermemorySetupActive] = useState(false);
+  const [dashboardSupermemorySetupActive, setDashboardSupermemorySetupActive] = useState(dependencies.initialDashboardSupermemorySetupActive ?? false);
   // The Tavily value is kept only while the masked entry screen is active.
   // It is never copied into dashboard state, plans, config, diagnostics, or logs.
   const [dashboardWebSearchCredentialEntryActive, setDashboardWebSearchCredentialEntryActive] = useState(false);
   const [webSearchCredential, setWebSearchCredential] = useState("");
   const [webSearchCredentialError, setWebSearchCredentialError] = useState<string | undefined>(undefined);
   const [dashboardCompletionStatus, setDashboardCompletionStatus] = useState<string | undefined>(undefined);
-  const [dashboardState, setDashboardState] = useState<RunnerDashboardState>(() => createDefaultRunnerDashboardState());
+  const [dashboardState, setDashboardState] = useState<RunnerDashboardState>(() => dependencies.initialDashboardState ?? createDefaultRunnerDashboardState());
   const [dashboardInventory, setDashboardInventory] = useState<CapabilityInventory | null>(null);
   const [dashboardEnvironmentId, setDashboardEnvironmentId] = useState<EnvironmentId | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
@@ -962,6 +1049,13 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       try {
         const adapter = adapterFor(state.runnerScope);
         log(`dashboardPlanBuilder: adapter=${adapter.runnerId}`);
+        const runtimeReadiness = state.adaptiveMemory.provider === "supermemory"
+          ? resolveSupermemoryRuntimeCredentialReadiness({ setup: state.adaptiveMemory.supermemory, secretStore: deckSecretStore })
+          : undefined;
+        if (process.env.DECK_DEBUG && runtimeReadiness) {
+          log(`supermemory runtime readiness for plan: ${runtimeReadiness.ready ? "ready" : "not-ready"} (${runtimeReadiness.reason})`);
+        }
+        const adaptiveMemory = withAuthoritativeSupermemoryRuntimeReadiness(state.adaptiveMemory, deckSecretStore);
         const adapterState: DashboardState & {
           teams: RunnerDashboardState["teams"];
           runtime: { toolsReview?: unknown };
@@ -977,7 +1071,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
            operationId: state.operationId,
            webSearchProvider: state.webSearchProvider,
            webSearchProviderDescriptor: state.webSearchProviderDescriptor,
-           adaptiveMemory: state.adaptiveMemory,
+            adaptiveMemory,
           packageInstructions: Object.fromEntries(
             Object.entries(state.packageInstructions).map(([packageId, enabled]) => [packageId, enabled === true]),
           ),
@@ -1281,6 +1375,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           setDashboardSerenaStages((current) => current.includes(stage) ? current : [...current, stage]);
         },
         runnerAction: runSerenaAction,
+        secretStore: deckSecretStore,
+        validateSupermemoryReadOnlyApi: validateSupermemoryRuntimeCredentialReadOnly,
         supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
          memoryProvider: resolvedMemoryProvider,
          resolvedMemoryProvider,
@@ -1703,6 +1799,42 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
       const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
 
+      if (deckConfig.adaptiveMemory.activeProvider === "supermemory") {
+        const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
+        if (!resolved.ok) {
+          if (!cancelled) {
+            const message = "Unable to resolve canonical x-sm-project scope from the verified project root; Supermemory runtime credential was not stored and Developer Team installation was not applied.";
+            requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));
+            setMemoryProvider(undefined);
+            setSupermemorySetup((current) => ({ ...current, token: "" }));
+            setInstallResults((current) => [...current, { tool: "Developer Team", success: false, message }]);
+            resetCursor(getNextScreenAfterDeveloperTeamInstall({ selectedEnvironments, nextEnvironment: openCodeExclusive ? null : (selectedEnvironments.find((e) => e !== "pi-development") ?? null) }));
+          }
+          return;
+        }
+
+        const runtimeCredential = await validateAndStoreSupermemoryRuntimeCredential({
+          token: supermemorySetup.token,
+          projectRoot,
+          secretStore: deckSecretStore,
+          validateSupermemoryReadOnlyApi: dependencies.validateSupermemoryReadOnlyApi ?? validateSupermemoryRuntimeCredentialReadOnly,
+        });
+        setSupermemorySetup((current) => ({ ...current, token: "" }));
+        if (!runtimeCredential.ok) {
+          if (!cancelled) {
+            requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));
+            setMemoryProvider(undefined);
+            setInstallResults((current) => [...current, {
+              tool: "Developer Team",
+              success: false,
+              message: `${runtimeCredential.message}${runtimeCredential.diagnostics.length > 0 ? ` Details: ${runtimeCredential.diagnostics.slice(0, 3).join("; ")}` : ""}`,
+            }]);
+            resetCursor(getNextScreenAfterDeveloperTeamInstall({ selectedEnvironments, nextEnvironment: openCodeExclusive ? null : (selectedEnvironments.find((e) => e !== "pi-development") ?? null) }));
+          }
+          return;
+        }
+      }
+
       const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
         projectRoot,
         environmentId,
@@ -1779,7 +1911,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     return () => {
       cancelled = true;
     };
-  }, [screen, selectedEnvironments, openCodePreflight, modelAssignments, thinkingAssignments, memoryProvider]);
+  }, [screen, selectedEnvironments, openCodePreflight, modelAssignments, thinkingAssignments, memoryProvider, dependencies.validateSupermemoryReadOnlyApi]);
 
   function resetCursor(nextScreen: Screen, nextCursor = 0) {
     setScreen(nextScreen);
@@ -1812,6 +1944,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           runnerScope: adapter.runnerId,
           runnerDisplayName: adapter.displayName,
           runnerUi: adapter.ui,
+          adaptiveMemory: hydrateDashboardAdaptiveMemoryState(config, deckSecretStore),
           runtime: { inspectionState: "blocked", diagnostics: [normalizedInventory.diagnostic.message] },
           packageInstructions: loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds),
         }));
@@ -1868,6 +2001,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
            mcpConfigConflict: webSearchEvidence?.mcpConfigConflict ?? false,
            readiness: webSearchReadiness?.state ?? "disabled",
          },
+        adaptiveMemory: hydrateDashboardAdaptiveMemoryState(config, deckSecretStore),
         runtime: {
           runnerCommand: runtimes.find((runtime) => runtime.isAvailable)?.runtimeId ?? runtimes[0]?.runtimeId ?? adapter.runnerId,
           preflight: inspection,
@@ -1901,6 +2035,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         runnerScope: adapter.runnerId,
         runnerDisplayName: adapter.displayName,
         runnerUi: adapter.ui,
+        adaptiveMemory: hydrateDashboardAdaptiveMemoryState(config, deckSecretStore),
         runtime: { inspectionState: "blocked", diagnostics: [message] },
         packageInstructions: loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds),
       }));
@@ -2437,18 +2572,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
 
     if (screen === "memory-provider-selection") {
-      const choice = (["none", "engram", "supermemory"] as const)[cursor];
+      const choice = (["none", "supermemory"] as const)[cursor];
       if (!choice) return;
       setMemoryProviderChoice(choice);
       setSupermemoryError(undefined);
       if (choice === "supermemory") {
-        if (!shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)) {
-          setSupermemorySetup({ token: "" });
-          setMemoryProvider(undefined);
-          setMemoryStatus("Supermemory uses Codex native OAuth from the runner dashboard; no token was captured.");
-          resetCursor("developer-team-review");
-          return;
-        }
         setDashboardSupermemorySetupActive(false);
         resetCursor("supermemory-token");
         return;
@@ -2459,7 +2587,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
 
     if (isSupermemoryInputScreen(screen)) {
-      continueSupermemorySetup();
+      void continueSupermemorySetup();
       return;
     }
 
@@ -2814,13 +2942,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       goBack();
       return;
     }
-    if (!shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)) {
-      setSupermemorySetup({ token: "" });
-      setSupermemoryError("Codex uses native OAuth; this token input is unavailable.");
-      return;
-    }
     if (key.return) {
-      continueSupermemorySetup();
+      void continueSupermemorySetup();
       return;
     }
     const field = supermemoryFieldForScreen(screen);
@@ -2834,17 +2957,48 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
   }
 
-  function continueSupermemorySetup() {
+  async function validateAndStoreSubmittedSupermemoryToken(values: SupermemorySetupValues): Promise<boolean> {
+    const projectRoot = projectRootFor({ require: true }) ?? localResolvedProjectRoot;
+    if (!projectRoot) {
+      requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));
+      setMemoryProvider(undefined);
+      setSupermemoryError("Unable to resolve verified project root; Supermemory runtime credential was not stored.");
+      return false;
+    }
+    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
+    if (!resolved.ok) {
+      requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));
+      setMemoryProvider(undefined);
+      setSupermemoryError("Unable to resolve canonical x-sm-project scope from the verified project root; Supermemory runtime credential was not stored.");
+      return false;
+    }
+
+    const result = await validateAndStoreSupermemoryRuntimeCredential({
+      token: values.token,
+      projectRoot,
+      projectScope: resolved.scope,
+      secretStore: deckSecretStore,
+      validateSupermemoryReadOnlyApi: dependencies.validateSupermemoryReadOnlyApi ?? validateSupermemoryRuntimeCredentialReadOnly,
+    });
+    if (!result.ok) {
+      requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));
+      setMemoryProvider(undefined);
+      setSupermemoryError(`${result.message}${result.diagnostics.length > 0 ? ` Details: ${result.diagnostics.slice(0, 3).join("; ")}` : ""}`);
+      return false;
+    }
+    setSupermemorySetup((current) => ({ ...current, token: "" }));
+    return true;
+  }
+
+  async function continueSupermemorySetup() {
     setSupermemoryError(undefined);
-    // Token-only: after token is entered, complete setup directly
+    // Token-only: after token is entered, validate and store before any config is marked ready.
     if (screen === "supermemory-token") {
-      if (!shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)) {
-        setSupermemorySetup({ token: "" });
-        setSupermemoryError("Codex uses native OAuth; this token input is unavailable.");
-        return;
-      }
       if (!supermemorySetup.token.trim()) {
         setSupermemoryError("Supermemory token is required and must be stored outside Deck config.");
+        return;
+      }
+      if (!await validateAndStoreSubmittedSupermemoryToken(supermemorySetup)) {
         return;
       }
       // Complete setup: go to dashboard review or developer-team-review
@@ -2870,10 +3024,15 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       return false;
     }
 
+    requiredConfigStore.patch((existing) => ({ ...existing, ...buildMemoryProviderConfig("supermemory", values) }));
+    setMemoryProvider(createMemoryProviderForSelection("supermemory", values));
     setDashboardState((state) => reduceRunnerDashboard(
-      reduceRunnerDashboard(state, {
+      reduceRunnerDashboard(reduceRunnerDashboard(state, {
         type: "update-supermemory",
         values: setup.values,
+      }, dashboardPlanBuilder), {
+        type: "enter-review",
+        inventory: dashboardInventory,
       }, dashboardPlanBuilder),
       { type: "navigate", screen: "dashboard" },
       dashboardPlanBuilder,
@@ -2888,7 +3047,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       if (current.adaptiveMemory.provider !== "supermemory" || !current.adaptiveMemory.supermemory?.hasToken) return current;
       return reduceRunnerDashboard(current, {
         type: "update-supermemory",
-        values: { configured: false, hasToken: false, diagnostics: [] },
+        values: { configured: false, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] },
       }, dashboardPlanBuilder);
     });
   }
@@ -2900,12 +3059,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
     if (state.adaptiveMemory.provider === "supermemory") {
       const setup = state.adaptiveMemory.supermemory;
-      if (!setup?.configured) {
+      const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup, secretStore: deckSecretStore });
+      if (process.env.DECK_DEBUG) log(`Supermemory runtime readiness: ${readiness.ready ? "ready" : "not-ready"} (${readiness.reason}).`);
+      if (!setup?.configured && !readiness.ready) {
         diagnostics.push({ message: "Supermemory setup must be selected before Review/Install." });
-      } else if (runnerRequiresExternalSupermemoryToken(state) && !setup.hasToken) {
-        diagnostics.push({ message: "Supermemory requires an external token to run Review/Install on this runner." });
-      } else if (runnerRequiresExternalSupermemoryToken(state) && !token.trim()) {
-        diagnostics.push({ message: "Supermemory requires re-entering the external token before running Review/Install." });
+      } else if (!readiness.ready) {
+        diagnostics.push({ message: readiness.diagnostics[0] ?? "Supermemory Deck runtime API credential must be validated and stored before Review/Install." });
       }
     }
     return diagnostics;
@@ -2917,13 +3076,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
   function persistMemoryProviderSelection(choice: MemoryProviderChoice, values: SupermemorySetupValues): boolean {
     try {
-      if (choice === "supermemory" && !shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)) {
-        setSupermemorySetup({ token: "" });
-        setMemoryProvider(undefined);
-        setSupermemoryError("Codex uses native OAuth; no Supermemory token was persisted.");
-        return false;
-      }
-      if (choice === "supermemory") {
+      if (choice === "supermemory" && shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)) {
         if (!localResolvedProjectRoot) {
           const message = "Unable to resolve verified project root; Supermemory MCP setup was not written.";
           setMemoryProvider(undefined);
@@ -2953,9 +3106,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       requiredConfigStore.patch((existing) => ({ ...existing, ...config }));
       setMemoryProvider(createMemoryProviderForSelection(choice, values));
       if (choice === "supermemory") {
-        setMemoryStatus("Active adaptive-memory provider: Supermemory MCP. Token: [redacted]. Pi MCP config: ~/.pi/agent/mcp.json.");
-      } else if (choice === "engram") {
-        setMemoryStatus("Active adaptive-memory provider: Engram.");
+        setMemoryStatus(shouldUseLegacySupermemoryTokenRoute(selectedEnvironments)
+          ? "Adaptive-memory provider selected: Supermemory. Review & Install will run read-only API validation before storing the runtime credential in Deck's secret store; Pi MCP config remains credential-free."
+          : "Adaptive-memory provider selected: Supermemory. Review & Install will run read-only API validation before storing the runtime credential in Deck's secret store; optional runner MCP OAuth is separate.");
       } else {
         setMemoryStatus("Adaptive memory disabled.");
       }
@@ -3538,7 +3691,7 @@ function screenTitle(screen: Screen, runnerLabel?: string): string {
     "no-providers": "No providers detected",
     "memory-provider-selection": "Adaptive memory provider",
     // Removed: userId/teamId/orgId screens — token-only config
-    "supermemory-token": "Supermemory MCP token",
+    "supermemory-token": "Supermemory API key (Deck Runtime)",
     "web-search-credential": "Tavily credential",
     "developer-team-review": "Developer Team",
     "developer-team-installing": "Installing Developer Team",

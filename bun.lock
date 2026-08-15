@@ -19,7 +19,6 @@
       "version": "0.0.0",
       "dependencies": {
         "@deck/adapter-codex": "workspace:*",
-        "@deck/adapter-engram": "workspace:*",
         "@deck/adapter-opencode": "workspace:*",
         "@deck/adapter-pi": "workspace:*",
         "@deck/adapter-supermemory": "workspace:*",
@@ -39,13 +38,6 @@
         "@deck/provider-tavily": "workspace:*",
         "@deck/sdd-runtime": "workspace:*",
         "toml-eslint-parser": "1.0.3",
-      },
-    },
-    "packages/adapter-engram": {
-      "name": "@deck/adapter-engram",
-      "version": "0.0.0",
-      "dependencies": {
-        "@deck/core": "workspace:*",
       },
     },
     "packages/adapter-opencode": {
@@ -97,8 +89,6 @@
     "@alcalzone/ansi-tokenize": ["@alcalzone/ansi-tokenize@0.3.0", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-p+CMKJ93HFmLkjXKlXiVGlMQEuRb6H0MokBSwUsX+S6BRX8eV5naFZpQJFfJHjRZY0Hmnqy1/r6UWl3x+19zYA=="],
 
     "@deck/adapter-codex": ["@deck/adapter-codex@workspace:packages/adapter-codex"],
-
-    "@deck/adapter-engram": ["@deck/adapter-engram@workspace:packages/adapter-engram"],
 
     "@deck/adapter-opencode": ["@deck/adapter-opencode@workspace:packages/adapter-opencode"],
 

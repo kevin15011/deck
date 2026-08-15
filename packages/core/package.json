@@ -14,6 +14,7 @@
     "./explorer-prompt": "./src/explorer-prompt.ts",
     "./orchestrator-prompt": "./src/orchestrator-prompt.ts",
     "./config/deck-config": "./src/config/deck-config.ts",
+    "./config/secret-store": "./src/config/secret-store.ts",
     "./memory/adaptive-memory": "./src/memory/adaptive-memory.ts",
     "./memory/adaptive-memory-contract": "./src/memory/adaptive-memory-contract.ts",
     "./memory/adaptive-memory-governance": "./src/memory/adaptive-memory-governance.ts",

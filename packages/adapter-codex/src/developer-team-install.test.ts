@@ -16,8 +16,9 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(plan.inventory.externalStandaloneSkillIds).toHaveLength(29);
     expect(plan.inventory.bootstrapSkillIds).toEqual(["deck-onboard", "deck-archive"]);
     expect(paths).toContain(".codex/config.toml");
+    expect(paths).toContain(".codex/hooks/developer-team-execution.js");
     expect(paths).toContain("AGENTS.md");
-    expect(plan.diagnostics.some((diagnostic) => diagnostic.code === "trusted-bridge-unavailable")).toBe(true);
+    expect(plan.diagnostics.some((diagnostic) => diagnostic.code === "trusted-bridge-unavailable")).toBe(false);
     expect(plan.expectedFiles).toHaveLength(plan.mutations.length);
     expect(paths).toContain(".codex/deck-manifest.json");
   });

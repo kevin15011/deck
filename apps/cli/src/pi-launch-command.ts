@@ -13,7 +13,6 @@ import {
   type PromptProfileActivationV1,
   type SupermemoryRuntimeValidationResult,
 } from "@deck/adapter-pi";
-import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import {
   DeckConfigError,
@@ -23,17 +22,20 @@ import {
   type DeckSupermemoryConfig,
 } from "@deck/core/config/deck-config";
 import { resolveCanonicalSupermemoryProjectScope } from "@deck/core";
+import type { DeckSecretStore } from "@deck/core";
 import type { AdaptiveMemoryProvider, MemoryDiagnostic, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
+import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import {
   buildCapabilityInstructionBundle,
   getEnabledCapabilityInstructionIds,
   type CapabilityInstructionBundle,
 } from "@deck/core/teams/developer/instruction-bundles";
+import { createSupermemoryRuntimeHost, type SupermemoryRunnerLoopbackBridge } from "./supermemory-runtime-host";
 
 // --- Types ---
 
-const SUPPORTED_PI_LAUNCH_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
+const SUPPORTED_PI_LAUNCH_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
 
 type SupermemoryRuntimeValidator = (options: {
   serverName?: string;
@@ -69,6 +71,7 @@ export type RunPiLaunchOptions = {
   supermemoryRuntimeValidator?: SupermemoryRuntimeValidator;
   /** Per-request Supermemory validation timeout for each non-mutating probe. Defaults to 3000ms. */
   supermemoryValidationTimeoutMs?: number;
+  supermemoryRuntime?: { secretStore?: DeckSecretStore; apiKey?: string; transport?: SupermemoryRuntimeTransport; stateHome?: string };
   /** Check if a command exists in PATH */
   commandExists?: (command: string) => boolean;
   /** Override the Pi command path */
@@ -80,15 +83,15 @@ export type RunPiLaunchOptions = {
 };
 
 export type MemoryProviderDiagnostic = {
-  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers";
+  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers" | "supermemory_runtime";
   message: string;
   providerId?: string;
 };
 
 export type PiLaunchResult =
   | { status: "error"; message: string; memoryDiagnostics: MemoryProviderDiagnostic[] }
-  | { status: "ready"; plan: PiTeamLaunchPlan; profileDir: string; memoryDiagnostics: MemoryProviderDiagnostic[] }
-  | { status: "launched"; plan: PiTeamLaunchPlan; memoryDiagnostics: MemoryProviderDiagnostic[] };
+  | { status: "ready"; plan: PiTeamLaunchPlan; profileDir: string; memoryDiagnostics: MemoryProviderDiagnostic[]; loopbackBridge?: SupermemoryRunnerLoopbackBridge }
+  | { status: "launched"; plan: PiTeamLaunchPlan; memoryDiagnostics: MemoryProviderDiagnostic[]; loopbackBridge?: SupermemoryRunnerLoopbackBridge };
 
 export type ResolvedPiAdaptiveMemoryProvider = {
   provider?: AdaptiveMemoryProvider;
@@ -157,12 +160,41 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
   const resolvedMemory = await resolveLaunchMemoryProvider(options);
   const allDiagnostics: MemoryProviderDiagnostic[] = [...resolvedMemory.diagnostics];
   const capabilityInstructions = buildPiLaunchCapabilityInstructions(options);
+  let runtimeMemoryInjection: MemoryInjectionBundle | undefined;
+  let loopbackBridge: SupermemoryRunnerLoopbackBridge | undefined;
+  if (options.deckConfig !== undefined) {
+    try {
+      const deckConfig = validateDeckConfig(options.deckConfig);
+      const runtimeDeckConfig = options.cliMemoryProvider === "none"
+        ? { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: false, activeProvider: "none" as const } }
+        : options.cliMemoryProvider === "supermemory"
+          ? { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: true, activeProvider: "supermemory" as const } }
+          : deckConfig;
+      const runtimeHost = await createSupermemoryRuntimeHost({
+        projectRoot,
+        teamId,
+        deckConfig: runtimeDeckConfig,
+        runnerId: "pi",
+        role: "lead",
+        launchMode: "interactive",
+        secretStore: options.supermemoryRuntime?.secretStore,
+        apiKey: options.supermemoryRuntime?.apiKey,
+        transport: options.supermemoryRuntime?.transport,
+        stateHome: options.supermemoryRuntime?.stateHome,
+        deferInitialRecallToLoopback: true,
+      });
+      allDiagnostics.push(...runtimeHost.diagnostics.filter((diagnostic) => diagnostic.severity !== "info").map((diagnostic) => ({ code: "supermemory_runtime" as const, providerId: "supermemory", message: diagnostic.message })));
+      loopbackBridge = runtimeHost.enabled && !dryRun ? await runtimeHost.startLoopbackBridge() : undefined;
+    } catch (error) {
+      allDiagnostics.push({ code: "supermemory_runtime", providerId: "supermemory", message: redactedConfigErrorMessage(error, "launch") });
+    }
+  }
 
   const profileDiagnostics = materializeTeamProfile({
     teamId,
     projectRoot,
     supportedMemoryProviderIds,
-    ...(resolvedMemory.memoryInjection ? { memoryInjection: resolvedMemory.memoryInjection } : {}),
+    ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { memoryInjection: runtimeMemoryInjection ?? resolvedMemory.memoryInjection } : {}),
     ...(resolvedMemory.provider ? { memoryProvider: resolvedMemory.provider } : {}),
     ...(resolvedMemory.memoryUnavailableReason ? { memoryUnavailableReason: resolvedMemory.memoryUnavailableReason } : {}),
     ...(capabilityInstructions ? { capabilityInstructions } : {}),
@@ -178,7 +210,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
       return { skillId: skill.skillId, body: bundle.SKILL, files: bundle.files };
     });
     const installPlan = buildDeveloperTeamInstallPlan(projectRoot, {
-      ...(resolvedMemory.memoryInjection ? { memoryInjection: resolvedMemory.memoryInjection } : {}),
+      ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { memoryInjection: runtimeMemoryInjection ?? resolvedMemory.memoryInjection } : {}),
       ...(resolvedMemory.provider ? { memoryProvider: resolvedMemory.provider } : {}),
       supportedMemoryProviderIds,
       modelAssignments,
@@ -195,21 +227,22 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
   }
 
   const plan = buildPiTeamLaunchPlan({ teamId, projectRoot, flags, piCommand });
+  if (loopbackBridge) Object.assign(plan.env, Object.fromEntries(Object.entries(loopbackBridge.envOverlay).map(([key, entry]) => [key, entry.value])));
   const memoryDiagnostics = dedupeDiagnostics(allDiagnostics);
 
   if (dryRun) {
-    return { status: "ready", plan, profileDir: plan.profileDir, memoryDiagnostics };
+    return { status: "ready", plan, profileDir: plan.profileDir, memoryDiagnostics, ...(loopbackBridge ? { loopbackBridge } : {}) };
   }
 
-  return { status: "launched", plan, memoryDiagnostics };
+  return { status: "launched", plan, memoryDiagnostics, ...(loopbackBridge ? { loopbackBridge } : {}) };
 }
 
 function buildPiLaunchCapabilityInstructions(options: RunPiLaunchOptions): CapabilityInstructionBundle | undefined {
   try {
     const deckConfig = validateDeckConfig(options.deckConfig);
     const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, "pi");
-    const activeProvider = options.activeProvider ?? deckConfig.adaptiveMemory.activeProvider;
-    if (activeProvider === "supermemory" && !enabledIds.includes("adaptive-memory")) {
+    const activeMemoryEnabled = options.activeProvider === "supermemory" || deckConfig.adaptiveMemory.enabled === true;
+    if (activeMemoryEnabled && !enabledIds.includes("adaptive-memory")) {
       enabledIds.push("adaptive-memory");
     }
     if (enabledIds.length === 0) return undefined;
@@ -264,14 +297,6 @@ async function resolveLaunchMemoryProvider(options: RunPiLaunchOptions): Promise
         },
       ],
     };
-  }
-
-  if (activeProvider === "engram") {
-    try {
-      return { provider: createEngramMemoryProvider(), diagnostics };
-    } catch {
-      return providerConstructionUnavailable("engram", "launch");
-    }
   }
 
   if (activeProvider === "supermemory") {
@@ -419,14 +444,6 @@ export async function resolvePiAdaptiveMemoryProvider(
     };
   }
 
-  if (activeProvider === "engram") {
-    try {
-      return { provider: createEngramMemoryProvider(), diagnostics };
-    } catch {
-      return providerConstructionUnavailable("engram", context);
-    }
-  }
-
   if (activeProvider === "supermemory") {
     const supermemory = resolved.supermemory;
     // Token-only config: configured check removed since DeckSupermemoryConfig no longer
@@ -490,7 +507,8 @@ function redactLaunchDiagnosticText(value: string): string {
   return redactPiMcpConfigDiagnosticText(value)
     .replace(/(bad\s+token\s+)[^\s,;]+/gi, "$1[REDACTED]")
     .replace(/(token\s+)[^\s,;]+/gi, "$1[REDACTED]")
-    .replace(/(secret\s+)[^\s,;]+/gi, "$1[REDACTED]");
+    .replace(/(secret\s+)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/\bsupermemory-[A-Za-z0-9_-]+/gi, "supermemory-[REDACTED]");
 }
 
 function dedupeDiagnostics(diagnostics: MemoryProviderDiagnostic[]): MemoryProviderDiagnostic[] {
@@ -510,12 +528,12 @@ function supportsProvider(providerId: string, supportedProviderIds: Iterable<str
 }
 
 function inferProviderId(cliProvider: string | undefined, deckConfig: unknown): AdaptiveMemoryActiveProvider | undefined {
-  if (cliProvider === "engram" || cliProvider === "supermemory" || cliProvider === "none") return cliProvider;
+  if (cliProvider === "supermemory" || cliProvider === "none") return cliProvider;
   if (typeof deckConfig === "object" && deckConfig !== null && !Array.isArray(deckConfig)) {
     const adaptiveMemory = (deckConfig as { adaptiveMemory?: unknown }).adaptiveMemory;
     if (typeof adaptiveMemory === "object" && adaptiveMemory !== null && !Array.isArray(adaptiveMemory)) {
       const activeProvider = (adaptiveMemory as { activeProvider?: unknown }).activeProvider;
-      if (activeProvider === "engram" || activeProvider === "supermemory" || activeProvider === "none") return activeProvider;
+      if (activeProvider === "supermemory" || activeProvider === "none") return activeProvider;
     }
   }
   return undefined;

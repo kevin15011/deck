@@ -37,7 +37,7 @@ A minimal, credential-free example is:
 {
   "version": 1,
   "adaptiveMemory": {
-    "activeProvider": "none"
+    "enabled": false
   },
   "orchestratorPersonality": "pragmatica",
   "packageInstructions": {
@@ -65,12 +65,12 @@ Package instructions are separate from adaptive-memory context. Enabled package 
 
 ## Adaptive memory
 
-Choose exactly one of `none`, `engram`, or `supermemory`. The default is `none`. Supermemory setup is runner-specific:
+Adaptive Memory is a boolean product setting: **Disabled** or **Enabled**. Legacy `activeProvider` values are normalized only for compatibility (`supermemory` maps to enabled, `none` maps to disabled). The explicit launch flag `--memory=none` overrides globally enabled config for that launch. Supermemory setup is runner-specific:
 
 | Runner | Setup input and effect | Persisted configuration boundary |
 |---|---|---|
-| Pi | The TUI accepts a token ephemerally for setup and writes the Supermemory server and credential to Pi's global MCP config. | Deck config stores only the selected provider and non-secret options; the token is not written to `.deck/config.json`. |
-| OpenCode | Deck writes the remote Supermemory endpoint and derived or explicit `x-sm-project` scope to OpenCode's `~/.config/opencode/opencode.json`. Authenticate with native OAuth through `/connect` or `opencode mcp auth supermemory`. | The OpenCode file contains endpoint and project scope only. OAuth credentials live outside project configuration, and Deck does not persist an `Authorization` header. |
+| Pi | The TUI validates a token and stores the runtime credential in Deck's owner-only secret store. Optional MCP config is written without persisting that token. | Deck config stores only Adaptive Memory enablement and non-secret options; the token is not written to `.deck/config.json` or runner MCP config. |
+| OpenCode/Codex | Deck runtime still requires a Supermemory API token, which is read-only validated and stored in Deck's owner-only secret store. Separately, Deck can write the remote Supermemory endpoint and `x-sm-project` scope to the runner MCP config. Authenticate optional MCP with native OAuth through `/connect`, `opencode mcp auth supermemory`, or `codex mcp login supermemory`. | Runner MCP config contains endpoint and project scope only. OAuth credentials live outside project configuration, do not replace the Deck runtime bearer credential, and Deck does not persist an `Authorization` header. |
 
 See [Adaptive memory](adaptive-memory.md) for provider behavior and governance.
 
@@ -116,6 +116,6 @@ The safe default keeps execution in observe/shadow mode with no cohort rollout a
 
 1. Select the active runner in the TUI.
 2. Review the package and MCP evidence before applying changes.
-3. Keep credentials in the runner's supported secret/configuration surface.
+3. Keep the Deck runtime API bearer in the Deck secret store and optional MCP OAuth in the runner's native OAuth surface; these are distinct credentials. Do not place bearer tokens in runner MCP config.
 4. Run `deck doctor` after changing runner configuration.
 5. Use [Troubleshooting](troubleshooting.md) when a value is rejected or a runner remains indeterminate.

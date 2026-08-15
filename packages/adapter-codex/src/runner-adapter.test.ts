@@ -176,14 +176,13 @@ describe("Codex RunnerAdapter production composition", () => {
         severity: "warning",
         message: expect.stringContaining("sandboxing and command approvals are disabled"),
       }));
-      expect(adapter.getCapabilityIds()).toEqual(expect.arrayContaining([...protectedIds, "engram", "pi-hud", "opencode-mermaid-renderer", "deck-model-variants"]));
+      expect(adapter.getCapabilityIds()).toEqual(expect.arrayContaining([...protectedIds, "pi-hud", "opencode-mermaid-renderer", "deck-model-variants"]));
       for (const capabilityId of protectedIds) expect(adapter.getCapability(capabilityId)).toMatchObject({ capabilityId, status: "gap", requirementLevel: "required" });
       expect(adapter.getCapability("pi-hud")).toMatchObject({ supportStatus: "not-applicable" });
       expect(adapter.getCapability("opencode-mermaid-renderer")).toMatchObject({ supportStatus: "not-applicable" });
 
       const inventory = await adapter.getCapabilityInventory({ projectRoot, environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
       for (const capabilityId of protectedIds) expect(inventory.capabilities).toContainEqual(expect.objectContaining({ capabilityId, isBlocked: true, requirementLevel: "required" }));
-      expect(inventory.capabilities).toContainEqual(expect.objectContaining({ capabilityId: "engram", isBlocked: true }));
       expect(inventory.capabilities).toContainEqual(expect.objectContaining({ capabilityId: "pi-hud", supportStatus: "not-applicable", isInstalled: false, isBlocked: false }));
       expect(inventory.capabilities).toContainEqual(expect.objectContaining({ capabilityId: "opencode-mermaid-renderer", supportStatus: "not-applicable", isInstalled: false, isBlocked: false }));
 
@@ -218,10 +217,10 @@ describe("Codex RunnerAdapter production composition", () => {
     }
   });
 
-  test("normalizes none, Supermemory, and explicit Engram-gap review flows", () => {
+  test("normalizes none and Supermemory review flows", () => {
     const adapter = createCodexRunnerAdapter();
     const inventory = { runnerId: "codex", environmentId: "codex-development", capabilities: [{ capabilityId: "supermemory-tool-bindings", label: "Supermemory", description: "memory", section: "memory", requirementLevel: "optional", installKind: "runner-native", isInstalled: false, isBlocked: false }] } as const;
-    const state = (provider: "none" | "supermemory" | "engram") => ({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: {}, packageInstructions: {}, adaptiveMemory: { provider } }) as const;
+    const state = (provider: "none" | "supermemory") => ({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: {}, packageInstructions: {}, adaptiveMemory: { provider } }) as const;
     expect(adapter.buildReviewPlan(state("none"), inventory)).toMatchObject({ ready: true });
     const supermemoryReview = adapter.buildReviewPlan(state("supermemory"), inventory);
     expect(supermemoryReview.groups.configWrites).toContainEqual(expect.objectContaining({ capabilityId: "supermemory-tool-bindings" }));
@@ -231,11 +230,6 @@ describe("Codex RunnerAdapter production composition", () => {
     expect(supermemoryReview.diagnostics).not.toContainEqual(expect.objectContaining({
       code: "codex-supermemory-user-authorization",
     }));
-    expect(adapter.buildReviewPlan(state("engram"), inventory)).toMatchObject({
-      ready: false,
-      groups: { manualSteps: [expect.objectContaining({ capabilityId: "engram", status: "blocked" })] },
-      diagnostics: [expect.objectContaining({ severity: "error", message: expect.stringContaining("Engram Codex integration is deferred") })],
-    });
   });
   test("gates launch modes from inspected installed Codex help evidence", async () => {
     const adapter = createCodexRunnerAdapter({
@@ -409,7 +403,7 @@ describe("Codex RunnerAdapter production composition", () => {
     }
   });
 
-  test("keeps every default production route static-compatible when no released host binding exists", async () => {
+  test("materializes trusted hooks while launch-time host binding remains Deck-supervised", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-unbound-project-"));
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-unbound-journal-"));
     try {
@@ -423,8 +417,8 @@ describe("Codex RunnerAdapter production composition", () => {
       });
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
-      expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(false);
-      expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).not.toContain("deck-codex-hook-v1");
+      expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(true);
+      expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).toContain("deck-codex-hook-v1");
       expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).not.toContain("dangerously-bypass-approvals-and-sandbox");
 
       const launches = await Promise.all([
@@ -469,7 +463,7 @@ describe("Codex RunnerAdapter production composition", () => {
       });
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
-      expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(false);
+      expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(true);
 
       const interactive = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });
       expect(interactive).toMatchObject({ status: "ready", plan: { executionClass: "static-compatible" } });
@@ -1367,7 +1361,8 @@ describe("Codex RunnerAdapter production composition", () => {
       const mismatchedLead = mismatchedPlan.files.find((file) => file.path === ".codex/agents/deck-lead.toml")?.content ?? "";
 
       expect(matchingLead.includes('containerTag: "sm_project_v1_kevin15011_deck"') || matchingLead.includes('containerTag: \\"sm_project_v1_kevin15011_deck\\"')).toBe(true);
-      expect(matchingLead).toContain("supermemory_add_memory");
+      expect(matchingLead).not.toContain("supermemory_add_memory");
+      expect(matchingLead).toContain("explicit remember are routed through the Deck runtime");
       expect(mismatchedPlan.blocked).toBe(false);
       expect(mismatchedLead).toContain("Adaptive-memory project operations are disabled");
       expect(mismatchedLead).toContain("scope mismatch");

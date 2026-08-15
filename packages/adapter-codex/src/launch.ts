@@ -5,6 +5,9 @@ import {
   type RunnerDiagnostic,
   type RunnerStdinPayload,
 } from "@deck/core";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export type CodexLaunchFeatures = {
   interactive: boolean;
@@ -126,6 +129,7 @@ export function buildCodexLaunchPlan(
     }
   }
   let stdinPayload: RunnerStdinPayload | undefined;
+  let finalMessagePath: string | undefined;
   if (input.mode === "exec") {
     stdinPayload = execPayload(input);
     if (!stdinPayload) {
@@ -135,7 +139,8 @@ export function buildCodexLaunchPlan(
         diagnostics: [{ code: "invalid-exec-prompt", severity: "error", message: "Codex exec prompt is invalid or exceeds the supported stdin payload limit." }],
       };
     }
-    args.push("exec", "-");
+    finalMessagePath = join(tmpdir(), `deck-codex-last-message-${randomUUID()}.txt`);
+    args.push("exec", "--output-last-message", finalMessagePath, "-");
   }
   if (input.mode === "resume-by-id") args.push("resume", input.sessionId);
   if (input.mode === "resume-latest") args.push("resume", "--last");
@@ -162,6 +167,20 @@ export function buildCodexLaunchPlan(
       ...(stdinPayload ? { stdinPayload } : {}),
       executionClass: "static-compatible",
       ...(input.mode === "exec" ? { captureLimitBytes: 1024 * 1024 } : {}),
+      ...(input.mode === "exec"
+        ? {
+            outputCapture: {
+              finalAssistantMessage: {
+                source: "file" as const,
+                path: finalMessagePath!,
+                trust: "runner-native-final-assistant" as const,
+                route: "codex-exec-output-last-message",
+                maxBytes: 64 * 1024,
+                cleanup: true,
+              },
+            },
+          }
+        : {}),
     },
     diagnostics: [
       CODEX_DEVELOPER_BYPASS_DIAGNOSTIC,

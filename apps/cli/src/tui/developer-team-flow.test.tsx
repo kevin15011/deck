@@ -291,19 +291,18 @@ describe("Developer Team TUI screens", () => {
 
 
   describe("MemoryProviderSelectionScreen", () => {
-    test("offers exactly one adaptive-memory provider choice including Supermemory MCP", () => {
+    test("offers exactly one adaptive-memory provider choice including Supermemory", () => {
       const output = renderToString(<MemoryProviderSelectionScreen cursor={0} selectedProvider="none" />);
 
-      expect(output).toContain("Select adaptive-memory provider");
-      expect(output).toContain("None");
-      expect(output).toContain("Engram");
-      expect(output).toContain("Supermemory MCP");
-      expect(output).toContain("Exactly one provider can be active");
+      expect(output).toContain("Adaptive Memory");
+      expect(output).toContain("None active");
+      expect(output).not.toContain("Engram");
+      expect(output).toContain("Supermemory requires Deck secret-store token");
     });
 
     test("confirms selected provider status", () => {
       const output = renderToString(
-        <MemoryProviderSelectionScreen cursor={2} selectedProvider="supermemory" status="Active adaptive-memory provider: Supermemory MCP. Token: [redacted]." />,
+        <MemoryProviderSelectionScreen cursor={1} selectedProvider="supermemory" status="Active adaptive-memory provider: Supermemory. Token: [redacted]." />,
       );
 
       expect(output).toContain("active");
@@ -320,16 +319,20 @@ describe("Developer Team TUI screens", () => {
         />,
       );
 
-      expect(output).toContain("Supermemory token (required)");
+      expect(output).toContain("Supermemory API key (Deck Runtime) (required)");
       expect(output).toContain("[redacted]");
       expect(output).not.toContain("super-secret-token");
-      expect(output).toContain("never stored");
-      expect(output).toContain("Deck config");
+      expect(output).toContain("Deck's owner-only");
+      expect(output).toContain("secret store");
+      expect(output).toContain("credential-free endpoint/canonical");
+      expect(output).toContain("Pi");
+      expect(output).toContain("MCP");
       // Token-only verification
-      expect(output).toContain("User identity is derived automatically");
-      expect(output).toContain("x-sm-project header");
+      expect(output).toContain("identity");
+      expect(output).toContain("derived from the key");
+      expect(output).toContain("endpoint/canonical");
       expect(output).toContain("canonical");
-      expect(output).toContain("containerTag on each project-memory operation");
+      expect(output).toContain("scope");
       expect(output).not.toContain("Project scoping handled via x-sm-project header");
     });
 
@@ -353,7 +356,7 @@ describe("Developer Team TUI screens", () => {
       expect(provider).toBeDefined();
     });
 
-    test("writes Supermemory credential through Pi MCP config writer without leaking token in status", () => {
+    test("writes credential-free Supermemory Pi MCP config without leaking token in status", () => {
       const tempDir = mkdtempSync(join(tmpdir(), "deck-supermemory-tui-"));
       const token = "sentinel-supermemory-token";
       const configPath = join(tempDir, ".pi", "agent", "mcp.json");
@@ -366,12 +369,13 @@ describe("Developer Team TUI screens", () => {
 
         expect(result.success).toBe(true);
         expect(result.message).toContain("Pi MCP config");
-        expect(result.message).toContain("[redacted]");
+        expect(result.message).toContain("bearer credentials remain only");
         expect(result.message).not.toContain(token);
 
         const externalConfig = JSON.parse(readFileSync(configPath, "utf-8"));
         expect(externalConfig.mcpServers.supermemory.url).toBe("https://mcp.supermemory.ai/mcp");
-        expect(externalConfig.mcpServers.supermemory.headers["x-supermemory-api-key"]).toBe(token);
+        expect(externalConfig.mcpServers.supermemory.headers["x-sm-project"]).toBe("sm_project_v1_kevin15011_deck");
+        expect(JSON.stringify(externalConfig)).not.toContain("x-supermemory-api-key");
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
@@ -382,7 +386,7 @@ describe("Developer Team TUI screens", () => {
       const result = handOffSupermemoryCredentialToPiMcp(
         { token },
         {
-          writer: ({ token: receivedToken }) => ({
+          writer: () => ({
             ok: false,
             action: "failed",
             path: "/tmp/mcp.json",
@@ -393,7 +397,7 @@ describe("Developer Team TUI screens", () => {
                 severity: "error",
                 path: "/tmp/mcp.json",
                 serverName: "supermemory",
-                message: `Unable to write Pi MCP config; token: ${receivedToken}`.replace(receivedToken, "[REDACTED]"),
+                message: "Unable to write Pi MCP config; token: [REDACTED]",
               },
             ],
           }),

@@ -1,8 +1,8 @@
 schema: spec-registry-v1
 changeId: canonical-supermemory-conversation-memory
 name: Canonical Supermemory Conversation Memory
-currentPhase: apply
-status: in_progress
+currentPhase: review
+status: completed
 artifacts:
   exploration: exploration.md
   proposal: proposal.md
@@ -11,6 +11,8 @@ artifacts:
   tasks: tasks.md
   preconditions: preconditions.md
   apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
 provenance:
   - phase: explore
     agent: deck-lead
@@ -66,3 +68,27 @@ provenance:
     timestamp: "2026-08-13"
     registryWrite: non-deferred
     note: "Completed and independently approved explicit per-operation containerTag materialization across runner production paths; full suite passed 4,541/4,541."
+  - phase: design
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-15"
+    registryWrite: non-deferred
+    note: "User superseded the MCP-primary partial candidate with a first-class runner-neutral Supermemory runtime, Engram/provider-selection removal, standalone packaging, observability, and DeckMemoryBench."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-15"
+    registryWrite: non-deferred
+    note: "Implemented the authenticated runner-neutral lifecycle bridge, Supermemory HTTP runtime, Engram removal, migration, security boundaries, TUI/Doctor, observability, benchmark, and standalone release gates."
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-15"
+    registryWrite: non-deferred
+    note: "Adversarial security, runner-contract, standalone, benchmark, full-suite, TypeScript, OpenSpec, and diff verification passed."
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-15"
+    registryWrite: non-deferred
+    note: "Independent release review returned GO with documented live-provider, cross-platform execution, MCP observability, and remote-copy limitations."

@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 
-import { createNodeRunnerProcessEffects, executeRunnerLaunchPlan } from "./runner-launch-command";
+import { classifyExplicitMemoryIntent, createNodeRunnerProcessEffects, executeRunnerLaunchPlan } from "./runner-launch-command";
 import { runRunnerLaunch } from "./runner-launch-command";
+import { deriveDeckRuntimeSessionId } from "./supermemory-runtime-host";
+import { createFreshDeckSessionId, persistNativeDeckRuntimeSessionMapping, resolveDeckRuntimeSessionId } from "./supermemory-session-store";
 import { getDefaultDeckConfig, type RunnerAdapter, type RunnerLaunchInput } from "@deck/core";
 import { createPiRunnerAdapter } from "@deck/adapter-pi";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { buildCodexLaunchPlan, createCodexRunnerAdapter } from "@deck/adapter-codex";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -17,7 +19,41 @@ const withDeckConfig = <T extends Omit<RunnerLaunchInput, "deckConfig">>(input: 
 });
 
 describe("executeRunnerLaunchPlan", () => {
-  test("merges an allowlisted overlay, redacts diagnostics, and propagates exit", async () => {
+  test("classifies only direct supervised exec memory intents", () => {
+    expect(classifyExplicitMemoryIntent(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "exec", prompt: ["What did we do so far?"], stdin: "closed" }))).toMatchObject({ kind: "recall" });
+    expect(classifyExplicitMemoryIntent(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "exec", prompt: ["Remember that Codex exec uses output-last-message files."], stdin: "closed" }))).toMatchObject({ kind: "remember", content: "Codex exec uses output-last-message files." });
+    expect(classifyExplicitMemoryIntent(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "exec", prompt: ["Please implement the feature and remember to test it."], stdin: "closed" }))).toMatchObject({ kind: "none" });
+    expect(classifyExplicitMemoryIntent(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }))).toMatchObject({ kind: "none" });
+  });
+
+  test("Supermemory runtime session ids are fresh for new runs and native-stable for resume", () => {
+    expect(createFreshDeckSessionId()).not.toBe(createFreshDeckSessionId());
+    expect(deriveDeckRuntimeSessionId(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "resume-by-id", sessionId: "native-1" }))).toBe("runner-resume:native-1");
+    expect(deriveDeckRuntimeSessionId(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }))).toBeUndefined();
+  });
+
+  test("Supermemory session map lets resume-latest reuse the previous top-level Deck session", async () => {
+    const stateHome = await mkdtemp(join(tmpdir(), "deck-session-map-"));
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-session-project-"));
+    try {
+      await mkdir(join(projectRoot, ".git"), { recursive: true });
+      await writeFile(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+      const fresh = resolveDeckRuntimeSessionId(withDeckConfig({ projectRoot, teamId: "developer-team", mode: "exec", prompt: ["x"], stdin: "closed" }), { runnerId: "codex", stateHome });
+      expect(fresh.persist()).toEqual([]);
+      const latest = resolveDeckRuntimeSessionId(withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-latest" }), { runnerId: "codex", stateHome });
+      const explicit = resolveDeckRuntimeSessionId(withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "native-1" }), { runnerId: "codex", stateHome });
+      expect(latest.sessionId).toBe(fresh.sessionId);
+      expect(explicit.sessionId).toBe("runner-resume:native-1");
+      expect(persistNativeDeckRuntimeSessionMapping({ projectRoot, teamId: "developer-team", runnerId: "codex", nativeSessionId: "native-1", deckSessionId: fresh.sessionId, stateHome })).toEqual([]);
+      const nativeResume = resolveDeckRuntimeSessionId(withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "native-1" }), { runnerId: "codex", stateHome });
+      expect(nativeResume.sessionId).toBe(fresh.sessionId);
+    } finally {
+      await rm(stateHome, { recursive: true, force: true });
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("sanitizes inherited and overlay secrets, redacts diagnostics, and propagates exit", async () => {
     const result = await executeRunnerLaunchPlan({
       command: "runner",
       args: ["exec"],
@@ -25,12 +61,31 @@ describe("executeRunnerLaunchPlan", () => {
       stdio: "pipe",
       stdin: "closed",
       captureLimitBytes: 5,
-      envOverlay: { PUBLIC: { value: "ok" }, TOKEN: { value: "secret", sensitive: true } },
+      envOverlay: { PUBLIC: { value: "ok" }, TOKEN: { value: "secret", sensitive: true }, DECK_RUNNER_MEMORY_TOKEN: { value: "loopback", sensitive: true } },
     }, {
-      inheritedEnv: { PATH: "/bin" },
-      spawn: async (_command, _args, options) => ({ exitCode: 7, stdout: "123456", stderr: options.env.TOKEN }),
+      inheritedEnv: { PATH: "/bin", SUPERMEMORY_API_KEY: "sm_test_secret", DATABASE_URL: "postgres://user:pass@db/app", DATABASE_URI: "postgres://user:pass@db/app", LOCAL_DB_URI: "/home/dev/private/app.sqlite", AUTHORIZATION: "Bearer hidden" },
+      spawn: async (_command, _args, options) => ({ exitCode: 7, stdout: "123456", stderr: options.env.TOKEN ?? "" }),
     });
-    expect(result).toEqual({ exitCode: 7, signal: undefined, stdout: "12345", stderr: "[REDACTED]", truncated: true });
+    expect(result).toEqual({ exitCode: 7, signal: undefined, stdout: "12345", stderr: "", truncated: true });
+  });
+
+  test("preserves only the ephemeral loopback secret for runner-native bridge assets", async () => {
+    await executeRunnerLaunchPlan({
+      command: "runner",
+      args: [],
+      cwd: "/project",
+      stdio: "pipe",
+      stdin: "closed",
+      envOverlay: { DECK_RUNNER_MEMORY_ENDPOINT: { value: "http://127.0.0.1:1234/deck-runner-memory/v1" }, DECK_RUNNER_MEMORY_TOKEN: { value: "loopback-token", sensitive: true } },
+    }, {
+      inheritedEnv: { PATH: "/bin", OPENAI_API_KEY: "sk-test-secret", COOKIE: "Cookie: session=secret" },
+      spawn: async (_command, _args, options) => {
+        expect(options.env).toMatchObject({ PATH: "/bin", DECK_RUNNER_MEMORY_ENDPOINT: "http://127.0.0.1:1234/deck-runner-memory/v1", DECK_RUNNER_MEMORY_TOKEN: "loopback-token" });
+        expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
+        expect(options.env).not.toHaveProperty("COOKIE");
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+    });
   });
 
   test("passes Codex exec content only through bounded stdin payloads", async () => {
@@ -103,7 +158,8 @@ describe("executeRunnerLaunchPlan", () => {
     if (launch.status !== "ready") return;
     const result = await executeRunnerLaunchPlan(launch.plan, {
       spawn: async (_command, args, options) => {
-        expect(args).toEqual(["--dangerously-bypass-approvals-and-sandbox", "exec", "-"]);
+        expect(args.slice(0, 3)).toEqual(["--dangerously-bypass-approvals-and-sandbox", "exec", "--output-last-message"]);
+        expect(args.at(-1)).toBe("-");
         expect(options).toMatchObject({ stdio: "pipe", stdin: "closed", stdinPayload: { type: "utf8", content: "safe" } });
         return { exitCode: 0, stdout: "", stderr: "" };
       },
@@ -130,6 +186,236 @@ describe("runRunnerLaunch consent and status", () => {
       ...overrides,
     } as unknown as RunnerAdapter;
   }
+
+  test("lets native loopback own recall and prompt capture without generic pre-search duplication", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-host-"));
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    await writeFile(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+    const calls: Array<{ operation: string; payload: unknown }> = [];
+    const transport = {
+      async add(payload: unknown) { calls.push({ operation: "add", payload }); return { id: "capture" }; },
+      async search(payload: unknown) { calls.push({ operation: "search", payload }); return { results: [{ id: "m1", memory: "Prior advisory context." }] }; },
+      async profile(payload: unknown) { calls.push({ operation: "profile", payload }); return { profile: { static: ["Static profile."], dynamic: [] } }; },
+      async health() { calls.push({ operation: "health", payload: {} }); return { ok: true }; },
+    };
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({
+          buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+          buildLaunchPlan: (launch) => {
+            expect(launch.mode).toBe("exec");
+            if (launch.mode === "exec") {
+              expect(launch.stdinPayload?.content).not.toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
+              expect(launch.stdinPayload?.content).not.toContain("Prior advisory context.");
+            }
+            return { status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed", stdinPayload: launch.mode === "exec" ? launch.stdinPayload : undefined }, diagnostics: [] };
+          },
+        }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Decision: capture the supervised runtime boundary with focused verification."], stdin: "closed", stdinPayload: { type: "utf8", content: "Decision: capture the supervised runtime boundary with focused verification." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          expect(calls.map((call) => call.operation)).toEqual(["health"]);
+          const endpoint = options.env.DECK_RUNNER_MEMORY_ENDPOINT!;
+          const token = options.env.DECK_RUNNER_MEMORY_TOKEN!;
+          const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+          await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "native-session-start", timestamp: Date.now(), event: "session_start", sessionId: "native-session", role: "lead", query: "Decision: capture the supervised runtime boundary with focused verification." }) });
+          await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "native-prompt-capture", timestamp: Date.now(), event: "capture", sessionId: "native-session", source: "trusted-user-prompt", content: "Decision: capture the supervised runtime boundary with focused verification." }) });
+          return { exitCode: 0, stdout: "finished token=secret", stderr: "" };
+        } },
+        supermemoryRuntime: { transport },
+      });
+
+      expect(result.status).toBe("launched");
+      expect(calls.map((call) => call.operation)).toEqual(["health", "profile", "search", "add"]);
+      expect(calls[3]!.payload).toMatchObject({ containerTag: "sm_project_v1_kevin15011_deck", customId: expect.stringMatching(/^deck_conversation_/) });
+      expect(calls[3]!.payload).toMatchObject({ metadata: { role: "user", source: "trusted-user-prompt" } });
+      expect(JSON.stringify(calls[3]!.payload)).toContain("supervised runtime boundary");
+      expect(JSON.stringify(calls[3]!.payload)).not.toContain("finished");
+      expect(JSON.stringify(calls[3]!.payload)).not.toContain("token=secret");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("captures bounded final-assistant file only when the launch plan declares a trusted file contract", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-final-"));
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    await writeFile(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+    const calls: Array<{ operation: string; payload: any }> = [];
+    const transport = {
+      async add(payload: unknown) { calls.push({ operation: "add", payload }); return { id: "capture" }; },
+      async search(payload: unknown) { calls.push({ operation: "search", payload }); return { results: [] }; },
+      async profile(payload: unknown) { calls.push({ operation: "profile", payload }); return { profile: { static: [], dynamic: [] } }; },
+      async health() { calls.push({ operation: "health", payload: {} }); return { ok: true }; },
+    };
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({
+          buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+          buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed", outputCapture: { finalAssistantMessage: { source: "file", path: join(projectRoot, "final.txt"), trust: "runner-native-final-assistant", route: "fake-exec", maxBytes: 120 } } }, diagnostics: [] }),
+        }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Constraint: trusted final assistant capture must use bounded file output."], stdin: "closed", stdinPayload: { type: "utf8", content: "Constraint: trusted final assistant capture must use bounded file output." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: {
+          spawn: async (_command, _args, options) => {
+            const endpoint = options.env.DECK_RUNNER_MEMORY_ENDPOINT!;
+            const token = options.env.DECK_RUNNER_MEMORY_TOKEN!;
+            const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+            await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "final-user-capture", timestamp: Date.now(), event: "capture", sessionId: "native-session", source: "trusted-user-prompt", content: "Constraint: trusted final assistant capture must use bounded file output." }) });
+            await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "final-assistant-capture", timestamp: Date.now(), event: "capture", sessionId: "native-session", source: "trusted-final-assistant", content: "Implemented final answer capture through bounded file output and verified the production path." }) });
+            return { exitCode: 0, stdout: "mixed stdout must not capture", stderr: "tool log must not capture" };
+          },
+          readTextFile: async () => ({ content: "Implemented final answer capture through bounded file output and verified the production path.", truncated: false }),
+          removeFile: async () => {},
+        },
+        supermemoryRuntime: { transport },
+      });
+      expect(result.status).toBe("launched");
+      const adds = calls.filter((call) => call.operation === "add").map((call) => call.payload);
+      expect(adds).toHaveLength(2);
+      expect(adds[0]).toMatchObject({ metadata: { role: "user", source: "trusted-user-prompt" } });
+      expect(adds[1]).toMatchObject({ metadata: { role: "assistant", source: "trusted-final-assistant" } });
+      expect(adds[1].content).toBe("Implemented final answer capture through bounded file output and verified the production path.");
+      expect(JSON.stringify(adds)).not.toContain("tool log");
+      expect(JSON.stringify(adds)).not.toContain("mixed stdout");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit recall blocks before launch when production runtime recall is unavailable", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-explicit-recall-"));
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    await writeFile(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+    const calls: string[] = [];
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({
+          buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+          buildLaunchPlan: () => { calls.push("launch-plan"); return { status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }; },
+        }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["What did we do so far?"], stdin: "closed", stdinPayload: { type: "utf8", content: "What did we do so far?" }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async () => { calls.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
+        supermemoryRuntime: { transport: { add: async () => {}, search: async () => { throw new Error("provider unavailable"); }, profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result).toMatchObject({ status: "blocked", message: expect.stringContaining("reason=transport_error") });
+      expect(JSON.stringify(result)).not.toContain("provider unavailable");
+      expect(calls).toEqual([]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit remember captures once with correlation id and skips duplicate prompt capture", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-explicit-remember-"));
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    await writeFile(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+    const calls: Array<{ operation: string; payload: any }> = [];
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({
+          buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+          buildLaunchPlan: (launch) => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed", stdinPayload: launch.mode === "exec" ? launch.stdinPayload : undefined }, diagnostics: [] }),
+        }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Remember that Pi MCP config remains credential-free while Deck stores the runtime token."], stdin: "closed", stdinPayload: { type: "utf8", content: "Remember that Pi MCP config remains credential-free while Deck stores the runtime token." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
+        supermemoryRuntime: { transport: {
+          async add(payload: unknown) { calls.push({ operation: "add", payload }); return { id: "capture" }; },
+          async search(payload: unknown) { calls.push({ operation: "search", payload }); return { results: [] }; },
+          async profile(payload: unknown) { calls.push({ operation: "profile", payload }); return { profile: {} }; },
+          async health() { calls.push({ operation: "health", payload: {} }); return { ok: true }; },
+        } },
+      });
+      expect(result.status).toBe("launched");
+      const adds = calls.filter((call) => call.operation === "add").map((call) => call.payload);
+      expect(adds).toHaveLength(1);
+      expect(adds[0]).toMatchObject({ metadata: { role: "user", source: "explicit-remember", dependency: "explicit-remember", correlationId: expect.stringMatching(/^explicit-remember-[a-f0-9]{16}$/) } });
+      expect(adds[0].content).not.toMatch(/^Remember that/i);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit remember failure blocks before runner spawn", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-explicit-remember-fail-"));
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    await writeFile(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    const calls: string[] = [];
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Remember that this explicit write must fail before launch."], stdin: "closed", stdinPayload: { type: "utf8", content: "Remember that this explicit write must fail before launch." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async () => { calls.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
+        supermemoryRuntime: { transport: { add: async () => { throw new Error("write unavailable"); }, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result).toMatchObject({ status: "blocked", message: expect.stringContaining("reason=transport_error") });
+      expect(JSON.stringify(result)).not.toContain("write unavailable");
+      expect(calls).toEqual([]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit --memory=none launch override disables globally enabled runtime before launch planning", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-none-"));
+    await mkdir(join(projectRoot, ".git"), { recursive: true });
+    await writeFile(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    const calls: string[] = [];
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({
+          buildDeveloperTeamInstallPlan: (installInput) => {
+            expect(installInput.deckConfig.adaptiveMemory.enabled).toBe(false);
+            return { files: [], mutationPreview: [] };
+          },
+          buildLaunchPlan: (launch) => {
+            expect(launch.deckConfig.adaptiveMemory.enabled).toBe(false);
+            return { status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] };
+          },
+        }),
+        cliMemoryProvider: "none",
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["do work"], stdin: "closed", stdinPayload: { type: "utf8", content: "do work" }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async () => ({ exitCode: 0, stdout: "ok", stderr: "" }) },
+        supermemoryRuntime: { transport: { add: async () => { calls.push("add"); }, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result.status).toBe("launched");
+      expect(calls).toEqual([]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("only Codex exec declares trusted output-last-message file capture; Pi/OpenCode routes remain unsupported", async () => {
+    const codex = buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "exec", prompt: ["x"], stdin: "closed", stdinPayload: { type: "utf8", content: "x" } }), { interactive: true, exec: true, resumeById: true, resumeLatest: true });
+    expect(codex).toMatchObject({ status: "ready", plan: { outputCapture: { finalAssistantMessage: { source: "file", trust: "runner-native-final-assistant", route: "codex-exec-output-last-message" } } } });
+    if (codex.status === "ready") expect(codex.plan.args).toContain("--output-last-message");
+    const opencode = await createOpenCodeRunnerAdapter().buildLaunchPlan!(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }));
+    const pi = await createPiRunnerAdapter().buildLaunchPlan!(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }));
+    if (opencode.status === "ready") expect(opencode.plan.outputCapture).toBeUndefined();
+    if (pi.status === "ready") expect(pi.plan.outputCapture).toBeUndefined();
+  });
 
   test("previews exact safe mutation metadata before non-interactive refusal and never applies", async () => {
     const events: string[] = [];
@@ -349,7 +635,8 @@ describe("runRunnerLaunch consent and status", () => {
               expect(args.join(" ")).toContain("developer_instructions=");
               expect(args).not.toContain("--agent");
               if (route.launch.mode === "exec") {
-                expect(args.slice(-2)).toEqual(["exec", "-"]);
+                expect(args).toContain("--output-last-message");
+                expect(args.at(-1)).toBe("-");
                 expect(options.stdinPayload).toEqual({ type: "utf8", content: "" });
               }
             } else {
@@ -373,8 +660,8 @@ describe("runRunnerLaunch consent and status", () => {
           expect(result.launch.diagnostics).toContainEqual(expect.objectContaining({ code: "materialized-but-inactive" }));
         }
       }
-      expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(false);
-      expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).not.toContain("deck-codex-hook-v1");
+      expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(true);
+      expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).toContain("deck-codex-hook-v1");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

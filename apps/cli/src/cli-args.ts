@@ -8,8 +8,7 @@
  * - `deck pi developer` → launch Pi with Developer Team
  * - `deck pi developer --continue` → continue Developer Team session
  * - `deck pi developer --resume` → resume picker for Developer Team session
- * - `deck pi developer --memory=engram` → enable Engram memory provider (experimental)
- * - `deck pi developer --memory=supermemory` → enable Supermemory MCP memory provider
+ * - `deck pi developer --memory=supermemory` → enable Supermemory adaptive memory
  * - `deck pi developer --memory=none` → explicitly disable memory provider (default)
  */
 
@@ -27,6 +26,8 @@ export type ParsedArgs =
     }
   | { command: "version" }
   | { command: "internal-serena-mcp"; probe: boolean }
+  | { command: "internal-supermemory-runtime-smoke" }
+  | { command: "internal-codex-memory-hook" }
   | {
       command: "upgrade";
       flags: {
@@ -72,7 +73,7 @@ export type ParsedArgs =
         continue?: boolean;
         resume?: boolean;
       };
-      /** Memory provider selection, e.g. "engram" or "supermemory". Undefined means no memory. */
+      /** Legacy CLI memory override. Undefined means no memory; Supermemory is the only supported backend. */
       memoryProvider?: string;
     }
   | {
@@ -88,6 +89,7 @@ export type ParsedArgs =
       dryRun?: boolean;
       localOnly?: boolean;
       yes?: boolean;
+      memoryProvider?: "supermemory" | "none";
     }
   | {
       command: "error";
@@ -104,7 +106,7 @@ const PI_TEAM_SLUGS: Record<string, string> = {
 /**
  * Supported memory provider identifiers for Pi.
  */
-export const SUPPORTED_MEMORY_PROVIDERS = ["engram", "supermemory"] as const;
+export const SUPPORTED_MEMORY_PROVIDERS = ["supermemory"] as const;
 export type SupportedMemoryProvider = (typeof SUPPORTED_MEMORY_PROVIDERS)[number];
 
 function parseBooleanFlag(value: string | undefined): boolean | undefined {
@@ -129,7 +131,7 @@ export function serializeCodexExecPrompt(tokens: readonly string[]): { ok: true;
  */
 function parseCodexArgs(rest: string[]): ParsedArgs {
   if (rest[0] !== "developer") {
-    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--local-only] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck never enables project trust; the shipped registry has no external hook-host binding, so every production route is currently static-compatible." };
+    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--local-only] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck never enables project trust; Deck-supervised launches bind adaptive memory through an ephemeral hook loopback while protected execution controls remain route-limited." };
   }
 
   const tokens = rest.slice(1);
@@ -139,9 +141,18 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
   const localOnly = deckFlagRegion.includes("--local-only");
   const yes = deckFlagRegion.includes("--yes");
   const installOnly = deckFlagRegion.includes("--install-only");
+  let memoryProvider: "supermemory" | "none" | undefined;
+  for (const flag of deckFlagRegion) {
+    if (flag === "--memory") return { command: "error", message: "--memory requires a value: supermemory or none." };
+    if (flag.startsWith("--memory=")) {
+      const value = flag.slice("--memory=".length);
+      if (value !== "supermemory" && value !== "none") return { command: "error", message: `Unsupported memory provider: ${value}. Available providers: supermemory, none` };
+      memoryProvider = value;
+    }
+  }
   const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only"]);
   const filtered = [
-    ...deckFlagRegion.filter((token) => !deckFlags.has(token)),
+    ...deckFlagRegion.filter((token) => !deckFlags.has(token) && !token.startsWith("--memory=")),
     ...(separatorIndex >= 0 ? ["--", ...tokens.slice(separatorIndex + 1)] : []),
   ];
 
@@ -177,6 +188,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
     ...(dryRun ? { dryRun: true } : {}),
     ...(localOnly ? { localOnly: true } : {}),
     ...(yes ? { yes: true } : {}),
+    ...(memoryProvider ? { memoryProvider } : {}),
   };
 }
 
@@ -194,6 +206,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (first === "internal") {
     if (rest.length === 2 && rest[0] === "serena-mcp" && rest[1] === "--probe") return { command: "internal-serena-mcp", probe: true };
     if (rest.length === 1 && rest[0] === "serena-mcp") return { command: "internal-serena-mcp", probe: false };
+    if (rest.length === 1 && rest[0] === "supermemory-runtime-smoke") return { command: "internal-supermemory-runtime-smoke" };
+    if (rest.length === 1 && rest[0] === "codex-memory-hook") return { command: "internal-codex-memory-hook" };
     return { command: "error", message: "Usage: deck internal serena-mcp" };
   }
 
@@ -391,8 +405,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
 
   if (first === "opencode") {
-    if (rest[0] !== "developer" || rest.some((token, index) => index > 0 && !["--yes", "--dry-run", "--install-only"].includes(token))) {
-      return { command: "error", message: "Usage: deck opencode developer [--install-only] [--dry-run] [--yes]" };
+    let memoryProvider: "supermemory" | "none" | undefined;
+    const valid = rest.every((token, index) => {
+      if (index === 0) return token === "developer";
+      if (["--yes", "--dry-run", "--install-only"].includes(token)) return true;
+      if (token.startsWith("--memory=")) {
+        const value = token.slice("--memory=".length);
+        if (value === "supermemory" || value === "none") {
+          memoryProvider = value;
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!valid) {
+      return { command: "error", message: "Usage: deck opencode developer [--install-only] [--dry-run] [--yes] [--memory=supermemory|none]" };
     }
     return {
       command: "runner-launch",
@@ -402,6 +429,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(rest.includes("--install-only") ? { installOnly: true } : {}),
       ...(rest.includes("--dry-run") ? { dryRun: true } : {}),
       ...(rest.includes("--yes") ? { yes: true } : {}),
+      ...(memoryProvider ? { memoryProvider } : {}),
     };
   }
 
@@ -413,7 +441,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (rest.length === 0) {
     return {
       command: "error",
-      message: "Usage: deck pi <team> [--continue | --resume] [--memory=engram|supermemory|none]\nAvailable teams: developer",
+      message: "Usage: deck pi <team> [--continue | --resume] [--memory=supermemory|none]\nAvailable teams: developer",
     };
   }
 
@@ -461,9 +489,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   // Validate memory provider if specified
   if (memoryProvider !== undefined) {
-    if (memoryProvider === "" || memoryProvider === "none") {
-      // Explicitly disabled — treat as no provider
-      memoryProvider = undefined;
+    if (memoryProvider === "") {
+      return { command: "error", message: "--memory requires a value: supermemory or none." };
+    } else if (memoryProvider === "none") {
+      // Explicitly disabled — preserve the override through launch.
     } else if (!SUPPORTED_MEMORY_PROVIDERS.includes(memoryProvider as SupportedMemoryProvider)) {
       const available = [...SUPPORTED_MEMORY_PROVIDERS, "none"].join(", ");
       return {

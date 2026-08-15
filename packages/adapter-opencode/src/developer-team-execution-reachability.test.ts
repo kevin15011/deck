@@ -548,6 +548,34 @@ test("OpenCode static-compatible hook preserves legacy delegation when its provi
   expect(String(rejection)).not.toContain("SECRET_PROVIDER_SENTINEL");
 });
 
+test("OpenCode memory loopback advisory reaches model-visible message transform", async () => {
+  const events: unknown[] = [];
+  const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
+    memoryLoopback: {
+      endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
+      token: "loopback-token",
+      post: async (_endpoint, _token, body) => {
+        events.push(JSON.parse(body));
+        return { ok: true, advisoryText: "<DECK_ADAPTIVE_CONTEXT_JSON_V1>safe</DECK_ADAPTIVE_CONTEXT_JSON_V1>" };
+      },
+    },
+  });
+  const hooks = await plugin();
+  const message: Record<string, unknown> = { message: { role: "user" }, parts: [{ type: "text", text: "Remember that role recall is bounded." }] };
+  await hooks["chat.message"]({ sessionID: "s", messageID: "m" }, message);
+  expect(message).not.toHaveProperty("deckAdaptiveMemoryContext");
+  const modelOutput = { messages: [{ info: { id: "original", role: "user" }, parts: [{ type: "text", text: "original" }] }] };
+  await hooks["experimental.chat.messages.transform"]({}, modelOutput);
+  expect(modelOutput.messages[0]!.parts[0]!.text).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
+  const args: Record<string, unknown> = { subagent_type: "deck-apply-deep" };
+  await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c" }, { args });
+  expect(args).not.toHaveProperty("deckAdaptiveMemoryContext");
+  const roleModelOutput = { messages: [{ info: { id: "role-original", role: "user" }, parts: [{ type: "text", text: "role original" }] }] };
+  await hooks["experimental.chat.messages.transform"]({}, roleModelOutput);
+  expect(roleModelOutput.messages[0]!.parts[0]!.text).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
+  expect(events).toContainEqual(expect.objectContaining({ event: "role_start", role: "apply-deep", eventId: expect.any(String), timestamp: expect.any(Number) }));
+});
+
 test("OpenCode invocation-required hook blocks when the trusted provider is absent", async () => {
   const createPlugin = await loadOpenCodePluginFactory();
   const hooks = await createPlugin({ invocationAuthorization: "invocation-required" })();

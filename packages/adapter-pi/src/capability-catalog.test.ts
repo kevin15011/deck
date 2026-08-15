@@ -21,8 +21,7 @@ describe("PI_RUNNER_CAPABILITY_CATALOG", () => {
     expect(canonical.every((capability) => mappings.some((mapping) => mapping.capabilityId === capability.id))).toBe(true);
   });
 
-  test("keeps provider and optional visual dispositions adapter-owned", () => {
-    expect(PI_ADAPTER_CAPABILITY_DISPOSITIONS).toContainEqual({ capabilityId: "engram", status: "provider-selected" });
+  test("keeps optional visual dispositions adapter-owned", () => {
     expect(PI_ADAPTER_CAPABILITY_DISPOSITIONS).toContainEqual({ capabilityId: "pi-hud", status: "gap", installKind: "user-optional" });
   });
 

@@ -54,6 +54,20 @@ if (parsed.command === "internal-serena-mcp") {
   process.exit(result.exitCode);
 }
 
+if (parsed.command === "internal-supermemory-runtime-smoke") {
+  const { runInternalSupermemoryRuntimeSmoke } = await import("./internal-supermemory-runtime-smoke");
+  const result = await runInternalSupermemoryRuntimeSmoke();
+  console.log(result.output);
+  process.exit(result.exitCode);
+}
+
+if (parsed.command === "internal-codex-memory-hook") {
+  const { runInternalCodexMemoryHook } = await import("./internal-codex-memory-hook");
+  const result = await runInternalCodexMemoryHook();
+  if (result.output) process.stdout.write(result.output);
+  process.exit(result.exitCode);
+}
+
 if (parsed.command === "doctor") {
   try {
     const { runDoctorDiagnostics, renderDoctorReport, shouldExitWithError } = await import("./doctor-command");
@@ -202,6 +216,7 @@ if (parsed.command === "runner-launch") {
     dryRun: parsed.dryRun,
     yes: parsed.yes,
     localOnly: parsed.localOnly,
+    cliMemoryProvider: parsed.memoryProvider,
     interactive,
     confirm: interactive ? async (summary) => {
       const { createInterface } = await import("node:readline/promises");
@@ -268,6 +283,7 @@ if (parsed.command === "runner-launch") {
   const exitCode = await new Promise<number>((resolve) => {
     child.on("close", (code) => resolve(code ?? 1));
   });
+  await result.loopbackBridge?.close();
   process.exit(exitCode);
 } else if (process.stdin.isTTY) {
   render(<DeckApp adapterRegistry={adapterRegistry} configStore={configStore} />, {

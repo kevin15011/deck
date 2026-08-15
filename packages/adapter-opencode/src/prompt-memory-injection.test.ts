@@ -1,12 +1,12 @@
 /**
- * Tests para Task 10: Tests de prompt/instrucciones + regresión Engram
+ * Tests para Task 10: Tests de prompt/instrucciones + regresión Legacy
  *
  * Valida:
  * 1. Prompt contiene herramientas reales (memory/recall), no antiguas
  * 2. Prompt contiene jerarquía OpenSpec > adaptive
  * 3. Prompt contiene fail-open
  * 4. Prompt no contiene team/org scoping (t:, o:)
- * 5. Regresión: Engram provider sigue funcionando sin contaminación
+ * 5. Regresión: Legacy provider sigue funcionando sin contaminación
  */
 
 import { describe, expect, test } from "bun:test";
@@ -19,7 +19,7 @@ import { buildAdaptiveMemoryInstructionBundle } from "../../core/src/teams/devel
 
 // Helper para crear un MemoryInjectionBundle simulado
 function createMockMemoryBundle(
-	providerId: "supermemory" | "engram",
+	providerId: "supermemory" | "legacy",
 	tools: string[],
 ): MemoryInjectionBundle {
 	const toolBindings: MemoryToolBinding[] = tools.map((toolName) => ({
@@ -39,7 +39,7 @@ function createMockMemoryBundle(
 	};
 }
 
-describe("Task 10: prompt/instrucciones + regresión Engram", () => {
+describe("Task 10: prompt/instrucciones + regresión Legacy", () => {
 	describe("Supermemory prompt validation", () => {
 		test("prompt NO contiene herramientas obsoletas (execute, search_docs)", () => {
 			// Build instruction bundle de Supermemory
@@ -109,25 +109,25 @@ test("prompt fails closed without exact Deck-materialized scope", () => {
 	});
 
 	describe("Provider isolation validation", () => {
-		test("Supermemory bundle NO contiene herramientas Engram", () => {
+		test("Supermemory bundle NO contiene herramientas Legacy", () => {
 			const supermemoryTools = ["memory", "recall", "whoAmI"];
-			const engramTools = ["mem_save", "mem_recall", "mem_context", "mem_search", "mem_get_observation"];
+			const legacyTools = ["mem_save", "mem_recall", "mem_context", "mem_search", "mem_get_observation"];
 
 			const bundle = createMockMemoryBundle("supermemory", supermemoryTools);
 
 			// Verificar que solo يحتوي herramientas de Supermemory
 			for (const binding of bundle.toolBindings) {
-				expect(engramTools).not.toContain(binding.toolNames[0]);
+				expect(legacyTools).not.toContain(binding.toolNames[0]);
 			}
 		});
 
-		test("Engram bundle NO contiene herramientas Supermemory", () => {
+		test("Legacy bundle NO contiene herramientas Supermemory", () => {
 			const supermemoryTools = ["memory", "recall", "whoAmI"];
-			const engramTools = ["mem_save", "mem_recall", "mem_context", "mem_search", "mem_get_observation"];
+			const legacyTools = ["mem_save", "mem_recall", "mem_context", "mem_search", "mem_get_observation"];
 
-			const bundle = createMockMemoryBundle("engram", engramTools);
+			const bundle = createMockMemoryBundle("legacy", legacyTools);
 
-			// Verificar que solo contiene herramientas de Engram
+			// Verificar que solo contiene herramientas de Legacy
 			for (const binding of bundle.toolBindings) {
 				expect(supermemoryTools).not.toContain(binding.toolNames[0]);
 			}
@@ -135,7 +135,7 @@ test("prompt fails closed without exact Deck-materialized scope", () => {
 	});
 
 	describe("prompt-generation provider-specific injection", () => {
-		test("generatePromptGenerationPlan con Supermemory bundle no incluye Engram tools en los prompts", () => {
+		test("generatePromptGenerationPlan con Supermemory bundle no incluye Legacy tools en los prompts", () => {
 			const supermemoryBundle = createMockMemoryBundle("supermemory", ["memory", "recall", "whoAmI"]);
 
 			const plan = buildPromptGenerationPlan({
@@ -144,7 +144,7 @@ test("prompt fails closed without exact Deck-materialized scope", () => {
 				memoryBundle: supermemoryBundle,
 			});
 
-			// Verificar que ningún prompt contiene herramientas de Engram
+			// Verificar que ningún prompt contiene herramientas de Legacy
 			for (const planned of plan) {
 				expect(planned.content).not.toContain("mem_save");
 				expect(planned.content).not.toContain("mem_recall");
@@ -154,13 +154,13 @@ test("prompt fails closed without exact Deck-materialized scope", () => {
 			}
 		});
 
-		test("generatePromptGenerationPlan con Engram bundle no incluye Supermemory tools en los prompts", () => {
-			const engramBundle = createMockMemoryBundle("engram", ["mem_save", "mem_recall", "mem_context"]);
+		test("generatePromptGenerationPlan con Legacy bundle no incluye Supermemory tools en los prompts", () => {
+			const legacyBundle = createMockMemoryBundle("legacy", ["mem_save", "mem_recall", "mem_context"]);
 
 			const plan = buildPromptGenerationPlan({
 				configDir: "/tmp/.config/opencode",
 				projectRoot: "/tmp/project",
-				memoryBundle: engramBundle,
+				memoryBundle: legacyBundle,
 			});
 
 			// Verificar que ningún prompt contiene ferramentas Supermemory específicas (no palavras genéricas)
@@ -199,28 +199,28 @@ test("prompt fails closed without exact Deck-materialized scope", () => {
 		});
 	});
 
-	describe("regresión Engram", () => {
-		test("Engram instruction bundle existe y contiene sus herramientas propias", () => {
-			// Verificar que existe un bundle con herramientas Engram
-			const engramBundle = createMockMemoryBundle("engram", [
+	describe("regresión Legacy", () => {
+		test("Legacy instruction bundle existe y contiene sus herramientas propias", () => {
+			// Verificar que existe un bundle con herramientas Legacy
+			const legacyBundle = createMockMemoryBundle("legacy", [
 				"mem_save",
 				"mem_recall",
 				"mem_context",
 				"mem_search",
 			]);
 
-			expect(engramBundle.toolBindings).toHaveLength(4);
-			expect(engramBundle.toolBindings[0]!.toolNames[0]).toBe("mem_save");
-			expect(engramBundle.toolBindings[1]!.toolNames[0]).toBe("mem_recall");
+			expect(legacyBundle.toolBindings).toHaveLength(4);
+			expect(legacyBundle.toolBindings[0]!.toolNames[0]).toBe("mem_save");
+			expect(legacyBundle.toolBindings[1]!.toolNames[0]).toBe("mem_recall");
 		});
 
-		test("prompts generados con bundle Engram no reciben herramientas Supermemory", () => {
-			const engramBundle = createMockMemoryBundle("engram", ["mem_save", "mem_recall"]);
+		test("prompts generados con bundle Legacy no reciben herramientas Supermemory", () => {
+			const legacyBundle = createMockMemoryBundle("legacy", ["mem_save", "mem_recall"]);
 
 			const plan = buildPromptGenerationPlan({
 				configDir: "/tmp/.config/opencode",
 				projectRoot: "/tmp/project",
-				memoryBundle: engramBundle,
+				memoryBundle: legacyBundle,
 			});
 
 			// Verificar que no hay contaminación de Supermemory

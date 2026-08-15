@@ -14,16 +14,12 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
       projectScope: "sm_project_v1_kevin15011_deck",
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     }).buildInjection({ teamId: "developer-team" });
-    expect(bundle.toolBindings).toHaveLength(2);
-    expect(bundle.toolBindings[0]!.toolNames).toEqual(SUPERMEMORY_MCP_TOOLS);
+    expect(bundle.toolBindings).toHaveLength(1);
+    expect(bundle.toolBindings[0]!.toolNames).toEqual(["supermemory_search_memory"]);
     const tools = bundle.toolBindings.flatMap((binding) => [...binding.toolNames]);
-    expect(tools).toContain("supermemory_add_memory");
     expect(tools).toContain("supermemory_search_memory");
-    expect(tools).toContain("supermemory_listMemories");
-    expect(tools).toContain("supermemory_listDocuments");
-    expect(tools).toContain("supermemory_fetch-graph-data");
-    expect(tools).toContain("supermemory_memory-graph");
-    expect(tools).toContain("supermemory_save-memory");
+    expect(tools).not.toContain("supermemory_add_memory");
+    expect(tools).not.toContain("supermemory_save-memory");
     expect(tools).not.toContain("memory");
     expect(tools).not.toContain("recall");
     expect(tools).not.toContain("execute");
@@ -64,7 +60,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     }).buildInjection({ teamId: "developer-team" });
     expect(bundle.instructions).toHaveLength(3);
-    expect(bundle.toolBindings).toHaveLength(2);
+    expect(bundle.toolBindings).toHaveLength(1);
     expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ authenticatedRuntimeValidated: false });
   });
 
@@ -92,24 +88,22 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     const metadata = ((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata;
 
     expect(metadata.scopedTools).toEqual(expect.arrayContaining([
-      "supermemory_add_memory",
       "supermemory_search_memory",
       "supermemory_listMemories",
       "supermemory_listDocuments",
       "supermemory_fetch-graph-data",
       "supermemory_memory-graph",
-      "supermemory_save-memory",
     ]));
     expect(metadata.accountOnlyTools).toEqual(expect.arrayContaining(["supermemory account/active-space readiness tools"]));
     expect(metadata.activeSpaceOnlyToolsForbidden).toEqual(expect.arrayContaining(["active-space mutation or selection tools"]));
     expect(metadata.documentIdToolsRequireScopedPredecessor).toEqual(expect.arrayContaining(["document fetch tools"]));
-    expect(text).toContain('supermemory_add_memory({ content, containerTag: "sm_project_v1_kevin15011_deck" })');
+    expect(text).not.toContain('customId: "deck_explicit_<correlation>"');
     expect(text).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
     expect(text).toContain('supermemory_listMemories({ containerTag: "sm_project_v1_kevin15011_deck" })');
     expect(text).toContain('supermemory_listDocuments({ containerTag: "sm_project_v1_kevin15011_deck" })');
     expect(text).toContain('supermemory_fetch-graph-data({ containerTag: "sm_project_v1_kevin15011_deck" })');
     expect(text).toContain('supermemory_memory-graph({ containerTag: "sm_project_v1_kevin15011_deck" })');
-    expect(text).toContain('supermemory_save-memory({ content, containerTag: "sm_project_v1_kevin15011_deck" })');
+    expect(text).toContain("write/save tools are not part of Deck MCP guidance");
     expect(text).toContain('supermemory_getDocument({ documentId })');
     expect(text).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
     expect(text).toContain("document fetch only after the document id came from a scoped predecessor");
@@ -173,10 +167,10 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     expect(text).not.toMatch(/at most \d+/i);
-    expect(text).toContain("conversation capture");
+    expect(text).toMatch(/conversation capture/i);
   });
 
-  test("does not claim automatic production conversation capture without a runner MCP execution boundary", () => {
+  test("claims automatic production conversation capture only through Deck-supervised runtime", () => {
     const bundle = createSupermemoryMemoryProvider({
       projectScope: "sm_project_v1_kevin15011_deck",
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
@@ -185,15 +179,15 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     const metadata = ((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata;
 
     expect(metadata).toMatchObject({
-      conversationCaptureDefault: false,
+      conversationCaptureDefault: true,
       conversationCaptureSupport: {
-        opencode: "unsupported/static-compatible",
-        pi: "unsupported/static-compatible",
-        codex: "unsupported/static-compatible",
+        opencode: "unsupported/direct-launch",
+        pi: "unsupported/direct-launch",
+        codex: "supported/deck-supervised",
       },
     });
-    expect(text).toContain("conversation capture is not production-wired");
-    expect(text).not.toContain("Selecting Supermemory enables recommended conversation capture by default");
+    expect(text).toContain("Automatic scoping contract");
+    expect(text).not.toContain("conversation capture is not production-wired");
   });
 
   test("ignores custom maxMemoriesPerSession compatibility input", () => {
@@ -204,8 +198,8 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
   });
 });
 
-describe("MCP-only behavior: commit operations deferred to runtime", () => {
-  test("commit returns zero saved - MCP-only defers to runtime", async () => {
+describe("runtime behavior with MCP fallback diagnostics", () => {
+  test("commit returns zero saved when direct runner launch has no Deck runtime transport", async () => {
     const provider = createSupermemoryMemoryProvider({ authenticatedRuntimeValidated: true });
     const result = await provider.adapter!.commit({
       candidates: [{
@@ -217,39 +211,83 @@ describe("MCP-only behavior: commit operations deferred to runtime", () => {
       }],
     });
 
-    // MCP-only returns 0 saved count - defers to runtime MCP
     expect(result.savedCount).toBe(0);
-    // Decision should indicate not persisted by adapter
+    expect(result).toMatchObject({ dependency: "explicit-remember", status: "failed" });
     expect(result.decisions[0].accepted).toBe(false);
     expect(result.discardedCount).toBe(1);
-    expect(result.diagnostics?.[0].message).toContain("automatic execution is unsupported/static-compatible");
+    expect(result.diagnostics?.[0].message).toContain("requires Deck-supervised runtime authentication");
+    expect(result.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_EXPLICIT_REMEMBER_FAILED");
     expect(result.diagnostics?.[0].message).toContain("zero candidates were saved");
     expect(result.diagnostics?.[0].message).not.toContain("queued");
     expect(result.diagnostics?.[0].message).not.toContain("deferred");
   });
 
-  test("search returns empty items - MCP-only defers to runtime", async () => {
+  test("search returns empty items when direct runner launch has no Deck runtime transport", async () => {
     const provider = createSupermemoryMemoryProvider({ authenticatedRuntimeValidated: true });
     const result = await provider.adapter!.search({
       scopes: [{ scope: "personal", userId: "user" }],
       query: "test query",
     });
 
-    // MCP-only returns empty - defers to runtime MCP
     expect(result.items).toHaveLength(0);
-    expect(result.diagnostics?.[0].message).toContain("automatic search execution is unsupported/static-compatible");
+    expect(result).toMatchObject({ dependency: "explicit-recall", status: "failed" });
+    expect(result.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_EXPLICIT_RECALL_FAILED");
+    expect(result.diagnostics?.[0].message).toContain("requires Deck-supervised runtime authentication");
     expect(result.diagnostics?.[0].message).not.toContain("performed through");
   });
 
-  test("loadContext returns diagnostic that context is via MCP tool", async () => {
+  test("loadContext returns direct-launch diagnostic without Deck runtime transport", async () => {
     const provider = createSupermemoryMemoryProvider({ authenticatedRuntimeValidated: true });
     const result = await provider.adapter!.loadContext({
       scopes: [{ scope: "personal", userId: "user" }],
     });
 
     expect(result.items).toHaveLength(0);
-    expect(result.diagnostics?.[0].message).toContain("automatic context execution is unsupported/static-compatible");
+    expect(result).toMatchObject({ dependency: "explicit-recall", status: "failed" });
+    expect(result.diagnostics?.[0].code).toBe("ADAPTIVE_MEMORY_EXPLICIT_RECALL_FAILED");
+    expect(result.diagnostics?.[0].message).toContain("requires Deck-supervised runtime authentication");
     expect(result.diagnostics?.[0].message).not.toContain("performed via");
+  });
+
+  test("commit/search use injected Deck runtime transport when configured", async () => {
+    const calls: Array<{ operation: string; payload: unknown }> = [];
+    const provider = createSupermemoryMemoryProvider({
+      projectScope: "sm_project_v1_kevin15011_deck",
+      sessionId: "session-1",
+      runtimeTransport: {
+        async add(payload) {
+          calls.push({ operation: "add", payload });
+          return { id: "doc-1" };
+        },
+        async search(payload) {
+          calls.push({ operation: "search", payload });
+          return { results: [{ id: "m1", memory: "Remember scoped runtime." }] };
+        },
+        async profile(payload) {
+          calls.push({ operation: "profile", payload });
+          return { profile: { static: ["Static"], dynamic: [] } };
+        },
+      },
+    });
+
+    const commit = await provider.adapter!.commit({
+      candidates: [{
+        content: "Scoped conversation outcome confirmed runtime capture through the Deck supervised host.",
+        highSignal: true,
+        scope: { scope: "project", projectId: "deck" },
+        containerTag: "sm_project_v1_kevin15011_deck",
+        metadata: { source: "agent_summary", scope: "project", type: "workflow", confidence: 0.9, createdBy: "agent" },
+      }],
+    });
+    const search = await provider.adapter!.search({ scopes: [{ scope: "project", projectId: "deck" }], query: "runtime" });
+
+    expect(commit.savedCount).toBe(1);
+    expect(commit).toMatchObject({ dependency: "explicit-remember", status: "ok" });
+    expect(search).toMatchObject({ dependency: "explicit-recall", status: "ok" });
+    expect(search.items).toHaveLength(1);
+    expect(calls.map((call) => call.operation)).toEqual(["add", "search"]);
+    expect(calls[0]!.payload).toMatchObject({ containerTag: "sm_project_v1_kevin15011_deck" });
+    expect(calls[1]!.payload).toMatchObject({ containerTag: "sm_project_v1_kevin15011_deck", searchMode: "hybrid" });
   });
 });
 

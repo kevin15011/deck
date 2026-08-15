@@ -84,3 +84,143 @@ events:
     notes:
       - "Explicit per-operation containerTag propagation passed 4,541 tests, TypeScript, OpenSpec validation, and independent Quality review."
       - "The change remains Apply/in_progress because hard transport enforcement and remote migration copy are still unavailable."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+    notes:
+      - "Implemented first-class automatic recall/capture through a Deck-hosted authenticated runner-neutral loopback bridge."
+      - "Removed Engram/provider selection and added security, migration, TUI, Doctor, observability, benchmark, and standalone release coverage."
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-15"
+    actor: deck-quality
+    registry_write: non-deferred
+    notes:
+      - "Full suite passed 4,604 tests with 19,307 assertions across 301 files."
+      - "Adversarial runner, secret, context-budget, replay, authority, compiled-binary, benchmark, TypeScript, OpenSpec, and diff checks passed."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-15"
+    actor: deck-quality
+    registry_write: non-deferred
+    notes:
+      - "Independent review returned GO for the completed candidate."
+      - "Live provider ranking/TLS, non-host execution, external MCP observability, and remote copy remain documented limitations."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Post-reinstall validation removed stale Supermemory CLI prerequisite guidance and replaced the superseded exec-only Doctor message with the native loopback route matrix."
+      - "Focused Doctor/binary tests, TypeScript, compiled-runtime verification, rebuilt Doctor output, OpenSpec validation, and diff checks passed."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Real OpenCode reinstall evidence found that native MCP OAuth incorrectly bypassed Deck Runtime API-key validation and persistence."
+      - "Runtime and MCP authentication were decoupled; native-OAuth OpenCode now requires read-only API validation and owner-only secret-store persistence before setup is ready."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "A third real reinstall proved the primary Start Installation effect bypassed the shared Supermemory runtime validation action."
+      - "Start Installation now performs read-only API validation and owner-only secret persistence before runner mutation, with RED/GREEN OpenCode native-OAuth regression coverage."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "A fourth real validation proved config/package setup could bypass both later credential gates."
+      - "The shared token-submit boundary now validates and stores the runtime credential before any TUI path can persist Adaptive Memory Enabled."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Real Review & Install output proved persisted runtime readiness was still conflated with cleared ephemeral input and optional runner MCP OAuth."
+      - "TUI state now separates stored runtime credential, ephemeral input, and optional MCP OAuth; stored readiness no longer requires token re-entry."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Restart analysis found fresh dashboard state did not hydrate persisted Adaptive Memory credential readiness."
+      - "Dashboard composition now derives memory readiness from canonical config plus injected owner-only secret-store evidence without retaining secret values."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Fresh TUI evidence showed a stale React/dashboard snapshot could still override valid persisted secret readiness."
+      - "Plan building and execution preflight now resolve authoritative runtime readiness from the injected owner-only secret store while preserving revision/CAS safety."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Exact real-plan reproduction proved the OpenCode generic-to-native adapter mapper discarded runtimeCredentialStored and fell back to deprecated hasToken=false."
+      - "Runner-neutral readiness fields now survive adapter mapping; the real OpenCode plan is ready with all Supermemory actions ready."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Live authenticated loopback recall showed broad profile context could exhaust the final budget before task-specific search results."
+      - "Search results now precede deduplicated profile context; the live canary is injected within the unchanged physical context ceiling."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Live acceptance passed against the real Supermemory API and authenticated OpenCode loopback using canonical config and owner-only secret readiness."
+      - "The canary was captured, searched, and injected; the final full suite passed 4,623 tests with 0 failures."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-15"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Real TUI validation found DECK_DEBUG ready diagnostics were incorrectly appended to blocker arrays, causing ready installs to be blocked."
+      - "Debug readiness now logs outside blocker channels; real config/secret validation reports ready with zero blockers and the full suite passes 4,627 tests."

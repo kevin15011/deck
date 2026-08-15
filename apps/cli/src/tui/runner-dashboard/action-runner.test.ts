@@ -25,6 +25,7 @@ import { getAdapter } from "../../runner-adapters";
 import type { NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import {
   getPiRunnerReviewPlanRunBlockDiagnostics,
+  getRunnerReviewPlanRunBlockDiagnostics,
   runRunnerAction,
   runRunnerReviewPlan,
   runPiRunnerAction,
@@ -439,13 +440,15 @@ expect(setup.ok).toBe(true);
     if (!setup.ok) return;
     expect(setup.values).toMatchObject({
       configured: true,
-      hasToken: true,
+      hasToken: false,
+      runtimeCredentialStored: true,
+      ephemeralTokenAvailable: false,
       diagnostics: [
-        "Supermemory token captured ephemerally for Review & Install; no Pi MCP config was written yet."
+        "Supermemory Deck runtime API credential validated and stored; Pi MCP config remains credential-free."
       ],
     });
     expect(JSON.stringify(setup)).not.toContain(TOKEN_SENTINEL);
-    expect(setup.values.diagnostics.join(" ")).toContain("no Pi MCP config was written yet");
+    expect(setup.values.diagnostics.join(" ")).toContain("runtime API credential validated and stored");
   });
 
 
@@ -512,41 +515,62 @@ expect(setup.ok).toBe(true);
         order.push("validate");
         return { ok: true, path: "/tmp/mcp.json", serverName: "supermemory", diagnostics: [] } as never;
       },
+      validateSupermemoryReadOnlyApi: async () => {
+        order.push("api-validate");
+        return { ok: true };
+      },
+      secretStore: { write: () => { order.push("secret-store"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => undefined },
     });
 
     expect(results.map((result) => result.actionId)).toContain("adaptive-memory.supermemory.pi-mcp-config");
     expect(results.map((result) => result.actionId)).toContain("teams.developer-team.apply");
-    expect(order).toEqual(["write-deck-config", "write-pi-mcp-config", "resolve-provider", "apply-team-bundle", "build-team-plan", "validate"]);
+    expect(order).toEqual(["write-deck-config", "write-pi-mcp-config", "resolve-provider", "apply-team-bundle", "build-team-plan", "validate", "api-validate", "secret-store"]);
     expect(teamMemoryProvider).toMatchObject({ id: "supermemory", displayName: "Supermemory" });
     expect(JSON.stringify(results)).not.toContain(TOKEN_SENTINEL);
   });
 
-  test("bloquea Run cuando hasToken quedó true pero falta token efímero real", async () => {
+  test("allows Review & Install with stored Supermemory runtime credential and cleared ephemeral token", async () => {
     const state = createDefaultPiRunnerDashboardState({
       adaptiveMemory: {
         provider: "supermemory",
-        supermemory: { configured: true, hasToken: true, userId: "user-1", diagnostics: [] },
+        supermemory: { configured: true, hasToken: false, runtimeCredentialStored: true, ephemeralTokenAvailable: false, diagnostics: [] },
       },
     });
-    const writes: string[] = [];
+    const order: string[] = [];
 
     const results = await runPiRunnerReviewPlan(supermemoryPlan, {
       projectRoot: "/tmp/project",
       dashboardState: state,
       writeDeckConfig: (_root, config) => {
-        writes.push("deck");
+        order.push("deck");
         return config as NormalizedDeckConfig;
       },
       writeSupermemoryPiMcpConfig: () => {
-        writes.push("mcp");
+        order.push("mcp");
         return { ok: true, action: "updated", path: "/tmp/mcp.json", serverName: "supermemory", diagnostics: [] } as never;
+      },
+      validateSupermemoryPiMcpConfig: () => { order.push("validate-mcp"); return { ok: true, diagnostics: [] }; },
+      validateSupermemoryReadOnlyApi: async ({ apiKey }) => { order.push("api"); expect(apiKey).toBe(TOKEN_SENTINEL); return { ok: true }; },
+      secretStore: { read: () => TOKEN_SENTINEL, write: () => { order.push("secret"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; } },
+    });
+
+    expect(results.map((result) => result.status)).not.toContain("failed");
+    expect(order).toContain("api");
+  });
+
+  test("blocks Review & Install when Supermemory runtime credential is not stored", async () => {
+    const state = createDefaultPiRunnerDashboardState({
+      adaptiveMemory: {
+        provider: "supermemory",
+        supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, diagnostics: [] },
       },
     });
 
+    const results = await runPiRunnerReviewPlan(supermemoryPlan, { projectRoot: "/tmp/project", dashboardState: state });
+
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ actionId: "review-plan.preflight", status: "failed" });
-    expect(results[0]?.diagnostics.join(" ")).toContain("ephemeral credential is no longer available");
-    expect(writes).toEqual([]);
+    expect(results[0]?.diagnostics.join(" ")).toContain("Deck runtime API credential must be validated and stored");
   });
 
   test("write-pi-mcp-config sin token falla para handoff Supermemory requerido", async () => {
@@ -641,10 +665,15 @@ expect(setup.ok).toBe(true);
         order.push("validate");
         return { ok: true, path: "/tmp/mcp.json", serverName: "supermemory", diagnostics: [] } as never;
       },
+      validateSupermemoryReadOnlyApi: async () => {
+        order.push("api-validate");
+        return { ok: true };
+      },
+      secretStore: { write: () => { order.push("secret-store"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => undefined },
     });
 
     expect(results.map((result) => result.actionId)).toContain("teams.developer-team.apply");
-    expect(order).toEqual(["write-deck-config", "write-pi-mcp-config", "resolve-provider", "apply-team-bundle", "build-team-plan", "validate"]);
+    expect(order).toEqual(["write-deck-config", "write-pi-mcp-config", "resolve-provider", "apply-team-bundle", "build-team-plan", "validate", "api-validate", "secret-store"]);
     expect(teamMemoryProvider).toMatchObject({ id: "supermemory", displayName: "Supermemory" });
     expect(JSON.stringify(results)).not.toContain(TOKEN_SENTINEL);
   });
@@ -696,6 +725,37 @@ expect(setup.ok).toBe(true);
 
     expect(JSON.stringify(mcpResult)).not.toContain(TOKEN_SENTINEL);
     expect(JSON.stringify(mcpResult)).toContain("[REDACTED]");
+  });
+
+  test("validates Supermemory token with injectable read-only API before storing", async () => {
+    const state = createDefaultPiRunnerDashboardState({
+      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true, userId: "user-1", diagnostics: [] } },
+    });
+    const action = supermemoryPlan.groups.validations[0]!;
+    const order: string[] = [];
+    const failed = await runPiRunnerAction(action, {
+      projectRoot: "/tmp/project",
+      dashboardState: state,
+      supermemoryToken: TOKEN_SENTINEL,
+      validateSupermemoryPiMcpConfig: () => { order.push("mcp"); return { ok: true, diagnostics: [] }; },
+      validateSupermemoryReadOnlyApi: async () => { order.push("api"); return { ok: false, diagnostics: [`bad ${TOKEN_SENTINEL}`] }; },
+      secretStore: { write: () => { order.push("secret"); throw new Error("must not store"); }, read: () => undefined },
+    });
+    expect(failed).toMatchObject({ status: "failed", message: expect.stringContaining("read-only API validation failed") });
+    expect(order).toEqual(["mcp", "api"]);
+    expect(JSON.stringify(failed)).not.toContain(TOKEN_SENTINEL);
+
+    order.length = 0;
+    const ok = await runPiRunnerAction(action, {
+      projectRoot: "/tmp/project",
+      dashboardState: state,
+      supermemoryToken: TOKEN_SENTINEL,
+      validateSupermemoryPiMcpConfig: () => { order.push("mcp"); return { ok: true, diagnostics: [] }; },
+      validateSupermemoryReadOnlyApi: async () => { order.push("api"); return { ok: true }; },
+      secretStore: { write: () => { order.push("secret"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => undefined },
+    });
+    expect(ok.status).toBe("executed");
+    expect(order).toEqual(["mcp", "api", "secret"]);
   });
 });
 
@@ -896,16 +956,67 @@ describe("Serena action-runner evidence and cancellation gates", () => {
 });
 
 describe("OpenCode dashboard action runner Supermemory OAuth", () => {
-  test("no exige ni persiste API key al escribir y validar la configuración MCP", async () => {
+  test("DECK_DEBUG ready Supermemory runtime diagnostics do not block review/install", async () => {
+    const previous = process.env.DECK_DEBUG;
+    process.env.DECK_DEBUG = "1";
     const state = createDefaultPiRunnerDashboardState({
       runnerScope: "opencode",
       runnerUi: getAdapter("opencode").ui,
       adaptiveMemory: {
         provider: "supermemory",
-        supermemory: { configured: true, hasToken: false, diagnostics: [] },
+        supermemory: { configured: true, hasToken: false, runtimeCredentialStored: true, ephemeralTokenAvailable: false, diagnostics: [] },
+      },
+    });
+    const plan: PiRunnerReviewPlan = {
+      ready: true,
+      diagnostics: [],
+      groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
+    };
+
+    try {
+      expect(getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => TOKEN_SENTINEL } })).toEqual([]);
+      const results = await runRunnerReviewPlan(plan, { dashboardState: state, secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) } });
+      expect(results).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.DECK_DEBUG;
+      else process.env.DECK_DEBUG = previous;
+    }
+  });
+
+  test("DECK_DEBUG missing Supermemory runtime secret blocks with actionable runtime wording only", () => {
+    const previous = process.env.DECK_DEBUG;
+    process.env.DECK_DEBUG = "1";
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
+      adaptiveMemory: {
+        provider: "supermemory",
+        supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] },
+      },
+    });
+
+    try {
+      const diagnostics = getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => undefined } });
+      expect(diagnostics.join(" ")).toContain("Deck runtime API credential must be validated and stored");
+      expect(diagnostics.join(" ")).not.toContain("Supermemory runtime readiness");
+    } finally {
+      if (previous === undefined) delete process.env.DECK_DEBUG;
+      else process.env.DECK_DEBUG = previous;
+    }
+  });
+
+  test("keeps MCP OAuth separate while requiring Deck runtime token validation", async () => {
+    const order: string[] = [];
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
+      adaptiveMemory: {
+        provider: "supermemory",
+        supermemory: { configured: true, hasToken: true, diagnostics: [] },
       },
     });
     expect(getPiRunnerReviewPlanRunBlockDiagnostics(state)).toEqual([]);
+    expect(getPiRunnerReviewPlanRunBlockDiagnostics(state, { supermemoryToken: TOKEN_SENTINEL })).toEqual([]);
 
     let writerInput: { serverName: string; token?: string } | undefined;
     const writeResult = await runPiRunnerAction(
@@ -926,7 +1037,7 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
 
     expect(writerInput).toEqual({ serverName: "supermemory" });
     expect(writeResult).toMatchObject({ status: "executed" });
-    expect(writeResult.message).toContain("OAuth-enabled");
+    expect(writeResult.message).toContain("Deck did not copy the API key");
 
     let validatorInput: { serverName?: string; token?: string } | undefined;
     const validateResult = await runPiRunnerAction(
@@ -938,15 +1049,63 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
       },
       {
         dashboardState: state,
+        supermemoryToken: TOKEN_SENTINEL,
         validateMcpConfig: (input) => {
+          order.push("mcp");
           validatorInput = input;
           return { ok: true, diagnostics: [] };
         },
+        validateSupermemoryReadOnlyApi: async ({ apiKey }) => {
+          order.push("api");
+          expect(apiKey).toBe(TOKEN_SENTINEL);
+          return { ok: true };
+        },
+        secretStore: { write: () => { order.push("secret"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => undefined },
       },
     );
 
     expect(validatorInput).toEqual({ serverName: "supermemory" });
     expect(validateResult).toMatchObject({ status: "executed" });
+    expect(order).toEqual(["mcp", "api", "secret"]);
+    expect(validateResult.message).toContain("Deck runtime API credential was validated and stored");
+  });
+
+  test("native-OAuth OpenCode validation still fails without Deck runtime API key", async () => {
+    const order: string[] = [];
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
+      adaptiveMemory: {
+        provider: "supermemory",
+        supermemory: { configured: true, hasToken: true, diagnostics: [] },
+      },
+    });
+
+    const validateResult = await runPiRunnerAction(
+      {
+        id: "adaptive-memory.supermemory.validate",
+        kind: "validate",
+        title: "Validate Supermemory OpenCode MCP config",
+        status: "ready",
+      },
+      {
+        dashboardState: state,
+        validateMcpConfig: () => {
+          order.push("mcp");
+          return { ok: true, diagnostics: [] };
+        },
+        validateSupermemoryReadOnlyApi: async () => {
+          order.push("api");
+          return { ok: true };
+        },
+        secretStore: { write: () => { order.push("secret"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => undefined },
+      },
+    );
+
+    expect(validateResult.status).toBe("failed");
+    expect(String(validateResult.message)).toContain("runtime API key is required");
+    expect(String(validateResult.message)).toContain("runner-native MCP OAuth does not make Deck runtime-ready");
+    expect(order).toEqual(["mcp"]);
   });
 });
 

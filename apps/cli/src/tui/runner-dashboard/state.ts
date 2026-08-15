@@ -37,13 +37,20 @@ export const RUNNER_DASHBOARD_SCREENS: RunnerDashboardScreen[] = [
   "complete",
 ];
 
-export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
+export type AdaptiveMemoryProviderChoice = "none" | "supermemory";
 
 export type SupermemorySetupValues = {
   userId?: string;
   teamId?: string;
   organizationId?: string;
+  /** @deprecated Use runtimeCredentialStored for persisted Deck runtime readiness. */
   hasToken?: boolean;
+  /** Deck runtime API key has been validated and stored in Deck's owner-only secret store. */
+  runtimeCredentialStored?: boolean;
+  /** Ephemeral token input is currently present in TUI state; cleared after storage. */
+  ephemeralTokenAvailable?: boolean;
+  /** Optional runner-native MCP OAuth status; not required for Deck runtime memory. */
+  mcpOAuthReady?: boolean;
 };
 
 export type SupermemorySetupState = SupermemorySetupValues & {
@@ -178,7 +185,8 @@ export type RunnerDashboardState = {
 };
 
 export function runnerRequiresExternalSupermemoryToken(state?: Pick<RunnerDashboardState, "runnerUi">): boolean {
-  return state?.runnerUi?.adaptiveMemory?.supermemory.requiresExternalToken ?? true;
+  void state;
+  return true;
 }
 
 export type RunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";

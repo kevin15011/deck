@@ -707,7 +707,6 @@ class OpenCodeRunnerAdapterImpl {
         selectionStatus: "Supermemory selected; OpenCode will request OAuth once through /connect.",
         configuredDiagnostics: ["OpenCode will authenticate Supermemory through native OAuth on first connection."],
       },
-      engram: { label: "Engram", detail: "Engram enables the derived engram-memory technical action." },
     },
   } as const;
   readonly skillDiscovery: SkillDiscoverySourceProviderV1;
@@ -979,6 +978,9 @@ class OpenCodeRunnerAdapterImpl {
         supermemory: state.adaptiveMemory.supermemory ? {
           configured: state.adaptiveMemory.supermemory.configured,
           hasToken: state.adaptiveMemory.supermemory.hasToken,
+          runtimeCredentialStored: state.adaptiveMemory.supermemory.runtimeCredentialStored,
+          ephemeralTokenAvailable: state.adaptiveMemory.supermemory.ephemeralTokenAvailable,
+          mcpOAuthReady: state.adaptiveMemory.supermemory.mcpOAuthReady,
         } : undefined,
       } : undefined,
       teams: state.teams as Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }> | undefined,
@@ -1581,7 +1583,7 @@ class OpenCodeRunnerAdapterImpl {
       reasoningEffortOverrides: thinkingAssignments,
       changedAgentIds: input.changedAgentIds,
       memoryProvider: input.memoryProvider as any,
-      supportedMemoryProviderIds: ["engram", "supermemory"],
+      supportedMemoryProviderIds: ["supermemory"],
       capabilityInstructions,
       personality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,
       standaloneSkills,

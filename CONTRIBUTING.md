@@ -55,7 +55,7 @@ Never hand-edit generated runner assets. Codex changes should use focused adapte
 
 Do not hand-edit generated outputs, including `packages/core/src/skills/external/content.generated.ts` and `apps/cli/src/runtime/build-info.generated.ts`; their generators and existing tests own freshness.
 
-For external development tools, use canonical upstream sources: [RTK](https://github.com/rtk-ai/rtk), [context-mode](https://github.com/mksglu/context-mode), and [codebase-memory](https://github.com/DeusData/codebase-memory-mcp). Detect RTK, context-mode, codebase-memory, and Engram by their binaries rather than guessing Pi package names. Pi-native packages remain runner-specific configuration, and OpenCode installation state must be verified from its configuration and available binaries.
+For external development tools, use canonical upstream sources: [RTK](https://github.com/rtk-ai/rtk), [context-mode](https://github.com/mksglu/context-mode), and [codebase-memory](https://github.com/DeusData/codebase-memory-mcp). Detect RTK, context-mode, codebase-memory, and Supermemory by their binaries rather than guessing Pi package names. Pi-native packages remain runner-specific configuration, and OpenCode installation state must be verified from its configuration and available binaries.
 
 ## Further guidance
 

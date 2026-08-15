@@ -5,6 +5,7 @@ import { buildCodexLaunchPlan } from "./launch";
 
 const features = { interactive: true, exec: true, resumeById: true, resumeLatest: true } as const;
 const withDeckConfig = <T extends object>(input: T) => ({ ...input, deckConfig: getDefaultDeckConfig() });
+const execTail = expect.arrayContaining(["exec", "--output-last-message", expect.stringContaining("deck-codex-last-message-"), "-"]);
 
 describe("buildCodexLaunchPlan", () => {
   test("adds exactly one adapter-owned bypass token before every Codex subcommand", () => {
@@ -36,7 +37,7 @@ describe("buildCodexLaunchPlan", () => {
     });
     expect(buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "exec", prompt: ["fix", "it"], stdin: "closed", stdinPayload: { type: "utf8", content: "fix it" } }), features)).toMatchObject({
       status: "ready",
-      plan: { args: [bypass, "exec", "-"], stdio: "pipe", stdin: "closed", stdinPayload: { type: "utf8", content: "fix it" } },
+      plan: { args: execTail, stdio: "pipe", stdin: "closed", stdinPayload: { type: "utf8", content: "fix it" } },
     });
     expect(buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "resume-by-id", sessionId: "abc" }), features)).toMatchObject({
       status: "ready", plan: { args: [bypass, "resume", "abc"] },
@@ -49,7 +50,7 @@ describe("buildCodexLaunchPlan", () => {
   test("keeps flag-shaped prompts in stdin and blocks option-like resume ids", () => {
     expect(buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "exec", prompt: ["--dangerously-bypass-approvals-and-sandbox"], stdin: "closed", stdinPayload: { type: "utf8", content: "--dangerously-bypass-approvals-and-sandbox" } }), features)).toMatchObject({
       status: "ready",
-      plan: { args: ["--dangerously-bypass-approvals-and-sandbox", "exec", "-"], stdinPayload: { type: "utf8", content: "--dangerously-bypass-approvals-and-sandbox" } },
+      plan: { args: execTail, stdinPayload: { type: "utf8", content: "--dangerously-bypass-approvals-and-sandbox" } },
     });
     expect(buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "resume-by-id", sessionId: "--last" }), features)).toMatchObject({
       status: "blocked",
@@ -83,7 +84,7 @@ describe("buildCodexLaunchPlan", () => {
     );
     expect(result).toMatchObject({
       status: "ready",
-      plan: { args: ["--dangerously-bypass-approvals-and-sandbox", "exec", "-"], stdio: "pipe", stdin: "closed", stdinPayload: { type: "utf8", content: "safe" } },
+      plan: { args: execTail, stdio: "pipe", stdin: "closed", stdinPayload: { type: "utf8", content: "safe" } },
     });
   });
 
@@ -140,7 +141,7 @@ describe("buildCodexLaunchPlan", () => {
     });
     expect(exec).toMatchObject({
       status: "ready",
-      plan: { args: ["--dangerously-bypass-approvals-and-sandbox", "-c", `developer_instructions=${JSON.stringify(bootstrap)}`, "--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="high"', "exec", "-"], stdinPayload: { type: "utf8", content: "quoted line\nnext" } },
+      plan: { args: expect.arrayContaining(["--dangerously-bypass-approvals-and-sandbox", "-c", `developer_instructions=${JSON.stringify(bootstrap)}`, "--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="high"', "exec", "--output-last-message", "-"]), stdinPayload: { type: "utf8", content: "quoted line\nnext" } },
     });
     expect(JSON.stringify(exec)).not.toContain("--agent");
     expect(resume).toMatchObject({ status: "ready", plan: { args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "session-1"] } });

@@ -285,7 +285,6 @@ export const OPENCODE_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityCon
 });
 
 export const OPENCODE_ADAPTER_CAPABILITY_DISPOSITIONS = Object.freeze([
-  { capabilityId: "engram", status: "provider-selected" },
   { capabilityId: "opencode-mermaid-renderer", status: "runner-specific", installKind: "internal-required" },
   { capabilityId: "deck-model-variants", status: "runner-specific", installKind: "internal-required" },
   { capabilityId: "pi-hud", status: "not-applicable" },

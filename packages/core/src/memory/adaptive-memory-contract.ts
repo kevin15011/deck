@@ -102,6 +102,8 @@ export type AdaptiveMemoryContextItem = {
 
 export type AdaptiveMemoryContextResult = {
   providerId: AdaptiveMemoryProviderId;
+  dependency?: "automatic" | "explicit-recall" | "explicit-remember";
+  status?: "ok" | "failed";
   items: readonly AdaptiveMemoryContextItem[];
   diagnostics?: readonly AdaptiveMemoryDiagnostic[];
 };
@@ -148,6 +150,8 @@ export type AdaptiveMemoryCommitDecision = {
 };
 
 export type AdaptiveMemoryCommitResult = {
+  dependency?: "automatic" | "explicit-remember";
+  status?: "ok" | "failed";
   savedCount: number;
   discardedCount: number;
   decisions: readonly AdaptiveMemoryCommitDecision[];
@@ -181,7 +185,9 @@ export type AdaptiveMemoryDiagnosticCode =
   | "ADAPTIVE_MEMORY_CONFIG_INVALID"
   | "ADAPTIVE_MEMORY_HEALTH_UNKNOWN"
   | "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED"
-  | "ADAPTIVE_MEMORY_OPERATION_UNSUPPORTED";
+  | "ADAPTIVE_MEMORY_OPERATION_UNSUPPORTED"
+  | "ADAPTIVE_MEMORY_EXPLICIT_RECALL_FAILED"
+  | "ADAPTIVE_MEMORY_EXPLICIT_REMEMBER_FAILED";
 
 export type AdaptiveMemoryDiagnostic = {
   code: AdaptiveMemoryDiagnosticCode;

@@ -7,7 +7,7 @@ import type { AdapterRegistry } from "../adapter-registry";
 export const DECK_CONFIG_VERSION = 1;
 export const DECK_CONFIG_RELATIVE_PATH = join(".deck", "config.json");
 
-export type AdaptiveMemoryActiveProvider = "none" | (string & {});
+export type AdaptiveMemoryActiveProvider = "none" | "supermemory";
 
 export const SUPERMEMORY_SEARCH_MODES = ["memories", "documents", "hybrid"] as const;
 export type SupermemorySearchMode = (typeof SUPERMEMORY_SEARCH_MODES)[number];
@@ -28,6 +28,8 @@ export type DeckSupermemoryConfig = {
 };
 
 export type DeckAdaptiveMemoryConfig = {
+  /** First-class product toggle. `true` enables Supermemory; `false` disables remote memory effects. */
+  enabled?: boolean;
   activeProvider?: AdaptiveMemoryActiveProvider;
   supermemory?: DeckSupermemoryConfig;
 };
@@ -184,6 +186,7 @@ export type DeckConfig = {
 export type NormalizedDeckConfig = {
   version: typeof DECK_CONFIG_VERSION;
   adaptiveMemory: {
+    enabled?: boolean;
     activeProvider: AdaptiveMemoryActiveProvider;
     supermemory?: DeckSupermemoryConfig;
   };
@@ -249,7 +252,7 @@ const SECRET_FIELD_PATTERN =
   /(?:token|secret|credential|credentials|api[-_]?key|password|private[-_]?key|access[-_]?key|auth(?:orization)?)/i;
 
 const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "webSearch", "packageInstructions", "orchestratorPersonality", "developerTeamExecution", "profiles", "activeProfile"]);
-const ADAPTIVE_MEMORY_FIELDS = new Set(["activeProvider", "supermemory"]);
+const ADAPTIVE_MEMORY_FIELDS = new Set(["enabled", "activeProvider", "supermemory"]);
 const WEB_SEARCH_FIELDS = new Set(["enabled", "provider"]);
 const SUPERMEMORY_FIELDS = new Set([
   "mcpServerName",
@@ -272,6 +275,7 @@ export function getDefaultDeckConfig(): NormalizedDeckConfig {
   return {
     version: DECK_CONFIG_VERSION,
     adaptiveMemory: {
+      enabled: false,
       activeProvider: "none",
     },
     webSearch: {
@@ -884,17 +888,27 @@ export function validateDeckConfig(
 
 export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckConfigDiagnostic[] {
   if (!config || typeof config !== "object" || Array.isArray(config)) return [];
+  const diagnostics: DeckConfigDiagnostic[] = [];
   const adaptiveMemory = (config as Record<string, unknown>).adaptiveMemory;
-  if (!adaptiveMemory || typeof adaptiveMemory !== "object" || Array.isArray(adaptiveMemory)) return [];
+  if (!adaptiveMemory || typeof adaptiveMemory !== "object" || Array.isArray(adaptiveMemory)) return diagnostics;
+  if ((adaptiveMemory as Record<string, unknown>).activeProvider === "engram") {
+    diagnostics.push({
+      code: "SUPERMEMORY_CONFIG_DEPRECATED",
+      severity: "warning",
+      fieldPath: "adaptiveMemory.activeProvider",
+      message: "Engram has been removed. Legacy Engram configuration is migrated to Adaptive Memory disabled; enable Adaptive Memory to use Supermemory.",
+    });
+  }
   const supermemory = (adaptiveMemory as Record<string, unknown>).supermemory;
-  if (!supermemory || typeof supermemory !== "object" || Array.isArray(supermemory)) return [];
-  if (!Object.prototype.hasOwnProperty.call(supermemory, "maxMemoriesPerSession")) return [];
-  return [{
-    code: "SUPERMEMORY_CONFIG_DEPRECATED",
-    severity: "warning",
-    fieldPath: "adaptiveMemory.supermemory.maxMemoriesPerSession",
-    message: "Deprecated Supermemory maxMemoriesPerSession is accepted for compatibility but ignored; conversation capture uses provider-native extraction instead.",
-  }];
+  if (supermemory && typeof supermemory === "object" && !Array.isArray(supermemory) && Object.prototype.hasOwnProperty.call(supermemory, "maxMemoriesPerSession")) {
+    diagnostics.push({
+      code: "SUPERMEMORY_CONFIG_DEPRECATED",
+      severity: "warning",
+      fieldPath: "adaptiveMemory.supermemory.maxMemoriesPerSession",
+      message: "Deprecated Supermemory maxMemoriesPerSession is accepted for compatibility but ignored; conversation capture uses provider-native extraction instead.",
+    });
+  }
+  return diagnostics;
 }
 
 function normalizeWebSearchConfig(
@@ -982,6 +996,17 @@ function executionConfigEnum<T extends string>(
   return value as T;
 }
 
+function normalizeBoolean(value: unknown, fieldPath: string, configPath?: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new DeckConfigError(
+      "DECK_CONFIG_INVALID_SHAPE",
+      `${fieldPath} must be a boolean.`,
+      { configPath, fieldPath },
+    );
+  }
+  return value;
+}
+
 function normalizeDeveloperTeamExecutionConfig(
   value: unknown,
   configPath?: string,
@@ -1035,15 +1060,18 @@ function normalizeAdaptiveMemoryConfig(
   configPath?: string,
 ): NormalizedDeckConfig["adaptiveMemory"] {
   if (value === undefined || value === null) {
-    return { activeProvider: "none" };
+    return { enabled: false, activeProvider: "none" };
   }
 
   assertPlainObject(value, "adaptiveMemory", configPath);
   assertKnownFields(value, ADAPTIVE_MEMORY_FIELDS, "adaptiveMemory", configPath);
 
-  const activeProvider = value.activeProvider === undefined
-    ? "none"
-    : parseActiveProvider(value.activeProvider, "adaptiveMemory.activeProvider", configPath);
+  const enabled = value.enabled === undefined ? undefined : normalizeBoolean(value.enabled, "adaptiveMemory.enabled", configPath);
+  const activeProvider = enabled !== undefined
+    ? enabled ? "supermemory" : "none"
+    : value.activeProvider === undefined
+      ? "none"
+      : parseActiveProvider(value.activeProvider, "adaptiveMemory.activeProvider", configPath);
 
   const supermemory = normalizeSupermemoryConfig(
     value.supermemory,
@@ -1051,7 +1079,7 @@ function normalizeAdaptiveMemoryConfig(
     configPath,
   );
 
-  return supermemory ? { activeProvider, supermemory } : { activeProvider };
+  return supermemory ? { enabled: activeProvider === "supermemory", activeProvider, supermemory } : { enabled: false, activeProvider };
 }
 
 const DEPRECATED_SUPERMEMORY_FIELDS = new Set(["userId", "teamId", "orgId", "projectId"]);
@@ -1337,7 +1365,14 @@ function parseActiveProvider(
       { configPath, fieldPath },
     );
   }
-  return value as AdaptiveMemoryActiveProvider;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "none" || normalized === "supermemory") return normalized;
+  if (normalized === "engram") return "none";
+  throw new DeckConfigError(
+    "ADAPTIVE_MEMORY_UNSUPPORTED_PROVIDER",
+    "Unsupported adaptive-memory provider value. Adaptive Memory supports only disabled or Supermemory.",
+    { configPath, fieldPath },
+  );
 }
 
 function normalizeSearchMode(value: unknown, configPath?: string): SupermemorySearchMode {

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createRunnerCapabilityRegistry, createMemoryProviders, createRunnerParityContributions, type MemoryProviderRegistration, type RunnerCapabilityCatalog } from "./runner-capability-registry";
 import { composeRunnerCapabilityContributions } from "@deck/core";
-import { createEngramMemoryProvider } from "@deck/adapter-engram";
 
 describe("runner-capability-registry", () => {
   test("composes all real adapter parity contributions without collisions or order dependence", () => {
@@ -12,14 +11,6 @@ describe("runner-capability-registry", () => {
   });
 
   describe("createMemoryProviders", () => {
-    test("creates engram memory provider", () => {
-      const providers = createMemoryProviders();
-      const engram = providers.find((p) => p.id === "engram");
-      expect(engram).toBeDefined();
-      expect(engram?.id).toBe("engram");
-      expect(engram?.displayName).toContain("Engram");
-    });
-
     test("creates supermemory memory provider factory", () => {
       const providers = createMemoryProviders();
       const supermemoryFactory = providers.find((p) => p.id === "supermemory");
@@ -30,7 +21,7 @@ describe("runner-capability-registry", () => {
     test("returns array of memory provider registrations", () => {
       const providers = createMemoryProviders();
       expect(Array.isArray(providers)).toBe(true);
-      expect(providers.length).toBeGreaterThanOrEqual(2);
+      expect(providers.length).toBe(1);
     });
 
     test("each provider has required metadata fields", () => {
@@ -113,7 +104,6 @@ describe("runner-capability-registry", () => {
       for (const runner of Object.values(catalog.runners)) {
         const supportedIds = runner.memory.getSupportedProviderIds();
         expect(Array.isArray(supportedIds)).toBe(true);
-        expect(supportedIds).toContain("engram");
         expect(supportedIds).toContain("supermemory");
       }
     });
@@ -126,7 +116,7 @@ describe("runner-capability-registry", () => {
     test("catalog exposes memory provider registrations", () => {
       const catalog = createRunnerCapabilityRegistry();
       expect(Array.isArray(catalog.memoryProviders)).toBe(true);
-      expect(catalog.memoryProviders.length).toBeGreaterThanOrEqual(2);
+      expect(catalog.memoryProviders.length).toBe(1);
     });
 
     test("catalog exposes only the reviewed Web Search provider", () => {
@@ -142,18 +132,11 @@ describe("runner-capability-registry", () => {
   });
 
   describe("memory provider registration", () => {
-    test("memory providers are registered with engram and supermemory IDs", () => {
+    test("memory providers are registered with only Supermemory", () => {
       const providers = createMemoryProviders();
       const ids = providers.map((p) => p.id);
 
-      expect(ids).toContain("engram");
-      expect(ids).toContain("supermemory");
-    });
-
-    test("engram provider can be created without config", () => {
-      const engram = createEngramMemoryProvider();
-      expect(engram.id).toBe("engram");
-      expect(typeof engram.buildInjection).toBe("function");
+      expect(ids).toEqual(["supermemory"]);
     });
   });
 

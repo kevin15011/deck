@@ -84,7 +84,7 @@ export function getDashboardContinueEffect(
   }
 
   if (state.screen === "adaptive-memory-detail") {
-    const providers = ["none", "engram", "supermemory"] as const;
+    const providers = ["none", "supermemory"] as const;
     const provider = providers[state.cursor];
     if (!provider) return { type: "dispatch", action: { type: "go-dashboard" } };
     const action: RunnerDashboardAction = { type: "select-adaptive-memory", provider };
@@ -124,6 +124,9 @@ export function getDashboardContinueEffect(
 
   if (state.screen === "review-plan") {
     if (state.cursor === 0) {
+      if (state.planGeneratedForRevision !== state.planRevision) {
+        return { type: "dispatch", action: { type: "enter-review", inventory: options.inventory } };
+      }
       if (state.plan?.ready !== true) {
         return {
           type: "block-review-install",

@@ -20,19 +20,20 @@ Developer Team installs seven adaptive roles plus the standalone Onboard and Arc
 
 ### Codex route classification
 
-Codex interactive, exec, resume-by-ID, and resume-latest routes are all classified `static-compatible`:
+Codex interactive, exec, resume-by-ID, and resume-latest routes have split classification:
 
 | Classification | Meaning |
 |---|---|
-| `static-compatible` | Native roles, skills, instructions, and launch are available, but host-enforced execution controls are not proven for that route. |
+| `first-class` for adaptive memory on Deck-supervised launches | The runner hook posts to Deck's authenticated loopback endpoint. Deck binds the project scope and Supermemory API key; the runner sends neither. |
+| `static-compatible` for protected execution controls | Native roles, skills, instructions, and launch are available, but host-enforced execution controls are not fully promoted for that route. |
 
-Deck never changes Codex trust, provider, profile, or telemetry security settings, and it never persists sandbox or approval-policy changes. The sole exception is an always-on per-process launch policy: every non-install-only Codex Developer Team route passes `--dangerously-bypass-approvals-and-sandbox` before its Codex subcommand. Sandboxing and command approvals are disabled for that process, so Codex may modify or delete files and run commands without approval; launch preview and Doctor report this high-risk policy. The public Codex adapter installs no hook asset/config and exposes no callback-based first-class promotion API.
+Deck never changes Codex trust, provider, profile, or telemetry security settings, and it never persists sandbox or approval-policy changes. The sole exception is an always-on per-process launch policy: every non-install-only Codex Developer Team route passes `--dangerously-bypass-approvals-and-sandbox` before its Codex subcommand. Sandboxing and command approvals are disabled for that process, so Codex may modify or delete files and run commands without approval; launch preview and Doctor report this high-risk policy. The Codex adapter installs hook configuration that executes Deck's hidden `internal codex-memory-hook` command through the installed Deck binary; without Deck's per-process loopback endpoint/token, that hook fails open. Users do not need Bun or Node for the Codex hook at runtime.
 
-Codex MCP configuration supports verified stdio and streamable HTTP entries. Context7 credentials remain environment references only. Supermemory uses credential-free project configuration: after Deck successfully applies and verifies its MCP entry, the user may run `codex mcp login supermemory` when ready. Deck never executes that command, opens a browser, captures a token, or stores OAuth credentials. Secret values do not enter project TOML, previews, diagnostics, or reports. Engram remains an explicit gap.
+Codex MCP configuration supports verified stdio and streamable HTTP entries. Context7 credentials remain environment references only. Supermemory uses credential-free project configuration: after Deck successfully applies and verifies its MCP entry, the user may run `codex mcp login supermemory` when ready. Deck never executes that command, opens a browser, captures a token, or stores OAuth credentials. Secret values do not enter project TOML, previews, diagnostics, or reports. Automatic memory remains route-limited to Deck-supervised launches and hook-exposed events, and advisory injection uses Codex's official `hookSpecificOutput.additionalContext` shape with the current hook event name.
 
 | Boundary | Rule |
 |---|---|
-| Host input | OpenCode and Pi resolve execution context through trusted runner hooks. Codex remains static-compatible and does not claim host-enforced execution authority. Agent-supplied context has no authority. |
+| Host input | OpenCode, Pi, and Codex route adaptive-memory events through Deck's authenticated loopback when launched by Deck. Protected execution authority remains separately governed; agent-supplied context has no authority. |
 | Dossier revisions | Revision 1 is standalone. Later revisions must carry the complete validated predecessor chain through host, composition, replay, role scheduling, and registry consumption. |
 | Modification | A process-local, one-use authorization envelope must match invocation, role, batch, task artifact, action, target, and receipt. |
 | Shadow | Legacy effects remain authoritative. Shadow computes the same V1 decision semantics but causes no V1 effects. |

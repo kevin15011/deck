@@ -296,7 +296,7 @@ describe("Pi install path regressions (REQ-REPAIR-PI-001)", () => {
       expect(shouldDelegateToAdapter).toBe(true);
 
       // The capability should be recognized in Pi's capability-catalog
-      const piCapabilityIds = ["context-mode", "codebase-memory-mcp", "rtk", "context7", "serena", "engram-memory"];
+      const piCapabilityIds = ["context-mode", "codebase-memory-mcp", "rtk", "context7", "serena"];
       expect(piCapabilityIds).toContain(packageId);
     });
   });

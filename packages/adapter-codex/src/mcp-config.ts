@@ -258,7 +258,7 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
 
 export function buildCodexMcpServers(input: {
   packageIds: readonly string[];
-  memoryProvider: "none" | "supermemory" | "engram";
+  memoryProvider: "none" | "supermemory";
   supermemoryProjectScope?: string;
   /** A fresh Core probe confirmed the Deck-owned Serena launcher. */
   serenaLauncherAvailable?: boolean;
@@ -323,7 +323,6 @@ export function buildCodexMcpServers(input: {
       });
     }
   }
-  if (input.memoryProvider === "engram") gaps.push("engram-codex-deferred");
   return { servers, gaps };
 }
 

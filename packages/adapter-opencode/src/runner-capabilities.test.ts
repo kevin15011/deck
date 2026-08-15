@@ -77,8 +77,7 @@ describe("OpenCode RunnerCapabilities factory", () => {
   test("getSupportedProviderIds returns memory provider IDs", () => {
     const ids = capabilities.memory.getSupportedProviderIds();
     expect(Array.isArray(ids)).toBe(true);
-    expect(ids).toContain("engram");
-    expect(ids).toContain("supermemory");
+    expect(ids).toEqual(["supermemory"]);
   });
 
   test("getTeamsForEnvironment returns teams for opencode-development", () => {
@@ -112,7 +111,7 @@ describe("OpenCode RunnerCapabilities factory", () => {
     expect(source).not.toContain("@deck/adapter-pi");
   });
 
-  test("no imports from @deck/adapter-engram (providers injected at composition time)", () => {
+  test("no imports from removed @deck/adapter-engram", () => {
     const source = require("fs").readFileSync(__filename.replace(".test.ts", ".ts"), "utf-8");
     expect(source).not.toContain("@deck/adapter-engram");
   });

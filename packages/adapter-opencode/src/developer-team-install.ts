@@ -182,7 +182,7 @@ export type OpenCodeDeveloperTeamVerifyResult = {
 /** Re-export MemoryDiagnostic from core for backward compatibility. */
 export type MemoryDiagnostic = CoreMemoryDiagnostic;
 
-const SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS = ["engram", "supermemory"] as const;
+const SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
 
 /** Options for memory injection during OpenCode Developer Team install. */
 export type MemoryInjectionOptions = {
@@ -258,8 +258,6 @@ function buildStandaloneSkillFiles(
 const VALIDATED_MEMORY_PROVIDERS: Record<string, readonly string[]> = {
   // SupercodeMemory MCP-only: tools documented in MCP v4
   supermemory: ["memory", "recall", "whoAmI"],
-  // Engram: tools from Engram adapter
-  engram: ["memory", "recall", "listProjects", "whoAmI"],
 };
 
 /**
@@ -359,8 +357,6 @@ function resolveOpenCodeMemoryInjection(
     }
     if (toolNames.has("memory") && toolNames.has("recall")) {
       providerId = "supermemory";
-    } else if (toolNames.has("listProjects")) {
-      providerId = "engram";
     }
   }
 

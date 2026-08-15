@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import {
-  SUPERMEMORY_API_KEY_HEADER,
   type SupermemoryPiMcpPublicServer,
   type ValidateSupermemoryPiMcpConfigOptions,
   validateSupermemoryPiMcpConfig,
@@ -32,6 +31,6 @@ export function extractValidatedSupermemoryPiMcpRuntimeServer(
     path: validation.path,
     serverName: validation.serverName,
     endpoint: String(server.url),
-    headers: { [SUPERMEMORY_API_KEY_HEADER]: String(headers[SUPERMEMORY_API_KEY_HEADER]) },
+    headers: { "x-sm-project": String(headers["x-sm-project"]) },
   };
 }

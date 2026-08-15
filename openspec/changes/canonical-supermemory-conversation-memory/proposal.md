@@ -2,16 +2,21 @@
 
 ## Intent
 
-Replace Deck's fragmented, prompt-driven Supermemory integration with one canonical project scope and Supermemory's recommended conversation-ingestion model across OpenCode, Pi, and Codex.
+Replace Deck's fragmented, provider-selectable, prompt-driven adaptive-memory integration with one first-class, runner-neutral Supermemory runtime. Deck owns lifecycle, scope, security, budgets, permissions, and observability; Supermemory owns learning, graph relationships, updates, forgetting, profiles, ranking, and retrieval.
 
 ## User-visible outcome
 
-When a user selects Supermemory, Deck configures it without an additional capture decision. Conversations are associated with one stable project container and one stable session document, allowing Supermemory to extract and evolve useful memories. The same project does not silently fall back to `sm_project_default`, and all supported runners expose equivalent behavior.
+The user enables or disables Adaptive Memory from Deck. Enabling it configures Supermemory from the Deck TUI, starts automatic role-aware recall and capture through Deck Runtime, and keeps MCP available only for optional ad-hoc recall. Conversations use one stable project container and one stable session document. The standalone Deck binary includes the integration and requires no Node/npm, SDK installation, or manual runner configuration.
 
 ## In scope
 
 - Canonical, versioned project-scope resolution independent of current working directory and SSH host aliases.
-- One session/conversation document per stable `customId` with dynamic dreaming in production.
+- One session/conversation document per stable `customId` with provider-native learning in production.
+- Complete removal of Engram, provider selection, and provider-specific product configuration.
+- A Deck-owned runtime execution boundary above OpenCode, Pi, Codex, and future runners.
+- Central role-aware retrieval, capture, sanitization, context-budget, fail-open, and observability policies.
+- TUI-managed authentication, setup, Doctor/readiness, and MCP materialization.
+- Standalone compiled-binary validation and an initial DeckMemoryBench.
 - Equivalent Supermemory scope and endpoint behavior for OpenCode, Pi, and Codex.
 - Removal of the arbitrary seven-memory semantic limit and immediate manual-save instructions.
 - Profile plus query retrieval with bounded result context.
@@ -25,16 +30,19 @@ When a user selects Supermemory, Deck configures it without an additional captur
 - Uploading OpenSpec artifacts automatically.
 - Adding team-shared or organization-wide memory routing.
 - Replacing Supermemory's extraction, graph, profile, ranking, or deduplication logic.
-- Adding a general hosted Deck memory service.
+- Adding a general hosted Deck memory service or a persistent Deck daemon.
+- Mem0, dual-write, another memory provider, or a Deck-owned semantic memory engine.
+- Deck-owned extraction, semantic deduplication, ranking, graph, contradiction, temporal, or forgetting logic.
 
 ## Approach
 
 1. Introduce a provider-neutral canonical project memory identity resolved from the verified project root and canonical repository identity, with no default-container fallback.
-2. Validate the current official Supermemory MCP/API capability for stable `customId`, dynamic dreaming, OAuth/API-key delegation, and scoped writes before selecting the exact transport.
-3. Route Deck-managed Supermemory capture and recall through one governed contract that injects the canonical scope and does not expose arbitrary container selection to agents.
-4. Install the same semantic contract through runner-specific serializers.
-5. Replace manual memory-save prompt policy with conversation capture and provider-native learning.
-6. Add dry-run migration tooling that never deletes or mutates source containers.
+2. Execute profile/search/capture through a Deck-owned runtime host using the official Supermemory API/SDK and a server-bound canonical scope; agents never choose a container.
+3. Normalize runner lifecycle events through one authenticated, versioned bridge contract and inject bounded advisory context before relevant agent execution.
+4. Replace per-fact prompt saving with a central capture/skip policy that sends eligible rich conversation context after deterministic secret filtering.
+5. Keep Supermemory MCP as a separately diagnosed, project-scoped ad-hoc capability and prevent automatic double ingestion.
+6. Migrate legacy configuration conservatively: `supermemory` becomes enabled, `none` becomes disabled, and `engram` becomes disabled with an actionable removal warning.
+7. Package and verify the client inside Deck's compiled release binaries and benchmark automatic memory against the prior MCP-primary baseline.
 
 ## Risks and mitigations
 

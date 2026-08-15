@@ -103,7 +103,7 @@ describe("Pi Runner dashboard input mapping", () => {
   });
 
   test("seleccionar Supermemory abre setup y bloquea ejecución hasta configurar", () => {
-    let state = createDefaultPiRunnerDashboardState({ screen: "adaptive-memory-detail", cursor: 2 });
+    let state = createDefaultPiRunnerDashboardState({ screen: "adaptive-memory-detail", cursor: 1 });
     const setupEffect = getPiRunnerDashboardContinueEffect(state, { inventory });
     expect(setupEffect).toMatchObject({
       type: "select-supermemory-and-open-setup",
@@ -125,30 +125,30 @@ describe("Pi Runner dashboard input mapping", () => {
     });
   });
 
-  test("OpenCode selecciona Supermemory con OAuth nativo sin pedir API key", () => {
+  test("OpenCode Supermemory selection opens runtime token setup before optional OAuth", () => {
     const state = createDefaultPiRunnerDashboardState({
       runnerScope: "opencode",
       runnerUi: getAdapter("opencode").ui,
       screen: "adaptive-memory-detail",
-      cursor: 2,
+      cursor: 1,
     });
 
     expect(getPiRunnerDashboardContinueEffect(state, { inventory })).toEqual({
-      type: "dispatch",
+      type: "select-supermemory-and-open-setup",
       action: { type: "select-adaptive-memory", provider: "supermemory" },
     });
   });
 
-  test("Codex selects Supermemory with native OAuth and never requests an external token", () => {
+  test("Codex Supermemory selection opens runtime token setup before optional OAuth", () => {
     const state = createDefaultPiRunnerDashboardState({
       runnerScope: "codex",
       runnerUi: getAdapter("codex").ui,
       screen: "adaptive-memory-detail",
-      cursor: 2,
+      cursor: 1,
     });
 
     expect(getPiRunnerDashboardContinueEffect(state, { inventory })).toEqual({
-      type: "dispatch",
+      type: "select-supermemory-and-open-setup",
       action: { type: "select-adaptive-memory", provider: "supermemory" },
     });
   });
@@ -170,6 +170,21 @@ describe("Pi Runner dashboard input mapping", () => {
     });
     expect(getPiRunnerDashboardContinueEffect(reviewState, { inventory, canRunPlan: true })).toEqual({ type: "dispatch", action: { type: "start-install" } });
     expect(getPiRunnerDashboardContinueEffect(reviewState, { inventory, canRunPlan: false }).type).toBe("block-review-install");
+  });
+
+  test("stale Review screen regenerates current plan before blocking or running", () => {
+    const reviewState = createDefaultPiRunnerDashboardState({
+      screen: "review-plan",
+      cursor: 0,
+      plan: { ready: false, diagnostics: [{ code: "old", severity: "warning", message: "old stale diagnostic" }], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } },
+      planRevision: 2,
+      planGeneratedForRevision: 1,
+    });
+
+    expect(getPiRunnerDashboardContinueEffect(reviewState, { inventory, canRunPlan: true })).toEqual({
+      type: "dispatch",
+      action: { type: "enter-review", inventory },
+    });
   });
 
   test("allows reviewed static-compatible gaps while keeping their diagnostic visible", () => {

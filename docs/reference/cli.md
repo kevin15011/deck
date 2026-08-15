@@ -62,10 +62,9 @@ All three operations accept `--root` and `--json` where applicable. `validate` a
 | `deck pi developer --continue` | Continue the current Developer Team session. |
 | `deck pi developer --resume` | Open the resume picker for a Developer Team session. |
 | `deck pi developer --memory=none` | Explicitly disable adaptive memory for this launch. |
-| `deck pi developer --memory=engram` | Select the experimental Engram provider. |
-| `deck pi developer --memory=supermemory` | Select the Supermemory MCP provider. |
+| `deck pi developer --memory=supermemory` | Select Supermemory Adaptive Memory for the launch; Deck runtime handles supported supervised effects and optional external MCP remains scoped recall-only and unobservable to Deck runtime metrics. |
 
-`--continue` and `--resume` are mutually exclusive. Supported memory identifiers are `none`, `engram`, and `supermemory`; omitting the flag means no provider is selected by the launch command.
+`--continue` and `--resume` are mutually exclusive. Supported memory identifiers are `none` and `supermemory`; omitting the flag uses the configured global Adaptive Memory setting.
 
 ## Command boundaries
 

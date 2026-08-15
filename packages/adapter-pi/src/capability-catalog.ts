@@ -394,6 +394,5 @@ export const PI_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityContribut
 });
 
 export const PI_ADAPTER_CAPABILITY_DISPOSITIONS = Object.freeze([
-  { capabilityId: "engram", status: "provider-selected" },
   { capabilityId: "pi-hud", status: "gap", installKind: "user-optional" },
 ] as const);

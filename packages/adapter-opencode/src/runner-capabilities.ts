@@ -141,7 +141,7 @@ function buildInstallationPlan(input: RunnerInstallationInput) {
   const { reviewOpenCodeTools } = require("./required-tools");
 
   const toolsReview = reviewOpenCodeTools();
-  const selectedToolIds: Array<"rtk" | "context-mode" | "codebase-memory" | "context7" | "engram-memory"> = [];
+  const selectedToolIds: Array<"rtk" | "context-mode" | "codebase-memory" | "context7"> = [];
 
   const plan = buildOpenCodeInstallationPlan({ tools: toolsReview.tools, selectedToolIds });
 
@@ -265,7 +265,7 @@ function buildDeveloperTeamManifest(input: import("@deck/core").DeveloperTeamMan
   const plan = buildOpenCodeDeveloperTeamInstallPlan(input.projectRoot, {
     configModelOverrides: modelAssignments,
     reasoningEffortOverrides: reasoningAssignments,
-    supportedMemoryProviderIds: ["engram", "supermemory"],
+    supportedMemoryProviderIds: ["supermemory"],
     capabilityInstructions: resolvedCapabilityInstructions,
   });
 
@@ -454,7 +454,7 @@ function getProviders(_input: import("@deck/core").RunnerMemoryProviderInput): r
 }
 
 function getSupportedProviderIds(): readonly string[] {
-  return ["engram", "supermemory"];
+  return ["supermemory"];
 }
 
 // ---------------------------------------------------------------------------

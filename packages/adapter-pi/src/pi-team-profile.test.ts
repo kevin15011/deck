@@ -38,14 +38,14 @@ describe("buildTeamSystemPrompt", () => {
   });
 
   test("materializes the Pi runtime context before adaptive memory", () => {
-    const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram",
-      displayName: "Engram Memory",
+    const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "fixture-memory",
+      displayName: "Supermemory Memory",
       buildInjection: () => ({
         instructions: [
           {
             surface: "session",
-            markdown: "Use Engram memory for persistent context.",
+            markdown: "Use Supermemory memory for persistent context.",
             teamId: "developer-team",
           },
         ],
@@ -53,7 +53,7 @@ describe("buildTeamSystemPrompt", () => {
       }),
     };
 
-    const { content } = buildTeamSystemPrompt("developer-team", { memoryProvider: engramProvider });
+    const { content } = buildTeamSystemPrompt("developer-team", { memoryProvider: supermemoryProvider, supportedMemoryProviderIds: ["fixture-memory"] });
 
     expect(content).toContain("## Skill Discovery Runtime Context");
     expect(content).toContain("- active_runner_id: pi");
@@ -134,45 +134,47 @@ describe("buildTeamSystemPrompt", () => {
     expect(withUndefined.memoryDiagnostics).toHaveLength(0);
   });
 
-  test("composes Engram memory into session prompt when Engram provider is provided", () => {
-    const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram",
-      displayName: "Engram Memory",
+  test("composes Supermemory memory into session prompt when Supermemory provider is provided", () => {
+    const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "fixture-memory",
+      displayName: "Supermemory Memory",
       buildInjection: () => ({
         instructions: [
           {
             surface: "session",
-            markdown: "Use Engram memory for persistent context.",
+            markdown: "Use Supermemory memory for persistent context.",
             teamId: "developer-team",
           },
         ],
         toolBindings: [
-          { capability: "memory.search", serverName: "engram", toolNames: ["memory_search"] },
+          { capability: "memory.search", serverName: "fixture-memory", toolNames: ["memory_search"] },
         ],
       }),
     };
 
     const { content, memoryDiagnostics } = buildTeamSystemPrompt("developer-team", {
-      memoryProvider: engramProvider,
+      memoryProvider: supermemoryProvider,
+      supportedMemoryProviderIds: ["fixture-memory"],
     });
 
     expect(content).toContain("## Adaptive Memory (provider-injected)");
-    expect(content).toContain("Use Engram memory for persistent context.");
+    expect(content).toContain("Use Supermemory memory for persistent context.");
     expect(content).toContain("Memory is auxiliary");
     expect(memoryDiagnostics).toHaveLength(0);
   });
 
-  test("returns diagnostic when supported Engram provider buildInjection throws", () => {
-    const brokenEngram: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram", // Supported ID, but buildInjection throws
-      displayName: "Broken Engram",
+  test("returns diagnostic when supported Supermemory provider buildInjection throws", () => {
+    const brokenSupermemory: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "fixture-memory", // Supported ID, but buildInjection throws
+      displayName: "Broken Supermemory",
       buildInjection: () => {
         throw new Error("provider initialization failed");
       },
     };
 
     const { content, memoryDiagnostics } = buildTeamSystemPrompt("developer-team", {
-      memoryProvider: brokenEngram,
+      memoryProvider: brokenSupermemory,
+      supportedMemoryProviderIds: ["fixture-memory"],
     });
 
     // Should return base content without injection
@@ -181,7 +183,7 @@ describe("buildTeamSystemPrompt", () => {
     // Should have diagnostic
     expect(memoryDiagnostics).toHaveLength(1);
     expect(memoryDiagnostics[0].code).toBe("memory_provider_unavailable");
-    expect(memoryDiagnostics[0].providerId).toBe("engram");
+    expect(memoryDiagnostics[0].providerId).toBe("fixture-memory");
   });
 
   test("returns diagnostic when unsupported provider ID is passed", () => {
@@ -210,17 +212,17 @@ describe("buildTeamSystemPrompt", () => {
 
   test("composes Supermemory advisory context into explicit official/adaptive sections", () => {
     const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "supermemory",
+      id: "fixture-memory",
       displayName: "Supermemory MCP",
       buildInjection: () => ({
         instructions: [
           { surface: "session", markdown: "Use Supermemory MCP advisory context through execute and search_docs only.", teamId: "developer-team" },
         ],
-        toolBindings: [{ capability: "memory.search", serverName: "supermemory", toolNames: ["execute", "search_docs"] }],
+        toolBindings: [{ capability: "memory.search", serverName: "fixture-memory", toolNames: ["execute", "search_docs"] }],
       }),
     };
 
-    const { content, memoryDiagnostics } = buildTeamSystemPrompt("developer-team", { memoryProvider: supermemoryProvider });
+    const { content, memoryDiagnostics } = buildTeamSystemPrompt("developer-team", { memoryProvider: supermemoryProvider, supportedMemoryProviderIds: ["fixture-memory"] });
 
     expect(memoryDiagnostics).toHaveLength(0);
     expect(content).toContain("## OFFICIAL CONTEXT");
@@ -232,17 +234,17 @@ describe("buildTeamSystemPrompt", () => {
 
   test("renders adaptive-context absence indicator when Supermemory provider is unavailable", () => {
     const brokenSupermemory: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "supermemory",
+      id: "fixture-memory",
       displayName: "Supermemory MCP",
       buildInjection: () => {
         throw new Error("Supermemory MCP validation is incomplete or failed.");
       },
     };
 
-    const { content, memoryDiagnostics } = buildTeamSystemPrompt("developer-team", { memoryProvider: brokenSupermemory });
+    const { content, memoryDiagnostics } = buildTeamSystemPrompt("developer-team", { memoryProvider: brokenSupermemory, supportedMemoryProviderIds: ["fixture-memory"] });
 
     expect(memoryDiagnostics).toHaveLength(1);
-    expect(memoryDiagnostics[0].providerId).toBe("supermemory");
+    expect(memoryDiagnostics[0].providerId).toBe("fixture-memory");
     expect(content).toContain("## OFFICIAL CONTEXT");
     expect(content).toContain("## ADAPTIVE CONTEXT");
     expect(content).toContain("Adaptive context was not loaded");
@@ -359,22 +361,22 @@ describe("materializeTeamProfile", () => {
     }
   });
 
-  test("materializes with Engram memory provider and includes Adaptive Memory section", () => {
+  test("materializes with Supermemory memory provider and includes Adaptive Memory section", () => {
     const projectRoot = createTempDir();
     try {
-      const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-        id: "engram",
-        displayName: "Engram Memory",
+      const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+        id: "fixture-memory",
+        displayName: "Supermemory Memory",
         buildInjection: () => ({
           instructions: [
             {
               surface: "session",
-              markdown: "Use Engram for persistent session context.",
+              markdown: "Use Supermemory for persistent session context.",
               teamId: "developer-team",
             },
           ],
           toolBindings: [
-            { capability: "memory.search", serverName: "engram", toolNames: ["memory_search"] },
+            { capability: "memory.search", serverName: "fixture-memory", toolNames: ["memory_search"] },
           ],
         }),
       };
@@ -382,7 +384,8 @@ describe("materializeTeamProfile", () => {
       materializeTeamProfile({
         teamId: "developer-team",
         projectRoot,
-        memoryProvider: engramProvider,
+        memoryProvider: supermemoryProvider,
+        supportedMemoryProviderIds: ["fixture-memory"],
       });
 
       const content = readFileSync(
@@ -391,7 +394,7 @@ describe("materializeTeamProfile", () => {
       );
 
       expect(content).toContain("## Adaptive Memory (provider-injected)");
-      expect(content).toContain("Use Engram for persistent session context.");
+      expect(content).toContain("Use Supermemory for persistent session context.");
       expect(content).toContain("Memory is auxiliary");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });

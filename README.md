@@ -62,7 +62,7 @@ See [runner support](docs/runner-support.md) for MCP, memory, ownership, rollbac
 | OpenCode | **Supported** | Detects OpenCode, reviews its package/config evidence, configures its runner surfaces, and installs the Developer Team through the TUI flow. |
 | Claude | **Detection only** | Checks whether `claude` is present in `PATH`; no operational runner adapter is exposed for it. |
 | Codex | **Beta** | Detects Codex CLI, installs static-compatible Developer Team content, previews project-local materialization, and launches interactive, exec, and resume flows. |
-| Adaptive memory | **Optional** | Defaults to none; Engram is experimental; Supermemory is MCP-based and needs runtime configuration. |
+| Adaptive memory | **Optional** | Defaults to none; Supermemory uses Deck runtime for supported supervised exec capture and optional MCP for scoped recall/list/graph/document operations. |
 | Developer Team | **Supported** | Seven adaptive roles, proportional verification, runner-native materialization, and separate lifecycle skills. |
 | Bundled external skills | **Supported** | 29 reusable standalone skills are shipped as content and cataloged by user goal. |
 

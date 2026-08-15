@@ -19,7 +19,7 @@ function initCanonicalRemote(projectRoot: string) {
   execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
 }
 
-function writePiMcpConfig(configPath: string, token = SENTINEL_TOKEN, projectScope = "sm_project_v1_kevin15011_deck") {
+function writePiMcpConfig(configPath: string, _token = SENTINEL_TOKEN, projectScope = "sm_project_v1_kevin15011_deck") {
   mkdirSync(join(configPath, ".."), { recursive: true });
   writeFileSync(
     configPath,
@@ -29,7 +29,7 @@ function writePiMcpConfig(configPath: string, token = SENTINEL_TOKEN, projectSco
           supermemory: {
             transport: "http",
             url: "https://mcp.supermemory.ai/mcp",
-            headers: { "x-sm-project": projectScope, "x-supermemory-api-key": token },
+            headers: { "x-sm-project": projectScope },
           },
         },
       },
@@ -64,7 +64,7 @@ function failedRuntimeValidation(code: "unauthenticated" | "timeout", message: s
   });
 }
 
-function deckConfig(activeProvider: "none" | "engram" | "supermemory" = "none") {
+function deckConfig(activeProvider: "none" | "supermemory" = "none") {
   return validateDeckConfig({
     version: 1,
     adaptiveMemory: {
@@ -112,7 +112,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8");
         expect(orchestrator).toContain("Supermemory MCP Conversation Memory");
         expect(orchestrator).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-        expect(orchestrator).toContain("supermemory_add_memory");
+        expect(orchestrator).not.toContain("supermemory_add_memory");
         expect(orchestrator).not.toContain("supermemory.memory");
         expect(orchestrator).not.toContain(SENTINEL_TOKEN);
         expect(orchestrator).not.toContain("x-supermemory-api-key");
@@ -148,7 +148,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
       expect(first.status).toBe("ready");
-      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8")).toContain("supermemory_add_memory");
+      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8")).toContain("supermemory_search_memory");
 
       const second = await runPiLaunch({
         teamId: "developer-team",
@@ -260,11 +260,12 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     }
   });
 
-  test("CLI provider overrides injected global Deck config and does not double-inject providers", async () => {
+  test("CLI Supermemory overrides disabled global Deck config and does not double-inject providers", async () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
       writePiMcpConfig(piMcpConfigPath);
+      initCanonicalRemote(projectRoot);
 
       const result = await runPiLaunch({
         teamId: "developer-team",
@@ -272,21 +273,19 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
-        deckConfig: deckConfig("supermemory"),
-        cliMemoryProvider: "engram",
+        deckConfig: deckConfig("none"),
+        cliMemoryProvider: "supermemory",
         piMcpConfigPath,
+        supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
 
       expect(result.status).toBe("ready");
       if (result.status === "ready") {
-        expect(result.memoryDiagnostics).toHaveLength(0);
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
-        expect(systemPrompt).toContain("Engram Memory");
-        expect(systemPrompt).not.toContain("Supermemory MCP Conversation Memory");
+        expect(systemPrompt).toContain("Supermemory MCP Conversation Memory");
 
         const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8");
-        expect(orchestrator).toContain("memory_search");
-        expect(orchestrator).not.toContain("search_docs");
+        expect(orchestrator).toContain("supermemory_search_memory");
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -507,7 +506,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         commandExists: () => true,
         dryRun: true,
         deckConfig: deckConfig("none"),
-        cliMemoryProvider: "engram",
+        cliMemoryProvider: "supermemory",
         memoryProvider: {
           id: "supermemory",
           displayName: "Supermemory MCP",

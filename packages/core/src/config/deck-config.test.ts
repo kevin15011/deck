@@ -111,7 +111,7 @@ describe("readDeckConfig", () => {
 
     expect(config).toEqual({
       version: 1,
-      adaptiveMemory: { activeProvider: "none" },
+      adaptiveMemory: { enabled: false, activeProvider: "none" },
       webSearch: { enabled: false },
       packageInstructions: {
         pi: { "codebase-memory": false, "code-economy": true, "context-mode": false, rtk: false, "adaptive-memory": false, serena: false },
@@ -743,6 +743,16 @@ describe("Orchestrator Personality", () => {
 // ---------------------------------------------------------------------------
 
 describe("resolveActiveMemoryProvider", () => {
+  test("uses enabled as the first-class Adaptive Memory toggle", () => {
+    const enabled = validateDeckConfig({ version: 1, adaptiveMemory: { enabled: true } });
+    const disabled = validateDeckConfig({ version: 1, adaptiveMemory: { enabled: false, activeProvider: "supermemory" } });
+
+    expect(enabled.adaptiveMemory.activeProvider).toBe("supermemory");
+    expect(enabled.adaptiveMemory.enabled).toBe(true);
+    expect(disabled.adaptiveMemory.activeProvider).toBe("none");
+    expect(disabled.adaptiveMemory.enabled).toBe(false);
+  });
+
   test("uses CLI override before config", () => {
     const resolution = resolveActiveMemoryProvider({
       cliProvider: "none",
@@ -759,12 +769,12 @@ describe("resolveActiveMemoryProvider", () => {
     expect(resolution.source).toBe("cli");
   });
 
-  test("uses config when CLI override is absent", () => {
+  test("migrates legacy Engram config to disabled when CLI override is absent", () => {
     const resolution = resolveActiveMemoryProvider({
       config: { version: 1, adaptiveMemory: { activeProvider: "engram" } },
     });
 
-    expect(resolution.activeProvider).toBe("engram");
+    expect(resolution.activeProvider).toBe("none");
     expect(resolution.source).toBe("config");
   });
 
@@ -786,13 +796,13 @@ describe("resolveActiveMemoryProvider", () => {
     expect(valid.supermemory?.userId).toBeUndefined();
   });
 
-  test("reads project config file for resolver precedence", () => {
+  test("reads project config file and disables legacy Engram", () => {
     const root = createTempRoot();
     writeDeckConfig(root, { version: 1, adaptiveMemory: { activeProvider: "engram" } });
 
     const resolution = resolveActiveMemoryProvider({ projectRoot: root });
 
-    expect(resolution.activeProvider).toBe("engram");
+    expect(resolution.activeProvider).toBe("none");
     expect(resolution.source).toBe("config");
   });
 });

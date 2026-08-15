@@ -215,7 +215,7 @@ function isDocumentedDeckCommandShape(args: string[]): boolean {
         resumeSeen = true;
         continue;
       }
-      if (/^--memory=(?:none|engram|supermemory)$/.test(flag)) {
+      if (/^--memory=(?:none|supermemory)$/.test(flag)) {
         if (memorySeen) return false;
         memorySeen = true;
         continue;
@@ -290,7 +290,7 @@ const directCommandExpectations = [
   ["deck rollback --backup backup-id", true],
   ["deck openspec validate --json --root .", true],
   ["deck skill-registry validate --runner pi", true],
-  ["deck pi developer --memory=engram", true],
+  ["deck pi developer --memory=supermemory", true],
   ["deck --help", false],
   ["deck --version", false],
   ["./dist/cli/deck --help", false],

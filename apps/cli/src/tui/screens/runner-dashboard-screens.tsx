@@ -12,7 +12,7 @@ import {
   getWebSearchSummary,
   type CapabilityResolver,
 } from "../runner-dashboard/selectors";
-import { runnerRequiresExternalSupermemoryToken, type RunnerAction, type RunnerDashboardState } from "../runner-dashboard/state";
+import { type RunnerAction, type RunnerDashboardState } from "../runner-dashboard/state";
 
 type DashboardRunDiagnostic = { message: string };
 
@@ -87,9 +87,7 @@ function canRunPlanFromState(state: RunnerDashboardState): boolean {
   if (state.plan?.ready !== true) return false;
   if (state.adaptiveMemory.provider !== "supermemory") return true;
   const setup = state.adaptiveMemory.supermemory;
-  return runnerRequiresExternalSupermemoryToken(state)
-    ? Boolean(setup?.configured && setup?.hasToken)
-    : Boolean(setup?.configured);
+  return Boolean(setup?.configured && (setup.runtimeCredentialStored ?? setup.hasToken));
 }
 
 // ---------------------------------------------------------------------------

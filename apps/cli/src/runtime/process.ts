@@ -8,6 +8,7 @@
  */
 
 import { spawn as nodeSpawn, spawnSync as nodeSpawnSync, SpawnOptions as NodeSpawnOptions, ChildProcess, type SpawnSyncReturns } from "node:child_process";
+import { sanitizeRunnerEnv } from "@deck/core";
 
 // ============================================================================
 // Types
@@ -53,11 +54,12 @@ export async function spawnAsync(
   opts: SpawnOptions = {},
 ): Promise<ProcessResult> {
   const { cwd, env, stdio = "pipe" } = opts;
+  const childEnv = sanitizeRunnerEnv(env ?? process.env);
 
   return new Promise((resolve) => {
     const child = nodeSpawn(command, args, {
       cwd,
-      env,
+      env: childEnv,
       stdio: stdio === "inherit" ? "inherit" : ["ignore", "pipe", "pipe"],
     });
 
@@ -114,10 +116,11 @@ export function spawnInherited(
   opts: SpawnOptions = {},
 ): ChildProcess {
   const { cwd, env } = opts;
+  const childEnv = sanitizeRunnerEnv(env ?? process.env);
 
   const child = nodeSpawn(command, args, {
     cwd,
-    env,
+    env: childEnv,
     stdio: "inherit",
   });
 
@@ -142,10 +145,11 @@ export function spawnSync(
   opts: SpawnOptions = {},
 ): SyncProcessResult {
   const { cwd, env, stdio = "pipe" } = opts;
+  const childEnv = sanitizeRunnerEnv(env ?? process.env);
 
   const options: NodeSpawnOptions = {
     cwd,
-    env,
+    env: childEnv,
     stdio: stdio === "inherit" ? "inherit" : ["ignore", "pipe", "pipe"],
     windowsHide: true,
   };

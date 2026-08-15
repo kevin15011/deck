@@ -9,7 +9,7 @@ import { createToolStatus } from "./tool-status";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
 
 function review(installedPackages: string[] = []): PiRequiredToolsReview {
-  const requiredNames = ["sub-agents", "MCP packages", "context-mode", "codebase-memory", "RTK", "Context7", "Engram memory"];
+  const requiredNames = ["sub-agents", "MCP packages", "context-mode", "codebase-memory", "RTK", "Context7"];
   return {
     installedPackages,
     requiredTools: requiredNames.map((name) => ({ name, installed: installedPackages.some((pkg) => normalize(pkg) === normalize(name)) })),
@@ -170,23 +170,12 @@ describe("buildPiRunnerReviewPlan", () => {
     expect(plan.groups.configWrites.some((action) => action.capabilityId === "context7")).toBe(true);
   });
 
-  test("Adaptive Memory none generates no Engram or Supermemory actions", () => {
+  test("Adaptive Memory none generates no Supermemory actions", () => {
     const inventory = buildPiRunnerCapabilityInventory(review(["sub-agents", "MCP packages"]), undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(baseState(), inventory);
     const text = actionText(plan).toLowerCase();
 
-    expect(text).not.toContain("engram");
     expect(text).not.toContain("supermemory");
-  });
-
-  test("Adaptive Memory Engram conditionally adds only Engram manual action when missing", () => {
-    const toolsReview = review(["sub-agents", "MCP packages"]);
-    const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
-    const plan = buildPiRunnerReviewPlan(baseState({ adaptiveMemory: { provider: "engram" }, runtime: { toolsReview } }), inventory);
-
-    expect(plan.groups.manualSteps.some((action) => action.toolId === "engram-memory" && action.kind === "manual-external-install")).toBe(true);
-    expect(actionText(plan).toLowerCase()).not.toContain("supermemory");
-    expect(plan.ready).toBe(false);
   });
 
   test("Adaptive Memory Supermemory adds config writes and validation without package install", () => {
@@ -202,20 +191,17 @@ describe("buildPiRunnerReviewPlan", () => {
 
     expect([...plan.groups.configWrites.map((action) => action.kind)].sort()).toEqual(["write-deck-config", "write-pi-mcp-config"]);
     expect(plan.groups.validations.some((action) => action.id === "adaptive-memory.supermemory.validate")).toBe(true);
-    expect(allActions(plan).some((action) => action.toolId === "engram-memory")).toBe(false);
     expect(allActions(plan).filter((action) => action.title.toLowerCase().includes("supermemory")).every((action) => action.kind !== "install-pi-package")).toBe(true);
   });
 
-  test("switching from Engram to Supermemory removes Engram and adds Supermemory", () => {
+  test("Adaptive Memory Supermemory adds Supermemory actions without legacy Engram actions", () => {
     const toolsReview = review(["sub-agents", "MCP packages"]);
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
-    const engramPlan = buildPiRunnerReviewPlan(baseState({ adaptiveMemory: { provider: "engram" }, runtime: { toolsReview } }), inventory);
     const supermemoryPlan = buildPiRunnerReviewPlan(
       baseState({ adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true } }, runtime: { toolsReview } }),
       inventory,
     );
 
-    expect(actionText(engramPlan).toLowerCase()).toContain("engram");
     expect(actionText(supermemoryPlan).toLowerCase()).not.toContain("engram");
     expect(actionText(supermemoryPlan).toLowerCase()).toContain("supermemory");
   });
@@ -588,14 +574,14 @@ describe("Task 5: silent internal visual support", () => {
 describe("buildDeveloperTeamInstallPlan dashboard memory regression", () => {
   test("dashboardMemoryProvider preserves comparable output to memoryProvider for same assignments", () => {
     const provider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram",
-      displayName: "Engram",
+      id: "supermemory",
+      displayName: "Supermemory",
       buildInjection: () => ({
         instructions: [
           { surface: "agent", markdown: "Dashboard provider memory instructions.", teamId: "developer-team" },
           { surface: "skill", markdown: "Dashboard provider skill memory instructions.", teamId: "developer-team" },
         ],
-        toolBindings: [{ capability: "memory.search", serverName: "engram", toolNames: ["memory_search"] }],
+        toolBindings: [{ capability: "memory.search", serverName: "supermemory", toolNames: ["search_memory"] }],
       }),
     };
     const assignments = { "deck-developer-orchestrator": "openai-codex/gpt-5.5" } as const;

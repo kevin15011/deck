@@ -26,11 +26,11 @@ Deck's product docs explain the path from installation to an operating AI work e
 ## Guides
 
 - [Getting started](getting-started.md) — installer, source checkout, first TUI run, and readiness checks.
-- [Runners](runners.md) — operational Pi/OpenCode support and detection-only Claude/Codex boundaries.
+- [Runners](runners.md) — Claude detection-only boundaries and operational Pi/OpenCode/Codex support.
 - [Configuration](configuration.md) — Deck config, packages, MCP, models, reasoning, and runner-specific persistence.
 - [Developer Team](developer-team.md) — the seven roles, adaptive routing, and conditional Quality.
 - [Skills](skills.md) — lifecycle skills, all 29 bundled external skills, and project-local discovery boundaries.
-- [Adaptive memory](adaptive-memory.md) — none, experimental Engram, Supermemory MCP, governance, and authority.
+- [Adaptive memory](adaptive-memory.md) — none, Supermemory runtime, optional scoped MCP recall, governance, and authority.
 - [Operations](operations.md) — doctor, version, updates, release advisories, rollback, and recovery signals.
 - [Project workflows](project-workflows.md) — onboarding, implementation, validation, discovery, and closure.
 - [Troubleshooting](troubleshooting.md) — symptom-first recovery paths.

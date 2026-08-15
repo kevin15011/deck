@@ -2,18 +2,18 @@ import type { AdaptiveMemoryProvider, MemoryInjectionBundle, MemoryInstructionFr
 import { createAdaptiveMemoryDiagnostic, type AdaptiveMemoryAdapter, type AdaptiveMemoryCommitRequest, type AdaptiveMemoryCommitResult, type AdaptiveMemoryConfigureRequest, type AdaptiveMemoryContextRequest, type AdaptiveMemoryContextResult, type AdaptiveMemoryHealthResult, type AdaptiveMemorySearchRequest, type AdaptiveMemorySearchResult, type AdaptiveMemorySource } from "@deck/core/memory/adaptive-memory-contract";
 import { validateAdaptiveMemoryCommitRequest, validateAdaptiveMemorySearchFilters, validateAdaptiveMemoryScope } from "@deck/core/memory/adaptive-memory-governance";
 import { isCanonicalSupermemoryProjectScope, renderProjectBoundAdaptiveMemoryInstructions } from "@deck/core";
+import { createSupermemoryRuntime, createSupermemoryHttpTransport, type SupermemoryRuntimeTransport } from "./runtime";
 
 export * from "./conversation";
 
 export const SUPERMEMORY_MCP_SERVER_URL = "https://mcp.supermemory.ai/mcp";
 export const SUPERMEMORY_MCP_TOOLS = [
-  "supermemory_add_memory",
   "supermemory_search_memory",
   "supermemory_listMemories",
   "supermemory_listDocuments",
   "supermemory_fetch-graph-data",
   "supermemory_memory-graph",
-  "supermemory_save-memory",
+  "supermemory_getDocument",
 ] as const;
 
 /** Specific metadata shape used by Supermemory tool bindings. */
@@ -24,7 +24,7 @@ export type SupermemoryToolBindingMetadata = {
   serverQualifiedToolNamesRequired: boolean;
   serverQualifiedToolNames: readonly string[];
   conversationCaptureDefault?: boolean;
-  conversationCaptureSupport?: Readonly<Record<"opencode" | "pi" | "codex", "unsupported/static-compatible">>;
+  conversationCaptureSupport?: Readonly<Record<"opencode" | "pi" | "codex", "supported/deck-supervised" | "unsupported/direct-launch">>;
   dreamingDefault?: "dynamic" | "instant";
   maxResultsDefault?: number;
   maxContextTokensDefault?: number;
@@ -55,6 +55,16 @@ export type SupermemoryMemoryProviderConfig = {
   projectScope?: string;
   /** Scope observed in configured MCP transport; when present it must match projectScope. */
   configuredProjectScope?: string;
+  /** Stable top-level Deck runner session/change identity. */
+  sessionId?: string;
+  /** Runner id for content-free observability. */
+  runnerId?: string;
+  /** Optional injected transport for tests and host-owned runtime composition. */
+  runtimeTransport?: SupermemoryRuntimeTransport;
+  /** Override for the official Supermemory API base URL. */
+  apiBaseUrl?: string;
+  /** Runtime provider operation timeout. */
+  timeoutMs?: number;
 };
 
 /**
@@ -78,18 +88,13 @@ function createFragments(config: { mcpServerName: string; projectScope?: string;
       configuredSupermemoryProjectScope: config.configuredProjectScope,
     }),
     "Use these active runner-exposed Supermemory tools when available:",
-    "- `supermemory_add_memory` — explicit durable memory save; pass the canonical `containerTag` argument",
     "- `supermemory_search_memory` — bounded recall/search; pass the canonical `containerTag` argument",
     "- `supermemory_listMemories` and `supermemory_listDocuments` — scoped list operations; pass the canonical `containerTag` argument when the schema accepts it",
     "- `supermemory_fetch-graph-data` and `supermemory_memory-graph` — scoped graph operations; pass the canonical `containerTag` argument when the schema accepts it",
-    "- `supermemory_save-memory` — save-equivalent scoped operation; pass the canonical `containerTag` argument",
     "- `supermemory_getDocument` — document fetch only after the document id came from a scoped predecessor in the same workflow",
     "- Supermemory account/active-space tools are for account readiness only and must not be used as project isolation.",
     "",
     "Tool examples:",
-    scopeAuthorized
-      ? `- supermemory_add_memory({ content, containerTag: \"${config.projectScope}\" })`
-      : "- supermemory_add_memory is disabled until Deck provides a canonical containerTag.",
     scopeAuthorized
       ? `- supermemory_search_memory({ query, containerTag: \"${config.projectScope}\" })`
       : "- supermemory_search_memory is disabled until Deck provides a canonical containerTag.",
@@ -105,13 +110,12 @@ function createFragments(config: { mcpServerName: string; projectScope?: string;
     scopeAuthorized
       ? `- supermemory_memory-graph({ containerTag: \"${config.projectScope}\" })`
       : "- supermemory_memory-graph is disabled until Deck provides a canonical containerTag.",
-    scopeAuthorized
-      ? `- supermemory_save-memory({ content, containerTag: \"${config.projectScope}\" })`
-      : "- supermemory_save-memory is disabled until Deck provides a canonical containerTag.",
     "- supermemory_getDocument({ documentId }) only after a scoped predecessor returned that document id.",
     "",
     "Tool semantics:",
-    "- add/search/list memory, document, graph, and save equivalents are project-scoped only when the exposed schema accepts `containerTag` and the exact Deck value is passed.",
+    "- search/list memory, document, and graph tools are project-scoped only when the exposed schema accepts `containerTag` and the exact Deck value is passed.",
+    "- write/save tools are not part of Deck MCP guidance; automatic capture and explicit remember are performed only by the Deck runtime to prevent double ingestion.",
+    "- If the upstream MCP server exposes write/save tools outside Deck control, treat those tools as unmanaged and do not advertise or use them from Deck instructions.",
     "- Account-readiness tools are account-only and exempt from project scope only for non-memory effects.",
     "- Never use active-space-only tools for automatic memory; active space is not project isolation.",
     "- Use document fetch only after the document id came from a scoped predecessor in the same workflow.",
@@ -126,43 +130,105 @@ function createFragments(config: { mcpServerName: string; projectScope?: string;
 
 function diagnostic(
   message: string,
-  code: "ADAPTIVE_MEMORY_HEALTH_UNKNOWN" | "ADAPTIVE_MEMORY_OPERATION_UNSUPPORTED" | "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED" = "ADAPTIVE_MEMORY_OPERATION_UNSUPPORTED",
+  code: "ADAPTIVE_MEMORY_HEALTH_UNKNOWN" | "ADAPTIVE_MEMORY_OPERATION_UNSUPPORTED" | "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED" | "ADAPTIVE_MEMORY_EXPLICIT_RECALL_FAILED" | "ADAPTIVE_MEMORY_EXPLICIT_REMEMBER_FAILED" = "ADAPTIVE_MEMORY_OPERATION_UNSUPPORTED",
+  severity?: "warning" | "error",
 ) {
   return createAdaptiveMemoryDiagnostic(code, message, {
-    severity: code === "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED" ? "error" : "warning",
+    severity: severity ?? (code === "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED" ? "error" : "warning"),
     providerId: "supermemory",
     recoverable: true,
   });
 }
 
 function createAdapter(
-  _config: { mcpServerName: string; mcpServerUrl: string },
+  config: { mcpServerName: string; mcpServerUrl: string; projectScope?: string; sessionId?: string; runnerId?: string; runtimeTransport?: SupermemoryRuntimeTransport; apiKey?: string; apiBaseUrl?: string; timeoutMs?: number },
   _authenticatedRuntimeValidated: { current: boolean },
 ): AdaptiveMemoryAdapter {
+  const runtimeTransport = config.runtimeTransport ?? (config.apiKey
+    ? createSupermemoryHttpTransport({ apiKey: config.apiKey, baseURL: config.apiBaseUrl, timeoutMs: config.timeoutMs })
+    : undefined);
+  const runtime = config.projectScope && runtimeTransport
+    ? createSupermemoryRuntime({
+      canonicalScope: config.projectScope,
+      sessionId: config.sessionId ?? "deck-session-unknown",
+      runnerId: config.runnerId,
+      transport: runtimeTransport,
+    })
+    : undefined;
+
   return {
-    identity: { id: "supermemory", displayName: "Supermemory MCP" },
-    async loadContext(_request: AdaptiveMemoryContextRequest): Promise<AdaptiveMemoryContextResult> {
+    identity: { id: "supermemory", displayName: "Supermemory" },
+    async loadContext(request: AdaptiveMemoryContextRequest): Promise<AdaptiveMemoryContextResult> {
+      if (runtime) {
+        const result = request.query
+          ? await runtime.search({ role: "apply-deep", query: request.query, dependency: "explicit-recall" })
+          : await runtime.profile({ role: "lead", dependency: "explicit-recall" });
+        if (result.ok) {
+          return {
+            providerId: "supermemory",
+            dependency: "explicit-recall",
+            status: "ok",
+            items: result.context.items.map((item) => ({
+              id: item.id,
+              content: item.content,
+              containerTag: config.projectScope,
+              metadata: { source: "system", scope: "project", type: "workflow", confidence: 1, createdBy: "system" },
+            })),
+          };
+        }
+        return { providerId: "supermemory", dependency: "explicit-recall", status: "failed", items: [], diagnostics: [diagnostic("Explicit Supermemory recall failed; no advisory context was loaded and user-visible retry is required.", "ADAPTIVE_MEMORY_EXPLICIT_RECALL_FAILED", "error")] };
+      }
       return {
         providerId: "supermemory",
+        dependency: "explicit-recall",
+        status: "failed",
         items: [],
-        diagnostics: [diagnostic("Supermemory automatic context execution is unsupported/static-compatible; use MCP tool bindings explicitly when the active runner exposes them.")],
+        diagnostics: [diagnostic("Explicit Supermemory recall requires Deck-supervised runtime authentication; direct runner launch remains MCP-only.", "ADAPTIVE_MEMORY_EXPLICIT_RECALL_FAILED", "error")],
       };
     },
     async search(request: AdaptiveMemorySearchRequest): Promise<AdaptiveMemorySearchResult> {
       const issues = request.scopes.flatMap((scope) => validateAdaptiveMemoryScope(scope).issues);
       if (request.filters) issues.push(...validateAdaptiveMemorySearchFilters(request.filters).issues);
+      if (issues.length) {
+        return {
+          providerId: "supermemory",
+          dependency: "explicit-recall",
+          status: "failed",
+          items: [],
+          diagnostics: [diagnostic("Supermemory search request failed governance validation.", "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED")],
+        };
+      }
+      if (runtime) {
+        const result = await runtime.search({ role: "apply-deep", query: request.query, dependency: "explicit-recall" });
+        if (result.ok) {
+          return {
+            providerId: "supermemory",
+            dependency: "explicit-recall",
+            status: "ok",
+            items: result.context.items.map((item) => ({
+              id: item.id,
+              content: item.content,
+              containerTag: config.projectScope,
+              metadata: { source: "system", scope: "project", type: "workflow", confidence: 1, createdBy: "system" },
+            })),
+          };
+        }
+        return { providerId: "supermemory", dependency: "explicit-recall", status: "failed", items: [], diagnostics: [diagnostic("Explicit Supermemory recall failed; no search results were loaded and user-visible retry is required.", "ADAPTIVE_MEMORY_EXPLICIT_RECALL_FAILED", "error")] };
+      }
       return {
         providerId: "supermemory",
+        dependency: "explicit-recall",
+        status: "failed",
         items: [],
-        diagnostics: issues.length
-          ? [diagnostic("Supermemory search request failed governance validation.", "ADAPTIVE_MEMORY_GOVERNANCE_REJECTED")]
-          : [diagnostic("Supermemory automatic search execution is unsupported/static-compatible; zero items were returned because the static-compatible adapter does not execute MCP tools.")],
+        diagnostics: [diagnostic("Explicit Supermemory recall requires Deck-supervised runtime authentication; direct runner launch remains MCP-only.", "ADAPTIVE_MEMORY_EXPLICIT_RECALL_FAILED", "error")],
       };
     },
     async commit(request: AdaptiveMemoryCommitRequest): Promise<AdaptiveMemoryCommitResult> {
       const validation = validateAdaptiveMemoryCommitRequest(request);
       if (!validation.valid) {
         return {
+          dependency: "explicit-remember",
+          status: "failed",
           savedCount: 0,
           discardedCount: request.candidates.length,
           decisions: request.candidates.map((candidate) => ({
@@ -175,20 +241,48 @@ function createAdapter(
         };
       }
 
-      // MCP-only: commit operations are delegated to runtime MCP tool calls.
-      // The adapter does NOT make direct REST calls. Memory persistence is handled by the MCP server.
+      if (runtime) {
+        const results = await Promise.all(request.candidates.map((candidate, index) => runtime.capture({
+          role: candidate.metadata.createdBy === "user" ? "user" : "assistant",
+          content: candidate.content,
+          source: "explicit-remember",
+          dependency: "explicit-remember",
+          correlationId: `deck-explicit-${index}`,
+        })));
+        const savedCount = results.filter((result) => result.ok).length;
+        return {
+          dependency: "explicit-remember",
+          status: savedCount === request.candidates.length ? "ok" : "failed",
+          savedCount,
+          discardedCount: request.candidates.length - savedCount,
+          decisions: request.candidates.map((candidate, index) => ({
+            accepted: results[index]?.ok === true,
+            scope: candidate.scope.scope as "personal" | "team" | "org" | "project",
+            source: candidate.metadata.source as AdaptiveMemorySource,
+            reason: results[index]?.ok ? "Captured through Deck-owned Supermemory runtime." : "Skipped by Supermemory runtime capture policy.",
+          })),
+          diagnostics: results.some((result) => !result.ok)
+            ? [diagnostic("Explicit Supermemory remember failed; the request was not persisted and user-visible retry is required.", "ADAPTIVE_MEMORY_EXPLICIT_REMEMBER_FAILED", "error")]
+            : [],
+        };
+      }
+
       return {
+        dependency: "explicit-remember",
+        status: "failed",
         savedCount: 0,
         discardedCount: request.candidates.length,
         decisions: request.candidates.map((candidate) => ({
           accepted: false,
           scope: candidate.scope.scope as "personal" | "team" | "org" | "project",
           source: candidate.metadata.source as AdaptiveMemorySource,
-          reason: "Automatic persistence is unsupported/static-compatible; adapter saved zero candidates and discarded this candidate without executing MCP tools.",
+          reason: "Automatic persistence requires Deck-supervised runtime authentication; direct runner launch remains MCP-only.",
         })),
         diagnostics: [
           diagnostic(
-            `Supermemory automatic execution is unsupported/static-compatible; zero candidates were saved and ${request.candidates.length} candidates were discarded because the adapter does not execute MCP tools.`,
+            `Supermemory automatic execution requires Deck-supervised runtime authentication; zero candidates were saved and ${request.candidates.length} candidates were discarded because no authenticated runtime transport is configured.`,
+            "ADAPTIVE_MEMORY_EXPLICIT_REMEMBER_FAILED",
+            "error",
           ),
         ],
       };
@@ -199,6 +293,14 @@ function createAdapter(
       }
     },
     async health(): Promise<AdaptiveMemoryHealthResult> {
+      if (runtimeTransport && config.projectScope) {
+        try {
+          await runtimeTransport.health?.({ containerTag: config.projectScope });
+          return { providerId: "supermemory", status: "available", diagnostics: [] };
+        } catch {
+          return { providerId: "supermemory", status: "degraded", diagnostics: [diagnostic("Supermemory runtime health check failed open with redacted provider diagnostics.", "ADAPTIVE_MEMORY_HEALTH_UNKNOWN")] };
+        }
+      }
       return {
         providerId: "supermemory",
         status: _authenticatedRuntimeValidated.current ? "available" : "degraded",
@@ -216,16 +318,19 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
     mcpServerUrl: config.mcpServerUrl ?? SUPERMEMORY_MCP_SERVER_URL,
     projectScope: config.projectScope?.trim(),
     configuredProjectScope: config.configuredProjectScope?.trim(),
+    sessionId: config.sessionId?.trim(),
+    runnerId: config.runnerId?.trim(),
+    apiKey: config.apiKey,
+    apiBaseUrl: config.apiBaseUrl,
+    timeoutMs: config.timeoutMs,
+    runtimeTransport: config.runtimeTransport,
   };
   const _authenticatedRuntimeValidated = { current: config.authenticatedRuntimeValidated ?? false };
-  const adapter = createAdapter(
-    normalized,
-    _authenticatedRuntimeValidated,
-  );
+  const adapter = createAdapter(normalized, _authenticatedRuntimeValidated);
 
   return {
     id: "supermemory",
-    displayName: "Supermemory MCP",
+    displayName: "Supermemory",
     adapter,
     health: () => adapter.health(),
     buildInjection(context = {}): MemoryInjectionBundle {
@@ -244,11 +349,11 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
         authenticatedRuntimeValidated: _authenticatedRuntimeValidated.current,
         serverQualifiedToolNamesRequired: false,
         serverQualifiedToolNames: [...SUPERMEMORY_MCP_TOOLS],
-        conversationCaptureDefault: false,
+        conversationCaptureDefault: true,
         conversationCaptureSupport: {
-          opencode: "unsupported/static-compatible",
-          pi: "unsupported/static-compatible",
-          codex: "unsupported/static-compatible",
+          opencode: "unsupported/direct-launch",
+          pi: "unsupported/direct-launch",
+          codex: "supported/deck-supervised",
         },
         dreamingDefault: "dynamic",
         maxResultsDefault: 5,
@@ -259,12 +364,6 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
         documentIdToolsRequireScopedPredecessor: ["document fetch tools"],
       } as SupermemoryToolBindingMetadata;
       const bindings: readonly MemoryToolBinding[] = scopeAuthorized ? [
-        {
-          capability: "memory.write",
-          serverName: normalized.mcpServerName,
-          toolNames: SUPERMEMORY_MCP_TOOLS,
-          metadata: metadata as unknown as Readonly<Record<string, unknown>>,
-        },
         {
           capability: "memory.search",
           serverName: normalized.mcpServerName,
@@ -284,6 +383,6 @@ export function createSupermemoryMemoryProvider(config: SupermemoryMemoryProvide
 export const SUPERMEMORY_MEMORY_PROVIDER_ID = "supermemory";
 export const SUPERMEMORY_MEMORY_PROVIDER_METADATA = {
   id: SUPERMEMORY_MEMORY_PROVIDER_ID,
-  displayName: "Supermemory MCP",
-  description: "MCP-based adaptive memory with user and project/repository scoping.",
+  displayName: "Supermemory",
+  description: "First-class adaptive memory runtime with optional project-scoped MCP recall.",
 } as const;

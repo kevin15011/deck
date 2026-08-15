@@ -208,7 +208,6 @@ describe("buildDeveloperTeamInstallPlan", () => {
             transport: "http",
             url: "https://mcp.supermemory.ai/mcp",
             headers: {
-              "x-supermemory-api-key": "redacted-test-token",
               "x-sm-project": "sm_project_v1_kevin15011_deck",
             },
           },
@@ -236,7 +235,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
 
       for (const content of samples) {
         expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-        expect(content).toContain("supermemory_add_memory");
+        expect(content).not.toContain("supermemory_add_memory");
         expect(content).toContain("x-sm-project is diagnostic/transport metadata only");
         expect(content).not.toContain("No manual containerTag required");
         expect(content).not.toContain("sm_project_default");
@@ -258,7 +257,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
           supermemory: {
             transport: "http",
             url: "https://mcp.supermemory.ai/mcp",
-            headers: { "x-supermemory-api-key": "redacted-test-token", "x-sm-project": "sm_project_v1_kevin15011_deck" },
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
           },
         },
       }));
@@ -1123,31 +1122,31 @@ describe("verifyRunnerIsolation", () => {
 });
 
 describe("buildDeveloperTeamInstallPlan with memory injection", () => {
-  const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-    id: "engram",
-    displayName: "Engram Memory",
+  const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+    id: "fixture-memory",
+    displayName: "Supermemory Memory",
     buildInjection: () => ({
       instructions: [
         {
           surface: "session" as const,
-          markdown: "Session-level Engram memory instructions.",
+          markdown: "Session-level Supermemory memory instructions.",
           teamId: "developer-team",
         },
         {
           surface: "agent" as const,
-          markdown: "Agent-level Engram memory instructions.",
+          markdown: "Agent-level Supermemory memory instructions.",
           teamId: "developer-team",
         },
         {
           surface: "skill" as const,
-          markdown: "Skill-level Engram memory instructions.",
+          markdown: "Skill-level Supermemory memory instructions.",
           teamId: "developer-team",
         },
       ],
       toolBindings: [
-        { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
-        { capability: "memory.read" as const, serverName: "engram", toolNames: ["memory_read"] },
-        { capability: "memory.write" as const, serverName: "engram", toolNames: ["memory_write"] },
+        { capability: "memory.search" as const, serverName: "fixture-memory", toolNames: ["memory_search"] },
+        { capability: "memory.read" as const, serverName: "fixture-memory", toolNames: ["memory_read"] },
+        { capability: "memory.write" as const, serverName: "fixture-memory", toolNames: ["memory_write"] },
       ],
     }),
   };
@@ -1170,9 +1169,10 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
     expect(orchestrator.content).not.toContain("memory_search");
   });
 
-  test("plan with Engram provider includes Adaptive Memory section in agent content", () => {
+  test("plan with Supermemory provider includes Adaptive Memory section in agent content", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: engramProvider,
+      memoryProvider: supermemoryProvider,
+      supportedMemoryProviderIds: ["fixture-memory"],
     });
 
     expect(plan.memoryDiagnostics).toHaveLength(0);
@@ -1180,24 +1180,26 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
     const orchestrator = plan.agents.find((a) => a.agent.id === "deck-lead")!;
     expect(orchestrator.content).toContain("## Adaptive Memory (provider-injected)");
     expect(orchestrator.content).toContain("## Adaptive Memory");
-    expect(orchestrator.content).toContain("Agent-level Engram memory instructions.");
+    expect(orchestrator.content).toContain("Agent-level Supermemory memory instructions.");
     // Memory is auxiliary policy is in the profile system prompt, not the agent stub
     expect(orchestrator.content).toContain("The profile is authoritative");
   });
 
-  test("plan with Engram provider includes Adaptive Memory section in skill content", () => {
+  test("plan with Supermemory provider includes Adaptive Memory section in skill content", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: engramProvider,
+      memoryProvider: supermemoryProvider,
+      supportedMemoryProviderIds: ["fixture-memory"],
     });
 
     const orchestratorSkill = plan.skills.find((s) => s.agent.id === "deck-lead")!;
     expect(orchestratorSkill.content).toContain("## Adaptive Memory (provider-injected)");
-    expect(orchestratorSkill.content).toContain("Skill-level Engram memory instructions.");
+    expect(orchestratorSkill.content).toContain("Skill-level Supermemory memory instructions.");
   });
 
-  test("plan with Engram provider adds memory tool names to Pi tools line", () => {
+  test("plan with Supermemory provider adds memory tool names to Pi tools line", () => {
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: engramProvider,
+      memoryProvider: supermemoryProvider,
+      supportedMemoryProviderIds: ["fixture-memory"],
     });
 
     const orchestrator = plan.agents.find((a) => a.agent.id === "deck-lead")!;
@@ -1244,13 +1246,14 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
     };
 
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: engramProvider,
+      memoryProvider: supermemoryProvider,
+      supportedMemoryProviderIds: ["fixture-memory"],
       memoryInjection: bundle,
     });
 
     const orchestrator = plan.agents.find((a) => a.agent.id === "deck-lead")!;
     expect(orchestrator.content).toContain("Bundle content, not provider content.");
-    expect(orchestrator.content).not.toContain("Agent-level Engram memory instructions.");
+    expect(orchestrator.content).not.toContain("Agent-level Supermemory memory instructions.");
   });
 
   test("unsupported provider ID produces diagnostic and no injection (REQ-AMI-003)", () => {
@@ -1289,23 +1292,24 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
     expect(orchestrator.content).toContain("tools: read,write,bash");
   });
 
-  test("broken supported Engram provider produces memory_provider_unavailable diagnostic and no injection", () => {
-    const brokenEngram: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram", // Supported ID, but buildInjection throws
-      displayName: "Broken Engram",
+  test("broken supported Supermemory provider produces memory_provider_unavailable diagnostic and no injection", () => {
+    const brokenSupermemory: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "fixture-memory", // Supported ID, but buildInjection throws
+      displayName: "Broken Supermemory",
       buildInjection: () => {
         throw new Error("provider init failed");
       },
     };
 
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: brokenEngram,
+      memoryProvider: brokenSupermemory,
+      supportedMemoryProviderIds: ["fixture-memory"],
     });
 
     // Should produce a memory_provider_unavailable diagnostic (not unsupported_memory_provider)
     expect(plan.memoryDiagnostics).toHaveLength(1);
     expect(plan.memoryDiagnostics[0].code).toBe("memory_provider_unavailable");
-    expect(plan.memoryDiagnostics[0].providerId).toBe("engram");
+    expect(plan.memoryDiagnostics[0].providerId).toBe("fixture-memory");
 
     // Should NOT inject memory content — fail-closed
     const orchestrator = plan.agents.find((a) => a.agent.id === "deck-lead")!;
@@ -1349,7 +1353,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
     // should NOT appear in agent/skill content because composeAdaptiveMemory
     // returns empty toolBindings when no fragments match the surface.
     const sessionOnlyWithTools: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram",
+      id: "fixture-memory",
       displayName: "Session-Only with Tools",
       buildInjection: () => ({
         instructions: [
@@ -1360,8 +1364,8 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
           },
         ],
         toolBindings: [
-          { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
-          { capability: "memory.read" as const, serverName: "engram", toolNames: ["memory_read"] },
+          { capability: "memory.search" as const, serverName: "fixture-memory", toolNames: ["memory_search"] },
+          { capability: "memory.read" as const, serverName: "supermemory", toolNames: ["memory_read"] },
         ],
       }),
     };
@@ -1390,7 +1394,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
           supermemory: {
             transport: "http",
             url: "https://mcp.supermemory.ai/mcp",
-            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": "sentinel-token-install" },
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
           },
         },
       }), "utf-8");
@@ -1437,7 +1441,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
           customSupermemory: {
             transport: "http",
             url: "https://mcp.supermemory.ai/mcp",
-            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": "sentinel-token-install" },
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
           },
         },
       }), "utf-8");
@@ -1478,7 +1482,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
           customSupermemory: {
             transport: "http",
             url: "https://mcp.supermemory.ai/mcp",
-            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": "sentinel-token-install" },
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
           },
         },
       }), "utf-8");
@@ -1631,15 +1635,15 @@ describe("buildDeveloperTeamInstallPlan with capability instruction injection", 
   });
 
   test("capability instructions coexist with memory injection", () => {
-    const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram",
-      displayName: "Engram Memory",
+    const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+      id: "fixture-memory",
+      displayName: "Supermemory Memory",
       buildInjection: () => ({
         instructions: [
-          { surface: "agent", markdown: "Agent-level Engram memory instructions.", teamId: "developer-team" },
+          { surface: "agent", markdown: "Agent-level Supermemory memory instructions.", teamId: "developer-team" },
         ],
         toolBindings: [
-          { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
+          { capability: "memory.search" as const, serverName: "fixture-memory", toolNames: ["memory_search"] },
         ],
       }),
     };
@@ -1656,14 +1660,15 @@ describe("buildDeveloperTeamInstallPlan with capability instruction injection", 
     };
 
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: engramProvider,
+      memoryProvider: supermemoryProvider,
+      supportedMemoryProviderIds: ["fixture-memory"],
       capabilityInstructions: bundle,
     });
 
-    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-lead")!;
+    const orchestrator = plan.agents.find((a) => a.agent.id === "deck-investigate")!;
     expect(orchestrator.content).toContain("## Adaptive Memory (provider-injected)");
     expect(orchestrator.content).toContain("## Package Instructions (configured)");
-    expect(orchestrator.content).toContain("Agent-level Engram memory instructions.");
+    expect(orchestrator.content).toContain("Agent-level Supermemory memory instructions.");
     expect(orchestrator.content).toContain("Prefer search_graph for structural discovery.");
     expect(orchestrator.content).toContain("memory_search");
   });

@@ -264,10 +264,13 @@ function selectAdaptiveMemoryProvider(
           ? {
               configured: true,
               hasToken: false,
+              runtimeCredentialStored: false,
+              ephemeralTokenAvailable: false,
+              mcpOAuthReady: false,
               diagnostics: [...(supermemoryUi?.configuredDiagnostics ?? [])],
             }
           : createEmptySupermemorySetup(),
-        status: supermemoryUi?.selectionStatus ?? "Supermemory selected; provide an external API key for the runner MCP handoff.",
+        status: "Supermemory selected; provide a Deck runtime API token for read-only validation and secret-store persistence. Optional runner MCP OAuth is configured separately.",
       },
     });
     return nativeOAuth ? navigate(next, "dashboard") : next;
@@ -279,7 +282,7 @@ function selectAdaptiveMemoryProvider(
       ...state,
       adaptiveMemory: {
         provider,
-        status: provider === "none" ? "No adaptive memory provider selected." : "Engram selected; engram-memory action is derived by the plan.",
+        status: "No adaptive memory provider selected.",
       },
     }),
     "dashboard",
@@ -302,6 +305,8 @@ function updateSupermemory(
         ...values,
         diagnostics: values.diagnostics ?? current.diagnostics,
         configured: values.configured ?? current.configured,
+        runtimeCredentialStored: values.runtimeCredentialStored ?? values.hasToken ?? current.runtimeCredentialStored ?? current.hasToken,
+        ephemeralTokenAvailable: values.ephemeralTokenAvailable ?? false,
       },
     },
   });
@@ -380,6 +385,9 @@ function createEmptySupermemorySetup(): SupermemorySetupState {
   return {
     configured: false,
     hasToken: false,
+    runtimeCredentialStored: false,
+    ephemeralTokenAvailable: false,
+    mcpOAuthReady: false,
     diagnostics: [],
   };
 }

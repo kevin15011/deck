@@ -15,6 +15,15 @@ export type CodexHookHostResponseV1 = Readonly<{ accepted: boolean; reason?: str
 
 function digest(value: string): Buffer { return createHash("sha256").update(value).digest(); }
 
+function normalizeCodexHookInput(value: unknown): Partial<CodexTrustedHookInputV1> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const record = value as Record<string, unknown>;
+  if (record.schema === "deck-runner-memory-loopback-v1" && record.runnerId === "codex" && record.rawHook && typeof record.rawHook === "object" && !Array.isArray(record.rawHook)) {
+    return record.rawHook as Partial<CodexTrustedHookInputV1>;
+  }
+  return record as Partial<CodexTrustedHookInputV1>;
+}
+
 export function createCodexTrustedHookHostV1(options: {
   projectRoot: string;
   bearerToken: string;
@@ -32,7 +41,7 @@ export function createCodexTrustedHookHostV1(options: {
       if (Buffer.byteLength(request.body, "utf8") > 1024 * 1024) return { accepted: false, reason: "invalid-evidence" };
       let input: CodexTrustedHookInputV1;
       try {
-        const parsed = JSON.parse(request.body) as Partial<CodexTrustedHookInputV1>;
+        const parsed = normalizeCodexHookInput(JSON.parse(request.body));
         const allowed = new Set(["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "SubagentStart", "SubagentStop", "Stop"]);
         if (typeof parsed.session_id !== "string" || !parsed.session_id || typeof parsed.cwd !== "string" || resolve(parsed.cwd) !== resolve(options.projectRoot) || typeof parsed.hook_event_name !== "string" || !allowed.has(parsed.hook_event_name)) throw new Error("invalid");
         if (parsed.turn_id !== undefined && (typeof parsed.turn_id !== "string" || !parsed.turn_id)) throw new Error("invalid");

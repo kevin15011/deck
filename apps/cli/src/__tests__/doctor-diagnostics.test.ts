@@ -75,6 +75,9 @@ function fabDependencies() {
     })),
     memoryBinaryAvailable: vi.fn((_command: string) => false),
     readOpenCodeMcpSection: vi.fn((): Record<string, unknown> | null => null),
+    readSupermemorySecret: vi.fn((): string | undefined => undefined),
+    checkSupermemoryApi: vi.fn(async () => undefined),
+    checkSupermemoryObservabilitySink: vi.fn(() => ({ ok: true, path: "/tmp/deck/supermemory-runtime.jsonl", diagnostics: ["Doctor did not create it."] })),
     inspectCodex: vi.fn(async (): Promise<ReadonlyArray<{ category: string; status: "ok" | "warning" | "error"; message: string; suggestion?: string }>> => []),
   };
 }
@@ -249,34 +252,55 @@ describe("runDoctorDiagnostics", () => {
     expect(JSON.stringify(codex)).not.toContain("secret-value");
   });
 
-  // ── Engram available ─────────────────────────────────────────────────────
-
-  test("Engram normal-path check returns a redacted diagnostic category", async () => {
-    const dependencies = fabDependencies();
-    dependencies.memoryBinaryAvailable.mockImplementation((command) => command === "engram");
-
-    const result = await runDoctorDiagnostics(dependencies);
-
-    expect(dependencies.memoryBinaryAvailable).toHaveBeenCalledWith("engram");
-    const engramCategory = result.memory.find((item) => item.category === "Engram");
-    expect(engramCategory).toMatchObject({ status: "ok" });
-    expect(JSON.stringify(engramCategory)).not.toMatch(/Bearer\s+eyJ/i);
-  });
-
-  // ── Supermemory without binary ───────────────────────────────────────────
+  // ── Supermemory runtime readiness ────────────────────────────────────────
 
   test("Supermemory normal-path check never exposes credentials", async () => {
     const dependencies = fabDependencies();
-    dependencies.memoryBinaryAvailable.mockReturnValue(false);
+    dependencies.configStore.write({ adaptiveMemory: { enabled: true } });
+    dependencies.readSupermemorySecret.mockReturnValue("sk-test-doctor-secret-value");
+    dependencies.checkSupermemoryApi.mockResolvedValue({ operations: ["health", "profile", "search"] } as never);
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-doctor-sm-runtime-"));
+    mkdirSync(join(projectRoot, ".git", "objects", "info"), { recursive: true });
+    mkdirSync(join(projectRoot, ".git", "objects", "pack"), { recursive: true });
+    mkdirSync(join(projectRoot, ".git", "refs", "heads"), { recursive: true });
+    writeFileSync(join(projectRoot, ".git", "HEAD"), "ref: refs/heads/main\n");
+    writeFileSync(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
 
-    const result = await runDoctorDiagnostics(dependencies);
+    const result = await runDoctorDiagnostics(dependencies, projectRoot);
 
-    expect(dependencies.memoryBinaryAvailable).toHaveBeenCalledWith("supermemory");
-    const supermemoryCategory = result.memory.find((item) => item.category === "Supermemory");
-    expect(supermemoryCategory).toMatchObject({ status: "warning" });
+    expect(dependencies.memoryBinaryAvailable).not.toHaveBeenCalledWith("supermemory");
+    const supermemoryCategory = result.memory.find((item) => item.category === "Supermemory Runtime");
+    expect(supermemoryCategory).toBeDefined();
     const messages = supermemoryCategory!.items.map((item) => item.message).join(" ");
     expect(messages).not.toMatch(/Bearer\s+/i);
     expect(messages).not.toMatch(/sk-[a-zA-Z0-9]{20,}/);
+    expect(messages).toContain("health, profile, search");
+    expect(messages).not.toContain("health, profile, search, capture");
+    expect(messages).toContain("unobservable-external-mcp");
+    expect(messages).toContain("Doctor did not create, rotate, or write metrics");
+    expect(messages).toContain("Deck-supervised native loopback route matrix");
+    expect(messages).toContain("OpenCode model-message transform");
+    expect(messages).toContain("Codex hookSpecificOutput.additionalContext");
+    expect(messages).toContain("Pi remains unsupported unless Pi exposes a trusted final-assistant event");
+    expect(messages).toContain("No Supermemory CLI package is required");
+    expect(messages).not.toContain("supported only on Deck-supervised exec paths");
+    expect(messages).not.toContain("Install Supermemory");
+  });
+
+  test("Supermemory Doctor uses only read-only provider and observability checks", async () => {
+    const dependencies = fabDependencies();
+    dependencies.configStore.write({ adaptiveMemory: { enabled: true } });
+    dependencies.readSupermemorySecret.mockReturnValue("sk-test-doctor-secret-value");
+    dependencies.checkSupermemoryApi.mockResolvedValue({ operations: ["health", "profile", "search"] } as never);
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-doctor-sm-readonly-"));
+    mkdirSync(join(projectRoot, ".git"), { recursive: true });
+    writeFileSync(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+
+    await runDoctorDiagnostics(dependencies, projectRoot);
+
+    expect(dependencies.checkSupermemoryApi).toHaveBeenCalledWith({ apiKey: "sk-test-doctor-secret-value", containerTag: "sm_project_v1_kevin15011_deck" });
+    expect(dependencies.checkSupermemoryApi.mock.results[0]?.type).toBe("return");
+    expect(dependencies.checkSupermemoryObservabilitySink).toHaveBeenCalledTimes(1);
   });
 
   // ── Pi MCP configured correctly ──────────────────────────────────────────
@@ -363,7 +387,7 @@ describe("runDoctorDiagnostics", () => {
     expect(pi).toBeDefined();
 
     // Memory checks should still be present
-    expect(result.memory.length).toBeGreaterThanOrEqual(2);
+    expect(result.memory.length).toBeGreaterThanOrEqual(1);
 
     // MCP checks should still be present
     expect(result.mcp.length).toBeGreaterThanOrEqual(2);
@@ -440,6 +464,8 @@ describe("runDoctorDiagnostics dependency seam", () => {
     const result = await runDoctorDiagnostics(dependencies);
 
     expect(Object.keys(dependencies).sort()).toEqual([
+      "checkSupermemoryApi",
+      "checkSupermemoryObservabilitySink",
       "configStore",
       "detectSelectedRuntimes",
       "fetchReleaseDescriptor",
@@ -448,6 +474,7 @@ describe("runDoctorDiagnostics dependency seam", () => {
       "inspectPiEnvironment",
       "memoryBinaryAvailable",
       "readOpenCodeMcpSection",
+      "readSupermemorySecret",
       "reviewOpenCodeTools",
       "reviewPiRequiredTools",
       "runDeckChecks",
@@ -457,14 +484,11 @@ describe("runDoctorDiagnostics dependency seam", () => {
     expect(dependencies.runDeckChecks).toHaveBeenCalledTimes(1);
     expect(dependencies.fetchReleaseDescriptor).toHaveBeenCalledTimes(1);
     expect(dependencies.memoryBinaryAvailable.mock.calls.map(([command]) => command)).toEqual([
-      "engram",
-      "supermemory",
       "serena",
     ]);
     expect(dependencies.readOpenCodeMcpSection).toHaveBeenCalledTimes(1);
     expect(result.binary?.reason).toBe("Release descriptor not found");
-    expect(result.memory.find((item) => item.category === "Engram")?.status).toBe("ok");
-    expect(result.memory.find((item) => item.category === "Supermemory")?.status).toBe("warning");
+    expect(result.memory.find((item) => item.category === "Supermemory Runtime")?.status).toBe("ok");
     expect(result.mcp.find((item) => item.category === "OpenCode MCP")?.status).toBe("ok");
   });
 });

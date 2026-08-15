@@ -544,7 +544,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         requiresExternalToken: true,
         selectionStatus: "Supermemory selected; provide an API key for the Pi MCP handoff.",
       },
-      engram: { label: "Engram", detail: "Engram enables the derived engram-memory technical action." },
     },
   } as const;
 
@@ -689,7 +688,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
               explicitlySelected: state.explicitlySelectedCapabilities?.serena === true,
             }
           : undefined,
-        adaptiveMemory: state.adaptiveMemory as { provider?: "none" | "engram" | "supermemory"; supermemory?: { configured?: boolean; hasToken?: boolean; userId?: string; teamId?: string; organizationId?: string } },
+        adaptiveMemory: state.adaptiveMemory as { provider?: "none" | "supermemory"; supermemory?: { configured?: boolean; hasToken?: boolean; runtimeCredentialStored?: boolean; ephemeralTokenAvailable?: boolean; mcpOAuthReady?: boolean; userId?: string; teamId?: string; organizationId?: string } },
         teams: {} as Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>,
         runtime: { toolsReview: review },
         packageInstructions: {
@@ -1175,7 +1174,6 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
 
   async writeMcpConfig(input: RunnerMcpConfigInput): Promise<RunnerMcpConfigResult> {
     const result = writeSupermemoryPiMcpConfig({
-      token: input.token ?? "",
       serverName: input.serverName,
       projectScope: resolvePiSupermemoryProjectScope(input.projectRoot ?? "") ?? "",
       configPath: undefined,
@@ -1392,17 +1390,7 @@ async function writeNamedPiMcpConfig(
         credentialEnvironment: process.env,
       });
     case "supermemory": {
-      const token = context.supermemoryToken ?? process.env.SUPERMEMORY_API_KEY;
-      if (!token) {
-        return {
-          ok: false,
-          action: "failed",
-          path: configPath,
-          serverName: capabilityId,
-          diagnostics: [],
-        };
-      }
-      return writeSupermemoryPiMcpConfig({ token, configPath, homeDir, projectScope: resolvePiSupermemoryProjectScope(context.projectRoot) ?? "" });
+      return writeSupermemoryPiMcpConfig({ configPath, homeDir, projectScope: resolvePiSupermemoryProjectScope(context.projectRoot) ?? "" });
     }
     default:
       return {
@@ -1544,5 +1532,5 @@ function toInternalInstallAction(action: RunnerAction): InternalRunnerPackageIns
 
 function isOptionalToolId(id: string): id is InstallablePiToolId {
   // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
-  return ["context-mode", "codebase-memory-mcp", "rtk", "context7", "engram-memory"].includes(id);
+  return ["context-mode", "codebase-memory-mcp", "rtk", "context7"].includes(id);
 }

@@ -31,7 +31,7 @@ import {
   type WebSearchProviderDescriptorV1,
 } from "@deck/core";
 
-export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
+export type AdaptiveMemoryProviderChoice = "none" | "supermemory";
 export type PiRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
 
 export type PiRunnerAction = {
@@ -83,7 +83,7 @@ type BuildPiRunnerReviewPlanState = {
   currentOperation?: SerenaOperationIdentity;
   adaptiveMemory?: {
     provider?: AdaptiveMemoryProviderChoice;
-    supermemory?: { configured?: boolean; hasToken?: boolean; userId?: string; teamId?: string; organizationId?: string };
+    supermemory?: { configured?: boolean; hasToken?: boolean; runtimeCredentialStored?: boolean; ephemeralTokenAvailable?: boolean; mcpOAuthReady?: boolean; userId?: string; teamId?: string; organizationId?: string };
   };
   teams?: Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>;
   runtime?: { toolsReview?: PiRequiredToolsReview };
@@ -420,45 +420,10 @@ function addAdaptiveMemoryActions(
   const provider = state.adaptiveMemory?.provider ?? "none";
   if (provider === "none") return;
 
-  if (provider === "engram") {
-    const installedNames = buildInstalledNameSet(review);
-    if (installedNames.has("engram") || installedNames.has("engram-memory")) {
-      groups.validations.push({
-        id: "adaptive-memory.engram.validate",
-        kind: "validate",
-        title: "Validate Engram adaptive memory",
-        description: "Engram selected as the single Adaptive Memory provider.",
-        toolId: "engram-memory",
-        source: getPiInstallableTool("engram-memory")?.source,
-        status: "ready",
-      });
-      return;
-    }
-
-    groups.manualSteps.push({
-      id: "adaptive-memory.engram.manual-install",
-      kind: "manual-external-install",
-      title: "Install Engram adaptive memory",
-      description: "Engram/engram-memory appears only because Adaptive Memory = Engram is selected.",
-      toolId: "engram-memory",
-      source: getPiInstallableTool("engram-memory")?.source,
-      status: "manual",
-      required: true,
-      diagnostics: ["Install or verify Engram manually before using it as the adaptive-memory provider."],
-    });
-    diagnostics.push({
-      code: "MANUAL_TOOL_REQUIRED",
-      severity: "warning",
-      message: "Engram adaptive memory requires manual external installation when selected.",
-      actionId: "adaptive-memory.engram.manual-install",
-    });
-    return;
-  }
-
   const supermemory = state.adaptiveMemory?.supermemory;
   const configured = Boolean(supermemory?.configured);
-  const hasToken = Boolean(supermemory?.hasToken);
-  const supermemoryReady = configured && hasToken;
+  const runtimeCredentialReady = Boolean(supermemory?.runtimeCredentialStored ?? supermemory?.hasToken);
+  const supermemoryReady = configured && runtimeCredentialReady;
   groups.configWrites.push({
     id: "adaptive-memory.supermemory.deck-config",
     kind: "write-deck-config",
@@ -466,16 +431,16 @@ function addAdaptiveMemoryActions(
     description: "Records Supermemory as the selected Adaptive Memory provider without storing tokens in Deck config.",
     status: configured ? "ready" : "pending",
     required: true,
-    diagnostics: ["Supermemory tokens must be handed off through Pi MCP config, not Deck config."],
+    diagnostics: ["Supermemory tokens must be stored in Deck's secret store after read-only validation, not Deck config or Pi MCP config."],
   });
   groups.configWrites.push({
     id: "adaptive-memory.supermemory.pi-mcp-config",
     kind: "write-pi-mcp-config",
-    title: "Configure Supermemory Pi MCP credentials",
-    description: "Writes/validates redacted Pi MCP credential handoff for Supermemory.",
-    status: hasToken ? "ready" : "pending",
+    title: "Configure credential-free Supermemory Pi MCP server",
+    description: "Writes/validates Supermemory Pi MCP server scope only; runtime credentials stay in Deck's secret store after read-only API validation.",
+    status: runtimeCredentialReady ? "ready" : "pending",
     required: true,
-    diagnostics: ["Credential value must be redacted and never persisted in Deck config."],
+    diagnostics: ["Credential value must be redacted, read-only validated, and never persisted in Deck config or Pi MCP config."],
   });
   groups.validations.push({
     id: "adaptive-memory.supermemory.validate",

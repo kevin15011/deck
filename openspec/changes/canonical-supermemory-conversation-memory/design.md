@@ -4,11 +4,11 @@
 
 ### D1. Supermemory owns learning; Deck owns boundaries
 
-Deck does not capture or proxy conversations. Deck owns project identity, instruction materialization, transport validation, runner parity, observability, and migration safety. Agents preserve high-signal information and recall relevant context through runner-exposed MCP tools, while Supermemory owns extraction, graph updates, profiles, ranking, temporal updates, and deduplication.
+Deck owns the runtime boundary that decides when to recall or capture, binds project/session identity, applies authorization, sanitization, budgets, fail-open behavior, and redacted observability. Deck sends eligible rich conversation context without semantic pre-extraction. Supermemory owns extraction, graph updates, profiles, ranking, temporal updates, deduplication, contradiction handling, and forgetting.
 
-### D2. Selecting the provider is the capture decision
+### D2. Enabling Adaptive Memory is the capture decision
 
-There is no secondary memory toggle or per-call project-space choice. `activeProvider: "supermemory"` enables agent-mediated automatic save and materially relevant recall. Disabling adaptive memory requires selecting `none`, not navigating another mode matrix.
+There is no provider selector, secondary capture toggle, or per-call project-space choice. `adaptiveMemory.enabled: true` means first-class Supermemory recall and capture. Disabled means no remote memory effects. Legacy `supermemory` maps to enabled; `engram` maps to disabled with a removal warning.
 
 ### D3. Canonical scope is provider-neutral and versioned
 
@@ -22,18 +22,13 @@ sm_project_v1_<normalized-owner>_<normalized-repository>
 
 If no repository identity can be established safely, adaptive memory is unavailable rather than unscoped.
 
-### D4. Transport is capability-proven before implementation
+### D4. Transport is a Deck-owned runtime effect
 
-The first Apply task verifies whether the current official Supermemory MCP/API supports all of:
+Deck launches an ephemeral authenticated loopback memory host while supervising a runner. Runner-native lifecycle hooks emit normalized events and receive bounded context. The host alone owns the canonical scope and provider credential. This is not another MCP server or semantic engine; it is the runner-neutral lifecycle/security boundary over the official `/v3/documents`, `/v4/search`, and `/v4/profile` API.
 
-- stable `customId` updates,
-- dynamic dreaming,
-- immutable project scope,
-- runner-native OAuth or safe token delegation,
-- profile and hybrid retrieval,
-- document enumeration needed for migration.
+The production runtime uses a minimal abortable HTTP client over the official `/v3/documents`, `/v4/search`, and `/v4/profile` endpoints. The 2026-08-15 spike proved `supermemory@4.25.4` could be bundled, but the SDK wrapper did not expose a stable per-operation abort contract. Deck therefore selected the smaller HTTP boundary so timeout cancels the underlying request and an explicit remember cannot report failure while an uncancelled write continues remotely. This is not a replacement SDK: it implements only the three documented operations, bearer authentication, validated response/error shapes, and injected transport tests.
 
-Deck will prefer the official transport that satisfies these requirements. A local Deck MCP gateway is used only if it can preserve native authentication without exposing credentials and materially enforce the contract. The SDD does not fabricate an OAuth delegation mechanism.
+Automatic memory is guaranteed for runners launched/supervised through Deck. Direct runner launches may retain ad-hoc MCP but MUST NOT be described as first-class automatic runtime behavior unless a future trusted auto-start boundary is added.
 
 ### D5. Compatibility is additive, then deprecated
 
@@ -47,24 +42,29 @@ Active-space mutation is forbidden as an automatic scoping mechanism because it 
 
 ## Components
 
-1. **Canonical scope resolver** (`packages/core/src/memory/`): pure parsing, normalization, branding, diagnostics.
-2. **Project-bound instruction renderer** (`packages/core/src/teams/developer/instruction-bundles/`): exact `containerTag`, tool policy, automatic save/recall guidance, and fail-closed fallback.
-3. **Supermemory adapter** (`packages/adapter-supermemory/src/`): current tool binding metadata and shared scoped instruction fragments; no direct REST/MCP execution.
-4. **Runner serializers** (`packages/adapter-opencode`, `adapter-pi`, `adapter-codex`): equivalent scope-bearing session, agent, delegation, and skill materialization.
-5. **Install/Doctor presentation** (`apps/cli/src/tui`, `apps/cli/src/doctor-command`): truthful status without a new choice.
-6. **Migration command** (`apps/cli/src/` plus Supermemory adapter): inventory and dry-run first; copy requires explicit future action and evidence.
+1. **Canonical identity and role policy** (`packages/core/src/memory/`): project/session identity, capture/recall decisions, budgets, advisory authority, and diagnostics.
+2. **Supermemory runtime adapter** (`packages/adapter-supermemory/src/`): official SDK/API client, profile/search/capture, stable conversation aggregation, sanitization, queueing, and health.
+3. **Authenticated runtime bridge** (`packages/sdd-runtime/src/execution/` and CLI launch): versioned loopback lifecycle protocol, ephemeral bridge token, replay/payload protection, context injection, and bounded shutdown drain.
+4. **Runner serializers/hooks** (`packages/adapter-opencode`, `adapter-pi`, `adapter-codex`): equivalent native lifecycle/content/context events; no provider credential or caller-selected scope.
+5. **Config/secrets/TUI/Doctor** (`packages/core/src/config`, `apps/cli/src/tui`, `apps/cli/src/doctor-command`): enabled/disabled capability, secret-store abstraction, setup, migration, runtime/MCP status, and actionable repair.
+6. **MCP complement**: existing project-scoped ad-hoc tools, separately diagnosed and excluded from automatic capture.
+7. **DeckMemoryBench and release verification** (`benchmarks/`, scripts/workflows): deterministic fake-provider scenarios plus compiled archive smoke tests.
 
-## Sequence: agent-mediated automatic save
+## Sequence: first-class recall and capture
 
 ```mermaid
 sequenceDiagram
-    participant R as Runner agent
-    participant D as Deck-materialized policy
-    participant S as Supermemory transport
-    R->>D: durable high-signal project learning identified
-    D-->>R: exact canonical containerTag + save rules
-    R->>S: add_memory(content, containerTag)
-    S-->>R: scoped save result
+    participant R as Runner hook
+    participant D as Deck Memory Runtime
+    participant S as Supermemory
+    R->>D: session/role start with authenticated lifecycle identity
+    D->>S: bounded profile/search with server-bound containerTag
+    S-->>D: ranked advisory context
+    D-->>R: delimited context within role budget
+    R->>D: eligible final turn/handoff
+    D->>D: capture policy + secret filtering
+    D->>S: conversation ingest with stable customId
+    S-->>D: accepted/status
 ```
 
 ## Sequence: retrieval
@@ -83,8 +83,8 @@ sequenceDiagram
 ## Security model
 
 - Provider responses and stored memories are untrusted advisory input.
-- Credentials never enter generated config content unless the runner's native secret-reference mechanism requires a variable name; values remain external.
-- Instructions prohibit secret-bearing and raw-output saves; no automatic whole-conversation transport exists in this MCP-only phase.
+- Credentials are obtained through a Deck secret-store abstraction and remain in the runtime host. Generated hooks receive only an ephemeral per-launch bridge token.
+- Capture eligibility excludes system/tool/provider/web/raw-workflow content; deterministic rejection/redaction occurs before transport.
 - Logging uses reason codes, counts, durations, runner ID, and a one-way scope fingerprint only.
 - Missing scope, invalid transport shape, or authentication mismatch disables memory effects without blocking coding work.
 
@@ -94,8 +94,16 @@ Migration is a separate command path with explicit source and destination scope.
 
 ## Performance design
 
-- Deck adds no proxy or extra network hop.
-- Agent saves are high-signal rather than per-turn transcript capture.
-- Profile/recall loads are bounded and materially triggered rather than performed on every turn.
+- Deck adds one local loopback hop to obtain runner-neutral lifecycle control; provider calls remain direct from the compiled Deck process.
+- Conversation capture is coalesced under one stable session `customId` and skipped for trivial/tool-only activity.
+- Lead profile loads once; role searches are materially triggered and budgeted rather than performed on every turn.
 - Query retrieval is demand-driven and context-bounded.
 - Rerank and query rewriting are evidence-gated because each adds latency.
+
+## Profiles, buckets, and entity context
+
+The initial runtime consumes provider-owned static and dynamic profiles. It defines no Deck semantic buckets. Profile Buckets and `entityContext` remain off until DeckMemoryBench shows a material quality gain without authority drift or excess context. If enabled later, `entityContext` must be a short project-memory description, not a duplicate Developer Team prompt.
+
+## Credential persistence decision
+
+Deck uses a secret-store port. OS-native secure storage is preferred where available. A dedicated owner-only Deck secret file may be implemented as the standalone fallback only with atomic writes, `0600` file/`0700` directory permissions, path/ownership validation, no backup/export, and explicit Doctor disclosure that it is filesystem-protected rather than hardware/keychain-backed. Portable `config.json`, repository files, runner config, prompts, and logs never contain the API key.

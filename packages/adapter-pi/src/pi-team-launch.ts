@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { sanitizeRunnerEnv } from "@deck/core";
 import { getDeveloperTeamCatalog } from "./developer-team-catalog";
 import { readDeveloperTeamModelConfigAssignments } from "./developer-team-install";
 import { resolveThinkingForModel, supportsDeveloperTeamModel, type PiThinkingLevel } from "./model-config";
@@ -149,9 +150,7 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
 
   // Forward essential env vars + add PI_SESSION_DIR
   const env: Record<string, string> = {
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(([, v]) => v !== undefined),
-    ) as Record<string, string>,
+    ...sanitizeRunnerEnv(process.env),
     PI_SESSION_DIR: sessionDir,
   };
 

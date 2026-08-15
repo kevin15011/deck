@@ -6,7 +6,7 @@ import { createToolStatus } from "./tool-status";
 import { resolveWebSearchReadiness } from "@deck/core";
 
 function makeReview(installedPackages: string[] = []): PiRequiredToolsReview {
-  const names = ["sub-agents", "MCP packages", "context-mode", "codebase-memory", "RTK", "Context7", "Engram memory"];
+  const names = ["sub-agents", "MCP packages", "context-mode", "codebase-memory", "RTK", "Context7"];
   return {
     installedPackages,
     requiredTools: names.map((name) => ({

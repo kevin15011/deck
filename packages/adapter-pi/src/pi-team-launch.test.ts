@@ -202,6 +202,23 @@ describe("buildPiTeamLaunchPlan", () => {
     expect(plan.env.PATH).toBe(process.env.PATH!);
     expect(plan.env.HOME).toBe(process.env.HOME!);
   });
+
+  test("sanitizes provider credentials from the legacy Pi child environment", () => {
+    const previous = { SUPERMEMORY_API_KEY: process.env.SUPERMEMORY_API_KEY, DATABASE_URL: process.env.DATABASE_URL };
+    process.env.SUPERMEMORY_API_KEY = "sm_test_secret";
+    process.env.DATABASE_URL = "postgres://user:pass@host/db";
+    try {
+      const plan = buildPiTeamLaunchPlan({ teamId: "developer-team", projectRoot: "/tmp/project" });
+      expect(plan.env).not.toHaveProperty("SUPERMEMORY_API_KEY");
+      expect(plan.env).not.toHaveProperty("DATABASE_URL");
+      expect(plan.env.PI_SESSION_DIR).toBe(plan.sessionDir);
+    } finally {
+      if (previous.SUPERMEMORY_API_KEY === undefined) delete process.env.SUPERMEMORY_API_KEY;
+      else process.env.SUPERMEMORY_API_KEY = previous.SUPERMEMORY_API_KEY;
+      if (previous.DATABASE_URL === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previous.DATABASE_URL;
+    }
+  });
 });
 
 describe("buildTeamSessionDir", () => {

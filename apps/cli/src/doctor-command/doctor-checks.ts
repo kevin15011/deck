@@ -402,8 +402,6 @@ const KNOWN_BINARIES = [
   { id: "deck", label: "Deck CLI", command: "deck" },
   { id: "opencode", label: "OpenCode", command: "opencode" },
   { id: "pi", label: "Pi", command: "pi" },
-  { id: "engram", label: "Engram", command: "engram" },
-  { id: "supermemory", label: "Supermemory", command: "supermemory" },
   { id: "serena", label: "Serena", command: "serena" },
 ] as const;
 
@@ -514,7 +512,7 @@ export function checkRunnerConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps
 
   items.push({
     status: "ok",
-    message: `Supermemory contract: endpoint ${SUPERMEMORY_MCP_SERVER_URL}; auth readiness is runner-native; conversation-capture: unsupported/static-compatible until a trusted MCP execution boundary is available; endpoint and x-sm-project scope are inspected per runner below.`,
+    message: `Supermemory contract: endpoint ${SUPERMEMORY_MCP_SERVER_URL}; optional MCP auth readiness is runner-native; automatic recall/capture uses Deck-supervised native loopback hooks for OpenCode, Pi, and Codex where trusted lifecycle events exist; endpoint and x-sm-project scope are inspected per runner below.`,
   });
 
     const home = homedir();

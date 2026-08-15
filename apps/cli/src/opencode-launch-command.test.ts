@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test";
+import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,47 +6,36 @@ import { execFileSync } from "node:child_process";
 import { runOpenCodeLaunch } from "./opencode-launch-command";
 import { getDefaultDeckConfig } from "@deck/core";
 
-// Mock imports before importing the module under test
-const mockGetSupportedProviderIds = mock(() => ["engram", "supermemory"]);
-const mockCreateProvider = mock((providerId: string) => {
-  if (providerId === "engram") return { id: "engram" };
-  if (providerId === "supermemory") return { id: "supermemory", buildInjection: () => ({ instructions: [], toolBindings: [] }) };
-  return null;
-});
-
 // Simple test file to verify provider selection behavior in launch command
 // Note: Uses module mocks since the actual launch command has complex dependencies
-describe("provider selection provider-agnostic", () => {
-  test("DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS includes engram and supermemory", () => {
-    // This verifies that the new default includes both providers
-    const supportedIds = ["engram", "supermemory"];
-    expect(supportedIds).toContain("engram");
-    expect(supportedIds).toContain("supermemory");
+describe("provider selection", () => {
+  test("DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS includes only Supermemory", () => {
+    const supportedIds = ["supermemory"];
+    expect(supportedIds).toEqual(["supermemory"]);
   });
 
-  test("provider selection does not hardcode exclusive to engram", () => {
-    // Verify the old hardcode is gone
-    const exclusiveIds = ["engram"];
-    expect(exclusiveIds).not.toContain("supermemory");
+  test("provider selection no longer accepts removed providers", () => {
+    const supportedIds = ["supermemory", "none"];
+    expect(supportedIds).not.toContain("engram");
   });
 
   test("supermemory provider ID is valid for selection", () => {
     const providerId = "supermemory";
     expect(providerId).toBe("supermemory");
-    expect(["engram", "supermemory", "none"]).toContain(providerId);
+    expect(["supermemory", "none"]).toContain(providerId);
   });
 });
 
 describe("provider IDs consistency between launch and install", () => {
   test("install accepts same provider IDs as launch", () => {
-    const installAccepted = ["engram", "supermemory", "none"];
-    const launchAccepted = ["engram", "supermemory", "none"];
+    const installAccepted = ["supermemory", "none"];
+    const launchAccepted = ["supermemory", "none"];
     expect(installAccepted.sort()).toEqual(launchAccepted.sort());
   });
 
   test("launch rejects unknown provider with diagnostic", () => {
     const unknownProvider = "unknown-provider";
-    const supported = ["engram", "supermemory", "none"];
+    const supported = ["supermemory", "none"];
     expect(supported).not.toContain(unknownProvider);
     // Diagnostic would be "unsupported_memory_provider"
   });
@@ -187,7 +176,8 @@ describe("production prompt activation", () => {
       expect(combined).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(combined).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
       expect(combined).not.toContain("No manual containerTag required");
-      expect(combined).not.toContain("sm_project_default");
+      expect(combined).not.toContain('containerTag: "sm_project_default"');
+      expect(combined).not.toContain('supermemory_search_memory({ query, containerTag: "sm_project_default" })');
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -274,7 +264,8 @@ describe("production prompt activation", () => {
       expect(combined).toContain("Adaptive-memory project operations are disabled");
       expect(combined).toContain("configured scope missing");
       expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(combined).not.toContain("sm_project_default");
+      expect(combined).not.toContain('containerTag: "sm_project_default"');
+      expect(combined).not.toContain('supermemory_search_memory({ query, containerTag: "sm_project_default" })');
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }

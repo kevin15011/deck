@@ -40,7 +40,6 @@ const REQUIRED_TOOLS = [
   { name: "codebase-memory", packageNames: ["codebase-memory", "codebase-memory-mcp"], capabilityId: "codebase-memory-mcp" as const },
   { name: "RTK", packageNames: ["rtk"], capabilityId: "rtk" as const },
   { name: "Context7", packageNames: ["context7", "pi-context7", "@dreki-gg/pi-context7"] },
-  { name: "Engram memory", packageNames: ["engram"] },
 ];
 
 // Future detector extension point: runner-mermaid is the required global capability,
@@ -75,9 +74,6 @@ export function reviewPiRequiredTools(options: ReviewPiRequiredToolsOptions): Pi
   }
   if (commandExists("codebase-memory-mcp")) {
     installedPackages.push("codebase-memory-mcp");
-  }
-  if (commandExists("engram")) {
-    installedPackages.push("engram");
   }
   const normalizedInstalled = new Set(installedPackages.map(normalizePackageName));
 

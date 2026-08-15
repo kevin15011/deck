@@ -16,7 +16,7 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
       const markdown = bundle.instructions.find((fragment) => fragment.surface === surface)?.markdown ?? "";
 
       expect(markdown).toContain("conversation capture");
-      expect(markdown).toContain("not production-wired");
+      expect(markdown).toContain("Deck-owned runtime");
       expect(markdown).toContain("stable customId");
       expect(markdown).toContain("canonical project scope");
       expect(markdown).toContain("five results");
@@ -36,13 +36,14 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
       const markdown = scopedBundle.instructions.find((fragment) => fragment.surface === surface)?.markdown ?? "";
 
       expect(markdown).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(markdown).toContain('supermemory_add_memory({ content, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(markdown).toContain("Automatic MCP write/save operations are disabled");
       expect(markdown).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
       expect(markdown).toContain('supermemory_listMemories({ containerTag: "sm_project_v1_kevin15011_deck" })');
       expect(markdown).toContain('supermemory_listDocuments({ containerTag: "sm_project_v1_kevin15011_deck" })');
       expect(markdown).toContain('supermemory_fetch-graph-data({ containerTag: "sm_project_v1_kevin15011_deck" })');
       expect(markdown).toContain('supermemory_memory-graph({ containerTag: "sm_project_v1_kevin15011_deck" })');
-      expect(markdown).toContain('supermemory_save-memory({ content, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(markdown).toContain("explicit remember are routed through the Deck runtime");
+      expect(markdown).not.toContain("supermemory_add_memory");
       expect(markdown).toContain("supermemory_getDocument");
       expect(markdown).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
       expect(markdown).toContain("Agents MUST NOT derive, replace, or omit this value");

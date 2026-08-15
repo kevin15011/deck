@@ -18,7 +18,7 @@ const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
 function log(msg: string) { if (!process.env.DECK_DEBUG) return; try { appendFileSync(LOG, `${_ts()} [capability-plan] ${msg}\n`); } catch {} }
 
-export type AdaptiveMemoryProviderChoice = "none" | "engram" | "supermemory";
+export type AdaptiveMemoryProviderChoice = "none" | "supermemory";
 export type OpenCodeRunnerActionStatus = "ready" | "manual" | "pending" | "blocked" | "complete" | "failed";
 
 export type OpenCodeRunnerAction = {
@@ -69,7 +69,7 @@ export type BuildOpenCodeRunnerReviewPlanState = {
   selectedCapabilities?: Partial<Record<string, boolean>>;
   adaptiveMemory?: {
     provider?: AdaptiveMemoryProviderChoice;
-    supermemory?: { configured?: boolean; hasToken?: boolean; userId?: string; teamId?: string; organizationId?: string };
+    supermemory?: { configured?: boolean; hasToken?: boolean; runtimeCredentialStored?: boolean; ephemeralTokenAvailable?: boolean; mcpOAuthReady?: boolean; userId?: string; teamId?: string; organizationId?: string };
   };
   teams?: Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>;
   runtime?: { toolsReview?: OpenCodeToolsReview };
@@ -369,32 +369,30 @@ function addAdaptiveMemoryActions(
   const provider = state.adaptiveMemory?.provider ?? "none";
   if (provider === "none") return;
 
-  if (provider === "engram") {
-    // Engram is handled as adaptive memory; no tool installation needed
-    return;
-  }
-
   const supermemory = state.adaptiveMemory?.supermemory;
   const configured = Boolean(supermemory?.configured);
-  const supermemoryReady = configured;
+  const runtimeCredentialReady = Boolean(supermemory?.runtimeCredentialStored ?? supermemory?.hasToken);
+  const supermemoryReady = configured && runtimeCredentialReady;
 
   groups.configWrites.push({
     id: "adaptive-memory.supermemory.deck-config",
     kind: "write-deck-config",
     title: "Write Supermemory non-secret Deck config",
-    description: "Records Supermemory as the selected Adaptive Memory provider without storing tokens in Deck config.",
-    status: configured ? "ready" : "pending",
+    description: "Records Supermemory as the selected Adaptive Memory provider after Deck runtime API credential validation/storage; no API key is stored in Deck config.",
+    status: supermemoryReady ? "ready" : "pending",
     required: true,
-    diagnostics: ["OpenCode owns Supermemory OAuth credentials outside Deck and project configuration."],
+    diagnostics: [runtimeCredentialReady
+      ? "Deck runtime API key is validated and stored in Deck's owner-only secret store."
+      : "Deck runtime API key is required for automatic Adaptive Memory and must be validated/stored before Review & Install."],
   });
   groups.configWrites.push({
     id: "adaptive-memory.supermemory.opencode-mcp-config",
     kind: "write-mcp-config",
     title: "Configure Supermemory OpenCode MCP",
-    description: "Writes Supermemory MCP server config to OpenCode's opencode.json.",
+    description: "Writes credential-free Supermemory MCP server config to OpenCode's opencode.json for optional ad-hoc MCP use.",
     status: configured ? "ready" : "pending",
     required: true,
-    diagnostics: ["Native OAuth is completed once through OpenCode /connect; no API key is persisted by Deck."],
+    diagnostics: ["No API key is copied into MCP config. OpenCode native OAuth is optional and only affects ad-hoc Supermemory MCP, not Deck automatic runtime memory."],
   });
   groups.validations.push({
     id: "adaptive-memory.supermemory.validate",
@@ -408,8 +406,8 @@ function addAdaptiveMemoryActions(
     code: "SUPERMEMORY_CONFIGURATION_REQUIRED",
     severity: supermemoryReady ? "info" : "warning",
     message: supermemoryReady
-      ? "Supermemory uses OpenCode native OAuth; no API key or package install action is generated."
-      : "Supermemory must be selected before Deck can install its OAuth-enabled OpenCode MCP entry.",
+      ? "Supermemory Deck runtime API credential is validated and stored. OpenCode native OAuth is optional for ad-hoc Supermemory MCP; no API key is copied into MCP config."
+      : "Supermemory Deck runtime API key must be validated and stored before Adaptive Memory can run. OpenCode native OAuth is optional and does not satisfy Deck runtime readiness.",
     actionId: "adaptive-memory.supermemory.deck-config",
   });
 }

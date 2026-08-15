@@ -35,7 +35,7 @@ export function inspectCodexCompatibility(release: CodexReleaseFixture) {
       releasedCandidate: hooksStable ? "hooks" as const : null,
       proven: false,
       gaps: Object.freeze([
-        "production-route-binding",
+        "protected-production-route-binding",
         "dossier-revision-continuity",
         "one-use-invocation-authorization",
         "controlled-effects",
@@ -43,7 +43,7 @@ export function inspectCodexCompatibility(release: CodexReleaseFixture) {
         "bound-verification-evidence",
       ]),
       reason: hooksStable
-        ? "Released hooks expose trusted lifecycle events, but Phase 3 production launch routes are not bound to Deck's host bridge."
+        ? "Released hooks expose trusted lifecycle events; Deck binds adaptive memory at launch time, while protected execution controls remain unpromoted."
         : "No stable released trusted host surface is available.",
     },
   };

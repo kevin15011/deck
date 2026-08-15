@@ -28,7 +28,7 @@ If the screen opens but a plan cannot run, inspect the dashboard's blocked diagn
 Detection and operational support are different:
 
 - Pi and OpenCode have Deck adapters and runner-specific preflight.
-- Claude and Codex are detection-only; there is no Deck adapter or operational setup flow for them.
+- Claude is detection-only. Codex has a Deck-supervised adaptive-memory hook bridge for launches started by Deck; protected execution controls remain static-compatible.
 
 Run:
 
@@ -48,12 +48,12 @@ Nested skill directories and legacy SDD files are reported as cleanup warnings. 
 
 Choose `none` to continue without adaptive memory, or complete the selected provider's runner setup. For Supermemory, follow the active runner's path:
 
-- **Pi:** enter the token only in the setup flow; Deck writes it to Pi's global MCP configuration and never to `.deck/config.json`.
-- **OpenCode:** let Deck write the remote endpoint and `x-sm-project` scope, then authenticate with `/connect` or `opencode mcp auth supermemory`; OpenCode stores OAuth credentials outside project configuration and does not use a persisted `Authorization` header.
+- **Pi:** re-run setup so Deck validates the token and stores it in the Deck secret store; Pi MCP config must contain only non-secret endpoint/scope data and must not contain the bearer credential.
+- **OpenCode/Codex:** provide the Deck runtime API token so Deck can validate it and store it in the Deck secret store. Separately, Deck can write the remote endpoint and `x-sm-project` scope; authenticate that optional MCP path with `/connect`, `opencode mcp auth supermemory`, or `codex mcp login supermemory` as appropriate. Runner OAuth credentials do not replace the Deck runtime bearer credential.
 
-Expect degraded/unknown health until the selected runner's authenticated runtime validation succeeds. Project scope is represented by the runner's `x-sm-project` configuration; user identity comes from the Pi token or OpenCode OAuth session as applicable.
+Expect degraded/unknown health until the selected runner's authenticated runtime validation succeeds. Project scope is represented by the runner's `x-sm-project` configuration; user identity for runtime calls comes from the Deck secret-store token, while optional MCP identity comes from the runner OAuth session where used.
 
-Engram is experimental and its common-contract adapter operations are bounded; existing MCP tool bindings may still be visible. Memory failure is intended to be fail-open for normal work. See [Adaptive memory](adaptive-memory.md).
+Supermemory is experimental and its common-contract adapter operations are bounded; existing MCP tool bindings may still be visible. Memory failure is intended to be fail-open for normal work. See [Adaptive memory](adaptive-memory.md).
 
 ## Skill registry is not ready
 

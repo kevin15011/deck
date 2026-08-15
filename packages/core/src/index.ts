@@ -124,6 +124,8 @@ export { renderProjectBoundAdaptiveMemoryInstructions } from "./teams/developer/
 
 // Deck project config contracts
 export * from "./config/deck-config";
+export * from "./config/secret-store";
+export * from "./config/env-sanitizer";
 
 // Adaptive memory provider-neutral contracts, governance, rendering, and compositor
 export * from "./memory/adaptive-memory";
@@ -131,6 +133,7 @@ export * from "./memory/adaptive-memory-contract";
 export * from "./memory/adaptive-memory-governance";
 export * from "./memory/adaptive-context-renderer";
 export * from "./memory/canonical-supermemory-project";
+export * from "./memory/capture-eligibility";
 
 // Runner adapter interface and DTOs (TUI-facing runner abstraction)
 // Note: RunnerId is already exported from runner-capability.ts (this avoids duplicate export)

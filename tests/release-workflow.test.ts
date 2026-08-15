@@ -13,7 +13,8 @@ const workflow = parse(
     {
       "runs-on"?: string;
       strategy?: { matrix?: { target?: string[] } };
-      steps?: Array<{ name?: string; with?: { files?: string } }>;
+      needs?: string | string[];
+      steps?: Array<{ name?: string; run?: string; with?: { files?: string } }>;
     }
   >;
 };
@@ -45,5 +46,25 @@ describe("release workflow platform contract", () => {
     );
     expect(publishedArchives("release", "Create Release")).toEqual(expectedArchives);
     expect(publishedArchives("artifacts", "Upload to GitHub Release")).toEqual(expectedArchives);
+  });
+
+  test("runs release hard gates before archive build", () => {
+    expect(workflow.jobs.build?.needs).toEqual(["metadata", "release-verification"]);
+    const steps = workflow.jobs["release-verification"]?.steps ?? [];
+    const stepRuns = steps.map((step) => step.run).filter(Boolean);
+    expect(stepRuns).toContain("bun test --timeout 30000");
+    expect(stepRuns).toContain("bunx tsc --noEmit");
+    expect(stepRuns).toContain("bun run apps/cli/src/main.tsx openspec validate --json --root . --change canonical-supermemory-conversation-memory");
+    expect(stepRuns).toContain("bun run bench:memory");
+    expect(stepRuns).toContain("bun run verify:supermemory-compiled");
+    const order = [
+      "bun test --timeout 30000",
+      "bunx tsc --noEmit",
+      "bun run apps/cli/src/main.tsx openspec validate --json --root . --change canonical-supermemory-conversation-memory",
+      "bun run bench:memory",
+      "bun run verify:supermemory-compiled",
+    ].map((run) => stepRuns.indexOf(run));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 });

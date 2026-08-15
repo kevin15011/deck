@@ -96,30 +96,22 @@ describe("configured capability composition", () => {
 });
 
 describe("adaptive memory provider filtering", () => {
-  const providerBundle = (provider: "supermemory" | "engram"): MemoryInjectionBundle => ({
+  const providerBundle = (): MemoryInjectionBundle => ({
     instructions: [{
       surface: "agent",
-      markdown: "### Provider: Supermemory\n\nUse memory.\n\n### Provider: Engram\n\nUse Engram.",
+      markdown: "### Provider: Supermemory\n\nUse memory.\n\n### Provider: Legacy\n\nUse Legacy.",
     }],
-    toolBindings: provider === "supermemory"
-      ? [{ capability: "memory.write", serverName: "supermemory", toolNames: ["memory", "recall"] }]
-      : [{ capability: "memory.write", serverName: "engram", toolNames: ["listProjects"] }],
+    toolBindings: [{ capability: "memory.write", serverName: "supermemory", toolNames: ["memory", "recall"] }],
   });
 
   test("removes the inactive provider section", () => {
     const supermemory = buildPromptGenerationPlan({
       configDir: "/tmp/.config/opencode",
       projectRoot: "/tmp/project",
-      memoryBundle: providerBundle("supermemory"),
-    });
-    const engram = buildPromptGenerationPlan({
-      configDir: "/tmp/.config/opencode",
-      projectRoot: "/tmp/project",
-      memoryBundle: providerBundle("engram"),
+      memoryBundle: providerBundle(),
     });
 
-    for (const planned of supermemory) expect(planned.content).not.toContain("### Provider: Engram");
-    for (const planned of engram) expect(planned.content).not.toContain("### Provider: Supermemory");
+    for (const planned of supermemory) expect(planned.content).not.toContain("### Provider: Legacy");
   });
 
   test("detected Supermemory MCP without materialized scope does not imply scoped recall instructions", () => {
@@ -156,7 +148,8 @@ describe("adaptive memory provider filtering", () => {
 
       expect(plan.find(({ agent }) => agent.id === "deck-lead")!.content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(plan.find(({ agent }) => agent.id === "deck-investigate")!.content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(combined).toContain("supermemory_add_memory");
+      expect(combined).not.toContain("supermemory_add_memory");
+      expect(combined).toContain("explicit remember are routed through the Deck runtime");
       expect(combined).toContain("supermemory_search_memory");
       expect(combined).toContain("x-sm-project is diagnostic/transport metadata only");
       expect(combined).not.toContain("No manual containerTag required");

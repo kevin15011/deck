@@ -15,8 +15,7 @@ describe("OpenCode Serena capability metadata", () => {
     expect(canonical.every((capability) => mappings.some((mapping) => mapping.capabilityId === capability.id))).toBe(true);
   });
 
-  test("keeps provider and internal package dispositions adapter-owned", () => {
-    expect(OPENCODE_ADAPTER_CAPABILITY_DISPOSITIONS).toContainEqual({ capabilityId: "engram", status: "provider-selected" });
+  test("keeps internal package dispositions adapter-owned", () => {
     expect(OPENCODE_ADAPTER_CAPABILITY_DISPOSITIONS).toContainEqual({ capabilityId: "opencode-mermaid-renderer", status: "runner-specific", installKind: "internal-required" });
     expect(OPENCODE_ADAPTER_CAPABILITY_DISPOSITIONS).toContainEqual({ capabilityId: "deck-model-variants", status: "runner-specific", installKind: "internal-required" });
   });

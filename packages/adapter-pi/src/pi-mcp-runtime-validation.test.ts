@@ -11,7 +11,7 @@ function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "deck-runtime-validation-"));
 }
 
-function writeConfig(path: string, token = SENTINEL_TOKEN) {
+function writeConfig(path: string, _token = SENTINEL_TOKEN) {
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(
     path,
@@ -20,7 +20,7 @@ function writeConfig(path: string, token = SENTINEL_TOKEN) {
         supermemory: {
           transport: "http",
           url: ENDPOINT,
-          headers: { "x-sm-project": "sm_project_v1_kevin15011_deck", "x-supermemory-api-key": token },
+          headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
         },
       },
     }),
@@ -173,7 +173,8 @@ describe("validateSupermemoryPiMcpRuntime", () => {
         fetch: (async (_url: RequestInfo | URL, init?: RequestInit) => {
           const body = JSON.parse(String(init?.body));
           bodies.push(body);
-          expect(JSON.stringify(init?.headers)).toContain(SENTINEL_TOKEN);
+          expect(JSON.stringify(init?.headers)).not.toContain(SENTINEL_TOKEN);
+          expect(JSON.stringify(init?.headers)).not.toContain("x-supermemory-api-key");
           return body.method === "initialize"
             ? jsonResponse({ jsonrpc: "2.0", id: body.id, result: {} })
             : jsonResponse({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "memory" }, { name: "recall" }] } });

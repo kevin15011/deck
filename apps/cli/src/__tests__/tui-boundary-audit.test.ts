@@ -13,7 +13,6 @@ const sourceExtensions = new Set([".ts", ".tsx"]);
 const forbiddenAdapterImports = new Set([
   "@deck/adapter-pi",
   "@deck/adapter-opencode",
-  "@deck/adapter-engram",
   "@deck/adapter-supermemory",
 ]);
 

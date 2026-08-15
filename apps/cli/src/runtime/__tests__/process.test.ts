@@ -54,6 +54,15 @@ describe("runtime/process.ts", () => {
 
       expect(result.stdout.trim()).toBe("test-value");
     });
+
+    it("removes provider credentials from child env while preserving loopback token", async () => {
+      const { spawnAsync } = await import("../process");
+      const script = "console.log(JSON.stringify({sm:process.env.SUPERMEMORY_API_KEY,db:process.env.DATABASE_URL,uri:process.env.DATABASE_URI,dsn:process.env.SQLITE_DSN,loop:process.env.DECK_RUNNER_MEMORY_TOKEN}))";
+      const result = await spawnAsync("node", ["-e", script], {
+        env: { PATH: process.env.PATH ?? "/bin", SUPERMEMORY_API_KEY: "sm_test_secret", DATABASE_URL: "postgres://user:pass@host/db", DATABASE_URI: "postgres://user:pass@host/db", SQLITE_DSN: "file:///home/dev/private/customer.sqlite", DECK_RUNNER_MEMORY_TOKEN: "loopback-token" },
+      });
+      expect(JSON.parse(result.stdout)).toEqual({ loop: "loopback-token" });
+    });
   });
 
   describe("spawnInherited", () => {

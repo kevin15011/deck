@@ -67,8 +67,8 @@ const defaultPiMcpConfigFileSystem: PiMcpConfigFileSystem = {
 };
 
 export type WriteSupermemoryPiMcpConfigOptions = {
-  /** Supermemory API token supplied by the user at install/configuration time. */
-  token: string;
+  /** @deprecated API tokens must stay in Deck's secret store and are ignored for Pi MCP config writes. */
+  token?: string;
   /** MCP server entry name. Defaults to `supermemory`. */
   serverName?: string;
   /** Override for tests or advanced callers. Defaults to `~/.pi/agent/mcp.json`. */
@@ -96,20 +96,7 @@ export function writeSupermemoryPiMcpConfig(
 ): PiMcpConfigWriteResult {
   const configPath = options.configPath ?? defaultPiMcpConfigPath(options.homeDir);
   const serverName = normalizeServerName(options.serverName);
-  const token = options.token.trim();
   const projectScope = options.projectScope?.trim();
-
-  if (!token) {
-    return failedResult(configPath, serverName, [
-      {
-        code: "PI_MCP_CONFIG_CONFLICT",
-        severity: "error",
-        path: configPath,
-        serverName,
-        message: "Supermemory token is required to configure the Pi MCP server.",
-      },
-    ]);
-  }
 
   if (!projectScope || !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(projectScope)) {
     return failedResult(configPath, serverName, [
@@ -123,7 +110,7 @@ export function writeSupermemoryPiMcpConfig(
     ]);
   }
 
-  const merged = readAndMergeConfig(configPath, serverName, token, projectScope);
+  const merged = readAndMergeConfig(configPath, serverName, projectScope);
   if (!merged.ok) {
     return failedResult(configPath, serverName, merged.diagnostics);
   }
@@ -132,7 +119,7 @@ export function writeSupermemoryPiMcpConfig(
     const diagnostics = [
       infoDiagnostic(
         "PI_MCP_CONFIG_UNCHANGED",
-        "Supermemory Pi MCP server entry is already configured; credential value is redacted.",
+        "Supermemory Pi MCP server entry is already configured without persisted bearer credentials.",
         configPath,
         serverName,
       ),
@@ -174,8 +161,8 @@ export function writeSupermemoryPiMcpConfig(
     infoDiagnostic(
       merged.existed ? "PI_MCP_CONFIG_UPDATED" : "PI_MCP_CONFIG_CREATED",
       merged.existed
-        ? "Updated Supermemory Pi MCP server entry with canonical project scope when available; credential value is redacted."
-        : "Created Pi MCP config with Supermemory server entry and canonical project scope when available; credential value is redacted.",
+        ? "Updated Supermemory Pi MCP server entry with canonical project scope; bearer credentials remain outside Pi MCP config."
+        : "Created Pi MCP config with Supermemory server entry and canonical project scope; bearer credentials remain outside Pi MCP config.",
       configPath,
       serverName,
     ),
@@ -274,16 +261,16 @@ export function validateSupermemoryPiMcpConfig(
     };
   }
 
-  if (!isPlainRecord(server.headers) || typeof server.headers[SUPERMEMORY_API_KEY_HEADER] !== "string" || !server.headers[SUPERMEMORY_API_KEY_HEADER].trim()) {
+  if (isPlainRecord(server.headers) && typeof server.headers[SUPERMEMORY_API_KEY_HEADER] === "string" && server.headers[SUPERMEMORY_API_KEY_HEADER].trim()) {
     return {
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [errorDiagnostic("PI_MCP_CONFIG_CONFLICT", `Pi MCP server '${serverName}' is missing a non-empty redacted Supermemory credential header; Supermemory tools were not injected.`, configPath, serverName)],
+      diagnostics: [errorDiagnostic("PI_MCP_CONFIG_CONFLICT", `Pi MCP server '${serverName}' contains a legacy persisted Supermemory credential header; remove it because Deck stores runtime credentials only in its secret store.`, configPath, serverName)],
     };
   }
 
-  if (typeof server.headers["x-sm-project"] !== "string" || !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(server.headers["x-sm-project"].trim())) {
+  if (!isPlainRecord(server.headers) || typeof server.headers["x-sm-project"] !== "string" || !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(server.headers["x-sm-project"].trim())) {
     return {
       ok: false,
       path: configPath,
@@ -297,7 +284,7 @@ export function validateSupermemoryPiMcpConfig(
     path: configPath,
     serverName,
     projectScope: server.headers["x-sm-project"].trim(),
-    diagnostics: [infoDiagnostic("PI_MCP_CONFIG_UNCHANGED", "Supermemory Pi MCP server entry is present; credential value is redacted.", configPath, serverName)],
+    diagnostics: [infoDiagnostic("PI_MCP_CONFIG_UNCHANGED", "Supermemory Pi MCP server entry is present without persisted bearer credentials.", configPath, serverName)],
   };
 }
 
@@ -326,7 +313,7 @@ export function redactPiMcpConfigDiagnosticText(value: string): string {
   return redact(value);
 }
 
-function readAndMergeConfig(configPath: string, serverName: string, token: string, projectScope?: string): MergeOutcome {
+function readAndMergeConfig(configPath: string, serverName: string, projectScope?: string): MergeOutcome {
   const existed = existsSync(configPath);
   let config: JsonRecord = {};
 
@@ -397,14 +384,15 @@ function readAndMergeConfig(configPath: string, serverName: string, token: strin
   }
 
   const scopedHeaders: JsonRecord = projectScope ? { "x-sm-project": projectScope } : {};
+  const previousHeaderRecord = { ...((previousHeaders as JsonRecord | undefined) ?? {}) };
+  delete previousHeaderRecord[SUPERMEMORY_API_KEY_HEADER];
   const nextServer: JsonRecord = {
     ...previousServer,
     transport: "http",
     url: SUPERMEMORY_MCP_URL,
     headers: {
-      ...((previousHeaders as JsonRecord | undefined) ?? {}),
+      ...previousHeaderRecord,
       ...scopedHeaders,
-      [SUPERMEMORY_API_KEY_HEADER]: token,
     },
   };
 
@@ -519,6 +507,7 @@ export function redact(value: string): string {
       /(["']?(?:api[_-]?key|token|credential|secret|password|authorization)["']?\s*[:=]\s*["']?)([^"',}]+)(["']?)/gi,
       "$1[REDACTED]$3",
     )
+    .replace(/\bsm_[A-Za-z0-9_-]+/g, "sm_[REDACTED]")
     .replace(/(SUPERMEMORY_API_KEY\s*=\s*)[^\s]+/gi, "$1[REDACTED]");
 }
 

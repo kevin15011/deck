@@ -238,7 +238,6 @@ describe("Pi global MCP config writer", () => {
             url: SUPERMEMORY_MCP_URL,
             headers: {
               "x-sm-project": "sm_project_v1_kevin15011_deck",
-              [SUPERMEMORY_API_KEY_HEADER]: SENTINEL_TOKEN,
             },
           },
         },
@@ -295,7 +294,7 @@ describe("Pi global MCP config writer", () => {
       expect(config.mcpServers.supermemory.url).toBe(SUPERMEMORY_MCP_URL);
       expect(config.mcpServers.supermemory.headers["x-existing-header"]).toBe("keep-me");
       expect(config.mcpServers.supermemory.headers["x-sm-project"]).toBe("sm_project_v1_kevin15011_deck");
-      expect(config.mcpServers.supermemory.headers[SUPERMEMORY_API_KEY_HEADER]).toBe(SENTINEL_TOKEN);
+      expect(config.mcpServers.supermemory.headers[SUPERMEMORY_API_KEY_HEADER]).toBeUndefined();
     } finally {
       cleanup(home);
     }
@@ -315,7 +314,7 @@ describe("Pi global MCP config writer", () => {
       expect(result.serverName).toBe("team-supermemory");
       const config = readJson(defaultPiMcpConfigPath(home));
       expect(config.mcpServers.supermemory).toBeUndefined();
-      expect(config.mcpServers["team-supermemory"].headers[SUPERMEMORY_API_KEY_HEADER]).toBe(SENTINEL_TOKEN);
+      expect(config.mcpServers["team-supermemory"].headers[SUPERMEMORY_API_KEY_HEADER]).toBeUndefined();
     } finally {
       cleanup(home);
     }
@@ -440,15 +439,15 @@ describe("Pi global MCP config writer", () => {
     expect(redacted).toContain("[REDACTED]");
   });
 
-  test("rejects blank tokens without writing config", () => {
+  test("ignores blank legacy tokens and writes credential-free config", () => {
     const home = tempHome();
     try {
       const configPath = defaultPiMcpConfigPath(home);
       const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: "   ", projectScope: "sm_project_v1_kevin15011_deck" });
 
-      expect(result.ok).toBe(false);
-      expect(result.action).toBe("failed");
-      expect(existsSync(configPath)).toBe(false);
+      expect(result.ok).toBe(true);
+      expect(result.action).toBe("created");
+      expect(existsSync(configPath)).toBe(true);
       expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
     } finally {
       cleanup(home);
@@ -494,7 +493,7 @@ describe("Pi global MCP config writer", () => {
       const result = extractValidatedSupermemoryPiMcpServer({ homeDir: home });
       expect(result).toBeUndefined();
     } catch (error) {
-      expect(String(error)).toContain("canonical x-sm-project");
+      expect(String(error)).toMatch(/canonical x-sm-project|legacy persisted Supermemory credential/);
     } finally {
       cleanup(home);
     }

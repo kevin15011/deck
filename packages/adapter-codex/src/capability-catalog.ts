@@ -36,7 +36,6 @@ export const CODEX_CAPABILITY_CATALOG = Object.freeze([
   { capabilityId: "context7", status: "supported", provisionMode: "streamable-http-mcp", mcpServerName: "context7", runtimeReadiness: "mcp" },
   { capabilityId: "web-search", label: "Web Search", status: "supported", provisionMode: "native-mcp", mcpServerName: TAVILY_MCP_SERVER_ID, implementationId: TAVILY_IMPLEMENTATION_ID, runtimeReadiness: "mcp" },
   { capabilityId: "supermemory-tool-bindings", status: "supported", provisionMode: "streamable-http-mcp-native-oauth", mcpServerName: "supermemory", runtimeReadiness: "mcp" },
-  { capabilityId: "engram", label: "Engram", status: "gap", provisionMode: "deferred" },
   { capabilityId: "code-economy", status: "supported", provisionMode: "native-instruction-composition", runtimeReadiness: "content" },
   { capabilityId: "trusted-runner-host-bridge", status: "gap", provisionMode: "static-compatible-gap", reviewDisposition: "static-compatible-gap", runtimeReadiness: "route-bound" },
   { capabilityId: "invocation-authorization", status: "gap", provisionMode: "static-compatible-gap", reviewDisposition: "static-compatible-gap", runtimeReadiness: "route-bound" },

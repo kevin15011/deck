@@ -18,27 +18,37 @@
 
 **REQ-SM-007 (MUST):** Agents MUST NOT derive, choose, rewrite, or accept an arbitrary replacement for the Deck-materialized canonical scope.
 
-### Agent-mediated automatic memory
+### First-class runtime memory
 
-**REQ-SM-010 (MUST):** Selecting Supermemory MUST preserve Deck's agent-mediated automatic save and materially relevant recall policy without adding UI, a per-call scope choice, or a second consent decision.
+**REQ-SM-010 (MUST):** `adaptiveMemory.enabled` MUST be the sole Adaptive Memory product decision. Enabled means Supermemory; disabled means no remote memory effects. Deck MUST expose no provider selector.
 
-**REQ-SM-011 (MUST):** Until a trusted authenticated execution boundary or native runner plugin exists, Deck MUST describe this behavior as agent-mediated tool use, not automatic whole-conversation ingestion, stable-session document capture, or guaranteed dynamic dreaming.
+**REQ-SM-011 (MUST):** Enabled memory MUST execute automatic profile/search/capture through a Deck-owned authenticated runtime boundary above the runner, using the current official Supermemory API surface. Normal behavior MUST NOT depend on an agent voluntarily invoking MCP.
 
-**REQ-SM-012 (MUST):** Every automatic save or recall attempted by an agent MUST use a project-scoped operation with the explicit canonical `containerTag`; otherwise the operation MUST be skipped.
+**REQ-SM-012 (MUST):** The runtime MUST bind the canonical `containerTag` server-side for every provider request and MUST reject any runner-supplied project scope. Provider authentication MUST use the supported bearer credential without exposing it to prompts or hooks.
 
-**REQ-SM-013 (MUST):** Deck MUST continue to allow high-signal automatic agent saves and proactive recall when prior project context is materially relevant.
+**REQ-SM-013 (MUST):** One stable `customId` MUST represent one top-level runner session/change across resume and specialist execution. Specialists MUST NOT fragment the conversation into unrelated documents.
 
-**REQ-SM-014 (MUST):** Failure to resolve or apply project scope MUST fail open for coding work and fail closed for the memory operation, with only a redacted diagnostic.
+**REQ-SM-014 (MUST):** Ordinary automatic recall/capture failure MUST fail open for coding and fail closed for the memory effect, with an observable redacted diagnostic. An explicitly memory-dependent request or explicit remember request MUST report failure and MUST NOT claim success.
 
-**REQ-SM-015 (MUST):** Deck MUST NOT require agents to fill a semantic quota, create manual topic keys, or write a mandatory session summary. Agents MAY automatically preserve high-signal durable information through the scoped MCP tools.
+**REQ-SM-015 (MUST):** Deck MUST make a central capture/skip decision over eligible rich conversation material. It MUST NOT use another LLM to extract facts, summarize facts, deduplicate, rank, resolve contradictions, build a graph, or implement forgetting before Supermemory ingestion.
 
-**REQ-SM-016 (MUST):** Deck MUST deprecate `maxMemoriesPerSession` as a behavioral control. Any remaining compatibility parser MUST ignore it safely and report deprecation without treating it as an ingestion target.
+**REQ-SM-016 (MUST):** Deck MUST apply a versioned role-aware retrieval policy and a physical final context limit. The default global ceiling is five results and approximately 1,500 injected tokens; narrower roles MUST use smaller budgets.
 
-**REQ-SM-017 (MUST):** Account/readiness operations that do not accept project scope MAY be used only for non-memory effects such as authentication status.
+**REQ-SM-017 (MUST):** Supermemory MUST remain responsible for extraction, learning, semantic deduplication, supersession, temporal reasoning, graph relationships, profile evolution, ranking, reranking, query rewriting, aggregation, and forgetting.
 
-**REQ-SM-018 (MUST):** Active-space-only interactive operations MUST NOT participate in automatic project save or recall, and agents MUST NOT change active space as a substitute for explicit `containerTag`.
+**REQ-SM-018 (MUST):** MCP MUST remain complementary for ad-hoc recall. Automatic runtime effects MUST neither require MCP nor double-write content already captured by the runtime.
 
-**REQ-SM-019 (MUST):** A document-ID operation without `containerTag` MAY be used only with an ID obtained through a canonically scoped operation in the same workflow.
+**REQ-SM-019 (MUST):** Account/readiness operations without project scope MAY be used only for authentication status. Active-space state MUST NOT route project memory. Document-ID operations are allowed only after a scoped predecessor in the same workflow.
+
+### Capture, security, and credentials
+
+**REQ-SM-024 (MUST):** Automatic capture MUST include only eligible user requests/corrections, confirmed decisions/discoveries/root causes/conventions/constraints, and relevant final outcomes. It MUST exclude tool chatter, raw logs/tests/stacks/diffs, transient attempts, orchestrator state, token accounting, provider responses, and incidental web/OpenSpec/source content.
+
+**REQ-SM-025 (MUST):** Credentials, private keys, authorization headers, passwords, raw environment dumps, and `.env` content MUST be rejected or redacted before transport. Empty or only-redacted content MUST NOT be sent.
+
+**REQ-SM-026 (MUST):** The Supermemory credential MUST be held by a Deck secret-store abstraction and the Deck runtime process. It MUST NOT be stored in portable Deck config, repository files, runner prompts, generated instructions, logs, telemetry, or memory. Hooks MAY receive only an ephemeral per-launch bridge credential.
+
+**REQ-SM-027 (MUST):** Retrieved memory MUST be clearly delimited as untrusted advisory data and MUST NOT grant authority, permissions, requirements, blockers, or instruction precedence.
 
 ### Privacy and authority
 
@@ -62,6 +72,10 @@
 
 **REQ-SM-034 (MUST):** Retrieval MUST NOT silently broaden from the canonical project container to personal, default, or legacy containers.
 
+**REQ-SM-035 (MUST):** Lead MAY receive bounded static and dynamic profile context once at start/resume; Investigate and Architect SHOULD receive task-scoped search when relevant; Apply Fast MUST remain narrowly bounded and MAY skip recall; Apply Deep MAY receive broader technical recall; Quality MAY recall historical risks but memory alone MUST NOT create a blocker.
+
+**REQ-SM-036 (MUST):** `entityContext`, profile buckets, reranking, query rewriting, aggregation options, thresholds, and budget increases MUST remain benchmark-gated. The initial runtime MUST use provider-owned static/dynamic profiles without a Deck semantic taxonomy.
+
 ### Runner installation and diagnostics
 
 **REQ-SM-040 (MUST):** OpenCode, Pi, and Codex materializations MUST contain the same canonical scope value and operation rules across session, agent, delegation, and relevant skill surfaces; adapter differences MAY be limited to native configuration serialization, authentication handoff, and verified project-root plumbing.
@@ -70,17 +84,33 @@
 
 **REQ-SM-042 (MUST):** All install paths MUST use one reviewed provider-install plan and MUST NOT retain a legacy Pi-only side path.
 
-**REQ-SM-043 (MUST):** The UI MUST clearly report provider, canonical scope fingerprint, authentication readiness, and runner parity but MUST NOT add another conversation-capture choice after Supermemory is selected.
+**REQ-SM-043 (MUST):** The TUI MUST expose Adaptive Memory as Disabled/Enabled, configure and validate Supermemory within Deck, report canonical scope fingerprint and runtime/MCP readiness, and never require SDK installation, npm/Node, manual runner edits, or a provider choice.
 
 **REQ-SM-044 (MUST):** Doctor MUST detect missing scope, scope mismatch, deprecated endpoint, runner disagreement, ungoverned direct provider entries, and accidental credential persistence.
 
+**REQ-SM-045 (MUST):** OpenCode, Pi, and Codex MUST expose equivalent session identity, role identity, eligible-content capture, bounded recall injection, explicit-failure, and shutdown-flush semantics through the common runtime contract. Runner adapters MAY only serialize native hooks/configuration.
+
+**REQ-SM-046 (MUST):** A runner without a proven lifecycle/content/context-injection boundary MUST be reported unsupported for automatic memory; prompt-only behavior MUST NOT be presented as runtime parity.
+
+**REQ-SM-047 (MUST):** Compiled release archives MUST exercise disabled mode, missing/invalid auth, mocked profile/search/capture, TLS-capable provider transport, Doctor, and MCP materialization without repository access, `node_modules`, Node, npm, or manual dependencies.
+
+**REQ-SM-048 (MUST):** Legacy config MUST migrate as follows: missing/`none` to disabled; `supermemory` to enabled; `engram` to disabled with an actionable removal warning; unknown providers to invalid/fail-closed compatibility input. Engram code, dependencies, setup, readiness, UI, docs, and capability mappings MUST be removed.
+
+### Observability and benchmark
+
+**REQ-SM-060 (MUST):** Deck MUST observe recall attempted/skipped/succeeded/failed, profile/search usage, duration, approximate injected context, capture attempted/skipped/succeeded/failed, provider errors, and fail-open events without logging queries, memory content, credentials, or raw project identifiers. Because optional MCP executes outside Deck Runtime, Doctor and metrics MUST report MCP ad-hoc usage as externally unobservable rather than fabricate counts.
+
+**REQ-SM-061 (MUST):** DeckMemoryBench MUST compare the prior MCP-primary baseline with first-class automatic profile/search/capture over sanitized scenarios for success, recall correctness, stale/contradictory dominance, rediscovery, tokens, latency, context size, changed decisions, recurring problems, preferences, conventions, and root causes.
+
+**REQ-SM-062 (MUST):** Benchmark hard gates MUST include zero cross-project leakage, zero secret transmission, deterministic role-policy compliance, bounded context, and compiled-runtime parity. Benchmark results MAY tune policy but MUST NOT authorize a second memory provider.
+
 ### Migration
 
-**REQ-SM-050 (MUST):** Legacy migration MUST begin with a read-only inventory and dry-run classification into confirmed, unrelated, duplicate, and ambiguous records.
+**REQ-SM-050 (MUST):** Legacy configuration migration MUST be conservative and explicit. Disabled/none remains disabled, Supermemory becomes enabled, Engram becomes disabled with an actionable removal warning, partial configuration requires repair, and historical canonical container identity is preserved when valid. Optional remote inventory MUST be read-only and dry-run first.
 
-**REQ-SM-051 (MUST):** Migration MUST copy only explicitly approved confirmed records and MUST preserve source containers unchanged.
+**REQ-SM-051 (MUST):** This change MUST NOT copy or delete remote provider records. A future remote-copy workflow requires separately proven provider enumeration/copy capabilities and explicit user approval; source containers remain unchanged.
 
-**REQ-SM-052 (MUST):** Duplicate detection MUST use deterministic source identity and normalized content hashing; semantic near-duplicates MUST remain reviewable rather than being silently removed.
+**REQ-SM-052 (MUST):** Any supplied legacy inventory dry-run MUST use deterministic source identity and normalized content hashing; semantic near-duplicates remain reviewable rather than being silently removed.
 
 **REQ-SM-053 (MUST):** Remote deletion MUST remain unavailable in this change.
 
@@ -104,10 +134,10 @@
 
 ### Scenario: selecting Supermemory preserves automatic agent memory without another choice
 
-**Given** the user selects Supermemory in Review & Install
+**Given** the user enables Adaptive Memory in Review & Install
 **When** Deck builds and applies the installation plan
-**Then** high-signal automatic agent save and materially relevant recall instructions are configured by default
-**And** no additional mode, project-space choice, opt-in, or confirmation row is shown
+**Then** Deck Runtime configures automatic bounded recall and eligible conversation capture through Supermemory
+**And** no provider, mode, project-space, SDK-install, or manual-runner choice is shown
 
 ### Scenario: transport header is not trusted as a tool default
 

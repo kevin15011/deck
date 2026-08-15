@@ -162,7 +162,7 @@ async function writePiSupermemoryConfig(configPath: string, projectScope: string
       supermemory: {
         transport: "http",
         url: "https://mcp.supermemory.ai/mcp",
-        headers: { "x-sm-project": projectScope, "x-supermemory-api-key": "redacted-test-token" },
+        headers: { "x-sm-project": projectScope },
       },
     },
   }, null, 2)}\n`, "utf8");

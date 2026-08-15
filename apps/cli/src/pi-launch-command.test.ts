@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { getDefaultDeckConfig } from "@deck/core";
+import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { runPiLaunch as runPiLaunchProduction } from "./pi-launch-command";
 import { runPiLaunchLegacyCompatibility as runPiLaunch } from "./pi-launch-command-legacy-compatibility.test-support";
 
@@ -46,6 +47,37 @@ describe("runPiLaunch", () => {
       const result = await runPiLaunchProduction({ teamId: "developer-team", projectRoot, flags: {}, commandExists: () => true, dryRun: true, deckConfig: getDefaultDeckConfig() });
       expect(result.status).toBe("ready");
       if (result.status === "ready") expect(result.memoryDiagnostics).toEqual([]);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("production Pi launch starts supervised loopback and passes only ephemeral bridge env", async () => {
+    const projectRoot = createTempDir();
+    const transport: SupermemoryRuntimeTransport = {
+      async health() {},
+      async profile() { return { profile: { static: ["Remembered convention: Pi uses Deck loopback."] } }; },
+      async search() { return { results: [] }; },
+      async add() {},
+    };
+    try {
+      mkdirSync(join(projectRoot, ".git"), { recursive: true });
+      writeFileSync(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+      const result = await runPiLaunchProduction({
+        teamId: "developer-team",
+        projectRoot,
+        flags: {},
+        commandExists: () => true,
+        deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
+        supermemoryRuntime: { transport },
+      });
+      expect(result.status).toBe("launched");
+      if (result.status === "launched") {
+        expect(result.plan.env.DECK_RUNNER_MEMORY_ENDPOINT).toMatch(/^http:\/\/127\.0\.0\.1:/);
+        expect(result.plan.env.DECK_RUNNER_MEMORY_TOKEN).toBeDefined();
+        expect(result.plan.env).not.toHaveProperty("SUPERMEMORY_API_KEY");
+        await result.loopbackBridge?.close();
+      }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -152,22 +184,22 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("passes Engram memory provider to materializeTeamProfile", async () => {
+  test("passes Supermemory memory provider to materializeTeamProfile", async () => {
     const projectRoot = createTempDir();
     try {
-      const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-        id: "engram",
-        displayName: "Engram Memory",
+      const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+        id: "fixture-memory",
+        displayName: "Supermemory Memory",
         buildInjection: () => ({
           instructions: [
             {
               surface: "session" as const,
-              markdown: "Test Engram session injection.",
+              markdown: "Test Supermemory session injection.",
               teamId: "developer-team",
             },
           ],
           toolBindings: [
-            { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
+            { capability: "memory.search" as const, serverName: "fixture-memory", toolNames: ["supermemory_search_memory"] },
           ],
         }),
       };
@@ -178,7 +210,8 @@ describe("runPiLaunch", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
-        memoryProvider: engramProvider,
+        memoryProvider: supermemoryProvider,
+        supportedMemoryProviderIds: ["fixture-memory"],
       });
 
       expect(result.status).toBe("ready");
@@ -191,7 +224,7 @@ describe("runPiLaunch", () => {
         const profileDir = path.join(projectRoot, ".deck", "pi", "profiles", "developer-team");
         const systemPromptContent = fs.readFileSync(path.join(profileDir, "system-prompt.md"), "utf-8");
         expect(systemPromptContent).toContain("## Adaptive Memory (provider-injected)");
-        expect(systemPromptContent).toContain("Test Engram session injection.");
+        expect(systemPromptContent).toContain("Test Supermemory session injection.");
         expect(systemPromptContent).toContain("Memory is auxiliary");
       }
     } finally {
@@ -201,7 +234,7 @@ describe("runPiLaunch", () => {
 
   test("reports memory_provider_unavailable diagnostic when provider buildInjection throws", async () => {
     const brokenProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-      id: "engram",
+      id: "fixture-memory",
       displayName: "Broken",
       buildInjection: () => {
         throw new Error("provider failed");
@@ -217,6 +250,7 @@ describe("runPiLaunch", () => {
         commandExists: () => true,
         dryRun: true,
         memoryProvider: brokenProvider,
+        supportedMemoryProviderIds: ["fixture-memory"],
       });
 
       expect(result.status).toBe("ready");
@@ -224,7 +258,7 @@ describe("runPiLaunch", () => {
         // Should report diagnostics from both profile and install materialization
         expect(result.memoryDiagnostics.length).toBeGreaterThanOrEqual(1);
         expect(result.memoryDiagnostics.some(d => d.code === "memory_provider_unavailable")).toBe(true);
-        expect(result.memoryDiagnostics.find(d => d.code === "memory_provider_unavailable")!.providerId).toBe("engram");
+        expect(result.memoryDiagnostics.find(d => d.code === "memory_provider_unavailable")!.providerId).toBe("fixture-memory");
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -253,34 +287,34 @@ describe("runPiLaunch", () => {
 
   // --- Regression tests for verify/review findings ---
 
-  test("--memory=engram materializes agent and skill files with tool bindings (REQ-AMI-002)", async () => {
+  test("--memory=supermemory materializes agent and skill files with tool bindings (REQ-AMI-002)", async () => {
     const projectRoot = createTempDir();
     try {
-      const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-        id: "engram",
-        displayName: "Engram Memory",
+      const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+        id: "fixture-memory",
+        displayName: "Supermemory Memory",
         buildInjection: () => ({
           instructions: [
             {
               surface: "session" as const,
-              markdown: "Session Engram memory injection.",
+              markdown: "Session Supermemory memory injection.",
               teamId: "developer-team",
             },
             {
               surface: "agent" as const,
-              markdown: "Agent Engram memory injection.",
+              markdown: "Agent Supermemory memory injection.",
               teamId: "developer-team",
             },
             {
               surface: "skill" as const,
-              markdown: "Skill Engram memory injection.",
+              markdown: "Skill Supermemory memory injection.",
               teamId: "developer-team",
             },
           ],
           toolBindings: [
-            { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
-            { capability: "memory.read" as const, serverName: "engram", toolNames: ["memory_read"] },
-            { capability: "memory.write" as const, serverName: "engram", toolNames: ["memory_write"] },
+            { capability: "memory.search" as const, serverName: "fixture-memory", toolNames: ["supermemory_search_memory"] },
+            { capability: "memory.read" as const, serverName: "fixture-memory", toolNames: ["supermemory_getDocument"] },
+            { capability: "memory.write" as const, serverName: "fixture-memory", toolNames: ["supermemory_add_memory"] },
           ],
         }),
       };
@@ -291,7 +325,8 @@ describe("runPiLaunch", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
-        memoryProvider: engramProvider,
+        memoryProvider: supermemoryProvider,
+        supportedMemoryProviderIds: ["fixture-memory"],
       });
 
       expect(result.status).toBe("ready");
@@ -309,44 +344,44 @@ describe("runPiLaunch", () => {
       expect(fs.existsSync(orchestratorPath)).toBe(true);
       const orchestratorContent = fs.readFileSync(orchestratorPath, "utf-8");
       expect(orchestratorContent).toContain("## Adaptive Memory (provider-injected)");
-      expect(orchestratorContent).toContain("Agent Engram memory injection.");
-      expect(orchestratorContent).toContain("memory_search");
-      expect(orchestratorContent).toContain("memory_read");
-      expect(orchestratorContent).toContain("memory_write");
+      expect(orchestratorContent).toContain("Agent Supermemory memory injection.");
+      expect(orchestratorContent).toContain("supermemory_search_memory");
+      expect(orchestratorContent).toContain("supermemory_getDocument");
+      expect(orchestratorContent).toContain("supermemory_add_memory");
 
       // Skill files should be materialized with Adaptive Memory section
       const skillPath = path.join(projectRoot, ".pi", "skills", "deck-lead", "SKILL.md");
       expect(fs.existsSync(skillPath)).toBe(true);
       const skillContent = fs.readFileSync(skillPath, "utf-8");
       expect(skillContent).toContain("## Adaptive Memory (provider-injected)");
-      expect(skillContent).toContain("Skill Engram memory injection.");
+      expect(skillContent).toContain("Skill Supermemory memory injection.");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
 
-  test("--memory=engram preserves pre-existing orchestrator model and thinking assignments", async () => {
+  test("--memory=supermemory preserves pre-existing orchestrator model and thinking assignments", async () => {
     const projectRoot = createTempDir();
     try {
       writeOrchestratorAssignment(projectRoot);
-      const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-        id: "engram",
-        displayName: "Engram Memory",
+      const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+        id: "fixture-memory",
+        displayName: "Supermemory Memory",
         buildInjection: () => ({
           instructions: [
             {
               surface: "session" as const,
-              markdown: "Session Engram memory injection.",
+              markdown: "Session Supermemory memory injection.",
               teamId: "developer-team",
             },
             {
               surface: "agent" as const,
-              markdown: "Agent Engram memory injection.",
+              markdown: "Agent Supermemory memory injection.",
               teamId: "developer-team",
             },
           ],
           toolBindings: [
-            { capability: "memory.search" as const, serverName: "engram", toolNames: ["memory_search"] },
+            { capability: "memory.search" as const, serverName: "fixture-memory", toolNames: ["supermemory_search_memory"] },
           ],
         }),
       };
@@ -357,7 +392,8 @@ describe("runPiLaunch", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
-        memoryProvider: engramProvider,
+        memoryProvider: supermemoryProvider,
+        supportedMemoryProviderIds: ["fixture-memory"],
       });
 
       expect(result.status).toBe("ready");
@@ -374,21 +410,21 @@ describe("runPiLaunch", () => {
       expect(orchestratorContent).toContain("model: openai-codex/gpt-5.5");
       expect(orchestratorContent).toContain("thinking: medium");
       expect(orchestratorContent).toContain("## Adaptive Memory (provider-injected)");
-      expect(orchestratorContent).toContain("memory_search");
+      expect(orchestratorContent).toContain("supermemory_search_memory");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
 
-  test("--memory=engram materialization omits unsupported orchestrator thinking", async () => {
+  test("--memory=supermemory materialization omits unsupported orchestrator thinking", async () => {
     const projectRoot = createTempDir();
     try {
       writeOrchestratorAssignment(projectRoot, "opencode-go/kimi-k2.6", "high");
-      const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-        id: "engram",
-        displayName: "Engram Memory",
+      const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+        id: "fixture-memory",
+        displayName: "Supermemory Memory",
         buildInjection: () => ({
-          instructions: [{ surface: "agent" as const, markdown: "Agent Engram memory injection.", teamId: "developer-team" }],
+          instructions: [{ surface: "agent" as const, markdown: "Agent Supermemory memory injection.", teamId: "developer-team" }],
           toolBindings: [],
         }),
       };
@@ -399,7 +435,8 @@ describe("runPiLaunch", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
-        memoryProvider: engramProvider,
+        memoryProvider: supermemoryProvider,
+        supportedMemoryProviderIds: ["fixture-memory"],
       });
 
       expect(result.status).toBe("ready");
@@ -419,15 +456,15 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("--memory=engram materialization preserves missing thinking frontmatter", async () => {
+  test("--memory=supermemory materialization preserves missing thinking frontmatter", async () => {
     const projectRoot = createTempDir();
     try {
       writeOrchestratorAssignment(projectRoot, "custom/no-reasoning", "");
-      const engramProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
-        id: "engram",
-        displayName: "Engram Memory",
+      const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
+        id: "fixture-memory",
+        displayName: "Supermemory Memory",
         buildInjection: () => ({
-          instructions: [{ surface: "agent" as const, markdown: "Agent Engram memory injection.", teamId: "developer-team" }],
+          instructions: [{ surface: "agent" as const, markdown: "Agent Supermemory memory injection.", teamId: "developer-team" }],
           toolBindings: [],
         }),
       };
@@ -438,7 +475,8 @@ describe("runPiLaunch", () => {
         flags: {},
         commandExists: () => true,
         dryRun: true,
-        memoryProvider: engramProvider,
+        memoryProvider: supermemoryProvider,
+        supportedMemoryProviderIds: ["fixture-memory"],
       });
 
       expect(result.status).toBe("ready");

@@ -32,15 +32,14 @@ Codex CLI 0.146 does not provide an OpenCode-style root custom-agent selector or
 | 29 standalone bundles/support files | Supported | Complete ownership manifest verifies. |
 | `deck-onboard`, `deck-archive` | Supported | Native skill metadata verifies. |
 | Six package instruction bundles | Supported | Canonical metadata/order/tool policy are preserved; Codex translation removes OpenCode/Claude-specific hook, installer, and tool names. Only `code-economy` defaults on, independently of runtime readiness. |
-| Interactive / exec / resume | Static-compatible beta | The public adapter exposes no trusted host lifecycle or first-class promotion API. |
+| Interactive / exec / resume | Supported with route limits | Deck-supervised launches provide an authenticated adaptive-memory loopback when hooks expose lifecycle events; protected execution controls remain static-compatible. |
 | Context7 | Supported | Semantic streamable HTTP MCP config. Credentials remain external. |
 | context-mode | Shared | Usable binary plus semantic MCP config. |
 | codebase-memory | Shared | Usable binary plus semantic MCP config plus project index readiness. |
 | Serena | Shared | Usable binary plus semantic project-aware MCP config. |
 | RTK | Shared | Usable binary; MCP is not required. |
 | No memory provider | Supported | No provider MCP entry. |
-| Supermemory | Supported | Credential-free semantic remote MCP config. After Deck successfully applies and verifies it, the user runs Codex-native OAuth when ready. |
-| Engram | Gap | No verified Codex provider contract. |
+| Supermemory | Supported with route limits | Deck runtime still requires a validated API bearer in Deck's secret store. Credential-free semantic remote MCP config is optional; after Deck applies/verifies it, the user may run Codex-native OAuth when ready. MCP OAuth does not supply the runtime bearer credential. |
 | Web Search | Supported on OpenCode, Pi, and Codex | Optional native stdio MCP materialization; readiness separately reports disabled, provider/credential/executable gaps, missing MCP materialization, conflicts, or ready. Unsupported runners report an explicit gap. |
 | `pi-mermaid` | Pi internal | Not applicable to Codex. |
 | `opencode-mermaid-renderer`, `deck-model-variants` | OpenCode internal | Not applicable to Codex. |
@@ -77,6 +76,6 @@ Deck owns only entries recorded in `.codex/deck-manifest.json`, the exact Deck m
 
 - Node/Bun cannot provide `openat`/`renameat2` pathname guarantees. Deck revalidates ancestors and targets immediately before atomic rename, but a privileged concurrent actor can still race pathname resolution.
 - Trust remains a Codex/user decision.
-- The shipped registry does not install Codex hook assets because it cannot guarantee the external authenticated host process; all four production routes therefore remain static-compatible.
+- Deck installs Codex hook assets that fail open when no Deck loopback endpoint/token is present. Deck-supervised launches provide the ephemeral endpoint/token; plain `codex` launches do not.
 - Trusted-host, invocation-authorization, dossier, controlled-effect, registry, and bound-verification controls are explicit Codex gaps.
 - Content-only sync never installs runtime packages, MCP servers, providers, shared binaries, or optional capabilities.

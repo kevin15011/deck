@@ -88,3 +88,68 @@
 - `bunx tsc --noEmit`
 - Relevant build/smoke commands if production CLI composition changes.
 - Independent Quality review is required because this change crosses authentication, remote writes, privacy, runner contracts, and migration boundaries.
+
+## Phase 7: First-class runtime evidence and supersession
+
+### 7.1 Record current official provider evidence
+- Confirm canonical endpoints, bearer auth, explicit `containerTag`, stable `customId`, profile/search semantics, and MCP role from official sources.
+- Record retrieval date and distinguish documentation from runtime evidence.
+
+### 7.2 Complete the SDK/compiled-binary gate
+- Compile the official SDK for every supported Bun target, run Linux x64 without Node/npm, and verify mocked add/search/profile, timeout, TLS, and redacted errors from an extracted binary.
+- Fall back to a minimal injected-fetch client only on demonstrated SDK defects.
+
+### 7.3 Prove runner lifecycle parity
+- Verify stable session identity, final user/assistant content access, specialist role identity, context injection, and shutdown flush for OpenCode, Pi, and Codex.
+- Report unsupported honestly when a native boundary is absent.
+
+## Phase 8: Runtime vertical
+
+### 8.1 Implement central policy and runtime contracts
+- Add provider-neutral project/session identity, role-aware recall budgets, capture/skip policy, advisory rendering, event schema, and observability schema in Core/SDD Runtime.
+
+### 8.2 Implement the Supermemory runtime adapter
+- Add real profile/search/capture/health operations, stable `customId`, sanitization, timeout/retry bounds, injected transport tests, and no semantic preprocessing.
+
+### 8.3 Complete one OpenCode end-to-end vertical
+- Launch through Deck, automatically inject bounded memory before relevant execution, capture eligible final context, preserve MCP for ad-hoc recall, and prevent double ingestion.
+
+## Phase 9: Runner parity
+
+### 9.1 Add Pi and Codex lifecycle bridges
+- Use the same runtime contract and policy; keep runner differences limited to native serialization/hooks.
+
+### 9.2 Add cross-runner behavior tests
+- Assert equivalent scope, session identity, role policy, context injection, capture, explicit-failure, and shutdown semantics.
+
+## Phase 10: Product and migration
+
+### 10.1 Remove Engram and provider selection
+- Remove package, dependencies, composition, TUI/provider rows, readiness, setup, capability mappings, prompts, tests, and docs.
+- Add conservative compatibility migration and actionable warnings.
+
+### 10.2 Implement enabled/disabled TUI and secret setup
+- Connect, validate, persist through the secret-store abstraction, materialize optional MCP, and complete readiness without manual packages or runner edits.
+
+### 10.3 Extend Setup and Doctor
+- Diagnose enabled state, runtime, auth/API connectivity, isolation, recall/capture, per-runner MCP, fail-open, migration, and credential leakage without exposing secrets.
+
+## Phase 11: Observability and DeckMemoryBench
+
+### 11.1 Add content-free runtime metrics
+- Measure attempts/skips/success/failure, profile/search, latency, injected size, capture, MCP ad-hoc usage, provider errors, and fail-open events.
+
+### 11.2 Add the initial benchmark
+- Compare MCP-primary baseline against first-class runtime over temporal supersession, recurring issues, decisions, preferences, conventions, root causes, stale/contradictory dominance, rediscovery, tokens, latency, and context size.
+- Do not add Mem0 or another provider.
+
+## Phase 12: Standalone, migration, and independent verification
+
+### 12.1 Verify compiled release targets
+- Exercise release archives without Node/npm or `node_modules`; include mocked runtime transport, auth, TLS, Doctor, MCP materialization, and explicit platform limitations.
+
+### 12.2 Run migration and security gates
+- Cover disabled/legacy Supermemory/Engram/partial/MCP/container cases, project isolation, stable session identity, supersession, fail-open, explicit recall failure, credential-negative output, and web-search exclusion.
+
+### 12.3 Run broad checks and independent Quality
+- Run focused tests, `bun test`, `bunx tsc --noEmit`, OpenSpec validation, build/release smoke, `git diff --check`, and independent architecture/security/regression review.

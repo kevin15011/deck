@@ -91,10 +91,6 @@ export type RunnerUiMetadata = Readonly<{
       selectionStatus: string;
       configuredDiagnostics?: readonly string[];
     }>;
-    engram?: Readonly<{
-      label: string;
-      detail: string;
-    }>;
   }>;
 }>;
 
@@ -199,6 +195,17 @@ export type RunnerLaunchPlan = {
   /** Per-route execution-control classification after production binding verification. */
   executionClass?: "first-class" | "static-compatible";
   bridgeBinding?: Readonly<{ surface: string; mode: RunnerLaunchInput["mode"]; evidence: string }>;
+  /** Content capture contract. Omitted means stdout/stderr are not trusted conversation channels. */
+  outputCapture?: Readonly<{
+    finalAssistantMessage?: Readonly<{
+      source: "file";
+      path: string;
+      trust: "runner-native-final-assistant";
+      route: string;
+      maxBytes: number;
+      cleanup?: boolean;
+    }>;
+  }>;
 };
 
 export type RunnerLaunchResult =
@@ -460,13 +467,17 @@ export type DashboardState = {
   webSearchProviderDescriptor?: WebSearchProviderDescriptorV1;
   packageInstructions: Record<string, boolean>;
   adaptiveMemory: {
-    provider: "none" | "engram" | "supermemory";
+    provider: "none" | "supermemory";
     supermemory?: {
       configured: boolean;
       userId?: string;
       teamId?: string;
       organizationId?: string;
+      /** @deprecated Use runtimeCredentialStored for persisted Deck runtime readiness. */
       hasToken?: boolean;
+      runtimeCredentialStored?: boolean;
+      ephemeralTokenAvailable?: boolean;
+      mcpOAuthReady?: boolean;
     };
   };
 };

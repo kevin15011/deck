@@ -3,7 +3,7 @@
  *
  * This module is the composition root for the Deck CLI. It wires together:
  * - Runner adapter factories (Pi, OpenCode)
- * - Memory provider factories (Engram, Supermemory)
+ * - Memory provider factories (Supermemory)
  *
  * The registry produces a `RunnerCapabilityCatalog` that maps runner IDs to
  * their `RunnerCapabilities` objects. The CLI entry point (main.tsx) uses
@@ -26,7 +26,6 @@ import { CODEX_RUNNER_CAPABILITY_CONTRIBUTION } from "@deck/adapter-codex";
 // Memory provider factories
 // ---------------------------------------------------------------------------
 
-import { createEngramMemoryProvider } from "@deck/adapter-engram";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import { getWebSearchProviderDescriptor, isSupportedWebSearchProvider, SUPPORTED_WEB_SEARCH_PROVIDER_IDS } from "./web-search-provider";
 
@@ -44,7 +43,7 @@ export type MemoryProviderRegistration = {
   description?: string;
   /**
    * Creates a memory provider instance.
-   * Some providers (like Engram) need no config; others (like Supermemory) need userId etc.
+ * Supermemory is the only durable Adaptive Memory backend.
    */
   createProvider(config?: Record<string, string>): AdaptiveMemoryProvider;
 };
@@ -89,21 +88,15 @@ export type RunnerCapabilityCatalog = {
  * Creates the registry of available memory providers.
  *
  * CONTRACT (Repair 2026-05-29):
- * - Supermemory NO requiere userId/teamId/orgId manual.
- * - El usuario se deriva del token. Solo token es input manual.
+ * - Supermemory requires no userId/teamId/orgId manual configuration.
+ * - The user is derived from the token/OAuth account; Deck binds project scope.
  */
 export function createMemoryProviders(): readonly MemoryProviderRegistration[] {
   return [
     {
-      id: "engram",
-      displayName: "Engram Memory (Experimental)",
-      description: "Experimental persistent memory provider with session search and write capabilities.",
-      createProvider: () => createEngramMemoryProvider(),
-    },
-    {
       id: "supermemory",
-      displayName: "Supermemory MCP",
-      description: "MCP-only adaptive memory with automatic user/project scoping. Uses tools: memory, recall, whoAmI. No team/org scopes. Token-only config.",
+      displayName: "Supermemory",
+      description: "First-class Adaptive Memory runtime with optional project-scoped external MCP recall that remains unobservable to Deck runtime metrics. Token-only config.",
       createProvider: () => {
         // CONTRACT: token-only — no userId required
         return createSupermemoryMemoryProvider();
