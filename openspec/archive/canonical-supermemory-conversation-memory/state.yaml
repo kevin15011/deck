@@ -1,8 +1,8 @@
 schema: spec-registry-v1
 changeId: canonical-supermemory-conversation-memory
 name: Canonical Supermemory Conversation Memory
-currentPhase: review
-status: completed
+currentPhase: archive
+status: archived
 artifacts:
   exploration: exploration.md
   proposal: proposal.md
@@ -13,6 +13,7 @@ artifacts:
   apply_progress: apply-progress.md
   verify_report: verify-report.md
   review_report: review-report.md
+  archive_report: archive-report.md
 provenance:
   - phase: explore
     agent: deck-lead
@@ -92,3 +93,9 @@ provenance:
     timestamp: "2026-08-15"
     registryWrite: non-deferred
     note: "Independent release review returned GO with documented live-provider, cross-platform execution, MCP observability, and remote-copy limitations."
+  - phase: archive
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-15T19:49:41Z"
+    registryWrite: non-deferred
+    note: "Reconciled final real-install evidence, preserved residual limitations, produced the archive report, and moved the completed change to the canonical archive."

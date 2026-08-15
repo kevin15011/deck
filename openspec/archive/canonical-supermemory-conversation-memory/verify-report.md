@@ -6,7 +6,7 @@ PASS. The first-class Supermemory runtime candidate satisfies the approved imple
 
 ## Evidence
 
-- Full repository: 4,604 passed, 0 failed; 19,307 assertions across 301 files.
+- Final full repository after real-install repairs: 4,627 passed, 0 failed; 19,413 assertions across 301 files.
 - Adversarial bridge/security bundle: 151 passed, 0 failed.
 - Acceptance-area bundle: 424 passed, 0 failed.
 - TypeScript: `bunx tsc --noEmit` passed.
@@ -15,6 +15,10 @@ PASS. The first-class Supermemory runtime candidate satisfies the approved imple
 - Extracted binary: ran outside the workspace with empty PATH; authenticated loopback capture, read-only Doctor, and standalone Codex hook execution passed.
 - OpenSpec validation: 0 errors, 0 warnings.
 - `git diff --check`: passed.
+- Real OpenCode reinstall: completed successfully through Review & Install with every plan action ready and `blockerCount: 0` under `DECK_DEBUG=1`.
+- Installed state: materialized OpenCode plugin matched the generated repository asset byte-for-byte; MCP configuration contained only the canonical project-scope header and no runtime credential.
+- Runtime credential: owner-only secret-store entry present with mode `0600`; Doctor reported enabled runtime, canonical scope, credential readiness, and valid OpenCode configuration.
+- Live provider acceptance: authenticated health, profile, capture, and search succeeded over TLS; the authenticated OpenCode loopback recalled and injected canary `deck-sm-canary-20260815-02` within the 6,000-byte physical ceiling.
 
 ## Adversarial boundaries verified
 
@@ -31,7 +35,7 @@ PASS. The first-class Supermemory runtime candidate satisfies the approved imple
 
 ## Limitations
 
-- CI uses deterministic fake provider ranking and an HTTP-only local fixture; it does not prove live Supermemory ranking or live TLS with real credentials.
+- CI uses deterministic fake provider ranking and an HTTP-only local fixture. Separate post-install live acceptance proves endpoint/TLS/authentication and canary recall, but not broad production ranking quality.
 - Non-host release targets are compile-only in the current Linux CI environment.
 - External MCP usage is outside Deck Runtime observability.
 - Remote provider-record copy/deletion remains unavailable and unauthorized.

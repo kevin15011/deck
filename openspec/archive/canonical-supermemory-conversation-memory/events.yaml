@@ -224,3 +224,23 @@ events:
     notes:
       - "Real TUI validation found DECK_DEBUG ready diagnostics were incorrectly appended to blocker arrays, causing ready installs to be blocked."
       - "Debug readiness now logs outside blocker channels; real config/secret validation reports ready with zero blockers and the full suite passes 4,627 tests."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-15T19:49:41Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Final verification evidence was reconciled with the successful real OpenCode reinstall, installed-state inspection, and authenticated live canary recall."
+      - "The final repository suite passed 4,627 tests with 19,413 assertions across 301 files."
+  - phase: archive
+    status: archived
+    event: archive.completed
+    artifact: archive-report.md
+    timestamp: "2026-08-15T19:49:41Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "The completed and approved change was archived at openspec/archive/canonical-supermemory-conversation-memory/."
+      - "No push, release publication, remote legacy copy, or remote deletion was performed."
