@@ -168,7 +168,7 @@ describe("resolveMemoryInjection", () => {
     expect(diagnostics).toEqual([]);
   });
 
-  test("returns pre-built bundle when memoryInjection is provided", () => {
+  test("rejects caller-supplied pre-built bundles unless they are explicitly trusted", () => {
     const preBuilt: MemoryInjectionBundle = {
       instructions: [
         { surface: "session", markdown: "Pre-built injection.", teamId: "developer-team" },
@@ -177,6 +177,17 @@ describe("resolveMemoryInjection", () => {
     };
 
     const { bundle, diagnostics } = resolveMemoryInjection({ memoryInjection: preBuilt });
+    expect(bundle).toBeUndefined();
+    expect(diagnostics).toEqual([expect.objectContaining({ code: "untrusted_memory_injection" })]);
+  });
+
+  test("returns trusted pre-built bundle only for the centralized composition root", () => {
+    const preBuilt: MemoryInjectionBundle = {
+      instructions: [{ surface: "session", markdown: "Trusted runtime injection.", teamId: "developer-team" }],
+      toolBindings: [],
+    };
+
+    const { bundle, diagnostics } = resolveMemoryInjection({ memoryInjection: preBuilt, trustedMemoryInjection: true });
     expect(bundle).toBe(preBuilt);
     expect(diagnostics).toEqual([]);
   });
@@ -253,6 +264,7 @@ describe("resolveMemoryInjection", () => {
 
     const { bundle, diagnostics } = resolveMemoryInjection({
       memoryInjection: preBuilt,
+      trustedMemoryInjection: true,
       memoryProvider: provider,
     });
     expect(bundle).toBe(preBuilt);

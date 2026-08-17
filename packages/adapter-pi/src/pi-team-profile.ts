@@ -25,6 +25,8 @@ export type MaterializeTeamProfileOptions = {
   projectRoot: string;
   /** A pre-built memory injection bundle (takes precedence over provider). */
   memoryInjection?: MemoryInjectionBundle;
+  /** Pre-built bundles are accepted only from Deck's trusted composition root. */
+  trustedMemoryInjection?: boolean;
   /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
   memoryProvider?: AdaptiveMemoryProvider;
   /** Launch-owned reason to render explicit adaptive-context unavailability without resolving a provider. */
@@ -67,6 +69,7 @@ export type BuildTeamSystemPromptResult = {
 
 export type BuildTeamSystemPromptOptions = {
   memoryInjection?: MemoryInjectionBundle;
+  trustedMemoryInjection?: boolean;
   memoryProvider?: AdaptiveMemoryProvider;
   memoryUnavailableReason?: string;
   capabilityInstructions?: CapabilityInstructionBundle;
@@ -119,6 +122,7 @@ export function buildTeamSystemPrompt(
   // Resolve memory injection using adapter/caller-owned provider ID validation.
   const { bundle, diagnostics } = resolveMemoryInjection({
     memoryInjection: options?.memoryInjection,
+    trustedMemoryInjection: options?.trustedMemoryInjection,
     memoryProvider: options?.memoryProvider,
     supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS,
     buildContext: { teamId },
@@ -183,6 +187,7 @@ export function materializeTeamProfile(options: MaterializeTeamProfileOptions): 
 
   const { content, memoryDiagnostics } = buildTeamSystemPrompt(teamId, {
     memoryInjection: options.memoryInjection,
+    trustedMemoryInjection: options.trustedMemoryInjection,
     memoryProvider: options.memoryProvider,
     supportedMemoryProviderIds: options.supportedMemoryProviderIds,
     memoryUnavailableReason: options.memoryUnavailableReason,

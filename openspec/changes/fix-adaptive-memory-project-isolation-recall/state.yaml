@@ -1,0 +1,66 @@
+schema: spec-registry-v1
+changeId: fix-adaptive-memory-project-isolation-recall
+name: Fix Adaptive Memory Project Isolation and Automatic Recall
+currentPhase: review
+status: completed
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+provenance:
+  - phase: proposal
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-15T21:50:58Z"
+    registryWrite: non-deferred
+  - phase: spec
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-15T21:50:58Z"
+    registryWrite: non-deferred
+  - phase: design
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-15T21:50:58Z"
+    registryWrite: non-deferred
+  - phase: tasks
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-15T21:50:58Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-16T03:16:53Z"
+    registryWrite: non-deferred
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-16T03:16:53Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-16T03:16:53Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-16T23:17:08Z"
+    registryWrite: non-deferred
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-16T23:17:08Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-16T23:17:08Z"
+    registryWrite: non-deferred

@@ -296,7 +296,9 @@ describe("runner-sync", () => {
         await readFile(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8"),
         await readFile(join(configDir, "skills", "deck-onboard", "SKILL.md"), "utf8"),
       ].join("\n");
-      expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(content).toContain("schemas permit model-selected project scope");
+      expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(content).toContain("Codebase Memory Package");
       expect(content).not.toContain("Adaptive-memory project operations are disabled");
     } finally {
@@ -304,7 +306,7 @@ describe("runner-sync", () => {
     }
   });
 
-  it("OpenCode content-only sync fails closed for mismatched/default Supermemory scopes while preserving unrelated package fragments", async () => {
+  it("OpenCode content-only sync ignores mismatched/default raw MCP scopes while preserving unrelated package fragments", async () => {
     for (const [name, projectScope, expectedReason] of [
       ["mismatch", "sm_project_v1_other_repo", "scope mismatch"],
       ["default", "sm_project_default", "configured scope missing"],
@@ -329,12 +331,8 @@ describe("runner-sync", () => {
           await readFile(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8"),
           await readFile(join(configDir, "skills", "deck-onboard", "SKILL.md"), "utf8"),
         ].join("\n");
-        expect(content).toContain("Adaptive-memory project operations are disabled");
-        if (expectedReason === "scope mismatch") {
-          expect(content).toMatch(/scope mismatch|configured scope missing/);
-        } else {
-          expect(content).toContain(expectedReason);
-        }
+        expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+        expect(content).toContain("schemas permit model-selected project scope");
         expect(content).toContain("Codebase Memory Package");
         expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
         expect(content).not.toContain(projectScope);
@@ -366,7 +364,9 @@ describe("runner-sync", () => {
         await readFile(join(home, ".pi", "agent", "skills", "deck-apply-fast", "SKILL.md"), "utf8"),
         await readFile(join(home, ".pi", "agent", "skills", "deck-onboard", "SKILL.md"), "utf8"),
       ].join("\n");
-      expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(content).toContain("schemas permit model-selected project scope");
+      expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(content).toContain("Codebase Memory Package");
       expect(content).not.toContain("Adaptive-memory project operations are disabled");
     } finally {
@@ -374,7 +374,7 @@ describe("runner-sync", () => {
     }
   });
 
-  it("Pi content-only sync fails closed for mismatched/default Supermemory scopes while preserving unrelated package fragments", async () => {
+  it("Pi content-only sync ignores mismatched/default raw MCP scopes while preserving unrelated package fragments", async () => {
     for (const [name, projectScope, expectedReason] of [
       ["mismatch", "sm_project_v1_other_repo", "scope mismatch"],
       ["default", "sm_project_default", "configured scope missing"],
@@ -400,12 +400,8 @@ describe("runner-sync", () => {
           await readFile(join(home, ".pi", "agent", "skills", "deck-apply-fast", "SKILL.md"), "utf8"),
           await readFile(join(home, ".pi", "agent", "skills", "deck-onboard", "SKILL.md"), "utf8"),
         ].join("\n");
-        expect(content).toContain("Adaptive-memory project operations are disabled");
-        if (expectedReason === "scope mismatch") {
-          expect(content).toMatch(/scope mismatch|configured scope missing/);
-        } else {
-          expect(content).toContain(expectedReason);
-        }
+        expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+        expect(content).toContain("schemas permit model-selected project scope");
         expect(content).toContain("Codebase Memory Package");
         expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
         expect(content).not.toContain(projectScope);

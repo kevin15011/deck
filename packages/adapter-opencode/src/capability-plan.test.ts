@@ -204,6 +204,8 @@ describe("buildOpenCodeRunnerReviewPlan Supermemory auth UX", () => {
     );
 
     expect(plan.ready).toBe(true);
+    expect(JSON.stringify(plan)).not.toContain("adaptive-memory.supermemory.opencode-mcp-config");
+    expect(JSON.stringify(plan)).not.toContain("Configure Supermemory OpenCode MCP");
     expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "ready" }));
     expect(JSON.stringify(plan)).toContain("Deck runtime API credential is validated and stored");
     expect(JSON.stringify(plan)).toContain("OpenCode native OAuth is optional");

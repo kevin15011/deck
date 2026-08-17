@@ -152,7 +152,21 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(JSON.stringify(invalid.diagnostics)).not.toContain("Engram");
   });
 
-  test("propagates the exact canonical Supermemory scope across Codex session, roles, agent skills, external skills, and bootstrap skills", () => {
+  test("diagnoses unmarked raw Supermemory MCP as unmanaged and not authorized project memory", () => {
+    const plan = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map([[".codex/config.toml", '[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\nhttp_headers = { "x-sm-project" = "sm_project_v1_other_repo" }\n']]),
+      memoryProvider: "supermemory",
+      supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
+    });
+
+    expect(plan.blocked).toBe(false);
+    expect(plan.diagnostics).toContainEqual(expect.objectContaining({ code: "supermemory-mcp-unmanaged", severity: "warning" }));
+    expect(plan.diagnostics.map((diagnostic) => diagnostic.message).join(" ")).toContain("external-unobservable");
+    expect(plan.diagnostics.map((diagnostic) => diagnostic.message).join(" ")).not.toContain("sm_project_v1_other_repo");
+  });
+
+  test("propagates Runtime-owned Supermemory scope guidance across Codex session, roles, agent skills, external skills, and bootstrap skills", () => {
     const plan = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
       existingFiles: new Map(),
@@ -174,11 +188,10 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
       ".agents/skills/deck-onboard/SKILL.md",
     ]) {
       const content = expected.get(path) ?? "";
-      expect(
-        content.includes('containerTag: "sm_project_v1_kevin15011_deck"') || content.includes('containerTag: \\"sm_project_v1_kevin15011_deck\\"'),
-        path,
-      ).toBe(true);
-      expect(content, path).toContain("x-sm-project is diagnostic/transport metadata only");
+      expect(content, path).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(content, path).toContain("schemas permit model-selected project scope");
+      expect(content, path).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(content, path).not.toContain('containerTag: \\"sm_project_v1_kevin15011_deck\\"');
       expect(content, path).not.toContain("No manual containerTag required");
       expect(content, path).not.toContain("sm_project_default");
     }

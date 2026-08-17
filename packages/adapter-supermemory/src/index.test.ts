@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { createSupermemoryMemoryProvider, SUPERMEMORY_MCP_TOOLS, SUPERMEMORY_MCP_SERVER_URL, SupermemoryToolBindingMetadata } from "./index";
+import { createSupermemoryMemoryProvider, SUPERMEMORY_MCP_SERVER_URL } from "./index";
 
 describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-29)", () => {
   test("NO userId required - token-only input", () => {
@@ -9,15 +9,14 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     expect(provider.id).toBe("supermemory");
   });
 
-  test("buildInjection produces bindings with active runner-exposed Supermemory tools", () => {
+  test("buildInjection does not expose raw runner Supermemory MCP tools", () => {
     const bundle = createSupermemoryMemoryProvider({
       projectScope: "sm_project_v1_kevin15011_deck",
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     }).buildInjection({ teamId: "developer-team" });
-    expect(bundle.toolBindings).toHaveLength(1);
-    expect(bundle.toolBindings[0]!.toolNames).toEqual(["supermemory_search_memory"]);
+    expect(bundle.toolBindings).toHaveLength(0);
     const tools = bundle.toolBindings.flatMap((binding) => [...binding.toolNames]);
-    expect(tools).toContain("supermemory_search_memory");
+    expect(tools).not.toContain("supermemory_search_memory");
     expect(tools).not.toContain("supermemory_add_memory");
     expect(tools).not.toContain("supermemory_save-memory");
     expect(tools).not.toContain("memory");
@@ -26,15 +25,15 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     expect(tools).not.toContain("search_docs");
   });
 
-  test("NO arbitrary containerTag manual - instruction shows canonical Deck scoping", () => {
+  test("NO arbitrary containerTag manual - instructions say Runtime owns scope", () => {
     const bundle = createSupermemoryMemoryProvider({
       projectScope: "sm_project_v1_kevin15011_deck",
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
-    expect(text).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-    expect(text).toContain("stable customId");
-    expect(text).toContain("do not add or ask for a second capture toggle");
+    expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+    expect(text).toContain("scope server-side");
+    expect(text).toContain("Raw Supermemory MCP tools are not materialized or authorized");
     // Can mention u: in the negative but not as live scopes
     expect(text).not.toMatch(/\bu:[a-z0-9]/i); // No actual u: username
   });
@@ -60,8 +59,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     }).buildInjection({ teamId: "developer-team" });
     expect(bundle.instructions).toHaveLength(3);
-    expect(bundle.toolBindings).toHaveLength(1);
-    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ authenticatedRuntimeValidated: false });
+    expect(bundle.toolBindings).toHaveLength(0);
   });
 
   test("health returns available after authenticatedRuntimeValidated is true", async () => {
@@ -71,12 +69,12 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     expect(health.diagnostics).toHaveLength(0);
   });
 
-  test("tool binding metadata includes serverQualifiedToolNames with new tools", () => {
+  test("tool binding metadata is absent because raw MCP is not authorized", () => {
     const bundle = createSupermemoryMemoryProvider({
       projectScope: "sm_project_v1_kevin15011_deck",
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     }).buildInjection({});
-    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ serverQualifiedToolNames: [...SUPERMEMORY_MCP_TOOLS] });
+    expect(bundle.toolBindings).toEqual([]);
   });
 
   test("documents current scoped Supermemory tool semantics and forbids active-space automatic memory", () => {
@@ -85,29 +83,11 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
-    const metadata = ((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata;
-
-    expect(metadata.scopedTools).toEqual(expect.arrayContaining([
-      "supermemory_search_memory",
-      "supermemory_listMemories",
-      "supermemory_listDocuments",
-      "supermemory_fetch-graph-data",
-      "supermemory_memory-graph",
-    ]));
-    expect(metadata.accountOnlyTools).toEqual(expect.arrayContaining(["supermemory account/active-space readiness tools"]));
-    expect(metadata.activeSpaceOnlyToolsForbidden).toEqual(expect.arrayContaining(["active-space mutation or selection tools"]));
-    expect(metadata.documentIdToolsRequireScopedPredecessor).toEqual(expect.arrayContaining(["document fetch tools"]));
+    expect(bundle.toolBindings).toEqual([]);
     expect(text).not.toContain('customId: "deck_explicit_<correlation>"');
-    expect(text).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
-    expect(text).toContain('supermemory_listMemories({ containerTag: "sm_project_v1_kevin15011_deck" })');
-    expect(text).toContain('supermemory_listDocuments({ containerTag: "sm_project_v1_kevin15011_deck" })');
-    expect(text).toContain('supermemory_fetch-graph-data({ containerTag: "sm_project_v1_kevin15011_deck" })');
-    expect(text).toContain('supermemory_memory-graph({ containerTag: "sm_project_v1_kevin15011_deck" })');
-    expect(text).toContain("write/save tools are not part of Deck MCP guidance");
-    expect(text).toContain('supermemory_getDocument({ documentId })');
+    expect(text).not.toContain("supermemory_search_memory");
+    expect(text).toContain("external-unobservable");
     expect(text).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
-    expect(text).toContain("document fetch only after the document id came from a scoped predecessor");
-    expect(text).toContain("Never use active-space-only tools");
     expect(text).not.toContain("sm_project_default");
   });
 
@@ -119,8 +99,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
 
     expect(bundle.toolBindings).toHaveLength(0);
-    expect(text).toContain("Adaptive-memory project operations are disabled");
-    expect(text).toContain("scope mismatch");
+    expect(text).toContain("Raw Supermemory MCP tools are not materialized");
     expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
     expect(text).not.toContain("sm_project_default");
   });
@@ -134,7 +113,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
       const text = bundle.instructions.map((f) => f.markdown).join("\n");
 
       expect(bundle.toolBindings).toHaveLength(0);
-      expect(text).toContain("Adaptive-memory project operations are disabled");
+      expect(text).toContain("Raw Supermemory MCP tools are not materialized");
       expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       if (configuredProjectScope) expect(text).not.toContain(configuredProjectScope);
     }
@@ -146,8 +125,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
       projectScope: "sm_project_v1_kevin15011_deck",
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     }).buildInjection({});
-    expect(bundle.toolBindings[0]!.serverName).toBe("custom");
-    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ serverQualifiedToolNames: [...SUPERMEMORY_MCP_TOOLS] });
+    expect(bundle.toolBindings).toEqual([]);
   });
 
   test("default URL is MCP v4 endpoint", () => {
@@ -156,7 +134,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     });
     const bundle = provider.buildInjection({});
-    expect(((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata).toMatchObject({ endpoint: SUPERMEMORY_MCP_SERVER_URL });
+    expect(bundle.toolBindings).toEqual([]);
     expect(SUPERMEMORY_MCP_SERVER_URL).toBe("https://mcp.supermemory.ai/mcp");
   });
 
@@ -167,7 +145,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     expect(text).not.toMatch(/at most \d+/i);
-    expect(text).toMatch(/conversation capture/i);
+    expect(text).toMatch(/recall and capture/i);
   });
 
   test("claims automatic production conversation capture only through Deck-supervised runtime", () => {
@@ -176,17 +154,8 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
       configuredProjectScope: "sm_project_v1_kevin15011_deck",
     }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
-    const metadata = ((bundle.toolBindings[0]!).metadata ?? {}) as SupermemoryToolBindingMetadata;
-
-    expect(metadata).toMatchObject({
-      conversationCaptureDefault: true,
-      conversationCaptureSupport: {
-        opencode: "unsupported/direct-launch",
-        pi: "unsupported/direct-launch",
-        codex: "supported/deck-supervised",
-      },
-    });
-    expect(text).toContain("Automatic scoping contract");
+    expect(bundle.toolBindings).toEqual([]);
+    expect(text).toContain("Automatic recall");
     expect(text).not.toContain("conversation capture is not production-wired");
   });
 
@@ -194,7 +163,7 @@ describe("createSupermemoryMemoryProvider - token-only contract (Repair 2026-05-
     const bundle = createSupermemoryMemoryProvider({ maxMemoriesPerSession: 3 }).buildInjection({});
     const text = bundle.instructions.map((f) => f.markdown).join("\n");
     expect(text).not.toContain("at most 3");
-    expect(text).toContain("stable customId");
+    expect(text).toContain("immutable runtime scope");
   });
 });
 

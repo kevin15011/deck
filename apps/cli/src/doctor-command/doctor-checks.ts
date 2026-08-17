@@ -512,7 +512,7 @@ export function checkRunnerConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps
 
   items.push({
     status: "ok",
-    message: `Supermemory contract: endpoint ${SUPERMEMORY_MCP_SERVER_URL}; optional MCP auth readiness is runner-native; automatic recall/capture uses Deck-supervised native loopback hooks for OpenCode, Pi, and Codex where trusted lifecycle events exist; endpoint and x-sm-project scope are inspected per runner below.`,
+    message: `Supermemory contract: endpoint ${SUPERMEMORY_MCP_SERVER_URL}; automatic recall/capture uses Deck-supervised native loopback hooks for OpenCode, Pi, and Codex where trusted lifecycle events exist; auth readiness comes from Deck Runtime; external raw MCP entries and their x-sm-project scope are inspected only when present and are not required for Deck Runtime readiness.`,
   });
 
     const home = homedir();
@@ -528,10 +528,14 @@ export function checkRunnerConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps
       });
 
       if (validation.ok) {
-        const fingerprint = safeScopeFingerprint(readSupermemoryScopeFromJsonConfig(opencodeConfigPath, "opencode"));
+        const fingerprint = validation.projectScope
+          ? safeScopeFingerprint(readSupermemoryScopeFromJsonConfig(opencodeConfigPath, "opencode"))
+          : "not-present";
         items.push({
           status: "ok",
-          message: `OpenCode Supermemory config validated successfully; canonical scope fingerprint: ${fingerprint}; auth readiness: native OAuth.`,
+          message: validation.projectScope
+            ? `OpenCode raw Supermemory MCP scope is present; canonical scope fingerprint: ${fingerprint}; Deck Runtime remains the authority for Adaptive Memory.`
+            : `OpenCode raw Supermemory MCP is absent; Deck Runtime owns Adaptive Memory project isolation. ${validation.diagnostics.join(" ")}`,
         });
       } else {
         // Report specific validation diagnostics (not errors)

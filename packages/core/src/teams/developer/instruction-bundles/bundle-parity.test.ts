@@ -28,9 +28,9 @@ function hash(s: string): number {
  */
 const BASELINE_HASHES: Record<string, Record<string, number>> = {
   "adaptive-memory": {
-    agent: 1741611688, // first-class runtime capture wording; MCP remains optional/ad-hoc only
-    session: 1741611688, // first-class runtime capture wording; MCP remains optional/ad-hoc only
-    skill: 1741611688, // first-class runtime capture wording; MCP remains optional/ad-hoc only
+    agent: -1572652701, // Runtime owns project scope; raw provider MCP is not materialized for project memory
+    session: -1572652701, // Runtime owns project scope; raw provider MCP is not materialized for project memory
+    skill: -1572652701, // Runtime owns project scope; raw provider MCP is not materialized for project memory
   },
   "codebase-memory": {
     agent: 392768171,

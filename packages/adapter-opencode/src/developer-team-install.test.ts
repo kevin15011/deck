@@ -921,6 +921,7 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
 
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       memoryInjection: preBuiltBundle,
+      trustedMemoryInjection: true,
     });
 
     expect(plan.memoryBundle).toBeDefined();
@@ -973,9 +974,11 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
       ];
 
       for (const content of samples) {
-        expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+        expect(content).toContain("schemas permit model-selected project scope");
+        expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
         expect(content).not.toContain("supermemory_add_memory");
-        expect(content).toContain("explicit remember are routed through the Deck runtime");
+        expect(content).not.toContain("supermemory_search_memory");
         expect(content).not.toContain("No manual containerTag required");
         expect(content).not.toContain("sm_project_default");
       }
@@ -984,7 +987,7 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
     }
   });
 
-  test("rebinds caller-supplied adaptive-memory capability fragments to the configured canonical OpenCode MCP scope", () => {
+  test("replaces caller-supplied adaptive-memory capability fragments with Runtime-owned scope guidance", () => {
     const projectRoot = createTempProject();
     const configDir = createTempConfigDir(projectRoot);
     try {
@@ -1016,8 +1019,10 @@ describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
         plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("api-and-interface-design/SKILL.md"))!.content,
       ].join("\n");
 
-      expect(combined).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(combined).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(combined).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(combined).toContain("schemas permit model-selected project scope");
+      expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(combined).not.toContain("supermemory_search_memory");
       expect(plan.capabilityInstructions?.instructions.some((fragment) => fragment.markdown === "caller-unrelated-marker")).toBe(true);
       expect(combined).not.toContain("No manual containerTag required");
       expect(combined).not.toContain("sm_project_default");

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -45,7 +45,7 @@ export async function runInternalSupermemoryRuntimeSmoke(): Promise<{ exitCode: 
     const invalidAuthSafe = !JSON.stringify(invalidAuth).includes("sm_bad_compiled") && !invalidAuth.ok;
 
     const mcp = writeSupermemoryPiMcpConfig({ homeDir: process.env.HOME ?? homedir(), serverName: "supermemory", projectScope: scope });
-    const mcpText = mcp.path ? readFileSync(mcp.path, "utf8") : "";
+    const mcpText = mcp.path && existsSync(mcp.path) ? readFileSync(mcp.path, "utf8") : "";
     const credentialFreeMcp = mcp.ok && !mcpText.includes("x-supermemory-api-key") && !mcpText.includes(apiKey);
 
     const runtimeHost = await createSupermemoryRuntimeHost({
@@ -57,6 +57,7 @@ export async function runInternalSupermemoryRuntimeSmoke(): Promise<{ exitCode: 
       launchMode: "interactive",
       apiKey,
       transport: createSupermemoryHttpTransport({ apiKey, baseURL, timeoutMs: 2_000 }),
+      stateHome: process.env.XDG_STATE_HOME,
     });
     const loopback = await runtimeHost.startLoopbackBridge();
     const loopbackResponse = loopback

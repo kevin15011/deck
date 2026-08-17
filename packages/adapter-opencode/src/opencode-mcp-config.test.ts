@@ -1,10 +1,11 @@
 import { describe, expect, test, mock } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import {
   validateSupermemoryOpenCodeMcpConfig,
+  writeOpenCodeMcpConfig,
   writeSupermemoryOpenCodeMcpConfig,
   writeSerenaOpenCodeMcpConfig,
   SUPERMEMORY_MCP_URL,
@@ -23,8 +24,270 @@ function cleanup(dir: string) {
 }
 
 // Test suite for Task 9: MCP config x-sm-project REQUIRED
+describe("writeOpenCodeMcpConfig - idempotent user config safety", () => {
+  test("does not rewrite an already-equivalent OpenCode MCP entry", () => {
+    const dir = createTempDir();
+    try {
+      const configPath = join(dir, "opencode.json");
+      const content = JSON.stringify({
+        mcp: {
+          context7: {
+            type: "local",
+            enabled: true,
+            command: ["npx", "-y", "@upstash/context7-mcp"],
+          },
+        },
+      }, null, 2);
+      writeFileSync(configPath, content, { encoding: "utf-8", mode: 0o600 });
+      chmodSync(configPath, 0o600);
+      const old = new Date("2026-01-01T00:00:00.000Z");
+      utimesSync(configPath, old, old);
+      const before = statSync(configPath);
+
+      const result = writeOpenCodeMcpConfig({
+        configPath,
+        serverName: "context7",
+        type: "local",
+        command: ["npx", "-y", "@upstash/context7-mcp"],
+      });
+      const after = statSync(configPath);
+
+      expect(result).toMatchObject({ ok: true, status: "unchanged" });
+      expect(readFileSync(configPath, "utf-8")).toBe(content);
+      expect(after.size).toBe(before.size);
+      expect(after.mtimeMs).toBe(before.mtimeMs);
+      expect(after.mode & 0o777).toBe(before.mode & 0o777);
+    } finally {
+      cleanup(dir);
+    }
+  });
+});
+
 describe("writeSupermemoryOpenCodeMcpConfig - x-sm-project REQUIRED (Repair 2026-05-29)", () => {
-  test("always includes x-sm-project header in written config", () => {
+  test("does not materialize raw Supermemory MCP and retires exact stale Deck-managed entries", () => {
+    const dir = createTempDir();
+    try {
+      const configPath = join(dir, "opencode.json");
+      writeFileSync(configPath, JSON.stringify({
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: SUPERMEMORY_MCP_URL,
+            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
+            enabled: true,
+          },
+          external: { type: "remote", url: "https://example.com/mcp" },
+        },
+      }), "utf-8");
+
+      const result = writeSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir, explicitProjectId: "sm_project_v1_kevin15011_deck" });
+      const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
+
+      expect(result.ok).toBe(true);
+      expect(config.mcp.supermemory).toBeUndefined();
+      expect(config.mcp.external).toEqual({ type: "remote", url: "https://example.com/mcp" });
+      expect(result.diagnostics.join(" ").toLowerCase()).toContain("retired");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("retires exact stale Deck-managed entries even when the stored scope belongs to an old project", () => {
+    const dir = createTempDir();
+    try {
+      const configPath = join(dir, "opencode.json");
+      writeFileSync(configPath, JSON.stringify({
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: SUPERMEMORY_MCP_URL,
+            headers: { "x-sm-project": "sm_project_v1_acme_project_a" },
+            enabled: true,
+          },
+          external: { type: "remote", url: "https://example.com/mcp" },
+        },
+      }), "utf-8");
+
+      const first = writeSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir, explicitProjectId: "sm_project_v1_acme_project_b" });
+      const second = writeSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir, explicitProjectId: "sm_project_v1_acme_project_b" });
+      const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
+
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(false);
+      expect(second.diagnostics.join(" ")).toContain("no OpenCode MCP entry was present");
+      expect(config.mcp.supermemory).toBeUndefined();
+      expect(config.mcp.external).toEqual({ type: "remote", url: "https://example.com/mcp" });
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("preserves the original file when atomic retirement rename fails", () => {
+    const configPath = "/fixtures/opencode.json";
+    const original = JSON.stringify({
+      mcp: {
+        supermemory: {
+          type: "remote",
+          url: SUPERMEMORY_MCP_URL,
+          headers: { "x-sm-project": "sm_project_v1_acme_project_a" },
+          enabled: true,
+        },
+      },
+    });
+    const files = new Map([[configPath, original]]);
+    const result = writeSupermemoryOpenCodeMcpConfig({
+      configPath,
+      explicitProjectId: "sm_project_v1_acme_project_b",
+      fileSystem: {
+        exists: (path) => files.has(path),
+        readFile: (path) => files.get(path) ?? (() => { throw new Error("missing"); })(),
+        writeFile: (path, content) => { files.set(path, content); },
+        rename: () => { throw new Error("rename failed"); },
+        unlink: (path) => { files.delete(path); },
+        temporaryPath: (path) => `${path}.tmp`,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(files.get(configPath)).toBe(original);
+    expect(files.has(`${configPath}.tmp`)).toBe(false);
+  });
+
+  test("preserves owner-only mode and unrelated secret-bearing entries while retiring stale Supermemory", () => {
+    const dir = createTempDir();
+    try {
+      const configPath = join(dir, "opencode.json");
+      writeFileSync(configPath, JSON.stringify({
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: SUPERMEMORY_MCP_URL,
+            headers: { "x-sm-project": "sm_project_v1_acme_project_a" },
+            enabled: true,
+          },
+          external: { type: "remote", url: "https://example.com/mcp", headers: { Authorization: "Bearer keep-external-secret" } },
+        },
+      }), { encoding: "utf-8", mode: 0o600 });
+      chmodSync(configPath, 0o600);
+
+      const result = writeSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir, explicitProjectId: "sm_project_v1_acme_project_b" });
+      const config = JSON.parse(readFileSync(configPath, "utf-8"));
+
+      expect(result.ok).toBe(true);
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
+      expect(config.mcp.supermemory).toBeUndefined();
+      expect(config.mcp.external.headers.Authorization).toBe("Bearer keep-external-secret");
+      expect(JSON.stringify(result)).not.toContain("keep-external-secret");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("uses owner-only mode when original mode cannot be safely read", () => {
+    const configPath = "/fixtures/opencode.json";
+    const original = JSON.stringify({ mcp: { supermemory: { type: "remote", url: SUPERMEMORY_MCP_URL, headers: { "x-sm-project": "sm_project_v1_acme_project_a" }, enabled: true } } });
+    const files = new Map([[configPath, original]]);
+    const modes = new Map<string, number>();
+    const result = writeSupermemoryOpenCodeMcpConfig({
+      configPath,
+      explicitProjectId: "sm_project_v1_acme_project_b",
+      fileSystem: {
+        exists: (path: string) => files.has(path),
+        readFile: (path: string) => files.get(path) ?? (() => { throw new Error("missing"); })(),
+        writeFile: (path: string, content: string, options?: { mode?: number }) => { files.set(path, content); modes.set(path, typeof options === "object" ? options.mode ?? 0 : 0); },
+        rename: (from: string, to: string) => { files.set(to, files.get(from)!); modes.set(to, modes.get(from)!); files.delete(from); modes.delete(from); },
+        unlink: (path: string) => { files.delete(path); modes.delete(path); },
+        temporaryPath: (path: string) => `${path}.tmp`,
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(modes.get(configPath)).toBe(0o600);
+  });
+
+  test("rejects concurrent preimage changes without replacing the updated config", () => {
+    const configPath = "/fixtures/opencode.json";
+    const original = JSON.stringify({ mcp: { supermemory: { type: "remote", url: SUPERMEMORY_MCP_URL, headers: { "x-sm-project": "sm_project_v1_acme_project_a" }, enabled: true } } });
+    const concurrent = JSON.stringify({ mcp: { external: { type: "remote", url: "https://changed.example/mcp" } } });
+    const files = new Map([[configPath, original]]);
+    const result = writeSupermemoryOpenCodeMcpConfig({
+      configPath,
+      explicitProjectId: "sm_project_v1_acme_project_b",
+      fileSystem: {
+        exists: (path: string) => files.has(path),
+        readFile: (path: string) => files.get(path) ?? (() => { throw new Error("missing"); })(),
+        writeFile: (path: string, content: string) => { files.set(path, content); files.set(configPath, concurrent); },
+        rename: (from: string, to: string) => { files.set(to, files.get(from)!); files.delete(from); },
+        unlink: (path: string) => { files.delete(path); },
+        temporaryPath: (path: string) => `${path}.tmp`,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(files.get(configPath)).toBe(concurrent);
+    expect(files.has(`${configPath}.tmp`)).toBe(false);
+  });
+
+  test("rolls back and cleans up when post-replacement verification fails", () => {
+    const configPath = "/fixtures/opencode.json";
+    const original = JSON.stringify({ mcp: { supermemory: { type: "remote", url: SUPERMEMORY_MCP_URL, headers: { "x-sm-project": "sm_project_v1_acme_project_a" }, enabled: true } } });
+    const files = new Map([[configPath, original]]);
+    let corruptNextReplacement = true;
+    const result = writeSupermemoryOpenCodeMcpConfig({
+      configPath,
+      explicitProjectId: "sm_project_v1_acme_project_b",
+      fileSystem: {
+        exists: (path: string) => files.has(path),
+        readFile: (path: string) => files.get(path) ?? (() => { throw new Error("missing"); })(),
+        writeFile: (path: string, content: string) => { files.set(path, content); },
+        rename: (from: string, to: string) => {
+          if (to === configPath && corruptNextReplacement) {
+            corruptNextReplacement = false;
+            files.set(to, "{not-json");
+          } else {
+            files.set(to, files.get(from)!);
+          }
+          files.delete(from);
+        },
+        unlink: (path: string) => { files.delete(path); },
+        temporaryPath: (path: string) => `${path}.tmp`,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(files.get(configPath)).toBe(original);
+    expect(files.has(`${configPath}.tmp`)).toBe(false);
+  });
+
+  test("preserves ambiguous external Supermemory entries as unmanaged", () => {
+    const dir = createTempDir();
+    try {
+      const configPath = join(dir, "opencode.json");
+      const original = {
+        mcp: {
+          supermemory: {
+            type: "remote",
+            url: SUPERMEMORY_MCP_URL,
+            headers: { "x-sm-project": "sm_project_v1_other_repo" },
+            enabled: true,
+            userNote: "external",
+          },
+        },
+      };
+      writeFileSync(configPath, JSON.stringify(original), "utf-8");
+
+      const result = writeSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir, explicitProjectId: "sm_project_v1_kevin15011_deck" });
+      const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
+
+      expect(result.ok).toBe(false);
+      expect(config).toEqual(original);
+      expect(result.diagnostics.join(" ")).toContain("unmanaged");
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("does not create fresh raw Supermemory MCP config", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -35,21 +298,15 @@ describe("writeSupermemoryOpenCodeMcpConfig - x-sm-project REQUIRED (Repair 2026
           explicitProjectId: "sm_project_v1_test_project",
       });
 
-      expect(result.ok).toBe(true);
-      
-      // Read back the config and verify x-sm-project is present
-      const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
-      expect(config.mcp.supermemory.headers["x-sm-project"]).toBeDefined();
-      expect(config.mcp.supermemory.headers.Authorization).toBeUndefined();
-      expect(config.mcp.supermemory.oauth).toBeUndefined();
-      // REQ-R26: NO legacy p: prefix
-      expect(config.mcp.supermemory.headers["x-sm-project"]).not.toMatch(/^p:/);
+      expect(result.ok).toBe(false);
+      expect(require("node:fs").existsSync(configPath)).toBe(false);
+      expect(result.diagnostics.join(" ")).toContain("disabled");
     } finally {
       cleanup(dir);
     }
   });
 
-  test("accepts explicit canonical projectId override WITHOUT p: prefix", () => {
+  test("accepts explicit canonical projectId only for exact stale retirement, not materialization", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -61,11 +318,9 @@ describe("writeSupermemoryOpenCodeMcpConfig - x-sm-project REQUIRED (Repair 2026
         explicitProjectId: "sm_project_v1_my_custom_project",  // NOT "p:my-custom-project"
       });
 
-      expect(result.ok).toBe(true);
-      
-      const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
-      // Value should be stored as-provided (no p: prefix added)
-      expect(config.mcp.supermemory.headers["x-sm-project"]).toBe("sm_project_v1_my_custom_project");
+      expect(result.ok).toBe(false);
+      expect(require("node:fs").existsSync(configPath)).toBe(false);
+      expect(result.diagnostics.join(" ")).toContain("disabled");
     } finally {
       cleanup(dir);
     }
@@ -90,7 +345,7 @@ describe("writeSupermemoryOpenCodeMcpConfig - x-sm-project REQUIRED (Repair 2026
 });
 
 describe("validateSupermemoryOpenCodeMcpConfig - URL validation", () => {
-  test("accepts new MCP v4 URL with native OAuth configuration", () => {
+  test("diagnoses an exact Deck-managed raw Supermemory MCP entry as stale instead of authorizing it", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -99,6 +354,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - URL validation", () => {
           supermemory: {
             type: "remote",
             url: SUPERMEMORY_MCP_URL,
+            enabled: true,
             headers: {
               "x-sm-project": "sm_project_v1_test_project",
             },
@@ -107,8 +363,10 @@ describe("validateSupermemoryOpenCodeMcpConfig - URL validation", () => {
       }), "utf-8");
 
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir });
-      expect(result.ok).toBe(true);
-      expect(result.diagnostics).toHaveLength(0);
+      expect(result.ok).toBe(false);
+      expect(result.projectScope).toBe("sm_project_v1_test_project");
+      expect(result.diagnostics.join(" ")).toContain("stale Deck-managed raw Supermemory MCP");
+      expect(result.diagnostics.join(" ")).toContain("retire");
     } finally {
       cleanup(dir);
     }
@@ -189,7 +447,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - URL validation", () => {
 });
 
 describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () => {
-  test("accepts OAuth discovery with no persisted credential", () => {
+  test("diagnoses credential-free raw Supermemory MCP as unmanaged and external-unobservable", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -206,14 +464,15 @@ describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () =>
       }), "utf-8");
 
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir });
-      expect(result.ok).toBe(true);
-      expect(result.diagnostics).toHaveLength(0);
+      expect(result.ok).toBe(false);
+      expect(result.diagnostics.join(" ")).toContain("unmanaged");
+      expect(result.diagnostics.join(" ")).toContain("external-unobservable");
     } finally {
       cleanup(dir);
     }
   });
 
-  test("accepts canonical x-sm-project header for project scoping", () => {
+  test("diagnoses raw Supermemory MCP even with a canonical x-sm-project header", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -230,7 +489,8 @@ describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () =>
       }), "utf-8");
 
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir });
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(result.diagnostics.join(" ")).toContain("external-unobservable");
     } finally {
       cleanup(dir);
     }
@@ -309,7 +569,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - native OAuth validation", () =>
 });
 
 describe("validateSupermemoryOpenCodeMcpConfig - Server name handling", () => {
-  test("accepts default server name 'supermemory'", () => {
+  test("diagnoses default server name 'supermemory' when raw MCP is present", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -326,14 +586,14 @@ describe("validateSupermemoryOpenCodeMcpConfig - Server name handling", () => {
       }), "utf-8");
 
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir });
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
       expect(result.serverName).toBe(SUPERMEMORY_MCP_SERVER_NAME);
     } finally {
       cleanup(dir);
     }
   });
 
-  test("accepts custom server name pointing to Supermemory MCP URL", () => {
+  test("diagnoses custom server name pointing to Supermemory MCP URL", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -350,7 +610,7 @@ describe("validateSupermemoryOpenCodeMcpConfig - Server name handling", () => {
       }), "utf-8");
 
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath, serverName: "mycustom", homeDir: dir });
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
       expect(result.serverName).toBe("mycustom");
     } finally {
       cleanup(dir);
@@ -399,13 +659,13 @@ describe("provider IDs consistency", () => {
 });
 
 describe("fail-open diagnostics", () => {
-  test("missing config returns recoverable diagnostic", () => {
+  test("missing config is safe because raw Supermemory MCP is optional and absent", () => {
     const dir = createTempDir();
     try {
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath: join(dir, "opencode.json"), homeDir: dir });
-      expect(result.ok).toBe(false);
-      expect(result.diagnostics[0]).toContain("missing");
-      expect(result.diagnostics[0]).toContain("not injected");
+      expect(result.ok).toBe(true);
+      expect(result.diagnostics.join(" ")).toContain("absent");
+      expect(result.diagnostics.join(" ")).toContain("Deck Runtime");
     } finally {
       cleanup(dir);
     }
@@ -425,7 +685,7 @@ describe("fail-open diagnostics", () => {
     }
   });
 
-  test("missing server entry returns diagnostic", () => {
+  test("missing server entry is safe and does not request raw MCP materialization", () => {
     const dir = createTempDir();
     try {
       const configPath = join(dir, "opencode.json");
@@ -439,8 +699,9 @@ describe("fail-open diagnostics", () => {
       }), "utf-8");
 
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath, homeDir: dir });
-      expect(result.ok).toBe(false);
-      expect(result.diagnostics[0]).toContain("missing server entry");
+      expect(result.ok).toBe(true);
+      expect(result.diagnostics.join(" ")).toContain("absent");
+      expect(result.diagnostics.join(" ")).not.toContain("not injected");
     } finally {
       cleanup(dir);
     }
@@ -603,13 +864,9 @@ describe("deriveSmProjectIdentifier - git remote derivation with sm_project_ pre
         projectRoot: dir,
       });
 
-      expect(result.ok).toBe(true);
-      
-      // Verify x-sm-project starts with sm_project_ (not sm-project-)
-      const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
-      const xSmProject = config.mcp.supermemory.headers["x-sm-project"];
-      expect(xSmProject.startsWith("sm_project_")).toBe(true);
-      expect(xSmProject).toContain("_");
+      expect(result.ok).toBe(false);
+      expect(require("node:fs").existsSync(configPath)).toBe(false);
+      expect(result.diagnostics.join(" ")).toContain("disabled");
     } finally {
       cleanup(dir);
     }
@@ -639,12 +896,9 @@ describe("deriveSmProjectIdentifier - git remote derivation with sm_project_ pre
         projectRoot: dir,
       });
 
-      expect(result.ok).toBe(true);
-      
-      const config = JSON.parse(require("node:fs").readFileSync(configPath, "utf-8"));
-      const xSmProject = config.mcp.supermemory.headers["x-sm-project"];
-      expect(xSmProject).toBe("sm_project_v1_my_org_my_project");
-      expect(xSmProject).not.toMatch(/^sm-/);
+      expect(result.ok).toBe(false);
+      expect(require("node:fs").existsSync(configPath)).toBe(false);
+      expect(result.diagnostics.join(" ")).toContain("disabled");
     } finally {
       cleanup(dir);
     }

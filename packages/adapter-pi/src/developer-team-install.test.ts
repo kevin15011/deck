@@ -195,7 +195,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
     }
   });
 
-  test("Pi agents, skills, standalone skills, and bootstrap skills receive exact scoped Supermemory guidance", () => {
+  test("Pi agents, skills, standalone skills, and bootstrap skills receive Runtime-owned Supermemory guidance", () => {
     const projectRoot = createTempProject();
     try {
       ensurePiDirs(projectRoot);
@@ -234,9 +234,11 @@ describe("buildDeveloperTeamInstallPlan", () => {
       ];
 
       for (const content of samples) {
-        expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(content).toContain("verified project identity");
+        expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+        expect(content).toContain("schemas permit model-selected project scope");
+        expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
         expect(content).not.toContain("supermemory_add_memory");
-        expect(content).toContain("x-sm-project is diagnostic/transport metadata only");
         expect(content).not.toContain("No manual containerTag required");
         expect(content).not.toContain("sm_project_default");
       }
@@ -245,7 +247,7 @@ describe("buildDeveloperTeamInstallPlan", () => {
     }
   });
 
-  test("rebinds caller-supplied adaptive-memory capability fragments to the configured canonical Pi MCP scope", () => {
+  test("replaces caller-supplied adaptive-memory capability fragments with Runtime-owned scope guidance", () => {
     const projectRoot = createTempProject();
     try {
       ensurePiDirs(projectRoot);
@@ -279,9 +281,11 @@ describe("buildDeveloperTeamInstallPlan", () => {
         plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("api-and-interface-design/SKILL.md"))!.content,
       ].join("\n");
 
-      expect(combined).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(combined).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(combined).toContain("verified project identity");
+      expect(combined).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(combined).toContain("schemas permit model-selected project scope");
       expect(combined).toContain("caller-unrelated-marker");
+      expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(combined).not.toContain("No manual containerTag required");
       expect(combined).not.toContain("sm_project_default");
       expect(combined).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
@@ -1225,6 +1229,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
 
     const plan = buildDeveloperTeamInstallPlan("/tmp/project", {
       memoryInjection: bundle,
+      trustedMemoryInjection: true,
     });
 
     expect(plan.memoryDiagnostics).toHaveLength(0);
@@ -1249,6 +1254,7 @@ describe("buildDeveloperTeamInstallPlan with memory injection", () => {
       memoryProvider: supermemoryProvider,
       supportedMemoryProviderIds: ["fixture-memory"],
       memoryInjection: bundle,
+      trustedMemoryInjection: true,
     });
 
     const orchestrator = plan.agents.find((a) => a.agent.id === "deck-lead")!;

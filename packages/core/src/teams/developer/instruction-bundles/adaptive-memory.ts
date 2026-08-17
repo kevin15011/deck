@@ -28,13 +28,13 @@ export function renderProjectBoundAdaptiveMemoryInstructions(options: ProjectBou
     ? renderAuthorizedSupermemoryPolicy(resolved.scope)
     : renderFailClosedSupermemoryPolicy(resolved.reason);
 
-  return `Adaptive Memory is enabled or disabled by Deck. When enabled, Supermemory is the only durable backend and automatic profile/search/capture runs through a Deck-owned runtime for Deck-supervised runner launches. Direct runner launches remain MCP-only and must be diagnosed honestly.
+  return `Adaptive Memory is enabled or disabled by Deck. When enabled, Supermemory is the only durable backend and automatic profile/search/capture runs through a Deck-owned runtime for Deck-supervised runner launches. Direct runner launches must not claim automatic memory unless the Deck runtime bridge is active.
 
 ### Conversation Capture
 
 - Selecting Supermemory remains the only memory provider decision; do not add or ask for a second capture toggle, consent screen, quota, or mode selector.
-- Supermemory token or OAuth credentials identify the account; Deck supplies project isolation through one Deck-materialized canonical project scope.
-- Automatic scoping contract and conversation capture: one runner session/change is captured as one conversation document with a stable customId and canonical project scope when Deck supervises the runner runtime.
+- Supermemory token or OAuth credentials identify the account; Deck supplies project isolation through one verified Git repository identity held by Runtime, not through prompt text or model-selected tool arguments.
+- Automatic scoping contract and conversation capture: one runner session/change is captured as one conversation document with a stable customId and immutable project scope when Deck supervises the runner runtime.
 - Supermemory owns extraction, profiles, graph updates, ranking, temporal updates, and deduplication.
 - Agents must not manually extract routine facts, create topic keys, fill a semantic memory quota, or write mandatory session summaries.
 
@@ -44,9 +44,9 @@ ${scopePolicy}
 
 ### Retrieval
 
-- Load bounded project-profile context once on start/resume when healthy.
+- Load bounded project-profile context once on start/resume when healthy and policy-eligible.
 - Search only when prior context is materially relevant or the user requests recall.
-- Keep recall advisory, scoped to the canonical project container, limited to five results and about 1,500 tokens by default.
+- Keep recall advisory, scoped by Deck Runtime, limited to five results and about 1,500 tokens by default.
 - Keep query rewriting and reranking disabled unless benchmark evidence enables them.
 
 ### Privacy and Authority
@@ -58,7 +58,7 @@ ${scopePolicy}
 
 ### Provider: Supermemory
 
-Use runner-exposed Supermemory MCP tools only for optional ad-hoc recall, account readiness, and explicit user forget requests. Do not pass arbitrary containerTag values; Deck owns the canonical project scope. Do not double-ingest content already captured by the Deck runtime.`;
+Use Deck Runtime for project recall/capture. Raw provider MCP is unmanaged external capability and must not be used as a Deck project-memory isolation boundary.`;
 }
 
 export function buildAdaptiveMemoryInstructionBundle(options: ProjectBoundAdaptiveMemoryInstructionOptions = {}): CapabilityInstructionBundle {
@@ -78,32 +78,23 @@ function resolveProjectBoundSupermemoryInstructionScope(
 ): { authorized: true; scope: CanonicalSupermemoryProjectScope } | { authorized: false; reason: "missing" | "mismatch" | "invalid" } {
   const derived = options.supermemoryProjectScope?.trim();
   const configured = options.configuredSupermemoryProjectScope?.trim();
-  if (!derived || !configured) return { authorized: false, reason: "missing" };
-  if (!isCanonicalSupermemoryProjectScope(derived) || !isCanonicalSupermemoryProjectScope(configured)) {
-    return { authorized: false, reason: "invalid" };
+  if (!derived) return { authorized: false, reason: "missing" };
+  if (!isCanonicalSupermemoryProjectScope(derived)) return { authorized: false, reason: "invalid" };
+  if (configured !== undefined && configured !== "") {
+    if (!isCanonicalSupermemoryProjectScope(configured)) return { authorized: false, reason: "invalid" };
+    if (configured !== derived) return { authorized: false, reason: "mismatch" };
   }
-  if (configured !== derived) return { authorized: false, reason: "mismatch" };
   return { authorized: true, scope: derived };
 }
 
-function renderAuthorizedSupermemoryPolicy(scope: CanonicalSupermemoryProjectScope): string {
+function renderAuthorizedSupermemoryPolicy(_scope: CanonicalSupermemoryProjectScope): string {
   return [
-    `- The only authorized project container is \`containerTag: "${scope}"\`.`,
-    "- Agents MUST NOT derive, replace, or omit this value; if this value is unavailable, skip the memory operation and continue coding.",
-    "- x-sm-project is diagnostic/transport metadata only; it does not supply an omitted tool argument; project scoping requires this header plus the explicit canonical `containerTag` on each scoped operation.",
-    "- Every recall, list, document, or graph operation that accepts `containerTag` must pass the exact value above.",
-    "- Automatic MCP write/save operations are disabled; Deck runtime capture owns automatic ingestion to prevent duplicates.",
-    "- Exact scoped recall examples:",
-    `  - \`supermemory_search_memory({ query, containerTag: "${scope}" })\``,
-    `  - \`supermemory_listMemories({ containerTag: "${scope}" })\``,
-    `  - \`supermemory_listDocuments({ containerTag: "${scope}" })\``,
-    `  - \`supermemory_fetch-graph-data({ containerTag: "${scope}" })\``,
-    `  - \`supermemory_memory-graph({ containerTag: "${scope}" })\``,
-    "- Do not use MCP write/save tools for Deck-managed memory; automatic capture and explicit remember are routed through the Deck runtime to prevent duplicates.",
-    "- Use `supermemory_search_memory` only when prior context is materially relevant or requested.",
-    "- Account-only readiness tools that do not accept project scope may be used only for authentication/status.",
-    "- Never use active-space-only tools, and never change active space, for automatic project memory.",
-    "- Use `supermemory_getDocument` only after the document id came from a scoped predecessor in the same workflow.",
+    "- Deck has resolved a verified project identity for this supervised launch; the raw scope is held inside Deck Runtime and is not a model-controlled tool argument.",
+    "- Runtime-managed recall and capture bind project scope server-side. Runner events, prompts, agents, and tools MUST NOT provide or override any scope-like field.",
+    "- Raw provider MCP tools are not materialized or authorized for Deck project memory because their schemas permit model-selected project scope.",
+    "- If an external provider MCP entry is visible, treat it as unmanaged and external-unobservable; do not use it for automatic project memory.",
+    "- Automatic capture and explicit remember are routed through Deck Runtime to prevent duplicates and preserve one immutable top-level session scope.",
+    "- Account-only readiness checks may still be used for authentication/status when exposed by the runner, but active space is not project isolation.",
   ].join("\n");
 }
 

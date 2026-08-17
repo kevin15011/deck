@@ -97,7 +97,6 @@ import {
   type DeveloperTeamThinkingAssignments,
   type PiThinkingLevel,
 } from "./model-config";
-import { validateSupermemoryPiMcpConfig } from "./pi-mcp-config";
 
 // --- Types ---
 
@@ -372,6 +371,8 @@ const SUPPORTED_PI_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
 export type MemoryInjectionOptions = {
   /** A pre-built memory injection bundle (takes precedence over provider). */
   memoryInjection?: MemoryInjectionBundle;
+  /** Pre-built bundles are accepted only from Deck's trusted composition root. */
+  trustedMemoryInjection?: boolean;
   /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
   memoryProvider?: AdaptiveMemoryProvider;
   /** Provider IDs accepted by this adapter/caller registry. */
@@ -424,66 +425,42 @@ function resolvePiMemoryInjection(
   options?: MemoryInjectionOptions,
   projectRoot?: string,
 ): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
-  const derived = projectRoot ? resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] }) : undefined;
-  const resolved = resolveMemoryInjection({
-    memoryInjection: options?.memoryInjection,
-    memoryProvider: options?.memoryProvider,
-    supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_MEMORY_PROVIDER_IDS,
-    buildContext: {
-      teamId: "developer-team",
-      supermemoryProjectScope: derived?.ok ? derived.scope : undefined,
-    },
-  });
-
-  // Pi behaves like OpenCode: inject memory tools when MCP config is structurally valid
-  if (options?.memoryInjection || options?.memoryProvider?.id !== "supermemory" || !resolved.bundle) {
-    return resolved;
-  }
-
-  const serverName = resolved.bundle.toolBindings.find((binding) => binding.serverName)?.serverName;
-  const mcpValidation = validateSupermemoryPiMcpConfig({
-    serverName,
-    configPath: options.piMcpConfigPath,
-    homeDir: options.piMcpHomeDir,
-  });
-
-  // If MCP config is structurally valid, inject tools (no Pi-only gate)
-  if (mcpValidation.ok) {
-    if (derived?.ok && mcpValidation.projectScope === derived.scope) {
-      const scoped = resolveMemoryInjection({
-        memoryInjection: options?.memoryInjection,
-        memoryProvider: options?.memoryProvider,
-        supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_MEMORY_PROVIDER_IDS,
-        buildContext: {
-          teamId: "developer-team",
-          supermemoryProjectScope: derived.scope,
-          configuredSupermemoryProjectScope: mcpValidation.projectScope,
-        },
-      });
-      return scoped;
+  let memoryProvider = options?.memoryProvider;
+  let scopeDiagnostic: MemoryDiagnostic | undefined;
+  if (memoryProvider?.id === "supermemory") {
+    const derived = projectRoot ? resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] }) : undefined;
+    if (derived?.ok) {
+      // Keep the caller-provided provider, but only pass the verified runtime scope
+      // through the trusted build context. Pi does not materialize raw Supermemory MCP.
+    } else {
+      memoryProvider = undefined;
+      scopeDiagnostic = {
+        code: "memory_provider_unavailable",
+        providerId: "supermemory",
+        message: "Supermemory project identity is missing or invalid; omitted adaptive-memory injection with redacted diagnostics.",
+      };
     }
   }
 
-  // Config invalid or missing — fail-closed with diagnostic
+  const resolved = resolveMemoryInjection({
+    memoryInjection: options?.memoryInjection,
+    trustedMemoryInjection: options?.trustedMemoryInjection,
+    memoryProvider,
+    supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_PI_MEMORY_PROVIDER_IDS,
+    buildContext: {
+      teamId: "developer-team",
+      supermemoryProjectScope: memoryProvider?.id === "supermemory" && projectRoot
+        ? (() => {
+            const derived = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
+            return derived.ok ? derived.scope : undefined;
+          })()
+        : undefined,
+    },
+  });
+
   return {
-    bundle: undefined,
-    diagnostics: [
-      ...resolved.diagnostics,
-      {
-        code: "memory_provider_unavailable",
-        providerId: "supermemory",
-        message: "Supermemory Pi MCP config is unavailable or invalid; omitted adaptive-memory injection with redacted diagnostics.",
-        details: {
-          path: mcpValidation.path,
-          serverName: mcpValidation.serverName,
-          diagnostics: mcpValidation.diagnostics.map((diagnostic) => ({
-            code: diagnostic.code,
-            severity: diagnostic.severity,
-            message: diagnostic.message,
-          })),
-        },
-      },
-    ],
+    bundle: resolved.bundle,
+    diagnostics: [...resolved.diagnostics, ...(scopeDiagnostic ? [scopeDiagnostic] : [])],
   };
 }
 
@@ -554,6 +531,7 @@ export function buildDeveloperTeamInstallPlan(
 
   const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolvePiMemoryInjection({
     memoryInjection: options?.memoryInjection,
+    trustedMemoryInjection: options?.trustedMemoryInjection,
     memoryProvider: resolvedMemoryProvider,
     supportedMemoryProviderIds: options?.supportedMemoryProviderIds,
     piMcpConfigPath: options?.piMcpConfigPath,
@@ -564,16 +542,8 @@ export function buildDeveloperTeamInstallPlan(
     const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
     return resolved.ok ? resolved.scope : undefined;
   })();
-  const configuredSupermemoryProjectScope = (() => {
-    const validation = validateSupermemoryPiMcpConfig({
-      configPath: options?.piMcpConfigPath,
-      homeDir: options?.piMcpHomeDir,
-    });
-    return validation.ok ? validation.projectScope : undefined;
-  })();
   const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(options?.capabilityInstructions, {
     supermemoryProjectScope: derivedSupermemoryProjectScope,
-    configuredSupermemoryProjectScope,
   });
 
   const personality = options?.orchestratorPersonality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
@@ -908,6 +878,7 @@ export function applyDeveloperTeamInstall(
     teamId: "developer-team",
     projectRoot: plan.projectRoot,
     ...(plan.memoryBundle ? { memoryInjection: plan.memoryBundle } : {}),
+    ...(plan.memoryBundle ? { trustedMemoryInjection: true } : {}),
     ...(plan.promptProfileActivation === undefined
       ? {}
       : { promptProfileActivation: plan.promptProfileActivation }),

@@ -1509,33 +1509,68 @@ async function writeMcpConfigAction(
     };
   }
 
-  // Default: Supermemory remote MCP. Runtime credentials are stored in Deck's
-  // secret store after validation; runner MCP config must not persist API keys.
-  const nativeOAuth = !runnerRequiresExternalSupermemoryToken(dependencies.dashboardState);
+  // Legacy/advisory Supermemory MCP action. Production plans no longer emit this
+  // action; if a stale synthetic action is supplied, it may only retire an exact
+  // Deck-managed raw entry or report absent-safe/unmanaged state.
+  const isSupermemoryMcpAction =
+    action.id.includes("supermemory") ||
+    action.capabilityId === "supermemory" ||
+    action.toolId === "supermemory";
+  if (!isSupermemoryMcpAction) {
+    return {
+      actionId: action.id,
+      status: "failed",
+      message: "Unsupported MCP config action; no MCP write was attempted.",
+      diagnostics: redactDiagnostics(action.diagnostics ?? []),
+    };
+  }
 
   const result = await writer({
     serverName: "supermemory",
     projectRoot: dependencies.projectRoot,
   });
   const safeResultDiagnostics = (result.diagnostics ?? []).filter((diagnostic) => !/x-supermemory-api-key|authorization|bearer|token/i.test(String(diagnostic)));
-  if (!result.ok) {
+  const diagnosticText = safeResultDiagnostics.join(" ");
+  const redactedRaw = redactRaw(result);
+
+  if (result.ok) {
+    const absentSafe = /absent-safe|absent|no OpenCode MCP entry was present|no config directory was provided/i.test(diagnosticText);
     return {
       actionId: action.id,
-      status: "failed",
-      message: `MCP config write failed at ${result.path ?? "unknown path"}.`,
+      status: absentSafe ? "skipped" : "executed",
+      message: absentSafe
+        ? "Raw Supermemory MCP is absent-safe; Deck Runtime owns Adaptive Memory and no MCP config was written."
+        : "Retired stale Deck-managed raw Supermemory MCP entry; Deck Runtime owns Adaptive Memory and no new MCP config was written.",
       diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...safeResultDiagnostics]),
-      raw: redactRaw(result),
+      raw: redactedRaw,
+    };
+  }
+
+  if (/unmanaged|ambiguous|external-unobservable/i.test(diagnosticText)) {
+    return {
+      actionId: action.id,
+      status: "skipped",
+      message: "Existing raw Supermemory MCP is unmanaged or external-unobservable; Deck left it unchanged and no MCP config was written.",
+      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...safeResultDiagnostics]),
+      raw: redactedRaw,
+    };
+  }
+  if (/absent|no OpenCode MCP entry was present|disabled/i.test(diagnosticText)) {
+    return {
+      actionId: action.id,
+      status: "skipped",
+      message: "Raw Supermemory MCP is absent-safe; Deck Runtime owns Adaptive Memory and no MCP config was written.",
+      diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...safeResultDiagnostics]),
+      raw: redactedRaw,
     };
   }
 
   return {
     actionId: action.id,
-    status: "executed",
-    message: nativeOAuth
-      ? `Supermemory MCP config written successfully at ${result.path}. Optional runner OAuth is separate from Deck runtime credentials.`
-      : `Supermemory MCP config written successfully at ${result.path}; if the runner MCP server requires auth, complete that runner-native step separately. Deck did not copy the API key.`,
+    status: "failed",
+    message: `Raw Supermemory MCP retirement failed at ${result.path ?? "unknown path"}; no new MCP config was written.`,
     diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...safeResultDiagnostics]),
-    raw: redactRaw(result),
+    raw: redactedRaw,
   };
 }
 
@@ -1653,20 +1688,20 @@ async function validateAction(
       // Backward-compatible Pi-specific validator alias
       validator = dependencies.validateSupermemoryPiMcpConfig;
     }
-    if (!validator) {
-      return skippedResult(action, "MCP config validator not provided.");
-    }
 
-    const result = validator({ serverName: "supermemory" });
-    const redactedRaw = redactRaw(result);
-    if (!result.ok) {
-      return {
-        actionId: action.id,
-        status: "failed",
-        message: "Supermemory MCP config validation failed. MCP authentication must be completed through the runner-native flow; Deck does not copy API keys into runner MCP config.",
-        diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...((redactedRaw as { diagnostics?: Array<string | { message?: string; code?: string; severity?: string }> })?.diagnostics ?? [])]),
-        raw: redactedRaw,
-      };
+    let redactedRaw: unknown;
+    if (validator) {
+      const result = validator({ serverName: "supermemory" });
+      redactedRaw = redactRaw(result);
+      if (!result.ok) {
+        return {
+          actionId: action.id,
+          status: "failed",
+          message: "Raw Supermemory MCP inspection found a stale or unmanaged entry. Deck Runtime did not authorize it as project memory.",
+          diagnostics: redactDiagnostics([...action.diagnostics ?? [], ...((redactedRaw as { diagnostics?: Array<string | { message?: string; code?: string; severity?: string }> })?.diagnostics ?? [])]),
+          raw: redactedRaw,
+        };
+      }
     }
 
     const runtimeValidation = await validateAndStoreSupermemoryRuntimeCredential({
@@ -1691,8 +1726,8 @@ async function validateAction(
       actionId: action.id,
       status: "executed",
       message: nativeOAuth
-        ? "Supermemory MCP config validated successfully. Optional runner OAuth is separate; Deck runtime API credential was validated and stored."
-        : "Supermemory MCP config validated successfully. Deck runtime API credential was validated and stored; runner MCP authentication remains separate.",
+        ? "Supermemory Deck runtime API credential was validated and stored. Optional runner OAuth is separate and only affects ad-hoc MCP use."
+        : "Supermemory Deck runtime API credential was validated and stored; runner MCP authentication remains separate.",
       diagnostics: runtimeValidation.diagnostics,
       raw: redactedRaw,
     };

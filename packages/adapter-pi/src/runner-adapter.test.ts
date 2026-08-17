@@ -72,7 +72,7 @@ describe("Pi optional Web Search readiness", () => {
 });
 
 describe("Pi active-runner skill discovery provider", () => {
-  test("does not fabricate configured Supermemory scope in the generic install adapter path", () => {
+  test("uses verified Runtime-owned Supermemory scope in the generic install adapter path", () => {
     const projectRoot = tempHome();
     try {
       execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
@@ -89,8 +89,8 @@ describe("Pi active-runner skill discovery provider", () => {
       });
       const text = plan.files.map((file) => file.content).join("\n");
 
-      expect(text).toContain("Adaptive-memory project operations are disabled");
-      expect(text).toContain("scope mismatch");
+      expect(text).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(text).toContain("schemas permit model-selected project scope");
       expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
     } finally {
       cleanup(projectRoot);

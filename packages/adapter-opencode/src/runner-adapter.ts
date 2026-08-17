@@ -1447,8 +1447,8 @@ class OpenCodeRunnerAdapterImpl {
           });
         }
         case "supermemory": {
-          // Supermemory is handled separately via adaptive memory flow
-          return { ok: true, diagnostics: ["Supermemory MCP config handled by adaptive memory provider."] };
+          // Supermemory project memory is handled by Deck Runtime; raw OpenCode MCP is not materialized here.
+          return { ok: true, diagnostics: ["Supermemory project memory is handled by Deck Runtime; raw OpenCode MCP is not materialized."] };
         }
         default: {
           if (source) {
@@ -1693,12 +1693,22 @@ class OpenCodeRunnerAdapterImpl {
       };
     }
 
-    // Supermemory uses OpenCode's native OAuth discovery. The legacy token
-    // input remains accepted by the shared runner contract but is not persisted.
+    // Supermemory project memory is owned by Deck Runtime. The raw OpenCode MCP
+    // surface is never materialized here; when the adapter has an explicit
+    // config directory, this path may retire an exact stale Deck-managed entry.
     if (input.serverName === "supermemory") {
+      const configPath = this.#developerTeamConfigDir ? join(this.#developerTeamConfigDir, "opencode.json") : undefined;
+      if (!configPath) {
+        return {
+          ok: true,
+          path: "",
+          diagnostics: ["Raw OpenCode Supermemory MCP is absent-safe; no config directory was provided and no user config was inspected or written."],
+        };
+      }
       const { writeSupermemoryOpenCodeMcpConfig } = require("./opencode-mcp-config");
       const result = writeSupermemoryOpenCodeMcpConfig({
         serverName: input.serverName,
+        configPath,
         projectRoot: input.projectRoot,
       });
       const diagnosticsList: string[] = [];

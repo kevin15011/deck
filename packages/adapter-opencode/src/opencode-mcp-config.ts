@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, appendFileSync, renameSync, unlinkSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, statSync, writeFileSync, appendFileSync, renameSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   SERENA_MCP_ARGS,
@@ -22,24 +22,10 @@ export type OpenCodeMcpConfigValidationResult = {
 };
 
 /**
- * Validates the Supermemory MCP server entry in OpenCode's opencode.json.
- *
- * OpenCode MCP format (remote) with native OAuth discovery:
- *   {
- *     "mcp": {
- *       "supermemory": {
- *         "type": "remote",
- *         "url": "https://mcp.supermemory.ai/mcp",
- *         "headers": {
- *           "x-sm-project": "sm_project_example"
- *         }
- *       }
- *     }
- *   }
- *
- * OpenCode owns OAuth credentials outside project configuration. Deck only
- * installs the endpoint and project scope; the runner discovers authentication
- * and prompts once through `/connect` or `opencode mcp auth supermemory`.
+ * Inspects any present raw Supermemory MCP server entry in OpenCode's
+ * opencode.json. Absence is valid because Deck Runtime owns Adaptive Memory
+ * project isolation; present raw entries are diagnosed as stale Deck-managed
+ * or unmanaged/external-unobservable instead of being treated as readiness.
  *
  * @param options.configPath - Override the default opencode.json path.
  * @param options.serverName - Override the MCP server entry name (default: "supermemory").
@@ -51,13 +37,14 @@ export function validateSupermemoryOpenCodeMcpConfig(
   const homeDir = options.homeDir ?? process.env.HOME ?? "/home/user";
   const configPath = options.configPath ?? join(homeDir, ".config", "opencode", "opencode.json");
   const serverName = (options.serverName ?? SUPERMEMORY_MCP_SERVER_NAME).trim() || SUPERMEMORY_MCP_SERVER_NAME;
+  const absentDiagnostic = `Raw Supermemory MCP entry '${serverName}' is absent; Deck Runtime owns Adaptive Memory project isolation.`;
 
   if (!existsSync(configPath)) {
     return {
-      ok: false,
+      ok: true,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP config is missing at '${configPath}'; Supermemory tools were not injected.`],
+      diagnostics: [absentDiagnostic],
     };
   }
 
@@ -69,28 +56,48 @@ export function validateSupermemoryOpenCodeMcpConfig(
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP config contains malformed JSON; Supermemory tools were not injected: ${error instanceof Error ? error.message : String(error)}`],
+      diagnostics: [`OpenCode MCP config contains malformed JSON; raw Supermemory MCP state could not be inspected: ${error instanceof Error ? error.message : String(error)}`],
     };
   }
 
   if (!isPlainRecord(parsed) || !isPlainRecord(parsed.mcp)) {
     return {
-      ok: false,
+      ok: true,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP config must contain an object 'mcp' map; Supermemory tools were not injected.`],
+      diagnostics: [absentDiagnostic],
     };
   }
 
   const mcpSection = parsed.mcp as Record<string, unknown>;
   const serverEntry = mcpSection[serverName];
 
+  if (serverEntry === undefined) {
+    return {
+      ok: true,
+      path: configPath,
+      serverName,
+      diagnostics: [absentDiagnostic],
+    };
+  }
+
+  if (isExactDeckManagedOpenCodeSupermemoryEntry(serverEntry)) {
+    const projectScope = ((serverEntry as Record<string, unknown>).headers as Record<string, unknown>)["x-sm-project"] as string;
+    return {
+      ok: false,
+      path: configPath,
+      serverName,
+      projectScope: projectScope.trim(),
+      diagnostics: [`OpenCode MCP server '${serverName}' is a stale Deck-managed raw Supermemory MCP entry; retire it because Deck Runtime owns Adaptive Memory project isolation.`],
+    };
+  }
+
   if (!isPlainRecord(serverEntry)) {
     return {
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP config is missing server entry '${serverName}'; Supermemory tools were not injected.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' is unmanaged or ambiguous and external-unobservable; Deck Runtime did not authorize it as project memory.`],
     };
   }
 
@@ -99,7 +106,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' must have type 'remote'; Supermemory tools were not injected.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' is unmanaged or ambiguous and external-unobservable; expected raw Supermemory entries to use type 'remote'.`],
     };
   }
 
@@ -109,11 +116,10 @@ export function validateSupermemoryOpenCodeMcpConfig(
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' has missing or empty URL; Supermemory tools were not injected.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' has missing or empty URL; raw Supermemory MCP is unmanaged and external-unobservable.`],
     };
   }
 
-  // Validate URL: reject deprecated/custom URLs (REQ-OMC-004)
   const trimmedUrl = url.trim().toLowerCase();
   const validUrls = ["https://mcp.supermemory.ai/mcp"];
   const deprecatedUrls = [
@@ -122,20 +128,20 @@ export function validateSupermemoryOpenCodeMcpConfig(
   ];
 
   if (validUrls.includes(trimmedUrl)) {
-    // Valid URL - proceed
+    // Valid Supermemory endpoint; continue classifying the present raw entry.
   } else if (deprecatedUrls.includes(trimmedUrl)) {
     return {
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' uses deprecated URL; please use '${SUPERMEMORY_MCP_URL}' instead.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' uses deprecated URL; raw Supermemory MCP is unmanaged/external-unobservable and should not be used for project memory. Use Deck Runtime instead of '${SUPERMEMORY_MCP_URL}' raw MCP materialization.`],
     };
   } else {
     return {
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' uses unrecognized URL; expected '${SUPERMEMORY_MCP_URL}'.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' uses unrecognized URL; raw Supermemory MCP is unmanaged and external-unobservable.`],
     };
   }
 
@@ -144,7 +150,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' must leave OAuth enabled; remove 'oauth: false' and authenticate through OpenCode.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' has oauth: false; raw Supermemory MCP is unmanaged and external-unobservable.`],
     };
   }
 
@@ -154,7 +160,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' must have a headers object containing 'x-sm-project'; Supermemory tools were not injected.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' has no headers object; raw Supermemory MCP is unmanaged and external-unobservable.`],
     };
   }
 
@@ -163,7 +169,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' must not persist an Authorization header; OpenCode manages Supermemory OAuth credentials outside opencode.json.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' must not persist an Authorization header; OpenCode OAuth credentials must stay outside opencode.json, and raw Supermemory MCP is unmanaged and external-unobservable.`],
     };
   }
 
@@ -173,16 +179,16 @@ export function validateSupermemoryOpenCodeMcpConfig(
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' must include a canonical 'x-sm-project' header; Supermemory tools were not injected.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' is missing canonical 'x-sm-project' header; raw Supermemory MCP is unmanaged and external-unobservable.`],
     };
   }
 
   return {
-    ok: true,
+    ok: false,
     path: configPath,
     serverName,
     projectScope: projectHeader.trim(),
-    diagnostics: [],
+    diagnostics: [`OpenCode MCP server '${serverName}' is an unmanaged raw Supermemory MCP entry and external-unobservable; Deck Runtime did not authorize it as project memory.`],
   };
 }
 
@@ -273,14 +279,80 @@ function deriveSmProjectIdentifier(cwd?: string): { projectId?: string; derived:
   }
 }
 
+function isExactDeckManagedOpenCodeSupermemoryEntry(entry: unknown): boolean {
+  if (!isPlainRecord(entry)) return false;
+  const keys = Object.keys(entry).sort();
+  const allowed = ["enabled", "headers", "type", "url"];
+  if (JSON.stringify(keys) !== JSON.stringify(allowed)) return false;
+  if (entry.type !== "remote" || entry.url !== SUPERMEMORY_MCP_URL || entry.enabled !== true) return false;
+  if (!isPlainRecord(entry.headers)) return false;
+  const headerKeys = Object.keys(entry.headers);
+  if (headerKeys.length !== 1 || headerKeys[0] !== "x-sm-project") return false;
+  if (typeof entry.headers["x-sm-project"] !== "string") return false;
+  if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(entry.headers["x-sm-project"].trim())) return false;
+  return true;
+}
+
+function writeJsonAtomically(configPath: string, originalContent: string, config: Record<string, unknown>, fileSystem: OpenCodeMcpConfigFileSystem): void {
+  const tempPath = fileSystem.temporaryPath?.(configPath) ?? `${configPath}.deck-supermemory.tmp`;
+  if (resolve(dirname(tempPath)) !== resolve(dirname(configPath))) throw new Error("temporary path must share the config directory");
+  const rollbackPath = `${tempPath}.rollback`;
+  const mode = safeExistingFileMode(configPath, fileSystem) ?? 0o600;
+  const nextContent = JSON.stringify(config, null, 2);
+  let replaced = false;
+  try {
+    fileSystem.writeFile(tempPath, nextContent, { mode });
+    fileSystem.chmod?.(tempPath, mode);
+    if (fileSystem.readFile(configPath) !== originalContent) throw new Error("OpenCode MCP config changed while Deck was retiring stale Supermemory MCP; no changes were written.");
+    fileSystem.rename(tempPath, configPath);
+    replaced = true;
+    fileSystem.chmod?.(configPath, mode);
+    verifyRetiredSupermemoryConfig(configPath, nextContent, fileSystem);
+  } catch (error) {
+    try { fileSystem.unlink?.(tempPath); } catch { /* preserve original config */ }
+    try { fileSystem.unlink?.(rollbackPath); } catch { /* preserve original config */ }
+    if (replaced && fileSystem.exists(configPath)) {
+      try {
+        const current = fileSystem.readFile(configPath);
+        if (current !== originalContent && current !== nextContent) {
+          fileSystem.writeFile(rollbackPath, originalContent, { mode });
+          fileSystem.chmod?.(rollbackPath, mode);
+          fileSystem.rename(rollbackPath, configPath);
+          fileSystem.chmod?.(configPath, mode);
+        }
+      } catch {
+        try { fileSystem.unlink?.(rollbackPath); } catch { /* preserve original config */ }
+      }
+    }
+    throw error;
+  }
+}
+
+function safeExistingFileMode(configPath: string, fileSystem: OpenCodeMcpConfigFileSystem): number | undefined {
+  try {
+    const mode = fileSystem.statMode?.(configPath);
+    return typeof mode === "number" && Number.isFinite(mode) ? mode & 0o777 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function verifyRetiredSupermemoryConfig(configPath: string, expectedContent: string, fileSystem: OpenCodeMcpConfigFileSystem): void {
+  const actual = fileSystem.readFile(configPath);
+  if (actual !== expectedContent) throw new Error("OpenCode MCP config replacement verification failed.");
+  const parsed = JSON.parse(actual) as unknown;
+  if (!isPlainRecord(parsed)) throw new Error("OpenCode MCP config replacement did not produce a JSON object.");
+}
+
 /**
- * Writes or updates the Supermemory MCP server config in OpenCode's opencode.json.
+ * Retires only exact stale Deck-managed Supermemory MCP server config in
+ * OpenCode's opencode.json. It never creates a fresh raw Supermemory MCP entry.
  *
- * CONTRACT (Repair 2026-05-29):
- * - x-sm-project header is REQUIRED (derived from git remote or fallback to directory)
- * - User identity comes from OpenCode-managed OAuth
- * - No manual container tags
- * - NO legacy p: prefix in x-sm-project (use sm_project_ prefix)
+ * CONTRACT:
+ * - Deck Runtime owns Supermemory project memory and secret storage.
+ * - Raw OpenCode Supermemory MCP is optional ad-hoc surface only.
+ * - Absence is safe; exact stale Deck-managed entries may be retired.
+ * - Unmanaged or ambiguous entries are preserved and reported.
  */
 export function writeSupermemoryOpenCodeMcpConfig(
   options: {
@@ -293,55 +365,64 @@ export function writeSupermemoryOpenCodeMcpConfig(
     explicitProjectId?: string;
     /** Verified project root used for canonical repository identity. */
     projectRoot?: string;
+    /** Injectable atomic file boundary for hermetic tests. */
+    fileSystem?: OpenCodeMcpConfigFileSystem;
   },
 ): WriteSupermemoryOpenCodeMcpConfigResult {
   const homeDir = options.homeDir ?? process.env.HOME ?? "/home/user";
   const configPath = options.configPath ?? join(homeDir, ".config", "opencode", "opencode.json");
   const serverName = (options.serverName ?? SUPERMEMORY_MCP_SERVER_NAME).trim() || SUPERMEMORY_MCP_SERVER_NAME;
+  const fileSystem = options.fileSystem ?? defaultOpenCodeMcpConfigFileSystem();
   const diagnostics: string[] = [];
 
   const projectDerivation = options.explicitProjectId?.trim()
     ? { projectId: options.explicitProjectId.trim(), derived: true }
     : deriveSmProjectIdentifier(options.projectRoot);
   if (projectDerivation.diagnostic) diagnostics.push(projectDerivation.diagnostic);
-  if (!projectDerivation.projectId) {
+  const projectId = projectDerivation.projectId;
+  if (projectId && !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(projectId)) {
+    diagnostics.push("Canonical x-sm-project scope is required; raw Supermemory MCP configuration was not written.");
     return { ok: false, path: configPath, serverName, diagnostics };
   }
-  if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(projectDerivation.projectId)) {
-    diagnostics.push("Canonical x-sm-project scope is required; Supermemory MCP configuration was not written.");
+
+  if (!fileSystem.exists(configPath)) {
+    diagnostics.push("Raw Supermemory MCP is disabled; no OpenCode MCP configuration was written.");
     return { ok: false, path: configPath, serverName, diagnostics };
   }
-  const smProjectHeader = projectDerivation.projectId;
 
-  let config: Record<string, unknown> = {};
-  if (existsSync(configPath)) {
-    try {
-      const content = readFileSync(configPath, "utf-8");
-      config = JSON.parse(content) as Record<string, unknown>;
-    } catch (error) {
-      diagnostics.push(`Unable to parse existing opencode.json: ${error instanceof Error ? error.message : String(error)}`);
-      return { ok: false, path: configPath, serverName, diagnostics };
-    }
+  let config: Record<string, unknown>;
+  let originalContent: string;
+  try {
+    originalContent = fileSystem.readFile(configPath);
+    config = JSON.parse(originalContent) as Record<string, unknown>;
+  } catch (error) {
+    diagnostics.push(`Unable to parse existing opencode.json: ${error instanceof Error ? error.message : String(error)}`);
+    return { ok: false, path: configPath, serverName, diagnostics };
   }
 
-  const mcpSection = (config.mcp ?? {}) as Record<string, unknown>;
+  const mcpSection = config.mcp;
+  if (!isPlainRecord(mcpSection)) {
+    diagnostics.push("Raw Supermemory MCP is disabled; no OpenCode MCP entry was present to retire.");
+    return { ok: false, path: configPath, serverName, diagnostics };
+  }
 
-  mcpSection[serverName] = {
-    type: "remote",
-    url: SUPERMEMORY_MCP_URL,
-    headers: {
-      "x-sm-project": smProjectHeader,
-    },
-    enabled: true,
-  };
+  const existing = mcpSection[serverName];
+  if (existing === undefined) {
+    diagnostics.push("Raw Supermemory MCP is disabled; no OpenCode MCP entry was present to retire.");
+    return { ok: false, path: configPath, serverName, diagnostics };
+  }
+  if (!isExactDeckManagedOpenCodeSupermemoryEntry(existing)) {
+    diagnostics.push(`Existing OpenCode Supermemory MCP entry '${serverName}' is unmanaged or ambiguous; Deck left it unchanged and did not authorize raw Supermemory MCP.`);
+    return { ok: false, path: configPath, serverName, diagnostics };
+  }
 
-  config.mcp = mcpSection;
+  const nextMcp = { ...mcpSection };
+  delete nextMcp[serverName];
+  config.mcp = nextMcp;
 
   try {
-    writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
-    diagnostics.push(`Supermemory MCP server '${serverName}' configured for native OpenCode OAuth at ${configPath}.`);
-    diagnostics.push(`Authenticate once with '/connect' or 'opencode mcp auth ${serverName}'; OpenCode stores OAuth credentials outside this config.`);
-
+    writeJsonAtomically(configPath, originalContent, config, fileSystem);
+    diagnostics.push(`Retired stale Deck-managed OpenCode Supermemory MCP entry '${serverName}'; raw Supermemory MCP is no longer authorized by Deck.`);
     return { ok: true, path: configPath, serverName, diagnostics };
   } catch (error) {
     diagnostics.push(`Failed to write opencode.json: ${error instanceof Error ? error.message : String(error)}`);
@@ -392,10 +473,12 @@ export type WriteOpenCodeMcpConfigResult = {
 export type OpenCodeMcpConfigFileSystem = {
   exists: (path: string) => boolean;
   readFile: (path: string) => string;
-  writeFile: (path: string, content: string) => void;
+  writeFile: (path: string, content: string, options?: { mode?: number }) => void;
   rename: (from: string, to: string) => void;
   unlink?: (path: string) => void;
   temporaryPath?: (configPath: string) => string;
+  statMode?: (path: string) => number;
+  chmod?: (path: string, mode: number) => void;
 };
 
 export type WriteSerenaOpenCodeMcpConfigOptions = {
@@ -521,8 +604,21 @@ export function writeOpenCodeMcpConfig(
     }
   }
 
+  const nextContent = JSON.stringify(config, null, 2);
+  if (existsSync(configPath)) {
+    try {
+      if (readFileSync(configPath, "utf-8") === nextContent) {
+        diagnostics.push(`MCP server '${serverName}' already configured in OpenCode at ${configPath}; no changes were written.`);
+        return { ok: true, path: configPath, serverName, status: "unchanged", diagnostics };
+      }
+    } catch (error) {
+      diagnostics.push(`Unable to re-read existing opencode.json before write: ${error instanceof Error ? error.message : String(error)}`);
+      return { ok: false, path: configPath, serverName, diagnostics };
+    }
+  }
+
   try {
-    writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+    writeFileSync(configPath, nextContent, "utf-8");
     diagnostics.push(`MCP server '${serverName}' configured in OpenCode at ${configPath}.`);
 
     return { ok: true, path: configPath, serverName, diagnostics };
@@ -655,9 +751,11 @@ function defaultOpenCodeMcpConfigFileSystem(): OpenCodeMcpConfigFileSystem {
   return {
     exists: existsSync,
     readFile: (path) => readFileSync(path, "utf8"),
-    writeFile: (path, content) => writeFileSync(path, content, "utf8"),
+    writeFile: (path, content, options) => writeFileSync(path, content, { encoding: "utf8", mode: options?.mode }),
     rename: renameSync,
     unlink: unlinkSync,
+    statMode: (path) => statSync(path).mode,
+    chmod: chmodSync,
   };
 }
 

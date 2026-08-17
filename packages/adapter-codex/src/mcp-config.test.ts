@@ -2,17 +2,31 @@ import { describe, expect, test } from "bun:test";
 import { buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
 
 describe("Codex MCP semantic configuration", () => {
-  test("writes Supermemory as a credential-free native OAuth streamable HTTP server", () => {
+  test("does not materialize raw Supermemory MCP because scope would be model-selectable", () => {
     const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory", "serena", "context7"], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_v1_kevin15011_deck" });
     const merged = mergeCodexMcpServers("[mcp_servers.user]\ncommand = \"user-mcp\"\n", desired.servers);
-    expect(merged.status).toBe("updated");
+    expect(desired.gaps).toContain("supermemory-raw-mcp-disabled");
     expect(merged.content).toContain("[mcp_servers.context-mode]");
-    expect(merged.content).toContain('url = "https://mcp.supermemory.ai/mcp"');
-    expect(merged.content).toContain('"x-sm-project" = "sm_project_v1_kevin15011_deck"');
+    expect(merged.content).not.toContain("mcp.supermemory.ai");
+    expect(merged.content).not.toContain("sm_project_v1_kevin15011_deck");
     expect(merged.content).not.toContain("bearer_token_env_var");
     expect(merged.content).not.toContain("SUPERMEMORY_API_KEY");
     expect(merged.content).not.toContain("secret-value");
     expect(merged.content).toContain("[mcp_servers.user]");
+  });
+
+  test("retires only marker-owned stale Supermemory blocks and preserves unmarked external entries", () => {
+    const desired = buildCodexMcpServers({ packageIds: [], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_v1_kevin15011_deck" });
+    const stale = '# deck-codex-mcp:supermemory\n[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\nhttp_headers = { "x-sm-project" = "sm_project_v1_kevin15011_deck" }\n';
+    const retired = mergeCodexMcpServers(stale, desired.servers);
+    expect(retired).toMatchObject({ status: "updated" });
+    expect(retired.content).not.toContain("mcp_servers.supermemory");
+
+    const external = '[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\nhttp_headers = { "x-sm-project" = "sm_project_v1_other_repo" }\n';
+    const preserved = mergeCodexMcpServers(external, desired.servers);
+    expect(preserved).toMatchObject({ status: "unchanged" });
+    expect(preserved.content).toBe(external);
+    expect(inspectCodexSupermemoryMcpState(external)).toMatchObject({ ok: false, code: "supermemory-mcp-unmanaged" });
   });
 
   test("serializes the portable Deck Serena proxy without user-specific paths or shell", () => {
@@ -92,6 +106,7 @@ describe("Codex MCP semantic configuration", () => {
 
   test("classifies Codex Supermemory scope failures with provider-specific blocking codes", () => {
     expect(inspectCodexSupermemoryMcpState(`
+# deck-codex-mcp:supermemory
 [mcp_servers.supermemory]
 url = "https://mcp.supermemory.ai/mcp"
 
@@ -102,8 +117,15 @@ x-sm-project = "sm_project_v1_kevin15011_deck"
 [mcp_servers.supermemory]
 url = "https://mcp.supermemory.ai/mcp"
 http_headers = { "x-sm-project" = "sm_project_default" }
+`)).toMatchObject({ ok: false, code: "supermemory-mcp-unmanaged" });
+    expect(inspectCodexSupermemoryMcpState(`
+# deck-codex-mcp:supermemory
+[mcp_servers.supermemory]
+url = "https://mcp.supermemory.ai/mcp"
+http_headers = { "x-sm-project" = "sm_project_default" }
 `)).toMatchObject({ ok: false, code: "supermemory-project-scope-invalid" });
     expect(inspectCodexSupermemoryMcpState(`
+# deck-codex-mcp:supermemory
 [mcp_servers.supermemory]
 url = "https://mcp.supermemory.ai/mcp"
 `)).toMatchObject({ ok: false, code: "supermemory-project-scope-missing" });

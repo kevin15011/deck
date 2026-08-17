@@ -381,7 +381,7 @@ async function checkSupermemoryRuntimeReadiness(
     items.push(sink.ok
       ? { status: "ok", message: "Supermemory content-free observability sink path inspected read-only; Doctor did not create, rotate, or write metrics." }
       : { status: "warning", message: `Supermemory observability sink inspection found a readiness issue; runtime still fails open. ${redactSecretDiagnostic(sink.diagnostics.join(" "))}` });
-    items.push({ status: "warning", message: "Optional Supermemory MCP ad-hoc usage is unobservable-external-mcp: Deck cannot measure external MCP calls, and runtime metrics include only Deck-supervised automatic or explicit operations." });
+    items.push({ status: "ok", message: "Optional Supermemory MCP ad-hoc usage is unobservable-external-mcp: Deck cannot measure external MCP calls, and runtime metrics include only Deck-supervised automatic or explicit operations." });
   }
   items.push(...supermemoryRouteMatrixItems(runtimeStatuses));
   return { category: "Supermemory Runtime", status: deriveCategoryStatus(items), items };
@@ -435,6 +435,7 @@ function checkPiMcp(
 
 function checkOpenCodeMcp(
   readMcpSection: typeof readOpenCodeMcpSection,
+  validateSupermemoryMcp: typeof validateSupermemoryOpenCodeMcpConfig = validateSupermemoryOpenCodeMcpConfig,
 ): DoctorCategoryResult {
   const items: DoctorCheckItem[] = [];
 
@@ -443,11 +444,11 @@ function checkOpenCodeMcp(
     if (!mcpSection) {
       items.push({
         status: "warning",
-        message: "opencode.json not found or mcp section missing",
-        suggestion: "Configure MCP servers in opencode.json to enable memory features",
+        message: "opencode.json not found or mcp section missing; optional OpenCode MCP capabilities could not be inspected.",
       });
     } else {
       for (const known of KNOWN_OPENCODE_MCP_SERVERS) {
+        if (known.name === "supermemory") continue;
         const entry = mcpSection[known.name];
         if (entry && typeof entry === "object" && entry !== null) {
           const record = entry as Record<string, unknown>;
@@ -473,6 +474,23 @@ function checkOpenCodeMcp(
           });
         }
       }
+
+      const supermemoryValidation = validateSupermemoryMcp();
+      const supermemoryDiagnostics = supermemoryValidation.diagnostics.join(" ");
+      if (supermemoryValidation.ok) {
+        items.push({
+          status: "ok",
+          message: supermemoryDiagnostics || "Raw Supermemory MCP is absent; Deck Runtime owns Adaptive Memory project isolation.",
+        });
+      } else {
+        items.push({
+          status: "warning",
+          message: supermemoryDiagnostics || "Raw Supermemory MCP is present but not authorized for Deck project memory.",
+          suggestion: supermemoryDiagnostics.includes("stale Deck-managed")
+            ? "Run the Deck-owned retirement path; do not create a new raw Supermemory MCP entry."
+            : "Leave unmanaged external entries unchanged; Deck Runtime does not treat them as project memory.",
+        });
+      }
     }
   } catch (err) {
     items.push({
@@ -496,6 +514,7 @@ export function checkSupermemoryProjectScopeAgreement(input: {
   const scopePattern = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
   const derived = input.derivedScope?.trim();
   const derivedAvailable = !!derived && scopePattern.test(derived);
+  const configuredEntries = Object.entries(input.configuredScopes ?? {});
 
   if (!derivedAvailable) {
     items.push({
@@ -505,7 +524,7 @@ export function checkSupermemoryProjectScopeAgreement(input: {
     });
   }
 
-  for (const [runner, configuredValue] of Object.entries(input.configuredScopes ?? {})) {
+  for (const [runner, configuredValue] of configuredEntries) {
     const configured = configuredValue?.trim();
     if (!configured) {
       items.push({
@@ -541,11 +560,16 @@ export function checkSupermemoryProjectScopeAgreement(input: {
     });
   }
 
-  if (items.length === 0) {
-    items.push({
-      status: "warning",
-      message: "No Supermemory MCP scope materialization was found; adaptive-memory project operations remain disabled.",
-    });
+  if (configuredEntries.length === 0) {
+    items.push(derivedAvailable
+      ? {
+          status: "ok",
+          message: "No raw Supermemory MCP scope materialization was found; Deck Runtime owns canonical project scope when Adaptive Memory is enabled.",
+        }
+      : {
+          status: "warning",
+          message: "No raw Supermemory MCP scope materialization was found, and no verified repository scope is available for Deck Runtime.",
+        });
   }
 
   return {
@@ -894,7 +918,7 @@ export async function runDoctorDiagnostics(
   const opencodeMcpResult = checkOpenCodeMcp(() => {
     openCodeMcpSection = dependencies.readOpenCodeMcpSection();
     return openCodeMcpSection;
-  });
+  }, dependencies.validateSupermemoryOpenCodeMcpConfig);
   const configuredScopes: Record<string, string | undefined> = {};
   if (piMcpResult.status !== "warning") {
     try {
@@ -907,9 +931,11 @@ export async function runDoctorDiagnostics(
   if (openCodeMcpSection !== null) {
     try {
       const openCodeValidation = dependencies.validateSupermemoryOpenCodeMcpConfig();
-      configuredScopes.OpenCode = openCodeValidation.projectScope;
+      if (openCodeValidation.ok && openCodeValidation.projectScope) {
+        configuredScopes.OpenCode = openCodeValidation.projectScope;
+      }
     } catch {
-      configuredScopes.OpenCode = undefined;
+      // Raw OpenCode Supermemory MCP is optional; failed inspection is reported by the OpenCode MCP check.
     }
   }
   if (projectRoot) {

@@ -26,11 +26,16 @@ export function resolveDeckRuntimeSessionId(
   options: { runnerId: string; stateHome?: string } = { runnerId: "unknown" },
 ): DeckRuntimeSessionResolution {
   const path = sessionMapPath(options.stateHome);
-  const key = sessionMapKey(input.projectRoot, input.teamId, options.runnerId);
   const diagnostics: string[] = [];
+  const key = sessionMapKey(input.projectRoot, input.teamId, options.runnerId);
+  if (!key) {
+    diagnostics.push("Deck runtime session continuity skipped because no verified project identity was available.");
+    return { sessionId: createFreshDeckSessionId(), diagnostics, persist: () => [] };
+  }
   const map = readMap(path, diagnostics);
   if (input.mode === "resume-by-id") {
-    const native = map[nativeSessionMapKey(input.projectRoot, input.teamId, options.runnerId, input.sessionId)];
+    const nativeKey = nativeSessionMapKey(input.projectRoot, input.teamId, options.runnerId, input.sessionId);
+    const native = nativeKey ? map[nativeKey] : undefined;
     return { sessionId: native ?? deterministicResumeSessionId(input.sessionId), diagnostics, persist: () => [] };
   }
   if (input.mode === "resume-latest" && map[key]) return { sessionId: map[key], diagnostics, persist: () => [] };
@@ -60,9 +65,11 @@ export function persistNativeDeckRuntimeSessionMapping(input: {
 }): readonly string[] {
   const diagnostics: string[] = [];
   if (!input.nativeSessionId || /[\0\r\n]/.test(input.nativeSessionId)) return ["Deck runtime native session id was invalid; resume-by-id continuity was not updated."];
+  const key = nativeSessionMapKey(input.projectRoot, input.teamId, input.runnerId, input.nativeSessionId);
+  if (!key) return ["Deck runtime native session continuity skipped because no verified project identity was available."];
   const path = sessionMapPath(input.stateHome);
   const map = readMap(path, diagnostics);
-  map[nativeSessionMapKey(input.projectRoot, input.teamId, input.runnerId, input.nativeSessionId)] = input.deckSessionId;
+  map[key] = input.deckSessionId;
   writeMap(path, map, diagnostics);
   return diagnostics;
 }
@@ -71,16 +78,16 @@ function sessionMapPath(stateHome?: string): string {
   return join(stateHome ?? process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "deck", "supermemory-sessions.json");
 }
 
-function sessionMapKey(projectRoot: string, teamId: string, runnerId: string): string {
+function sessionMapKey(projectRoot: string, teamId: string, runnerId: string): string | undefined {
   const scope = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
-  const project = scope.ok ? scope.scope : projectRoot;
-  return createHash("sha256").update(JSON.stringify({ project, teamId, runnerId })).digest("hex");
+  if (!scope.ok) return undefined;
+  return createHash("sha256").update(JSON.stringify({ project: scope.scope, teamId, runnerId })).digest("hex");
 }
 
-function nativeSessionMapKey(projectRoot: string, teamId: string, runnerId: string, nativeSessionId: string): string {
+function nativeSessionMapKey(projectRoot: string, teamId: string, runnerId: string, nativeSessionId: string): string | undefined {
   const scope = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
-  const project = scope.ok ? scope.scope : projectRoot;
-  return createHash("sha256").update(JSON.stringify({ project, teamId, runnerId, nativeSessionId })).digest("hex");
+  if (!scope.ok) return undefined;
+  return createHash("sha256").update(JSON.stringify({ project: scope.scope, teamId, runnerId, nativeSessionId })).digest("hex");
 }
 
 function readMap(path: string, diagnostics: string[]): SessionMap {

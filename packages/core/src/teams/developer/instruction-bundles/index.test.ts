@@ -196,9 +196,10 @@ describe("buildCapabilityInstructionBundle", () => {
 
     expect(text).toContain("preserve code economy");
     expect(text).toContain("preserve serena");
-    expect(text).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-    expect(text).toContain("Automatic MCP write/save operations are disabled");
-    expect(text).toContain("supermemory_search_memory({ query, containerTag: \"sm_project_v1_kevin15011_deck\" })");
+    expect(text).toContain("Runtime-managed recall and capture bind project scope server-side");
+    expect(text).toContain("schemas permit model-selected project scope");
+    expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+    expect(text).not.toContain("supermemory_search_memory");
     expect(text).not.toContain("stale unscoped adaptive memory");
     expect(text).not.toContain("No manual containerTag required");
   });

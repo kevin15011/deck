@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { validateSupermemoryPiMcpRuntime } from "@deck/adapter-pi";
+import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { validateDeckConfig } from "@deck/core";
 import { runPiLaunch } from "./pi-launch-command";
 
@@ -64,6 +65,18 @@ function failedRuntimeValidation(code: "unauthenticated" | "timeout", message: s
   });
 }
 
+function hermeticSupermemoryRuntime(projectRoot: string): { stateHome: string; transport: SupermemoryRuntimeTransport } {
+  return {
+    stateHome: join(projectRoot, ".state"),
+    transport: {
+      async health() {},
+      async profile() { return { profile: { static: ["Hermetic test profile."] } }; },
+      async search() { return { results: [] }; },
+      async add() {},
+    },
+  };
+}
+
 function deckConfig(activeProvider: "none" | "supermemory" = "none") {
   return validateDeckConfig({
     version: 1,
@@ -94,6 +107,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
 
@@ -103,15 +117,19 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         const diagnosticText = JSON.stringify(result.memoryDiagnostics);
         expect(diagnosticText).not.toContain(SENTINEL_TOKEN);
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
-        expect(systemPrompt).toContain("Supermemory MCP Conversation Memory");
-        expect(systemPrompt).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-        expect(systemPrompt).toContain("supermemory_search_memory");
+        expect(systemPrompt).toContain("Supermemory Runtime Conversation Memory");
+        expect(systemPrompt).toContain("Deck Runtime binds the verified project scope server-side");
+        expect(systemPrompt).toContain("schemas permit model-selected project scope");
+        expect(systemPrompt).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(systemPrompt).not.toContain("supermemory_search_memory");
         expect(systemPrompt).not.toContain("supermemory.memory");
         expect(systemPrompt).not.toContain("memory` (action");
         expect(existsSync(join(projectRoot, ".pi", "agents", "deck-lead.md"))).toBe(true);
         const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8");
-        expect(orchestrator).toContain("Supermemory MCP Conversation Memory");
-        expect(orchestrator).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(orchestrator).toContain("Supermemory Runtime Conversation Memory");
+        expect(orchestrator).toContain("Deck Runtime binds the verified project scope server-side");
+        expect(orchestrator).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+        expect(orchestrator).not.toContain("supermemory_search_memory");
         expect(orchestrator).not.toContain("supermemory_add_memory");
         expect(orchestrator).not.toContain("supermemory.memory");
         expect(orchestrator).not.toContain(SENTINEL_TOKEN);
@@ -119,8 +137,10 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         const standaloneSkill = readFileSync(join(projectRoot, ".pi", "skills", "api-and-interface-design", "SKILL.md"), "utf-8");
         const bootstrapSkill = readFileSync(join(projectRoot, ".pi", "skills", "deck-onboard", "SKILL.md"), "utf-8");
         for (const content of [standaloneSkill, bootstrapSkill]) {
-          expect(content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-          expect(content).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+          expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+          expect(content).toContain("schemas permit model-selected project scope");
+          expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+          expect(content).not.toContain("supermemory_search_memory");
           expect(content).not.toContain("No manual containerTag required");
           expect(content).not.toContain("sm_project_default");
         }
@@ -145,10 +165,11 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
       expect(first.status).toBe("ready");
-      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8")).toContain("supermemory_search_memory");
+      expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8")).toContain("Supermemory Runtime Conversation Memory");
 
       const second = await runPiLaunch({
         teamId: "developer-team",
@@ -158,6 +179,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         supermemoryRuntimeValidator: () => failedRuntimeValidation("unauthenticated", `bad token ${SENTINEL_TOKEN}`),
       });
 
@@ -168,7 +190,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         expect(agentFiles.length).toBeGreaterThan(0);
         for (const agentFile of agentFiles) {
           const content = readFileSync(join(projectRoot, ".pi", "agents", agentFile), "utf-8");
-          expect(content).not.toContain("Supermemory MCP Conversation Memory");
+          expect(content).not.toContain("Supermemory Runtime Conversation Memory");
           expect(content).not.toContain("supermemory.execute");
           expect(content).not.toContain("supermemory.search_docs");
         }
@@ -178,7 +200,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     }
   });
 
-  test("configured Pi MCP scope mismatch fails closed for system prompt, agents, standalone skills, and bootstrap skills", async () => {
+  test("configured Pi MCP scope mismatch is ignored because Runtime owns project scope", async () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
@@ -193,12 +215,13 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
 
       expect(result.status).toBe("ready");
       if (result.status === "ready") {
-        expect(result.memoryDiagnostics.some((diagnostic) => diagnostic.providerId === "supermemory")).toBe(true);
+        expect(result.memoryDiagnostics.some((diagnostic) => diagnostic.providerId === "supermemory")).toBe(false);
         const samples = [
           readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8"),
           readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8"),
@@ -206,8 +229,8 @@ describe("runPiLaunch Supermemory provider resolution", () => {
           readFileSync(join(projectRoot, ".pi", "skills", "deck-onboard", "SKILL.md"), "utf-8"),
         ];
         for (const content of samples.slice(1)) {
-          expect(content).toContain("Adaptive-memory project operations are disabled");
-          expect(content).toContain("scope mismatch");
+          expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+          expect(content).toContain("schemas permit model-selected project scope");
           expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
           expect(content).not.toContain("sm_project_v1_other_repo");
         }
@@ -219,7 +242,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
     }
   });
 
-  test("configured Pi MCP default scope fails closed for system prompt, agents, standalone skills, and bootstrap skills", async () => {
+  test("configured Pi MCP default scope is ignored because Runtime owns project scope", async () => {
     const projectRoot = createTempDir();
     const piMcpConfigPath = join(projectRoot, "home", ".pi", "agent", "mcp.json");
     try {
@@ -234,12 +257,13 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
 
       expect(result.status).toBe("ready");
       if (result.status === "ready") {
-        expect(result.memoryDiagnostics.some((diagnostic) => diagnostic.providerId === "supermemory")).toBe(true);
+        expect(result.memoryDiagnostics.some((diagnostic) => diagnostic.providerId === "supermemory")).toBe(false);
         const samples = [
           readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8"),
           readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8"),
@@ -247,8 +271,8 @@ describe("runPiLaunch Supermemory provider resolution", () => {
           readFileSync(join(projectRoot, ".pi", "skills", "deck-onboard", "SKILL.md"), "utf-8"),
         ];
         for (const content of samples.slice(1)) {
-          expect(content).toContain("Adaptive-memory project operations are disabled");
-          expect(content).toContain("configured scope missing");
+          expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
+          expect(content).toContain("schemas permit model-selected project scope");
           expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
           expect(content).not.toContain("sm_project_default");
         }
@@ -276,16 +300,19 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         deckConfig: deckConfig("none"),
         cliMemoryProvider: "supermemory",
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         supermemoryRuntimeValidator: successfulRuntimeValidation,
       });
 
       expect(result.status).toBe("ready");
       if (result.status === "ready") {
         const systemPrompt = readFileSync(join(result.profileDir, "system-prompt.md"), "utf-8");
-        expect(systemPrompt).toContain("Supermemory MCP Conversation Memory");
+        expect(systemPrompt).toContain("Supermemory Runtime Conversation Memory");
+        expect(systemPrompt).not.toContain("supermemory_search_memory");
 
         const orchestrator = readFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), "utf-8");
-        expect(orchestrator).toContain("supermemory_search_memory");
+        expect(orchestrator).toContain("Supermemory Runtime Conversation Memory");
+        expect(orchestrator).not.toContain("supermemory_search_memory");
       }
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
@@ -329,6 +356,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
       });
 
       expect(result.status).toBe("ready");
@@ -366,6 +394,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
       });
 
       expect(result.status).toBe("ready");
@@ -397,6 +426,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         supermemoryRuntimeValidator: () => failedRuntimeValidation("unauthenticated", `bad token ${SENTINEL_TOKEN}`),
       });
 
@@ -425,6 +455,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         supermemoryRuntimeValidator: (options) => validateSupermemoryPiMcpRuntime({
           ...options,
           fetch: (async () => { throw new Error(SENTINEL_TOKEN); }) as unknown as typeof fetch,
@@ -456,6 +487,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("supermemory"),
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         supermemoryRuntimeValidator: () => failedRuntimeValidation("timeout", "Supermemory runtime validation timed out."),
       });
 
@@ -483,6 +515,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: validateDeckConfig({ version: 1, adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }),
         piMcpHomeDir: fakeHome,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
       });
 
       expect(result.status).toBe("ready");
@@ -507,6 +540,7 @@ describe("runPiLaunch Supermemory provider resolution", () => {
         dryRun: true,
         deckConfig: deckConfig("none"),
         cliMemoryProvider: "supermemory",
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         memoryProvider: {
           id: "supermemory",
           displayName: "Supermemory MCP",

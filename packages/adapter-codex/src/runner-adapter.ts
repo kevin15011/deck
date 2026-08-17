@@ -1057,15 +1057,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
       const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
       return resolved.ok ? resolved.scope : undefined;
     })();
-    const existingSupermemory = inspectCodexSupermemoryMcpState(existingConfig);
-    const configuredSupermemoryProjectScope = existingSupermemory.ok ? existingSupermemory.scope : undefined;
     const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions
       ?? buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "codex"), {
         supermemoryProjectScope: derivedSupermemoryProjectScope,
-        configuredSupermemoryProjectScope,
       }), {
       supermemoryProjectScope: derivedSupermemoryProjectScope,
-      configuredSupermemoryProjectScope,
     });
     if (!this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingConfig, config.webSearch.enabled).includes("serena")) return [];
     const preparation = await this.#prepareSerena(input.projectRoot);
@@ -1199,10 +1195,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const selectionCapabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions
       ?? buildCapabilityInstructionBundle(enabledCapabilityInstructionIds, {
         supermemoryProjectScope: derivedSupermemoryProjectScope,
-        configuredSupermemoryProjectScope: existingConfiguredSupermemoryProjectScope,
       }), {
       supermemoryProjectScope: derivedSupermemoryProjectScope,
-      configuredSupermemoryProjectScope: existingConfiguredSupermemoryProjectScope,
     });
     const mcpCapabilityIds = materializationScope === "full"
       ? this.#selectedMcpCapabilityIds(input, selectionCapabilityInstructions, existingCodexConfig, config.webSearch.enabled)
@@ -1223,10 +1217,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(input.capabilityInstructions
       ?? buildCapabilityInstructionBundle(enabledCapabilityInstructionIds, {
         supermemoryProjectScope: derivedSupermemoryProjectScope,
-        configuredSupermemoryProjectScope,
       }), {
       supermemoryProjectScope: derivedSupermemoryProjectScope,
-      configuredSupermemoryProjectScope,
     });
     let native = buildCodexDeveloperTeamInstallPlan({
       projectRoot: input.projectRoot,

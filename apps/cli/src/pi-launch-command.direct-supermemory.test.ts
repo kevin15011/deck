@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 
 import { runPiLaunchLegacyCompatibility as runPiLaunch } from "./pi-launch-command-legacy-compatibility.test-support";
 
@@ -32,6 +33,18 @@ function writePiMcpConfig(configPath: string) {
   );
 }
 
+function hermeticSupermemoryRuntime(projectRoot: string): { stateHome: string; transport: SupermemoryRuntimeTransport } {
+  return {
+    stateHome: join(projectRoot, ".state"),
+    transport: {
+      async health() {},
+      async profile() { return { profile: {} }; },
+      async search() { return { results: [] }; },
+      async add() {},
+    },
+  };
+}
+
 describe("runPiLaunch direct Supermemory dashboard config", () => {
   test("fails closed for invalid dashboard container tags without injecting memory", async () => {
     const projectRoot = createTempDir();
@@ -46,6 +59,7 @@ describe("runPiLaunch direct Supermemory dashboard config", () => {
         commandExists: () => true,
         dryRun: true,
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         activeProvider: "supermemory",
         supermemory: {
           mcpServerName: "supermemory",
@@ -97,6 +111,7 @@ describe("runPiLaunch direct Supermemory dashboard config", () => {
         commandExists: () => true,
         dryRun: true,
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         activeProvider: "supermemory",
         supermemory: {
           mcpServerName: "supermemory",
@@ -132,6 +147,7 @@ describe("runPiLaunch direct Supermemory dashboard config", () => {
         commandExists: () => true,
         dryRun: true,
         piMcpConfigPath,
+        supermemoryRuntime: hermeticSupermemoryRuntime(projectRoot),
         activeProvider: "supermemory",
         supermemory: {
           mcpServerName: "supermemory",

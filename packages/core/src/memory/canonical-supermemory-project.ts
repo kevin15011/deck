@@ -7,7 +7,9 @@ export type CanonicalSupermemoryProjectScope = `sm_project_v1_${string}_${string
 
 export type SupermemoryProjectScopeDiagnosticCode =
   | "SUPERMEMORY_PROJECT_IDENTITY_MISSING"
-  | "SUPERMEMORY_PROJECT_REMOTE_INVALID";
+  | "SUPERMEMORY_PROJECT_REMOTE_INVALID"
+  | "SUPERMEMORY_PROJECT_GIT_ROOT_INVALID"
+  | "SUPERMEMORY_PROJECT_REMOTE_MISMATCH";
 
 export type SupermemoryProjectScopeDiagnostic = Readonly<{
   code: SupermemoryProjectScopeDiagnosticCode;
@@ -31,43 +33,82 @@ export function resolveCanonicalSupermemoryProjectScope(input: {
   remotes: readonly string[];
 }): SupermemoryProjectScopeResult {
   const diagnostics: SupermemoryProjectScopeDiagnostic[] = [];
-  const remotes = [...input.remotes];
-  if (remotes.length === 0) {
-    const origin = readGitOriginRemote(input.projectRoot);
-    if (origin) remotes.push(origin);
+  const gitTopLevel = resolveVerifiedGitTopLevel(input.projectRoot);
+  if (!gitTopLevel) {
+    return {
+      ok: false,
+      diagnostics: [{
+        code: "SUPERMEMORY_PROJECT_GIT_ROOT_INVALID",
+        severity: "error",
+        message: "No verified Git top-level was available for the explicit project; Supermemory effects are disabled.",
+      }],
+    };
   }
-  for (const remote of remotes) {
+
+  const canonicalOrigin = readGitOriginRemote(gitTopLevel);
+  if (!canonicalOrigin) {
+    return {
+      ok: false,
+      diagnostics: [{
+        code: "SUPERMEMORY_PROJECT_IDENTITY_MISSING",
+        severity: "error",
+        message: "No canonical repository identity was available; Supermemory effects are disabled without a default scope fallback.",
+      }],
+    };
+  }
+
+  const originParsed = parseGitRemoteOwnerRepository(canonicalOrigin);
+  if (!originParsed) {
+    return {
+      ok: false,
+      diagnostics: [{
+        code: "SUPERMEMORY_PROJECT_REMOTE_INVALID",
+        severity: "error",
+        message: "The canonical Git origin remote could not be normalized into a repository identity.",
+      }],
+    };
+  }
+
+  for (const remote of input.remotes) {
     const parsed = parseGitRemoteOwnerRepository(remote);
     if (!parsed) {
       diagnostics.push({
         code: "SUPERMEMORY_PROJECT_REMOTE_INVALID",
         severity: "warning",
-        message: "A Git remote could not be normalized into a canonical repository identity.",
+        message: "A supplied Git remote could not be normalized into a canonical repository identity.",
       });
       continue;
     }
-    const owner = normalizeScopeSegment(parsed.owner);
-    const repository = normalizeScopeSegment(parsed.repository);
-    if (!owner || !repository) continue;
-    return {
-      ok: true,
-      scope: `sm_project_v1_${owner}_${repository}`,
-      owner,
-      repository,
-      diagnostics,
-    };
+    if (!sameRepositoryIdentity(originParsed, parsed)) {
+      return {
+        ok: false,
+        diagnostics: [{
+          code: "SUPERMEMORY_PROJECT_REMOTE_MISMATCH",
+          severity: "error",
+          message: "Supplied repository identity did not match the verified Git origin; Supermemory effects are disabled.",
+        }],
+      };
+    }
   }
 
-  return {
-    ok: false,
-    diagnostics: [
-      ...diagnostics,
-      {
+  const owner = normalizeScopeSegment(originParsed.owner);
+  const repository = normalizeScopeSegment(originParsed.repository);
+  if (!owner || !repository) {
+    return {
+      ok: false,
+      diagnostics: [{
         code: "SUPERMEMORY_PROJECT_IDENTITY_MISSING",
         severity: "error",
         message: "No canonical repository identity was available; Supermemory effects are disabled without a default scope fallback.",
-      },
-    ],
+      }],
+    };
+  }
+  return {
+    ok: true,
+    scope: `sm_project_v1_${owner}_${repository}`,
+    owner,
+    repository,
+    diagnostics,
   };
 }
 
@@ -105,10 +146,9 @@ function readGitOriginRemote(projectRoot: string): string | undefined {
     // Fall through to git for worktrees and non-standard git directories.
   }
   try {
-    const { GIT_DIR: _gitDir, GIT_WORK_TREE: _gitWorkTree, GIT_CONFIG: _gitConfig, ...env } = process.env;
     const origin = execFileSync("git", ["remote", "get-url", "origin"], {
       cwd,
-      env,
+      env: sanitizedGitIdentityEnv(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
@@ -117,6 +157,42 @@ function readGitOriginRemote(projectRoot: string): string | undefined {
     // No origin could be resolved.
   }
   return undefined;
+}
+
+function resolveVerifiedGitTopLevel(projectRoot: string): string | undefined {
+  const cwd = projectRoot.trim();
+  if (!cwd) return undefined;
+  try {
+    const topLevel = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      env: sanitizedGitIdentityEnv(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return topLevel || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sanitizedGitIdentityEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith("GIT_")) continue;
+    env[key] = value;
+  }
+  env.GIT_CONFIG_COUNT = "0";
+  env.GIT_CONFIG_NOSYSTEM = "1";
+  env.GIT_CONFIG_GLOBAL = "/dev/null";
+  return env;
+}
+
+function sameRepositoryIdentity(
+  a: { owner: string; repository: string },
+  b: { owner: string; repository: string },
+): boolean {
+  return normalizeScopeSegment(a.owner) === normalizeScopeSegment(b.owner)
+    && normalizeScopeSegment(a.repository) === normalizeScopeSegment(b.repository);
 }
 
 function isFilesystemLikeRemote(value: string): boolean {

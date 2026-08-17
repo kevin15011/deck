@@ -1030,14 +1030,15 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
         dashboardState: state,
         writeMcpConfig: async (input) => {
           writerInput = input;
-          return { ok: true, path: "/tmp/opencode.json", diagnostics: [] };
+          return { ok: true, path: "/tmp/opencode.json", diagnostics: ["Retired stale Deck-managed OpenCode Supermemory MCP entry 'supermemory'."] };
         },
       },
     );
 
     expect(writerInput).toEqual({ serverName: "supermemory" });
     expect(writeResult).toMatchObject({ status: "executed" });
-    expect(writeResult.message).toContain("Deck did not copy the API key");
+    expect(writeResult.message).toContain("Retired stale Deck-managed raw Supermemory MCP entry");
+    expect(writeResult.message).not.toContain("Supermemory MCP config written successfully");
 
     let validatorInput: { serverName?: string; token?: string } | undefined;
     const validateResult = await runPiRunnerAction(
@@ -1068,6 +1069,50 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
     expect(validateResult).toMatchObject({ status: "executed" });
     expect(order).toEqual(["mcp", "api", "secret"]);
     expect(validateResult.message).toContain("Deck runtime API credential was validated and stored");
+  });
+
+  test("synthetic Supermemory write-MCP action reports absent-safe without claiming a write", async () => {
+    const result = await runPiRunnerAction(
+      {
+        id: "adaptive-memory.supermemory.opencode-mcp-config",
+        kind: "write-mcp-config",
+        title: "Write Supermemory OpenCode MCP config",
+        status: "ready",
+      },
+      {
+        writeMcpConfig: async () => ({
+          ok: true,
+          path: "/tmp/opencode.json",
+          diagnostics: ["Raw OpenCode Supermemory MCP is absent-safe; no config directory was provided and no user config was inspected or written."],
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({ status: "skipped" });
+    expect(result.message).toContain("absent-safe");
+    expect(result.message).not.toContain("Supermemory MCP config written successfully");
+  });
+
+  test("synthetic Supermemory write-MCP action preserves unmanaged entries without claiming a write", async () => {
+    const result = await runPiRunnerAction(
+      {
+        id: "adaptive-memory.supermemory.opencode-mcp-config",
+        kind: "write-mcp-config",
+        title: "Write Supermemory OpenCode MCP config",
+        status: "ready",
+      },
+      {
+        writeMcpConfig: async () => ({
+          ok: false,
+          path: "/tmp/opencode.json",
+          diagnostics: ["Existing OpenCode Supermemory MCP entry 'supermemory' is unmanaged or ambiguous; Deck left it unchanged and did not authorize raw Supermemory MCP."],
+        }),
+      },
+    );
+
+    expect(result).toMatchObject({ status: "skipped" });
+    expect(result.message).toContain("unchanged");
+    expect(result.message).not.toContain("Supermemory MCP config written successfully");
   });
 
   test("native-OAuth OpenCode validation still fails without Deck runtime API key", async () => {
@@ -1106,6 +1151,42 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
     expect(String(validateResult.message)).toContain("runtime API key is required");
     expect(String(validateResult.message)).toContain("runner-native MCP OAuth does not make Deck runtime-ready");
     expect(order).toEqual(["mcp"]);
+  });
+
+  test("Supermemory validation does not require raw OpenCode MCP when Deck Runtime credential is present", async () => {
+    const order: string[] = [];
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
+      adaptiveMemory: {
+        provider: "supermemory",
+        supermemory: { configured: true, hasToken: true, diagnostics: [] },
+      },
+    });
+
+    const validateResult = await runPiRunnerAction(
+      {
+        id: "adaptive-memory.supermemory.validate",
+        kind: "validate",
+        title: "Validate Supermemory provider configuration",
+        status: "ready",
+      },
+      {
+        dashboardState: state,
+        supermemoryToken: TOKEN_SENTINEL,
+        validateSupermemoryReadOnlyApi: async ({ apiKey }) => {
+          order.push("api");
+          expect(apiKey).toBe(TOKEN_SENTINEL);
+          return { ok: true };
+        },
+        secretStore: { write: () => { order.push("secret"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => undefined },
+      },
+    );
+
+    expect(validateResult).toMatchObject({ status: "executed" });
+    expect(validateResult.message).toContain("Deck runtime API credential was validated and stored");
+    expect(validateResult.message).not.toContain("MCP config validated");
+    expect(order).toEqual(["api", "secret"]);
   });
 });
 

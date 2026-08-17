@@ -5,6 +5,7 @@ import {
   createSupermemoryRuntime,
   createSupermemoryHttpTransport,
   type SupermemoryRenderedContext,
+  type SupermemoryRequestDependency,
   type SupermemoryRuntimeMetric,
   type SupermemoryRuntimeRole,
   type SupermemoryRuntimeTransport,
@@ -12,6 +13,7 @@ import {
 import {
   createOwnerOnlyFileSecretStore,
   redactSecretDiagnostic,
+  fingerprintSupermemoryProjectScope,
   resolveCanonicalSupermemoryProjectScope,
   type DeckSecretStore,
   type NormalizedDeckConfig,
@@ -96,12 +98,18 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
   const diagnostics: SupermemoryRuntimeHostDiagnostic[] = [];
   const metrics: SupermemoryRuntimeMetric[] = [];
   const launchMode = input.launchMode ?? "exec";
-  const sink = input.observabilitySink ?? createSupermemoryObservabilitySink();
-  if (!sink.healthy) diagnostics.push({ code: "supermemory-runtime-observability-degraded", severity: "warning", message: "Supermemory observability sink is unavailable; runtime remains fail-open." });
+  let sink: SupermemoryObservabilitySink | undefined;
+  const ensureSink = (): SupermemoryObservabilitySink => {
+    if (sink) return sink;
+    sink = input.observabilitySink ?? createSupermemoryObservabilitySink({ stateHome: input.stateHome });
+    if (!sink.healthy) diagnostics.push({ code: "supermemory-runtime-observability-degraded", severity: "warning", message: "Supermemory observability sink is unavailable; runtime remains fail-open." });
+    return sink;
+  };
   const observe = (metric: SupermemoryRuntimeMetric) => {
     metrics.push(metric);
-    sink.observe(metric);
-    const sinkHealth = sink.health();
+    const activeSink = ensureSink();
+    activeSink.observe(metric);
+    const sinkHealth = activeSink.health();
     if (!sinkHealth.healthy && !diagnostics.some((diagnostic) => diagnostic.code === "supermemory-runtime-observability-degraded")) {
       diagnostics.push({ code: "supermemory-runtime-observability-degraded", severity: "warning", message: `Supermemory observability sink degraded after runtime start; metrics may be incomplete. ${redactSecretDiagnostic(sinkHealth.diagnostics.join(" "))}` });
     }
@@ -128,9 +136,7 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
       return disabled();
     }
 
-    const scope = input.canonicalScope
-      ? { ok: true as const, scope: input.canonicalScope, diagnostics: [] }
-      : resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
+    const scope = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
     if (!scope.ok) {
       diagnostics.push({ code: "supermemory-runtime-scope-missing", severity: "error", message: scope.diagnostics.map((diagnostic) => diagnostic.message).join(" ") });
       return disabled();
@@ -150,6 +156,7 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
 
     const transport = input.transport ?? createSupermemoryHttpTransport({ apiKey: apiKey!, timeoutMs: 8_000 });
     const runtime = createSupermemoryRuntime({ canonicalScope: scope.scope, sessionId, transport, runnerId: input.runnerId, observe });
+    const scopeFingerprint = fingerprintSupermemoryProjectScope(scope.scope);
 
     const health = await runtime.health({ dependency: "automatic" });
     observe(health.metrics);
@@ -160,6 +167,8 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
 
     const contexts: SupermemoryRenderedContext[] = [];
     if (input.deferInitialRecallToLoopback !== true) {
+      const recallStartedAt = Date.now();
+      observe(runtimeRecallAttemptMetric({ runnerId: input.runnerId, role, scopeFingerprint, dependency: "automatic" }));
       const [profile, search] = await Promise.all([
         runtime.profile({ role, dependency: "automatic" }),
         runtime.search({ role, query: input.query ?? "current task project context", dependency: "automatic" }),
@@ -173,6 +182,18 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
       }
       if (profile.ok) contexts.push(profile.context);
       else diagnostics.push({ code: "supermemory-runtime-recall-failed", severity: "warning", message: redactSecretDiagnostic(profile.diagnostics.join(" ")) });
+      const recallDiagnostics = [
+        ...(profile.ok ? [] : profile.diagnostics),
+        ...(search.ok ? [] : search.diagnostics),
+      ];
+      observe(runtimeRecallTerminalMetric({
+        basis: profile.metrics,
+        operationMetrics: [profile.metrics, search.metrics],
+        contexts,
+        diagnostics: recallDiagnostics,
+        startedAt: recallStartedAt,
+        dependency: "automatic",
+      }));
     }
 
     const advisoryText = renderAdvisoryContext(contexts);
@@ -257,6 +278,7 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
             role,
             runtime,
             observe,
+            scopeFingerprint,
             stateHome: input.stateHome,
           });
         } catch (error) {
@@ -295,6 +317,7 @@ function startSupermemoryRunnerLoopbackBridge(input: {
   role: SupermemoryRuntimeRole;
   runtime: SupermemoryRuntimeInstance;
   observe(metric: SupermemoryRuntimeMetric): void;
+  scopeFingerprint: string;
   stateHome?: string;
 }): SupermemoryRunnerLoopbackBridge {
   const token = `deck-loopback-${randomBytes(24).toString("base64url")}`;
@@ -350,13 +373,14 @@ function startSupermemoryRunnerLoopbackBridge(input: {
 
 async function handleLoopbackRequest(
   body: string,
-  host: { runnerId: string; projectRoot: string; teamId: string; sessionId: string; role: SupermemoryRuntimeRole; runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; stateHome?: string },
+  host: { runnerId: string; projectRoot: string; teamId: string; sessionId: string; role: SupermemoryRuntimeRole; runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; scopeFingerprint: string; stateHome?: string },
   rolesBySession: Map<string, SupermemoryRuntimeRole>,
   successfulEvents: Map<string, number>,
 ): Promise<Record<string, unknown>> {
   let event: RunnerLoopbackEvent;
   try { event = JSON.parse(body) as RunnerLoopbackEvent; } catch { return { ok: false, diagnostics: ["invalid-json"] }; }
   if (event.schema !== "deck-runner-memory-loopback-v1" || event.runnerId !== host.runnerId) return { ok: false, diagnostics: ["invalid-evidence"] };
+  if (hasRunnerSuppliedScopeField(event)) return { ok: false, diagnostics: ["scope-input-rejected"] };
   const eventId = typeof event.eventId === "string" && /^[A-Za-z0-9_.:-]{1,160}$/.test(event.eventId) ? event.eventId : undefined;
   const timestamp = typeof event.timestamp === "number" && Number.isFinite(event.timestamp) ? event.timestamp : undefined;
   if (!eventId || timestamp === undefined || Math.abs(Date.now() - timestamp) > 5 * 60_000) return { ok: false, diagnostics: ["invalid-event-id"] };
@@ -399,24 +423,91 @@ async function handleLoopbackRequest(
   return { ok: false, diagnostics: ["unsupported-event"] };
 }
 
+function runtimeRecallAttemptMetric(input: {
+  runnerId?: string;
+  role: SupermemoryRuntimeRole;
+  scopeFingerprint: string;
+  dependency: SupermemoryRequestDependency;
+}): SupermemoryRuntimeMetric {
+  return {
+    provider: "supermemory",
+    operation: "runtime_recall",
+    channel: "runtime-recall",
+    status: "attempted",
+    durationMs: 0,
+    runnerId: input.runnerId,
+    role: input.role,
+    scopeFingerprint: input.scopeFingerprint,
+    dependency: input.dependency,
+  };
+}
+
+function runtimeRecallTerminalMetric(input: {
+  basis: SupermemoryRuntimeMetric;
+  operationMetrics: readonly SupermemoryRuntimeMetric[];
+  contexts: readonly SupermemoryRenderedContext[];
+  diagnostics: readonly string[];
+  startedAt: number;
+  dependency: SupermemoryRequestDependency;
+}): SupermemoryRuntimeMetric {
+  const skippedByPolicy = input.operationMetrics.every((metric) => metric.status === "skipped" && metric.reason === "role_policy_skip");
+  const failed = input.diagnostics.length > 0 && input.contexts.length === 0 && !skippedByPolicy;
+  return {
+    ...input.basis,
+    operation: "runtime_recall",
+    channel: "runtime-recall",
+    status: skippedByPolicy ? "skipped" : failed ? "failed" : "succeeded",
+    reason: skippedByPolicy ? "role_policy_skip" : failed ? "provider_error" : undefined,
+    durationMs: Date.now() - input.startedAt,
+    approximateInjectedTokens: conservativeTokenCount(renderAdvisoryContext(input.contexts) ?? ""),
+    resultCount: input.contexts.reduce((sum, context) => sum + context.items.length, 0),
+    dependency: input.dependency,
+  };
+}
+
+function hasRunnerSuppliedScopeField(event: Record<string, unknown>): boolean {
+  const forbidden = new Set(["containerTag", "scope", "projectScope", "supermemoryProjectScope", "configuredSupermemoryProjectScope", "x-sm-project"]);
+  const visit = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(visit);
+    if (!value || typeof value !== "object") return false;
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (forbidden.has(key)) return true;
+      if (visit(nested)) return true;
+    }
+    return false;
+  };
+  return visit(event);
+}
+
 async function recallForLoopback(
-  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void },
+  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; scopeFingerprint: string },
   role: SupermemoryRuntimeRole,
   query?: string,
   dependency: "automatic" | "explicit-recall" = "automatic",
 ): Promise<Record<string, unknown>> {
   const contexts: SupermemoryRenderedContext[] = [];
   const diagnostics: string[] = [];
+  const operationMetrics: SupermemoryRuntimeMetric[] = [];
+  const startedAt = Date.now();
+  host.observe(runtimeRecallAttemptMetric({ role, scopeFingerprint: host.scopeFingerprint, dependency }));
   const profile = await host.runtime.profile({ role, dependency });
+  operationMetrics.push(profile.metrics);
   host.observe(profile.metrics);
   if (query?.trim()) {
     const search = await host.runtime.search({ role, query, dependency });
+    operationMetrics.push(search.metrics);
     host.observe(search.metrics);
     if (search.ok) contexts.push(search.context);
     else diagnostics.push(...search.diagnostics);
   }
   if (profile.ok) contexts.push(profile.context);
   else diagnostics.push(...profile.diagnostics);
+
+  const basis = operationMetrics[0];
+  if (basis) {
+    host.observe(runtimeRecallTerminalMetric({ basis, operationMetrics, contexts, diagnostics, startedAt, dependency }));
+  }
+
   if (dependency === "explicit-recall" && contexts.length === 0) return { ok: false, diagnostics };
   return { ok: true, advisoryText: renderAdvisoryContext(contexts), diagnostics: [] };
 }

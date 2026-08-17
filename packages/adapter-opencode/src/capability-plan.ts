@@ -385,20 +385,11 @@ function addAdaptiveMemoryActions(
       ? "Deck runtime API key is validated and stored in Deck's owner-only secret store."
       : "Deck runtime API key is required for automatic Adaptive Memory and must be validated/stored before Review & Install."],
   });
-  groups.configWrites.push({
-    id: "adaptive-memory.supermemory.opencode-mcp-config",
-    kind: "write-mcp-config",
-    title: "Configure Supermemory OpenCode MCP",
-    description: "Writes credential-free Supermemory MCP server config to OpenCode's opencode.json for optional ad-hoc MCP use.",
-    status: configured ? "ready" : "pending",
-    required: true,
-    diagnostics: ["No API key is copied into MCP config. OpenCode native OAuth is optional and only affects ad-hoc Supermemory MCP, not Deck automatic runtime memory."],
-  });
   groups.validations.push({
     id: "adaptive-memory.supermemory.validate",
     kind: "validate",
     title: "Validate Supermemory provider configuration",
-    description: "Validate non-secret config before provider injection.",
+    description: "Validate Deck Runtime credential and non-secret config before provider injection.",
     status: supermemoryReady ? "ready" : "pending",
     required: true,
   });
@@ -406,7 +397,7 @@ function addAdaptiveMemoryActions(
     code: "SUPERMEMORY_CONFIGURATION_REQUIRED",
     severity: supermemoryReady ? "info" : "warning",
     message: supermemoryReady
-      ? "Supermemory Deck runtime API credential is validated and stored. OpenCode native OAuth is optional for ad-hoc Supermemory MCP; no API key is copied into MCP config."
+      ? "Supermemory Deck runtime API credential is validated and stored. OpenCode native OAuth is optional for ad-hoc Supermemory MCP and does not participate in Deck Runtime readiness."
       : "Supermemory Deck runtime API key must be validated and stored before Adaptive Memory can run. OpenCode native OAuth is optional and does not satisfy Deck runtime readiness.",
     actionId: "adaptive-memory.supermemory.deck-config",
   });

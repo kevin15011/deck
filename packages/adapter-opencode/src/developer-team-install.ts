@@ -84,7 +84,6 @@ import { buildCommandGenerationPlan, applyCommandGeneration } from "./command-ge
 import { mergeAndWrite } from "./config-merge";
 import { resolveModelConfig, DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { detectMermaidPluginStatus, INTERNAL_OPENCODE_PACKAGE_IDS } from "./internal-opencode-packages";
-import { validateSupermemoryOpenCodeMcpConfig } from "./opencode-mcp-config";
 import type { AgentEntry, OpenCodeConfig } from "./types";
 import executionPluginAssetPath from "../assets/opencode/plugins/developer-team-execution.generated.js" with { type: "file" };
 
@@ -188,6 +187,8 @@ const SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
 export type MemoryInjectionOptions = {
   /** A pre-built memory injection bundle (takes precedence over provider). */
   memoryInjection?: MemoryInjectionBundle;
+  /** Pre-built bundles are accepted only from Deck's trusted composition root. */
+  trustedMemoryInjection?: boolean;
   /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
   memoryProvider?: AdaptiveMemoryProvider;
   /** Provider IDs accepted by this adapter/caller registry. */
@@ -312,31 +313,29 @@ function validateMemoryBundleTools(
 
 function resolveOpenCodeMemoryInjection(
   options?: MemoryInjectionOptions,
-  configDir?: string,
+  _configDir?: string,
   projectRoot?: string,
 ): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
   let memoryProvider = options?.memoryProvider;
   let scopeDiagnostic: MemoryDiagnostic | undefined;
   if (memoryProvider?.id === "supermemory") {
     const derived = projectRoot ? resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] }) : undefined;
-    const validation = validateSupermemoryOpenCodeMcpConfig({ configPath: configDir ? join(configDir, "opencode.json") : undefined });
-    if (derived?.ok && validation.ok && validation.projectScope === derived.scope) {
+    if (derived?.ok) {
       memoryProvider = createSupermemoryMemoryProvider({
-        mcpServerName: validation.serverName,
         projectScope: derived.scope,
-        configuredProjectScope: validation.projectScope,
       });
     } else {
       memoryProvider = undefined;
       scopeDiagnostic = {
         code: "memory_provider_unavailable",
         providerId: "supermemory",
-        message: "Supermemory OpenCode MCP scope is missing or mismatched; omitted adaptive-memory injection with redacted diagnostics.",
+        message: "Supermemory project identity is missing or invalid; omitted adaptive-memory injection with redacted diagnostics.",
       };
     }
   }
   const result = resolveMemoryInjection({
     memoryInjection: options?.memoryInjection,
+    trustedMemoryInjection: options?.trustedMemoryInjection,
     memoryProvider,
     supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS,
     buildContext: { teamId: "developer-team" },
@@ -344,13 +343,10 @@ function resolveOpenCodeMemoryInjection(
 
   const { bundle: memoryBundle, diagnostics } = result;
 
-  // Validate tool bindings from the provider (fail-open)
-  // Determine provider ID from options or infer from bundle
   let providerId: string | undefined;
   if (options?.memoryProvider) {
     providerId = options.memoryProvider.id;
   } else if (memoryBundle && memoryBundle.toolBindings.length > 0) {
-    // Infer from tool names as fallback
     const toolNames = new Set<string>();
     for (const b of memoryBundle.toolBindings) {
       for (const t of b.toolNames) toolNames.add(t);
@@ -360,7 +356,6 @@ function resolveOpenCodeMemoryInjection(
     }
   }
 
-  // Add validation diagnostics
   const validationDiags = validateMemoryBundleTools(memoryBundle, providerId);
   const allDiagnostics = [...diagnostics, ...(scopeDiagnostic ? [scopeDiagnostic] : []), ...validationDiags];
 
@@ -599,13 +594,8 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
     const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
     return resolved.ok ? resolved.scope : undefined;
   })();
-  const configuredSupermemoryProjectScope = (() => {
-    const validation = validateSupermemoryOpenCodeMcpConfig({ configPath: join(configDir, "opencode.json") });
-    return validation.ok ? validation.projectScope : undefined;
-  })();
   const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(options?.capabilityInstructions, {
     supermemoryProjectScope: derivedSupermemoryProjectScope,
-    configuredSupermemoryProjectScope,
   });
 
   // Build tool policies from capability instructions for dynamic tool resolution

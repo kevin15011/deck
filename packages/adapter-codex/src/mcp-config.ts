@@ -95,6 +95,7 @@ export function inspectCodexSupermemoryMcpState(source: string): CodexSupermemor
   try {
     const server = existingServers(source).get("supermemory") as Record<string, unknown> | undefined;
     if (!server) return { ok: false, code: "supermemory-mcp-missing" };
+    if (!isDeckManagedCodexMcpServer(source, "supermemory")) return { ok: false, code: "supermemory-mcp-unmanaged" };
     if (server.url !== CODEX_SUPERMEMORY_MCP_URL) return { ok: false, code: "supermemory-endpoint-invalid" };
     if (server.bearer_token_env_var !== undefined || server.env_http_headers !== undefined) return { ok: false, code: "supermemory-mcp-unmanaged" };
     const scope = server.http_headers && typeof server.http_headers === "object"
@@ -216,9 +217,16 @@ function stripManagedServerBlocks(source: string, ids: ReadonlySet<string>): str
   for (let index = 0; index < lines.length;) {
     const marker = lines[index]!.trimEnd().match(/^# deck-codex-mcp:([a-z0-9-]+)$/);
     if (!marker || !ids.has(marker[1]!)) { output.push(lines[index++]!); continue; }
+    const id = marker[1]!;
     index += 1;
-    if (index < lines.length && lines[index]!.trimEnd() === `[mcp_servers.${marker[1]}]`) index += 1;
-    while (index < lines.length && !lines[index]!.startsWith("[") && !lines[index]!.startsWith("# deck-codex-mcp:")) index += 1;
+    while (index < lines.length) {
+      const trimmed = lines[index]!.trimEnd();
+      if (/^# deck-codex-mcp:([a-z0-9-]+)$/.test(trimmed)) break;
+      const section = trimmed.match(/^\[mcp_servers\.([^\].]+)(?:\.|\])/);
+      if (section && section[1] !== id) break;
+      if (trimmed.startsWith("[") && !section) break;
+      index += 1;
+    }
   }
   return output.join("").replace(/\n{3,}/g, "\n\n");
 }
@@ -303,7 +311,7 @@ export function buildCodexMcpServers(input: {
     } else if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(scope)) {
       gaps.push("supermemory-project-scope-invalid");
     } else {
-      servers.push({ id: "supermemory", transport: "streamable-http", url: CODEX_SUPERMEMORY_MCP_URL, httpHeaders: { "x-sm-project": scope } });
+      gaps.push("supermemory-raw-mcp-disabled");
     }
   }
   if (selected.has(WEB_SEARCH_CAPABILITY_ID)) {

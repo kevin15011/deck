@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import type { DoctorDiagnosticsResult } from "../doctor-command/types";
 import { createDeckConfigStore } from "../deck-config-store";
 import { installGlobalConfigRealEnvSentinel } from "../../../../packages/core/src/config/global-config-real-env-sentinel.test-helper";
@@ -30,6 +31,10 @@ function fabPiStatus(command = "pi") {
 
 function fabClaudeStatus(command = "claude") {
   return { environment: "Claude Development Environment", runtime: "claude" as const, installed: true, command };
+}
+
+function fabOpenCodeStatus(command = "opencode") {
+  return { environment: "OpenCode Development Environment", runtime: "opencode" as const, installed: true, command };
 }
 
 function fabCodexStatus(command = "codex") {
@@ -293,14 +298,135 @@ describe("runDoctorDiagnostics", () => {
     dependencies.readSupermemorySecret.mockReturnValue("sk-test-doctor-secret-value");
     dependencies.checkSupermemoryApi.mockResolvedValue({ operations: ["health", "profile", "search"] } as never);
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-doctor-sm-readonly-"));
-    mkdirSync(join(projectRoot, ".git"), { recursive: true });
-    writeFileSync(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+    execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
 
     await runDoctorDiagnostics(dependencies, projectRoot);
 
     expect(dependencies.checkSupermemoryApi).toHaveBeenCalledWith({ apiKey: "sk-test-doctor-secret-value", containerTag: "sm_project_v1_kevin15011_deck" });
     expect(dependencies.checkSupermemoryApi.mock.results[0]?.type).toBe("return");
     expect(dependencies.checkSupermemoryObservabilitySink).toHaveBeenCalledTimes(1);
+  });
+
+  test("Supermemory runtime ready without raw OpenCode MCP does not report MCP remediation or disabled project memory", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([fabOpenCodeStatus()]);
+    mockInspectOpenCodeEnvironment.mockReturnValue({
+      version: "1.0.0",
+      configDirectory: "/fake",
+      packageManifest: { name: "opencode" },
+      existingConfiguration: true,
+    });
+    mockReviewOpenCodeTools.mockReturnValue({ installedPackages: [], tools: [], toolStatuses: [] });
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue({ ...fabOkMcpResult(), projectScope: "sm_project_v1_kevin15011_deck" });
+    mockValidateSupermemoryOpenCodeMcpConfig.mockReturnValue({
+      ok: true,
+      path: "/fake/opencode.json",
+      serverName: "supermemory",
+      diagnostics: ["Raw Supermemory MCP is absent; Deck Runtime owns Adaptive Memory."],
+    });
+    const dependencies = fabDependencies();
+    dependencies.configStore.write({ adaptiveMemory: { enabled: true } });
+    dependencies.readSupermemorySecret.mockReturnValue("sk-test-doctor-secret-value");
+    dependencies.checkSupermemoryApi.mockResolvedValue({ operations: ["health", "profile", "search"] } as never);
+    dependencies.readOpenCodeMcpSection.mockReturnValue({
+      "codebase-memory-mcp": { type: "local", command: ["codebase-memory-mcp"] },
+      serena: { type: "local", command: ["serena"] },
+    });
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-doctor-runtime-no-raw-mcp-"));
+    execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
+
+    const result = await runDoctorDiagnostics(dependencies, projectRoot);
+    const text = JSON.stringify(result);
+
+    expect(result.memory.find((item) => item.category === "Supermemory Runtime")?.status).toBe("ok");
+    expect(text).toContain("Raw Supermemory MCP is absent");
+    expect(text).not.toContain("Configure Supermemory");
+    expect(text).not.toContain("not injected");
+    expect(text).not.toContain("project memory operations remain disabled");
+    expect(text).not.toContain("project memory operations are not authorized for that runner");
+    expect(result.mcp.find((item) => item.category === "Supermemory Project Scope")?.status).not.toBe("error");
+  });
+
+  test("disabled Adaptive Memory remains disabled without raw Supermemory MCP guidance", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([fabOpenCodeStatus()]);
+    mockInspectOpenCodeEnvironment.mockReturnValue({
+      version: "1.0.0",
+      configDirectory: "/fake",
+      packageManifest: { name: "opencode" },
+      existingConfiguration: true,
+    });
+    mockReviewOpenCodeTools.mockReturnValue({ installedPackages: [], tools: [], toolStatuses: [] });
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
+    mockValidateSupermemoryOpenCodeMcpConfig.mockReturnValue({
+      ok: true,
+      path: "/fake/opencode.json",
+      serverName: "supermemory",
+      diagnostics: ["Raw Supermemory MCP is absent; Deck Runtime owns Adaptive Memory."],
+    });
+    const dependencies = fabDependencies();
+    dependencies.configStore.write({ adaptiveMemory: { enabled: false } });
+    dependencies.readOpenCodeMcpSection.mockReturnValue({
+      "codebase-memory-mcp": { type: "local", command: ["codebase-memory-mcp"] },
+      serena: { type: "local", command: ["serena"] },
+    });
+
+    const result = await runDoctorDiagnostics(dependencies, mkdtempSync(join(tmpdir(), "deck-doctor-disabled-memory-")));
+    const text = JSON.stringify(result);
+
+    expect(text).toContain("Adaptive Memory runtime is disabled");
+    expect(text).not.toContain("Configure Supermemory");
+    expect(text).not.toContain("Supermemory tools were not injected");
+    expect(dependencies.checkSupermemoryApi).not.toHaveBeenCalled();
+  });
+
+  test("Doctor reports present stale Deck-managed raw OpenCode Supermemory MCP as retireable", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([]);
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
+    mockValidateSupermemoryOpenCodeMcpConfig.mockReturnValueOnce({
+      ok: false,
+      path: "/fake/opencode.json",
+      serverName: "supermemory",
+      projectScope: "sm_project_v1_old_project",
+      diagnostics: ["OpenCode MCP server 'supermemory' is a stale Deck-managed raw Supermemory MCP entry; retire it because Deck Runtime owns Adaptive Memory project isolation."],
+    });
+    const dependencies = fabDependencies();
+    dependencies.readOpenCodeMcpSection.mockReturnValue({
+      supermemory: { type: "remote", url: "https://mcp.supermemory.ai/mcp", enabled: true, headers: { "x-sm-project": "sm_project_v1_old_project" } },
+    });
+
+    const result = await runDoctorDiagnostics(dependencies);
+    const opencodeMcp = result.mcp.find((item) => item.category === "OpenCode MCP")!;
+    const text = JSON.stringify(opencodeMcp);
+
+    expect(opencodeMcp.status).toBe("warning");
+    expect(text).toContain("stale Deck-managed raw Supermemory MCP");
+    expect(text).toContain("retire");
+    expect(text).not.toContain("Configure Supermemory");
+  });
+
+  test("Doctor reports unmanaged raw OpenCode Supermemory MCP as external-unobservable", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([]);
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
+    mockValidateSupermemoryOpenCodeMcpConfig.mockReturnValueOnce({
+      ok: false,
+      path: "/fake/opencode.json",
+      serverName: "supermemory",
+      diagnostics: ["OpenCode MCP server 'supermemory' is an unmanaged raw Supermemory MCP entry and external-unobservable; Deck Runtime did not authorize it as project memory."],
+    });
+    const dependencies = fabDependencies();
+    dependencies.readOpenCodeMcpSection.mockReturnValue({
+      supermemory: { type: "remote", url: "https://mcp.supermemory.ai/mcp", headers: { "x-sm-project": "sm_project_v1_other_project" }, userNote: "external" },
+    });
+
+    const result = await runDoctorDiagnostics(dependencies);
+    const opencodeMcp = result.mcp.find((item) => item.category === "OpenCode MCP")!;
+    const text = JSON.stringify(opencodeMcp);
+
+    expect(opencodeMcp.status).toBe("warning");
+    expect(text).toContain("unmanaged");
+    expect(text).toContain("external-unobservable");
+    expect(text).toContain("unchanged");
   });
 
   // ── Pi MCP configured correctly ──────────────────────────────────────────

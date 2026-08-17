@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { chmodSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,6 +89,42 @@ describe("OpenCode RunnerAdapter Supermemory readiness mapping", () => {
     expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "pending" }));
     expect(JSON.stringify(plan)).toContain("does not satisfy Deck runtime readiness");
   });
+
+  test("synthetic Supermemory MCP write without an explicit config dir does not touch a real-like OpenCode config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-opencode-real-like-home-"));
+    const previousHome = process.env.HOME;
+    const configDir = join(root, ".config", "opencode");
+    const configPath = join(configDir, "opencode.json");
+    try {
+      await mkdir(configDir, { recursive: true });
+      const content = JSON.stringify({
+        mcp: {
+          context7: { type: "local", enabled: true, command: ["npx", "-y", "@upstash/context7-mcp"] },
+        },
+      }, null, 2);
+      writeFileSync(configPath, content, { encoding: "utf-8", mode: 0o600 });
+      chmodSync(configPath, 0o600);
+      const old = new Date("2026-01-01T00:00:00.000Z");
+      utimesSync(configPath, old, old);
+      const before = statSync(configPath);
+      process.env.HOME = root;
+
+      const adapter = createOpenCodeRunnerAdapter();
+      const result = await adapter.writeMcpConfig?.({ serverName: "supermemory", projectRoot: root });
+      const after = statSync(configPath);
+
+      expect(result).toMatchObject({ ok: true });
+      expect((result?.diagnostics ?? []).join(" ")).toContain("absent-safe");
+      expect(await readFile(configPath, "utf-8")).toBe(content);
+      expect(after.size).toBe(before.size);
+      expect(after.mtimeMs).toBe(before.mtimeMs);
+      expect(after.mode & 0o777).toBe(before.mode & 0o777);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("OpenCode RunnerAdapter developer team install plan", () => {
@@ -132,7 +169,7 @@ describe("OpenCode RunnerAdapter developer team install plan", () => {
     }));
   });
 
-  test("does not fabricate configured Supermemory scope in the generic install adapter path", async () => {
+  test("uses verified Runtime-owned Supermemory scope in the generic install adapter path", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-opencode-scope-"));
     try {
       execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
@@ -151,8 +188,8 @@ describe("OpenCode RunnerAdapter developer team install plan", () => {
       });
       const text = plan.files.map((file) => file.content).join("\n");
 
-      expect(text).toContain("Adaptive-memory project operations are disabled");
-      expect(text).toContain("configured scope missing");
+      expect(text).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(text).toContain("schemas permit model-selected project scope");
       expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });

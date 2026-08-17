@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { PassThrough } from "node:stream";
 import { render } from "ink";
 import {
@@ -22,6 +23,11 @@ import { buildOpenCodeRunnerReviewPlan } from "@deck/adapter-opencode";
 import { getRunnerReviewPlanRunBlockDiagnostics, resolveSupermemoryRuntimeCredentialReadiness } from "./runner-dashboard/action-runner";
 
 setDefaultTimeout(15_000);
+
+function initCanonicalGitRemote(projectRoot: string): void {
+  execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/deck-example.git"], { cwd: projectRoot, stdio: "ignore" });
+}
 
 function createInkHarness() {
   const chunks: Array<Buffer | null> = [];
@@ -243,8 +249,7 @@ describe("DeckApp synthetic runner production flow", () => {
   ] as const) {
     test(`${entry.name} stores Supermemory runtime key on token submit before later install actions`, async () => {
       const projectRoot = mkdtempSync(join(tmpdir(), "deck-token-submit-supermemory-"));
-      mkdirSync(join(projectRoot, ".git"));
-      writeFileSync(join(projectRoot, ".git", "config"), "[remote \"origin\"]\n\turl = https://github.com/acme/deck-example.git\n");
+      initCanonicalGitRemote(projectRoot);
       const xdgConfigHome = join(projectRoot, "xdg");
       const previousXdg = process.env.XDG_CONFIG_HOME;
       process.env.XDG_CONFIG_HOME = xdgConfigHome;
@@ -317,8 +322,7 @@ describe("DeckApp synthetic runner production flow", () => {
 
   test("Start installation validates and stores OpenCode Supermemory runtime key before applying Developer Team", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-start-install-supermemory-"));
-    mkdirSync(join(projectRoot, ".git"));
-    writeFileSync(join(projectRoot, ".git", "config"), "[remote \"origin\"]\n\turl = https://github.com/acme/deck-example.git\n");
+    initCanonicalGitRemote(projectRoot);
     const xdgConfigHome = join(projectRoot, "xdg");
     const previousXdg = process.env.XDG_CONFIG_HOME;
     process.env.XDG_CONFIG_HOME = xdgConfigHome;
@@ -391,8 +395,7 @@ describe("DeckApp synthetic runner production flow", () => {
 
   test("Start installation stops OpenCode Developer Team apply when Supermemory runtime key is invalid", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-start-install-invalid-supermemory-"));
-    mkdirSync(join(projectRoot, ".git"));
-    writeFileSync(join(projectRoot, ".git", "config"), "[remote \"origin\"]\n\turl = https://github.com/acme/deck-example.git\n");
+    initCanonicalGitRemote(projectRoot);
     const xdgConfigHome = join(projectRoot, "xdg");
     const previousXdg = process.env.XDG_CONFIG_HOME;
     process.env.XDG_CONFIG_HOME = xdgConfigHome;

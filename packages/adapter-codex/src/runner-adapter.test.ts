@@ -794,16 +794,11 @@ describe("Codex RunnerAdapter production composition", () => {
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
       const config = await readFile(join(projectRoot, ".codex", "config.toml"), "utf8");
       expect(config).toContain("[mcp_servers.context7]");
-      expect(config).toContain("[mcp_servers.supermemory]");
-       expect(config).not.toContain("bearer_token_env_var");
-       expect(config).not.toContain("SUPERMEMORY_API_KEY");
+      expect(config).not.toContain("[mcp_servers.supermemory]");
+      expect(config).not.toContain("bearer_token_env_var");
+      expect(config).not.toContain("SUPERMEMORY_API_KEY");
         expect(await adapter.verifyDeveloperTeamInstall(plan)).toMatchObject({
           valid: true,
-          verificationEvidence: [{ id: "mcp:supermemory" }],
-          postInstallFollowUps: [{
-            id: "supermemory-user-authorization",
-            message: "Run codex mcp login supermemory when you are ready to authorize Supermemory.",
-          }],
         });
        await writeFile(join(projectRoot, ".codex", "config.toml"), "[features]\nmulti_agent = false\n");
        const driftedVerification = await adapter.verifyDeveloperTeamInstall(plan);
@@ -817,7 +812,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(inventory.capabilities.find((capability) => capability.capabilityId === "supermemory-tool-bindings")).toMatchObject({
          isInstalled: false,
          isBlocked: false,
-          diagnostics: [expect.stringContaining("pending user authorization")],
+          diagnostics: [expect.stringContaining("MCP configuration missing")],
        });
        const unauthenticatedReview = adapter.buildReviewPlan({
          runnerId: "codex",
@@ -1081,8 +1076,8 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(healthy).toContainEqual(expect.objectContaining({ category: "Managed content", status: "ok" }));
       expect(healthy).toContainEqual(expect.objectContaining({
         category: "Capability: Supermemory",
-        status: "ok",
-        message: "Supermemory is configured and authenticated with native Codex OAuth.",
+        status: "error",
+        message: "supermemory: MCP configuration missing",
       }));
       for (const mode of ["interactive", "exec", "resume-by-id", "resume-latest"]) {
         expect(healthy).toContainEqual(expect.objectContaining({ category: `Execution route: ${mode}`, status: "warning", message: expect.stringContaining("static-compatible") }));
@@ -1101,9 +1096,8 @@ describe("Codex RunnerAdapter production composition", () => {
       });
       expect(await unauthorized.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({
         category: "Capability: Supermemory",
-        status: "warning",
-        message: expect.stringContaining("pending user authorization"),
-        suggestion: "Run codex mcp login supermemory when you are ready to authorize Supermemory.",
+        status: "error",
+        message: expect.stringContaining("MCP configuration missing"),
       }));
 
       const brokenSupermemory = createCodexRunnerAdapter({
@@ -1119,7 +1113,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(await brokenSupermemory.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({
         category: "Capability: Supermemory",
         status: "error",
-        message: expect.stringContaining("reviewed streamable HTTP configuration"),
+        message: expect.stringContaining("MCP configuration missing"),
       }));
 
       const untrusted = createCodexRunnerAdapter({
@@ -1336,7 +1330,7 @@ describe("Codex RunnerAdapter production composition", () => {
     }
   });
 
-  test("content-only Supermemory guidance follows the existing Codex MCP scope instead of trusting the derived scope", async () => {
+  test("content-only Supermemory guidance uses Runtime-owned scope instead of existing Codex MCP scope", async () => {
     const matchingRoot = await mkdtemp(join(tmpdir(), "deck-codex-sm-matching-"));
     const mismatchedRoot = await mkdtemp(join(tmpdir(), "deck-codex-sm-mismatched-"));
     try {
@@ -1360,12 +1354,14 @@ describe("Codex RunnerAdapter production composition", () => {
       const matchingLead = matchingPlan.files.find((file) => file.path === ".codex/agents/deck-lead.toml")?.content ?? "";
       const mismatchedLead = mismatchedPlan.files.find((file) => file.path === ".codex/agents/deck-lead.toml")?.content ?? "";
 
-      expect(matchingLead.includes('containerTag: "sm_project_v1_kevin15011_deck"') || matchingLead.includes('containerTag: \\"sm_project_v1_kevin15011_deck\\"')).toBe(true);
+      expect(matchingLead).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(matchingLead).toContain("schemas permit model-selected project scope");
+      expect(matchingLead).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(matchingLead).not.toContain('containerTag: \\"sm_project_v1_kevin15011_deck\\"');
       expect(matchingLead).not.toContain("supermemory_add_memory");
-      expect(matchingLead).toContain("explicit remember are routed through the Deck runtime");
       expect(mismatchedPlan.blocked).toBe(false);
-      expect(mismatchedLead).toContain("Adaptive-memory project operations are disabled");
-      expect(mismatchedLead).toContain("scope mismatch");
+      expect(mismatchedLead).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(mismatchedLead).toContain("schemas permit model-selected project scope");
       expect(mismatchedLead).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(mismatchedLead).not.toContain("sm_project_default");
     } finally {
@@ -1399,8 +1395,10 @@ describe("Codex RunnerAdapter production composition", () => {
       });
       const lead = plan.files.find((file) => file.path === ".codex/agents/deck-lead.toml")?.content ?? "";
 
-      expect(lead).toContain('containerTag: \\"sm_project_v1_kevin15011_deck\\"');
-      expect(lead).toContain('supermemory_search_memory({ query, containerTag: \\"sm_project_v1_kevin15011_deck\\" })');
+      expect(lead).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(lead).toContain("schemas permit model-selected project scope");
+      expect(lead).not.toContain('containerTag: \\"sm_project_v1_kevin15011_deck\\"');
+      expect(lead).not.toContain("supermemory_search_memory");
       expect(lead).toContain("caller-unrelated-marker");
       expect(lead).not.toContain("No manual containerTag required");
       expect(lead).not.toContain("sm_project_default");

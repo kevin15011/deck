@@ -123,10 +123,14 @@ try {
       chmodSync(join(smokeConfig, "deck"), 0o700);
       chmodSync(secretDir, 0o700);
       writeFileSync(join(secretDir, "supermemory-api-key.secret"), "sm_test_compiled", { mode: 0o600 });
+      const gitInit = Bun.spawnSync({ cmd: ["git", "init"], cwd: temp, env: { PATH: process.env.PATH ?? "" } });
+      if (!gitInit.success) throw new Error(`runtime smoke git init failed: ${new TextDecoder().decode(gitInit.stderr)}`);
+      const gitRemote = Bun.spawnSync({ cmd: ["git", "remote", "add", "origin", "https://github.com/kevin15011/deck.git"], cwd: temp, env: { PATH: process.env.PATH ?? "" } });
+      if (!gitRemote.success) throw new Error(`runtime smoke git remote failed: ${new TextDecoder().decode(gitRemote.stderr)}`);
       const runtimeSmoke = await spawnDeck({
         cmd: [extractedDeck, "internal", "supermemory-runtime-smoke"],
         cwd: temp,
-        env: { PATH: "", XDG_CONFIG_HOME: smokeConfig, HOME: smokeHome, DECK_ENABLE_INTERNAL_SUPERMEMORY_RUNTIME_SMOKE: "1", DECK_INTERNAL_SUPERMEMORY_API_BASE_URL: "http://127.0.0.1:" + server.port },
+        env: { PATH: process.env.PATH ?? "", XDG_CONFIG_HOME: smokeConfig, HOME: smokeHome, DECK_ENABLE_INTERNAL_SUPERMEMORY_RUNTIME_SMOKE: "1", DECK_INTERNAL_SUPERMEMORY_API_BASE_URL: "http://127.0.0.1:" + server.port },
       });
       const runtimeSmokeOutput = `${runtimeSmoke.stdout}${runtimeSmoke.stderr}`;
       if (!runtimeSmoke.success) throw new Error(`extracted Deck runtime smoke failed: ${runtimeSmokeOutput}`);

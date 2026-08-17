@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -213,41 +213,100 @@ describe("Pi Serena MCP config writer", () => {
 });
 
 describe("Pi global MCP config writer", () => {
+  test("does not materialize raw Supermemory MCP and retires exact stale Deck-managed entries", () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+      mkdirSync(join(configPath, ".."), { recursive: true });
+      writeFileSync(configPath, JSON.stringify({
+        mcpServers: {
+          supermemory: { transport: "http", url: SUPERMEMORY_MCP_URL, headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" } },
+          other: { command: "other" },
+        },
+      }));
+
+      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
+      const config = readJson(configPath);
+
+      expect(result).toMatchObject({ ok: true, action: "updated" });
+      expect(config.mcpServers.supermemory).toBeUndefined();
+      expect(config.mcpServers.other).toEqual({ command: "other" });
+      expect(allDiagnosticsText(result).toLowerCase()).toContain("retired");
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("retires exact stale Deck-managed entries even when the stored scope belongs to an old project", () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+      mkdirSync(join(configPath, ".."), { recursive: true });
+      writeFileSync(configPath, JSON.stringify({
+        mcpServers: {
+          supermemory: { transport: "http", url: SUPERMEMORY_MCP_URL, headers: { "x-sm-project": "sm_project_v1_acme_project_a" } },
+          other: { command: "other" },
+        },
+      }));
+
+      const first = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_acme_project_b" });
+      const second = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_acme_project_b" });
+      const config = readJson(configPath);
+
+      expect(first).toMatchObject({ ok: true, action: "updated" });
+      expect(second).toMatchObject({ ok: true, action: "unchanged" });
+      expect(config.mcpServers.supermemory).toBeUndefined();
+      expect(config.mcpServers.other).toEqual({ command: "other" });
+    } finally {
+      cleanup(home);
+    }
+  });
+
+  test("preserves ambiguous external Supermemory Pi MCP entries as unmanaged", () => {
+    const home = tempHome();
+    try {
+      const configPath = defaultPiMcpConfigPath(home);
+      mkdirSync(join(configPath, ".."), { recursive: true });
+      const original = {
+        mcpServers: {
+          supermemory: { transport: "http", url: SUPERMEMORY_MCP_URL, headers: { "x-sm-project": "sm_project_v1_other_repo" }, note: "external" },
+        },
+      };
+      writeFileSync(configPath, JSON.stringify(original));
+
+      const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
+
+      expect(result.ok).toBe(false);
+      expect(readJson(configPath)).toEqual(original);
+      expect(allDiagnosticsText(result)).toContain("unmanaged");
+    } finally {
+      cleanup(home);
+    }
+  });
+
   test("resolves default Pi MCP config path under the provided home directory", () => {
     const home = "/tmp/example-home";
     expect(defaultPiMcpConfigPath(home)).toBe(join(home, ".pi", "agent", "mcp.json"));
   });
 
-  test("creates ~/.pi/agent/mcp.json with the Supermemory server entry", () => {
+  test("does not create ~/.pi/agent/mcp.json with a raw Supermemory server entry", () => {
     const home = tempHome();
     try {
       const configPath = defaultPiMcpConfigPath(home);
       const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
 
       expect(result.ok).toBe(true);
-      expect(result.action).toBe("created");
+      expect(result.action).toBe("unchanged");
       expect(result.path).toBe(configPath);
       expect(result.serverName).toBe("supermemory");
       expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
-
-      const config = readJson(configPath);
-      expect(config).toEqual({
-        mcpServers: {
-          supermemory: {
-            transport: "http",
-            url: SUPERMEMORY_MCP_URL,
-            headers: {
-              "x-sm-project": "sm_project_v1_kevin15011_deck",
-            },
-          },
-        },
-      });
+      expect(existsSync(configPath)).toBe(false);
     } finally {
       cleanup(home);
     }
   });
 
-  test("preserves unrelated servers while updating only the configured server", () => {
+  test("preserves unrelated servers and blocks ambiguous existing Supermemory entries", () => {
     const home = tempHome();
     try {
       const configPath = defaultPiMcpConfigPath(home);
@@ -279,8 +338,8 @@ describe("Pi global MCP config writer", () => {
       );
 
       const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-      expect(result.ok).toBe(true);
-      expect(result.action).toBe("updated");
+      expect(result.ok).toBe(false);
+      expect(result.action).toBe("failed");
       expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
 
       const config = readJson(configPath);
@@ -291,10 +350,9 @@ describe("Pi global MCP config writer", () => {
       });
       expect(config.mcpServers.supermemory.extraSetting).toBe(true);
       expect(config.mcpServers.supermemory.transport).toBe("http");
-      expect(config.mcpServers.supermemory.url).toBe(SUPERMEMORY_MCP_URL);
+      expect(config.mcpServers.supermemory.url).toBe("https://old.example.invalid");
       expect(config.mcpServers.supermemory.headers["x-existing-header"]).toBe("keep-me");
-      expect(config.mcpServers.supermemory.headers["x-sm-project"]).toBe("sm_project_v1_kevin15011_deck");
-      expect(config.mcpServers.supermemory.headers[SUPERMEMORY_API_KEY_HEADER]).toBeUndefined();
+      expect(config.mcpServers.supermemory.headers[SUPERMEMORY_API_KEY_HEADER]).toBe("old-token");
     } finally {
       cleanup(home);
     }
@@ -312,9 +370,8 @@ describe("Pi global MCP config writer", () => {
 
       expect(result.ok).toBe(true);
       expect(result.serverName).toBe("team-supermemory");
-      const config = readJson(defaultPiMcpConfigPath(home));
-      expect(config.mcpServers.supermemory).toBeUndefined();
-      expect(config.mcpServers["team-supermemory"].headers[SUPERMEMORY_API_KEY_HEADER]).toBeUndefined();
+      expect(result.action).toBe("unchanged");
+      expect(existsSync(defaultPiMcpConfigPath(home))).toBe(false);
     } finally {
       cleanup(home);
     }
@@ -382,11 +439,8 @@ describe("Pi global MCP config writer", () => {
       const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
 
       expect(result.ok).toBe(true);
-      expect(existsSync(configPath)).toBe(true);
-      if (process.platform !== "win32") {
-        expect(statSync(join(home, ".pi", "agent")).mode & 0o777).toBe(0o700);
-        expect(statSync(configPath).mode & 0o777).toBe(0o600);
-      }
+      expect(result.action).toBe("unchanged");
+      expect(existsSync(configPath)).toBe(false);
     } finally {
       cleanup(home);
     }
@@ -396,19 +450,11 @@ describe("Pi global MCP config writer", () => {
     expect("extractValidatedSupermemoryPiMcpRuntimeServer" in adapterPi).toBe(false);
   });
 
-  test("extracts validated Supermemory server endpoint without credentials", () => {
+  test("extracting a Supermemory MCP endpoint fails closed after raw MCP retirement", () => {
     const home = tempHome();
     try {
       writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
-      const server = extractValidatedSupermemoryPiMcpServer({ homeDir: home });
-
-      expect(server).toEqual({
-        path: defaultPiMcpConfigPath(home),
-        serverName: "supermemory",
-        endpoint: SUPERMEMORY_MCP_URL,
-      });
-      expect(JSON.stringify(server)).not.toContain(SENTINEL_TOKEN);
-      expect(JSON.stringify(server)).not.toContain(SUPERMEMORY_API_KEY_HEADER);
+      expect(() => extractValidatedSupermemoryPiMcpServer({ homeDir: home })).toThrow(/missing/);
     } finally {
       cleanup(home);
     }
@@ -439,15 +485,15 @@ describe("Pi global MCP config writer", () => {
     expect(redacted).toContain("[REDACTED]");
   });
 
-  test("ignores blank legacy tokens and writes credential-free config", () => {
+  test("ignores blank legacy tokens and still does not create raw Supermemory config", () => {
     const home = tempHome();
     try {
       const configPath = defaultPiMcpConfigPath(home);
       const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: "   ", projectScope: "sm_project_v1_kevin15011_deck" });
 
       expect(result.ok).toBe(true);
-      expect(result.action).toBe("created");
-      expect(existsSync(configPath)).toBe(true);
+      expect(result.action).toBe("unchanged");
+      expect(existsSync(configPath)).toBe(false);
       expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
     } finally {
       cleanup(home);
@@ -699,7 +745,7 @@ describe("writeGatedLocalMcpConfig", () => {
     try {
       const configPath = defaultPiMcpConfigPath(home);
 
-      // First create a Supermemory config
+      // Raw Supermemory MCP is no longer created.
       writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_v1_kevin15011_deck" });
 
       // Then add context-mode via gated write
@@ -718,8 +764,7 @@ describe("writeGatedLocalMcpConfig", () => {
       expect(result.ok).toBe(true);
 
       const config = readJson(configPath);
-      // Both servers should exist
-      expect(config.mcpServers.supermemory).toBeDefined();
+      expect(config.mcpServers.supermemory).toBeUndefined();
       expect(config.mcpServers["context-mode"]).toBeDefined();
     } finally {
       cleanup(home);

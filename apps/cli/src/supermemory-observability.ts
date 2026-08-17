@@ -41,6 +41,7 @@ export function createSupermemoryObservabilitySink(input: { stateHome?: string; 
           at: input.now?.() ?? new Date().toISOString(),
           provider: metric.provider,
           operation: metric.operation,
+          channel: metric.channel,
           status: metric.status,
           reason: metric.reason,
           durationMs: metric.durationMs,

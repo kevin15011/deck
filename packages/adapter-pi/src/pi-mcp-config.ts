@@ -119,7 +119,7 @@ export function writeSupermemoryPiMcpConfig(
     const diagnostics = [
       infoDiagnostic(
         "PI_MCP_CONFIG_UNCHANGED",
-        "Supermemory Pi MCP server entry is already configured without persisted bearer credentials.",
+        "Raw Supermemory Pi MCP is disabled; no stale Deck-managed entry was present to retire.",
         configPath,
         serverName,
       ),
@@ -161,8 +161,8 @@ export function writeSupermemoryPiMcpConfig(
     infoDiagnostic(
       merged.existed ? "PI_MCP_CONFIG_UPDATED" : "PI_MCP_CONFIG_CREATED",
       merged.existed
-        ? "Updated Supermemory Pi MCP server entry with canonical project scope; bearer credentials remain outside Pi MCP config."
-        : "Created Pi MCP config with Supermemory server entry and canonical project scope; bearer credentials remain outside Pi MCP config.",
+        ? "Retired stale Deck-managed Supermemory Pi MCP server entry; raw Supermemory MCP is no longer authorized by Deck."
+        : "Raw Supermemory Pi MCP is disabled; no server entry was created.",
       configPath,
       serverName,
     ),
@@ -313,7 +313,7 @@ export function redactPiMcpConfigDiagnosticText(value: string): string {
   return redact(value);
 }
 
-function readAndMergeConfig(configPath: string, serverName: string, projectScope?: string): MergeOutcome {
+function readAndMergeConfig(configPath: string, serverName: string, _projectScope?: string): MergeOutcome {
   const existed = existsSync(configPath);
   let config: JsonRecord = {};
 
@@ -353,13 +353,16 @@ function readAndMergeConfig(configPath: string, serverName: string, projectScope
 
   const mcpServers = existingServers === undefined ? {} : { ...(existingServers as JsonRecord) };
   const existingServer = mcpServers[serverName];
-  if (existingServer !== undefined && !isPlainRecord(existingServer)) {
+  if (existingServer === undefined) {
+    return { ok: true, config, changed: false, existed };
+  }
+  if (!isExactDeckManagedPiSupermemoryEntry(existingServer)) {
     return {
       ok: false,
       diagnostics: [
         errorDiagnostic(
           "PI_MCP_CONFIG_CONFLICT",
-          `Existing MCP server entry '${serverName}' is not an object; no changes were written.`,
+          `Existing Pi Supermemory MCP server entry '${serverName}' is unmanaged or ambiguous; Deck left it unchanged and did not authorize raw Supermemory MCP.`,
           configPath,
           serverName,
         ),
@@ -367,41 +370,10 @@ function readAndMergeConfig(configPath: string, serverName: string, projectScope
     };
   }
 
-  const previousServer = (existingServer ?? {}) as JsonRecord;
-  const previousHeaders = previousServer.headers;
-  if (previousHeaders !== undefined && !isPlainRecord(previousHeaders)) {
-    return {
-      ok: false,
-      diagnostics: [
-        errorDiagnostic(
-          "PI_MCP_CONFIG_CONFLICT",
-          `Existing MCP server entry '${serverName}' has non-object headers; no changes were written.`,
-          configPath,
-          serverName,
-        ),
-      ],
-    };
-  }
-
-  const scopedHeaders: JsonRecord = projectScope ? { "x-sm-project": projectScope } : {};
-  const previousHeaderRecord = { ...((previousHeaders as JsonRecord | undefined) ?? {}) };
-  delete previousHeaderRecord[SUPERMEMORY_API_KEY_HEADER];
-  const nextServer: JsonRecord = {
-    ...previousServer,
-    transport: "http",
-    url: SUPERMEMORY_MCP_URL,
-    headers: {
-      ...previousHeaderRecord,
-      ...scopedHeaders,
-    },
-  };
-
+  delete mcpServers[serverName];
   const nextConfig: JsonRecord = {
     ...config,
-    mcpServers: {
-      ...mcpServers,
-      [serverName]: nextServer,
-    },
+    mcpServers,
   };
 
   return {
@@ -410,6 +382,19 @@ function readAndMergeConfig(configPath: string, serverName: string, projectScope
     changed: stableStringify(config) !== stableStringify(nextConfig),
     existed,
   };
+}
+
+function isExactDeckManagedPiSupermemoryEntry(entry: unknown): boolean {
+  if (!isPlainRecord(entry)) return false;
+  const keys = Object.keys(entry).sort();
+  if (JSON.stringify(keys) !== JSON.stringify(["headers", "transport", "url"])) return false;
+  if (entry.transport !== "http" || entry.url !== SUPERMEMORY_MCP_URL) return false;
+  if (!isPlainRecord(entry.headers)) return false;
+  const headerKeys = Object.keys(entry.headers);
+  if (headerKeys.length !== 1 || headerKeys[0] !== "x-sm-project") return false;
+  if (typeof entry.headers["x-sm-project"] !== "string") return false;
+  if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(entry.headers["x-sm-project"].trim())) return false;
+  return true;
 }
 
 function writeJsonAtomically(configPath: string, config: JsonRecord) {

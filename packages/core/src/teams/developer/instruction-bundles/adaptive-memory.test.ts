@@ -18,7 +18,7 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
       expect(markdown).toContain("conversation capture");
       expect(markdown).toContain("Deck-owned runtime");
       expect(markdown).toContain("stable customId");
-      expect(markdown).toContain("canonical project scope");
+      expect(markdown).toContain("verified Git repository identity held by Runtime");
       expect(markdown).toContain("five results");
       expect(markdown).toContain("1,500 tokens");
       expect(markdown).toContain("OPENSPEC IS OFFICIAL CONTEXT");
@@ -32,26 +32,19 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
       expect(markdown).not.toContain("Save Trigger Matrix");
     });
 
-    test(`${surface} surface binds automatic memory to the exact canonical containerTag`, () => {
+    test(`${surface} surface binds automatic memory to Runtime-owned project scope without model-controlled tool arguments`, () => {
       const markdown = scopedBundle.instructions.find((fragment) => fragment.surface === surface)?.markdown ?? "";
 
-      expect(markdown).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(markdown).toContain("Automatic MCP write/save operations are disabled");
-      expect(markdown).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
-      expect(markdown).toContain('supermemory_listMemories({ containerTag: "sm_project_v1_kevin15011_deck" })');
-      expect(markdown).toContain('supermemory_listDocuments({ containerTag: "sm_project_v1_kevin15011_deck" })');
-      expect(markdown).toContain('supermemory_fetch-graph-data({ containerTag: "sm_project_v1_kevin15011_deck" })');
-      expect(markdown).toContain('supermemory_memory-graph({ containerTag: "sm_project_v1_kevin15011_deck" })');
-      expect(markdown).toContain("explicit remember are routed through the Deck runtime");
+      expect(markdown).toContain("Deck has resolved a verified project identity");
+      expect(markdown).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(markdown).toContain("schemas permit model-selected project scope");
+      expect(markdown).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(markdown).not.toContain("supermemory_search_memory");
       expect(markdown).not.toContain("supermemory_add_memory");
-      expect(markdown).toContain("supermemory_getDocument");
+      expect(markdown).not.toContain("supermemory_getDocument");
       expect(markdown).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
-      expect(markdown).toContain("Agents MUST NOT derive, replace, or omit this value");
-      expect(markdown).toContain("x-sm-project is diagnostic/transport metadata only");
-      expect(markdown).toContain("skip the memory operation");
       expect(markdown).not.toContain("sm_project_default");
       expect(markdown).not.toContain("No manual containerTag required");
-      expect(markdown).not.toContain("x-sm-project header supplies an omitted tool argument");
     });
   }
 
@@ -68,13 +61,13 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
     expect(markdown).not.toContain("sm_project_default");
   });
 
-  test("derived scope without observed configured MCP scope fails closed", () => {
+  test("derived scope without observed configured MCP scope remains authorized because Runtime owns scope", () => {
     const markdown = buildAdaptiveMemoryInstructionBundle({
       supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
     }).instructions.map((fragment) => fragment.markdown).join("\n");
 
-    expect(markdown).toContain("Adaptive-memory project operations are disabled");
-    expect(markdown).toContain("configured scope missing");
+    expect(markdown).toContain("Deck has resolved a verified project identity");
+    expect(markdown).toContain("Runtime-managed recall and capture bind project scope server-side");
     expect(markdown).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
   });
 

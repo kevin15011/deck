@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 
 import { getDefaultDeckConfig } from "@deck/core";
 import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
@@ -61,15 +62,15 @@ describe("runPiLaunch", () => {
       async add() {},
     };
     try {
-      mkdirSync(join(projectRoot, ".git"), { recursive: true });
-      writeFileSync(join(projectRoot, ".git", "config"), '[remote "origin"]\n\turl = git@github.com:kevin15011/deck.git\n');
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "git@github.com:kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
       const result = await runPiLaunchProduction({
         teamId: "developer-team",
         projectRoot,
         flags: {},
         commandExists: () => true,
         deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
-        supermemoryRuntime: { transport },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), transport },
       });
       expect(result.status).toBe("launched");
       if (result.status === "launched") {

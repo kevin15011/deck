@@ -13,6 +13,7 @@ import {
   type AdaptiveMemoryActiveProvider,
 } from "@deck/core/config/deck-config";
 import type { AdaptiveMemoryProvider, MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
+import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import {
   getEnabledCapabilityInstructionIds,
@@ -46,6 +47,10 @@ export type RunOpenCodeLaunchOptions = {
   configDir?: string;
   /** Retained for API compatibility; compact prompts are active by default. */
   promptProfileActivation?: PromptProfileActivationV1;
+  /** Internal hermetic test seam; production uses Deck's runtime HTTP transport. */
+  supermemoryRuntimeTransport?: SupermemoryRuntimeTransport;
+  /** Internal hermetic test seam for runtime state/observability writes. */
+  supermemoryRuntimeStateHome?: string;
   dryRun?: boolean;
 };
 
@@ -61,7 +66,7 @@ export type OpenCodeLaunchPlan = {
 };
 
 export type MemoryProviderDiagnostic = {
-  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers" | "supermemory_runtime";
+  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers" | "untrusted_memory_injection" | "supermemory_runtime";
   message: string;
   providerId?: string;
 };
@@ -239,6 +244,8 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     runnerId: "opencode",
     role: "lead",
     launchMode: "interactive",
+    transport: options.supermemoryRuntimeTransport,
+    stateHome: options.supermemoryRuntimeStateHome,
   });
   allDiagnostics.push(...runtimeHost.diagnostics.filter((diagnostic) => diagnostic.severity !== "info").map((diagnostic) => ({
     code: "supermemory_runtime" as const,
@@ -260,6 +267,7 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
   const installPlan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
     configDir,
     memoryInjection: runtimeMemoryInjection ?? resolvedMemory.memoryInjection,
+    trustedMemoryInjection: runtimeMemoryInjection ? true : undefined,
     memoryProvider: resolvedMemory.provider,
     supportedMemoryProviderIds: options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS,
     capabilityInstructions,

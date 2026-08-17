@@ -83,7 +83,7 @@ export type RunPiLaunchOptions = {
 };
 
 export type MemoryProviderDiagnostic = {
-  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers" | "supermemory_runtime";
+  code: "unsupported_memory_provider" | "memory_provider_unavailable" | "multiple_memory_providers" | "untrusted_memory_injection" | "supermemory_runtime";
   message: string;
   providerId?: string;
 };
@@ -195,6 +195,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
     projectRoot,
     supportedMemoryProviderIds,
     ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { memoryInjection: runtimeMemoryInjection ?? resolvedMemory.memoryInjection } : {}),
+    ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { trustedMemoryInjection: true } : {}),
     ...(resolvedMemory.provider ? { memoryProvider: resolvedMemory.provider } : {}),
     ...(resolvedMemory.memoryUnavailableReason ? { memoryUnavailableReason: resolvedMemory.memoryUnavailableReason } : {}),
     ...(capabilityInstructions ? { capabilityInstructions } : {}),
@@ -211,6 +212,7 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
     });
     const installPlan = buildDeveloperTeamInstallPlan(projectRoot, {
       ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { memoryInjection: runtimeMemoryInjection ?? resolvedMemory.memoryInjection } : {}),
+      ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { trustedMemoryInjection: true } : {}),
       ...(resolvedMemory.provider ? { memoryProvider: resolvedMemory.provider } : {}),
       supportedMemoryProviderIds,
       modelAssignments,
@@ -247,14 +249,8 @@ function buildPiLaunchCapabilityInstructions(options: RunPiLaunchOptions): Capab
     }
     if (enabledIds.length === 0) return undefined;
     const derived = resolveCanonicalSupermemoryProjectScope({ projectRoot: options.projectRoot, remotes: [] });
-    const mcpValidation = validateSupermemoryPiMcpConfig({
-      serverName: deckConfig.adaptiveMemory.supermemory?.mcpServerName ?? "supermemory",
-      configPath: options.piMcpConfigPath,
-      homeDir: options.piMcpHomeDir,
-    });
     return buildCapabilityInstructionBundle(enabledIds, {
       supermemoryProjectScope: derived.ok ? derived.scope : undefined,
-      configuredSupermemoryProjectScope: mcpValidation.ok ? mcpValidation.projectScope : undefined,
     });
   } catch {
     return undefined;
@@ -319,21 +315,15 @@ async function resolveLaunchMemoryProvider(options: RunPiLaunchOptions): Promise
     }
 
     try {
-      const mcpValidation = validateSupermemoryPiMcpConfig({
-        serverName: runtimeValidation.serverName,
-        configPath: options.piMcpConfigPath,
-        homeDir: options.piMcpHomeDir,
-      });
       const derived = resolveCanonicalSupermemoryProjectScope({ projectRoot: options.projectRoot, remotes: [] });
-      if (!mcpValidation.ok || !derived.ok || mcpValidation.projectScope !== derived.scope) {
-        const message = "Supermemory Pi MCP scope is missing or mismatched; launched without adaptive-memory injection.";
+      if (!derived.ok) {
+        const message = "Supermemory project identity is missing or invalid; launched without adaptive-memory injection.";
         return { diagnostics: [{ code: "memory_provider_unavailable", providerId: "supermemory", message }], memoryUnavailableReason: message };
       }
       const provider = createSupermemoryMemoryProvider({
         mcpServerName: runtimeValidation.serverName,
         authenticatedRuntimeValidated: true,
         projectScope: derived.scope,
-        configuredProjectScope: mcpValidation.projectScope,
       });
       return { memoryInjection: provider.buildInjection({}), diagnostics };
     } catch (error) {

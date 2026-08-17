@@ -1,0 +1,72 @@
+schema: spec-registry-events-v1
+events:
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-08-15T21:50:58Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-08-15T21:50:58Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-08-15T21:50:58Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-15T21:50:58Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-16T03:16:53Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-16T03:16:53Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-16T03:16:53Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-16T23:17:08Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-16T23:17:08Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-16T23:17:08Z"
+    actor: deck-quality
+    registry_write: non-deferred

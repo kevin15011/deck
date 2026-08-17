@@ -1,10 +1,20 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { runOpenCodeLaunch } from "./opencode-launch-command";
 import { getDefaultDeckConfig } from "@deck/core";
+import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
+
+function hermeticSupermemoryTransport(): SupermemoryRuntimeTransport {
+  return {
+    async health() {},
+    async profile() { return { profile: {} }; },
+    async search() { return { results: [] }; },
+    async add() {},
+  };
+}
 
 // Simple test file to verify provider selection behavior in launch command
 // Note: Uses module mocks since the actual launch command has complex dependencies
@@ -124,6 +134,8 @@ describe("production prompt activation", () => {
         deckConfig,
         commandExists: () => true,
         dryRun: true,
+        supermemoryRuntimeTransport: hermeticSupermemoryTransport(),
+        supermemoryRuntimeStateHome: join(projectRoot, ".state"),
       });
       const leadPrompt = readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8");
       const leadSkill = readFileSync(join(configDir, "skills", "deck-lead", "SKILL.md"), "utf8");
@@ -138,7 +150,7 @@ describe("production prompt activation", () => {
     }
   });
 
-  test("OpenCode launch binds Supermemory guidance to validated MCP scope across prompts and skills", async () => {
+  test("OpenCode launch binds Supermemory guidance to Runtime-owned scope across prompts and skills", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-supermemory-launch-"));
     const configDir = join(projectRoot, ".config", "opencode");
     try {
@@ -166,6 +178,8 @@ describe("production prompt activation", () => {
         deckConfig,
         commandExists: () => true,
         dryRun: true,
+        supermemoryRuntimeTransport: hermeticSupermemoryTransport(),
+        supermemoryRuntimeStateHome: join(projectRoot, ".state"),
       });
       const leadPrompt = readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8");
       const standaloneSkill = readFileSync(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8");
@@ -173,8 +187,10 @@ describe("production prompt activation", () => {
       const combined = [leadPrompt, standaloneSkill, bootstrapSkill].join("\n");
 
       expect(result.status).toBe("ready");
-      expect(combined).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(combined).toContain('supermemory_search_memory({ query, containerTag: "sm_project_v1_kevin15011_deck" })');
+      expect(combined).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(combined).toContain("schemas permit model-selected project scope");
+      expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(combined).not.toContain("supermemory_search_memory");
       expect(combined).not.toContain("No manual containerTag required");
       expect(combined).not.toContain('containerTag: "sm_project_default"');
       expect(combined).not.toContain('supermemory_search_memory({ query, containerTag: "sm_project_default" })');
@@ -183,7 +199,72 @@ describe("production prompt activation", () => {
     }
   });
 
-  test("OpenCode launch fails closed for Supermemory guidance when configured MCP scope mismatches derived scope", async () => {
+  test("OpenCode launch materializes runtime recall before prompt install without raw MCP calls", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-runtime-recall-"));
+    const configDir = join(projectRoot, ".config", "opencode");
+    const stateHome = join(projectRoot, ".state");
+    const envHome = join(projectRoot, "empty-home");
+    const envConfig = join(projectRoot, "empty-config");
+    const envCache = join(projectRoot, "empty-cache");
+    const envState = join(projectRoot, "empty-state");
+    const previousEnv = {
+      HOME: process.env.HOME,
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+      XDG_STATE_HOME: process.env.XDG_STATE_HOME,
+      XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
+    };
+    const previousFetch = globalThis.fetch;
+    const calls: string[] = [];
+    const transport: SupermemoryRuntimeTransport = {
+      async health(payload) { calls.push(`health:${payload.containerTag}`); },
+      async profile(payload) { calls.push(`profile:${payload.containerTag}`); return { profile: { static: ["Remembered convention: runtime recall reaches OpenCode prompts before agent processing."] } }; },
+      async search(payload) { calls.push(`search:${payload.containerTag}:${payload.q}`); return { results: [{ content: "Current task: prove OpenCode uses trusted runtime memory injection with zero raw MCP calls." }] }; },
+      async add() { calls.push("add"); },
+    };
+    try {
+      process.env.HOME = envHome;
+      process.env.XDG_CONFIG_HOME = envConfig;
+      process.env.XDG_STATE_HOME = envState;
+      process.env.XDG_CACHE_HOME = envCache;
+      globalThis.fetch = (async () => { throw new Error("network blocked in hermetic launch test"); }) as unknown as typeof fetch;
+      mkdirSync(configDir, { recursive: true });
+      execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/opencode-runtime.git"], { cwd: projectRoot, stdio: "ignore" });
+
+      const result = await runOpenCodeLaunch({
+        teamId: "developer-team",
+        projectRoot,
+        configDir,
+        deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
+        commandExists: () => true,
+        dryRun: true,
+        supermemoryRuntimeTransport: transport,
+        supermemoryRuntimeStateHome: stateHome,
+      });
+      const leadPrompt = readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8");
+      const opencodeConfig = readFileSync(join(configDir, "opencode.json"), "utf8");
+
+      expect(result.status).toBe("ready");
+      expect(leadPrompt).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
+      expect(leadPrompt).toContain("runtime memory injection");
+      expect(opencodeConfig).not.toContain("mcp.supermemory.ai");
+      expect(calls).toEqual([
+        "health:sm_project_v1_acme_opencode_runtime",
+        "profile:sm_project_v1_acme_opencode_runtime",
+        "search:sm_project_v1_acme_opencode_runtime:current task project context",
+      ]);
+      expect(existsSync(join(envState, "deck", "supermemory-runtime.jsonl"))).toBe(false);
+    } finally {
+      for (const [key, value] of Object.entries(previousEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      globalThis.fetch = previousFetch;
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenCode launch ignores mismatched raw MCP scope because Runtime owns scope", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-supermemory-mismatch-"));
     const configDir = join(projectRoot, ".config", "opencode");
     try {
@@ -211,14 +292,16 @@ describe("production prompt activation", () => {
         deckConfig,
         commandExists: () => true,
         dryRun: true,
+        supermemoryRuntimeTransport: hermeticSupermemoryTransport(),
+        supermemoryRuntimeStateHome: join(projectRoot, ".state"),
       });
       const leadPrompt = readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8");
       const standaloneSkill = readFileSync(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8");
       const combined = [leadPrompt, standaloneSkill].join("\n");
 
       expect(result.status).toBe("ready");
-      expect(combined).toContain("Adaptive-memory project operations are disabled");
-      expect(combined).toContain("scope mismatch");
+      expect(combined).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(combined).toContain("schemas permit model-selected project scope");
       expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(combined).not.toContain("sm_project_v1_other_repo");
     } finally {
@@ -226,7 +309,7 @@ describe("production prompt activation", () => {
     }
   });
 
-  test("OpenCode launch fails closed for Supermemory guidance when configured MCP scope is the default scope", async () => {
+  test("OpenCode launch ignores default raw MCP scope because Runtime owns scope", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-supermemory-default-"));
     const configDir = join(projectRoot, ".config", "opencode");
     try {
@@ -254,6 +337,8 @@ describe("production prompt activation", () => {
         deckConfig,
         commandExists: () => true,
         dryRun: true,
+        supermemoryRuntimeTransport: hermeticSupermemoryTransport(),
+        supermemoryRuntimeStateHome: join(projectRoot, ".state"),
       });
       const leadPrompt = readFileSync(join(configDir, "prompts", "deck-team", "deck-lead.md"), "utf8");
       const standaloneSkill = readFileSync(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8");
@@ -261,8 +346,8 @@ describe("production prompt activation", () => {
       const combined = [leadPrompt, standaloneSkill, bootstrapSkill].join("\n");
 
       expect(result.status).toBe("ready");
-      expect(combined).toContain("Adaptive-memory project operations are disabled");
-      expect(combined).toContain("configured scope missing");
+      expect(combined).toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(combined).toContain("schemas permit model-selected project scope");
       expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(combined).not.toContain('containerTag: "sm_project_default"');
       expect(combined).not.toContain('supermemory_search_memory({ query, containerTag: "sm_project_default" })');

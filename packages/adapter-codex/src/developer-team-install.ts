@@ -21,7 +21,7 @@ import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/exter
 
 import { mergeCodexProjectConfig, mergeCodexTrustedHookConfig } from "./codex-config";
 import { translateCodexCapabilityInstructions, validateCodexInstructionTranslation } from "./instruction-translation";
-import { buildCodexMcpServers, mergeCodexMcpServers } from "./mcp-config";
+import { buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers } from "./mcp-config";
 import type { CodexExpectedFile, CodexMutation, CodexMutationPlan } from "./types";
 
 const OWNED_MARKER = "deck-codex-v1";
@@ -307,6 +307,14 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         webSearchCredentialAvailable: input.webSearchCredentialAvailable,
         webSearchExecutableAvailable: input.webSearchExecutableAvailable,
       });
+      const supermemoryMcpState = inspectCodexSupermemoryMcpState(configSource);
+      if (!supermemoryMcpState.ok && supermemoryMcpState.code === "supermemory-mcp-unmanaged") {
+        diagnostics.push({
+          code: "supermemory-mcp-unmanaged",
+          severity: "warning",
+          message: "Existing raw Supermemory Codex MCP configuration is unmanaged and external-unobservable; Deck Runtime did not authorize it as project memory.",
+        });
+      }
       for (const gap of desiredMcp.gaps) {
         if (gap === "serena-launcher-not-ready") {
           blocked = true;

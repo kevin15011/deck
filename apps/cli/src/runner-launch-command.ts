@@ -216,7 +216,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   };
   const { preparationDiagnostics, plan } = await prepareAndBuildDeveloperTeamInstallPlan(input.adapter, installInput);
   const launchPolicyDiagnostics = input.adapter.getLaunchPolicyDiagnostics?.() ?? [];
-  const sessionResolution = resolveDeckRuntimeSessionId(baseLaunch, { runnerId: input.adapter.runnerId });
+  const sessionResolution = resolveDeckRuntimeSessionId(baseLaunch, { runnerId: input.adapter.runnerId, stateHome: input.supermemoryRuntime?.stateHome });
   const memoryHost = await createSupermemoryRuntimeHost({
     projectRoot: baseLaunch.projectRoot,
     teamId: baseLaunch.teamId,
@@ -309,7 +309,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   if (launch.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; ") };
   let outcome: RunnerProcessOutcome;
   try {
-    const sessionPersistDiagnostics = sessionResolution.persist();
+    const sessionPersistDiagnostics = memoryHost.enabled ? sessionResolution.persist() : [];
     let explicitRememberCapture: { diagnostics: readonly import("./supermemory-runtime-host").SupermemoryRuntimeHostDiagnostic[]; metrics: readonly import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric[] } = { diagnostics: [], metrics: [] };
     if (explicitIntent.kind === "remember") {
       const remember = await blockingExplicitRememberCapture(() => memoryHost.explicitRemember(explicitIntent.content, { correlationId: explicitIntent.correlationId }));

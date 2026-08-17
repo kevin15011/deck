@@ -60,7 +60,8 @@ export type MemoryDiagnostic = {
   code:
     | "unsupported_memory_provider"
     | "memory_provider_unavailable"
-    | "multiple_memory_providers";
+    | "multiple_memory_providers"
+    | "untrusted_memory_injection";
   message: string;
   providerId?: string;
   details?: Readonly<Record<string, unknown>>;
@@ -69,6 +70,8 @@ export type MemoryDiagnostic = {
 export type ResolveMemoryInjectionOptions = {
   /** A pre-built memory injection bundle (trusted/internal; takes precedence over provider). */
   memoryInjection?: MemoryInjectionBundle;
+  /** Pre-built bundles are accepted only from the centralized trusted composition root. */
+  trustedMemoryInjection?: boolean;
   /** A memory provider that will build the injection bundle. Ignored if memoryInjection is set. */
   memoryProvider?: AdaptiveMemoryProvider;
   /** Candidate providers from configuration/registries. More than one fails closed. */
@@ -101,7 +104,14 @@ export function resolveMemoryInjection(
   const diagnostics: MemoryDiagnostic[] = [];
 
   if (!options) return { bundle: undefined, diagnostics };
-  if (options.memoryInjection) return { bundle: options.memoryInjection, diagnostics };
+  if (options.memoryInjection) {
+    if (options.trustedMemoryInjection === true) return { bundle: options.memoryInjection, diagnostics };
+    diagnostics.push({
+      code: "untrusted_memory_injection",
+      message: "Pre-built adaptive-memory injection bundles are rejected unless supplied by the trusted centralized composition root.",
+    });
+    return { bundle: undefined, diagnostics };
+  }
 
   const providers = [
     ...(options.memoryProvider ? [options.memoryProvider] : []),

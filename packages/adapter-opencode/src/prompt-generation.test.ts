@@ -131,7 +131,7 @@ describe("adaptive memory provider filtering", () => {
     }
   });
 
-  test("Lead and specialists only get scoped Supermemory guidance when configured MCP scope matches the derived repository scope", () => {
+  test("Lead and specialists get Runtime-owned Supermemory guidance without model-controlled scope arguments", () => {
     const root = tempDir();
     try {
       const configDir = join(root, ".config", "opencode");
@@ -146,12 +146,12 @@ describe("adaptive memory provider filtering", () => {
       const plan = buildPromptGenerationPlan({ configDir, projectRoot: root, memoryBundle });
       const combined = plan.map((planned) => planned.content).join("\n");
 
-      expect(plan.find(({ agent }) => agent.id === "deck-lead")!.content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(plan.find(({ agent }) => agent.id === "deck-investigate")!.content).toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(plan.find(({ agent }) => agent.id === "deck-lead")!.content).toContain("Deck Runtime binds the verified project scope server-side");
+      expect(plan.find(({ agent }) => agent.id === "deck-investigate")!.content).toContain("Deck Runtime binds the verified project scope server-side");
+      expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(combined).not.toContain("supermemory_add_memory");
-      expect(combined).toContain("explicit remember are routed through the Deck runtime");
-      expect(combined).toContain("supermemory_search_memory");
-      expect(combined).toContain("x-sm-project is diagnostic/transport metadata only");
+      expect(combined).not.toContain("supermemory_search_memory");
+      expect(combined).toContain("schemas permit model-selected project scope");
       expect(combined).not.toContain("No manual containerTag required");
       expect(combined).not.toContain("sm_project_default");
     } finally {
