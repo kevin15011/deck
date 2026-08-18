@@ -79,7 +79,7 @@ If the memory provider is unavailable, tools are missing, or operations error: c
 export function adaptiveMemoryWhenToSave(): string {
   return `### Conversation Capture
 
-Provider-native conversation capture is not production-wired on unsupported/static-compatible runner paths. Agents must not run a manual proactive-save lifecycle, invent topic keys, chase a semantic quota, or create routine memory summaries.
+Automatic Adaptive Memory requires a Deck-managed session. Direct runner launches remain runner-standalone/static-compatible: static tools and instructions may work, but automatic recall/capture is not provided by design. Agents must not run a manual proactive-save lifecycle, invent topic keys, chase a semantic quota, create routine memory summaries, or try to autobootstrap Deck Runtime.
 
 Use explicit memory writes only when the user directly asks to remember or forget something and the runner-exposed provider tool supports that action.`;
 }

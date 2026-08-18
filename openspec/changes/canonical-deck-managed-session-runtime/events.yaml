@@ -1,0 +1,166 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-08-17T19:53:53Z"
+    actor: deck-investigate
+    registry_write: non-deferred
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-08-17T19:53:53Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-08-17T19:53:53Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-08-17T19:53:53Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-17T19:53:53Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-08-17T19:53:53Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-17T20:25:21Z"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-17T21:06:57Z"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+    notes:
+      - "Removed legacy helper ownership of the Adaptive Memory runtime and bridge."
+      - "Added lifecycle observability, computed readiness consumers, and cleanup/product-surface tests."
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-18T00:52:52Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-18T00:52:52Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-18T05:27:36Z"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+    notes:
+      - "Added fixed deck-canary host compilation and immutable atomic alias activation."
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-18T05:27:36Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-18T06:09:24Z"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+    notes:
+      - "Accepted only the trusted user-owned primary-group 0775 default canary directory while preserving fail-closed custom and world-writable paths."
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-18T06:09:24Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-18T16:32:07Z"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+    notes:
+      - "Resolved common SSH aliases from trusted structural OS-account configuration without environment or executable authority."
+      - "Reduced interactive launch output to one mutation preview and one concise confirmation question."
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-18T16:32:07Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-18T16:43:04Z"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-18T16:43:04Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-18T16:43:04Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-18T16:32:07Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-18T06:09:24Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-18T05:27:36Z"
+    actor: deck-quality
+    registry_write: non-deferred

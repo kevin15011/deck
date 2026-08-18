@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { PassThrough } from "node:stream";
-import { render } from "ink";
+import { render, renderToString } from "ink";
 import {
   buildCapabilityInstructionBundle,
   createAdapterRegistry,
@@ -19,8 +19,10 @@ import { createDeckConfigStore } from "../deck-config-store";
 import { DeckApp } from "./app";
 import { createMemoryProviderForSelection, hydrateDashboardAdaptiveMemoryState, withAuthoritativeSupermemoryRuntimeReadiness } from "./app";
 import { createDefaultRunnerDashboardState } from "./runner-dashboard/state";
+import { reduceRunnerDashboard, type PlanBuilderFn } from "./runner-dashboard/reducer";
 import { buildOpenCodeRunnerReviewPlan } from "@deck/adapter-opencode";
-import { getRunnerReviewPlanRunBlockDiagnostics, resolveSupermemoryRuntimeCredentialReadiness } from "./runner-dashboard/action-runner";
+import { getRunnerReviewPlanRunBlockPreflight, resolveSupermemoryRuntimeCredentialReadiness } from "./runner-dashboard/action-runner";
+import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 
 setDefaultTimeout(15_000);
 
@@ -77,6 +79,70 @@ async function waitForCondition(instance: { waitUntilRenderFlush(): Promise<unkn
   }
 }
 
+function renderOpenCodeReviewAfterAuthoritativePlanReducer(
+  supermemory: NonNullable<ReturnType<typeof createDefaultRunnerDashboardState>["adaptiveMemory"]["supermemory"]>,
+  secretStore: Pick<ReturnType<typeof createOwnerOnlyFileSecretStore>, "read">,
+) {
+  const operation = { runner: "opencode" as const, operationId: "opencode-test-operation", explicitlySelected: false };
+  const initialState = createDefaultRunnerDashboardState({
+    runnerScope: "opencode",
+    screen: "dashboard",
+    operationId: operation.operationId,
+    currentOperation: operation,
+    adaptiveMemory: { provider: "supermemory", supermemory },
+    runtime: { inspectionState: "ready", projectIdentity: "verified" },
+  });
+  const planBuilder: PlanBuilderFn = (state, inventory) => {
+    const adaptiveMemory = withAuthoritativeSupermemoryRuntimeReadiness(state.adaptiveMemory, secretStore);
+    const planState = { ...state, adaptiveMemory };
+    return {
+      plan: buildOpenCodeRunnerReviewPlan(planState as never, inventory as never),
+      state: { adaptiveMemory },
+    };
+  };
+  const state = reduceRunnerDashboard(
+    initialState,
+    { type: "enter-review", inventory: {}, operation },
+    planBuilder,
+  );
+  return {
+    state,
+    rendered: renderToString(<RunnerDashboardScreens state={state} canRunPlan={state.plan?.ready === true} runBlockDiagnostics={[]} />),
+  };
+}
+
+function renderOpenCodeReviewAfterCredentialEvidenceAction(
+  supermemory: NonNullable<ReturnType<typeof createDefaultRunnerDashboardState>["adaptiveMemory"]["supermemory"]>,
+  secretStore: Pick<ReturnType<typeof createOwnerOnlyFileSecretStore>, "read">,
+) {
+  const operation = { runner: "opencode" as const, operationId: "opencode-evidence-operation", explicitlySelected: false };
+  const plan = { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } };
+  const initialState = createDefaultRunnerDashboardState({
+    runnerScope: "opencode",
+    screen: "review-plan",
+    operationId: operation.operationId,
+    currentOperation: operation,
+    adaptiveMemory: { provider: "supermemory", supermemory },
+    runtime: { inspectionState: "ready", projectIdentity: "verified" },
+    plan,
+    planGeneratedForRevision: 0,
+    planRevision: 0,
+  });
+  const preflight = getRunnerReviewPlanRunBlockPreflight(initialState, { secretStore });
+  if (!preflight.evidence) throw new Error("Expected Supermemory credential evidence");
+  const state = reduceRunnerDashboard(initialState, {
+    type: "apply-supermemory-runtime-credential-evidence",
+    evidence: preflight.evidence,
+    identity: { runnerId: "opencode", operation, planRevision: 0, planGeneratedForRevision: 0 },
+  });
+  return {
+    initialState,
+    state,
+    preflight,
+    rendered: renderToString(<RunnerDashboardScreens state={state} canRunPlan={preflight.diagnostics.length === 0} runBlockDiagnostics={[]} />),
+  };
+}
+
 describe("DeckApp synthetic runner production flow", () => {
   test("restart hydration disables Adaptive Memory when config is disabled", () => {
     const state = hydrateDashboardAdaptiveMemoryState(
@@ -128,48 +194,89 @@ describe("DeckApp synthetic runner production flow", () => {
     expect(JSON.stringify(state)).not.toContain("sk-sm-test-SHOULD-NOT-LEAK");
   });
 
-  test("authoritative secret readiness overrides stale OpenCode dashboard state at plan and execution preflight", () => {
+  test("authoritative secret readiness reaches Review through plan reducer state for present, missing, and read-error", () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-authoritative-supermemory-secret-"));
-    const secretStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "xdg") });
-    secretStore.write("supermemory-api-key", "sk-sm-test-AUTHORITATIVE-SHOULD-NOT-LEAK");
-    const staleAdaptiveMemory = {
-      provider: "supermemory" as const,
-      supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] },
-    };
+    const presentStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "present-xdg") });
+    presentStore.write("supermemory-api-key", "sk-sm-test-AUTHORITATIVE-SHOULD-NOT-LEAK");
+    const missingStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "missing-xdg") });
+    const errorStore = { read: () => { throw new Error("permission denied sk-sm-test-SHOULD-NOT-LEAK"); } };
 
     try {
-      const adaptiveMemory = withAuthoritativeSupermemoryRuntimeReadiness(staleAdaptiveMemory, secretStore);
-      const dashboardState = createDefaultRunnerDashboardState({ runnerScope: "opencode", adaptiveMemory });
-      const plan = buildOpenCodeRunnerReviewPlan(dashboardState as never, {} as never);
+      const present = renderOpenCodeReviewAfterAuthoritativePlanReducer(
+        { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] },
+        presentStore,
+      );
+      expect(resolveSupermemoryRuntimeCredentialReadiness({ setup: present.state.adaptiveMemory.supermemory, secretStore: presentStore })).toMatchObject({ ready: true, reason: "secret-ready" });
+      expect(present.state.adaptiveMemory.supermemory).toMatchObject({ configured: true, runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present", ephemeralTokenAvailable: false });
+      expect(present.state.plan?.ready).toBe(true);
+      expect(present.rendered).toContain("reason=deck-managed-ready");
+      expect(present.rendered).not.toContain("reason=managed-runtime-auth-missing");
 
-      expect(resolveSupermemoryRuntimeCredentialReadiness({ setup: staleAdaptiveMemory.supermemory, secretStore })).toMatchObject({ ready: true, reason: "secret-ready" });
-      expect(adaptiveMemory.supermemory).toMatchObject({ configured: true, runtimeCredentialStored: true, ephemeralTokenAvailable: false });
-      expect(plan.ready).toBe(true);
-      expect(JSON.stringify(plan)).toContain("Deck runtime API credential is validated and stored");
-      expect(JSON.stringify(plan)).not.toContain("must be validated and stored");
-      expect(getRunnerReviewPlanRunBlockDiagnostics(dashboardState, { secretStore })).toEqual([]);
-      expect(JSON.stringify({ adaptiveMemory, plan })).not.toContain("sk-sm-test-AUTHORITATIVE-SHOULD-NOT-LEAK");
+      const missing = renderOpenCodeReviewAfterAuthoritativePlanReducer(
+        { configured: true, hasToken: true, runtimeCredentialStored: true, ephemeralTokenAvailable: true, diagnostics: [] },
+        missingStore,
+      );
+      expect(missing.state.adaptiveMemory.supermemory).toMatchObject({ runtimeCredentialStored: false, runtimeCredentialVerification: "verified-missing", ephemeralTokenAvailable: false });
+      expect(missing.state.plan?.ready).toBe(false);
+      expect(JSON.stringify(missing.state.plan)).toContain("Deck runtime API key must be validated and stored");
+      expect(missing.rendered).toContain("reason=managed-runtime-auth-missing");
+      expect(missing.rendered).not.toContain("reason=deck-managed-ready");
+
+      const error = renderOpenCodeReviewAfterAuthoritativePlanReducer(
+        { configured: true, hasToken: true, runtimeCredentialStored: true, ephemeralTokenAvailable: true, diagnostics: [] },
+        errorStore,
+      );
+      expect(error.state.adaptiveMemory.supermemory).toMatchObject({ runtimeCredentialStored: false, runtimeCredentialVerification: "verified-error", ephemeralTokenAvailable: false });
+      expect(error.rendered).toContain("reason=managed-runtime-auth-deferred");
+      expect(error.rendered).not.toContain("reason=deck-managed-ready");
+      expect(JSON.stringify({ present, missing, error })).not.toContain("sk-sm-test-AUTHORITATIVE-SHOULD-NOT-LEAK");
+      expect(JSON.stringify({ present, missing, error })).not.toContain("sk-sm-test-SHOULD-NOT-LEAK");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
 
-  test("authoritative secret readiness blocks stale OpenCode state when secret is absent", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-authoritative-supermemory-missing-"));
-    const secretStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "xdg") });
-    const staleAdaptiveMemory = {
-      provider: "supermemory" as const,
-      supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] },
-    };
+  test("credential preflight evidence flows through reducer action payload to Review", () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-credential-evidence-action-"));
+    const presentStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "present-xdg") });
+    presentStore.write("supermemory-api-key", "sk-sm-test-EVIDENCE-SHOULD-NOT-LEAK");
+    const missingStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "missing-xdg") });
+    const errorStore = { read: () => { throw new Error("permission denied sk-sm-test-SHOULD-NOT-LEAK"); } };
 
     try {
-      const adaptiveMemory = withAuthoritativeSupermemoryRuntimeReadiness(staleAdaptiveMemory, secretStore);
-      const dashboardState = createDefaultRunnerDashboardState({ runnerScope: "opencode", adaptiveMemory });
-      const plan = buildOpenCodeRunnerReviewPlan(dashboardState as never, {} as never);
+      const present = renderOpenCodeReviewAfterCredentialEvidenceAction(
+        { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] },
+        presentStore,
+      );
+      expect(present.preflight.diagnostics).toEqual([]);
+      expect(present.state).not.toBe(present.initialState);
+      expect(present.initialState.adaptiveMemory.supermemory).not.toHaveProperty("runtimeCredentialVerification");
+      expect(present.state.adaptiveMemory.supermemory).toMatchObject({ runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present" });
+      expect(present.rendered).toContain("reason=deck-managed-ready");
 
-      expect(plan.ready).toBe(false);
-      expect(JSON.stringify(plan)).toContain("Deck runtime API key must be validated and stored");
-      expect(getRunnerReviewPlanRunBlockDiagnostics(dashboardState, { secretStore }).join(" ")).toContain("Deck runtime API credential must be validated and stored");
+      const missing = renderOpenCodeReviewAfterCredentialEvidenceAction(
+        { configured: true, hasToken: true, runtimeCredentialStored: true, ephemeralTokenAvailable: true, diagnostics: [] },
+        missingStore,
+      );
+      expect(missing.state).not.toBe(missing.initialState);
+      expect(missing.initialState.adaptiveMemory.supermemory).toMatchObject({ runtimeCredentialStored: true, ephemeralTokenAvailable: true });
+      expect(missing.initialState.adaptiveMemory.supermemory).not.toHaveProperty("runtimeCredentialVerification");
+      expect(missing.state.adaptiveMemory.supermemory).toMatchObject({ runtimeCredentialStored: false, runtimeCredentialVerification: "verified-missing", ephemeralTokenAvailable: false });
+      expect(missing.rendered).toContain("reason=managed-runtime-auth-missing");
+      expect(missing.rendered).not.toContain("reason=deck-managed-ready");
+
+      const error = renderOpenCodeReviewAfterCredentialEvidenceAction(
+        { configured: true, hasToken: true, runtimeCredentialStored: true, ephemeralTokenAvailable: true, diagnostics: [] },
+        errorStore,
+      );
+      expect(error.state).not.toBe(error.initialState);
+      expect(error.initialState.adaptiveMemory.supermemory).toMatchObject({ runtimeCredentialStored: true, ephemeralTokenAvailable: true });
+      expect(error.initialState.adaptiveMemory.supermemory).not.toHaveProperty("runtimeCredentialVerification");
+      expect(error.state.adaptiveMemory.supermemory).toMatchObject({ runtimeCredentialStored: false, runtimeCredentialVerification: "verified-error", ephemeralTokenAvailable: false });
+      expect(error.rendered).toContain("reason=managed-runtime-auth-deferred");
+      expect(error.rendered).not.toContain("reason=deck-managed-ready");
+      expect(JSON.stringify({ present, missing, error })).not.toContain("sk-sm-test-EVIDENCE-SHOULD-NOT-LEAK");
+      expect(JSON.stringify({ present, missing, error })).not.toContain("sk-sm-test-SHOULD-NOT-LEAK");
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }
@@ -209,8 +316,11 @@ describe("DeckApp synthetic runner production flow", () => {
     const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome, projectRoot });
     configStore.write({ version: 1, adaptiveMemory: { enabled: true, activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } });
     const dashboardPlan = adapter.buildReviewPlan({} as never, {} as never) as any;
+    const operation = { runner: "opencode" as const, operationId: "opencode-debug-ready-operation", explicitlySelected: false };
     const dashboardState = createDefaultRunnerDashboardState({
       runnerScope: "opencode",
+      operationId: operation.operationId,
+      currentOperation: operation,
       runnerDisplayName: "OpenCode",
       runnerUi: (adapter as any).ui,
       screen: "review-plan",

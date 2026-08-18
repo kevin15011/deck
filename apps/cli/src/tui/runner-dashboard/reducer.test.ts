@@ -75,6 +75,83 @@ describe("Pi Runner dashboard reducer", () => {
     });
   });
 
+  test("ignores stale review-plan state evidence from an old runner operation", () => {
+    const current = reduce(createDefaultPiRunnerDashboardState(), {
+      type: "set-runner",
+      runnerScope: "opencode",
+      operationId: "opencode-current-operation",
+    });
+    const builder: PlanBuilderFn = () => ({
+      plan: { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } },
+      state: { adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialVerification: "verified-present", diagnostics: [] } } },
+    });
+
+    const stale = reduce(current, {
+      type: "enter-review",
+      inventory,
+      operation: { runner: "opencode", operationId: "opencode-previous-operation", explicitlySelected: false },
+    }, builder);
+
+    expect(stale).toBe(current);
+    expect(stale.screen).toBe("dashboard");
+    expect(stale.plan).toBeUndefined();
+    expect(stale.adaptiveMemory.provider).toBe("none");
+  });
+
+  test("ignores stale credential evidence action for a different operation", () => {
+    const currentOperation = { runner: "opencode" as const, operationId: "opencode-current-operation", explicitlySelected: false };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      operationId: currentOperation.operationId,
+      currentOperation,
+      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, diagnostics: [] } },
+    });
+
+    const stale = reduce(state, {
+      type: "apply-supermemory-runtime-credential-evidence",
+      evidence: { configured: true, runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present", ephemeralTokenAvailable: false, diagnostics: [] },
+      identity: {
+        runnerId: "opencode",
+        operation: { runner: "opencode", operationId: "opencode-stale-operation", explicitlySelected: false },
+        planRevision: 0,
+        planGeneratedForRevision: 0,
+      },
+    });
+
+    expect(stale).toBe(state);
+    expect(stale.adaptiveMemory.supermemory).not.toHaveProperty("runtimeCredentialVerification");
+    expect(stale.adaptiveMemory.supermemory?.runtimeCredentialStored).toBe(false);
+  });
+
+  test("ignores credential evidence action after plan generation changes", () => {
+    const currentOperation = { runner: "opencode" as const, operationId: "opencode-current-operation", explicitlySelected: false };
+    const plan = { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      operationId: currentOperation.operationId,
+      currentOperation,
+      plan,
+      planRevision: 1,
+      planGeneratedForRevision: 1,
+      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, diagnostics: [] } },
+    });
+
+    const stale = reduce(state, {
+      type: "apply-supermemory-runtime-credential-evidence",
+      evidence: { configured: true, runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present", ephemeralTokenAvailable: false, diagnostics: [] },
+      identity: {
+        runnerId: "opencode",
+        operation: currentOperation,
+        planRevision: 0,
+        planGeneratedForRevision: 0,
+      },
+    });
+
+    expect(stale).toBe(state);
+    expect(stale.adaptiveMemory.supermemory).not.toHaveProperty("runtimeCredentialVerification");
+    expect(stale.adaptiveMemory.supermemory?.runtimeCredentialStored).toBe(false);
+  });
+
   test("uses adapter-owned memory behavior for an arbitrary runner identity", () => {
     const nativeOAuthUi = getAdapter("opencode").ui!;
     const state = reduce(createDefaultPiRunnerDashboardState({

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useLayoutEffect, useState } from "react";
 import { Box, Text } from "ink";
 
 import { runDoctorDiagnostics } from "../../doctor-command/doctor-diagnostics";
@@ -9,6 +9,10 @@ type DoctorScreenProps = {
   projectRoot?: string | null;
   runDiagnostics?: typeof runDoctorDiagnostics;
 };
+
+export function runDoctorScreenDiagnostics(runDiagnostics: typeof runDoctorDiagnostics, projectRoot?: string | null) {
+  return runDiagnostics({}, projectRoot ?? undefined);
+}
 
 const STATUS_ICON: Record<DoctorStatus, string> = {
   ok: "✓",
@@ -172,10 +176,10 @@ export function DoctorScreen({ projectRoot, runDiagnostics = runDoctorDiagnostic
   const [result, setResult] = useState<DoctorDiagnosticsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     let cancelled = false;
 
-    runDiagnostics({}, projectRoot ?? undefined)
+    runDoctorScreenDiagnostics(runDiagnostics, projectRoot)
       .then((diagnostics) => {
         if (cancelled) return;
         setResult(diagnostics);

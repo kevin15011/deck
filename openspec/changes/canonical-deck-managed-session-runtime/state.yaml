@@ -1,0 +1,131 @@
+schema: spec-registry-v1
+changeId: canonical-deck-managed-session-runtime
+name: Canonical Deck-Managed Session Runtime
+currentPhase: review
+status: completed
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+provenance:
+  - phase: explore
+    agent: deck-investigate
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-17T19:53:53Z"
+    registryWrite: non-deferred
+  - phase: proposal
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-17T19:53:53Z"
+    registryWrite: non-deferred
+  - phase: spec
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-17T19:53:53Z"
+    registryWrite: non-deferred
+  - phase: design
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-17T19:53:53Z"
+    registryWrite: non-deferred
+  - phase: tasks
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-17T19:53:53Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-17T19:53:53Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-17T20:25:21Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-17T21:06:57Z"
+    registryWrite: non-deferred
+    note: "Repaired independent Quality NO-GO findings for duplicate legacy runtime ownership, lifecycle observability, computed readiness integration, and protected cleanup/product-surface coverage."
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T00:52:52Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T00:52:52Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T05:27:36Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T06:09:24Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T16:32:07Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T16:43:04Z"
+    registryWrite: non-deferred
+    note: "Reconciled valid passwd GECOS spaces and confirmed the actual esprit-mobileapp canonical scope."
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T16:43:04Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T16:43:04Z"
+    registryWrite: non-deferred
+    note: "Added structurally verified common SSH alias project identity and concise single-preview confirmation after live cross-project reproduction."
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T16:32:07Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T16:32:07Z"
+    registryWrite: non-deferred
+    note: "Repaired default user-owned primary-group 0775 canary destination compatibility after live Docker reproduction."
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T06:09:24Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T06:09:24Z"
+    registryWrite: non-deferred
+    note: "Added the separate deck-canary host compile/install helper for deferred cross-project live acceptance."
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T05:27:36Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-18T05:27:36Z"
+    registryWrite: non-deferred

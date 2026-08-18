@@ -3,8 +3,6 @@ import { render, renderToString } from "ink";
 
 import { parseArgs } from "./cli-args";
 import { getBuildInfo } from "./runtime/build-info";
-import { spawnInherited } from "./runtime/process";
-import { runPiLaunch } from "./pi-launch-command";
 import { resolveProjectRoot } from "./project-root";
 import { createDefaultAdapterRegistry } from "./runner-adapters";
 import { createNodeRunnerProcessEffects, runRunnerLaunch } from "./runner-launch-command";
@@ -218,11 +216,11 @@ if (parsed.command === "runner-launch") {
     localOnly: parsed.localOnly,
     cliMemoryProvider: parsed.memoryProvider,
     interactive,
-    confirm: interactive ? async (summary) => {
+    confirm: interactive ? async (question) => {
       const { createInterface } = await import("node:readline/promises");
       const prompt = createInterface({ input: process.stdin, output: process.stdout });
       try {
-        const answer = await prompt.question(`${summary}. Apply these project changes? [y/N] `);
+        const answer = await prompt.question(`${question} `);
         return /^(y|yes)$/i.test(answer.trim());
       } finally {
         prompt.close();
@@ -252,39 +250,48 @@ if (parsed.command === "runner-launch") {
   }
 } else if (parsed.command === "pi-launch") {
   const projectRoot = resolveProjectRoot() ?? process.cwd();
-  const result = await runPiLaunch({
-    teamId: parsed.teamId,
-    projectRoot,
-    flags: parsed.flags,
+  const deckConfig = configStore.readRequired();
+  const adapter = adapterRegistry.get("pi");
+  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+  const result = await runRunnerLaunch({
+    adapter,
+    launch: { projectRoot, teamId: parsed.teamId, mode: "interactive", runnerNative: parsed.flags, deckConfig },
     cliMemoryProvider: parsed.memoryProvider,
-    deckConfig: configStore.readRequired(),
+    interactive,
+    yes: !interactive,
+    confirm: interactive ? async (question) => {
+      const { createInterface } = await import("node:readline/promises");
+      const prompt = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const answer = await prompt.question(`${question} `);
+        return /^(y|yes)$/i.test(answer.trim());
+      } finally {
+        prompt.close();
+      }
+    } : undefined,
+    presentPreview: async (preview) => { console.log(preview); },
+    processEffects: createNodeRunnerProcessEffects(),
   });
 
-  if (result.status === "error") {
+  if (result.status === "blocked") {
     console.error(result.message);
     process.exit(1);
   }
-
-  // Report memory diagnostics if any. Diagnostics are produced without memory
-  // content or credentials; Supermemory token/header values must remain redacted.
-  if (result.memoryDiagnostics.length > 0) {
-    for (const diagnostic of result.memoryDiagnostics) {
-      console.error(`[memory] ${diagnostic.code}: ${diagnostic.message}`);
-    }
+  if (result.status === "unsupported") {
+    console.error(result.message);
+    process.exit(2);
   }
-
-  // Spawn Pi with the launch plan
-  const plan = result.plan;
-  const child = spawnInherited(plan.command, plan.args, {
-    cwd: plan.cwd,
-    env: plan.env,
-  });
-
-  const exitCode = await new Promise<number>((resolve) => {
-    child.on("close", (code) => resolve(code ?? 1));
-  });
-  await result.loopbackBridge?.close();
-  process.exit(exitCode);
+  if (result.status === "dry-run" || result.status === "installed") {
+    for (const diagnostic of result.diagnostics) console.log(diagnostic);
+    process.exit(0);
+  }
+  if (result.status === "launched") {
+    for (const diagnostic of result.launch.diagnostics) console.error(`[${diagnostic.code}] ${diagnostic.message}`);
+    if (result.outcome.stdout) process.stdout.write(result.outcome.stdout);
+    if (result.outcome.stderr) process.stderr.write(result.outcome.stderr);
+    if (result.outcome.truncated) console.error("Runner output was truncated; it is not complete verification evidence.");
+    process.exit(result.outcome.exitCode);
+  }
 } else if (process.stdin.isTTY) {
   render(<DeckApp adapterRegistry={adapterRegistry} configStore={configStore} />, {
     alternateScreen: true,

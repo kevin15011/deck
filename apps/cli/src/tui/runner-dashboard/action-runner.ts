@@ -27,7 +27,7 @@ import {
   type RunnerVerificationEvidence,
   type DeckSecretStore,
 } from "@deck/core";
-import { runnerRequiresExternalSupermemoryToken, type RunnerAction, type RunnerDashboardState, type RunnerReviewPlan } from "./state";
+import { runnerRequiresExternalSupermemoryToken, type RunnerAction, type RunnerDashboardState, type RunnerDashboardEvidenceIdentity, type RunnerReviewPlan, type SupermemoryRuntimeCredentialEvidence } from "./state";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments, WebSearchProviderDescriptorV1 } from "@deck/core";
 // Canonical server name for codebase-memory MCP — defined locally to avoid adapter dependency in the runner
 const CODEBASE_MEMORY_MCP_SERVER_NAME = "codebase-memory";
@@ -195,6 +195,7 @@ export type RunnerActionRunnerDependencies = {
   configStore?: DeckConfigStore;
   writeDeckConfig?: (projectRoot: string, config: unknown) => NormalizedDeckConfig;
   onActionResult?: (result: RunnerActionRunResult) => void;
+  onSupermemoryRuntimeCredentialEvidence?: (payload: { evidence: SupermemoryRuntimeCredentialEvidence; identity: RunnerDashboardEvidenceIdentity }) => void;
   onInstallResult?: (result: RunnerPackageInstallResult) => void;
   /** Current-operation Serena authorization and the single operation signal. */
   runnerId?: string;
@@ -226,10 +227,7 @@ export type RunnerActionRunnerDependencies = {
 export function resolveSupermemoryRuntimeCredentialReadiness(options: {
   setup?: { runtimeCredentialStored?: boolean; hasToken?: boolean; configured?: boolean };
   secretStore?: Pick<DeckSecretStore, "read">;
-}): { ready: boolean; diagnostics: string[]; reason: "state-ready" | "secret-ready" | "missing" | "read-error" } {
-  if (options.setup?.runtimeCredentialStored === true || options.setup?.hasToken === true) {
-    return { ready: true, diagnostics: [], reason: "state-ready" };
-  }
+}): { ready: boolean; diagnostics: string[]; reason: "secret-ready" | "missing" | "read-error" } {
   if (!options.secretStore) {
     return { ready: false, diagnostics: ["Supermemory Deck runtime API credential must be validated and stored before Review & Install; no Deck secret store was available for readiness verification."], reason: "missing" };
   }
@@ -240,26 +238,103 @@ export function resolveSupermemoryRuntimeCredentialReadiness(options: {
   } catch (error) {
     return {
       ready: false,
-      diagnostics: [redact(error instanceof Error ? error.message : String(error))],
+      diagnostics: [`Supermemory Deck runtime API credential could not be read; Review & Install is blocked until the Deck secret store is readable. ${redact(error instanceof Error ? error.message : String(error))}`],
       reason: "read-error",
     };
   }
+}
+
+export function resolveSupermemoryRuntimeCredentialEvidence(options: {
+  setup?: RunnerDashboardState["adaptiveMemory"]["supermemory"];
+  secretStore?: Pick<DeckSecretStore, "read">;
+}): { readiness: ReturnType<typeof resolveSupermemoryRuntimeCredentialReadiness>; evidence: SupermemoryRuntimeCredentialEvidence } {
+  const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup: options.setup, secretStore: options.secretStore });
+  return {
+    readiness,
+    evidence: {
+      configured: options.setup?.configured === true || readiness.ready,
+      runtimeCredentialStored: readiness.ready,
+      runtimeCredentialVerification: readiness.ready ? "verified-present" : readiness.reason === "read-error" ? "verified-error" : "verified-missing",
+      ephemeralTokenAvailable: false,
+      diagnostics: readiness.ready
+        ? options.setup?.diagnostics ?? []
+        : [...(options.setup?.diagnostics ?? []), ...readiness.diagnostics],
+    },
+  };
+}
+
+export function getRunnerReviewPlanRunBlockPreflight(
+  state?: RunnerDashboardState,
+  options: { supermemoryToken?: string; secretStore?: Pick<DeckSecretStore, "read"> } = {},
+): { diagnostics: string[]; evidence?: SupermemoryRuntimeCredentialEvidence } {
+  if (state?.adaptiveMemory.provider !== "supermemory") return { diagnostics: [] };
+
+  const setup = state.adaptiveMemory.supermemory;
+  const { readiness, evidence } = resolveSupermemoryRuntimeCredentialEvidence({ setup, secretStore: options.secretStore });
+  const diagnostics: string[] = [];
+  if (!setup?.configured && !readiness.ready) diagnostics.push("Supermemory setup is not configured for Review & Install.");
+  if (!readiness.ready) diagnostics.push(...readiness.diagnostics);
+  if (process.env.DECK_DEBUG) log(`Supermemory runtime readiness: ${readiness.ready ? "ready" : "not-ready"} (${readiness.reason}).`);
+  diagnostics.push(...(setup?.diagnostics ?? []).filter(isBlockingSetupDiagnostic));
+  return { diagnostics: redactDiagnostics(diagnostics), evidence };
 }
 
 export function getRunnerReviewPlanRunBlockDiagnostics(
   state?: RunnerDashboardState,
   options: { supermemoryToken?: string; secretStore?: Pick<DeckSecretStore, "read"> } = {},
 ): string[] {
-  if (state?.adaptiveMemory.provider !== "supermemory") return [];
+  return getRunnerReviewPlanRunBlockPreflight(state, options).diagnostics;
+}
 
-  const setup = state.adaptiveMemory.supermemory;
-  const diagnostics: string[] = [];
-  const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup, secretStore: options.secretStore });
-  if (!setup?.configured && !readiness.ready) diagnostics.push("Supermemory setup is not configured for Review & Install.");
-  if (!readiness.ready) diagnostics.push(...readiness.diagnostics);
-  if (process.env.DECK_DEBUG) log(`Supermemory runtime readiness: ${readiness.ready ? "ready" : "not-ready"} (${readiness.reason}).`);
-  diagnostics.push(...(setup?.diagnostics ?? []).filter(isBlockingSetupDiagnostic));
-  return redactDiagnostics(diagnostics);
+type SupermemoryPreflightIdentity =
+  | { kind: "not-supermemory" }
+  | { kind: "stale" }
+  | { kind: "current"; identity: RunnerDashboardEvidenceIdentity };
+
+function captureSupermemoryPreflightIdentity(
+  plan: RunnerReviewPlan,
+  dependencies: RunnerActionRunnerDependencies,
+): SupermemoryPreflightIdentity {
+  const state = dependencies.dashboardState;
+  if (state?.adaptiveMemory.provider !== "supermemory") return { kind: "not-supermemory" };
+  if (state.runnerScope === "all") return { kind: "stale" };
+  const stateOperation = state.currentOperation ?? (state.operationId ? {
+    runner: state.runnerScope,
+    operationId: state.operationId,
+    explicitlySelected: false,
+  } : undefined);
+  if (!stateOperation || stateOperation.runner !== state.runnerScope || stateOperation.operationId.length === 0) return { kind: "stale" };
+  const dependencyRunner = dependencies.currentOperation?.runner ?? dependencies.runnerId;
+  const dependencyOperationId = dependencies.currentOperation?.operationId ?? dependencies.operationId;
+
+  if (dependencyRunner && dependencyRunner !== state.runnerScope) return { kind: "stale" };
+  if (dependencyOperationId && dependencyOperationId !== stateOperation.operationId) return { kind: "stale" };
+  if (dependencies.currentOperation && dependencies.currentOperation.operationId !== stateOperation.operationId) return { kind: "stale" };
+  if (state.plan !== plan) return { kind: "stale" };
+  if (state.planGeneratedForRevision === undefined || state.planGeneratedForRevision !== state.planRevision) return { kind: "stale" };
+  return {
+    kind: "current",
+    identity: {
+      runnerId: state.runnerScope,
+      operation: stateOperation,
+      planRevision: state.planRevision,
+      planGeneratedForRevision: state.planGeneratedForRevision,
+    },
+  };
+}
+
+function isCurrentSupermemoryPreflightIdentity(
+  plan: RunnerReviewPlan,
+  dependencies: RunnerActionRunnerDependencies,
+  identity: RunnerDashboardEvidenceIdentity,
+): boolean {
+  const current = captureSupermemoryPreflightIdentity(plan, dependencies);
+  return current.kind === "current"
+    && current.identity.runnerId === identity.runnerId
+    && current.identity.operation.runner === identity.operation.runner
+    && current.identity.operation.operationId === identity.operation.operationId
+    && current.identity.planRevision === identity.planRevision
+    && current.identity.planGeneratedForRevision === identity.planGeneratedForRevision;
 }
 
 function getReviewedPlanExecutionBlocker(
@@ -884,10 +959,23 @@ export async function runRunnerReviewPlan(
   log(`runRunnerReviewPlan: configWrites=${plan.groups.configWrites.length} automaticInstalls=${plan.groups.automaticInstalls.length} manualSteps=${plan.groups.manualSteps.length} teamApplications=${plan.groups.teamApplications.length} validations=${plan.groups.validations.length}`);
   log(`runRunnerReviewPlan: has installPackages=${!!dependencies.installPackages} has writeMcpConfig=${!!dependencies.writeMcpConfig} has installTeamBundle=${!!dependencies.installTeamBundle} has validateMcpConfig=${!!dependencies.validateMcpConfig}`);
 
-  const runBlockDiagnostics = getRunnerReviewPlanRunBlockDiagnostics(dependencies.dashboardState, {
-    supermemoryToken: dependencies.supermemoryToken,
-    secretStore: dependencies.secretStore,
+  if (dependencies.signal?.aborted) return [];
+  const preflightIdentity = captureSupermemoryPreflightIdentity(plan, dependencies);
+  const shouldEmitCredentialEvidence = Boolean(dependencies.onSupermemoryRuntimeCredentialEvidence);
+  if (shouldEmitCredentialEvidence && preflightIdentity.kind === "stale") return [];
+  const runBlockPreflight = preflightIdentity.kind !== "not-supermemory"
+    ? getRunnerReviewPlanRunBlockPreflight(dependencies.dashboardState, {
+        supermemoryToken: dependencies.supermemoryToken,
+        secretStore: dependencies.secretStore,
+      })
+    : { diagnostics: [] };
+  if (dependencies.signal?.aborted) return [];
+  if (shouldEmitCredentialEvidence && preflightIdentity.kind === "current" && !isCurrentSupermemoryPreflightIdentity(plan, dependencies, preflightIdentity.identity)) return [];
+  if (shouldEmitCredentialEvidence && preflightIdentity.kind === "current" && runBlockPreflight.evidence) dependencies.onSupermemoryRuntimeCredentialEvidence?.({
+    evidence: runBlockPreflight.evidence,
+    identity: preflightIdentity.identity,
   });
+  const runBlockDiagnostics = runBlockPreflight.diagnostics;
   if (runBlockDiagnostics.length > 0) {
     const blockedResult: RunnerActionRunResult = {
       actionId: "review-plan.preflight",

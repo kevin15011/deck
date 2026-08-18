@@ -90,6 +90,40 @@ describe("Pi Runner dashboard render", () => {
     expect(output).not.toContain("Supermemory runtime readiness");
   });
 
+  test("Review readiness does not treat stale cached Supermemory token booleans as verified", () => {
+    const readyPlan: PiRunnerReviewPlan = { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      screen: "review-plan",
+      plan: readyPlan,
+      runtime: { inspectionState: "ready", projectIdentity: "verified" },
+      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true, runtimeCredentialStored: true, diagnostics: [] } },
+    });
+
+    const output = renderToString(<RunnerDashboardScreens state={state} canRunPlan runBlockDiagnostics={[]} />);
+
+    expect(output).toContain("reason=managed-runtime-auth-missing");
+    expect(output).not.toContain("reason=deck-managed-ready");
+  });
+
+  test("Review readiness renders verified Supermemory credential states", () => {
+    const readyPlan: PiRunnerReviewPlan = { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } };
+    const base = {
+      runnerScope: "opencode" as const,
+      screen: "review-plan" as const,
+      plan: readyPlan,
+      runtime: { inspectionState: "ready" as const, projectIdentity: "verified" as const },
+    };
+
+    const present = renderToString(<RunnerDashboardScreens state={createDefaultPiRunnerDashboardState({ ...base, adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialVerification: "verified-present", diagnostics: [] } } })} canRunPlan runBlockDiagnostics={[]} />);
+    const missing = renderToString(<RunnerDashboardScreens state={createDefaultPiRunnerDashboardState({ ...base, adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialVerification: "verified-missing", diagnostics: [] } } })} canRunPlan runBlockDiagnostics={[]} />);
+    const error = renderToString(<RunnerDashboardScreens state={createDefaultPiRunnerDashboardState({ ...base, adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialVerification: "verified-error", diagnostics: [] } } })} canRunPlan runBlockDiagnostics={[]} />);
+
+    expect(present).toContain("reason=deck-managed-ready");
+    expect(missing).toContain("reason=managed-runtime-auth-missing");
+    expect(error).toContain("reason=managed-runtime-auth-deferred");
+  });
+
   test("dashboard principal muestra las cuatro secciones con estados y contadores", () => {
     const state = createDefaultPiRunnerDashboardState({ plan });
     const output = renderToString(<PiRunnerDashboardScreens state={state} />);

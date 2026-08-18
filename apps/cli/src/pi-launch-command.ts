@@ -31,7 +31,6 @@ import {
   getEnabledCapabilityInstructionIds,
   type CapabilityInstructionBundle,
 } from "@deck/core/teams/developer/instruction-bundles";
-import { createSupermemoryRuntimeHost, type SupermemoryRunnerLoopbackBridge } from "./supermemory-runtime-host";
 
 // --- Types ---
 
@@ -71,6 +70,7 @@ export type RunPiLaunchOptions = {
   supermemoryRuntimeValidator?: SupermemoryRuntimeValidator;
   /** Per-request Supermemory validation timeout for each non-mutating probe. Defaults to 3000ms. */
   supermemoryValidationTimeoutMs?: number;
+  /** @deprecated Compatibility-only; managed runtime effects are owned exclusively by runRunnerLaunch. */
   supermemoryRuntime?: { secretStore?: DeckSecretStore; apiKey?: string; transport?: SupermemoryRuntimeTransport; stateHome?: string };
   /** Check if a command exists in PATH */
   commandExists?: (command: string) => boolean;
@@ -90,8 +90,8 @@ export type MemoryProviderDiagnostic = {
 
 export type PiLaunchResult =
   | { status: "error"; message: string; memoryDiagnostics: MemoryProviderDiagnostic[] }
-  | { status: "ready"; plan: PiTeamLaunchPlan; profileDir: string; memoryDiagnostics: MemoryProviderDiagnostic[]; loopbackBridge?: SupermemoryRunnerLoopbackBridge }
-  | { status: "launched"; plan: PiTeamLaunchPlan; memoryDiagnostics: MemoryProviderDiagnostic[]; loopbackBridge?: SupermemoryRunnerLoopbackBridge };
+  | { status: "ready"; plan: PiTeamLaunchPlan; profileDir: string; memoryDiagnostics: MemoryProviderDiagnostic[] }
+  | { status: "launched"; plan: PiTeamLaunchPlan; memoryDiagnostics: MemoryProviderDiagnostic[] };
 
 export type ResolvedPiAdaptiveMemoryProvider = {
   provider?: AdaptiveMemoryProvider;
@@ -160,42 +160,13 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
   const resolvedMemory = await resolveLaunchMemoryProvider(options);
   const allDiagnostics: MemoryProviderDiagnostic[] = [...resolvedMemory.diagnostics];
   const capabilityInstructions = buildPiLaunchCapabilityInstructions(options);
-  let runtimeMemoryInjection: MemoryInjectionBundle | undefined;
-  let loopbackBridge: SupermemoryRunnerLoopbackBridge | undefined;
-  if (options.deckConfig !== undefined) {
-    try {
-      const deckConfig = validateDeckConfig(options.deckConfig);
-      const runtimeDeckConfig = options.cliMemoryProvider === "none"
-        ? { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: false, activeProvider: "none" as const } }
-        : options.cliMemoryProvider === "supermemory"
-          ? { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: true, activeProvider: "supermemory" as const } }
-          : deckConfig;
-      const runtimeHost = await createSupermemoryRuntimeHost({
-        projectRoot,
-        teamId,
-        deckConfig: runtimeDeckConfig,
-        runnerId: "pi",
-        role: "lead",
-        launchMode: "interactive",
-        secretStore: options.supermemoryRuntime?.secretStore,
-        apiKey: options.supermemoryRuntime?.apiKey,
-        transport: options.supermemoryRuntime?.transport,
-        stateHome: options.supermemoryRuntime?.stateHome,
-        deferInitialRecallToLoopback: true,
-      });
-      allDiagnostics.push(...runtimeHost.diagnostics.filter((diagnostic) => diagnostic.severity !== "info").map((diagnostic) => ({ code: "supermemory_runtime" as const, providerId: "supermemory", message: diagnostic.message })));
-      loopbackBridge = runtimeHost.enabled && !dryRun ? await runtimeHost.startLoopbackBridge() : undefined;
-    } catch (error) {
-      allDiagnostics.push({ code: "supermemory_runtime", providerId: "supermemory", message: redactedConfigErrorMessage(error, "launch") });
-    }
-  }
 
   const profileDiagnostics = materializeTeamProfile({
     teamId,
     projectRoot,
     supportedMemoryProviderIds,
-    ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { memoryInjection: runtimeMemoryInjection ?? resolvedMemory.memoryInjection } : {}),
-    ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { trustedMemoryInjection: true } : {}),
+    ...(resolvedMemory.memoryInjection ? { memoryInjection: resolvedMemory.memoryInjection } : {}),
+    ...(resolvedMemory.memoryInjection ? { trustedMemoryInjection: true } : {}),
     ...(resolvedMemory.provider ? { memoryProvider: resolvedMemory.provider } : {}),
     ...(resolvedMemory.memoryUnavailableReason ? { memoryUnavailableReason: resolvedMemory.memoryUnavailableReason } : {}),
     ...(capabilityInstructions ? { capabilityInstructions } : {}),
@@ -211,8 +182,8 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
       return { skillId: skill.skillId, body: bundle.SKILL, files: bundle.files };
     });
     const installPlan = buildDeveloperTeamInstallPlan(projectRoot, {
-      ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { memoryInjection: runtimeMemoryInjection ?? resolvedMemory.memoryInjection } : {}),
-      ...(runtimeMemoryInjection ?? resolvedMemory.memoryInjection ? { trustedMemoryInjection: true } : {}),
+      ...(resolvedMemory.memoryInjection ? { memoryInjection: resolvedMemory.memoryInjection } : {}),
+      ...(resolvedMemory.memoryInjection ? { trustedMemoryInjection: true } : {}),
       ...(resolvedMemory.provider ? { memoryProvider: resolvedMemory.provider } : {}),
       supportedMemoryProviderIds,
       modelAssignments,
@@ -229,14 +200,13 @@ export async function runPiLaunch(options: RunPiLaunchOptions): Promise<PiLaunch
   }
 
   const plan = buildPiTeamLaunchPlan({ teamId, projectRoot, flags, piCommand });
-  if (loopbackBridge) Object.assign(plan.env, Object.fromEntries(Object.entries(loopbackBridge.envOverlay).map(([key, entry]) => [key, entry.value])));
   const memoryDiagnostics = dedupeDiagnostics(allDiagnostics);
 
   if (dryRun) {
-    return { status: "ready", plan, profileDir: plan.profileDir, memoryDiagnostics, ...(loopbackBridge ? { loopbackBridge } : {}) };
+    return { status: "ready", plan, profileDir: plan.profileDir, memoryDiagnostics };
   }
 
-  return { status: "launched", plan, memoryDiagnostics, ...(loopbackBridge ? { loopbackBridge } : {}) };
+  return { status: "launched", plan, memoryDiagnostics };
 }
 
 function buildPiLaunchCapabilityInstructions(options: RunPiLaunchOptions): CapabilityInstructionBundle | undefined {

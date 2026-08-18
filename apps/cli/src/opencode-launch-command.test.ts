@@ -199,7 +199,7 @@ describe("production prompt activation", () => {
     }
   });
 
-  test("OpenCode launch materializes runtime recall before prompt install without raw MCP calls", async () => {
+  test("OpenCode compatibility launch does not materialize managed runtime recall or raw MCP calls", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-runtime-recall-"));
     const configDir = join(projectRoot, ".config", "opencode");
     const stateHome = join(projectRoot, ".state");
@@ -245,14 +245,10 @@ describe("production prompt activation", () => {
       const opencodeConfig = readFileSync(join(configDir, "opencode.json"), "utf8");
 
       expect(result.status).toBe("ready");
-      expect(leadPrompt).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
-      expect(leadPrompt).toContain("runtime memory injection");
+      expect(leadPrompt).not.toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
+      expect(leadPrompt).not.toContain("runtime memory injection");
       expect(opencodeConfig).not.toContain("mcp.supermemory.ai");
-      expect(calls).toEqual([
-        "health:sm_project_v1_acme_opencode_runtime",
-        "profile:sm_project_v1_acme_opencode_runtime",
-        "search:sm_project_v1_acme_opencode_runtime:current task project context",
-      ]);
+      expect(calls).toEqual([]);
       expect(existsSync(join(envState, "deck", "supermemory-runtime.jsonl"))).toBe(false);
     } finally {
       for (const [key, value] of Object.entries(previousEnv)) {

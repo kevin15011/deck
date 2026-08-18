@@ -160,11 +160,27 @@ export type RunnerDiagnostic = {
   severity: "info" | "warning" | "error";
 };
 
+/** Deck-managed launches are the canonical Full Deck topology; direct runner use is intentionally degraded. */
+export type SessionTopology = "deck-managed" | "runner-standalone";
+
+/** Runner-neutral readiness state for static integration, managed runtime, and optional capabilities. */
+export type ManagedCapabilityState = "ready" | "disabled" | "degraded" | "blocked";
+
+export type SessionRuntimeReadiness = Readonly<{
+  topology: SessionTopology;
+  staticIntegration: ManagedCapabilityState;
+  managedRuntime: ManagedCapabilityState;
+  capabilities: Readonly<Record<string, ManagedCapabilityState>>;
+  reasonCode?: string;
+}>;
+
 export type RunnerLaunchBase = {
   projectRoot: string;
   teamId: string;
   modelId?: string;
   reasoningLevel?: string;
+  /** Runner-native launch hints translated by adapters; never carries scope, credentials, or provider selection. */
+  runnerNative?: Readonly<Record<string, string | number | boolean>>;
   /** Caller-resolved global Deck preferences. Project root remains execution scope only. */
   deckConfig: NormalizedDeckConfig;
 };

@@ -49,6 +49,8 @@ export type SupermemorySetupValues = {
   runtimeCredentialStored?: boolean;
   /** Ephemeral token input is currently present in TUI state; cleared after storage. */
   ephemeralTokenAvailable?: boolean;
+  /** Current-run evidence from an authoritative Deck secret-store read. */
+  runtimeCredentialVerification?: "verified-present" | "verified-missing" | "verified-error";
   /** Optional runner-native MCP OAuth status; not required for Deck runtime memory. */
   mcpOAuthReady?: boolean;
 };
@@ -56,6 +58,21 @@ export type SupermemorySetupValues = {
 export type SupermemorySetupState = SupermemorySetupValues & {
   configured: boolean;
   diagnostics: string[];
+};
+
+export type SupermemoryRuntimeCredentialEvidence = {
+  configured: boolean;
+  runtimeCredentialStored: boolean;
+  runtimeCredentialVerification: NonNullable<SupermemorySetupValues["runtimeCredentialVerification"]>;
+  ephemeralTokenAvailable: false;
+  diagnostics: string[];
+};
+
+export type RunnerDashboardEvidenceIdentity = {
+  runnerId: Exclude<RunnerScope, "all">;
+  operation: RunnerOperationIdentity;
+  planRevision: number;
+  planGeneratedForRevision: number;
 };
 
 /** Non-secret Web Search facts projected from adapter inventory for the dashboard. */
@@ -174,6 +191,7 @@ export type RunnerDashboardState = {
     preflight?: unknown;
     toolsReview?: unknown;
     inspectionState?: "ready" | "degraded" | "blocked" | "unsupported";
+    projectIdentity?: "verified" | "unverified" | "deferred";
     diagnostics?: string[];
     executionRoutes?: Partial<Record<"interactive" | "exec" | "resume-by-id" | "resume-latest", "first-class" | "static-compatible" | "unsupported" | "blocked">>;
   };

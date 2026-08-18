@@ -6,12 +6,13 @@ import { classifyExplicitMemoryIntent, createNodeRunnerProcessEffects, executeRu
 import { runRunnerLaunch } from "./runner-launch-command";
 import { deriveDeckRuntimeSessionId } from "./supermemory-runtime-host";
 import { createFreshDeckSessionId, persistNativeDeckRuntimeSessionMapping, resolveDeckRuntimeSessionId } from "./supermemory-session-store";
-import { getDefaultDeckConfig, type RunnerAdapter, type RunnerLaunchInput } from "@deck/core";
+import { createOwnerOnlyFileSecretStore, getDefaultDeckConfig, type RunnerAdapter, type RunnerLaunchInput } from "@deck/core";
 import { createPiRunnerAdapter } from "@deck/adapter-pi";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { buildCodexLaunchPlan, createCodexRunnerAdapter } from "@deck/adapter-codex";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 
@@ -19,6 +20,23 @@ const withDeckConfig = <T extends Omit<RunnerLaunchInput, "deckConfig">>(input: 
   ...input,
   deckConfig: getDefaultDeckConfig(),
 });
+
+const TOKEN_SENTINEL = "sk-test-runner-secret-value-123456";
+
+async function loadInstalledOpenCodePlugin(pluginPath: string, memoryLoopback: { endpoint?: string; token?: string }) {
+  const url = `${pathToFileURL(pluginPath).href}?cache=${Date.now()}-${Math.random()}`;
+  const module = await import(url) as Record<string, unknown>;
+  const factory = module.createOpenCodeDeveloperTeamExecutionPluginV1 ?? module.default;
+  if (typeof factory !== "function") throw new Error("installed OpenCode developer-team plugin factory is unavailable");
+  const pluginFactory = await (factory as (options: { memoryLoopback: typeof memoryLoopback }) => Promise<unknown> | unknown)({ memoryLoopback });
+  const plugin = typeof pluginFactory === "function" ? await (pluginFactory as () => Promise<unknown> | unknown)() : pluginFactory;
+  return plugin as Record<string, (...args: any[]) => Promise<void>>;
+}
+
+function managedReadinessMessages(result: Awaited<ReturnType<typeof runRunnerLaunch>>): string[] {
+  const diagnostics = result.status === "launched" ? result.launch.diagnostics : "diagnostics" in result ? result.diagnostics ?? [] : [];
+  return diagnostics.filter((diagnostic) => typeof diagnostic !== "string" && diagnostic.code === "managed-session-readiness").map((diagnostic) => typeof diagnostic === "string" ? diagnostic : diagnostic.message);
+}
 
 function initGitRemote(projectRoot: string, remote = "git@github.com:kevin15011/deck.git") {
   execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
@@ -193,6 +211,28 @@ describe("runRunnerLaunch consent and status", () => {
     } as unknown as RunnerAdapter;
   }
 
+  test("prints one full mutation preview and uses a concise confirmation question", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-preview-once-"));
+    initGitRemote(projectRoot);
+    const output: string[] = [];
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter(),
+        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() },
+        interactive: true,
+        presentPreview: async (preview) => { output.push(preview); },
+        confirm: async (question) => { output.push(question); return true; },
+        processEffects: { spawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
+      });
+
+      expect(result.status).toBe("launched");
+      expect(output.join("\n").match(/create managed pre=absent post=abc owner=deck-file/g)?.length).toBe(1);
+      expect(output.at(-1)).toBe("Apply these project changes and launch Fake? [y/N]");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("does not persist Supermemory session continuity state when runtime is disabled", async () => {
     const stateHome = await mkdtemp(join(tmpdir(), "deck-disabled-session-state-"));
     const previousStateHome = process.env.XDG_STATE_HOME;
@@ -270,12 +310,386 @@ describe("runRunnerLaunch consent and status", () => {
     }
   });
 
+  test("dry-run and install-only create no Supermemory host, bridge, session persistence, or child process", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-no-effect-"));
+    initGitRemote(projectRoot);
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    const events: string[] = [];
+    const launchInput = { projectRoot, teamId: "developer-team", mode: "exec" as const, prompt: ["do not start memory"], stdin: "closed" as const, stdinPayload: { type: "utf8" as const, content: "do not start memory" }, deckConfig: cfg };
+    const fakeAdapter = adapter({
+      buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+      buildLaunchPlan: () => { events.push("launch-plan"); return { status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }; },
+      applyDeveloperTeamInstall: async () => { events.push("apply"); return { results: [], changedCount: 0, unchangedCount: 0 }; },
+    });
+    const supermemoryRuntime = { stateHome: join(projectRoot, ".state"), transport: {
+      async add() { events.push("add"); },
+      async search() { events.push("search"); return { results: [] }; },
+      async profile() { events.push("profile"); return { profile: {} }; },
+      async health() { events.push("health"); return { ok: true }; },
+    } };
+    try {
+      const dryRun = await runRunnerLaunch({
+        adapter: fakeAdapter,
+        launch: launchInput,
+        dryRun: true,
+        interactive: false,
+        presentPreview: async () => { events.push("preview:dry-run"); },
+        processEffects: { spawn: async () => { events.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
+        supermemoryRuntime,
+      });
+      const installOnly = await runRunnerLaunch({
+        adapter: fakeAdapter,
+        launch: launchInput,
+        installOnly: true,
+        yes: true,
+        interactive: false,
+        presentPreview: async () => { events.push("preview:install-only"); },
+        processEffects: { spawn: async () => { events.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
+        supermemoryRuntime,
+      });
+
+      expect(dryRun.status).toBe("dry-run");
+      expect(installOnly.status).toBe("installed");
+      expect(events).toEqual(["launch-plan", "preview:dry-run", "preview:install-only", "apply"]);
+      expect(existsSync(join(projectRoot, ".state", "deck", "supermemory-sessions.json"))).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("managed lifecycle observability records metadata-only start, identity, recall, capture, and cleanup", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-observe-"));
+    initGitRemote(projectRoot);
+    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({
+          buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+          buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }),
+        }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Decision: managed lifecycle observability records metadata only."], stdin: "closed", stdinPayload: { type: "utf8", content: "Decision: managed lifecycle observability records metadata only." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          const endpoint = options.env.DECK_RUNNER_MEMORY_ENDPOINT!;
+          const token = options.env.DECK_RUNNER_MEMORY_TOKEN!;
+          const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+          await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "observe-session", timestamp: Date.now(), event: "session_start", sessionId: "native-session", role: "lead", query: "Decision: managed lifecycle observability records metadata only." }) });
+          await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "observe-capture", timestamp: Date.now(), event: "capture", sessionId: "native-session", source: "trusted-user-prompt", content: "Decision: managed lifecycle observability records metadata only." }) });
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), observabilitySink: { path: "memory://test", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: {
+          async add() {},
+          async search() { return { results: [{ content: "metadata-only context" }] }; },
+          async profile() { return { profile: { static: ["metadata-only profile"] } }; },
+          async health() { return { ok: true }; },
+        } },
+      });
+      expect(result.status).toBe("launched");
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_lifecycle", reason: "identity-resolved", status: "succeeded" }));
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_lifecycle", reason: "runtime-started", status: "succeeded" }));
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_recall", status: "attempted" }));
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_recall", status: "succeeded" }));
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "capture", status: "succeeded" }));
+      expect(metrics.filter((metric) => metric.operation === "runtime_lifecycle" && metric.reason === "normal")).toHaveLength(1);
+      const serialized = JSON.stringify(metrics);
+      expect(serialized).not.toContain("sm_project_v1_");
+      expect(serialized).not.toContain("native-session");
+      expect(serialized).not.toContain("managed lifecycle observability");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("managed bridge cleanup is exactly once for signal outcomes and spawn failures", async () => {
+    for (const mode of ["signal", "spawn-failure"] as const) {
+      const projectRoot = await mkdtemp(join(tmpdir(), `deck-runtime-cleanup-${mode}-`));
+      initGitRemote(projectRoot);
+      const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+      const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+      try {
+        const result = await runRunnerLaunch({
+          adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+          launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Important limitation: cleanup once."], stdin: "closed", stdinPayload: { type: "utf8", content: "Important limitation: cleanup once." }, deckConfig: cfg },
+          yes: true,
+          interactive: false,
+          presentPreview: async () => {},
+          processEffects: { spawn: async () => {
+            if (mode === "spawn-failure") throw new Error("ENOENT");
+            return { exitCode: 1, signal: "SIGTERM", stdout: "", stderr: "" };
+          } },
+          supermemoryRuntime: { stateHome: join(projectRoot, ".state"), observabilitySink: { path: "memory://cleanup", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: { add: async () => {}, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+        });
+        if (mode === "signal") expect(result).toMatchObject({ status: "launched", outcome: { signal: "SIGTERM" } });
+        else expect(result).toMatchObject({ status: "blocked", message: "Runner spawn failed: ENOENT" });
+        expect(metrics.filter((metric) => metric.operation === "runtime_lifecycle" && metric.reason === (mode === "signal" ? "signal" : "spawn-failed"))).toHaveLength(1);
+      } finally {
+        await rm(projectRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test("managed bridge cleanup failure is reported with close cause diagnostics", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-cleanup-failed-"));
+    initGitRemote(projectRoot);
+    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Important limitation: cleanup failure evidence."], stdin: "closed", stdinPayload: { type: "utf8", content: "Important limitation: cleanup failure evidence." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          const endpoint = options.env.DECK_RUNNER_MEMORY_ENDPOINT!;
+          const token = options.env.DECK_RUNNER_MEMORY_TOKEN!;
+          void fetch(endpoint, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "cleanup-hangs", timestamp: Date.now(), event: "session_start", sessionId: "native-cleanup", role: "lead", query: "cleanup failure evidence" }) }).catch(() => undefined);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(projectRoot, "secret"), limitation: "test" }) }, observabilitySink: { path: "memory://cleanup-failed", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: { add: async () => {}, search: async () => new Promise(() => undefined), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result.status).toBe("launched");
+      expect(result.status === "launched" ? result.launch.diagnostics : []).toContainEqual(expect.objectContaining({ code: "supermemory-runtime-cleanup-failed" }));
+      expect(managedReadinessMessages(result)).toEqual(["Session topology: deck-managed; static=ready; managed=degraded; adaptive-memory=degraded; reason=supermemory-cleanup-degraded."]);
+      expect(JSON.stringify(result)).not.toContain("deck-managed-ready");
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_lifecycle", status: "failed", reason: "normal:cleanup-failed" }));
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("managed readiness reads the effective Deck secret store instead of trusting store objects", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-secret-read-"));
+    initGitRemote(projectRoot);
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    let preview = "";
+    const reads: string[] = [];
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Check readiness."], stdin: "closed", stdinPayload: { type: "utf8", content: "Check readiness." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async (value) => { preview = value; },
+        processEffects: { spawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), secretStore: { read: (name) => { reads.push(name); return undefined; }, write: () => ({ backend: "owner-only-file", path: "/tmp/test", limitation: "test" }) }, transport: { add: async () => {}, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result.status).toBe("launched");
+      expect(reads).toEqual(["supermemory-api-key", "supermemory-api-key"]);
+      expect(preview).toContain("reason=managed-runtime-auth-missing");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("managed readiness uses the canonical Deck secret store when no runtime store is injected", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-default-secret-"));
+    const configHome = await mkdtemp(join(tmpdir(), "deck-runtime-default-secret-home-"));
+    initGitRemote(projectRoot);
+    const previousXdg = process.env.XDG_CONFIG_HOME;
+    const previousHome = process.env.HOME;
+    process.env.XDG_CONFIG_HOME = configHome;
+    process.env.HOME = join(configHome, "home");
+    createOwnerOnlyFileSecretStore({ configHome }).write("supermemory-api-key", TOKEN_SENTINEL);
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    let preview = "";
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Check canonical readiness."], stdin: "closed", stdinPayload: { type: "utf8", content: "Check canonical readiness." }, deckConfig: cfg },
+        dryRun: true,
+        yes: true,
+        interactive: false,
+        presentPreview: async (value) => { preview = value; },
+        processEffects: { spawn: async () => { throw new Error("dry-run must not spawn"); } },
+      });
+      expect(result.status).toBe("dry-run");
+      expect(preview).toContain("reason=deck-managed-ready");
+      expect(preview).not.toContain(TOKEN_SENTINEL);
+    } finally {
+      if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previousXdg;
+      if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(configHome, { recursive: true, force: true });
+    }
+  });
+
+  test("non-spawn launch exceptions preserve generic wording and cleanup cause", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-exception-"));
+    initGitRemote(projectRoot);
+    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+    let buildCalls = 0;
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({
+          buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+          buildLaunchPlan: () => {
+            buildCalls += 1;
+            if (buildCalls > 1) throw new Error("adapter composition exploded");
+            return { status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] };
+          },
+        }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Handle exception."], stdin: "closed", stdinPayload: { type: "utf8", content: "Handle exception." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async () => { throw new Error("must not spawn"); } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), observabilitySink: { path: "memory://exception", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: { add: async () => {}, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result).toMatchObject({ status: "blocked", message: "Runner launch failed: adapter composition exploded" });
+      expect(result.status === "blocked" ? result.message : "").not.toContain("spawn failed");
+      expect(metrics.filter((metric) => metric.operation === "runtime_lifecycle" && metric.reason === "exception")).toHaveLength(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("observability sink exceptions during cleanup fail open and preserve launched result", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-observe-throw-"));
+    initGitRemote(projectRoot);
+    const observed: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Observe cleanup throw."], stdin: "closed", stdinPayload: { type: "utf8", content: "Observe cleanup throw." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          const endpoint = options.env.DECK_RUNNER_MEMORY_ENDPOINT!;
+          const token = options.env.DECK_RUNNER_MEMORY_TOKEN!;
+          await fetch(endpoint, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "observe-throw-session", timestamp: Date.now(), event: "session_start", sessionId: "native-observe", role: "lead", query: "observe cleanup throw" }) });
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), observabilitySink: { path: "memory://throw", healthy: true, diagnostics: [], observe: (metric) => { observed.push(metric); if (metric.operation === "runtime_lifecycle" && metric.reason === "normal") throw new Error(`${TOKEN_SENTINEL} sink failed`); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: { add: async () => {}, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result.status).toBe("launched");
+      const diagnostics = result.status === "launched" ? result.launch.diagnostics : [];
+      expect(diagnostics).toContainEqual(expect.objectContaining({ code: "supermemory-runtime-observability-degraded" }));
+      expect(JSON.stringify(diagnostics)).not.toContain(TOKEN_SENTINEL);
+      expect(observed.filter((metric) => metric.operation === "runtime_lifecycle" && metric.reason === "normal")).toHaveLength(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("healthy managed launch returns exactly one final ready readiness record", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-final-ready-"));
+    initGitRemote(projectRoot);
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Decision: healthy final ready."], stdin: "closed", stdinPayload: { type: "utf8", content: "Decision: healthy final ready." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          await fetch(options.env.DECK_RUNNER_MEMORY_ENDPOINT, { method: "POST", headers: { authorization: `Bearer ${options.env.DECK_RUNNER_MEMORY_TOKEN}`, "content-type": "application/json" }, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "healthy-capture", timestamp: Date.now(), event: "capture", sessionId: "native-healthy", source: "trusted-user-prompt", content: "Decision: healthy final ready." }) });
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(projectRoot, "secret"), limitation: "test" }) }, transport: { add: async () => ({ id: "capture" }), search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result.status).toBe("launched");
+      expect(managedReadinessMessages(result)).toEqual(["Session topology: deck-managed; static=ready; managed=ready; adaptive-memory=ready; reason=deck-managed-ready."]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("health failure final readiness is not ready and disabled runtime exposes no bridge", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-health-failed-"));
+    initGitRemote(projectRoot);
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    let childMemoryKeys: string[] = [];
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Health failure proof."], stdin: "closed", stdinPayload: { type: "utf8", content: "Health failure proof." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          childMemoryKeys = Object.keys(options.env).filter((key) => /DECK_RUNNER_MEMORY/i.test(key));
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(projectRoot, "secret"), limitation: "test" }) }, transport: { add: async () => {}, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => { throw new Error("credential rejected"); } } },
+      });
+      expect(result.status).toBe("launched");
+      const diagnostics = result.status === "launched" ? result.launch.diagnostics : [];
+      expect(managedReadinessMessages(result)).toHaveLength(1);
+      expect(diagnostics).toContainEqual(expect.objectContaining({ code: "managed-session-readiness", message: expect.stringContaining("reason=supermemory-provider-api-failed") }));
+      expect(managedReadinessMessages(result).join(" ")).not.toContain("managed=ready; adaptive-memory=ready");
+      expect(childMemoryKeys).toEqual([]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("observability startup failure final readiness is degraded, not ready", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-observe-start-failed-"));
+    initGitRemote(projectRoot);
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Observability degraded proof."], stdin: "closed", stdinPayload: { type: "utf8", content: "Observability degraded proof." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(projectRoot, "secret"), limitation: "test" }) }, observabilitySink: { path: "memory://observe-start", healthy: false, diagnostics: ["sink unavailable"], observe: () => {}, health: () => ({ healthy: false, diagnostics: ["sink unavailable"] }) }, transport: { add: async () => {}, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result.status).toBe("launched");
+      const diagnostics = result.status === "launched" ? result.launch.diagnostics : [];
+      expect(managedReadinessMessages(result)).toHaveLength(1);
+      expect(diagnostics).toContainEqual(expect.objectContaining({ code: "managed-session-readiness", message: expect.stringContaining("reason=supermemory-observability-degraded") }));
+      expect(managedReadinessMessages(result).join(" ")).not.toContain("managed=ready; adaptive-memory=ready");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("loopback bridge startup failure returns one degraded final readiness record", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-bridge-failed-"));
+    initGitRemote(projectRoot);
+    const originalServe = Bun.serve;
+    (Bun as unknown as { serve: typeof Bun.serve }).serve = (() => { throw new Error("loopback bind failed"); }) as typeof Bun.serve;
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["Bridge failure proof."], stdin: "closed", stdinPayload: { type: "utf8", content: "Bridge failure proof." }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          expect(Object.keys(options.env).filter((key) => /DECK_RUNNER_MEMORY/.test(key))).toEqual([]);
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(projectRoot, "secret"), limitation: "test" }) }, transport: { add: async () => ({ id: "capture" }), search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+      });
+      expect(result.status).toBe("launched");
+      expect(managedReadinessMessages(result)).toEqual(["Session topology: deck-managed; static=ready; managed=degraded; adaptive-memory=degraded; reason=supermemory-loopback-degraded."]);
+      expect(JSON.stringify(result)).not.toContain("deck-managed-ready");
+    } finally {
+      (Bun as unknown as { serve: typeof Bun.serve }).serve = originalServe;
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("eligible runtime recall completes before agent task processing with injected inert context and MCP count zero", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-order-"));
     initGitRemote(projectRoot, "https://github.com/acme/order-proof.git");
     const events: string[] = [];
     const calls: string[] = [];
-    let mcpCallCount = 0;
+    const exposedRunnerKeys: string[] = [];
     const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
     try {
       const result = await runRunnerLaunch({
@@ -290,11 +704,11 @@ describe("runRunnerLaunch consent and status", () => {
         processEffects: { spawn: async (_command, _args, options) => {
           const endpoint = options.env.DECK_RUNNER_MEMORY_ENDPOINT!;
           const token = options.env.DECK_RUNNER_MEMORY_TOKEN!;
+          exposedRunnerKeys.push(...Object.keys(options.env).filter((key) => /DECK_RUNNER_MEMORY|SUPERMEMORY|SM_PROJECT|X_SM_PROJECT|MCP/i.test(key)));
           const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
           const recalled = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "fake", eventId: "order-session-start", timestamp: Date.now(), event: "session_start", sessionId: "native-order", role: "lead", query: "Implement order proof" }) }).then((response) => response.json());
           events.push(`recall:${String((recalled as { advisoryText?: unknown }).advisoryText).includes("DECK_ADAPTIVE_CONTEXT_JSON_V1")}`);
           events.push("agent-task-processing");
-          mcpCallCount += 0;
           return { exitCode: 0, stdout: "", stderr: "" };
         } },
         supermemoryRuntime: { stateHome: join(projectRoot, ".state"), transport: {
@@ -308,7 +722,7 @@ describe("runRunnerLaunch consent and status", () => {
       expect(result.status).toBe("launched");
       expect(events).toEqual(["recall:true", "agent-task-processing"]);
       expect(calls).toEqual(["health:sm_project_v1_acme_order_proof", "profile:sm_project_v1_acme_order_proof", "search:sm_project_v1_acme_order_proof"]);
-      expect(mcpCallCount).toBe(0);
+      expect(exposedRunnerKeys.sort()).toEqual(["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN"]);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -366,6 +780,7 @@ describe("runRunnerLaunch consent and status", () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-explicit-recall-"));
     initGitRemote(projectRoot);
     const calls: string[] = [];
+    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
     const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
     try {
       const result = await runRunnerLaunch({
@@ -378,11 +793,54 @@ describe("runRunnerLaunch consent and status", () => {
         interactive: false,
         presentPreview: async () => {},
         processEffects: { spawn: async () => { calls.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
-        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), transport: { add: async () => {}, search: async () => { throw new Error("provider unavailable"); }, profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), observabilitySink: { path: "memory://explicit-recall-blocked", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: { add: async () => {}, search: async () => { throw new Error("provider unavailable"); }, profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
       });
       expect(result).toMatchObject({ status: "blocked", message: expect.stringContaining("reason=transport_error") });
       expect(JSON.stringify(result)).not.toContain("provider unavailable");
-      expect(calls).toEqual([]);
+      expect(calls).toEqual(["launch-plan"]);
+      expect(metrics.filter((metric) => metric.operation === "runtime_lifecycle" && metric.reason === "blocked")).toHaveLength(1);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("successful explicit recall injects advisory context and records metadata-only recall observability", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-explicit-recall-ok-"));
+    initGitRemote(projectRoot);
+    const launchPrompts: string[] = [];
+    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({
+          buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+          buildLaunchPlan: (launch) => {
+            launchPrompts.push(launch.mode === "exec" ? launch.prompt.join("\n") : "interactive");
+            return { status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed", stdinPayload: launch.mode === "exec" ? launch.stdinPayload : undefined }, diagnostics: [] };
+          },
+        }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["What did we do so far?"], stdin: "closed", stdinPayload: { type: "utf8", content: "What did we do so far?" }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          expect(options.stdinPayload?.content).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
+          expect(options.stdinPayload?.content).toContain("Earlier work summary.");
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), observabilitySink: { path: "memory://explicit-recall", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: {
+          add: async () => {},
+          search: async () => ({ results: [{ id: "prior", content: "Earlier work summary." }] }),
+          profile: async () => ({ profile: { static: ["Profile summary."] } }),
+          health: async () => ({ ok: true }),
+        } },
+      });
+      expect(result.status).toBe("launched");
+      expect(launchPrompts).toHaveLength(2);
+      expect(launchPrompts[1]).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_recall", dependency: "explicit-recall", status: "succeeded" }));
+      expect(JSON.stringify(metrics)).not.toContain("Earlier work summary");
+      expect(JSON.stringify(metrics)).not.toContain("sm_project_v1_");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -426,6 +884,7 @@ describe("runRunnerLaunch consent and status", () => {
     initGitRemote(projectRoot);
     const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
     const calls: string[] = [];
+    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
     try {
       const result = await runRunnerLaunch({
         adapter: adapter({ buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }), buildLaunchPlan: () => ({ status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }) }),
@@ -434,11 +893,13 @@ describe("runRunnerLaunch consent and status", () => {
         interactive: false,
         presentPreview: async () => {},
         processEffects: { spawn: async () => { calls.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
-        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), transport: { add: async () => { throw new Error("write unavailable"); }, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(projectRoot, "secret"), limitation: "test" }) }, observabilitySink: { path: "memory://explicit-remember-blocked", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: { add: async () => { throw new Error("write unavailable"); }, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
       });
       expect(result).toMatchObject({ status: "blocked", message: expect.stringContaining("reason=transport_error") });
       expect(JSON.stringify(result)).not.toContain("write unavailable");
       expect(calls).toEqual([]);
+      expect(managedReadinessMessages(result)).toEqual(["Session topology: deck-managed; static=ready; managed=degraded; adaptive-memory=degraded; reason=supermemory-capture-degraded."]);
+      expect(metrics.filter((metric) => metric.operation === "runtime_lifecycle" && metric.reason === "blocked")).toHaveLength(1);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -633,6 +1094,107 @@ describe("runRunnerLaunch consent and status", () => {
         expect(events).toEqual(["preview", "consent", "spawn"]);
         expect(preview).not.toContain("sandboxing and command approvals are disabled");
       }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("real OpenCode managed launch uses installed hook loopback without raw Supermemory MCP exposure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-opencode-managed-memory-"));
+    const projectRoot = join(root, "project");
+    const configDir = join(root, "opencode-home");
+    await mkdir(projectRoot, { recursive: true });
+    initGitRemote(projectRoot);
+    const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir });
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    const transportCalls: Array<{ operation: string; payload?: unknown }> = [];
+    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+    const childEnvKeys: string[] = [];
+    try {
+      const result = await runRunnerLaunch({
+        adapter,
+        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          childEnvKeys.push(...Object.keys(options.env).filter((key) => /SUPERMEMORY|SM_PROJECT|X_SM_PROJECT|MCP|DECK_RUNNER_MEMORY/i.test(key)));
+          const plugin = await loadInstalledOpenCodePlugin(join(configDir, "plugins", "developer-team-execution.js"), { endpoint: options.env.DECK_RUNNER_MEMORY_ENDPOINT, token: options.env.DECK_RUNNER_MEMORY_TOKEN });
+          await plugin["chat.message"]({ sessionID: "opencode-native", messageID: "user-1" }, { message: { role: "user" }, parts: [{ text: "Decision: managed OpenCode memory proof captures exactly once." }] });
+          const transformed = { messages: [] as { info: Record<string, unknown>; parts: Record<string, unknown>[] }[] };
+          await plugin["experimental.chat.messages.transform"]({}, transformed);
+          expect(JSON.stringify(transformed)).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
+          expect(JSON.stringify(transformed)).toContain("OpenCode prior context");
+          transportCalls.push({ operation: "agent-processing-after-recall" });
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+        supermemoryRuntime: { stateHome: join(root, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(root, "secret"), limitation: "test" }) }, observabilitySink: { path: "memory://opencode-managed", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: {
+          health: async (payload) => { transportCalls.push({ operation: "health", payload }); return { ok: true }; },
+          profile: async (payload) => { transportCalls.push({ operation: "profile", payload }); return { profile: { static: ["OpenCode profile context"] } }; },
+          search: async (payload) => { transportCalls.push({ operation: "search", payload }); return { results: [{ id: "prior", content: "OpenCode prior context" }] }; },
+          add: async (payload) => { transportCalls.push({ operation: "add", payload }); return { id: "capture" }; },
+        } },
+      });
+      expect(result.status).toBe("launched");
+      const config = JSON.parse(await readFile(join(configDir, "opencode.json"), "utf-8"));
+      expect(await readFile(join(configDir, "plugins", "developer-team-execution.js"), "utf-8")).toContain("deck-runner-memory-loopback-v1");
+      expect(JSON.stringify(config.mcp ?? {})).not.toContain("supermemory");
+      expect(transportCalls.map((call) => call.operation).slice(0, 3).sort()).toEqual(["health", "profile", "search"]);
+      expect(transportCalls.map((call) => call.operation).slice(3)).toEqual(["add", "agent-processing-after-recall"]);
+      expect(transportCalls.filter((call) => call.operation === "add")).toHaveLength(1);
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_recall", dependency: "automatic", status: "succeeded" }));
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "capture", dependency: "automatic", status: "succeeded" }));
+      expect(metrics.some((metric) => metric.operation === "runtime_recall" && metric.dependency === "explicit-recall")).toBe(false);
+      expect(JSON.stringify(config.mcp ?? {})).not.toContain("supermemory");
+      expect(JSON.stringify(metrics)).not.toContain("sm_project_v1_");
+      expect(childEnvKeys.sort()).toEqual(["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN"]);
+      expect(JSON.stringify(result)).not.toContain(TOKEN_SENTINEL);
+      expect(JSON.stringify(result)).not.toContain("sm_project_v1_");
+      expect(metrics.filter((metric) => metric.operation === "runtime_lifecycle" && metric.reason === "normal")).toHaveLength(1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("real OpenCode Quick Fix managed launch skips profile search recall and raw MCP exposure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-opencode-quickfix-memory-"));
+    const projectRoot = join(root, "project");
+    const configDir = join(root, "opencode-home");
+    await mkdir(projectRoot, { recursive: true });
+    initGitRemote(projectRoot);
+    const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir });
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    const transportCalls: string[] = [];
+    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+    try {
+      const result = await runRunnerLaunch({
+        adapter,
+        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async (_command, _args, options) => {
+          const plugin = await loadInstalledOpenCodePlugin(join(configDir, "plugins", "developer-team-execution.js"), { endpoint: options.env.DECK_RUNNER_MEMORY_ENDPOINT, token: options.env.DECK_RUNNER_MEMORY_TOKEN });
+          await plugin["tool.execute.before"]({ sessionID: "opencode-quickfix", callID: "task-1", tool: "task" }, { args: { subagent_type: "deck-apply-fast", prompt: "small typo" } });
+          const transformed = { messages: [] as { info: Record<string, unknown>; parts: Record<string, unknown>[] }[] };
+          await plugin["experimental.chat.messages.transform"]({}, transformed);
+          expect(transformed.messages).toEqual([]);
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+        supermemoryRuntime: { stateHome: join(root, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(root, "secret"), limitation: "test" }) }, observabilitySink: { path: "memory://opencode-quickfix", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: {
+          health: async () => { transportCalls.push("health"); return { ok: true }; },
+          profile: async () => { transportCalls.push("profile"); return { profile: { static: ["must-not-load"] } }; },
+          search: async () => { transportCalls.push("search"); return { results: [{ content: "must-not-search" }] }; },
+          add: async () => { transportCalls.push("add"); return { id: "capture" }; },
+        } },
+      });
+      expect(result.status).toBe("launched");
+      const config = JSON.parse(await readFile(join(configDir, "opencode.json"), "utf-8"));
+      expect(JSON.stringify(config.mcp ?? {})).not.toContain("supermemory");
+      expect(transportCalls).toEqual(["health"]);
+      expect(metrics.filter((metric) => metric.operation === "profile" || metric.operation === "search").map((metric) => metric.status)).toEqual(["skipped", "skipped"]);
+      expect(metrics.filter((metric) => metric.operation === "runtime_recall").map((metric) => metric.status)).toEqual(["attempted", "skipped"]);
+      expect(JSON.stringify(config.mcp ?? {})).not.toContain("supermemory");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

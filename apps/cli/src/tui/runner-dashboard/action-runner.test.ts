@@ -26,6 +26,7 @@ import type { NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import {
   getPiRunnerReviewPlanRunBlockDiagnostics,
   getRunnerReviewPlanRunBlockDiagnostics,
+  getRunnerReviewPlanRunBlockPreflight,
   runRunnerAction,
   runRunnerReviewPlan,
   runPiRunnerAction,
@@ -519,7 +520,7 @@ expect(setup.ok).toBe(true);
         order.push("api-validate");
         return { ok: true };
       },
-      secretStore: { write: () => { order.push("secret-store"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => undefined },
+      secretStore: { write: () => { order.push("secret-store"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => TOKEN_SENTINEL },
     });
 
     expect(results.map((result) => result.actionId)).toContain("adaptive-memory.supermemory.pi-mcp-config");
@@ -669,7 +670,7 @@ expect(setup.ok).toBe(true);
         order.push("api-validate");
         return { ok: true };
       },
-      secretStore: { write: () => { order.push("secret-store"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => undefined },
+      secretStore: { write: () => { order.push("secret-store"); return { backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }; }, read: () => TOKEN_SENTINEL },
     });
 
     expect(results.map((result) => result.actionId)).toContain("teams.developer-team.apply");
@@ -1005,6 +1006,194 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
     }
   });
 
+  test("stale cached Supermemory runtime credential flags are downgraded by the secret store", () => {
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
+      adaptiveMemory: {
+        provider: "supermemory",
+        supermemory: { configured: true, hasToken: true, runtimeCredentialStored: true, ephemeralTokenAvailable: false, diagnostics: [] },
+      },
+    });
+
+    const diagnostics = getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => undefined } });
+
+    expect(diagnostics.join(" ")).toContain("Deck runtime API credential must be validated and stored");
+  });
+
+  test("credential preflight returns evidence without mutating frozen dashboard state", () => {
+    const setup = Object.freeze({ configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: Object.freeze([] as string[]) });
+    const state = Object.freeze(createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
+      adaptiveMemory: Object.freeze({ provider: "supermemory" as const, supermemory: setup }) as any,
+    }));
+
+    expect(() => getRunnerReviewPlanRunBlockPreflight(state, { secretStore: { read: () => TOKEN_SENTINEL } })).not.toThrow();
+    const preflight = getRunnerReviewPlanRunBlockPreflight(state, { secretStore: { read: () => TOKEN_SENTINEL } });
+
+    expect(preflight.diagnostics).toEqual([]);
+    expect(preflight.evidence).toMatchObject({ runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present" });
+    expect("runtimeCredentialVerification" in setup).toBe(false);
+  });
+
+  test("aborted Review preflight returns before credential evidence can be read or emitted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let reads = 0;
+    const evidence: unknown[] = [];
+    const setup = { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] };
+    const state = createDefaultPiRunnerDashboardState({ runnerScope: "opencode", adaptiveMemory: { provider: "supermemory", supermemory: setup } });
+
+    const results = await runRunnerReviewPlan(supermemoryPlan, {
+      dashboardState: state,
+      signal: controller.signal,
+      secretStore: { read: () => { reads += 1; return TOKEN_SENTINEL; }, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) },
+      onSupermemoryRuntimeCredentialEvidence: (item) => evidence.push(item),
+    });
+
+    expect(results).toEqual([]);
+    expect(reads).toBe(0);
+    expect(evidence).toEqual([]);
+    expect(setup).not.toHaveProperty("runtimeCredentialVerification");
+  });
+
+  test("stale runner operation cannot emit credential evidence", async () => {
+    let reads = 0;
+    const evidence: unknown[] = [];
+    const setup = { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] };
+    const currentOperation = { runner: "opencode" as const, operationId: "opencode-current-operation", explicitlySelected: false };
+    const staleOperation = { runner: "opencode" as const, operationId: "opencode-stale-operation", explicitlySelected: false };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      operationId: currentOperation.operationId,
+      currentOperation,
+      plan: supermemoryPlan,
+      planGeneratedForRevision: 0,
+      planRevision: 0,
+      adaptiveMemory: { provider: "supermemory", supermemory: setup },
+    });
+
+    const results = await runRunnerReviewPlan(supermemoryPlan, {
+      dashboardState: state,
+      runnerId: "opencode",
+      operationId: staleOperation.operationId,
+      currentOperation: staleOperation,
+      secretStore: { read: () => { reads += 1; return TOKEN_SENTINEL; }, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) },
+      onSupermemoryRuntimeCredentialEvidence: (item) => evidence.push(item),
+    });
+
+    expect(results).toEqual([]);
+    expect(reads).toBe(0);
+    expect(evidence).toEqual([]);
+    expect(setup).not.toHaveProperty("runtimeCredentialVerification");
+  });
+
+  test("stale runner cannot read or emit credential evidence", async () => {
+    let reads = 0;
+    const evidence: unknown[] = [];
+    const setup = { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] };
+    const operation = { runner: "opencode" as const, operationId: "opencode-current-operation", explicitlySelected: false };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      operationId: operation.operationId,
+      currentOperation: operation,
+      plan: supermemoryPlan,
+      planGeneratedForRevision: 0,
+      planRevision: 0,
+      adaptiveMemory: { provider: "supermemory", supermemory: setup },
+    });
+
+    const results = await runRunnerReviewPlan(supermemoryPlan, {
+      dashboardState: state,
+      runnerId: "codex",
+      operationId: operation.operationId,
+      secretStore: { read: () => { reads += 1; return TOKEN_SENTINEL; }, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) },
+      onSupermemoryRuntimeCredentialEvidence: (item) => evidence.push(item),
+    });
+
+    expect(results).toEqual([]);
+    expect(reads).toBe(0);
+    expect(evidence).toEqual([]);
+    expect(setup).not.toHaveProperty("runtimeCredentialVerification");
+  });
+
+  test("stale generation before credential read cannot read or emit evidence", async () => {
+    let reads = 0;
+    const evidence: unknown[] = [];
+    const setup = { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] };
+    const operation = { runner: "opencode" as const, operationId: "opencode-current-operation", explicitlySelected: false };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      operationId: operation.operationId,
+      currentOperation: operation,
+      plan: supermemoryPlan,
+      planGeneratedForRevision: 0,
+      planRevision: 1,
+      adaptiveMemory: { provider: "supermemory", supermemory: setup },
+    });
+
+    const results = await runRunnerReviewPlan(supermemoryPlan, {
+      dashboardState: state,
+      runnerId: "opencode",
+      operationId: operation.operationId,
+      currentOperation: operation,
+      secretStore: { read: () => { reads += 1; return TOKEN_SENTINEL; }, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) },
+      onSupermemoryRuntimeCredentialEvidence: (item) => evidence.push(item),
+    });
+
+    expect(results).toEqual([]);
+    expect(reads).toBe(0);
+    expect(evidence).toEqual([]);
+    expect(setup).not.toHaveProperty("runtimeCredentialVerification");
+  });
+
+  test("stale generation during credential read rejects evidence after the read", async () => {
+    let reads = 0;
+    const evidence: unknown[] = [];
+    const setup = { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] };
+    const operation = { runner: "opencode" as const, operationId: "opencode-current-operation", explicitlySelected: false };
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      operationId: operation.operationId,
+      currentOperation: operation,
+      plan: supermemoryPlan,
+      planGeneratedForRevision: 0,
+      planRevision: 0,
+      adaptiveMemory: { provider: "supermemory", supermemory: setup },
+    });
+
+    const results = await runRunnerReviewPlan(supermemoryPlan, {
+      dashboardState: state,
+      runnerId: "opencode",
+      operationId: operation.operationId,
+      currentOperation: operation,
+      secretStore: { read: () => { reads += 1; state.planRevision = 1; return TOKEN_SENTINEL; }, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) },
+      onSupermemoryRuntimeCredentialEvidence: (item) => evidence.push(item),
+    });
+
+    expect(results).toEqual([]);
+    expect(reads).toBe(1);
+    expect(evidence).toEqual([]);
+    expect(setup).not.toHaveProperty("runtimeCredentialVerification");
+  });
+
+  test("Supermemory runtime credential store read errors block with redacted diagnostics", () => {
+    const state = createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      runnerUi: getAdapter("opencode").ui,
+      adaptiveMemory: {
+        provider: "supermemory",
+        supermemory: { configured: true, hasToken: true, runtimeCredentialStored: true, diagnostics: [] },
+      },
+    });
+
+    const diagnostics = getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => { throw new Error(`failed to read ${TOKEN_SENTINEL}`); } } });
+
+    expect(diagnostics.join(" ")).toContain("credential could not be read");
+    expect(diagnostics.join(" ")).not.toContain(TOKEN_SENTINEL);
+  });
+
   test("keeps MCP OAuth separate while requiring Deck runtime token validation", async () => {
     const order: string[] = [];
     const state = createDefaultPiRunnerDashboardState({
@@ -1015,8 +1204,9 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
         supermemory: { configured: true, hasToken: true, diagnostics: [] },
       },
     });
-    expect(getPiRunnerReviewPlanRunBlockDiagnostics(state)).toEqual([]);
-    expect(getPiRunnerReviewPlanRunBlockDiagnostics(state, { supermemoryToken: TOKEN_SENTINEL })).toEqual([]);
+    expect(getPiRunnerReviewPlanRunBlockDiagnostics(state).join(" ")).toContain("no Deck secret store was available");
+    expect(getPiRunnerReviewPlanRunBlockDiagnostics(state, { supermemoryToken: TOKEN_SENTINEL }).join(" ")).toContain("no Deck secret store was available");
+    expect(getPiRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => TOKEN_SENTINEL } })).toEqual([]);
 
     let writerInput: { serverName: string; token?: string } | undefined;
     const writeResult = await runPiRunnerAction(

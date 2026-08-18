@@ -40,6 +40,7 @@ export type SupermemoryRuntimeHostDiagnostic = Readonly<{
     | "supermemory-runtime-public-path-unsupported"
   | "supermemory-runtime-secret-store-failed"
     | "supermemory-runtime-loopback-failed"
+    | "supermemory-runtime-cleanup-failed"
     | "supermemory-runtime-observability-degraded";
   severity: "info" | "warning" | "error";
   message: string;
@@ -57,6 +58,7 @@ export type SupermemoryRuntimeHost = Readonly<{
   captureOutcome(outcome: SupermemoryRuntimeProcessOutcome): Promise<SupermemoryRuntimeHostCapture>;
   explicitRecall(query: string): Promise<Readonly<{ ok: boolean; advisoryText?: string; diagnostics: readonly SupermemoryRuntimeHostDiagnostic[] }>>;
   explicitRemember(content: string, options?: { correlationId?: string }): Promise<Readonly<{ ok: boolean; diagnostics: readonly SupermemoryRuntimeHostDiagnostic[]; metrics: readonly SupermemoryRuntimeMetric[] }>>;
+  recordLifecycle(event: "identity-resolved" | "runtime-started" | "runtime-cleanup", status?: "attempted" | "skipped" | "succeeded" | "failed", reason?: string): void;
   startLoopbackBridge(): Promise<SupermemoryRunnerLoopbackBridge | undefined>;
 }>;
 
@@ -105,15 +107,35 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
     if (!sink.healthy) diagnostics.push({ code: "supermemory-runtime-observability-degraded", severity: "warning", message: "Supermemory observability sink is unavailable; runtime remains fail-open." });
     return sink;
   };
+  const recordObservabilityDiagnostic = (message: string) => {
+    const redacted = redactSecretDiagnostic(message);
+    if (!diagnostics.some((diagnostic) => diagnostic.code === "supermemory-runtime-observability-degraded" && diagnostic.message.includes(redacted))) {
+      diagnostics.push({ code: "supermemory-runtime-observability-degraded", severity: "warning", message: `Supermemory observability failed open; metrics may be incomplete. ${redacted}` });
+    }
+  };
   const observe = (metric: SupermemoryRuntimeMetric) => {
     metrics.push(metric);
-    const activeSink = ensureSink();
-    activeSink.observe(metric);
-    const sinkHealth = activeSink.health();
-    if (!sinkHealth.healthy && !diagnostics.some((diagnostic) => diagnostic.code === "supermemory-runtime-observability-degraded")) {
-      diagnostics.push({ code: "supermemory-runtime-observability-degraded", severity: "warning", message: `Supermemory observability sink degraded after runtime start; metrics may be incomplete. ${redactSecretDiagnostic(sinkHealth.diagnostics.join(" "))}` });
+    try {
+      const activeSink = ensureSink();
+      try {
+        activeSink.observe(metric);
+      } catch (error) {
+        recordObservabilityDiagnostic(error instanceof Error ? error.message : String(error));
+      }
+      try {
+        const sinkHealth = activeSink.health();
+        if (!sinkHealth.healthy) recordObservabilityDiagnostic(sinkHealth.diagnostics.join(" "));
+      } catch (error) {
+        recordObservabilityDiagnostic(error instanceof Error ? error.message : String(error));
+      }
+    } catch (error) {
+      recordObservabilityDiagnostic(error instanceof Error ? error.message : String(error));
     }
-    input.observe?.(metric);
+    try {
+      input.observe?.(metric);
+    } catch (error) {
+      recordObservabilityDiagnostic(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const disabled = (): SupermemoryRuntimeHost => ({
@@ -127,6 +149,7 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
     captureOutcome: async () => ({ diagnostics: [], metrics: [] }),
     explicitRecall: async () => ({ ok: false, diagnostics: [{ code: "supermemory-runtime-recall-failed", severity: "error", message: "Explicit Supermemory recall requires an enabled Deck-supervised runtime." }] }),
     explicitRemember: async () => ({ ok: false, diagnostics: [{ code: "supermemory-runtime-capture-failed", severity: "error", message: "Explicit Supermemory remember requires an enabled Deck-supervised runtime." }], metrics: [] }),
+    recordLifecycle: () => {},
     startLoopbackBridge: async () => undefined,
   });
 
@@ -157,6 +180,10 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
     const transport = input.transport ?? createSupermemoryHttpTransport({ apiKey: apiKey!, timeoutMs: 8_000 });
     const runtime = createSupermemoryRuntime({ canonicalScope: scope.scope, sessionId, transport, runnerId: input.runnerId, observe });
     const scopeFingerprint = fingerprintSupermemoryProjectScope(scope.scope);
+    const recordLifecycle = (event: "identity-resolved" | "runtime-started" | "runtime-cleanup", status: "attempted" | "skipped" | "succeeded" | "failed" = "succeeded", reason?: string) => {
+      observe(runtimeLifecycleMetric({ runnerId: input.runnerId, role, scopeFingerprint, event, status, reason }));
+    };
+    recordLifecycle("identity-resolved");
 
     const health = await runtime.health({ dependency: "automatic" });
     observe(health.metrics);
@@ -164,6 +191,7 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
       diagnostics.push({ code: "supermemory-runtime-health-failed", severity: "error", message: redactSecretDiagnostic(health.diagnostics.join(" ")) });
       return disabled();
     }
+    recordLifecycle("runtime-started");
 
     const contexts: SupermemoryRenderedContext[] = [];
     if (input.deferInitialRecallToLoopback !== true) {
@@ -257,10 +285,9 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
         return { diagnostics: [], metrics: [capture.metrics] };
       },
       async explicitRecall(query) {
-        const result = await runtime.search({ role, query, dependency: "explicit-recall" });
-        observe(result.metrics);
-        if (!result.ok) return { ok: false, diagnostics: [{ code: "supermemory-runtime-recall-failed", severity: "error", message: redactSecretDiagnostic(result.diagnostics.join(" ")) }] };
-        return { ok: true, advisoryText: renderAdvisoryContext([result.context]), diagnostics: [] };
+        const result = await recallForLoopback({ runtime, observe, scopeFingerprint }, role, query, "explicit-recall");
+        if (result.ok === false) return { ok: false, diagnostics: [{ code: "supermemory-runtime-recall-failed", severity: "error", message: redactSecretDiagnostic(Array.isArray(result.diagnostics) ? result.diagnostics.join(" ") : "Explicit recall failed.") }] };
+        return { ok: true, advisoryText: typeof result.advisoryText === "string" ? result.advisoryText : undefined, diagnostics: [] };
       },
       async explicitRemember(content, options) {
         const capture = await runtime.capture({ role: "user", source: "explicit-remember", dependency: "explicit-remember", content, correlationId: options?.correlationId, capturedAt: new Date().toISOString() });
@@ -268,6 +295,7 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
         if (!capture.ok) return { ok: false, diagnostics: [{ code: "supermemory-runtime-capture-failed", severity: "error", message: redactSecretDiagnostic(capture.diagnostics.join(" ")) }], metrics: [capture.metrics] };
         return { ok: true, diagnostics: [], metrics: [capture.metrics] };
       },
+      recordLifecycle,
       async startLoopbackBridge() {
         try {
           return startSupermemoryRunnerLoopbackBridge({
@@ -325,6 +353,7 @@ function startSupermemoryRunnerLoopbackBridge(input: {
   const inFlight = new Set<Promise<unknown>>();
   const rolesBySession = new Map<string, SupermemoryRuntimeRole>([[input.sessionId, input.role]]);
   const successfulEvents = new Map<string, number>();
+  const inFlightEvents = new Map<string, Promise<Record<string, unknown>>>();
 
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -335,7 +364,7 @@ function startSupermemoryRunnerLoopbackBridge(input: {
       if (!sameBearer(request.headers.get("authorization") ?? "", expected)) return jsonResponse(401, { ok: false, diagnostics: ["unauthorized"] });
       const length = Number(request.headers.get("content-length") ?? "0");
       if (Number.isFinite(length) && length > 256 * 1024) return jsonResponse(413, { ok: false, diagnostics: ["payload-too-large"] });
-      const task = handleLoopbackRequest(await request.text(), input, rolesBySession, successfulEvents);
+      const task = handleLoopbackRequest(await request.text(), input, rolesBySession, successfulEvents, inFlightEvents);
       inFlight.add(task);
       try {
         return jsonResponse(200, await task);
@@ -358,11 +387,13 @@ function startSupermemoryRunnerLoopbackBridge(input: {
     async close() {
       const diagnostics: SupermemoryRuntimeHostDiagnostic[] = [];
       const metrics: SupermemoryRuntimeMetric[] = [];
+      let timedOut = false;
       try {
         await Promise.race([
-          Promise.allSettled([...inFlight]),
-          new Promise((resolve) => setTimeout(resolve, 1_000)),
+          Promise.allSettled([...inFlight, ...inFlightEvents.values()]),
+          new Promise((resolve) => setTimeout(() => { timedOut = true; resolve(undefined); }, 1_000)),
         ]);
+        if (timedOut) diagnostics.push({ code: "supermemory-runtime-cleanup-failed", severity: "warning", message: "Supermemory loopback cleanup timed out while draining in-flight runner events; cleanup continued." });
       } finally {
         server.stop(true);
       }
@@ -376,6 +407,7 @@ async function handleLoopbackRequest(
   host: { runnerId: string; projectRoot: string; teamId: string; sessionId: string; role: SupermemoryRuntimeRole; runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; scopeFingerprint: string; stateHome?: string },
   rolesBySession: Map<string, SupermemoryRuntimeRole>,
   successfulEvents: Map<string, number>,
+  inFlightEvents: Map<string, Promise<Record<string, unknown>>> = new Map(),
 ): Promise<Record<string, unknown>> {
   let event: RunnerLoopbackEvent;
   try { event = JSON.parse(body) as RunnerLoopbackEvent; } catch { return { ok: false, diagnostics: ["invalid-json"] }; }
@@ -386,41 +418,53 @@ async function handleLoopbackRequest(
   if (!eventId || timestamp === undefined || Math.abs(Date.now() - timestamp) > 5 * 60_000) return { ok: false, diagnostics: ["invalid-event-id"] };
   pruneReplay(successfulEvents, Date.now());
   if (successfulEvents.has(eventId)) return { ok: true, diagnostics: [] };
-  const sessionId = typeof event.sessionId === "string" && /^[^\0\r\n]{1,160}$/.test(event.sessionId) ? event.sessionId : host.sessionId;
-  const role = parseRuntimeRole(event.role) ?? rolesBySession.get(sessionId) ?? host.role;
-  if (event.event === "session_start" || event.event === "role_start") {
-    rolesBySession.set(sessionId, role);
-    if (event.event === "session_start") persistNativeDeckRuntimeSessionMapping({ projectRoot: host.projectRoot, teamId: host.teamId, runnerId: host.runnerId, nativeSessionId: sessionId, deckSessionId: host.sessionId, stateHome: host.stateHome });
-    const recalled = await recallForLoopback(host, role, typeof event.query === "string" ? event.query : undefined);
-    if (recalled.ok !== false) successfulEvents.set(eventId, Date.now());
-    return recalled;
+  const existing = inFlightEvents.get(eventId);
+  if (existing) return existing;
+  if (inFlightEvents.size >= 512) return { ok: false, diagnostics: ["in-flight-overflow"] };
+
+  const task = (async (): Promise<Record<string, unknown>> => {
+    const sessionId = typeof event.sessionId === "string" && /^[^\0\r\n]{1,160}$/.test(event.sessionId) ? event.sessionId : host.sessionId;
+    const role = parseRuntimeRole(event.role) ?? rolesBySession.get(sessionId) ?? host.role;
+    if (event.event === "session_start" || event.event === "role_start") {
+      rolesBySession.set(sessionId, role);
+      if (event.event === "session_start") persistNativeDeckRuntimeSessionMapping({ projectRoot: host.projectRoot, teamId: host.teamId, runnerId: host.runnerId, nativeSessionId: sessionId, deckSessionId: host.sessionId, stateHome: host.stateHome });
+      const recalled = await recallForLoopback(host, role, typeof event.query === "string" ? event.query : undefined);
+      if (recalled.ok !== false) successfulEvents.set(eventId, Date.now());
+      return recalled;
+    }
+    if (event.event === "recall" || event.event === "explicit_recall") {
+      const recalled = await recallForLoopback(host, role, typeof event.query === "string" ? event.query : undefined, event.event === "explicit_recall" ? "explicit-recall" : "automatic");
+      if (recalled.ok !== false) successfulEvents.set(eventId, Date.now());
+      return recalled;
+    }
+    if (event.event === "capture" || event.event === "explicit_remember") {
+      if (typeof event.content !== "string" || event.content.length > 64 * 1024) return { ok: false, diagnostics: ["invalid-content"] };
+      const source = event.event === "explicit_remember" ? "explicit-remember" : event.source === "trusted-final-assistant" ? "trusted-final-assistant" : "trusted-user-prompt";
+      const capture = await host.runtime.capture({
+        role: source === "trusted-final-assistant" ? "assistant" : "user",
+        source,
+        dependency: event.event === "explicit_remember" ? "explicit-remember" : "automatic",
+        content: event.content,
+        correlationId: typeof event.correlationId === "string" ? event.correlationId : undefined,
+        capturedAt: new Date().toISOString(),
+      });
+      host.observe(capture.metrics);
+      if (capture.ok) successfulEvents.set(eventId, Date.now());
+      return { ok: capture.ok, diagnostics: capture.diagnostics };
+    }
+    if (event.event === "shutdown_flush") {
+      rolesBySession.delete(sessionId);
+      successfulEvents.set(eventId, Date.now());
+      return { ok: true, diagnostics: [] };
+    }
+    return { ok: false, diagnostics: ["unsupported-event"] };
+  })();
+  inFlightEvents.set(eventId, task);
+  try {
+    return await task;
+  } finally {
+    inFlightEvents.delete(eventId);
   }
-  if (event.event === "recall" || event.event === "explicit_recall") {
-    const recalled = await recallForLoopback(host, role, typeof event.query === "string" ? event.query : undefined, event.event === "explicit_recall" ? "explicit-recall" : "automatic");
-    if (recalled.ok !== false) successfulEvents.set(eventId, Date.now());
-    return recalled;
-  }
-  if (event.event === "capture" || event.event === "explicit_remember") {
-    if (typeof event.content !== "string" || event.content.length > 64 * 1024) return { ok: false, diagnostics: ["invalid-content"] };
-    const source = event.event === "explicit_remember" ? "explicit-remember" : event.source === "trusted-final-assistant" ? "trusted-final-assistant" : "trusted-user-prompt";
-    const capture = await host.runtime.capture({
-      role: source === "trusted-final-assistant" ? "assistant" : "user",
-      source,
-      dependency: event.event === "explicit_remember" ? "explicit-remember" : "automatic",
-      content: event.content,
-      correlationId: typeof event.correlationId === "string" ? event.correlationId : undefined,
-      capturedAt: new Date().toISOString(),
-    });
-    host.observe(capture.metrics);
-    if (capture.ok) successfulEvents.set(eventId, Date.now());
-    return { ok: capture.ok, diagnostics: capture.diagnostics };
-  }
-  if (event.event === "shutdown_flush") {
-    rolesBySession.delete(sessionId);
-    successfulEvents.set(eventId, Date.now());
-    return { ok: true, diagnostics: [] };
-  }
-  return { ok: false, diagnostics: ["unsupported-event"] };
 }
 
 function runtimeRecallAttemptMetric(input: {
@@ -462,6 +506,27 @@ function runtimeRecallTerminalMetric(input: {
     approximateInjectedTokens: conservativeTokenCount(renderAdvisoryContext(input.contexts) ?? ""),
     resultCount: input.contexts.reduce((sum, context) => sum + context.items.length, 0),
     dependency: input.dependency,
+  };
+}
+
+function runtimeLifecycleMetric(input: {
+  runnerId: string;
+  role: SupermemoryRuntimeRole;
+  scopeFingerprint: string;
+  event: "identity-resolved" | "runtime-started" | "runtime-cleanup";
+  status: "attempted" | "skipped" | "succeeded" | "failed";
+  reason?: string;
+}): SupermemoryRuntimeMetric {
+  return {
+    provider: "supermemory",
+    operation: "runtime_lifecycle",
+    status: input.status,
+    reason: input.reason ?? input.event,
+    durationMs: 0,
+    runnerId: input.runnerId,
+    role: input.role,
+    scopeFingerprint: input.scopeFingerprint,
+    dependency: "automatic",
   };
 }
 
@@ -508,6 +573,7 @@ async function recallForLoopback(
     host.observe(runtimeRecallTerminalMetric({ basis, operationMetrics, contexts, diagnostics, startedAt, dependency }));
   }
 
+  if (dependency === "explicit-recall" && diagnostics.length > 0) return { ok: false, diagnostics };
   if (dependency === "explicit-recall" && contexts.length === 0) return { ok: false, diagnostics };
   return { ok: true, advisoryText: renderAdvisoryContext(contexts), diagnostics: [] };
 }

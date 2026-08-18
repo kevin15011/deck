@@ -147,7 +147,7 @@ import {
 import { reduceRunnerDashboard, type RunnerDashboardAction } from "./runner-dashboard/reducer";
 import { normalizeDashboardCapabilityInventory } from "./runner-dashboard/inventory";
 import { getToggleablePackageInstructionIds } from "./runner-dashboard/selectors";
-import { createDefaultRunnerDashboardState, createRunnerReviewPlanFailure, loadRunnerPackageInstructionsFromConfig, runnerRequiresExternalSupermemoryToken, type RunnerDashboardState, type RunnerOperationIdentity, type RunnerReviewPlan } from "./runner-dashboard/state";
+import { createDefaultRunnerDashboardState, createRunnerReviewPlanFailure, loadRunnerPackageInstructionsFromConfig, runnerRequiresExternalSupermemoryToken, type RunnerDashboardEvidenceIdentity, type RunnerDashboardState, type RunnerOperationIdentity, type RunnerReviewPlan, type SupermemoryRuntimeCredentialEvidence } from "./runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 import { getAdapter, createDefaultAdapterRegistry } from "../runner-adapters";
 import { getWebSearchProviderDescriptor } from "../web-search-provider";
@@ -718,6 +718,7 @@ export function withAuthoritativeSupermemoryRuntimeReadiness(
       ...adaptiveMemory.supermemory,
       configured: adaptiveMemory.supermemory?.configured === true || readiness.ready,
       runtimeCredentialStored: readiness.ready,
+      runtimeCredentialVerification: readiness.ready ? "verified-present" : readiness.reason === "read-error" ? "verified-error" : "verified-missing",
       ephemeralTokenAvailable: false,
       diagnostics: readiness.ready
         ? adaptiveMemory.supermemory?.diagnostics ?? []
@@ -1083,7 +1084,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           normalizedInventory.inventory,
         );
         log(`dashboardPlanBuilder: SUCCESS. planSteps=${Array.isArray(plan) ? plan.length : "not-array"}`);
-        return plan as RunnerReviewPlan;
+        return { plan: plan as RunnerReviewPlan, state: { adaptiveMemory } };
       } catch {
         log("dashboardPlanBuilder: FAILED to build review plan");
         return createRunnerReviewPlanFailure();
@@ -1584,6 +1585,14 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         onActionResult: (result: RunnerActionRunResult) => {
           if (!cancelled) setDashboardActionResults((current) => [...current, result]);
         },
+        onSupermemoryRuntimeCredentialEvidence: (payload: { evidence: SupermemoryRuntimeCredentialEvidence; identity: RunnerDashboardEvidenceIdentity }) => {
+          if (cancelled || controller.signal.aborted) return;
+          setDashboardState((current) => reduceRunnerDashboard(current, {
+            type: "apply-supermemory-runtime-credential-evidence",
+            evidence: payload.evidence,
+            identity: payload.identity,
+          }, dashboardPlanBuilder));
+        },
       } as any);
 
       log(`runDashboardInstall: runRunnerReviewPlan DONE. results=${results.length} cancelled=${cancelled} duration=${Date.now() - executionStart}ms`);
@@ -1945,7 +1954,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           runnerDisplayName: adapter.displayName,
           runnerUi: adapter.ui,
           adaptiveMemory: hydrateDashboardAdaptiveMemoryState(config, deckSecretStore),
-          runtime: { inspectionState: "blocked", diagnostics: [normalizedInventory.diagnostic.message] },
+          runtime: { inspectionState: "blocked", projectIdentity: "deferred", diagnostics: [normalizedInventory.diagnostic.message] },
           packageInstructions: loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds),
         }));
         resetCursor("pi-runner-dashboard");
@@ -1958,6 +1967,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const webSearchEvidence = webSearchInventoryEntry?.webSearchEvidence;
       const webSearchReadiness = webSearchInventoryEntry?.webSearchReadiness;
       const projectInspection = isRunnerProjectInspection(inspection) ? inspection : undefined;
+      const projectIdentityState: RunnerDashboardState["runtime"]["projectIdentity"] = (() => {
+        if (!projectInspection) return "deferred";
+        const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: projectInspection.projectRoot, remotes: [] });
+        return resolved.ok ? "verified" : "unverified";
+      })();
       const selectedTeamIds = new Set(adapter.ui?.dashboard?.defaultSelectedTeamIds ?? []);
       const teams = Object.fromEntries(adapter.getTeams(environmentId).map((team) => [team.id, {
         teamId: team.id,
@@ -2007,6 +2021,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           preflight: inspection,
           toolsReview,
           inspectionState: projectInspection?.state,
+          projectIdentity: projectIdentityState,
           diagnostics: projectInspection?.diagnostics.map((diagnostic) => diagnostic.message)
             ?? runtimes.flatMap((runtime) => runtime.diagnostics ?? []),
           ...(executionRoutes ? { executionRoutes } : {}),
@@ -2036,7 +2051,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         runnerDisplayName: adapter.displayName,
         runnerUi: adapter.ui,
         adaptiveMemory: hydrateDashboardAdaptiveMemoryState(config, deckSecretStore),
-        runtime: { inspectionState: "blocked", diagnostics: [message] },
+        runtime: { inspectionState: "blocked", projectIdentity: "deferred", diagnostics: [message] },
         packageInstructions: loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds),
       }));
       resetCursor("pi-runner-dashboard");

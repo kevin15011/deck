@@ -8,7 +8,7 @@
 import type { RunnerDashboardAction } from "./reducer";
 import { PACKAGE_INSTRUCTION_PACKAGE_IDS } from "@deck/core";
 import { getDashboardSectionSummaries, getToggleablePackageInstructionIds, type CapabilityResolver } from "./selectors";
-import { runnerRequiresExternalSupermemoryToken, type RunnerDashboardState } from "./state";
+import { runnerRequiresExternalSupermemoryToken, type RunnerDashboardState, type RunnerOperationIdentity } from "./state";
 
 export type RunnerDashboardContinueEffect =
   | { type: "dispatch"; action: RunnerDashboardAction }
@@ -19,6 +19,21 @@ export type RunnerDashboardContinueEffect =
   | { type: "block-review-install"; status: string }
   | { type: "complete-dashboard" }
   | { type: "none" };
+
+function currentOperationForAction(state: RunnerDashboardState): RunnerOperationIdentity | undefined {
+  if (state.currentOperation) return state.currentOperation;
+  if (state.runnerScope === "all" || !state.operationId) return undefined;
+  return { runner: state.runnerScope, operationId: state.operationId, explicitlySelected: false };
+}
+
+function enterReviewAction(state: RunnerDashboardState, inventory: unknown): RunnerDashboardAction {
+  const operation = currentOperationForAction(state);
+  return {
+    type: "enter-review",
+    inventory,
+    ...(operation ? { operation } : {}),
+  };
+}
 
 export function getReviewPlanBlockerReason(plan: RunnerDashboardState["plan"]): string | undefined {
   if (!plan || plan.ready) return undefined;
@@ -69,7 +84,7 @@ export function getDashboardContinueEffect(
     const section = sections[state.cursor];
     if (!section) return { type: "none" };
     if (section.screen === "review-plan") {
-      return { type: "dispatch", action: { type: "enter-review", inventory: options.inventory } };
+      return { type: "dispatch", action: enterReviewAction(state, options.inventory) };
     }
     return { type: "dispatch", action: { type: "navigate", screen: section.screen } };
   }
@@ -125,7 +140,7 @@ export function getDashboardContinueEffect(
   if (state.screen === "review-plan") {
     if (state.cursor === 0) {
       if (state.planGeneratedForRevision !== state.planRevision) {
-        return { type: "dispatch", action: { type: "enter-review", inventory: options.inventory } };
+        return { type: "dispatch", action: enterReviewAction(state, options.inventory) };
       }
       if (state.plan?.ready !== true) {
         return {

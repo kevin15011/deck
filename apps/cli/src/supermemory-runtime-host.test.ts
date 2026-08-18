@@ -109,6 +109,75 @@ describe("Supermemory runner loopback bridge", () => {
     await rm(projectRoot, { recursive: true, force: true });
   });
 
+  test("coalesces concurrent duplicate event ids and leaves failed ids retryable", async () => {
+    const adds: SupermemoryAddPayload[] = [];
+    let releaseAdd!: () => void;
+    const addGate = new Promise<void>((resolve) => { releaseAdd = resolve; });
+    let addAttempts = 0;
+    const projectRoot = await gitProject("https://github.com/acme/coalesce.git");
+    const host = await createSupermemoryRuntimeHost({
+      projectRoot,
+      stateHome: await mkdtemp(join(tmpdir(), "deck-sm-coalesce-state-")),
+      deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
+      runnerId: "opencode",
+      role: "lead",
+      launchMode: "interactive",
+      observabilitySink: testObservabilitySink(),
+      transport: {
+        async health() {},
+        async profile() { return { profile: {} }; },
+        async search() { return { results: [] }; },
+        async add(payload) {
+          addAttempts += 1;
+          await addGate;
+          adds.push(payload);
+        },
+      },
+    });
+    const bridge = await host.startLoopbackBridge();
+    const headers = { authorization: `Bearer ${bridge!.token}`, "content-type": "application/json" };
+    const duplicateBody = JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "opencode", eventId: "duplicate-capture", timestamp: Date.now(), event: "capture", sessionId: "native-session", source: "trusted-user-prompt", content: "Important limitation: capture this concurrent duplicate event exactly once for the managed runtime coalescing test." });
+    const first = fetch(bridge!.endpoint, { method: "POST", headers, body: duplicateBody }).then((response) => response.json());
+    const second = fetch(bridge!.endpoint, { method: "POST", headers, body: duplicateBody }).then((response) => response.json());
+    for (let i = 0; i < 20 && addAttempts === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    releaseAdd();
+    await expect(Promise.all([first, second])).resolves.toEqual([{ schema: "deck-runner-memory-loopback-response-v1", ok: true, diagnostics: [] }, { schema: "deck-runner-memory-loopback-response-v1", ok: true, diagnostics: [] }]);
+    expect(addAttempts).toBe(1);
+    expect(adds).toHaveLength(1);
+
+    let shouldFail = true;
+    const retryHost = await createSupermemoryRuntimeHost({
+      projectRoot,
+      stateHome: await mkdtemp(join(tmpdir(), "deck-sm-retry-state-")),
+      deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
+      runnerId: "opencode",
+      role: "lead",
+      launchMode: "interactive",
+      observabilitySink: testObservabilitySink(),
+      transport: {
+        async health() {},
+        async profile() { return { profile: {} }; },
+        async search() { return { results: [] }; },
+        async add(payload) {
+          if (shouldFail) throw new Error("temporary");
+          adds.push(payload);
+        },
+      },
+    });
+    const retryBridge = await retryHost.startLoopbackBridge();
+    const retryHeaders = { authorization: `Bearer ${retryBridge!.token}`, "content-type": "application/json" };
+    const retryBody = JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "opencode", eventId: "retry-capture", timestamp: Date.now(), event: "capture", sessionId: "native-session", source: "trusted-user-prompt", content: "Important limitation: retry this failed event after the provider succeeds on a later attempt." });
+    const failed = await fetch(retryBridge!.endpoint, { method: "POST", headers: retryHeaders, body: retryBody }).then((response) => response.json());
+    expect(failed.ok).toBe(false);
+    shouldFail = false;
+    const retried = await fetch(retryBridge!.endpoint, { method: "POST", headers: retryHeaders, body: retryBody }).then((response) => response.json());
+    expect(retried.ok).toBe(true);
+    expect(adds).toHaveLength(2);
+    await bridge!.close();
+    await retryBridge!.close();
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
   test("uses injected observability sink instead of real HOME or XDG state paths", async () => {
     const projectRoot = await gitProject("https://github.com/acme/hermetic-observability.git");
     const sentinelRoot = await mkdtemp(join(tmpdir(), "deck-sm-sentinel-home-"));
@@ -344,10 +413,9 @@ describe("Supermemory runner loopback bridge", () => {
     }
   });
 
-  test("Quick Fix policy skip performs zero provider recall and zero MCP calls", async () => {
+  test("Quick Fix policy skip performs zero provider recall calls", async () => {
     const projectRoot = await gitProject("https://github.com/acme/quick-fix.git");
     const calls: string[] = [];
-    let mcpCallCount = 0;
     const host = await createSupermemoryRuntimeHost({
       projectRoot,
       stateHome: await mkdtemp(join(tmpdir(), "deck-sm-test-state-")),
@@ -370,7 +438,6 @@ describe("Supermemory runner loopback bridge", () => {
       headers: { authorization: `Bearer ${bridge!.token}`, "content-type": "application/json" },
       body: event({ schema: "deck-runner-memory-loopback-v1", runnerId: "opencode", event: "session_start", sessionId: "native-fast", role: "apply-fast", query: "small typo" }),
     }).then((response) => response.json());
-    mcpCallCount += 0;
     expect(recall).toMatchObject({ ok: true });
     expect(calls).toEqual(["health"]);
     expect(host.metrics.filter((metric) => metric.operation === "profile" || metric.operation === "search").map((metric) => metric.status)).toEqual(["skipped", "skipped"]);
@@ -378,14 +445,14 @@ describe("Supermemory runner loopback bridge", () => {
     const aggregate = host.metrics.filter((metric) => metric.operation === "runtime_recall");
     expect(aggregate[0]?.scopeFingerprint).toBe(aggregate[1]?.scopeFingerprint);
     expect(aggregate[0]?.scopeFingerprint).toMatch(/^smfp_[a-f0-9]{16}$/);
-    expect(mcpCallCount).toBe(0);
     await bridge!.close();
     await rm(projectRoot, { recursive: true, force: true });
   });
 
   test("bounds combined profile/search recall and encodes provider breakout text as inert JSON", async () => {
+    const projectRoot = await gitProject();
     const host = await createSupermemoryRuntimeHost({
-      projectRoot: process.cwd(),
+      projectRoot,
       stateHome: await mkdtemp(join(tmpdir(), "deck-sm-test-state-")),
       deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
       runnerId: "opencode",
@@ -419,8 +486,9 @@ describe("Supermemory runner loopback bridge", () => {
 
   test("loopback session_start prioritizes query search canary over oversized profile context", async () => {
     const canary = "deck-canary-search-result-priority-unique";
+    const projectRoot = await gitProject();
     const host = await createSupermemoryRuntimeHost({
-      projectRoot: process.cwd(),
+      projectRoot,
       stateHome: await mkdtemp(join(tmpdir(), "deck-sm-test-state-")),
       deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
       runnerId: "opencode",
@@ -494,8 +562,9 @@ describe("Supermemory runner loopback bridge", () => {
   });
 
   test("truncates a 6261-byte advisory candidate to the physical final envelope limit", async () => {
+    const projectRoot = await gitProject();
     const host = await createSupermemoryRuntimeHost({
-      projectRoot: process.cwd(),
+      projectRoot,
       stateHome: await mkdtemp(join(tmpdir(), "deck-sm-test-state-")),
       deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
       runnerId: "opencode",
@@ -525,8 +594,9 @@ describe("Supermemory runner loopback bridge", () => {
   test("marks replay only after provider success so failed explicit remember retries", async () => {
     let attempts = 0;
     const adds: SupermemoryAddPayload[] = [];
+    const projectRoot = await gitProject();
     const host = await createSupermemoryRuntimeHost({
-      projectRoot: process.cwd(),
+      projectRoot,
       stateHome: await mkdtemp(join(tmpdir(), "deck-sm-test-state-")),
       deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
       runnerId: "opencode",
@@ -557,8 +627,9 @@ describe("Supermemory runner loopback bridge", () => {
 
   test.each(["opencode", "pi", "codex"] as const)("%s loopback performs exactly one profile/search/capture for replayed native lifecycle events", async (runnerId) => {
     const calls: string[] = [];
+    const projectRoot = await gitProject();
     const host = await createSupermemoryRuntimeHost({
-      projectRoot: process.cwd(),
+      projectRoot,
       stateHome: await mkdtemp(join(tmpdir(), "deck-sm-test-state-")),
       deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
       runnerId,
@@ -589,8 +660,9 @@ describe("Supermemory runner loopback bridge", () => {
 
   test("session_start persists native id so resume-by-id reuses the Deck session", async () => {
     const stateHome = await mkdtemp(join(tmpdir(), "deck-native-session-map-"));
+    const projectRoot = await gitProject();
     const host = await createSupermemoryRuntimeHost({
-      projectRoot: process.cwd(),
+      projectRoot,
       teamId: "developer-team",
       deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
       runnerId: "codex",
@@ -607,7 +679,7 @@ describe("Supermemory runner loopback bridge", () => {
         headers: { authorization: `Bearer ${bridge!.token}`, "content-type": "application/json" },
         body: event({ schema: "deck-runner-memory-loopback-v1", runnerId: "codex", event: "session_start", sessionId: "codex-native-123", role: "lead" }),
       });
-      const resumed = resolveDeckRuntimeSessionId({ projectRoot: process.cwd(), teamId: "developer-team", mode: "resume-by-id", sessionId: "codex-native-123", deckConfig: getDefaultDeckConfig() }, { runnerId: "codex", stateHome });
+      const resumed = resolveDeckRuntimeSessionId({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "codex-native-123", deckConfig: getDefaultDeckConfig() }, { runnerId: "codex", stateHome });
       expect(resumed.sessionId).toBe(host.sessionId);
     } finally {
       await bridge?.close();

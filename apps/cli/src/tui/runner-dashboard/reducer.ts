@@ -15,8 +15,10 @@ import {
   type CanonicalInstructionPackageId,
   type RunnerDashboardScreen,
   type RunnerDashboardState,
+  type RunnerDashboardEvidenceIdentity,
   type RunnerOperationIdentity,
   type RunnerReviewPlan,
+  type SupermemoryRuntimeCredentialEvidence,
   type SupermemorySetupState,
   createRunnerReviewPlanFailure,
 } from "./state";
@@ -36,6 +38,7 @@ export type RunnerDashboardAction =
   | { type: "set-capability-statuses"; statuses: Partial<Record<CapabilityId, CapabilityStatus>> }
   | { type: "select-adaptive-memory"; provider: AdaptiveMemoryProviderChoice }
   | { type: "update-supermemory"; values: Partial<SupermemorySetupState> }
+  | { type: "apply-supermemory-runtime-credential-evidence"; evidence: SupermemoryRuntimeCredentialEvidence; identity: RunnerDashboardEvidenceIdentity }
   | { type: "toggle-team"; teamId: string }
   | { type: "set-team-selected"; teamId: string; selected: boolean }
   | { type: "toggle-package-instruction"; packageId: CanonicalInstructionPackageId }
@@ -44,16 +47,21 @@ export type RunnerDashboardAction =
   | { type: "set-runner-scope"; runnerScope: RunnerDashboardState["runnerScope"]; operationId?: string }
   | { type: "new-operation"; runnerScope?: Exclude<RunnerDashboardState["runnerScope"], "all">; operationId: string }
   | { type: "start-operation"; runnerScope?: Exclude<RunnerDashboardState["runnerScope"], "all">; operationId: string }
-  | { type: "enter-review"; inventory: unknown }
-  | { type: "regenerate-plan"; inventory: unknown }
+  | { type: "enter-review"; inventory: unknown; operation?: RunnerOperationIdentity }
+  | { type: "regenerate-plan"; inventory: unknown; operation?: RunnerOperationIdentity }
   | { type: "start-install" }
   | { type: "complete" }
   | { type: "reset"; state?: Partial<RunnerDashboardState> };
 
+export type RunnerDashboardPlanBuildResult = RunnerReviewPlan | {
+  plan: RunnerReviewPlan;
+  state?: Pick<RunnerDashboardState, "adaptiveMemory">;
+};
+
 export type PlanBuilderFn = (
   state: RunnerDashboardState,
   inventory: unknown,
-) => RunnerReviewPlan;
+) => RunnerDashboardPlanBuildResult;
 
 const noopPlanBuilder: PlanBuilderFn = () => ({
   groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] },
@@ -99,6 +107,8 @@ export function reduceRunnerDashboard(
       return selectAdaptiveMemoryProvider(state, action.provider);
     case "update-supermemory":
       return updateSupermemory(state, action.values);
+    case "apply-supermemory-runtime-credential-evidence":
+      return applySupermemoryRuntimeCredentialEvidence(state, action.evidence, action.identity);
     case "toggle-team":
       return setTeamSelected(state, action.teamId, !state.teams[action.teamId]?.selected);
     case "set-team-selected":
@@ -114,9 +124,9 @@ export function reduceRunnerDashboard(
     case "start-operation":
       return beginRunnerOperation(state, action.runnerScope ?? state.runnerScope, action.operationId);
     case "enter-review":
-      return enterReview(state, action.inventory, planBuilder);
+      return enterReview(state, action.inventory, planBuilder, action.operation);
     case "regenerate-plan":
-      return withCurrentPlan(state, action.inventory, planBuilder);
+      return withCurrentPlan(state, action.inventory, planBuilder, action.operation);
     case "start-install":
       return hasCurrentPlan(state) && state.screen === "review-plan" ? navigate(state, "install-progress") : state;
     case "complete":
@@ -217,6 +227,15 @@ function getCurrentOperation(state: RunnerDashboardState): RunnerOperationIdenti
   return undefined;
 }
 
+function operationMatches(state: RunnerDashboardState, operation: RunnerOperationIdentity): boolean {
+  const current = getCurrentOperation(state);
+  return Boolean(
+    current
+    && current.runner === operation.runner
+    && current.operationId === operation.operationId,
+  );
+}
+
 function isCurrentOperation(state: RunnerDashboardState): boolean {
   const operation = getCurrentOperation(state);
   return Boolean(
@@ -312,6 +331,34 @@ function updateSupermemory(
   });
 }
 
+function applySupermemoryRuntimeCredentialEvidence(
+  state: RunnerDashboardState,
+  evidence: SupermemoryRuntimeCredentialEvidence,
+  identity: RunnerDashboardEvidenceIdentity,
+): RunnerDashboardState {
+  if (state.runnerScope !== identity.runnerId) return state;
+  if (!operationMatches(state, identity.operation)) return state;
+  if (state.planRevision !== identity.planRevision) return state;
+  if (state.planGeneratedForRevision !== identity.planGeneratedForRevision) return state;
+  if (state.adaptiveMemory.provider !== "supermemory") return state;
+  const current = state.adaptiveMemory.supermemory ?? createEmptySupermemorySetup();
+
+  return {
+    ...state,
+    adaptiveMemory: {
+      ...state.adaptiveMemory,
+      supermemory: {
+        ...current,
+        configured: evidence.configured,
+        runtimeCredentialStored: evidence.runtimeCredentialStored,
+        runtimeCredentialVerification: evidence.runtimeCredentialVerification,
+        ephemeralTokenAvailable: evidence.ephemeralTokenAvailable,
+        diagnostics: evidence.diagnostics,
+      },
+    },
+  };
+}
+
 function setTeamSelected(state: RunnerDashboardState, teamId: string, selected: boolean): RunnerDashboardState {
   const existing = state.teams[teamId] ?? { teamId, label: teamId, selected: false };
   if (existing.selected === selected) return state;
@@ -341,21 +388,41 @@ function setPackageInstruction(state: RunnerDashboardState, packageId: Canonical
   });
 }
 
-function enterReview(state: RunnerDashboardState, inventory: unknown, planBuilder: PlanBuilderFn): RunnerDashboardState {
+function enterReview(
+  state: RunnerDashboardState,
+  inventory: unknown,
+  planBuilder: PlanBuilderFn,
+  operation?: RunnerOperationIdentity,
+): RunnerDashboardState {
+  if (operation && !operationMatches(state, operation)) return state;
   return withCurrentPlan(navigate(state, "review-plan"), inventory, planBuilder);
 }
 
-function withCurrentPlan(state: RunnerDashboardState, inventory: unknown, planBuilder: PlanBuilderFn): RunnerDashboardState {
+function withCurrentPlan(
+  state: RunnerDashboardState,
+  inventory: unknown,
+  planBuilder: PlanBuilderFn,
+  operation?: RunnerOperationIdentity,
+): RunnerDashboardState {
+  if (operation && !operationMatches(state, operation)) return state;
   let plan: RunnerReviewPlan;
+  let nextState: Pick<RunnerDashboardState, "adaptiveMemory"> | undefined;
   try {
-    plan = planBuilder(state, inventory);
+    const result = planBuilder(state, inventory);
+    if ("plan" in result) {
+      plan = result.plan;
+      nextState = result.state;
+    } else {
+      plan = result;
+    }
   } catch {
     plan = createRunnerReviewPlanFailure();
   }
+  const stateWithPlanEvidence = nextState ? { ...state, ...nextState } : state;
   return {
-    ...state,
+    ...stateWithPlanEvidence,
     plan,
-    planGeneratedForRevision: state.planRevision,
+    planGeneratedForRevision: stateWithPlanEvidence.planRevision,
   };
 }
 

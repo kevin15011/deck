@@ -23,8 +23,8 @@ export type SupermemoryRolePolicy = Readonly<{
 
 export type SupermemoryRuntimeMetric = Readonly<{
   provider: "supermemory";
-  operation: "profile" | "search" | "capture" | "health" | "runtime_recall" | "mcp_invocation";
-  channel?: "runtime-recall" | "runtime-capture" | "trusted-observable-mcp" | "external-unobservable-mcp";
+  operation: "profile" | "search" | "capture" | "health" | "runtime_recall" | "runtime_lifecycle";
+  channel?: "runtime-recall" | "runtime-capture" | "external-unobservable-mcp";
   status: "attempted" | "skipped" | "succeeded" | "failed";
   reason?: string;
   durationMs: number;

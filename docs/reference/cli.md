@@ -66,6 +66,19 @@ All three operations accept `--root` and `--json` where applicable. `validate` a
 
 `--continue` and `--resume` are mutually exclusive. Supported memory identifiers are `none` and `supermemory`; omitting the flag uses the configured global Adaptive Memory setting.
 
+The Deck developer launch commands are the canonical Deck-managed session entrypoints. Launching the runner binary directly is runner-standalone/static-compatible and does not provide automatic Adaptive Memory; use the Deck command when automatic recall/capture is required.
+
 ## Command boundaries
 
 The current parser does not provide a generic Deck help/version-flag surface. Use `deck version`, this reference, and the relevant guide instead of guessing flags. Runner-native commands such as `pi` and `opencode` have their own syntax and are outside this reference.
+
+## Developer checkout canary helper
+
+`bun run canary:install` is a repository developer helper, not a released `deck` parser command. It compiles the current checkout for the current host target and installs the result as `deck-canary`, leaving the stable `deck` binary untouched. Use it to test Deck-managed sessions from another project, for example:
+
+```sh
+bun run canary:install -- --dir /tmp/deck-canary-bin
+cd /path/to/project && deck-canary opencode developer
+```
+
+The helper defaults to `DECK_CANARY_BIN_DIR` or `~/.local/bin`, accepts only `--dir`, `--dry-run`, and `--help`, and never regenerates tracked source artifacts, creates release archives, checksums, release descriptors, shell-profile edits, or PATH mutations. The visible `deck-canary` command is an atomic relative symlink to an immutable digest-named payload in the same directory. Old digest payloads may remain so a developer can manually roll back by retargeting the alias. If the destination is not on `PATH`, it prints the absolute invocation to use.

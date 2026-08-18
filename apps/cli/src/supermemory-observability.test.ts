@@ -38,7 +38,7 @@ describe("Supermemory observability sink", () => {
     }
   });
 
-  test("records redacted channel metadata for runtime recall and external MCP without content or raw scope", async () => {
+  test("records redacted channel metadata for runtime recall without fabricating external MCP metrics", async () => {
     const root = mkdtempSync(join(tmpdir(), "deck-sm-observe-channel-"));
     try {
       const sink = createSupermemoryObservabilitySink({ stateHome: join(root, "state"), now: () => "2026-08-15T00:00:00.000Z" });
@@ -55,20 +55,10 @@ describe("Supermemory observability sink", () => {
         resultCount: 2,
         dependency: "automatic",
       });
-      sink.observe({
-        provider: "supermemory",
-        operation: "mcp_invocation",
-        channel: "external-unobservable-mcp",
-        status: "skipped",
-        reason: "external_unobservable",
-        durationMs: 0,
-        scopeFingerprint: "smfp_0123456789abcdef",
-        dependency: "unobservable-external-mcp",
-      });
       const content = await Bun.file(sink.path).text();
       expect(content).toContain('"channel":"runtime-recall"');
       expect(content).toContain('"operation":"runtime_recall"');
-      expect(content).toContain('"channel":"external-unobservable-mcp"');
+      expect(content).not.toContain('"channel":"external-unobservable-mcp"');
       expect(content).not.toContain("sm_project_v1_kevin15011_deck");
       expect(content).not.toContain("Prior context");
       expect(content).not.toContain("query");

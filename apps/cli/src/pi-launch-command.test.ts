@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 
 import { getDefaultDeckConfig } from "@deck/core";
-import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { runPiLaunch as runPiLaunchProduction } from "./pi-launch-command";
 import { runPiLaunchLegacyCompatibility as runPiLaunch } from "./pi-launch-command-legacy-compatibility.test-support";
 
@@ -53,13 +52,14 @@ describe("runPiLaunch", () => {
     }
   });
 
-  test("production Pi launch starts supervised loopback and passes only ephemeral bridge env", async () => {
+  test("production Pi compatibility helper does not start a managed runtime or bridge", async () => {
     const projectRoot = createTempDir();
-    const transport: SupermemoryRuntimeTransport = {
-      async health() {},
-      async profile() { return { profile: { static: ["Remembered convention: Pi uses Deck loopback."] } }; },
-      async search() { return { results: [] }; },
-      async add() {},
+    const calls: string[] = [];
+    const transport = {
+      async health() { calls.push("health"); },
+      async profile() { calls.push("profile"); return { profile: { static: ["Remembered convention: Pi uses Deck loopback."] } }; },
+      async search() { calls.push("search"); return { results: [] }; },
+      async add() { calls.push("add"); },
     };
     try {
       execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
@@ -74,11 +74,11 @@ describe("runPiLaunch", () => {
       });
       expect(result.status).toBe("launched");
       if (result.status === "launched") {
-        expect(result.plan.env.DECK_RUNNER_MEMORY_ENDPOINT).toMatch(/^http:\/\/127\.0\.0\.1:/);
-        expect(result.plan.env.DECK_RUNNER_MEMORY_TOKEN).toBeDefined();
+        expect(result.plan.env).not.toHaveProperty("DECK_RUNNER_MEMORY_ENDPOINT");
+        expect(result.plan.env).not.toHaveProperty("DECK_RUNNER_MEMORY_TOKEN");
         expect(result.plan.env).not.toHaveProperty("SUPERMEMORY_API_KEY");
-        await result.loopbackBridge?.close();
       }
+      expect(calls).toEqual([]);
     } finally {
       rmSync(projectRoot, { recursive: true, force: true });
     }

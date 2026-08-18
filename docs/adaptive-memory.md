@@ -11,6 +11,10 @@ Adaptive memory is optional context that can persist useful learnings between se
 
 Adaptive Memory is either **Disabled** or **Enabled**. The default is disabled, which adds no memory injection and does not block normal work. When enabled, Supermemory is the only durable backend.
 
+Automatic recall and capture run only inside a **Deck-managed** launch, such as Deck's OpenCode, Pi, or Codex developer launch commands. A runner started directly is **runner-standalone/static-compatible**: installed agents, skills, prompts, and optional MCP surfaces can still be useful, but automatic Adaptive Memory is not provided and runner hooks must not autobootstrap Deck Runtime.
+
+Within one managed Deck process, duplicate runner event IDs are coalesced while an effect is in flight and replay-suppressed only after success. Failed event IDs remain retryable. Deck does not claim distributed exactly-once effects beyond any idempotency guarantee provided by Supermemory.
+
 | Setting | Status | Integration and behavior |
 |---|---|---|
 | Disabled | **Supported** | No remote adaptive-memory effects run. |
@@ -51,6 +55,8 @@ Project scoping is explicit at runtime and, where supported, in MCP configuratio
 - `x-sm-project` is diagnostic/transport metadata only and never supplies an omitted tool argument.
 
 User identity comes from the Supermemory credential or native OAuth account. Neither path uses manual user, team, organization, or container identifiers.
+
+Canonical project identity comes from the verified Git top-level and its actual `origin` remote, discovered structurally from `.git` directories or `gitdir:` files without executing `git` or using ambient `PATH`/`GIT_*` configuration. HTTPS and SSH remotes are accepted for literal `github.com` and `ssh.github.com`; an SSH host alias is accepted only for SCP-style or `ssh://` remotes when the OS account home can be resolved from a trusted structural account database and that home's `.ssh/config` has an exact `Host` block whose `HostName` maps to one of those canonical hosts. On Linux, Deck resolves that home from a no-follow, descriptor-validated `/etc/passwd`; platforms without an equivalent structural account record fail closed for SSH aliases. Deck opens the direct SSH config file once with no-follow descriptor validation and does not run `ssh`, expand `Include`, evaluate `Match`, execute commands, use ambient `HOME`, or follow unsafe config files. Missing, wildcard, negated, included, ambiguous, unsafe, or unsupported alias configuration fails closed.
 
 Enablement can be represented in Deck config without a credential:
 

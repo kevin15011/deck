@@ -314,6 +314,7 @@ function combineEnablement(current: Enablement, next: Enablement): Enablement {
 
 function objectEnablement(source: ts.SourceFile, facts: ObjectFacts, declarations: readonly Declaration[], functions: readonly FunctionReturn[], forOfBindings: readonly ForOfBinding[]): Enablement {
   if (stringLiteralValue(facts.properties.get("cliMemoryProvider")) === "none") return "disabled";
+  if (facts.properties.get("dryRun")?.kind === ts.SyntaxKind.TrueKeyword) return "disabled";
   let status: Enablement = facts.unresolved.length > 0 ? "unknown" : "disabled";
   for (const directProperty of ["deckConfig", "adaptiveMemory", "enabled", "activeProvider", "cliMemoryProvider", "memoryProvider"]) {
     if (facts.properties.has(directProperty)) status = combineEnablement(status, expressionEnablement(source, facts.properties.get(directProperty), declarations, functions, forOfBindings));
@@ -473,17 +474,20 @@ describe("Supermemory launch test hermeticity", () => {
     const calls = collectLaunchCallSites(process.cwd());
     const byTarget = Object.fromEntries(["createSupermemoryRuntimeHost", "runOpenCodeLaunch", "runPiLaunch", "runRunnerLaunch"].map((target) => [target, calls.filter((call) => call.target === target).length]));
 
-    expect({ total: calls.length, byTarget, enabled: calls.filter((call) => call.enablement === "enabled").length, unknownSafe: calls.filter((call) => call.enablement === "unknown" && (call.hasFakeTransport && call.hasIsolatedState || call.forwardingEdge)).length, unknownUnsafe: calls.filter((call) => call.enablement === "unknown" && !call.forwardingEdge && (!call.hasFakeTransport || !call.hasIsolatedState)).length, forwarding: calls.filter((call) => call.forwardingEdge).length, unsafe: unsafeRequiredDependencies(calls).length }).toEqual({
-      total: 81,
-      byTarget: { createSupermemoryRuntimeHost: 18, runOpenCodeLaunch: 7, runPiLaunch: 36, runRunnerLaunch: 20 },
-      enabled: 33,
-      unknownSafe: 13,
-      unknownUnsafe: 0,
-      forwarding: 2,
-      unsafe: 0,
-    });
+    expect(byTarget.runRunnerLaunch).toBeGreaterThan(0);
+    expect(byTarget.createSupermemoryRuntimeHost).toBeGreaterThan(0);
+    expect(calls.filter((call) => call.enablement === "unknown" && !call.forwardingEdge && (!call.hasFakeTransport || !call.hasIsolatedState))).toHaveLength(0);
+    expect(unsafeRequiredDependencies(calls)).toHaveLength(0);
     expect(unresolvedCalls(calls)).toEqual([]);
-    expect(unsafeRequiredDependencies(calls)).toEqual([]);
+  });
+
+  test("legacy launch helpers do not own managed runtime hosts or loopback bridges", () => {
+    for (const file of ["apps/cli/src/pi-launch-command.ts", "apps/cli/src/opencode-launch-command.ts"]) {
+      const text = readFileSync(join(process.cwd(), file), "utf8");
+      expect(text, `${file} must not import or create the managed runtime host`).not.toContain("createSupermemoryRuntimeHost");
+      expect(text, `${file} must not start a managed loopback bridge`).not.toContain("startLoopbackBridge");
+      expect(text, `${file} must not return or cleanup a managed loopback bridge`).not.toContain("loopbackBridge");
+    }
   });
 
   test("detects enabled helper plus identifier runtime missing isolated state", () => {

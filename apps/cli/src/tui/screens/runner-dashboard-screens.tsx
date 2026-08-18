@@ -13,6 +13,7 @@ import {
   type CapabilityResolver,
 } from "../runner-dashboard/selectors";
 import { type RunnerAction, type RunnerDashboardState } from "../runner-dashboard/state";
+import { formatSessionRuntimeReadiness, resolveSessionRuntimeReadiness } from "../../session-runtime-readiness";
 
 type DashboardRunDiagnostic = { message: string };
 
@@ -285,11 +286,31 @@ function DeveloperTeamDetail({ state, resolver }: { state: RunnerDashboardState;
 function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { state: RunnerDashboardState; canRunPlan?: boolean; runBlockDiagnostics?: DashboardRunDiagnostic[] }) {
   const counts = getPlanActionCounts(state.plan);
   const effectiveCanRun = state.plan?.ready === true && (canRunPlan ?? canRunPlanFromState(state));
+  const staticIntegrationState = state.runtime.inspectionState === "blocked" || state.runtime.inspectionState === "unsupported"
+    ? "blocked"
+    : state.runtime.inspectionState === "ready"
+      ? "ready"
+      : "degraded";
+  const readiness = resolveSessionRuntimeReadiness({
+    topology: "deck-managed",
+    staticIntegrationState,
+    adaptiveMemoryEnabled: state.adaptiveMemory.provider === "supermemory",
+    hasProjectIdentity: state.runtime.projectIdentity === "verified",
+    runtimeCredentialState: state.adaptiveMemory.provider === "supermemory"
+      ? state.adaptiveMemory.supermemory?.runtimeCredentialVerification === "verified-present"
+        ? "present"
+        : state.adaptiveMemory.supermemory?.runtimeCredentialVerification === "verified-error"
+          ? "deferred"
+          : "missing"
+      : "missing",
+  });
 
   return (
     <Box flexDirection="column">
       <Text bold>Review &amp; Install</Text>
       <Text dimColor>{counts.total} actions planned: {counts.automatic} automatic, {counts.manual} manual, {counts.config} config, {counts.team} team, {counts.validation} validation.</Text>
+      <Text dimColor>{formatSessionRuntimeReadiness(readiness)}</Text>
+      <Text dimColor>After review/install, launch through the CLI-managed session: deck {state.runnerScope} developer. Automatic Adaptive Memory requires this Deck-managed session; direct runner launches remain static-compatible.</Text>
       {state.plan?.diagnostics && state.plan.diagnostics.length > 0 && (
         <Box marginTop={1} flexDirection="column">
           <Text bold>Plan diagnostics:</Text>

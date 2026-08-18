@@ -20,7 +20,6 @@ import {
   buildCapabilityInstructionBundle,
   type CapabilityInstructionBundle,
 } from "@deck/core/teams/developer/instruction-bundles";
-import { createSupermemoryRuntimeHost } from "./supermemory-runtime-host";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,9 +46,9 @@ export type RunOpenCodeLaunchOptions = {
   configDir?: string;
   /** Retained for API compatibility; compact prompts are active by default. */
   promptProfileActivation?: PromptProfileActivationV1;
-  /** Internal hermetic test seam; production uses Deck's runtime HTTP transport. */
+  /** @deprecated Compatibility-only; managed runtime effects are owned exclusively by runRunnerLaunch. */
   supermemoryRuntimeTransport?: SupermemoryRuntimeTransport;
-  /** Internal hermetic test seam for runtime state/observability writes. */
+  /** @deprecated Compatibility-only; managed runtime effects are owned exclusively by runRunnerLaunch. */
   supermemoryRuntimeStateHome?: string;
   dryRun?: boolean;
 };
@@ -198,7 +197,7 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     };
   }
 
-  // 2. Resolve memory provider
+  // 2. Resolve static memory provider guidance only. Managed runtime effects are owned by runRunnerLaunch.
   const resolvedMemory = resolveOpenCodeMemory(options);
   const allDiagnostics: MemoryProviderDiagnostic[] = [...resolvedMemory.diagnostics];
 
@@ -234,40 +233,14 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     // Config not available or invalid — continue without capability instructions
   }
 
-  const runtimeHost = await createSupermemoryRuntimeHost({
-    projectRoot,
-    deckConfig: options.cliMemoryProvider === "none"
-      ? { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: false, activeProvider: "none" as const } }
-      : options.cliMemoryProvider === "supermemory"
-        ? { ...deckConfig, adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: true, activeProvider: "supermemory" as const } }
-        : deckConfig,
-    runnerId: "opencode",
-    role: "lead",
-    launchMode: "interactive",
-    transport: options.supermemoryRuntimeTransport,
-    stateHome: options.supermemoryRuntimeStateHome,
-  });
-  allDiagnostics.push(...runtimeHost.diagnostics.filter((diagnostic) => diagnostic.severity !== "info").map((diagnostic) => ({
-    code: "supermemory_runtime" as const,
-    providerId: "supermemory",
-    message: diagnostic.message,
-  })));
-  const runtimeMemoryInjection: MemoryInjectionBundle | undefined = runtimeHost.advisoryText
-    ? {
-        instructions: [{ surface: "session", markdown: runtimeHost.advisoryText, teamId }],
-        toolBindings: [],
-      }
-    : undefined;
-
-  // 4. Build install plan
+  // 4. Build install plan. Do not inject runtime recall/capture context here; standalone assets are static-compatible only.
   const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => {
     const bundle = getStandaloneSkill(s.skillId);
     return { skillId: s.skillId, body: bundle.SKILL, files: bundle.files };
   });
   const installPlan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
     configDir,
-    memoryInjection: runtimeMemoryInjection ?? resolvedMemory.memoryInjection,
-    trustedMemoryInjection: runtimeMemoryInjection ? true : undefined,
+    memoryInjection: resolvedMemory.memoryInjection,
     memoryProvider: resolvedMemory.provider,
     supportedMemoryProviderIds: options.supportedMemoryProviderIds ?? DEFAULT_SUPPORTED_MEMORY_PROVIDER_IDS,
     capabilityInstructions,
@@ -285,7 +258,7 @@ export async function runOpenCodeLaunch(options: RunOpenCodeLaunchOptions): Prom
     // Config merge succeeded
   }
 
-  // 5. Build launch plan
+  // 5. Build compatibility launch plan only. No host, bridge, spawn, persistence, or cleanup is owned here.
   const plan: OpenCodeLaunchPlan = {
     command: opencodeCommand,
     args: [projectRoot],

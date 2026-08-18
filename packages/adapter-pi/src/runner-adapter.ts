@@ -1029,7 +1029,16 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       code: `pi-${input.mode}-unsupported`,
       diagnostics: [{ code: "unsupported-launch-mode", severity: "error", message: "Pi generic compatibility launch currently supports interactive mode only." }],
     };
-    const native = buildPiTeamLaunchPlan({ teamId: input.teamId, projectRoot: input.projectRoot });
+    const nativeHints = input.runnerNative ?? {};
+    const native = buildPiTeamLaunchPlan({
+      teamId: input.teamId,
+      projectRoot: input.projectRoot,
+      flags: {
+        ...(nativeHints.continue === true ? { continue: true } : {}),
+        ...(nativeHints.resume === true ? { resume: true } : {}),
+      },
+      ...(typeof nativeHints.piCommand === "string" && nativeHints.piCommand.trim() ? { piCommand: nativeHints.piCommand } : {}),
+    });
     return {
       status: "ready",
       plan: {
@@ -1038,6 +1047,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         cwd: native.cwd,
         stdio: "inherit",
         stdin: "inherit",
+        executionClass: "static-compatible",
         envOverlay: native.env.PI_SESSION_DIR ? { PI_SESSION_DIR: { value: native.env.PI_SESSION_DIR } } : undefined,
       },
       diagnostics: [],

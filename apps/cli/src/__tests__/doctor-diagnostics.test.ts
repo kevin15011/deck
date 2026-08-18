@@ -50,6 +50,28 @@ function fabOkMcpResult() {
   };
 }
 
+function mockInstalledOpenCodeRuntime() {
+  mockDetectSelectedRuntimes.mockReturnValue([fabOpenCodeStatus()]);
+  mockInspectOpenCodeEnvironment.mockReturnValue({
+    version: "1.0.0",
+    configDirectory: "/fake",
+    packageManifest: { name: "opencode" },
+    existingConfiguration: true,
+  });
+  mockReviewOpenCodeTools.mockReturnValue({ installedPackages: [], tools: [], toolStatuses: [] });
+}
+
+function gitProjectRoot(remote = "git@github.com:kevin15011/deck.git") {
+  const projectRoot = mkdtempSync(join(tmpdir(), "deck-doctor-project-"));
+  execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+  execFileSync("git", ["remote", "add", "origin", remote], { cwd: projectRoot, stdio: "ignore" });
+  return projectRoot;
+}
+
+function supermemoryReadinessLine(result: DoctorDiagnosticsResult): string {
+  return result.memory.find((item) => item.category === "Supermemory Runtime")?.items[0]?.message ?? "";
+}
+
 
 function fabDependencies() {
   const root = mkdtempSync(join(tmpdir(), "deck-doctor-config-"));
@@ -306,6 +328,69 @@ describe("runDoctorDiagnostics", () => {
     expect(dependencies.checkSupermemoryApi).toHaveBeenCalledWith({ apiKey: "sk-test-doctor-secret-value", containerTag: "sm_project_v1_kevin15011_deck" });
     expect(dependencies.checkSupermemoryApi.mock.results[0]?.type).toBe("return");
     expect(dependencies.checkSupermemoryObservabilitySink).toHaveBeenCalledTimes(1);
+  });
+
+  test("Supermemory runtime readiness renders healthy managed state exactly", async () => {
+    mockInstalledOpenCodeRuntime();
+    const dependencies = fabDependencies();
+    dependencies.configStore.write({ adaptiveMemory: { enabled: true } });
+    dependencies.readSupermemorySecret.mockReturnValue("sk-test-doctor-secret-value");
+    dependencies.checkSupermemoryApi.mockResolvedValue({ operations: ["health", "profile", "search"] } as never);
+    const result = await runDoctorDiagnostics(dependencies, gitProjectRoot());
+
+    expect(supermemoryReadinessLine(result)).toBe("Session topology: deck-managed; static=ready; managed=ready; adaptive-memory=ready; reason=deck-managed-ready.");
+  });
+
+  test("Supermemory runtime readiness renders missing auth exactly", async () => {
+    mockInstalledOpenCodeRuntime();
+    const dependencies = fabDependencies();
+    dependencies.configStore.write({ adaptiveMemory: { enabled: true } });
+    dependencies.readSupermemorySecret.mockReturnValue(undefined);
+    const result = await runDoctorDiagnostics(dependencies, gitProjectRoot());
+
+    expect(supermemoryReadinessLine(result)).toBe("Session topology: deck-managed; static=ready; managed=blocked; adaptive-memory=blocked; reason=managed-runtime-auth-missing.");
+  });
+
+  test("Supermemory runtime readiness renders API failure after provider check exactly", async () => {
+    mockInstalledOpenCodeRuntime();
+    const dependencies = fabDependencies();
+    dependencies.configStore.write({ adaptiveMemory: { enabled: true } });
+    dependencies.readSupermemorySecret.mockReturnValue("sk-test-doctor-secret-value");
+    dependencies.checkSupermemoryApi.mockRejectedValue(new Error("provider unavailable"));
+    const result = await runDoctorDiagnostics(dependencies, gitProjectRoot());
+
+    expect(supermemoryReadinessLine(result)).toBe("Session topology: deck-managed; static=ready; managed=degraded; adaptive-memory=degraded; reason=supermemory-provider-api-failed.");
+  });
+
+  test("Supermemory runtime readiness renders identity missing exactly", async () => {
+    mockInstalledOpenCodeRuntime();
+    const dependencies = fabDependencies();
+    dependencies.configStore.write({ adaptiveMemory: { enabled: true } });
+    dependencies.readSupermemorySecret.mockReturnValue("sk-test-doctor-secret-value");
+    const result = await runDoctorDiagnostics(dependencies, undefined);
+
+    expect(supermemoryReadinessLine(result)).toBe("Session topology: deck-managed; static=ready; managed=blocked; adaptive-memory=blocked; reason=managed-runtime-project-missing.");
+  });
+
+  test("Supermemory runtime readiness renders invalid static integration exactly", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([]);
+    const dependencies = fabDependencies();
+    dependencies.configStore.write({ adaptiveMemory: { enabled: true } });
+    dependencies.readSupermemorySecret.mockReturnValue("sk-test-doctor-secret-value");
+    const result = await runDoctorDiagnostics(dependencies, gitProjectRoot());
+
+    expect(supermemoryReadinessLine(result)).toBe("Session topology: deck-managed; static=blocked; managed=blocked; adaptive-memory=blocked; reason=static-integration-blocked.");
+  });
+
+  test("Supermemory runtime readiness renders adaptive memory disabled and standalone degradation exactly", async () => {
+    mockInstalledOpenCodeRuntime();
+    const dependencies = fabDependencies();
+    dependencies.configStore.write({ adaptiveMemory: { enabled: false } });
+    const result = await runDoctorDiagnostics(dependencies, gitProjectRoot());
+    const messages = result.memory.find((item) => item.category === "Supermemory Runtime")?.items.map((item) => item.message) ?? [];
+
+    expect(messages[0]).toBe("Session topology: deck-managed; static=ready; managed=ready; adaptive-memory=disabled; reason=adaptive-memory-disabled.");
+    expect(messages).toContain("Session topology: runner-standalone; static=ready; managed=degraded; adaptive-memory=degraded; reason=runner-standalone-static-compatible. Standalone automatic Adaptive Memory is not provided by design and does not make Doctor fail.");
   });
 
   test("Supermemory runtime ready without raw OpenCode MCP does not report MCP remediation or disabled project memory", async () => {
@@ -614,7 +699,7 @@ describe("runDoctorDiagnostics dependency seam", () => {
     ]);
     expect(dependencies.readOpenCodeMcpSection).toHaveBeenCalledTimes(1);
     expect(result.binary?.reason).toBe("Release descriptor not found");
-    expect(result.memory.find((item) => item.category === "Supermemory Runtime")?.status).toBe("ok");
+    expect(result.memory.find((item) => item.category === "Supermemory Runtime")?.status).toBe("warning");
     expect(result.mcp.find((item) => item.category === "OpenCode MCP")?.status).toBe("ok");
   });
 });

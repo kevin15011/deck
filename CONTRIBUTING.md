@@ -22,10 +22,13 @@ The root [package metadata](package.json) is authoritative for scripts:
 | `bun run deck` | Run the CLI from the workspace. |
 | `bun run build` | Build release binaries. |
 | `bun run build:dry-run` | Exercise the binary build flow without publishing. |
+| `bun run canary:install` | Compile this checkout and install a `deck-canary` binary for local cross-project testing without replacing stable `deck`. |
 | `bun run deck:run` | Build and run the local debug CLI. |
 | `bun run test` | Run the repository test suite. |
 
 Direct supported forms are `bun test tests/documentation-governance.test.ts`, `bunx tsc --noEmit`, and `bun run scripts/prepare-release.ts`. Use `deck version` and the [CLI reference](docs/reference/cli.md) for the current parser-backed CLI surface.
+
+`bun run canary:install -- --dir /absolute/bin` builds only the current host target, installs the binary as `deck-canary`, and runs a bounded `deck-canary version` smoke. It does not regenerate tracked source artifacts, create release archives, checksums, release descriptors, shell-profile edits, or stable `deck` replacements. The default destination is `DECK_CANARY_BIN_DIR` when set, otherwise `~/.local/bin`; use `--dry-run` to print the planned path without compiling or writing. The command stores immutable digest-named payloads next to an atomic relative `deck-canary` symlink alias; old payloads may remain for manual rollback by retargeting the alias.
 
 ## Verification tiers
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+/// <reference types="bun" />
 /**
  * Build Binaries Script.
  *
@@ -15,18 +16,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 
-const ROOT = path.resolve(import.meta.dir, "..");
-const CLI_DIR = path.join(ROOT, "apps/cli");
-const OUTPUT_DIR = path.join(ROOT, "dist");
-const DIST_CLI_DIR = path.join(OUTPUT_DIR, "cli");
+export const ROOT = path.resolve(import.meta.dir, "..");
+export const CLI_DIR = path.join(ROOT, "apps/cli");
+export const OUTPUT_DIR = path.join(ROOT, "dist");
+export const DIST_CLI_DIR = path.join(OUTPUT_DIR, "cli");
 
 // Build targets: [os, arch, bunTarget]
-const BUILD_TARGETS = [
+export const BUILD_TARGETS = [
   ["linux", "x64", "bun-linux-x64"],
   ["linux", "arm64", "bun-linux-arm64"],
   ["darwin", "x64", "bun-darwin-x64"],
   ["darwin", "arm64", "bun-darwin-arm64"],
 ] as const;
+
+export type BuildTarget = (typeof BUILD_TARGETS)[number];
 
 interface Args {
   dryRun: boolean;
@@ -51,7 +54,7 @@ function parseArgs(argv: string[]): Args {
 /**
  * Get version from package.json.
  */
-function getVersion(): string {
+export function getVersion(): string {
   const pkgPath = path.join(ROOT, "package.json");
   const content = fs.readFileSync(pkgPath, "utf-8");
   const pkg = JSON.parse(content);
@@ -61,7 +64,7 @@ function getVersion(): string {
 /**
  * Run generate-build-info for a specific target.
  */
-async function generateBuildInfo(target: string, version: string): Promise<void> {
+export async function generateBuildInfo(target: string, version: string): Promise<void> {
   console.log(`  Generating build info for ${target}...`);
   const proc = Bun.spawnSync({
     cmd: [
@@ -84,7 +87,7 @@ async function generateBuildInfo(target: string, version: string): Promise<void>
 /**
  * Run generate-skill-bundle.
  */
-async function generateSkillBundle(): Promise<void> {
+export async function generateSkillBundle(): Promise<void> {
   console.log(`  Generating skill bundle...`);
   const proc = Bun.spawnSync({
     cmd: ["bun", "run", path.join(ROOT, "scripts/generate-skill-bundle.ts")],
@@ -96,7 +99,7 @@ async function generateSkillBundle(): Promise<void> {
   }
 }
 
-async function generateRunnerExecutionAssets(): Promise<void> {
+export async function generateRunnerExecutionAssets(): Promise<void> {
   const proc = Bun.spawnSync({
     cmd: ["bun", "run", path.join(ROOT, "scripts/generate-runner-execution-assets.ts")],
     cwd: ROOT,
@@ -106,28 +109,46 @@ async function generateRunnerExecutionAssets(): Promise<void> {
   }
 }
 
+export function getHostBuildTarget(platform: NodeJS.Platform = os.platform(), arch: string = os.arch()): BuildTarget {
+  const osName = platform === "darwin" ? "darwin" : platform === "linux" ? "linux" : undefined;
+  const archName = arch === "x64" ? "x64" : arch === "arm64" ? "arm64" : undefined;
+  const target = BUILD_TARGETS.find(([candidateOs, candidateArch]) => candidateOs === osName && candidateArch === archName);
+  if (!target) throw new Error(`No target mapping for ${platform}-${arch}`);
+  return target;
+}
+
+export async function prepareStandaloneBinaryBuild(target: BuildTarget, version: string): Promise<void> {
+  await generateRunnerExecutionAssets();
+  await generateBuildInfo(`${target[0]}-${target[1]}`, version);
+  await generateSkillBundle();
+}
+
 /**
  * Build binary for a specific target.
  *
- * The binary is always named 'deck' inside the archive for consistent extraction.
+ * Release builds use 'deck' inside the archive for consistent extraction.
+ * Developer-only canary builds may pass a different binaryName/outputDir;
+ * release callers must keep the defaults so archive contents stay stable.
  * The archive filename follows the format: deck_v{VERSION}_{OS}-{ARCH}.tar.gz
  */
-async function buildBinary(
+export async function buildBinary(
   osName: string,
   archName: string,
   bunTarget: string,
-  version: string
+  version: string,
+  options: { binaryName?: string; outputDir?: string } = {},
 ): Promise<string> {
   const targetName = `${osName}-${archName}`;
   console.log(`  Building ${targetName} (${bunTarget})...`);
 
-  // Always use 'deck' as the binary name inside the archive
-  const binaryName = "deck";
-  const outputPath = path.join(DIST_CLI_DIR, binaryName);
+  // Default remains 'deck' for release archive compatibility.
+  const binaryName = options.binaryName ?? "deck";
+  const outputDir = options.outputDir ?? DIST_CLI_DIR;
+  const outputPath = path.join(outputDir, binaryName);
 
   // Ensure output directory exists
-  if (!fs.existsSync(DIST_CLI_DIR)) {
-    fs.mkdirSync(DIST_CLI_DIR, { recursive: true });
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
   }
 
   // Build the actual binary
@@ -166,7 +187,7 @@ function getArchiveFilename(version: string, osName: string, archName: string): 
 /**
  * Code sign binary (macOS only).
  */
-function codeSign(binaryPath: string): void {
+export function codeSign(binaryPath: string): void {
   if (os.platform() !== "darwin") {
     return;
   }
