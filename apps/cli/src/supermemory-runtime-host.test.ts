@@ -178,6 +178,73 @@ describe("Supermemory runner loopback bridge", () => {
     await rm(projectRoot, { recursive: true, force: true });
   });
 
+  test("loopback successful replay is response-preserving, TTL/cap bounded, and failed explicit recall IDs retry", async () => {
+    let now = 2_000_000;
+    const originalNow = Date.now;
+    Date.now = () => now;
+    const projectRoot = await gitProject("https://github.com/acme/replay-response.git");
+    const calls: string[] = [];
+    let failSearch = false;
+    try {
+      const host = await createSupermemoryRuntimeHost({
+        projectRoot,
+        stateHome: await mkdtemp(join(tmpdir(), "deck-sm-response-replay-")),
+        deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
+        runnerId: "opencode",
+        role: "lead",
+        launchMode: "interactive",
+        deferInitialRecallToLoopback: true,
+        observabilitySink: testObservabilitySink(),
+        transport: {
+          async health() {},
+          async profile() { return { profile: {} }; },
+          async search(payload) {
+            calls.push(payload.q);
+            if (failSearch) throw new Error("reason=transport_error provider timeout token=secret");
+            return { results: [{ content: `remembered ${payload.q}` }] };
+          },
+          async add() {},
+        },
+      });
+      const bridge = await host.startLoopbackBridge();
+      const headers = { authorization: `Bearer ${bridge!.token}`, "content-type": "application/json" };
+      const explicit = (eventId: string, query = eventId) => event({ schema: "deck-runner-memory-loopback-v1", runnerId: "opencode", eventId, event: "explicit_recall", sessionId: "native-session", role: "lead", query });
+
+      const first = await fetch(bridge!.endpoint, { method: "POST", headers, body: explicit("same-success", "first-query") }).then((response) => response.json());
+      const replay = await fetch(bridge!.endpoint, { method: "POST", headers, body: explicit("same-success", "changed-query") }).then((response) => response.json());
+      expect(replay).toEqual(first);
+      expect(calls).toEqual(["first-query"]);
+
+      failSearch = true;
+      const failed1 = await fetch(bridge!.endpoint, { method: "POST", headers, body: explicit("same-failure", "failed-query") }).then((response) => response.json());
+      const failed2 = await fetch(bridge!.endpoint, { method: "POST", headers, body: explicit("same-failure", "failed-query") }).then((response) => response.json());
+      expect(failed1).toMatchObject({ ok: false });
+      expect(failed2).toMatchObject({ ok: false });
+      expect(JSON.stringify(failed1)).not.toContain("token=secret");
+      expect(calls.filter((query) => query === "failed-query")).toHaveLength(2);
+
+      failSearch = false;
+      for (let i = 0; i < 66; i += 1) {
+        await fetch(bridge!.endpoint, { method: "POST", headers, body: explicit(`cap-${i}`) });
+      }
+      const beforeEvicted = calls.length;
+      await fetch(bridge!.endpoint, { method: "POST", headers, body: explicit("same-success", "first-query") });
+      expect(calls.length).toBe(beforeEvicted + 1);
+
+      const beforeTtl = calls.length;
+      await fetch(bridge!.endpoint, { method: "POST", headers, body: explicit("ttl-success", "ttl-query") });
+      await fetch(bridge!.endpoint, { method: "POST", headers, body: explicit("ttl-success", "ignored-query") });
+      expect(calls.length).toBe(beforeTtl + 1);
+      now += 5 * 60_000 + 1;
+      await fetch(bridge!.endpoint, { method: "POST", headers, body: explicit("ttl-success", "ttl-query") });
+      expect(calls.length).toBe(beforeTtl + 2);
+      await bridge!.close();
+    } finally {
+      Date.now = originalNow;
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("uses injected observability sink instead of real HOME or XDG state paths", async () => {
     const projectRoot = await gitProject("https://github.com/acme/hermetic-observability.git");
     const sentinelRoot = await mkdtemp(join(tmpdir(), "deck-sm-sentinel-home-"));
@@ -561,6 +628,82 @@ describe("Supermemory runner loopback bridge", () => {
     await rm(projectRoot, { recursive: true, force: true });
   });
 
+  test("explicit recall with empty successful profile and search returns actionable no-match failure", async () => {
+    const projectRoot = await gitProject("https://github.com/acme/empty-explicit-recall.git");
+    const host = await createSupermemoryRuntimeHost({
+      projectRoot,
+      stateHome: await mkdtemp(join(tmpdir(), "deck-sm-test-state-")),
+      deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
+      runnerId: "opencode",
+      role: "lead",
+      launchMode: "interactive",
+      deferInitialRecallToLoopback: true,
+      observabilitySink: testObservabilitySink(),
+      transport: {
+        async health() {},
+        async profile() { return { profile: { static: [] } }; },
+        async search() { return { results: [] }; },
+        async add() {},
+      },
+    });
+    const bridge = await host.startLoopbackBridge();
+    const recall = await fetch(bridge!.endpoint, {
+      method: "POST",
+      headers: { authorization: `Bearer ${bridge!.token}`, "content-type": "application/json" },
+      body: event({ schema: "deck-runner-memory-loopback-v1", runnerId: "opencode", event: "explicit_recall", sessionId: "native-session", role: "lead", query: "not found" }),
+    }).then((response) => response.json());
+    const aggregate = host.metrics.filter((metric) => metric.operation === "runtime_recall");
+
+    expect(recall).toMatchObject({
+      ok: false,
+      advisoryPresent: false,
+      diagnostics: ["No project-scoped adaptive memory matched the explicit recall query."],
+    });
+    expect(recall).not.toHaveProperty("advisoryText");
+    expect(aggregate.map((metric) => metric.status)).toEqual(["attempted", "succeeded"]);
+    expect(aggregate[1]).toMatchObject({ dependency: "explicit-recall", resultCount: 0, approximateInjectedTokens: 0 });
+    await bridge!.close();
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
+
+  test("explicit recall with empty search and unrelated non-empty profile still returns no-match", async () => {
+    const projectRoot = await gitProject("https://github.com/acme/profile-only-explicit-recall.git");
+    const host = await createSupermemoryRuntimeHost({
+      projectRoot,
+      stateHome: await mkdtemp(join(tmpdir(), "deck-sm-profile-only-explicit-")),
+      deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
+      runnerId: "opencode",
+      role: "lead",
+      launchMode: "interactive",
+      deferInitialRecallToLoopback: true,
+      observabilitySink: testObservabilitySink(),
+      transport: {
+        async health() {},
+        async profile() { return { profile: { static: ["Remembered convention: unrelated profile context must not satisfy focused explicit recall."] } }; },
+        async search() { return { results: [] }; },
+        async add() {},
+      },
+    });
+    const bridge = await host.startLoopbackBridge();
+    const recall = await fetch(bridge!.endpoint, {
+      method: "POST",
+      headers: { authorization: `Bearer ${bridge!.token}`, "content-type": "application/json" },
+      body: event({ schema: "deck-runner-memory-loopback-v1", runnerId: "opencode", event: "explicit_recall", sessionId: "native-session", role: "lead", query: "missing focused convention" }),
+    }).then((response) => response.json());
+    const aggregate = host.metrics.filter((metric) => metric.operation === "runtime_recall");
+
+    expect(recall).toMatchObject({
+      ok: false,
+      advisoryPresent: false,
+      diagnostics: ["No project-scoped adaptive memory matched the explicit recall query."],
+    });
+    expect(recall).not.toHaveProperty("advisoryText");
+    expect(aggregate.at(-1)).toMatchObject({ dependency: "explicit-recall", resultCount: 0, approximateInjectedTokens: 0 });
+    await bridge!.close();
+    await rm(projectRoot, { recursive: true, force: true });
+  });
+
   test("truncates a 6261-byte advisory candidate to the physical final envelope limit", async () => {
     const projectRoot = await gitProject();
     const host = await createSupermemoryRuntimeHost({
@@ -622,6 +765,50 @@ describe("Supermemory runner loopback bridge", () => {
     expect(second).toMatchObject({ ok: true });
     expect(attempts).toBe(2);
     expect(adds).toHaveLength(1);
+    await bridge!.close();
+  });
+
+  test("explicit recall rejects invalid and sensitive queries before provider search", async () => {
+    const calls: string[] = [];
+    const projectRoot = await gitProject();
+    const host = await createSupermemoryRuntimeHost({
+      projectRoot,
+      stateHome: await mkdtemp(join(tmpdir(), "deck-sm-explicit-validation-")),
+      deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
+      runnerId: "opencode",
+      role: "lead",
+      launchMode: "interactive",
+      deferInitialRecallToLoopback: true,
+      observabilitySink: testObservabilitySink(),
+      transport: {
+        async health() { calls.push("health"); },
+        async profile() { calls.push("profile"); return { profile: {} }; },
+        async search() { calls.push("search"); return { results: [{ content: "provider should not be searched" }] }; },
+        async add() { calls.push("add"); },
+      },
+    });
+    const bridge = await host.startLoopbackBridge();
+    const headers = { authorization: `Bearer ${bridge!.token}`, "content-type": "application/json" };
+    for (const query of [
+      "",
+      "line\nbreak",
+      ` ${"é".repeat(512)} `,
+      "Authorization: Bearer secret-token",
+      "DATABASE_URL=postgres://user:pass@example.test/db",
+      "redis://:pass@example.test:6379/0",
+      "mongodb+srv://user:pass@example.test/db",
+      "file:///home/dev/private/app.sqlite3",
+      "/home/dev/private/customer.sqlite",
+    ]) {
+      const result = await fetch(bridge!.endpoint, {
+        method: "POST",
+        headers,
+        body: event({ schema: "deck-runner-memory-loopback-v1", runnerId: "opencode", event: "explicit_recall", sessionId: "native-session", role: "lead", query }),
+      }).then((response) => response.json());
+      expect(result).toMatchObject({ ok: false, diagnostics: ["invalid-query"] });
+      expect(JSON.stringify(result)).not.toContain("secret-token");
+    }
+    expect(calls).toEqual(["health"]);
     await bridge!.close();
   });
 

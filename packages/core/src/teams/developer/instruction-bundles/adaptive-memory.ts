@@ -45,6 +45,14 @@ ${scopePolicy}
 ### Retrieval
 
 - Load bounded project-profile context once on start/resume when healthy and policy-eligible.
+- When available, use \`deck_project_memory_recall\` first for earlier project decisions, names, conventions, rationale, discoveries, or prior-session work.
+- When available, call \`deck_project_memory_recall\` before answering whether a project-specific prior decision, name, terminology, convention, rationale, discovery, or established architecture exists or applies, including conditional phrasing such as "si existe", "si aplica", "if any", or "if applicable". Example trigger: "Si existe alguna denominación o convención del proyecto relacionada con esta arquitectura, inclúyela únicamente si realmente aplica."
+- Build concise and discriminative focused recall queries from requested historical facets + relevant project subject, not by paraphrasing the full current task; preserve every historical facet requested by the user rather than collapsing to one.
+- If a request asks about project-specific name/denomination/terminology and convention, include both facets and the relevant subject in the query. For that Spanish shape, use exactly: "nombre interno denominación convención arquitectura de memoria proyecto"; omit incidental hypothetical implementation terms such as provider externo, integración, separación, core/adapters, unless those are themselves the historical fact being sought.
+- Preserve requested names, conventions, rationale, decisions, and discoveries as separate query facets; do not insert facts or proper nouns the user did not provide.
+- Repository inspection may verify current implementation but must not be used to conclude that no historical convention exists before managed recall.
+- Do not force recall for ordinary current-state implementation questions with no historical/project-convention aspect.
+- Context Mode remains for local/indexed documentation, command output, and current session knowledge; it is not the Deck-owned cross-session project-memory channel.
 - Search only when prior context is materially relevant or the user requests recall.
 - Keep recall advisory, scoped by Deck Runtime, limited to five results and about 1,500 tokens by default.
 - Keep query rewriting and reranking disabled unless benchmark evidence enables them.

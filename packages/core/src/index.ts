@@ -134,6 +134,7 @@ export * from "./memory/adaptive-memory-governance";
 export * from "./memory/adaptive-context-renderer";
 export * from "./memory/canonical-supermemory-project";
 export * from "./memory/capture-eligibility";
+export * from "./memory/managed-project-memory-recall";
 
 // Runner adapter interface and DTOs (TUI-facing runner abstraction)
 // Note: RunnerId is already exported from runner-capability.ts (this avoids duplicate export)

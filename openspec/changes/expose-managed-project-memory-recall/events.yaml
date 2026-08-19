@@ -1,0 +1,86 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-08-19T15:10:00Z"
+    actor: deck-architect
+    registry_write: non-deferred
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-08-19T15:10:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-08-19T15:10:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-08-19T15:10:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-08-19T15:10:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-08-19T15:10:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-19T16:15:00Z"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-19T16:15:00Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-19T16:15:00Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-08-19T17:22:00Z"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-08-19T17:23:00Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-08-19T17:23:00Z"
+    actor: deck-quality
+    registry_write: non-deferred

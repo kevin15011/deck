@@ -1,0 +1,76 @@
+schema: spec-registry-v1
+changeId: expose-managed-project-memory-recall
+name: Expose Managed Project Memory Recall
+currentPhase: review
+status: completed
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+provenance:
+  - phase: explore
+    agent: deck-architect
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T15:10:00Z"
+    registryWrite: non-deferred
+  - phase: proposal
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T15:10:00Z"
+    registryWrite: non-deferred
+  - phase: spec
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T15:10:00Z"
+    registryWrite: non-deferred
+  - phase: design
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T15:10:00Z"
+    registryWrite: non-deferred
+  - phase: tasks
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T15:10:00Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T15:10:00Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T16:15:00Z"
+    registryWrite: non-deferred
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T16:15:00Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T16:15:00Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T17:22:00Z"
+    registryWrite: non-deferred
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T17:23:00Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-08-19T17:23:00Z"
+    registryWrite: non-deferred

@@ -22,6 +22,27 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
       expect(markdown).toContain("five results");
       expect(markdown).toContain("1,500 tokens");
       expect(markdown).toContain("OPENSPEC IS OFFICIAL CONTEXT");
+      expect(markdown).toContain("When available, use `deck_project_memory_recall` first");
+      expect(markdown).toContain("earlier project decisions, names, conventions, rationale, discoveries, or prior-session work");
+      expect(markdown).toContain("Si existe alguna denominación o convención del proyecto relacionada con esta arquitectura, inclúyela únicamente si realmente aplica.");
+      expect(markdown).toContain("si existe");
+      expect(markdown).toContain("if applicable");
+      expect(markdown).toContain("Repository inspection may verify current implementation but must not be used to conclude that no historical convention exists before managed recall");
+      expect(markdown).toContain("Do not force recall for ordinary current-state implementation questions with no historical/project-convention aspect");
+      expect(markdown).toContain("preserve every historical facet requested by the user");
+      expect(markdown).toContain("name/denomination/terminology and convention");
+      expect(markdown).toContain("nombre interno");
+      expect(markdown).toContain("denominación");
+      expect(markdown).toContain("convención");
+      expect(markdown).toContain("arquitectura de memoria");
+      expect(markdown).toContain("concise and discriminative");
+      expect(markdown).toContain("requested historical facets + relevant project subject, not by paraphrasing the full current task");
+      expect(markdown).toContain("nombre interno denominación convención arquitectura de memoria proyecto");
+      expect(markdown).toContain("omit incidental hypothetical implementation terms such as provider externo, integración, separación, core/adapters");
+      expect(markdown).toContain("unless those are themselves the historical fact being sought");
+      expect(markdown).toContain("Preserve requested names, conventions, rationale, decisions, and discoveries as separate query facets");
+      expect(markdown).toContain("do not insert facts or proper nouns the user did not provide");
+      expect(markdown).toContain("Context Mode remains for local/indexed documentation, command output, and current session knowledge");
 
       expect(markdown).toContain("Do not");
       expect(markdown).toContain("topic keys");
@@ -30,6 +51,7 @@ describe("buildAdaptiveMemoryInstructionBundle canonical Supermemory conversatio
       expect(markdown).not.toMatch(/at most \d+ memories/i);
       expect(markdown).not.toContain("Deck configures provider-native conversation capture automatically");
       expect(markdown).not.toContain("Save Trigger Matrix");
+      expect(markdown).not.toContain("Always use `deck_project_memory_recall`");
     });
 
     test(`${surface} surface binds automatic memory to Runtime-owned project scope without model-controlled tool arguments`, () => {

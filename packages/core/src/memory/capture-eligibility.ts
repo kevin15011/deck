@@ -32,7 +32,9 @@ const HIGH_SIGNAL_PATTERNS: Readonly<Record<AdaptiveMemoryCaptureSource, readonl
   "explicit-remember": [/.{1,}/],
   "trusted-user-prompt": [
     /\b(?:correction|correcting|preference|prefer|decision|decided|convention|constraint|requirement|must|never|root cause|confirmed discovery|discovered|resolution|resolved|important limitation|limitation)\b/i,
+    /\b(?:correcci[oó]n|preferencia|decisi[oó]n|convenci[oó]n|restricci[oó]n|requisito|debe|deber[aá]|nunca|jam[aá]s|causa ra[ií]z|descubrimiento|resoluci[oó]n|resuelto|limitaci[oó]n)\b/i,
     /^\s*remember\s+(?:that|this)\b/i,
+    /^\s*(?:recuerda que|memoriza|guarda en memoria)\b/i,
   ],
   "trusted-final-assistant": [
     /\b(?:implemented|fixed|changed|updated|removed|added|verified|validated|confirmed|resolved|captured|root cause|remaining risk|important limitation|limitation|final outcome|shipped)\b/i,

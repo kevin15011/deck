@@ -83,6 +83,9 @@ export async function executeRunnerLaunchPlan(
     throw new Error("Runner stdin payload is invalid.");
   }
   const env: Record<string, string> = sanitizeRunnerEnv(effects.inheritedEnv ?? process.env);
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("DECK_RUNNER_MEMORY_") || key.startsWith("DECK_CODEX_BRIDGE_")) delete env[key];
+  }
   const secrets: string[] = [];
   for (const [key, entry] of Object.entries(plan.envOverlay ?? {})) {
     if ((entry.sensitive || isSensitiveRunnerEnv(key, entry.value)) && !RUNNER_ENV_ALLOWLIST.has(key)) {

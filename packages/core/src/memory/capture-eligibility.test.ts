@@ -14,6 +14,13 @@ describe("adaptive-memory capture eligibility", () => {
     })).toMatchObject({ eligible: true });
   });
 
+  test("accepts Spanish durable architecture decisions as high-signal trusted user content", () => {
+    expect(evaluateAdaptiveMemoryCaptureEligibility({
+      source: "trusted-user-prompt",
+      content: "Decisión arquitectónica duradera: Orion deberá respetar Nebula Boundary como convención y política de dominio; esta preferencia deberá respetarse en futuras implementaciones.",
+    })).toMatchObject({ eligible: true });
+  });
+
   test.each([
     ["raw_log_or_test_output", "$ bun test\nFAIL runtime.test.ts\nExpected: 1\nReceived: 2"],
     ["stack_trace", "Error: boom\n    at run (/tmp/app.ts:1:1)\n    at main (/tmp/main.ts:2:1)"],

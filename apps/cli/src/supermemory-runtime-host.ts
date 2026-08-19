@@ -14,6 +14,7 @@ import {
   createOwnerOnlyFileSecretStore,
   redactSecretDiagnostic,
   fingerprintSupermemoryProjectScope,
+  parseManagedProjectMemoryRecallQuery,
   resolveCanonicalSupermemoryProjectScope,
   type DeckSecretStore,
   type NormalizedDeckConfig,
@@ -285,7 +286,9 @@ export async function createSupermemoryRuntimeHost(input: CreateSupermemoryRunti
         return { diagnostics: [], metrics: [capture.metrics] };
       },
       async explicitRecall(query) {
-        const result = await recallForLoopback({ runtime, observe, scopeFingerprint }, role, query, "explicit-recall");
+        const normalizedQuery = parseManagedProjectMemoryRecallQuery(query);
+        if (!normalizedQuery.ok) return { ok: false, diagnostics: [{ code: "supermemory-runtime-recall-failed", severity: "error", message: "invalid-query" }] };
+        const result = await recallForLoopback({ runtime, observe, scopeFingerprint }, "lead", normalizedQuery.query, "explicit-recall");
         if (result.ok === false) return { ok: false, diagnostics: [{ code: "supermemory-runtime-recall-failed", severity: "error", message: redactSecretDiagnostic(Array.isArray(result.diagnostics) ? result.diagnostics.join(" ") : "Explicit recall failed.") }] };
         return { ok: true, advisoryText: typeof result.advisoryText === "string" ? result.advisoryText : undefined, diagnostics: [] };
       },
@@ -336,6 +339,9 @@ type RunnerLoopbackEvent = Readonly<{
 }>;
 
 type SupermemoryRuntimeInstance = ReturnType<typeof createSupermemoryRuntime>;
+type LoopbackReplayEntry = Readonly<{ timestamp: number; response: Record<string, unknown> }>;
+const LOOPBACK_REPLAY_TTL_MS = 5 * 60_000;
+const LOOPBACK_REPLAY_CAP = 64;
 
 function startSupermemoryRunnerLoopbackBridge(input: {
   runnerId: string;
@@ -352,7 +358,7 @@ function startSupermemoryRunnerLoopbackBridge(input: {
   const expected = `Bearer ${token}`;
   const inFlight = new Set<Promise<unknown>>();
   const rolesBySession = new Map<string, SupermemoryRuntimeRole>([[input.sessionId, input.role]]);
-  const successfulEvents = new Map<string, number>();
+  const successfulEvents = new Map<string, LoopbackReplayEntry>();
   const inFlightEvents = new Map<string, Promise<Record<string, unknown>>>();
 
   const server = Bun.serve({
@@ -406,7 +412,7 @@ async function handleLoopbackRequest(
   body: string,
   host: { runnerId: string; projectRoot: string; teamId: string; sessionId: string; role: SupermemoryRuntimeRole; runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void; scopeFingerprint: string; stateHome?: string },
   rolesBySession: Map<string, SupermemoryRuntimeRole>,
-  successfulEvents: Map<string, number>,
+  successfulEvents: Map<string, LoopbackReplayEntry>,
   inFlightEvents: Map<string, Promise<Record<string, unknown>>> = new Map(),
 ): Promise<Record<string, unknown>> {
   let event: RunnerLoopbackEvent;
@@ -417,7 +423,8 @@ async function handleLoopbackRequest(
   const timestamp = typeof event.timestamp === "number" && Number.isFinite(event.timestamp) ? event.timestamp : undefined;
   if (!eventId || timestamp === undefined || Math.abs(Date.now() - timestamp) > 5 * 60_000) return { ok: false, diagnostics: ["invalid-event-id"] };
   pruneReplay(successfulEvents, Date.now());
-  if (successfulEvents.has(eventId)) return { ok: true, diagnostics: [] };
+  const replay = successfulEvents.get(eventId);
+  if (replay) return replay.response;
   const existing = inFlightEvents.get(eventId);
   if (existing) return existing;
   if (inFlightEvents.size >= 512) return { ok: false, diagnostics: ["in-flight-overflow"] };
@@ -429,12 +436,22 @@ async function handleLoopbackRequest(
       rolesBySession.set(sessionId, role);
       if (event.event === "session_start") persistNativeDeckRuntimeSessionMapping({ projectRoot: host.projectRoot, teamId: host.teamId, runnerId: host.runnerId, nativeSessionId: sessionId, deckSessionId: host.sessionId, stateHome: host.stateHome });
       const recalled = await recallForLoopback(host, role, typeof event.query === "string" ? event.query : undefined);
-      if (recalled.ok !== false) successfulEvents.set(eventId, Date.now());
+      if (recalled.ok !== false) successfulEvents.set(eventId, { timestamp: Date.now(), response: recalled });
       return recalled;
     }
     if (event.event === "recall" || event.event === "explicit_recall") {
-      const recalled = await recallForLoopback(host, role, typeof event.query === "string" ? event.query : undefined, event.event === "explicit_recall" ? "explicit-recall" : "automatic");
-      if (recalled.ok !== false) successfulEvents.set(eventId, Date.now());
+      let query = typeof event.query === "string" ? event.query : undefined;
+      let recallRole = role;
+      let dependency: "automatic" | "explicit-recall" = "automatic";
+      if (event.event === "explicit_recall") {
+        const explicitQuery = parseManagedProjectMemoryRecallQuery(event.query);
+        if (!explicitQuery.ok) return { ok: false, diagnostics: ["invalid-query"] };
+        query = explicitQuery.query;
+        recallRole = "lead";
+        dependency = "explicit-recall";
+      }
+      const recalled = await recallForLoopback(host, recallRole, query, dependency);
+      if (recalled.ok !== false) successfulEvents.set(eventId, { timestamp: Date.now(), response: recalled });
       return recalled;
     }
     if (event.event === "capture" || event.event === "explicit_remember") {
@@ -449,13 +466,15 @@ async function handleLoopbackRequest(
         capturedAt: new Date().toISOString(),
       });
       host.observe(capture.metrics);
-      if (capture.ok) successfulEvents.set(eventId, Date.now());
-      return { ok: capture.ok, diagnostics: capture.diagnostics };
+      const response = { ok: capture.ok, diagnostics: capture.diagnostics };
+      if (capture.ok) successfulEvents.set(eventId, { timestamp: Date.now(), response });
+      return response;
     }
     if (event.event === "shutdown_flush") {
       rolesBySession.delete(sessionId);
-      successfulEvents.set(eventId, Date.now());
-      return { ok: true, diagnostics: [] };
+      const response = { ok: true, diagnostics: [] };
+      successfulEvents.set(eventId, { timestamp: Date.now(), response });
+      return response;
     }
     return { ok: false, diagnostics: ["unsupported-event"] };
   })();
@@ -554,6 +573,8 @@ async function recallForLoopback(
   const diagnostics: string[] = [];
   const operationMetrics: SupermemoryRuntimeMetric[] = [];
   const startedAt = Date.now();
+  const explicitRecall = dependency === "explicit-recall";
+  let focusedSearchMatched = false;
   host.observe(runtimeRecallAttemptMetric({ role, scopeFingerprint: host.scopeFingerprint, dependency }));
   const profile = await host.runtime.profile({ role, dependency });
   operationMetrics.push(profile.metrics);
@@ -562,26 +583,34 @@ async function recallForLoopback(
     const search = await host.runtime.search({ role, query, dependency });
     operationMetrics.push(search.metrics);
     host.observe(search.metrics);
-    if (search.ok) contexts.push(search.context);
-    else diagnostics.push(...search.diagnostics);
+    if (search.ok) {
+      focusedSearchMatched = Boolean(renderAdvisoryContext([search.context]));
+      if (!explicitRecall || focusedSearchMatched) contexts.push(search.context);
+    } else diagnostics.push(...search.diagnostics);
   }
-  if (profile.ok) contexts.push(profile.context);
-  else diagnostics.push(...profile.diagnostics);
+  if (profile.ok) {
+    if (!explicitRecall || focusedSearchMatched) contexts.push(profile.context);
+  } else diagnostics.push(...profile.diagnostics);
 
+  const advisoryText = renderAdvisoryContext(contexts);
   const basis = operationMetrics[0];
   if (basis) {
     host.observe(runtimeRecallTerminalMetric({ basis, operationMetrics, contexts, diagnostics, startedAt, dependency }));
   }
 
-  if (dependency === "explicit-recall" && diagnostics.length > 0) return { ok: false, diagnostics };
-  if (dependency === "explicit-recall" && contexts.length === 0) return { ok: false, diagnostics };
-  return { ok: true, advisoryText: renderAdvisoryContext(contexts), diagnostics: [] };
+  if (explicitRecall && diagnostics.length > 0) return { ok: false, diagnostics };
+  if (explicitRecall && !focusedSearchMatched) {
+    return { ok: false, advisoryPresent: false, diagnostics: ["No project-scoped adaptive memory matched the explicit recall query."] };
+  }
+  if (explicitRecall && !advisoryText) {
+    return { ok: false, advisoryPresent: false, diagnostics: ["No project-scoped adaptive memory matched the explicit recall query."] };
+  }
+  return { ok: true, advisoryText, diagnostics: [] };
 }
 
-function pruneReplay(events: Map<string, number>, now: number): void {
-  const ttlMs = 5 * 60_000;
-  for (const [id, seenAt] of events) if (now - seenAt > ttlMs) events.delete(id);
-  while (events.size > 1024) {
+function pruneReplay(events: Map<string, LoopbackReplayEntry>, now: number): void {
+  for (const [id, entry] of events) if (now - entry.timestamp >= LOOPBACK_REPLAY_TTL_MS) events.delete(id);
+  while (events.size > LOOPBACK_REPLAY_CAP) {
     const oldest = events.keys().next().value;
     if (oldest === undefined) break;
     events.delete(oldest);

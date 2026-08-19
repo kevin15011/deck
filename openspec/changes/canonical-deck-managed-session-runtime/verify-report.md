@@ -43,3 +43,13 @@ The focused policy-skip test process previously measured 471 ms in Bun / 505 ms 
 - The live Docker permission regression was reproduced hermetically with default `~/.local/bin` mode `0775` and matching UID/GID. Compile/install and version smoke passed; 0777, foreign-group 0775, arbitrary custom group-writable, non-owned, symlink, and non-directory cases remained rejected.
 - The exact `github-work` live fixture resolved only `sm_project_v1_comodin_software_esprit_mobileapp`. Hostile HOME/PATH/GIT shims, malformed passwd, unsafe Git layouts/commondir, descriptor races, SSH syntax/directives, aliases, suffixes, ambiguous mappings, and unsupported URL protocols failed closed. Final focused trust tests passed 21/21 with 190 assertions; hostile-environment full CI passed 4,748 tests with zero failures and one skip.
 - The actual `/home/dev/esprit-mobileapp` resolver check passed after valid passwd GECOS-space handling; the final passwd/SSH trust suite passed 21 tests with 209 assertions and no alias leakage.
+
+## Live Adaptive Memory acceptance evidence
+
+- Exact canary capture for the Spanish Orion/Nebula Session A changed from `no_high_signal_category` to capture attempted/succeeded after the multilingual policy repair.
+- In a fresh canonical Git scope, a terminated Session A followed by a separate Session B returned both Orion and Nebula Boundary with runtime ready, no provider failure, no Context Mode, and no local inspection tools.
+- Same-project focused explicit recall found Orion/Nebula. Broad retrieval in the previously polluted Esprit scope favored older semantically similar canary decisions; project isolation remained intact.
+- OpenCode system-transform delivery is one-shot, session-isolated, bounded to one advisory, and guarded against late stale completions. Ordinary non-delegation tools emit no role-start recall.
+- Empty explicit recall returns one safe actionable diagnostic. All inherited `DECK_RUNNER_MEMORY_*` and `DECK_CODEX_BRIDGE_*` values are removed before fresh current-plan overlays.
+- Final focused verification: `154 passed, 0 failed`; `bunx tsc --noEmit`, compiled runtime verification, generated-asset parity, OpenSpec validation, and `git diff --check` passed. Final independent Quality returned GO with no blockers.
+- Existing approximate-injection token metrics represent context rendered/prepared for injection. Exact-run delivery claims use separate model-visible evidence.

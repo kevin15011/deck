@@ -100,11 +100,23 @@ describe("executeRunnerLaunchPlan", () => {
       cwd: "/project",
       stdio: "pipe",
       stdin: "closed",
-      envOverlay: { DECK_RUNNER_MEMORY_ENDPOINT: { value: "http://127.0.0.1:1234/deck-runner-memory/v1" }, DECK_RUNNER_MEMORY_TOKEN: { value: "loopback-token", sensitive: true } },
+      envOverlay: { DECK_RUNNER_MEMORY_ENDPOINT: { value: "http://127.0.0.1:1234/deck-runner-memory/v1" }, DECK_RUNNER_MEMORY_TOKEN: { value: "loopback-token", sensitive: true }, DECK_RUNNER_MEMORY_SCOPE: { value: "fresh-plan-scope" }, DECK_CODEX_BRIDGE_MODE: { value: "fresh-plan-mode" } },
     }, {
-      inheritedEnv: { PATH: "/bin", OPENAI_API_KEY: "sk-test-secret", COOKIE: "Cookie: session=secret" },
+      inheritedEnv: {
+        PATH: "/bin",
+        OPENAI_API_KEY: "sk-test-secret",
+        COOKIE: "Cookie: session=secret",
+        DECK_RUNNER_MEMORY_ENDPOINT: "http://127.0.0.1:9999/stale-parent-memory",
+        DECK_RUNNER_MEMORY_TOKEN: "stale-parent-memory-token",
+        DECK_RUNNER_MEMORY_SCOPE: "stale-parent-memory-scope",
+        DECK_CODEX_BRIDGE_ENDPOINT: "http://127.0.0.1:9999/stale-parent-codex",
+        DECK_CODEX_BRIDGE_TOKEN: "stale-parent-codex-token",
+        DECK_CODEX_BRIDGE_MODE: "stale-parent-codex-mode",
+      },
       spawn: async (_command, _args, options) => {
-        expect(options.env).toMatchObject({ PATH: "/bin", DECK_RUNNER_MEMORY_ENDPOINT: "http://127.0.0.1:1234/deck-runner-memory/v1", DECK_RUNNER_MEMORY_TOKEN: "loopback-token" });
+        expect(options.env).toMatchObject({ PATH: "/bin", DECK_RUNNER_MEMORY_ENDPOINT: "http://127.0.0.1:1234/deck-runner-memory/v1", DECK_RUNNER_MEMORY_TOKEN: "loopback-token", DECK_RUNNER_MEMORY_SCOPE: "fresh-plan-scope", DECK_CODEX_BRIDGE_MODE: "fresh-plan-mode" });
+        expect(options.env.DECK_CODEX_BRIDGE_ENDPOINT).toBeUndefined();
+        expect(options.env.DECK_CODEX_BRIDGE_TOKEN).toBeUndefined();
         expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
         expect(options.env).not.toHaveProperty("COOKIE");
         return { exitCode: 0, stdout: "", stderr: "" };
@@ -615,8 +627,17 @@ describe("runRunnerLaunch consent and status", () => {
         yes: true,
         interactive: false,
         presentPreview: async () => {},
-        processEffects: { spawn: async (_command, _args, options) => {
+        processEffects: { inheritedEnv: {
+          PATH: "/bin",
+          DECK_RUNNER_MEMORY_ENDPOINT: "http://127.0.0.1:9999/stale-parent-memory",
+          DECK_RUNNER_MEMORY_TOKEN: "stale-parent-memory-token",
+          DECK_RUNNER_MEMORY_SCOPE: "stale-parent-memory-scope",
+          DECK_CODEX_BRIDGE_ENDPOINT: "http://127.0.0.1:9999/stale-parent-codex",
+          DECK_CODEX_BRIDGE_TOKEN: "stale-parent-codex-token",
+          DECK_CODEX_BRIDGE_MODE: "stale-parent-codex-mode",
+        }, spawn: async (_command, _args, options) => {
           childMemoryKeys = Object.keys(options.env).filter((key) => /DECK_RUNNER_MEMORY/i.test(key));
+          expect(Object.keys(options.env).filter((key) => /DECK_CODEX_BRIDGE/.test(key))).toEqual([]);
           return { exitCode: 0, stdout: "", stderr: "" };
         } },
         supermemoryRuntime: { stateHome: join(projectRoot, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(projectRoot, "secret"), limitation: "test" }) }, transport: { add: async () => {}, search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => { throw new Error("credential rejected"); } } },
@@ -669,8 +690,17 @@ describe("runRunnerLaunch consent and status", () => {
         yes: true,
         interactive: false,
         presentPreview: async () => {},
-        processEffects: { spawn: async (_command, _args, options) => {
+        processEffects: { inheritedEnv: {
+          PATH: "/bin",
+          DECK_RUNNER_MEMORY_ENDPOINT: "http://127.0.0.1:9999/stale-parent-memory",
+          DECK_RUNNER_MEMORY_TOKEN: "stale-parent-memory-token",
+          DECK_RUNNER_MEMORY_SCOPE: "stale-parent-memory-scope",
+          DECK_CODEX_BRIDGE_ENDPOINT: "http://127.0.0.1:9999/stale-parent-codex",
+          DECK_CODEX_BRIDGE_TOKEN: "stale-parent-codex-token",
+          DECK_CODEX_BRIDGE_MODE: "stale-parent-codex-mode",
+        }, spawn: async (_command, _args, options) => {
           expect(Object.keys(options.env).filter((key) => /DECK_RUNNER_MEMORY/.test(key))).toEqual([]);
+          expect(Object.keys(options.env).filter((key) => /DECK_CODEX_BRIDGE/.test(key))).toEqual([]);
           return { exitCode: 0, stdout: "", stderr: "" };
         } },
         supermemoryRuntime: { stateHome: join(projectRoot, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(projectRoot, "secret"), limitation: "test" }) }, transport: { add: async () => ({ id: "capture" }), search: async () => ({ results: [] }), profile: async () => ({ profile: {} }), health: async () => ({ ok: true }) } },
@@ -840,6 +870,40 @@ describe("runRunnerLaunch consent and status", () => {
       expect(launchPrompts[1]).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
       expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_recall", dependency: "explicit-recall", status: "succeeded" }));
       expect(JSON.stringify(metrics)).not.toContain("Earlier work summary");
+      expect(JSON.stringify(metrics)).not.toContain("sm_project_v1_");
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("successful empty explicit recall blocks before spawn with safe no-match diagnostic", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runtime-explicit-recall-empty-"));
+    initGitRemote(projectRoot, "https://github.com/acme/empty-explicit-launch.git");
+    const calls: string[] = [];
+    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({
+          buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }),
+          buildLaunchPlan: () => { calls.push("launch-plan"); return { status: "ready", plan: { command: "fake", args: [], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] }; },
+        }),
+        launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["What did we decide about absent matches?"], stdin: "closed", stdinPayload: { type: "utf8", content: "What did we decide about absent matches?" }, deckConfig: cfg },
+        yes: true,
+        interactive: false,
+        presentPreview: async () => {},
+        processEffects: { spawn: async () => { calls.push("spawn"); return { exitCode: 0, stdout: "", stderr: "" }; } },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), observabilitySink: { path: "memory://explicit-recall-empty", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: {
+          add: async () => {},
+          search: async () => ({ results: [] }),
+          profile: async () => ({ profile: { static: [], dynamic: [] } }),
+          health: async () => ({ ok: true }),
+        } },
+      });
+      expect(result).toMatchObject({ status: "blocked", message: expect.stringContaining("No project-scoped adaptive memory matched the explicit recall query.") });
+      expect(calls).toEqual(["launch-plan"]);
+      expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_recall", dependency: "explicit-recall", status: "succeeded", resultCount: 0, approximateInjectedTokens: 0 }));
+      expect(JSON.stringify(metrics)).not.toContain("What did we decide");
       expect(JSON.stringify(metrics)).not.toContain("sm_project_v1_");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
@@ -1121,10 +1185,11 @@ describe("runRunnerLaunch consent and status", () => {
           childEnvKeys.push(...Object.keys(options.env).filter((key) => /SUPERMEMORY|SM_PROJECT|X_SM_PROJECT|MCP|DECK_RUNNER_MEMORY/i.test(key)));
           const plugin = await loadInstalledOpenCodePlugin(join(configDir, "plugins", "developer-team-execution.js"), { endpoint: options.env.DECK_RUNNER_MEMORY_ENDPOINT, token: options.env.DECK_RUNNER_MEMORY_TOKEN });
           await plugin["chat.message"]({ sessionID: "opencode-native", messageID: "user-1" }, { message: { role: "user" }, parts: [{ text: "Decision: managed OpenCode memory proof captures exactly once." }] });
-          const transformed = { messages: [] as { info: Record<string, unknown>; parts: Record<string, unknown>[] }[] };
-          await plugin["experimental.chat.messages.transform"]({}, transformed);
-          expect(JSON.stringify(transformed)).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
-          expect(JSON.stringify(transformed)).toContain("OpenCode prior context");
+          const transformed = { system: [] as string[] };
+          await plugin["experimental.chat.system.transform"]({ sessionID: "opencode-native" }, transformed);
+          expect(transformed.system).toHaveLength(1);
+          expect(transformed.system[0]).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
+          expect(transformed.system[0]).toContain("OpenCode prior context");
           transportCalls.push({ operation: "agent-processing-after-recall" });
           return { exitCode: 0, stdout: "", stderr: "" };
         } },
@@ -1257,7 +1322,15 @@ describe("runRunnerLaunch consent and status", () => {
           interactive: false,
           yes: true,
           presentPreview: async (preview) => { previews.push(preview); events.push("preview"); },
-          processEffects: { spawn: async (_command, args, options) => {
+          processEffects: { inheritedEnv: {
+            PATH: "/bin",
+            DECK_RUNNER_MEMORY_ENDPOINT: "http://127.0.0.1:9999/stale-parent-memory",
+            DECK_RUNNER_MEMORY_TOKEN: "stale-parent-memory-token",
+            DECK_RUNNER_MEMORY_SCOPE: "stale-parent-memory-scope",
+            DECK_CODEX_BRIDGE_ENDPOINT: "http://127.0.0.1:9999/stale-parent-codex",
+            DECK_CODEX_BRIDGE_TOKEN: "stale-parent-codex-token",
+            DECK_CODEX_BRIDGE_MODE: "stale-parent-codex-mode",
+          }, spawn: async (_command, args, options) => {
             events.push("spawn");
             const bypass = "--dangerously-bypass-approvals-and-sandbox";
             expect(args.filter((arg) => arg === bypass)).toHaveLength(1);
@@ -1274,8 +1347,8 @@ describe("runRunnerLaunch consent and status", () => {
               expect(args).toEqual(route.args ?? []);
               expect(options.stdinPayload).toBeUndefined();
             }
-            expect(options.env.DECK_CODEX_BRIDGE_ENDPOINT).toBeUndefined();
-            expect(options.env.DECK_CODEX_BRIDGE_TOKEN).toBeUndefined();
+            expect(Object.keys(options.env).filter((key) => /DECK_CODEX_BRIDGE/.test(key))).toEqual([]);
+            expect(Object.keys(options.env).filter((key) => /DECK_RUNNER_MEMORY/.test(key))).toEqual([]);
             return { exitCode: 0, stdout: "", stderr: "" };
           } },
         });
