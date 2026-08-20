@@ -1,4 +1,5 @@
 import { evaluateAdaptiveMemoryCaptureEligibility, fingerprintSupermemoryProjectScope, isCanonicalSupermemoryProjectScope } from "@deck/core";
+import { createHash } from "node:crypto";
 
 import {
   buildSupermemoryConversationIngest,
@@ -32,7 +33,10 @@ export type SupermemoryRuntimeMetric = Readonly<{
   role?: SupermemoryRuntimeRole;
   scopeFingerprint: string;
   approximateInputTokens?: number;
+  inputByteCount?: number;
+  inputSha256?: string;
   approximateInjectedTokens?: number;
+  injectedByteCount?: number;
   resultCount?: number;
   dependency?: SupermemoryRequestDependency;
 }>;
@@ -125,6 +129,17 @@ export function resolveSupermemoryRolePolicy(role: SupermemoryRuntimeRole): Supe
   }
 }
 
+function queryObservability(query: string): Pick<SupermemoryRuntimeMetric, "inputByteCount" | "inputSha256"> {
+  return {
+    inputByteCount: utf8ByteCount(query),
+    inputSha256: createHash("sha256").update(query, "utf8").digest("hex"),
+  };
+}
+
+function utf8ByteCount(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
 export function createSupermemoryRuntime(input: {
   canonicalScope: string;
   sessionId: string;
@@ -175,6 +190,7 @@ export function createSupermemoryRuntime(input: {
         const response = await input.transport.profile({ containerTag: canonicalScope, q: request.q });
         const items = profileItems(response);
         const bounded = boundSupermemoryRetrievalItems({ items, maxItems: rolePolicy.maxResults, maxTokens: rolePolicy.maxTokens });
+        const injectedText = bounded.items.map((item) => item.content).join(" ");
         return {
           ok: true,
           context: renderContext(bounded),
@@ -183,7 +199,8 @@ export function createSupermemoryRuntime(input: {
             status: "succeeded",
             role: request.role,
             resultCount: bounded.items.length,
-            approximateInjectedTokens: countApproxTokens(bounded.items.map((item) => item.content).join(" ")),
+            approximateInjectedTokens: countApproxTokens(injectedText),
+            injectedByteCount: utf8ByteCount(injectedText),
             dependency: request.dependency ?? "automatic",
             startedAt,
           }),
@@ -200,8 +217,9 @@ export function createSupermemoryRuntime(input: {
       const query = request.query.trim();
       if (rolePolicy.search === "skip" || rolePolicy.maxResults <= 0) return skipped("search", "role_policy_skip", rolePolicy, startedAt, metric);
       if (!query) return skipped("search", "empty_query", rolePolicy, startedAt, metric);
+      const queryMetadata = queryObservability(query);
       try {
-        emit({ operation: "search", status: "attempted", role: request.role, approximateInputTokens: countApproxTokens(query), dependency: request.dependency ?? "automatic", startedAt });
+        emit({ operation: "search", status: "attempted", role: request.role, approximateInputTokens: countApproxTokens(query), ...queryMetadata, dependency: request.dependency ?? "automatic", startedAt });
         const response = await input.transport.search({
           q: query,
           containerTag: canonicalScope,
@@ -211,6 +229,7 @@ export function createSupermemoryRuntime(input: {
           limit: rolePolicy.maxResults,
         });
         const bounded = boundSupermemoryRetrievalItems({ items: searchItems(response), maxItems: rolePolicy.maxResults, maxTokens: rolePolicy.maxTokens });
+        const injectedText = bounded.items.map((item) => item.content).join(" ");
         return {
           ok: true,
           context: renderContext(bounded),
@@ -220,7 +239,9 @@ export function createSupermemoryRuntime(input: {
             role: request.role,
             resultCount: bounded.items.length,
             approximateInputTokens: countApproxTokens(query),
-            approximateInjectedTokens: countApproxTokens(bounded.items.map((item) => item.content).join(" ")),
+            ...queryMetadata,
+            approximateInjectedTokens: countApproxTokens(injectedText),
+            injectedByteCount: utf8ByteCount(injectedText),
             dependency: request.dependency ?? "automatic",
             startedAt,
           }),

@@ -515,6 +515,7 @@ function runtimeRecallTerminalMetric(input: {
 }): SupermemoryRuntimeMetric {
   const skippedByPolicy = input.operationMetrics.every((metric) => metric.status === "skipped" && metric.reason === "role_policy_skip");
   const failed = input.diagnostics.length > 0 && input.contexts.length === 0 && !skippedByPolicy;
+  const advisoryText = renderAdvisoryContext(input.contexts) ?? "";
   return {
     ...input.basis,
     operation: "runtime_recall",
@@ -522,7 +523,8 @@ function runtimeRecallTerminalMetric(input: {
     status: skippedByPolicy ? "skipped" : failed ? "failed" : "succeeded",
     reason: skippedByPolicy ? "role_policy_skip" : failed ? "provider_error" : undefined,
     durationMs: Date.now() - input.startedAt,
-    approximateInjectedTokens: conservativeTokenCount(renderAdvisoryContext(input.contexts) ?? ""),
+    approximateInjectedTokens: conservativeTokenCount(advisoryText),
+    injectedByteCount: new TextEncoder().encode(advisoryText).byteLength,
     resultCount: input.contexts.reduce((sum, context) => sum + context.items.length, 0),
     dependency: input.dependency,
   };

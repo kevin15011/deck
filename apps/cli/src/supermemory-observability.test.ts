@@ -52,12 +52,36 @@ describe("Supermemory observability sink", () => {
         role: "lead",
         scopeFingerprint: "smfp_0123456789abcdef",
         approximateInjectedTokens: 42,
+        injectedByteCount: 256,
         resultCount: 2,
         dependency: "automatic",
-      });
+        advisoryText: "raw advisory Prior context must not persist",
+        memory: "raw memory credential must not persist",
+      } as Parameters<typeof sink.observe>[0] & { advisoryText: string; memory: string });
+      sink.observe({
+        provider: "supermemory",
+        operation: "search",
+        status: "succeeded",
+        durationMs: 7,
+        runnerId: "opencode",
+        role: "lead",
+        scopeFingerprint: "smfp_0123456789abcdef",
+        approximateInputTokens: 6,
+        inputByteCount: 31,
+        inputSha256: "a".repeat(64),
+        approximateInjectedTokens: 9,
+        injectedByteCount: 44,
+        resultCount: 1,
+        dependency: "automatic",
+        query: "raw query credential must not persist",
+      } as Parameters<typeof sink.observe>[0] & { query: string });
       const content = await Bun.file(sink.path).text();
       expect(content).toContain('"channel":"runtime-recall"');
       expect(content).toContain('"operation":"runtime_recall"');
+      expect(content).toContain('"inputByteCount":31');
+      expect(content).toContain(`"inputSha256":"${"a".repeat(64)}"`);
+      expect(content).toContain('"injectedByteCount":256');
+      expect(content).toContain('"injectedByteCount":44');
       expect(content).not.toContain('"channel":"external-unobservable-mcp"');
       expect(content).not.toContain("sm_project_v1_kevin15011_deck");
       expect(content).not.toContain("Prior context");

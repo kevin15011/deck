@@ -260,6 +260,8 @@ test("D-REACH-04 OpenCode install materializes the packaged execution plugin", (
     expect(pluginContent).toContain('"tool.execute.before"');
     expect(pluginContent).toContain("deck_project_memory_recall");
     expect(pluginContent).toContain("deterministic-targeted-repair-authority-v1");
+    const sourceContent = readFileSync(join(process.cwd(), "packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.ts"), "utf8");
+    expect(pluginContent).toContain(`source-sha256:${createHash("sha256").update(sourceContent).digest("hex")}`);
     expect(pluginContent).not.toContain(process.cwd());
     expect(pluginContent).not.toContain("supermemory_search_memory");
     expect(pluginContent).not.toContain("supermemory_add_memory");
@@ -552,13 +554,8 @@ test("OpenCode static-compatible hook preserves legacy delegation when its provi
   expect(String(rejection)).not.toContain("SECRET_PROVIDER_SENTINEL");
 });
 
-test("OpenCode memory loopback advisory reaches model-visible message transform", async () => {
+test("OpenCode automatic memory reaches system transform by native session and child agent", async () => {
   const events: unknown[] = [];
-  const advisories = [
-    "<DECK_ADAPTIVE_CONTEXT_JSON_V1>session</DECK_ADAPTIVE_CONTEXT_JSON_V1>",
-    "<DECK_ADAPTIVE_CONTEXT_JSON_V1>role</DECK_ADAPTIVE_CONTEXT_JSON_V1>",
-    "<DECK_ADAPTIVE_CONTEXT_JSON_V1>other-session</DECK_ADAPTIVE_CONTEXT_JSON_V1>",
-  ];
   const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
     memoryLoopback: {
       endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
@@ -566,7 +563,8 @@ test("OpenCode memory loopback advisory reaches model-visible message transform"
       post: async (_endpoint, _token, body) => {
         const event = JSON.parse(body);
         events.push(event);
-        return { ok: true, advisoryText: event.event === "session_start" || event.event === "role_start" ? advisories.shift() : undefined };
+        if (event.event !== "session_start") return { ok: true };
+        return { ok: true, advisoryText: `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.sessionId}:${event.role}</DECK_ADAPTIVE_CONTEXT_JSON_V1>` };
       },
     },
   });
@@ -577,6 +575,11 @@ test("OpenCode memory loopback advisory reaches model-visible message transform"
   await hooks["chat.message"]({ sessionID: "s", messageID: "m" }, message);
   expect(message).not.toHaveProperty("deckAdaptiveMemoryContext");
 
+  const pendingMessagesOutput = { messages: [{ info: { id: "pending", role: "user" }, parts: [{ type: "text", text: "pending" }] }] };
+  await hooks["experimental.chat.messages.transform"]({}, pendingMessagesOutput);
+  expect(pendingMessagesOutput.messages).toHaveLength(1);
+  expect(pendingMessagesOutput.messages[0]!.info.role).toBe("user");
+
   const missingSessionOutput = { system: ["missing base"] };
   await hooks["experimental.chat.system.transform"]({}, missingSessionOutput);
   expect(missingSessionOutput.system).toEqual(["missing base"]);
@@ -585,7 +588,7 @@ test("OpenCode memory loopback advisory reaches model-visible message transform"
   await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, modelOutput);
   expect(modelOutput.system).toHaveLength(2);
   expect(modelOutput.system[0]).toBe("base system");
-  expect(modelOutput.system[1]).toContain("session");
+  expect(modelOutput.system[1]).toContain("s:lead");
 
   const oneShotOutput = { system: ["base system"] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, oneShotOutput);
@@ -594,11 +597,17 @@ test("OpenCode memory loopback advisory reaches model-visible message transform"
   const args: Record<string, unknown> = { subagent_type: "deck-apply-deep" };
   await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c" }, { args });
   expect(args).not.toHaveProperty("deckAdaptiveMemoryContext");
-  const roleModelOutput = { system: ["role base"] };
-  await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, roleModelOutput);
-  expect(roleModelOutput.system).toHaveLength(2);
-  expect(roleModelOutput.system[0]).toBe("role base");
-  expect(roleModelOutput.system[1]).toContain("role");
+  const parentAfterDelegation = { system: ["role base"] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, parentAfterDelegation);
+  expect(parentAfterDelegation.system).toEqual(["role base"]);
+
+  await hooks["chat.message"]({ sessionID: "child-apply", messageID: "child-m", agent: "deck-apply-deep" }, { message: { role: "user" }, parts: [{ type: "text", text: "child task" }] });
+  const childOutput = { system: ["child base"] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "child-apply" }, childOutput);
+  expect(childOutput.system).toHaveLength(2);
+  expect(childOutput.system[0]).toBe("child base");
+  expect(childOutput.system[1]).toContain("child-apply:apply-deep");
+  expect(childOutput.system[1]).not.toContain("s:lead");
 
   await hooks["chat.message"]({ sessionID: "other", messageID: "m2" }, { message: { role: "user" }, parts: [{ type: "text", text: "other session" }] });
   const isolatedOutput = { system: ["isolated base"] };
@@ -608,77 +617,87 @@ test("OpenCode memory loopback advisory reaches model-visible message transform"
   await hooks["experimental.chat.system.transform"]({ sessionID: "other" }, otherOutput);
   expect(otherOutput.system).toHaveLength(2);
   expect(otherOutput.system[0]).toBe("other base");
-  expect(otherOutput.system[1]).toContain("other-session");
+  expect(otherOutput.system[1]).toContain("other:lead");
 
   const staleMessagesOutput = { messages: [{ info: { id: "original", role: "user" }, parts: [{ type: "text", text: "original" }] }] };
   await hooks["experimental.chat.messages.transform"]({}, staleMessagesOutput);
   expect(staleMessagesOutput.messages).toHaveLength(1);
   expect(staleMessagesOutput.messages[0]!.info.role).toBe("user");
 
-  expect(events).toContainEqual(expect.objectContaining({ event: "role_start", role: "apply-deep", eventId: expect.any(String), timestamp: expect.any(Number) }));
+  expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "s", role: "lead", eventId: expect.any(String), timestamp: expect.any(Number) }));
+  expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "child-apply", role: "apply-deep", eventId: expect.any(String), timestamp: expect.any(Number) }));
+  expect(events.some((event) => (event as { event?: string }).event === "role_start")).toBe(false);
 });
 
-test("OpenCode same-session concurrent role advisories deliver only latest bounded context", async () => {
-  const advisories = [
-    `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${"old".repeat(1700)}</DECK_ADAPTIVE_CONTEXT_JSON_V1>`,
-    `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${"latest".repeat(400)}</DECK_ADAPTIVE_CONTEXT_JSON_V1>`,
-  ];
+test("OpenCode concurrent native sessions remain isolated and inject once per first turn", async () => {
+  const events: Record<string, unknown>[] = [];
   const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
     memoryLoopback: {
       endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
       token: "loopback-token",
       post: async (_endpoint, _token, body) => {
         const event = JSON.parse(body);
-        return { ok: true, advisoryText: event.event === "role_start" ? advisories.shift() : undefined };
+        events.push(event);
+        return { ok: true, advisoryText: event.event === "session_start" ? `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.sessionId}-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>` : undefined };
       },
     },
   });
   const hooks = await plugin();
   await Promise.all([
-    hooks["tool.execute.before"]({ tool: "task", sessionID: "same", callID: "old" }, { args: { subagent_type: "deck-apply-fast" } }),
-    hooks["tool.execute.before"]({ tool: "task", sessionID: "same", callID: "latest" }, { args: { subagent_type: "deck-apply-deep" } }),
+    hooks["chat.message"]({ sessionID: "A", messageID: "a1" }, { message: { role: "user" }, parts: [{ type: "text", text: "alpha" }] }),
+    hooks["chat.message"]({ sessionID: "B", messageID: "b1", agent: "deck-apply-deep" }, { message: { role: "user" }, parts: [{ type: "text", text: "beta" }] }),
   ]);
 
-  const transformed = { system: [] as string[] };
-  await hooks["experimental.chat.system.transform"]({ sessionID: "same" }, transformed);
-  expect(transformed.system).toHaveLength(1);
-  expect(transformed.system[0]).toContain("latest");
-  expect(transformed.system[0]).not.toContain("oldoldold");
-  expect(Buffer.byteLength(transformed.system[0]!, "utf8")).toBeLessThanOrEqual(6_000);
+  const a = { system: [] as string[] };
+  const b = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "A" }, a);
+  await hooks["experimental.chat.system.transform"]({ sessionID: "B" }, b);
+  expect(a.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>A-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(b.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>B-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  await hooks["chat.message"]({ sessionID: "A", messageID: "a2" }, { message: { role: "user" }, parts: [{ type: "text", text: "second alpha" }] });
+  const aSecond = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "A" }, aSecond);
+  expect(aSecond.system).toEqual([]);
+  expect(events.filter((event) => event.event === "session_start" && event.sessionId === "A")).toHaveLength(1);
+  expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "B", role: "apply-deep" }));
 });
 
-test("OpenCode same-session role advisory generation ignores older slow completion", async () => {
-  const completions = new Map<string, (value: { ok: true; advisoryText: string }) => void>();
+test("OpenCode latest native session generation wins after same-id resume", async () => {
+  const completions: Array<(value: { ok: true; advisoryText: string }) => void> = [];
   const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
     memoryLoopback: {
       endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
       token: "loopback-token",
       post: async (_endpoint, _token, body) => {
         const event = JSON.parse(body);
+        if (event.event === "shutdown_flush") return { ok: true };
+        if (event.event !== "session_start") return { ok: true };
         return await new Promise<{ ok: true; advisoryText: string }>((resolve) => {
-          completions.set(String(event.eventId), resolve);
+          completions.push(resolve);
         });
       },
     },
   });
   const hooks = await plugin();
-  const older = hooks["tool.execute.before"]({ tool: "task", sessionID: "same", callID: "older" }, { args: { subagent_type: "deck-apply-fast" } });
-  const newer = hooks["tool.execute.before"]({ tool: "task", sessionID: "same", callID: "newer" }, { args: { subagent_type: "deck-apply-deep" } });
+  const older = hooks["chat.message"]({ sessionID: "same", messageID: "older" }, { message: { role: "user" }, parts: [{ type: "text", text: "older" }] });
+  await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "same" } } } });
+  const newer = hooks["chat.message"]({ sessionID: "same", messageID: "newer" }, { message: { role: "user" }, parts: [{ type: "text", text: "newer" }] });
 
-  completions.get("same:newer:role_start")!({ ok: true, advisoryText: "<DECK_ADAPTIVE_CONTEXT_JSON_V1>newer</DECK_ADAPTIVE_CONTEXT_JSON_V1>" });
+  completions[1]!({ ok: true, advisoryText: "<DECK_ADAPTIVE_CONTEXT_JSON_V1>newer</DECK_ADAPTIVE_CONTEXT_JSON_V1>" });
   await newer;
   const transformed = { system: [] as string[] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "same" }, transformed);
   expect(transformed.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>newer</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
 
-  completions.get("same:older:role_start")!({ ok: true, advisoryText: "<DECK_ADAPTIVE_CONTEXT_JSON_V1>older</DECK_ADAPTIVE_CONTEXT_JSON_V1>" });
+  completions[0]!({ ok: true, advisoryText: "<DECK_ADAPTIVE_CONTEXT_JSON_V1>older</DECK_ADAPTIVE_CONTEXT_JSON_V1>" });
   await older;
   const stale = { system: [] as string[] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "same" }, stale);
   expect(stale.system).toEqual([]);
 });
 
-test("OpenCode skips role_start recall for ordinary tools while preserving delegated Deck role recall", async () => {
+test("OpenCode never recalls from parent tool execution and uses child Quick Fix policy", async () => {
   const events: unknown[] = [];
   const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
     memoryLoopback: {
@@ -687,7 +706,7 @@ test("OpenCode skips role_start recall for ordinary tools while preserving deleg
       post: async (_endpoint, _token, body) => {
         const event = JSON.parse(body);
         events.push(event);
-        return { ok: true, advisoryText: event.event === "role_start" ? "<DECK_ADAPTIVE_CONTEXT_JSON_V1>delegated</DECK_ADAPTIVE_CONTEXT_JSON_V1>" : undefined };
+        return { ok: true, advisoryText: event.event === "session_start" && event.role !== "apply-fast" ? "<DECK_ADAPTIVE_CONTEXT_JSON_V1>delegated</DECK_ADAPTIVE_CONTEXT_JSON_V1>" : undefined };
       },
     },
   });
@@ -697,10 +716,38 @@ test("OpenCode skips role_start recall for ordinary tools while preserving deleg
   expect(events.filter((event) => (event as { event?: string }).event === "role_start")).toEqual([]);
 
   await hooks["tool.execute.before"]({ tool: "task", sessionID: "ordinary", callID: "task-1" }, { args: { subagent_type: "deck-apply-fast" } });
-  expect(events.filter((event) => (event as { event?: string }).event === "role_start")).toHaveLength(1);
+  expect(events.filter((event) => (event as { event?: string }).event === "role_start")).toHaveLength(0);
   const transformed = { system: [] as string[] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "ordinary" }, transformed);
-  expect(transformed.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>delegated</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(transformed.system).toEqual([]);
+
+  await hooks["chat.message"]({ sessionID: "quickfix-child", messageID: "quickfix-1", agent: "deck-apply-fast" }, { message: { role: "user" }, parts: [{ type: "text", text: "small typo" }] });
+  const quickfix = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "quickfix-child" }, quickfix);
+  expect(quickfix.system).toEqual([]);
+  expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "quickfix-child", role: "apply-fast" }));
+});
+
+test("OpenCode resumed plugin instance keeps pending automatic contexts instance-local", async () => {
+  const loopback = {
+    endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
+    token: "loopback-token",
+    post: async (_endpoint: string, _token: string, body: string) => {
+      const event = JSON.parse(body);
+      return { ok: true, advisoryText: event.event === "session_start" ? `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.messageId ?? event.sessionId}</DECK_ADAPTIVE_CONTEXT_JSON_V1>` : undefined };
+    },
+  };
+  const first = await createOpenCodeDeveloperTeamExecutionPluginV1({ memoryLoopback: loopback })();
+  const second = await createOpenCodeDeveloperTeamExecutionPluginV1({ memoryLoopback: loopback })();
+
+  await first["chat.message"]({ sessionID: "resume", messageID: "first" }, { message: { role: "user" }, parts: [{ type: "text", text: "first" }] });
+  await second["chat.message"]({ sessionID: "resume", messageID: "second" }, { message: { role: "user" }, parts: [{ type: "text", text: "second" }] });
+  const secondOutput = { system: [] as string[] };
+  await second["experimental.chat.system.transform"]({ sessionID: "resume" }, secondOutput);
+  expect(secondOutput.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>resume</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  const firstOutput = { system: [] as string[] };
+  await first["experimental.chat.system.transform"]({ sessionID: "resume" }, firstOutput);
+  expect(firstOutput.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>resume</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
 });
 
 test("OpenCode invocation-required hook blocks when the trusted provider is absent", async () => {

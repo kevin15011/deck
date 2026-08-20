@@ -23,7 +23,7 @@ const APPLY_AGENTS = new Set([
   "deck-apply-fast",
   "deck-apply-deep",
 ]);
-type OpenCodePluginInput = { sessionID: string; messageID?: string; callID?: string; tool?: string };
+type OpenCodePluginInput = { sessionID: string; messageID?: string; callID?: string; tool?: string; agent?: string };
 type OpenCodePluginOutput = { message?: unknown; parts?: unknown[]; args?: Record<string, unknown>; result?: unknown };
 type OpenCodeModelMessageTransformOutput = { messages: { info: Record<string, unknown>; parts: Record<string, unknown>[] }[] };
 type OpenCodeSystemTransformInput = { sessionID?: string };
@@ -430,7 +430,8 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
         if (!recalledSessions.has(input.sessionID)) {
           recalledSessions.add(input.sessionID);
           const generation = beginModelContextRecall(input.sessionID);
-          installModelContext(input.sessionID, generation, await recallMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:session_start`, event: "session_start", sessionId: input.sessionID, role: "lead", query: text })));
+          const roleForMemory = memoryRole(input.agent) ?? "lead";
+          installModelContext(input.sessionID, generation, await recallMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:session_start`, event: "session_start", sessionId: input.sessionID, role: roleForMemory, query: text })));
         }
         if (text && messageRole === "user") await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:${input.messageID ?? "message"}:user_capture`, event: "capture", sessionId: input.sessionID, source: "trusted-user-prompt", content: text, correlationId: input.messageID }));
         if (text && messageRole === "assistant") await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:${input.messageID ?? "message"}:assistant_capture`, event: "capture", sessionId: input.sessionID, source: "trusted-final-assistant", content: text, correlationId: input.messageID }));
@@ -471,11 +472,6 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
           return;
         }
         const role = args.subagent_type ?? args.agent ?? args.role;
-        const roleForMemory = isDelegationTool(input.tool) ? memoryRole(role) : undefined;
-        if (roleForMemory) {
-          const generation = beginModelContextRecall(input.sessionID);
-          installModelContext(input.sessionID, generation, await recallMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:${input.callID ?? "call"}:role_start`, event: "role_start", sessionId: input.sessionID, role: roleForMemory, query: typeof role === "string" ? role : undefined })));
-        }
         if (role === "deck-setup") {
           if (!isDelegationTool(input.tool) || !input.callID) throw new Error("invalid-evidence");
           if (!preparationAuthorizationService) throw new Error("modification-not-authorized:AUTHZ_PROVIDER_MISSING");

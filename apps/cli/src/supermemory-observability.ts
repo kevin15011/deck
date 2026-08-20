@@ -49,7 +49,10 @@ export function createSupermemoryObservabilitySink(input: { stateHome?: string; 
           role: metric.role,
           scopeFingerprint: metric.scopeFingerprint,
           approximateInputTokens: metric.approximateInputTokens,
+          inputByteCount: metric.inputByteCount,
+          inputSha256: metric.inputSha256,
           approximateInjectedTokens: metric.approximateInjectedTokens,
+          injectedByteCount: metric.injectedByteCount,
           resultCount: metric.resultCount,
           dependency: metric.dependency,
         };

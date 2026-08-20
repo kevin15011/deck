@@ -150,6 +150,29 @@ describe("Supermemory first-class runtime", () => {
     expect(search.ok && search.context.rewriteQuery).toBe(false);
   });
 
+  test("search metrics record bounded query observability without raw query text", async () => {
+    const observed: unknown[] = [];
+    const fake = createFakeTransport();
+    const runtime = createSupermemoryRuntime({
+      canonicalScope: "sm_project_v1_kevin15011_deck",
+      sessionId: "runner-session-1",
+      transport: fake.transport,
+      observe: (metric) => observed.push(metric),
+    });
+
+    const result = await runtime.search({ role: "lead", query: "current trusted user text" });
+
+    expect(result.ok).toBe(true);
+    expect(result.metrics).toMatchObject({
+      operation: "search",
+      status: "succeeded",
+      inputByteCount: Buffer.byteLength("current trusted user text", "utf8"),
+      inputSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(observed).toContainEqual(expect.objectContaining({ operation: "search", status: "attempted", inputByteCount: Buffer.byteLength("current trusted user text", "utf8"), inputSha256: result.metrics.inputSha256 }));
+    expect(JSON.stringify(observed)).not.toContain("current trusted user text");
+  });
+
   test("role policy keeps Apply Fast narrow and Apply Deep bounded", () => {
     expect(resolveSupermemoryRolePolicy("apply-fast")).toMatchObject({ maxResults: 0, profile: "skip" });
     expect(resolveSupermemoryRolePolicy("apply-deep")).toMatchObject({ maxResults: 5, maxTokens: 1500 });
