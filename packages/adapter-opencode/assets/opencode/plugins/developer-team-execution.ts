@@ -23,7 +23,7 @@ const APPLY_AGENTS = new Set([
   "deck-apply-fast",
   "deck-apply-deep",
 ]);
-type OpenCodePluginInput = { sessionID: string; messageID?: string; callID?: string; tool?: string; agent?: string };
+type OpenCodePluginInput = { sessionID: string; messageID?: string; callID?: string; tool?: string; agent?: string; model?: string; variant?: string };
 type OpenCodePluginOutput = { message?: unknown; parts?: unknown[]; args?: Record<string, unknown>; result?: unknown };
 type OpenCodeModelMessageTransformOutput = { messages: { info: Record<string, unknown>; parts: Record<string, unknown>[] }[] };
 type OpenCodeSystemTransformInput = { sessionID?: string };
@@ -290,6 +290,95 @@ function memoryEvent(base: Record<string, unknown>): Record<string, unknown> {
   return { timestamp: Date.now(), ...base };
 }
 
+type LogicalUserTurnV1 = Readonly<{ sessionId: string; messageId: string; turnKey: string }>;
+type ModelContextSnapshotV1 = Readonly<{ turnKey: string; generation: number; context?: string }>;
+
+function trustedMessageId(value: unknown): string | undefined {
+  return typeof value === "string" && /^[^\0\r\n]{1,160}$/.test(value) ? value : undefined;
+}
+
+function resolvedNativeMessageId(input: OpenCodePluginInput, output: OpenCodePluginOutput): string | undefined {
+  const inputMessageId = trustedMessageId(input.messageID);
+  if (inputMessageId) return inputMessageId;
+  const sessionId = nativeSessionId(input);
+  const message = output.message;
+  if (!sessionId || !message || typeof message !== "object") return undefined;
+  const record = message as { id?: unknown; sessionID?: unknown; sessionId?: unknown };
+  const messageSessionId = record.sessionID ?? record.sessionId;
+  if (messageSessionId !== sessionId) return undefined;
+  return trustedMessageId(record.id);
+}
+
+function logicalUserTurn(input: OpenCodePluginInput, output: OpenCodePluginOutput, messageRole: unknown): LogicalUserTurnV1 | undefined {
+  if (messageRole !== "user") return undefined;
+  const sessionId = nativeSessionId(input);
+  const messageId = resolvedNativeMessageId(input, output);
+  if (!sessionId || !messageId) return undefined;
+  return Object.freeze({ sessionId, messageId, turnKey: JSON.stringify([sessionId, messageId]) });
+}
+
+function textMetadata(value: string | undefined): Record<string, unknown> {
+  if (!value) return {};
+  return {
+    queryByteLength: Buffer.byteLength(value, "utf8"),
+    querySha256: `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`,
+  };
+}
+
+type ModelRequestKindV1 = "normal" | "compaction";
+type ModelRequestMarkerV1 = Readonly<{ kind: ModelRequestKindV1; messageId: string; createdOrder?: number; sequence: number }>;
+
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function modelRequestCreatedOrder(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function messageRecordFromEvent(event: unknown): Record<string, unknown> | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const root = event as { type?: unknown; properties?: unknown; message?: unknown };
+  if (root.type !== "message.updated") return undefined;
+  const properties = root.properties && typeof root.properties === "object" ? root.properties as { info?: unknown; message?: unknown } : undefined;
+  const candidate = properties?.info ?? properties?.message ?? root.message;
+  return candidate && typeof candidate === "object" && !Array.isArray(candidate) ? candidate as Record<string, unknown> : undefined;
+}
+
+function classifyModelRequestFromEvent(event: unknown): Readonly<{ sessionId: string; marker: Readonly<{ kind: ModelRequestKindV1; messageId: string; createdOrder: number }> }> | undefined {
+  try {
+    const message = messageRecordFromEvent(event);
+    if (!message) return undefined;
+    const sessionId = nativeSessionId(message);
+    const messageId = trustedMessageId(message.id ?? message.messageID ?? message.messageId);
+    if (!sessionId || !messageId || message.role !== "assistant") return undefined;
+    const time = message.time;
+    if (!time || typeof time !== "object" || Array.isArray(time)) return undefined;
+    const timeRecord = time as Record<string, unknown>;
+    if (!hasOwn(timeRecord, "created") || hasOwn(timeRecord, "completed") || hasOwn(message, "finish") || hasOwn(message, "error")) return undefined;
+    const createdOrder = modelRequestCreatedOrder(timeRecord.created);
+    if (createdOrder === undefined) return undefined;
+    const isCompaction = message.mode === "compaction" && message.agent === "compaction" && message.summary === true;
+    const isNormal = message.summary !== true && message.mode !== "compaction" && message.agent !== "compaction";
+    if (!isCompaction && !isNormal) return undefined;
+    return Object.freeze({
+      sessionId,
+      marker: Object.freeze({
+        kind: isCompaction ? "compaction" : "normal",
+        messageId,
+        createdOrder,
+      }),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 function qaInvocationResponse(value: unknown, callId: string): Readonly<{
   invocationId: string;
   digest: `sha256:${string}`;
@@ -374,22 +463,49 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
   const receipts = new Map<string, `sha256:${string}`>();
   const pendingQa = new Map<string, Readonly<{ sessionId: string; invocationId: string; digest: `sha256:${string}`; reference: object }>>();
   const settledQaKeys = new Set<string>();
-  const recalledSessions = new Set<string>();
-  const pendingModelContexts = new Map<string, string>();
+  const activeModelContexts = new Map<string, ModelContextSnapshotV1>();
+  const latestRequestMarkers = new Map<string, ModelRequestMarkerV1>();
   const modelContextGenerations = new Map<string, number>();
   const managedRecallLimiter = new Map<string, number[]>();
   const managedRecallInFlight = new Map<string, Promise<string>>();
   const managedRecallReplay = new Map<string, ManagedRecallReplayEntry>();
   let nextModelContextGeneration = 0;
-  const beginModelContextRecall = (sessionId: string): number => {
+  let nextRequestMarkerSequence = 0;
+  const beginModelContextRecall = (turn: LogicalUserTurnV1): number => {
     const generation = ++nextModelContextGeneration;
-    modelContextGenerations.set(sessionId, generation);
-    pendingModelContexts.delete(sessionId);
+    modelContextGenerations.set(turn.sessionId, generation);
+    activeModelContexts.set(turn.sessionId, Object.freeze({ turnKey: turn.turnKey, generation }));
     return generation;
   };
-  const installModelContext = (sessionId: string, generation: number, context: string | undefined) => {
-    if (!context || modelContextGenerations.get(sessionId) !== generation) return;
-    pendingModelContexts.set(sessionId, context);
+  const installModelContext = (turn: LogicalUserTurnV1, generation: number, context: string | undefined) => {
+    const active = activeModelContexts.get(turn.sessionId);
+    if (!active || active.turnKey !== turn.turnKey || active.generation !== generation || modelContextGenerations.get(turn.sessionId) !== generation) return;
+    activeModelContexts.set(turn.sessionId, Object.freeze({
+      turnKey: turn.turnKey,
+      generation,
+      ...(context ? { context } : {}),
+    }));
+  };
+  const clearModelContext = (sessionId: string) => {
+    activeModelContexts.delete(sessionId);
+    modelContextGenerations.delete(sessionId);
+  };
+  const markNormalRequest = (sessionId: string, messageId: string) => {
+    const current = latestRequestMarkers.get(sessionId);
+    latestRequestMarkers.set(sessionId, Object.freeze({
+      kind: "normal",
+      messageId,
+      sequence: ++nextRequestMarkerSequence,
+      ...(current?.createdOrder === undefined ? {} : { createdOrder: current.createdOrder }),
+    }));
+  };
+  const markRequestFromEvent = (event: unknown) => {
+    const classified = classifyModelRequestFromEvent(event);
+    if (!classified) return;
+    const current = latestRequestMarkers.get(classified.sessionId);
+    if (current?.messageId === classified.marker.messageId) return;
+    if (current?.createdOrder !== undefined && classified.marker.createdOrder <= current.createdOrder) return;
+    latestRequestMarkers.set(classified.sessionId, Object.freeze({ ...classified.marker, sequence: ++nextRequestMarkerSequence }));
   };
   const provider = (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT] as OpenCodeHostProviderV1 | undefined;
   // Capture every trusted host capability exactly once. Prompt/caller data is never consulted for authority.
@@ -418,23 +534,37 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
       "experimental.chat.messages.transform": async (_input: Record<string, never>, _output: OpenCodeModelMessageTransformOutput) => {},
       "experimental.chat.system.transform": async (input: OpenCodeSystemTransformInput, output: OpenCodeSystemTransformOutput) => {
         if (!input.sessionID) return;
-        const contexts = pendingModelContexts.get(input.sessionID);
+        if (latestRequestMarkers.get(input.sessionID)?.kind !== "normal") return;
+        const contexts = activeModelContexts.get(input.sessionID)?.context;
         if (!contexts) return;
-        pendingModelContexts.delete(input.sessionID);
         output.system.push(contexts);
       },
       "chat.message": async (input: OpenCodePluginInput, output: OpenCodePluginOutput) => {
         receipts.set(input.sessionID, receiptDigest(input, output));
         const text = textFromOutput(output);
         const messageRole = output.message && typeof output.message === "object" ? (output.message as { role?: unknown }).role : undefined;
-        if (!recalledSessions.has(input.sessionID)) {
-          recalledSessions.add(input.sessionID);
-          const generation = beginModelContextRecall(input.sessionID);
-          const roleForMemory = memoryRole(input.agent) ?? "lead";
-          installModelContext(input.sessionID, generation, await recallMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:session_start`, event: "session_start", sessionId: input.sessionID, role: roleForMemory, query: text })));
+        const messageId = resolvedNativeMessageId(input, output);
+        const turn = logicalUserTurn(input, output, messageRole);
+        if (messageRole === "user") {
+          if (messageId) markNormalRequest(input.sessionID, messageId);
+          if (!turn) {
+            clearModelContext(input.sessionID);
+          } else if (activeModelContexts.get(turn.sessionId)?.turnKey !== turn.turnKey) {
+            const generation = beginModelContextRecall(turn);
+            const roleForMemory = memoryRole(input.agent) ?? "lead";
+            installModelContext(turn, generation, await recallMemoryLoopback(memoryLoopback, memoryEvent({
+              eventId: `${turn.sessionId}:${turn.messageId}:session_start`,
+              event: "session_start",
+              sessionId: turn.sessionId,
+              messageId: turn.messageId,
+              role: roleForMemory,
+              query: text,
+              ...textMetadata(text),
+            })));
+          }
         }
-        if (text && messageRole === "user") await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:${input.messageID ?? "message"}:user_capture`, event: "capture", sessionId: input.sessionID, source: "trusted-user-prompt", content: text, correlationId: input.messageID }));
-        if (text && messageRole === "assistant") await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:${input.messageID ?? "message"}:assistant_capture`, event: "capture", sessionId: input.sessionID, source: "trusted-final-assistant", content: text, correlationId: input.messageID }));
+        if (text && messageRole === "user" && messageId) await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:${messageId}:user_capture`, event: "capture", sessionId: input.sessionID, source: "trusted-user-prompt", content: text, correlationId: messageId }));
+        if (text && messageRole === "assistant" && messageId) await sendMemoryLoopback(memoryLoopback, memoryEvent({ eventId: `${input.sessionID}:${messageId}:assistant_capture`, event: "capture", sessionId: input.sessionID, source: "trusted-final-assistant", content: text, correlationId: messageId }));
       },
       "tool.execute.before": async (input: OpenCodePluginInput, output: OpenCodePluginOutput) => {
         const args = output.args;
@@ -571,19 +701,19 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
         }
       },
       event: async ({ event }: { event: { type?: string; properties?: { info?: { id?: string } } } }) => {
+        markRequestFromEvent(event);
         if (event.type !== "session.deleted" || !event.properties?.info?.id) return;
-          const sessionId = event.properties.info.id;
-          receipts.delete(sessionId);
-          recalledSessions.delete(sessionId);
-          pendingModelContexts.delete(sessionId);
-          modelContextGenerations.delete(sessionId);
-          managedRecallLimiter.delete(sessionId);
-          for (const key of [...managedRecallInFlight.keys()]) {
-            if (key.startsWith(`${sessionId}:`)) managedRecallInFlight.delete(key);
-          }
-          for (const key of [...managedRecallReplay.keys()]) {
-            if (key.startsWith(`${sessionId}:`)) managedRecallReplay.delete(key);
-          }
+        const sessionId = event.properties.info.id;
+        receipts.delete(sessionId);
+        clearModelContext(sessionId);
+        latestRequestMarkers.delete(sessionId);
+        managedRecallLimiter.delete(sessionId);
+        for (const key of [...managedRecallInFlight.keys()]) {
+          if (key.startsWith(`${sessionId}:`)) managedRecallInFlight.delete(key);
+        }
+        for (const key of [...managedRecallReplay.keys()]) {
+          if (key.startsWith(`${sessionId}:`)) managedRecallReplay.delete(key);
+        }
         for (const [key, pending] of pendingQa) {
           if (pending.sessionId === sessionId) pendingQa.delete(key);
         }

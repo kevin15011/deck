@@ -554,8 +554,13 @@ test("OpenCode static-compatible hook preserves legacy delegation when its provi
   expect(String(rejection)).not.toContain("SECRET_PROVIDER_SENTINEL");
 });
 
-test("OpenCode automatic memory reaches system transform by native session and child agent", async () => {
+function openCodeMessageUpdatedEvent(sessionID: string, id: string, fields: Record<string, unknown>) {
+  return { event: { type: "message.updated", properties: { info: { id, sessionID, role: "assistant", ...fields } } } };
+}
+
+test("OpenCode automatic managed memory context is retained for every inference in one logical user turn", async () => {
   const events: unknown[] = [];
+  const providerUserCaptureIds = new Set<unknown>();
   const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
     memoryLoopback: {
       endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
@@ -563,8 +568,9 @@ test("OpenCode automatic memory reaches system transform by native session and c
       post: async (_endpoint, _token, body) => {
         const event = JSON.parse(body);
         events.push(event);
+        if (event.event === "capture" && event.source === "trusted-user-prompt" && event.sessionId === "s") providerUserCaptureIds.add(event.eventId);
         if (event.event !== "session_start") return { ok: true };
-        return { ok: true, advisoryText: `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.sessionId}:${event.role}</DECK_ADAPTIVE_CONTEXT_JSON_V1>` };
+        return { ok: true, advisoryText: `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.sessionId}:${event.messageId}:${event.role}</DECK_ADAPTIVE_CONTEXT_JSON_V1>` };
       },
     },
   });
@@ -572,6 +578,7 @@ test("OpenCode automatic memory reaches system transform by native session and c
   expect(typeof hooks["experimental.chat.system.transform"]).toBe("function");
 
   const message: Record<string, unknown> = { message: { role: "user" }, parts: [{ type: "text", text: "Remember that role recall is bounded." }] };
+  await hooks["chat.message"]({ sessionID: "s", messageID: "m" }, message);
   await hooks["chat.message"]({ sessionID: "s", messageID: "m" }, message);
   expect(message).not.toHaveProperty("deckAdaptiveMemoryContext");
 
@@ -588,48 +595,201 @@ test("OpenCode automatic memory reaches system transform by native session and c
   await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, modelOutput);
   expect(modelOutput.system).toHaveLength(2);
   expect(modelOutput.system[0]).toBe("base system");
-  expect(modelOutput.system[1]).toContain("s:lead");
+  expect(modelOutput.system[1]).toContain("s:m:lead");
 
-  const oneShotOutput = { system: ["base system"] };
-  await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, oneShotOutput);
-  expect(oneShotOutput.system).toEqual(["base system"]);
+  const retainedSecondInference = { system: ["base system"] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, retainedSecondInference);
+  expect(retainedSecondInference.system).toEqual(["base system", "<DECK_ADAPTIVE_CONTEXT_JSON_V1>s:m:lead</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
 
   const args: Record<string, unknown> = { subagent_type: "deck-apply-deep" };
   await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c" }, { args });
   expect(args).not.toHaveProperty("deckAdaptiveMemoryContext");
   const parentAfterDelegation = { system: ["role base"] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, parentAfterDelegation);
-  expect(parentAfterDelegation.system).toEqual(["role base"]);
+  expect(parentAfterDelegation.system).toEqual(["role base", "<DECK_ADAPTIVE_CONTEXT_JSON_V1>s:m:lead</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
 
   await hooks["chat.message"]({ sessionID: "child-apply", messageID: "child-m", agent: "deck-apply-deep" }, { message: { role: "user" }, parts: [{ type: "text", text: "child task" }] });
   const childOutput = { system: ["child base"] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "child-apply" }, childOutput);
   expect(childOutput.system).toHaveLength(2);
   expect(childOutput.system[0]).toBe("child base");
-  expect(childOutput.system[1]).toContain("child-apply:apply-deep");
-  expect(childOutput.system[1]).not.toContain("s:lead");
+  expect(childOutput.system[1]).toContain("child-apply:child-m:apply-deep");
+  expect(childOutput.system[1]).not.toContain("s:m:lead");
 
   await hooks["chat.message"]({ sessionID: "other", messageID: "m2" }, { message: { role: "user" }, parts: [{ type: "text", text: "other session" }] });
   const isolatedOutput = { system: ["isolated base"] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, isolatedOutput);
-  expect(isolatedOutput.system).toEqual(["isolated base"]);
+  expect(isolatedOutput.system).toEqual(["isolated base", "<DECK_ADAPTIVE_CONTEXT_JSON_V1>s:m:lead</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
   const otherOutput = { system: ["other base"] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "other" }, otherOutput);
   expect(otherOutput.system).toHaveLength(2);
   expect(otherOutput.system[0]).toBe("other base");
-  expect(otherOutput.system[1]).toContain("other:lead");
+  expect(otherOutput.system[1]).toContain("other:m2:lead");
 
   const staleMessagesOutput = { messages: [{ info: { id: "original", role: "user" }, parts: [{ type: "text", text: "original" }] }] };
   await hooks["experimental.chat.messages.transform"]({}, staleMessagesOutput);
   expect(staleMessagesOutput.messages).toHaveLength(1);
   expect(staleMessagesOutput.messages[0]!.info.role).toBe("user");
 
-  expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "s", role: "lead", eventId: expect.any(String), timestamp: expect.any(Number) }));
-  expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "child-apply", role: "apply-deep", eventId: expect.any(String), timestamp: expect.any(Number) }));
+  const afterCompaction = { system: ["after compaction"] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, afterCompaction);
+  expect(afterCompaction.system).toEqual(["after compaction", "<DECK_ADAPTIVE_CONTEXT_JSON_V1>s:m:lead</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "s" } } } });
+  const afterDeletion = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "s" }, afterDeletion);
+  expect(afterDeletion.system).toEqual([]);
+
+  expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "s", messageId: "m", role: "lead", eventId: expect.any(String), timestamp: expect.any(Number) }));
+  expect(events.filter((event) => (event as { event?: string; sessionId?: string }).event === "session_start" && (event as { sessionId?: string }).sessionId === "s")).toHaveLength(1);
+  expect(providerUserCaptureIds).toEqual(new Set(["s:m:user_capture"]));
+  expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "child-apply", messageId: "child-m", role: "apply-deep", eventId: expect.any(String), timestamp: expect.any(Number) }));
   expect(events.some((event) => (event as { event?: string }).event === "role_start")).toBe(false);
 });
 
-test("OpenCode concurrent native sessions remain isolated and inject once per first turn", async () => {
+test("OpenCode compaction request markers suppress system injection without consuming the active turn snapshot", async () => {
+  const events: Record<string, unknown>[] = [];
+  let automaticRecall = 0;
+  const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1({
+    memoryLoopback: {
+      endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
+      token: "loopback-token",
+      post: async (_endpoint, _token, body) => {
+        const event = JSON.parse(body) as Record<string, unknown>;
+        events.push(event);
+        if (event.event === "session_start") {
+          automaticRecall += 1;
+          return { ok: true, advisoryText: `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.sessionId}:${event.messageId}:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>` };
+        }
+        return { ok: true };
+      },
+    },
+  })();
+
+  await hooks["chat.message"]({ sessionID: "compact-a", messageID: "user-a" }, { message: { role: "user" }, parts: [{ type: "text", text: "turn A" }] });
+  const beforeCompaction = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "compact-a" }, beforeCompaction);
+  expect(beforeCompaction.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>compact-a:user-a:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  await hooks.event(openCodeMessageUpdatedEvent("compact-a", "msg_top_level_created_only", { created: 1500, mode: "compaction", agent: "compaction", summary: true }));
+  const afterFabricatedTopLevelCreated = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "compact-a" }, afterFabricatedTopLevelCreated);
+  expect(afterFabricatedTopLevelCreated.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>compact-a:user-a:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  await hooks.event(openCodeMessageUpdatedEvent("compact-a", "msg_compact", { time: { created: 2000 }, mode: "compaction", agent: "compaction", summary: true }));
+  const compactionRetryOne = { system: [] as string[] };
+  const compactionRetryTwo = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "compact-a" }, compactionRetryOne);
+  await hooks["experimental.chat.system.transform"]({ sessionID: "compact-a" }, compactionRetryTwo);
+  expect(compactionRetryOne.system).toEqual([]);
+  expect(compactionRetryTwo.system).toEqual([]);
+
+  await hooks.event(openCodeMessageUpdatedEvent("compact-a", "msg_compact", { time: { created: 2000, completed: "done" }, mode: "compaction", agent: "compaction", summary: true }));
+  await hooks.event(openCodeMessageUpdatedEvent("compact-a", "msg_older_normal", { time: { created: 1000 }, mode: "chat", agent: "deck-lead", summary: false }));
+  const afterTerminalAndOlderNormal = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "compact-a" }, afterTerminalAndOlderNormal);
+  expect(afterTerminalAndOlderNormal.system).toEqual([]);
+
+  await hooks["chat.message"]({ sessionID: "compact-b", messageID: "user-b" }, { message: { role: "user" }, parts: [{ type: "text", text: "turn B" }] });
+  const sessionB = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "compact-b" }, sessionB);
+  expect(sessionB.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>compact-b:user-b:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  await hooks["chat.message"]({ sessionID: "compact-child", messageID: "child-user", agent: "deck-apply-deep" }, { message: { role: "user" }, parts: [{ type: "text", text: "child turn" }] });
+  const child = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "compact-child" }, child);
+  expect(child.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>compact-child:child-user:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  await hooks.event(openCodeMessageUpdatedEvent("compact-a", "msg_normal_after_compaction", { time: { created: 3000 }, mode: "chat", agent: "deck-lead", summary: false }));
+  const normalAfterCompaction = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "compact-a" }, normalAfterCompaction);
+  expect(normalAfterCompaction.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>compact-a:user-a:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(automaticRecall).toBe(3);
+  expect(events.filter((event) => event.event === "session_start" && event.sessionId === "compact-a")).toHaveLength(1);
+});
+
+test("OpenCode trusted user normal restoration preserves compaction ordering watermark", async () => {
+  const events: Record<string, unknown>[] = [];
+  const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1({
+    memoryLoopback: {
+      endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
+      token: "loopback-token",
+      post: async (_endpoint, _token, body) => {
+        const event = JSON.parse(body) as Record<string, unknown>;
+        events.push(event);
+        return { ok: true, advisoryText: `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.sessionId}:${event.messageId}:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>` };
+      },
+    },
+  })();
+
+  await hooks["chat.message"]({ sessionID: "watermark", messageID: "turn-1" }, { message: { role: "user" }, parts: [{ type: "text", text: "first turn" }] });
+  await hooks.event(openCodeMessageUpdatedEvent("watermark", "msg_compact_a", { time: { created: 5000 }, mode: "compaction", agent: "compaction", summary: true }));
+  const compacted = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "watermark" }, compacted);
+  expect(compacted.system).toEqual([]);
+
+  await hooks["chat.message"]({ sessionID: "watermark", messageID: "turn-2" }, { message: { role: "user" }, parts: [{ type: "text", text: "second turn" }] });
+  await hooks.event(openCodeMessageUpdatedEvent("watermark", "msg_stale_compact", { time: { created: 4999 }, mode: "compaction", agent: "compaction", summary: true }));
+  await hooks.event(openCodeMessageUpdatedEvent("watermark", "msg_equal_compact", { time: { created: 5000 }, mode: "compaction", agent: "compaction", summary: true }));
+  const afterStaleCompactions = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "watermark" }, afterStaleCompactions);
+  expect(afterStaleCompactions.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>watermark:turn-2:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(events.filter((event) => event.event === "session_start" && event.sessionId === "watermark" && event.messageId === "turn-2")).toHaveLength(1);
+
+  await hooks.event(openCodeMessageUpdatedEvent("watermark", "msg_newer_compact", { time: { created: 5001 }, mode: "compaction", agent: "compaction", summary: true }));
+  const afterNewerCompaction = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "watermark" }, afterNewerCompaction);
+  expect(afterNewerCompaction.system).toEqual([]);
+});
+
+test("OpenCode compaction abort recovery requires a later normal marker and does not revive stale markers on resume", async () => {
+  const events: Record<string, unknown>[] = [];
+  const loopback = {
+    endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
+    token: "loopback-token",
+    post: async (_endpoint: string, _token: string, body: string) => {
+      const event = JSON.parse(body) as Record<string, unknown>;
+      events.push(event);
+      return { ok: true, advisoryText: `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.sessionId}:${event.messageId}:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>` };
+    },
+  };
+  const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1({ memoryLoopback: loopback })();
+
+  await hooks["chat.message"]({ sessionID: "abort-session", messageID: "turn-1" }, { message: { role: "user" }, parts: [{ type: "text", text: "first turn" }] });
+  const preSummaryAbortEquivalent = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "abort-session" }, preSummaryAbortEquivalent);
+  expect(preSummaryAbortEquivalent.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>abort-session:turn-1:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  await hooks.event(openCodeMessageUpdatedEvent("abort-session", "msg_compaction_abort", { time: { created: 5000 }, mode: "compaction", agent: "compaction", summary: true }));
+  const postSummaryAbort = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "abort-session" }, postSummaryAbort);
+  expect(postSummaryAbort.system).toEqual([]);
+
+  await hooks["chat.message"]({ sessionID: "abort-session", messageID: "turn-2" }, { message: { role: "user" }, parts: [{ type: "text", text: "second turn" }] });
+  await hooks.event(openCodeMessageUpdatedEvent("abort-session", "msg_abort_stale_compaction", { time: { created: 4999 }, mode: "compaction", agent: "compaction", summary: true }));
+  await hooks.event(openCodeMessageUpdatedEvent("abort-session", "msg_abort_equal_compaction", { time: { created: 5000 }, mode: "compaction", agent: "compaction", summary: true }));
+  const beforeNormalMarkerAfterAbort = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "abort-session" }, beforeNormalMarkerAfterAbort);
+  expect(beforeNormalMarkerAfterAbort.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>abort-session:turn-2:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  await hooks.event(openCodeMessageUpdatedEvent("abort-session", "msg_normal_after_abort", { time: { created: 6000 }, mode: "chat", agent: "deck-lead", summary: false }));
+  const recovered = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "abort-session" }, recovered);
+  expect(recovered.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>abort-session:turn-2:snapshot</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  await hooks.event({ event: { type: "session.deleted", properties: { info: { id: "abort-session" } } } });
+  const afterDelete = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "abort-session" }, afterDelete);
+  expect(afterDelete.system).toEqual([]);
+
+  const resumed = await createOpenCodeDeveloperTeamExecutionPluginV1({ memoryLoopback: loopback })();
+  const freshResume = { system: [] as string[] };
+  await resumed["experimental.chat.system.transform"]({ sessionID: "abort-session" }, freshResume);
+  expect(freshResume.system).toEqual([]);
+  expect(events.filter((event) => event.event === "session_start" && event.sessionId === "abort-session")).toHaveLength(2);
+});
+
+test("OpenCode concurrent native sessions remain isolated and retrieve once per logical turn", async () => {
   const events: Record<string, unknown>[] = [];
   const plugin = createOpenCodeDeveloperTeamExecutionPluginV1({
     memoryLoopback: {
@@ -638,7 +798,7 @@ test("OpenCode concurrent native sessions remain isolated and inject once per fi
       post: async (_endpoint, _token, body) => {
         const event = JSON.parse(body);
         events.push(event);
-        return { ok: true, advisoryText: event.event === "session_start" ? `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.sessionId}-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>` : undefined };
+        return { ok: true, advisoryText: event.event === "session_start" ? `<DECK_ADAPTIVE_CONTEXT_JSON_V1>${event.sessionId}:${event.messageId}-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>` : undefined };
       },
     },
   });
@@ -652,14 +812,14 @@ test("OpenCode concurrent native sessions remain isolated and inject once per fi
   const b = { system: [] as string[] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "A" }, a);
   await hooks["experimental.chat.system.transform"]({ sessionID: "B" }, b);
-  expect(a.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>A-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
-  expect(b.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>B-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(a.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>A:a1-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(b.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>B:b1-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
 
   await hooks["chat.message"]({ sessionID: "A", messageID: "a2" }, { message: { role: "user" }, parts: [{ type: "text", text: "second alpha" }] });
   const aSecond = { system: [] as string[] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "A" }, aSecond);
-  expect(aSecond.system).toEqual([]);
-  expect(events.filter((event) => event.event === "session_start" && event.sessionId === "A")).toHaveLength(1);
+  expect(aSecond.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>A:a2-context</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(events.filter((event) => event.event === "session_start" && event.sessionId === "A")).toHaveLength(2);
   expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "B", role: "apply-deep" }));
 });
 
@@ -694,7 +854,7 @@ test("OpenCode latest native session generation wins after same-id resume", asyn
   await older;
   const stale = { system: [] as string[] };
   await hooks["experimental.chat.system.transform"]({ sessionID: "same" }, stale);
-  expect(stale.system).toEqual([]);
+  expect(stale.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>newer</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
 });
 
 test("OpenCode never recalls from parent tool execution and uses child Quick Fix policy", async () => {
@@ -726,6 +886,12 @@ test("OpenCode never recalls from parent tool execution and uses child Quick Fix
   await hooks["experimental.chat.system.transform"]({ sessionID: "quickfix-child" }, quickfix);
   expect(quickfix.system).toEqual([]);
   expect(events).toContainEqual(expect.objectContaining({ event: "session_start", sessionId: "quickfix-child", role: "apply-fast" }));
+
+  await hooks["chat.message"]({ sessionID: "quickfix-child", messageID: "lead-2", agent: "deck-lead" }, { message: { role: "user" }, parts: [{ type: "text", text: "now investigate" }] });
+  const laterLeadTurn = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "quickfix-child" }, laterLeadTurn);
+  expect(laterLeadTurn.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>delegated</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(events.filter((event) => (event as { event?: string; sessionId?: string }).event === "session_start" && (event as { sessionId?: string }).sessionId === "quickfix-child")).toHaveLength(2);
 });
 
 test("OpenCode resumed plugin instance keeps pending automatic contexts instance-local", async () => {
@@ -744,10 +910,108 @@ test("OpenCode resumed plugin instance keeps pending automatic contexts instance
   await second["chat.message"]({ sessionID: "resume", messageID: "second" }, { message: { role: "user" }, parts: [{ type: "text", text: "second" }] });
   const secondOutput = { system: [] as string[] };
   await second["experimental.chat.system.transform"]({ sessionID: "resume" }, secondOutput);
-  expect(secondOutput.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>resume</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(secondOutput.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>second</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
   const firstOutput = { system: [] as string[] };
   await first["experimental.chat.system.transform"]({ sessionID: "resume" }, firstOutput);
-  expect(firstOutput.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>resume</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+  expect(firstOutput.system).toEqual(["<DECK_ADAPTIVE_CONTEXT_JSON_V1>first</DECK_ADAPTIVE_CONTEXT_JSON_V1>"]);
+
+  const resumedWithoutTurn = await createOpenCodeDeveloperTeamExecutionPluginV1({ memoryLoopback: loopback })();
+  const staleResumeOutput = { system: [] as string[] };
+  await resumedWithoutTurn["experimental.chat.system.transform"]({ sessionID: "resume" }, staleResumeOutput);
+  expect(staleResumeOutput.system).toEqual([]);
+});
+
+test("OpenCode E2E harness retains automatic memory through deck-lead skill and tool continuation", async () => {
+  const events: Record<string, unknown>[] = [];
+  let automaticRecall = 0;
+  let explicitRecall = 0;
+  let contextMode = 0;
+  const expectMemoryTerms = (output: { system: string[] }) => {
+    const visible = output.system.join("\n");
+    expect(visible).toContain("Orion");
+    expect(visible).toContain("Nebula Boundary");
+    expect(visible).toContain("core/adapter policy");
+  };
+  const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1({
+    memoryLoopback: {
+      endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
+      token: "loopback-token",
+      post: async (_endpoint, _token, body) => {
+        const event = JSON.parse(body) as Record<string, unknown>;
+        events.push(event);
+        if (event.event === "session_start") {
+          automaticRecall += 1;
+          return { ok: true, advisoryText: "<DECK_ADAPTIVE_CONTEXT_JSON_V1>Orion; Nebula Boundary; core/adapter policy</DECK_ADAPTIVE_CONTEXT_JSON_V1>" };
+        }
+        if (event.event === "explicit_recall") explicitRecall += 1;
+        if (event.event === "context_mode") contextMode += 1;
+        return { ok: true };
+      },
+    },
+  })();
+
+  await hooks["chat.message"](
+    { sessionID: "e2e", messageID: undefined, agent: "deck-lead", model: "anthropic/claude-sonnet-4", variant: "opencode" },
+    { message: { id: "msg_user_live", sessionID: "e2e", role: "user", agent: "deck-lead", model: "anthropic/claude-sonnet-4" }, parts: [{ type: "text", text: "Use prior project terms." }] },
+  );
+  await hooks.event(openCodeMessageUpdatedEvent("e2e", "msg_request_1", { time: { created: 1000 }, mode: "chat", agent: "deck-lead", summary: false }));
+  const firstInference = { system: ["base"] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "e2e" }, firstInference);
+  expectMemoryTerms(firstInference);
+
+  await hooks["tool.execute.before"]({ tool: "skill", sessionID: "e2e", callID: "skill-deck-lead" }, { args: { name: "deck-lead" } });
+  await hooks.event(openCodeMessageUpdatedEvent("e2e", "msg_request_2", { time: { created: 2000 }, mode: "chat", agent: "deck-lead", summary: false }));
+  const secondInferenceAfterSkill = { system: ["base after skill"] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "e2e" }, secondInferenceAfterSkill);
+  expectMemoryTerms(secondInferenceAfterSkill);
+
+  await hooks["tool.execute.before"]({ tool: "read", sessionID: "e2e", callID: "tool-read" }, { args: { filePath: "/tmp/example" } });
+  await hooks.event(openCodeMessageUpdatedEvent("e2e", "msg_request_3", { time: { created: 3000 }, mode: "chat", agent: "deck-lead", summary: false }));
+  const thirdInferenceAfterTool = { system: ["base after ordinary tool"] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "e2e" }, thirdInferenceAfterTool);
+  expectMemoryTerms(thirdInferenceAfterTool);
+
+  await hooks["chat.message"](
+    { sessionID: "e2e", messageID: undefined, agent: "deck-lead", model: "anthropic/claude-sonnet-4", variant: "opencode" },
+    { message: { id: "msg_assistant_live", sessionID: "e2e", role: "assistant", agent: "deck-lead", model: "anthropic/claude-sonnet-4" }, parts: [{ type: "text", text: "Final outcome used retained memory." }] },
+  );
+  expect(events.filter((event) => event.event === "capture" && event.source === "trusted-user-prompt")).toEqual([
+    expect.objectContaining({ eventId: "e2e:msg_user_live:user_capture", correlationId: "msg_user_live" }),
+  ]);
+  expect(events.filter((event) => event.event === "capture" && event.source === "trusted-final-assistant")).toEqual([
+    expect.objectContaining({ eventId: "e2e:msg_assistant_live:assistant_capture", correlationId: "msg_assistant_live" }),
+  ]);
+  expect(events.filter((event) => event.event === "session_start")).toEqual([
+    expect.objectContaining({ eventId: "e2e:msg_user_live:session_start", messageId: "msg_user_live" }),
+  ]);
+  expect(automaticRecall).toBe(1);
+  expect(explicitRecall).toBe(0);
+  expect(contextMode).toBe(0);
+});
+
+test("OpenCode rejects output message identity from a different native session", async () => {
+  const events: Record<string, unknown>[] = [];
+  const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1({
+    memoryLoopback: {
+      endpoint: "http://127.0.0.1:1/deck-runner-memory/v1",
+      token: "loopback-token",
+      post: async (_endpoint, _token, body) => {
+        events.push(JSON.parse(body) as Record<string, unknown>);
+        return { ok: true, advisoryText: "<DECK_ADAPTIVE_CONTEXT_JSON_V1>cross-session poison</DECK_ADAPTIVE_CONTEXT_JSON_V1>" };
+      },
+    },
+  })();
+
+  await hooks["chat.message"](
+    { sessionID: "safe-session", messageID: undefined, agent: "deck-lead", model: "anthropic/claude-sonnet-4", variant: "opencode" },
+    { message: { id: "msg_cross_session", sessionID: "other-session", role: "user", agent: "deck-lead", model: "anthropic/claude-sonnet-4" }, parts: [{ type: "text", text: "Do not correlate me." }] },
+  );
+
+  const transformed = { system: [] as string[] };
+  await hooks["experimental.chat.system.transform"]({ sessionID: "safe-session" }, transformed);
+  expect(transformed.system).toEqual([]);
+  expect(events.filter((event) => event.event === "session_start")).toEqual([]);
+  expect(events.filter((event) => event.event === "capture")).toEqual([]);
 });
 
 test("OpenCode invocation-required hook blocks when the trusted provider is absent", async () => {
