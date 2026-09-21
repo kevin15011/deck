@@ -9,6 +9,13 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-21
+
+### Fixed
+
+- Deck-managed Serena MCP configurations now disable automatic browser opening while keeping Serena's web dashboard available when opened explicitly.
+- Existing OpenCode and Pi installations must reapply Serena configuration once after upgrading; legacy direct-launch Codex entries require the normal Deck configuration migration. Deck does not silently rewrite user-owned runner configuration during content-only sync.
+
 ## [0.4.1] - 2026-09-21
 
 ### Changed

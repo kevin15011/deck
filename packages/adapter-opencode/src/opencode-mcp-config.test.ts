@@ -719,7 +719,7 @@ describe("writeSerenaOpenCodeMcpConfig", () => {
     probe: "serena-help",
     fingerprint: "serena-fingerprint",
   };
-  const command = [executable, "start-mcp-server", "--context", "ide", "--project-from-cwd"] as const;
+  const command = [executable, "start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"] as const;
 
   function fakeFileSystem(initial: Record<string, string> = {}) {
     const files = new Map(Object.entries(initial));
@@ -783,15 +783,24 @@ describe("writeSerenaOpenCodeMcpConfig", () => {
     expect(fake.files.get(path)).toBe(original);
   });
 
-  test("updates a legacy bare command only after validated evidence", () => {
+  test("upgrades the previous Deck Serena command, preserves unrelated MCP entries, and is idempotent", () => {
     const path = "/fixtures/opencode/opencode.json";
     const fake = fakeFileSystem({
-      [path]: JSON.stringify({ mcp: { serena: { type: "local", command: ["serena", "start-mcp-server"] }, other: { keep: true } } }),
+      [path]: JSON.stringify({
+        mcp: {
+          serena: { type: "local", command: [executable, "start-mcp-server", "--context", "ide", "--project-from-cwd"], enabled: true },
+          other: { keep: true },
+        },
+      }),
     });
 
-    const result = writeSerenaOpenCodeMcpConfig({ configPath: path, ownedRoot, readiness, command, fileSystem: fake.fileSystem });
+    const first = writeSerenaOpenCodeMcpConfig({ configPath: path, ownedRoot, readiness, command, fileSystem: fake.fileSystem });
+    const second = writeSerenaOpenCodeMcpConfig({ configPath: path, ownedRoot, readiness, command, fileSystem: fake.fileSystem });
 
-    expect(result).toMatchObject({ ok: true, status: "updated" });
+    expect(first).toMatchObject({ ok: true, status: "updated" });
+    expect(second).toMatchObject({ ok: true, status: "unchanged" });
+    expect(fake.writes).toHaveLength(1);
+    expect(fake.renames).toHaveLength(1);
     const config = JSON.parse(fake.files.get(path)!);
     expect(config.mcp.serena.command).toEqual([...command]);
     expect(config.mcp.other).toEqual({ keep: true });

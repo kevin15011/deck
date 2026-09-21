@@ -114,7 +114,7 @@ describe("runRunnerReviewPlan contract tests", () => {
       expect(writes[0]).toMatchObject({
         options: {
           serverName: "serena",
-          command: [executable, "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+          command: [executable, "start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"],
         },
       });
       expect(JSON.stringify(results)).not.toContain(executable);

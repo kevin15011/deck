@@ -605,7 +605,7 @@ describe("OpenCode Serena evidence handoff", () => {
       operation,
       readiness: evidence,
       command: executable,
-      args: ["start-mcp-server", "--context", "ide", "--project-from-cwd"],
+      args: ["start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"],
     });
   });
 
@@ -730,6 +730,8 @@ describe("OpenCode Serena evidence handoff", () => {
         "--context",
         "ide",
         "--project-from-cwd",
+        "--open-web-dashboard",
+        "false",
       ]);
       expect(written.mcp.unrelated).toEqual({ type: "remote", url: "https://example.test/mcp" });
     } finally {

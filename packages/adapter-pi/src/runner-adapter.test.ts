@@ -638,7 +638,7 @@ describe("Pi Serena adapter projection", () => {
       mcpServers: {
         serena: {
           command: readiness.resolvedExecutablePath,
-          args: ["start-mcp-server", "--context", "ide", "--project-from-cwd"],
+          args: ["start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"],
         },
       },
     });

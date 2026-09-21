@@ -18,6 +18,7 @@ import {
 import type { DeckConfigStore } from "../../deck-config-store";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import {
+  SERENA_MCP_ARGS,
   validateSerenaOperationAuthorization,
   validateSerenaReadinessEvidence,
   type SerenaBootstrapAuthorization,
@@ -888,7 +889,7 @@ async function runSerenaAction(
       const result = await writer({
         serverName: "serena",
         type: "local",
-        command: [readiness.resolvedExecutablePath, "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+        command: [readiness.resolvedExecutablePath, ...SERENA_MCP_ARGS],
       }, context);
       if (!result.ok) {
         return {
@@ -1510,7 +1511,7 @@ async function writeMcpConfigAction(
     const result = await writer({
       serverName: "serena",
       type: "local",
-      command: ["serena", "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+      command: ["serena", ...SERENA_MCP_ARGS],
     });
     if (!result.ok) {
       return {

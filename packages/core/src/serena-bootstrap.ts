@@ -25,6 +25,8 @@ export const SERENA_MCP_ARGS = [
   "--context",
   "ide",
   "--project-from-cwd",
+  "--open-web-dashboard",
+  "false",
 ] as const;
 
 /** Fixed bounds for remote content and child diagnostics. */

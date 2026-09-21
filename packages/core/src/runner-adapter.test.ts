@@ -277,7 +277,7 @@ describe("runner-adapter / detection facet (T2.9)", () => {
       },
       readiness,
       command: readiness.resolvedExecutablePath,
-      args: ["start-mcp-server", "--context", "ide", "--project-from-cwd"] as const,
+      args: ["start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"] as const,
       revalidate,
     };
     const writerResult = await runEvidenceGatedSerenaWriter(

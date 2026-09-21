@@ -871,7 +871,7 @@ describe("Serena action-runner evidence and cancellation gates", () => {
     expect(writerInputs[0]).toMatchObject({
       options: {
         serverName: "serena",
-        command: [SERENA_EVIDENCE.resolvedExecutablePath, "start-mcp-server", "--context", "ide", "--project-from-cwd"],
+        command: [SERENA_EVIDENCE.resolvedExecutablePath, "start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"],
       },
     });
     expect(JSON.stringify(results)).not.toContain(SERENA_ROOT);
