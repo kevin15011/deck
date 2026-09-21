@@ -23,6 +23,7 @@ The root [package metadata](package.json) is authoritative for scripts:
 | `bun run build` | Build release binaries. |
 | `bun run build:dry-run` | Exercise the binary build flow without publishing. |
 | `bun run canary:install` | Compile this checkout and install a `deck-canary` binary for local cross-project testing without replacing stable `deck`. |
+| `bun run sandbox:compat` | Build current working source in a disposable copy and verify one native archive with isolated Node 20 and 24. |
 | `bun run deck:run` | Build and run the local debug CLI. |
 | `bun run test` | Run the repository test suite. |
 
@@ -31,6 +32,14 @@ Direct supported forms are `bun test tests/documentation-governance.test.ts`, `b
 `bun run canary:install -- --dir /absolute/bin` builds only the current host target, installs the binary as `deck-canary`, and runs a bounded `deck-canary version` smoke. It does not regenerate tracked source artifacts, create release archives, checksums, release descriptors, shell-profile edits, or stable `deck` replacements. The default destination is `DECK_CANARY_BIN_DIR` when set, otherwise `~/.local/bin`; use `--dry-run` to print the planned path without compiling or writing. The command stores immutable digest-named payloads next to an atomic relative `deck-canary` symlink alias; old payloads may remain for manual rollback by retargeting the alias.
 
 ## Verification tiers
+
+### Native Node compatibility sandbox
+
+Run `bun run sandbox:compat -- --report /absolute/path/to/new-compatibility.json` with the canonical Bun version pinned in [release.yml](.github/workflows/release.yml) (currently **1.3.12**). Git, tar, a native Linux/macOS x64/arm64 host, and network access for frozen dependencies and official Node downloads are required. The command rejects a different Bun version before building or downloading. The report path is optional; JSON is always printed and existing report files are never overwritten.
+
+The sandbox copies tracked working-tree modifications and non-ignored untracked files, excluding symlinks, dotfiles other than `.github`, known secret filenames, dependencies, caches and build outputs. It regenerates canonical runner assets, build metadata and skills in that copy, builds once, checks official Node tarballs against `nodejs.org` SHA-256 metadata, then runs the **same archive** under both actual Node majors outside the checkout. It does not replace Deck, install global Node, change profiles, or write to the real HOME. Temporary source, tools and execution directories are removed when the command completes, including normal failures.
+
+Deck itself is Bun-compiled: an empty-PATH `deck version` check proves standalone startup and build identity. Separately, each selected Node executes the actual generated Codex hook against an offline loopback fixture covering capture, recall/context, denied requests and invalid input. Reports include candidate/hook digests, actual Node versions and per-case results; failures exit nonzero. This is **not** certification of arbitrary npm installations, third-party runners, every OS version, or a container/security boundary. Run only trusted source and dependency lifecycle scripts; filename exclusions cannot identify secrets embedded in arbitrary source files. Only the native host target is checked locally; the other targets require CI.
 
 Start with the smallest affected test, then use broader gates when the change requires them:
 

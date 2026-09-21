@@ -1,0 +1,32 @@
+schema: spec-registry-events-v1
+events:
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-09-20"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - Created bounded proposal, specification, design and tasks before implementation.
+      - No publication, global installation, destructive Git operation or historical OpenSpec edits authorized.
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-09-20"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - Implemented sandbox, deterministic tests, native CI matrix and documentation.
+      - Fixed cancellation and reproduced macOS signing failures with red/green evidence.
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-09-20"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - Focused 94-test run, clean isolated repository typecheck and real native Node 20/24 sandbox passed.
+      - Independent code review approved; remote CI matrix remains unexecuted and local broad-suite result was not captured.

@@ -1,0 +1,28 @@
+schema: spec-registry-v1
+changeId: node-release-compatibility-sandbox
+name: Current-source Node release compatibility sandbox
+currentPhase: verify
+status: passed_with_warnings
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+provenance:
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-6-astra
+    timestamp: "2026-09-20"
+    registryWrite: non-deferred
+    note: User requested isolated current-source Node 20/24 Linux/macOS pre-release compatibility verification.
+  - phase: verify
+    agent: deck-lead
+    model: openai/gpt-6-astra
+    timestamp: "2026-09-20"
+    registryWrite: non-deferred
+    note: 94 focused tests, isolated typecheck and real macOS ARM64 Node 20/24 acceptance passed; independent code review approved. Remote matrix and broad-suite completion remain pending.

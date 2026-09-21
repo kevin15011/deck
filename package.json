@@ -8,6 +8,7 @@
     "build": "bun run bench:memory && bun run verify:supermemory-compiled && bun run scripts/build-binaries.ts",
     "build:dry-run": "bun run scripts/build-binaries.ts --dry-run",
     "canary:install": "bun run scripts/install-canary.ts",
+    "sandbox:compat": "bun run scripts/verify-binary-compatibility.ts",
     "deck:run": "DECK_DEBUG=1 bun run build:dry-run && DECK_DEBUG=1 ./dist/cli/deck",
     "test": "bun test --timeout 30000",
     "bench:memory": "bun run benchmarks/deckmemorybench.ts",

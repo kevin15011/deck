@@ -31,6 +31,35 @@ The [helper](../../scripts/prepare-release.ts) and [runtime schema](../../apps/c
 5. After confirmation, create and push the stable tag using the agreed release process. Observe the [release workflow](../../.github/workflows/release.yml): it builds binaries, generates build information and the skill bundle, creates checksums, prepares `release.json`, and attaches release assets.
 6. After publication, confirm the release page contains the expected archives, checksums, and descriptor when applicable. Run the installed CLI's help/version or the relevant supported smoke check. Record any discrepancy before announcing completion.
 
+## Native compatibility gate
+
+The release workflow also runs on pull requests and `workflow_dispatch`, with read-only contents permission by default. Neither path can publish. Stable and draft publishing jobs require successful compatibility verification and an explicit tag/main **push**, respectively; only those jobs receive contents-write permission. Existing test, typecheck and provider-runtime gates remain prerequisites.
+
+Build jobs install frozen dependencies, regenerate runner assets with canonical Bun **1.3.12**, generate explicit version/commit/target/channel metadata and skills, and compile each archive once. The compatibility matrix downloads those exact artifacts and runs Node **20 and 24** on each native target:
+
+| Target | Native runner |
+|---|---|
+| `linux-x64` | `ubuntu-22.04` |
+| `linux-arm64` | `ubuntu-24.04-arm` |
+| `darwin-x64` | `macos-15-intel` |
+| `darwin-arm64` | `macos-14` |
+
+All eight cells must pass before either publishing job. Hosted runner availability depends on repository/GitHub support; unavailable native runners are blockers, not grounds to substitute cross-compilation evidence. Publication downloads the already-verified `deck-*` artifacts and never recompiles them. `compatibility-*` JSON artifacts are separate from release archives/checksum inputs. The generated hook accompanies its build artifact for the Node fixture, but is not a published release asset.
+
+For local development, use [the current-source sandbox](../../CONTRIBUTING.md#native-node-compatibility-sandbox). To verify an existing native candidate without downloading Node or installing dependencies, use an already-provisioned **absolute** Node executable and the generated hook from the candidate build:
+
+```sh
+bun scripts/verify-binary-compatibility.ts \
+  --archive /candidate/deck_v0.4.0_linux-x64.tar.gz \
+  --checksums /candidate/checksums.txt \
+  --node /isolated/node20/bin/node --major 20 \
+  --target linux-x64 --version 0.4.0 --commit FULL_EXPECTED_COMMIT_SHA --channel dev \
+  --hook /candidate/packages/adapter-codex/assets/codex/hooks/developer-team-execution.generated.js \
+  --report /reports/new-compatibility.json
+```
+
+Use exact candidate metadata, not the example placeholders, and repeat with Node 24. The verifier checks native target, archive digest and build identity, standalone startup with empty PATH, and the generated hook's Node protocol behavior. Reports explicitly distinguish these checks. No external provider is called; upstream npm package compatibility and untested OS versions remain outside the fixture's coverage. Retain failing JSON as evidence and fix the source rather than bypassing this gate.
+
 ## Rollback
 
 Use a normal revert or follow-up restoration commit for a release mistake. Do not use destructive reset, restore, clean, or history-rewriting commands. If an artifact or descriptor is wrong, stop publication where possible, correct the source-owned input, and rerun the verification sequence with explicit confirmation gates.
