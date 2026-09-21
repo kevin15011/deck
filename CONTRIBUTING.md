@@ -7,11 +7,13 @@
 
 ## Prerequisites and setup
 
-Use a current Bun runtime and Git. From a repository checkout, install dependencies before running commands:
+Use Bun 1.3.12, as pinned by `.bun-version` and `package.json`, plus Git. From a repository checkout, install dependencies before running commands:
 
 ```sh
-bun install
+bun install --frozen-lockfile
 ```
+
+Build and generation commands fail closed on a different Bun version because tracked runtime assets must remain reproducible.
 
 ## Supported root commands
 
@@ -20,7 +22,7 @@ The root [package metadata](package.json) is authoritative for scripts:
 | Command | Use |
 |---|---|
 | `bun run deck` | Run the CLI from the workspace. |
-| `bun run build` | Build release binaries. |
+| `bun run build` | Build every release target; Darwin targets require macOS because signing fails closed elsewhere. |
 | `bun run build:dry-run` | Exercise the binary build flow without publishing. |
 | `bun run canary:install` | Compile this checkout and install a `deck-canary` binary for local cross-project testing without replacing stable `deck`. |
 | `bun run deck:run` | Build and run the local debug CLI. |

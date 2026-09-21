@@ -650,6 +650,7 @@ export type DeckAppDependencies = {
   configStore?: DeckConfigStore;
   secretStore?: import("@deck/core").DeckSecretStore;
   validateSupermemoryReadOnlyApi?: typeof validateSupermemoryRuntimeCredentialReadOnly;
+  writeSupermemoryPiMcpConfig?: typeof writeSupermemoryPiMcpConfig;
   initialScreen?: Screen;
   initialUpgradeDescriptor?: ReleaseJson | null;
   initialSelectedEnvironments?: EnvironmentId[];
@@ -3116,7 +3117,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           setMemoryStatus(`Supermemory MCP setup failed: ${message}`);
           return false;
         }
-        const result = writeSupermemoryPiMcpConfig({ token: values.token.trim(), serverName: "supermemory", projectScope: resolved.scope });
+        const result = (dependencies.writeSupermemoryPiMcpConfig ?? writeSupermemoryPiMcpConfig)({
+          token: values.token.trim(),
+          serverName: "supermemory",
+          projectScope: resolved.scope,
+        });
         if (!result.ok) {
           const message = `Unable to configure Supermemory in Pi MCP config at ${result.path}. Check file permissions and existing MCP config JSON, then try again.`;
           setMemoryProvider(undefined);

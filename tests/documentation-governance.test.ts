@@ -229,7 +229,7 @@ function isDocumentedDeckCommandShape(args: string[]): boolean {
 }
 
 function isSupportedDirectCommand(command: string): boolean {
-  if (command === "bun install" || command === "bun test" || command === "bunx tsc --noEmit") {
+  if (command === "bun install" || command === "bun install --frozen-lockfile" || command === "bun test" || command === "bunx tsc --noEmit") {
     return true;
   }
   if (new Set([
@@ -281,6 +281,7 @@ function extractDocumentedDirectCommands(text: string): string[] {
 
 
 const directCommandExpectations = [
+  ["bun install --frozen-lockfile", true],
   ["bun test packages/core/src/teams/developer/git-safety.test.ts", true],
   ["bunx tsc --noEmit", true],
   ["deck", true],

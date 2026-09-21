@@ -25,6 +25,17 @@ export type BuildInfo = {
  */
 let cachedBuildInfo: BuildInfo | undefined;
 
+function getCompiledBuildInfo(): BuildInfo | undefined {
+  const version = process.env.DECK_COMPILED_BUILD_VERSION;
+  const commit = process.env.DECK_COMPILED_BUILD_COMMIT;
+  const date = process.env.DECK_COMPILED_BUILD_DATE;
+  const target = process.env.DECK_COMPILED_BUILD_TARGET;
+  const channel = process.env.DECK_COMPILED_BUILD_CHANNEL;
+  if (!version || !commit || !date || !target || !channel) return undefined;
+  if (channel !== "stable" && channel !== "beta" && channel !== "dev") return undefined;
+  return { version, commit, date, target, channel };
+}
+
 function getDevDefaults(): BuildInfo {
   return {
     version: "0.0.0-dev",
@@ -43,6 +54,12 @@ function getDevDefaults(): BuildInfo {
  */
 export function getBuildInfo(): BuildInfo {
   if (cachedBuildInfo) {
+    return cachedBuildInfo;
+  }
+
+  const compiledBuildInfo = getCompiledBuildInfo();
+  if (compiledBuildInfo) {
+    cachedBuildInfo = compiledBuildInfo;
     return cachedBuildInfo;
   }
 

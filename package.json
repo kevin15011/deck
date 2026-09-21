@@ -1,8 +1,9 @@
 {
   "name": "deck",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.3.12",
   "scripts": {
     "deck": "bun run --cwd apps/cli deck",
     "build": "bun run bench:memory && bun run verify:supermemory-compiled && bun run scripts/build-binaries.ts",

@@ -9,6 +9,23 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-21
+
+### Changed
+
+- Release jobs now use the repository's canonical target-aware build pipeline and Bun 1.3.12 toolchain contract instead of duplicating compile and archive commands in GitHub Actions.
+- Local canary builds validate workspace dependencies before compilation and embed the current checkout version, commit, target, date, and development channel without rewriting tracked generated metadata.
+
+### Fixed
+
+- Darwin binaries now remove Bun's malformed placeholder signature, apply an ad-hoc macOS signature, and verify it before archive creation. Extracted release artifacts are verified again and executed on matching CI architectures.
+- The macOS installer rejects unsigned or invalid candidates before replacing an existing binary and reports empty status-137 failures as `SIGKILL` before rollback.
+- macOS test and runtime smokes now account for canonical `/private` temporary paths, BSD tar behavior, host platform selection, and signed compiled executables.
+
+### Security
+
+- Runner environment sanitization now removes personal access token variables such as `GITHUB_MCP_PAT` while preserving Deck-owned loopback credentials.
+
 ## [0.4.0] - 2026-09-07
 
 ### Added
@@ -105,7 +122,8 @@ All notable release changes to Deck are recorded here. Current release procedure
 - OpenCode model selection now uses the model inventory resolved by the active runner.
 - Streamlined project documentation and strengthened contributor, architecture, release, and documentation-governance guidance.
 
-[Unreleased]: https://github.com/kevin15011/deck/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/kevin15011/deck/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/kevin15011/deck/releases/tag/v0.4.1
 [0.4.0]: https://github.com/kevin15011/deck/releases/tag/v0.4.0
 [0.3.0]: https://github.com/kevin15011/deck/releases/tag/v0.3.0
 [0.2.6]: https://github.com/kevin15011/deck/releases/tag/v0.2.6

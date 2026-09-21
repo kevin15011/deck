@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { STANDALONE_SKILLS } from "../packages/core/src/skills/external/index";
+import { assertCanonicalBunRuntime } from "./generate-runner-execution-assets";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
@@ -192,5 +193,6 @@ export const SKILL_BUNDLES = STANDALONE_SKILL_BUNDLES;
 
 // Run if called directly
 if (import.meta.main) {
+  assertCanonicalBunRuntime(ROOT);
   generateBundle();
 }

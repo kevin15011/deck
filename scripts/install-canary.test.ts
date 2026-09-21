@@ -1,12 +1,12 @@
 /// <reference types="bun" />
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { ROOT } from "./build-binaries";
-import { installCanary, parseCanaryInstallArgs } from "./install-canary";
+import { getVersion, ROOT } from "./build-binaries";
+import { assertCanaryWorkspaceDependencies, installCanary, parseCanaryInstallArgs } from "./install-canary";
 
 const roots: string[] = [];
 
@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function tempRoot(name: string): string {
-  const root = mkdtempSync(join(tmpdir(), name));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), name)));
   roots.push(root);
   return root;
 }
@@ -30,7 +30,7 @@ function logger() {
 }
 
 function successSpawn() {
-  return { success: true, stdout: Buffer.from("deck 0.0.0-test"), stderr: Buffer.from("") } as never;
+  return { success: true, stdout: Buffer.from(`deck ${getVersion()}`), stderr: Buffer.from("") } as never;
 }
 
 function failingSpawn() {
@@ -99,6 +99,20 @@ describe("install-canary argument planning", () => {
     expect(() => parseCanaryInstallArgs(["--dir", "/tmp/../bin"], { homeDir: home })).toThrow("path segments");
     expect(() => parseCanaryInstallArgs(["--deck"], { homeDir: home })).toThrow("Unknown flag");
     expect(() => parseCanaryInstallArgs(["deck"], { homeDir: home })).toThrow("Unexpected positional");
+  });
+});
+
+describe("install-canary workspace readiness", () => {
+  test("reports every unresolved workspace package before compilation", () => {
+    expect(() => assertCanaryWorkspaceDependencies((specifier) => {
+      if (specifier === "@deck/adapter-codex" || specifier === "@deck/provider-tavily") {
+        throw new Error("missing");
+      }
+      return `/workspace/${specifier}`;
+    })).toThrow("@deck/adapter-codex, @deck/provider-tavily");
+
+    expect(() => assertCanaryWorkspaceDependencies(() => "/workspace/package"))
+      .not.toThrow();
   });
 });
 
@@ -208,6 +222,27 @@ describe("install-canary hermetic install effects", () => {
     expect(readFileSync(join(root, ".bashrc"), "utf-8")).toBe("profile-sentinel");
     expect(readFileSync(join(root, ".config", "deck.json"), "utf-8")).toBe("config-sentinel");
     expect(log.lines.join("\n")).not.toContain("export PATH");
+  });
+
+  test("rejects a successful canary smoke that reports the wrong checkout version", async () => {
+    const root = tempRoot("deck-canary-version-mismatch-");
+    const bin = join(root, "bin");
+    mkdirSync(bin, { recursive: true });
+    chmodSync(bin, 0o755);
+    const log = logger();
+
+    const code = await installCanary(["--dir", bin], {
+      homeDir: root,
+      stdout: log.stdout,
+      stderr: log.stderr,
+      spawnSync: (() => ({ success: true, stdout: Buffer.from("deck 0.0.0"), stderr: Buffer.from("") })) as typeof Bun.spawnSync,
+      buildCanaryBinary: fakeBuild("wrong-version").buildCanaryBinary as never,
+      tempDir: () => join(root, "build"),
+    });
+
+    expect(code).toBe(1);
+    expect(log.lines.join("\n")).toContain(`expected deck ${getVersion()}`);
+    expect(existsSync(join(bin, "deck-canary"))).toBe(false);
   });
 
   test("build failure and staging/chmod/rename failures clean owned temp and transaction artifacts", async () => {

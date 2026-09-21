@@ -334,7 +334,7 @@ function isTrustedSshGithubAlias(alias: string, deps: SshConfigTrustDeps = {}): 
 
 function resolveTrustedAccountHome(deps: SshConfigTrustDeps): string | undefined {
   if (deps.homeDir !== undefined) return canonicalDirectory(deps.homeDir);
-  if (process.platform !== "linux") return undefined;
+  if (process.platform !== "linux" && deps.passwdPath === undefined) return undefined;
   const uid = deps.effectiveUid?.() ?? (typeof process.geteuid === "function" ? process.geteuid() : undefined);
   if (uid === undefined) return undefined;
   const passwd = readTrustedPasswdFile(deps);

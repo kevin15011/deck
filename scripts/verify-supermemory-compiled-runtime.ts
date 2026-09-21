@@ -3,6 +3,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, wr
 import { spawn as nodeSpawn } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { codeSign } from "./build-binaries";
 
 const targets = ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-x64", "bun-darwin-arm64"] as const;
 const dryRun = process.argv.includes("--dry-run");
@@ -83,6 +84,7 @@ try {
   for (const target of selected) {
     const build = Bun.spawnSync({ cmd: ["bun", "build", "--compile", `--target=${target}`, "--outfile", outfile, source], cwd: process.cwd() });
     if (!build.success) throw new Error(`compile failed for ${target}: ${new TextDecoder().decode(build.stderr)}`);
+    if (process.platform === "darwin" && target.startsWith("bun-darwin-")) codeSign(outfile);
     if (target === hostTarget()) {
       const run = Bun.spawnSync({ cmd: [outfile], cwd: temp, env: { PATH: "" } });
       if (!run.success) throw new Error(`compiled runtime smoke failed: ${new TextDecoder().decode(run.stderr)} ${new TextDecoder().decode(run.stdout)}`);
@@ -90,6 +92,7 @@ try {
       const deckOutfile = join(temp, "deck-cli");
       const deckBuild = Bun.spawnSync({ cmd: ["bun", "build", "--compile", `--target=${target}`, "--outfile", deckOutfile, join(process.cwd(), "apps/cli/src/main.tsx")], cwd: process.cwd() });
       if (!deckBuild.success) throw new Error(`Deck CLI compile failed for ${target}: ${new TextDecoder().decode(deckBuild.stderr)}`);
+      if (process.platform === "darwin" && target.startsWith("bun-darwin-")) codeSign(deckOutfile);
       const archiveSource = join(temp, "archive-source");
       const archivePath = join(temp, "deck_v0.0.0_smoke.tar.gz");
       const extracted = join(temp, "extracted");

@@ -4,6 +4,10 @@ import { renderToString } from "ink";
 
 import { HomeScreen } from "./home-screen";
 import type { ReleaseCheckState } from "../release-check";
+import { getCurrentPlatformTriple } from "../../upgrade-command/release-descriptor";
+
+const currentPlatform = getCurrentPlatformTriple();
+const foreignPlatform = currentPlatform === "darwin-arm64" ? "linux-x64" : "darwin-arm64";
 
 describe("HomeScreen release-check banner (T3.3)", () => {
   test("renders the menu with no banner when no release check is provided", () => {
@@ -48,8 +52,8 @@ describe("HomeScreen release-check banner (T3.3)", () => {
           id: "binary-1",
           kind: "binary",
           required: true,
-          platform: "linux-x64",
-          asset_name: "deck_v1.2.0_linux-x64.tar.gz",
+          platform: currentPlatform,
+          asset_name: `deck_v1.2.0_${currentPlatform}.tar.gz`,
           url: "https://example.com/a.tar.gz",
           sha256: "a".repeat(64),
           notes: "",
@@ -87,8 +91,8 @@ describe("HomeScreen release-check banner (T3.3)", () => {
           id: "binary-darwin",
           kind: "binary",
           required: true,
-          platform: "darwin-arm64",
-          asset_name: "deck_v1.2.0_darwin-arm64.tar.gz",
+          platform: foreignPlatform,
+          asset_name: `deck_v1.2.0_${foreignPlatform}.tar.gz`,
           url: "https://example.com/a.tar.gz",
           sha256: "a".repeat(64),
           notes: "",

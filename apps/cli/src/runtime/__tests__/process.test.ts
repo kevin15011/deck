@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { realpathSync } from "node:fs";
 
 describe("runtime/process.ts", () => {
   describe("spawnAsync", () => {
@@ -42,7 +43,7 @@ describe("runtime/process.ts", () => {
       const result = await spawnAsync("pwd", [], { cwd: "/tmp" });
 
       expect(result.exitCode).toBe(0);
-      expect(result.stdout.trim()).toBe("/tmp");
+      expect(result.stdout.trim()).toBe(realpathSync("/tmp"));
     });
 
     it("accepts env option to pass environment variables", async () => {

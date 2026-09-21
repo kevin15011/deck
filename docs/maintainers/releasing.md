@@ -16,9 +16,11 @@ bun test scripts/prepare-release.test.ts
 bun test
 bun run bench:memory
 bun run verify:supermemory-compiled
-bun run build
+bun run build:dry-run
 bunx tsc --noEmit
 ```
+
+The release workflow owns the four-platform artifact matrix. A local all-target `bun run build` requires macOS because Darwin signing fails closed; Linux maintainers use the host-only dry run above and rely on the matrix for signed Darwin artifacts.
 
 3. The current workflow generates `release.json` for both the stable-tag release path and the main-branch pre-release path. Use the source-backed helper only to inspect or prepare descriptor data locally when needed:
 

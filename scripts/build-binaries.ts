@@ -6,10 +6,11 @@
  * Compiles deck CLI into standalone tar.gz archives for distribution.
  *
  * Usage:
- *   bun run scripts/build-binaries.ts [--dry-run]
+ *   bun run scripts/build-binaries.ts [--dry-run | --target <os-arch>]
  *
  * Options:
- *   --dry-run  Run on host platform only, don't build all targets
+ *   --dry-run          Run on host platform only, don't build all targets
+ *   --target <target>  Build one supported release target
  */
 
 import * as fs from "node:fs";
@@ -30,23 +31,54 @@ export const BUILD_TARGETS = [
 ] as const;
 
 export type BuildTarget = (typeof BUILD_TARGETS)[number];
+export type EmbeddedBuildInfo = {
+  version: string;
+  commit: string;
+  date: string;
+  target: string;
+  channel: "stable" | "beta" | "dev";
+};
 
-interface Args {
+export interface BuildArgs {
   dryRun: boolean;
   help: boolean;
+  target?: string;
 }
 
-function parseArgs(argv: string[]): Args {
-  const args: Args = { dryRun: false, help: false };
+export function getBuildTarget(targetName: string): BuildTarget {
+  const target = BUILD_TARGETS.find(([osName, archName]) => `${osName}-${archName}` === targetName);
+  if (!target) {
+    throw new Error(`Unsupported build target: ${targetName}. Expected one of: ${BUILD_TARGETS.map(([osName, archName]) => `${osName}-${archName}`).join(", ")}.`);
+  }
+  return target;
+}
+
+export function parseBuildArgs(argv: string[]): BuildArgs {
+  const args: BuildArgs = { dryRun: false, help: false };
   const rawArgs = argv.slice(2);
 
-  for (const arg of rawArgs) {
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const arg = rawArgs[index]!;
     if (arg === "--help" || arg === "-h") {
       args.help = true;
     } else if (arg === "--dry-run") {
       args.dryRun = true;
+    } else if (arg === "--target") {
+      const target = rawArgs[index + 1];
+      if (!target || target.startsWith("-")) throw new Error("--target requires a build target.");
+      getBuildTarget(target);
+      args.target = target;
+      index += 1;
+    } else if (arg.startsWith("--target=")) {
+      const target = arg.slice("--target=".length);
+      getBuildTarget(target);
+      args.target = target;
+    } else {
+      throw new Error(`Unknown build argument: ${arg}`);
     }
   }
+
+  if (args.dryRun && args.target) throw new Error("--dry-run cannot be combined with --target.");
 
   return args;
 }
@@ -61,10 +93,20 @@ export function getVersion(): string {
   return pkg.version || "0.0.0";
 }
 
+export function getGitCommit(spawnSync: typeof Bun.spawnSync = Bun.spawnSync): string {
+  const result = spawnSync({
+    cmd: ["git", "rev-parse", "--short", "HEAD"],
+    cwd: ROOT,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return result.success ? new TextDecoder().decode(result.stdout).trim() || "unknown" : "unknown";
+}
+
 /**
  * Run generate-build-info for a specific target.
  */
-export async function generateBuildInfo(target: string, version: string): Promise<void> {
+export async function generateBuildInfo(target: string, version: string, commit?: string): Promise<void> {
   console.log(`  Generating build info for ${target}...`);
   const proc = Bun.spawnSync({
     cmd: [
@@ -75,6 +117,7 @@ export async function generateBuildInfo(target: string, version: string): Promis
       version,
       "--target",
       target,
+      ...(commit ? ["--commit", commit] : []),
     ],
     cwd: ROOT,
   });
@@ -136,7 +179,12 @@ export async function buildBinary(
   archName: string,
   bunTarget: string,
   version: string,
-  options: { binaryName?: string; outputDir?: string } = {},
+  options: {
+    binaryName?: string;
+    outputDir?: string;
+    buildInfo?: EmbeddedBuildInfo;
+    spawnSync?: typeof Bun.spawnSync;
+  } = {},
 ): Promise<string> {
   const targetName = `${osName}-${archName}`;
   console.log(`  Building ${targetName} (${bunTarget})...`);
@@ -152,17 +200,32 @@ export async function buildBinary(
   }
 
   // Build the actual binary
-  const proc = Bun.spawnSync({
-    cmd: [
+  const cmd = [
       "bun",
       "build",
       "--compile",
       `--target=${bunTarget}`,
       "--outfile",
       outputPath,
-      path.join(CLI_DIR, "src/main.tsx"),
-    ],
+  ];
+  let env: NodeJS.ProcessEnv | undefined;
+  if (options.buildInfo) {
+    cmd.push("--env=DECK_COMPILED_BUILD_*");
+    env = {
+      ...process.env,
+      DECK_COMPILED_BUILD_VERSION: options.buildInfo.version,
+      DECK_COMPILED_BUILD_COMMIT: options.buildInfo.commit,
+      DECK_COMPILED_BUILD_DATE: options.buildInfo.date,
+      DECK_COMPILED_BUILD_TARGET: options.buildInfo.target,
+      DECK_COMPILED_BUILD_CHANNEL: options.buildInfo.channel,
+    };
+  }
+  cmd.push(path.join(CLI_DIR, "src/main.tsx"));
+
+  const proc = (options.spawnSync ?? Bun.spawnSync)({
+    cmd,
     cwd: ROOT,
+    ...(env ? { env } : {}),
   });
 
   if (!proc.success) {
@@ -187,20 +250,44 @@ function getArchiveFilename(version: string, osName: string, archName: string): 
 /**
  * Code sign binary (macOS only).
  */
-export function codeSign(binaryPath: string): void {
-  if (os.platform() !== "darwin") {
-    return;
+export function codeSign(
+  binaryPath: string,
+  deps: { platform?: NodeJS.Platform; spawnSync?: typeof Bun.spawnSync } = {},
+): void {
+  if ((deps.platform ?? os.platform()) !== "darwin") {
+    throw new Error(`Cannot code sign Darwin binary on ${deps.platform ?? os.platform()}.`);
   }
 
   console.log(`  Codesigning ${path.basename(binaryPath)}...`);
+  const spawnSync = deps.spawnSync ?? Bun.spawnSync;
 
-  // Silent signing: codesign -s - (ad-hoc)
-  const proc = Bun.spawnSync({
-    cmd: ["codesign", "-s", "-", binaryPath],
+  // Bun 1.3.12 emits a malformed placeholder signature on compiled Mach-O
+  // binaries. Remove it before applying the release's ad-hoc signature.
+  const remove = spawnSync({
+    cmd: ["codesign", "--remove-signature", binaryPath],
+    stdout: "pipe",
+    stderr: "pipe",
   });
+  if (!remove.success) {
+    throw new Error(`codesign signature removal failed for ${binaryPath}: ${new TextDecoder().decode(remove.stderr).trim()}`);
+  }
 
-  if (!proc.success) {
-    console.warn(`  Warning: codesign failed: ${new TextDecoder().decode(proc.stderr)}`);
+  const sign = spawnSync({
+    cmd: ["codesign", "--force", "--sign", "-", binaryPath],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (!sign.success) {
+    throw new Error(`codesign failed for ${binaryPath}: ${new TextDecoder().decode(sign.stderr).trim()}`);
+  }
+
+  const verify = spawnSync({
+    cmd: ["codesign", "--verify", "--deep", "--strict", "--verbose=2", binaryPath],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (!verify.success) {
+    throw new Error(`codesign verification failed for ${binaryPath}: ${new TextDecoder().decode(verify.stderr).trim()}`);
   }
 }
 
@@ -272,16 +359,24 @@ async function buildBinaries(targets: readonly (readonly [string, string, string
   await generateRunnerExecutionAssets();
 
   for (const [osName, archName, bunTarget] of targets) {
-    console.log(`=== Building ${osName}-${archName} ===`);
+    const targetName = `${osName}-${archName}`;
+    const buildInfo: EmbeddedBuildInfo = {
+      version,
+      commit: getGitCommit(),
+      date: new Date().toISOString().split("T")[0]!,
+      target: targetName,
+      channel: "stable",
+    };
+    console.log(`=== Building ${targetName} ===`);
 
     // Step 1: Generate build info
-    await generateBuildInfo(`${osName}-${archName}`, version);
+    await generateBuildInfo(targetName, version, buildInfo.commit);
 
     // Step 2: Generate skill bundle
     await generateSkillBundle();
 
     // Step 3: Build binary
-    const binaryPath = await buildBinary(osName, archName, bunTarget, version);
+    const binaryPath = await buildBinary(osName, archName, bunTarget, version, { buildInfo });
 
     // Step 4: Code sign if macOS
     if (osName === "darwin") {
@@ -313,7 +408,7 @@ async function buildBinaries(targets: readonly (readonly [string, string, string
 }
 
 async function main() {
-  const args = parseArgs(process.argv);
+  const args = parseBuildArgs(process.argv);
 
   if (args.help) {
     console.log(`Build deck binary releases.
@@ -322,12 +417,14 @@ Usage:
   bun run scripts/build-binaries.ts [options]
 
 Options:
-  --dry-run  Build only for current platform (testing)
-  --help, -h  Show this help message
+  --dry-run          Build only for current platform (testing)
+  --target <target>  Build one of: ${BUILD_TARGETS.map(([osName, archName]) => `${osName}-${archName}`).join(", ")}
+  --help, -h         Show this help message
 
 Examples:
   bun run scripts/build-binaries.ts
   bun run scripts/build-binaries.ts --dry-run
+  bun run scripts/build-binaries.ts --target darwin-arm64
 `);
     process.exit(0);
   }
@@ -335,29 +432,24 @@ Examples:
   const version = getVersion();
   console.log(`Version: ${version}`);
 
-  if (args.dryRun) {
+  if (args.target) {
+    await buildBinaries([getBuildTarget(args.target)], version);
+  } else if (args.dryRun) {
     // Dry run on host platform only
     const currentOs = os.platform();
     const currentArch = os.arch();
 
-    // Map to bun target
-    const bunTargets: Record<string, string> = {
-      "linux-x64": "bun-linux-x64",
-      "linux-arm64": "bun-linux-arm64",
-      "darwin-x64": "bun-darwin-x64",
-      "darwin-arm64": "bun-darwin-arm64",
-    };
-
     const key = `${currentOs}-${currentArch}`;
-    const bunTarget = bunTargets[key];
-
-    if (!bunTarget) {
+    let target: BuildTarget;
+    try {
+      target = getBuildTarget(key);
+    } catch {
       console.error(`No target mapping for ${key}`);
       process.exit(1);
     }
 
     console.log(`Dry run: ${key}`);
-    await buildBinaries([[currentOs, currentArch, bunTarget]], version);
+    await buildBinaries([target], version);
 
     // Print checksum for verification
     const checksumsPath = path.join(DIST_CLI_DIR, "checksums.txt");

@@ -401,6 +401,13 @@ describe("DeckApp synthetic runner production flow", () => {
             expect(validatedRoot).toBe(projectRoot);
             return { ok: true };
           }}
+          writeSupermemoryPiMcpConfig={() => ({
+            ok: true,
+            action: "unchanged",
+            path: join(projectRoot, "pi-mcp.json"),
+            serverName: "supermemory",
+            diagnostics: [],
+          })}
           initialScreen="supermemory-token"
           initialSelectedEnvironments={[...entry.environments]}
           initialSupermemorySetup={{ token }}
@@ -414,10 +421,11 @@ describe("DeckApp synthetic runner production flow", () => {
         await waitForOutput(instance, harness.output, "Supermemory");
         harness.input("\r");
         await waitForCondition(instance, () => existsSync(join(xdgConfigHome, "deck", "secrets", "supermemory-api-key.secret")), `${entry.name} secret write`);
+        await instance.waitUntilRenderFlush();
 
         expect(calls).toEqual(["api"]);
         expect(readFileSync(join(xdgConfigHome, "deck", "secrets", "supermemory-api-key.secret"), "utf8")).toBe(token);
-        expect(configStore.readRequired().adaptiveMemory.activeProvider).toBe("supermemory");
+        expect(configStore.readRequired().adaptiveMemory.activeProvider, harness.output()).toBe("supermemory");
         expect(harness.output()).not.toContain(token);
       } finally {
         instance.unmount();

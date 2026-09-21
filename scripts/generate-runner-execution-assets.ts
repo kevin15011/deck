@@ -52,14 +52,17 @@ function executingBunVersion(projectRoot: string, spawnSync: SpawnSync): string 
   return decode(version.stdout).split(/\s+/)[0] ?? "";
 }
 
-function assertCanonicalBunRuntime(projectRoot: string, spawnSync: SpawnSync): { bunPath: string; bunVersion: string } {
+export function assertCanonicalBunRuntime(
+  projectRoot = root,
+  spawnSync: SpawnSync = Bun.spawnSync,
+): { bunPath: string; bunVersion: string } {
   const expected = readCanonicalBunVersionFromReleaseWorkflow(projectRoot);
   const bunPath = process.execPath;
   const actual = executingBunVersion(projectRoot, spawnSync);
   if (actual !== expected) {
     throw new Error(
       [
-        `Runner execution asset generation requires Bun ${expected} from .github/workflows/release.yml, but the executing Bun at ${bunPath} is ${actual || "unknown"}.`,
+        `Tracked asset generation requires Bun ${expected} from .github/workflows/release.yml, but the executing Bun at ${bunPath} is ${actual || "unknown"}.`,
         "No outputs were written.",
         `Run this script with a verified isolated Bun ${expected} binary or in the release workflow pinned toolchain; do not regenerate these assets with a different global or PATH-selected Bun.`,
       ].join(" "),

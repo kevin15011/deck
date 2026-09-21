@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { codeSign } from "../../../scripts/build-binaries";
 
 const roots: string[] = [];
 const repositoryRoot = resolve(import.meta.dir, "../../..");
@@ -32,6 +33,7 @@ describe("compiled Web Search smoke", () => {
       encoding: "utf8",
     });
     expect(build.status).toBe(0);
+    if (process.platform === "darwin") codeSign(compiled);
 
     const isolated = join(root, "isolated");
     const release = join(isolated, "release");
