@@ -9,6 +9,17 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-09-21
+
+### Changed
+
+- Codex project guidance now remains architecture-focused while dynamic Developer Team and Adaptive Memory policy stays on runner-owned runtime surfaces.
+
+### Fixed
+
+- Deck-managed Adaptive Memory now resolves exact macOS SSH host aliases such as `work → github.com` from protected operating-system account configuration, so project identity and recall work without rewriting Git remotes.
+- Hardened macOS account and SSH configuration validation against ambient environment influence, unsafe paths, incomplete account records, file growth, unsupported directives, and failed-identity provider access.
+
 ## [0.4.2] - 2026-09-21
 
 ### Fixed
@@ -129,7 +140,9 @@ All notable release changes to Deck are recorded here. Current release procedure
 - OpenCode model selection now uses the model inventory resolved by the active runner.
 - Streamlined project documentation and strengthened contributor, architecture, release, and documentation-governance guidance.
 
-[Unreleased]: https://github.com/kevin15011/deck/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/kevin15011/deck/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/kevin15011/deck/releases/tag/v0.4.3
+[0.4.2]: https://github.com/kevin15011/deck/releases/tag/v0.4.2
 [0.4.1]: https://github.com/kevin15011/deck/releases/tag/v0.4.1
 [0.4.0]: https://github.com/kevin15011/deck/releases/tag/v0.4.0
 [0.3.0]: https://github.com/kevin15011/deck/releases/tag/v0.3.0

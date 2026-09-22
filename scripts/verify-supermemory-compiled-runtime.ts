@@ -7,6 +7,12 @@ import { codeSign } from "./build-binaries";
 
 const targets = ["bun-linux-x64", "bun-linux-arm64", "bun-darwin-x64", "bun-darwin-arm64"] as const;
 const dryRun = process.argv.includes("--dry-run");
+const verifyDarwinAccountBoundary = process.argv.includes("--darwin-account-boundary");
+const darwinBoundaryProjectRootIndex = process.argv.indexOf("--project-root");
+const darwinBoundaryProjectRoot = darwinBoundaryProjectRootIndex >= 0 ? process.argv[darwinBoundaryProjectRootIndex + 1] : undefined;
+if (verifyDarwinAccountBoundary && (process.platform !== "darwin" || !darwinBoundaryProjectRoot || darwinBoundaryProjectRoot.startsWith("-"))) {
+  throw new Error("--darwin-account-boundary requires --project-root <verified-git-project-root> on a Darwin host; it performs read-only dscacheutil and protected SSH configuration verification.");
+}
 const temp = mkdtempSync(join(tmpdir(), "deck-sm-compiled-"));
 const calls: Array<{ path: string; method: string; authorization: string | null; body: any }> = [];
 const server = Bun.serve({
@@ -28,6 +34,9 @@ try {
   const outfile = join(temp, "harness");
   writeFileSync(source, `
     import { createSupermemoryRuntime, createSupermemoryHttpTransport } from ${JSON.stringify(join(process.cwd(), "packages/adapter-supermemory/src/runtime.ts"))};
+    import { resolveCanonicalSupermemoryProjectScope } from ${JSON.stringify(join(process.cwd(), "packages/core/src/memory/canonical-supermemory-project.ts"))};
+    import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
+    import { join } from "node:path";
     const calls: Array<{ path: string; method: string; authorization: string | null; body: any }> = [];
     const server = Bun.serve({
       port: 0,
@@ -44,7 +53,54 @@ try {
       },
     });
     try {
-      const scope = "sm_project_v1_kevin15011_deck";
+      const aliasRoot = join(process.cwd(), "darwin-ssh-alias-identity");
+      const aliasHome = join(aliasRoot, "account-home");
+      const aliasConfig = join(aliasHome, ".ssh", "config");
+      const aliasProject = join(aliasRoot, "project");
+      mkdirSync(join(aliasHome, ".ssh"), { recursive: true, mode: 0o700 });
+      mkdirSync(join(aliasProject, ".git"), { recursive: true, mode: 0o700 });
+      writeFileSync(aliasConfig, "Host work\\n  HostName github.com\\n  AddKeysToAgent 5m\\n", { mode: 0o600 });
+      writeFileSync(join(aliasProject, ".git", "config"), "[remote \\\"origin\\\"]\\n\\turl = git@work:comodin-software/espritec-theme.git\\n", { mode: 0o600 });
+      const aliasUid = Number(lstatSync(aliasHome).uid);
+      let accountQueryChecked = false;
+      const aliasScope = resolveCanonicalSupermemoryProjectScope({
+        projectRoot: aliasProject,
+        remotes: [],
+        sshConfig: {
+          platform: "darwin",
+          effectiveUid: () => aliasUid,
+          lstatSync: (path) => {
+            if (!["/", "/usr", "/usr/bin", "/usr/bin/dscacheutil"].includes(path)) throw new Error("Darwin account lookup used an unexpected executable path");
+            const stat = lstatSync(path === "/usr/bin/dscacheutil" ? aliasConfig : aliasHome);
+            return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: 0, mode: path === "/usr/bin/dscacheutil" ? 0o100755 : 0o40755 });
+          },
+          darwinAccountLookup: (input) => {
+            if (input.executable !== "/usr/bin/dscacheutil" || input.args.join(" ") !== "-q user -a uid " + aliasUid || input.cwd !== "/" || input.shell !== false || input.encoding !== "buffer" || input.timeout !== 1000 || input.maxBuffer !== 64 * 1024 || JSON.stringify(input.env) !== JSON.stringify({ LC_ALL: "C" })) throw new Error("Darwin account lookup was not hermetic");
+            accountQueryChecked = true;
+            return { status: 0, signal: null, stdout: Buffer.from("name: deck\\nuid: " + aliasUid + "\\ngid: " + aliasUid + "\\ndir: " + aliasHome + "\\nshell: /bin/zsh\\n\\n", "utf8"), stderr: Buffer.alloc(0) };
+          },
+        },
+      });
+      if (!aliasScope.ok || aliasScope.scope !== "sm_project_v1_comodin_software_espritec_theme" || !accountQueryChecked) throw new Error("compiled Darwin SSH alias identity was not derived");
+      console.log("compiled-darwin-ssh-alias-identity ok (fixed account lookup, hostile ambient environment, manual Git metadata, no alias-probe Git or SSH process)");
+      const rejectedAliasProject = join(aliasRoot, "rejected-project");
+      mkdirSync(join(rejectedAliasProject, ".git"), { recursive: true, mode: 0o700 });
+      writeFileSync(join(rejectedAliasProject, ".git", "config"), "[remote \\\"origin\\\"]\\n\\turl = git@untrusted-alias:comodin-software/espritec-theme.git\\n", { mode: 0o600 });
+      const providerCallsBeforeRejectedIdentity = calls.length;
+      const rejectedAliasScope = resolveCanonicalSupermemoryProjectScope({ projectRoot: rejectedAliasProject, remotes: [] });
+      if (rejectedAliasScope.ok || calls.length !== providerCallsBeforeRejectedIdentity) throw new Error("rejected alias identity reached provider effects");
+      console.log("compiled-rejected-alias-no-provider-effects ok");
+      let scope = aliasScope.scope;
+      if (process.platform === "darwin" && process.env.DECK_VERIFY_DARWIN_ACCOUNT_BOUNDARY === "1") {
+        const productionBoundaryProject = process.env.DECK_DARWIN_ACCOUNT_BOUNDARY_PROJECT_ROOT;
+        if (!productionBoundaryProject) throw new Error("Darwin account boundary project root was not supplied to the compiled harness");
+        const productionBoundaryScope = resolveCanonicalSupermemoryProjectScope({ projectRoot: productionBoundaryProject, remotes: [] });
+        if (!productionBoundaryScope.ok || productionBoundaryScope.scope !== "sm_project_v1_comodin_software_espritec_theme") throw new Error("compiled Darwin production account boundary did not derive the alias scope");
+        scope = productionBoundaryScope.scope;
+        console.log("compiled-darwin-account-boundary ok (production dscacheutil subprocess, account home, protected SSH config, and derived provider scope)");
+      } else {
+        console.log("compiled-darwin-account-boundary skipped (run --darwin-account-boundary --project-root <verified-git-project-root> on Darwin for read-only production evidence)");
+      }
       const transport = createSupermemoryHttpTransport({ apiKey: "sm_test_compiled", baseURL: "http://127.0.0.1:" + server.port, timeoutMs: 2000 });
       const runtime = createSupermemoryRuntime({ canonicalScope: scope, sessionId: "compiled", runnerId: "compiled-smoke", transport });
       const health = await runtime.health({ dependency: "automatic" });
@@ -86,7 +142,7 @@ try {
     if (!build.success) throw new Error(`compile failed for ${target}: ${new TextDecoder().decode(build.stderr)}`);
     if (process.platform === "darwin" && target.startsWith("bun-darwin-")) codeSign(outfile);
     if (target === hostTarget()) {
-      const run = Bun.spawnSync({ cmd: [outfile], cwd: temp, env: { PATH: "" } });
+      const run = Bun.spawnSync({ cmd: [outfile], cwd: temp, env: { PATH: "/attacker/bin", HOME: "/attacker/home", USER: "attacker", SHELL: "/attacker/shell", GIT_CONFIG_COUNT: "1", DYLD_LIBRARY_PATH: "/attacker/lib", DECK_VERIFY_DARWIN_ACCOUNT_BOUNDARY: verifyDarwinAccountBoundary ? "1" : "0", DECK_DARWIN_ACCOUNT_BOUNDARY_PROJECT_ROOT: darwinBoundaryProjectRoot ?? "" } });
       if (!run.success) throw new Error(`compiled runtime smoke failed: ${new TextDecoder().decode(run.stderr)} ${new TextDecoder().decode(run.stdout)}`);
       console.log(new TextDecoder().decode(run.stdout).trim());
       const deckOutfile = join(temp, "deck-cli");

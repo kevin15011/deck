@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, symlinkSync, writeFileSync, type Stats } from "node:fs";
+import { appendFileSync, chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, symlinkSync, writeFileSync, type Stats } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -131,7 +131,7 @@ describe("canonical Supermemory project scope", () => {
   });
 
   test("accepts comments, case-insensitive directives, and benign live-shape multi-alias exact Host blocks", () => {
-    const home = sshHome("# work alias\nHOST=github-work github-backup # inline comment\n  hostname = GitHub.COM\n  User git\n  IdentityFile ~/.ssh/work_key\n  IdentitiesOnly yes\n  Port=22\n");
+    const home = sshHome("# work alias\nHOST=github-work github-backup # inline comment\n  hostname = GitHub.COM\n  User git\n  IdentityFile ~/.ssh/work_key\n  IdentitiesOnly yes\n  AddKeysToAgent 5m\n  Port=22\n");
     const result = resolveCanonicalSupermemoryProjectScope({ projectRoot: gitProject("git@github-work:comodin-software/esprit-mobileapp.git"), remotes: [], sshConfig: sshDeps(home) });
 
     expect(result).toMatchObject({ ok: true, scope: "sm_project_v1_comodin_software_esprit_mobileapp" });
@@ -176,6 +176,7 @@ describe("canonical Supermemory project scope", () => {
       ["proxy command equals", "Host github-work\n  HostName github.com\n  ProxyCommand=sh -c whoami\n"],
       ["unknown directive space", "Host github-work\n  HostName github.com\n  UnknownDirective value\n"],
       ["unknown directive equals", "Host github-work\n  HostName github.com\n  UnknownDirective=value\n"],
+      ["unsupported AddKeysToAgent command", "Host github-work\n  HostName github.com\n  AddKeysToAgent $(whoami)\n"],
       ["proxy jump", "Host github-work\n  HostName github.com\n  ProxyJump bastion\n"],
       ["host key alias", "Host github-work\n  HostName github.com\n  HostKeyAlias github.com\n"],
       ["canonicalize hostname", "Host github-work\n  HostName github.com\n  CanonicalizeHostname yes\n"],
@@ -211,6 +212,32 @@ describe("canonical Supermemory project scope", () => {
     expect(resolveCanonicalSupermemoryProjectScope({ projectRoot: gitProject(remote), remotes: [], sshConfig: sshDeps(groupWritableHome, { mode: 0o620 }) }).ok).toBe(false);
     const noNoFollowHome = sshHome("Host github-work\n  HostName github.com\n");
     expect(resolveCanonicalSupermemoryProjectScope({ projectRoot: gitProject(remote), remotes: [], sshConfig: { ...sshDeps(noNoFollowHome), noFollowFlag: undefined } as never }).ok).toBe(false);
+  });
+
+  test("fails closed when an SSH config ancestor is a symlink or its validated descriptor grows", () => {
+    const remote = "git@github-work:comodin-software/esprit-mobileapp.git";
+    const ancestorSymlinkHome = mkdtempSync(join(tmpdir(), "deck-sm-ssh-ancestor-symlink-"));
+    const realSshDir = join(ancestorSymlinkHome, "real-ssh");
+    mkdirSync(realSshDir, { recursive: true });
+    writeFileSync(join(realSshDir, "config"), "Host github-work\n  HostName github.com\n", { mode: 0o600 });
+    symlinkSync(realSshDir, join(ancestorSymlinkHome, ".ssh"));
+    expect(resolveCanonicalSupermemoryProjectScope({ projectRoot: gitProject(remote), remotes: [], sshConfig: sshDeps(ancestorSymlinkHome) }).ok).toBe(false);
+
+    const growthHome = sshHome("Host github-work\n  HostName github.com\n");
+    const configPath = join(growthHome, ".ssh", "config");
+    const deps = sshDeps(growthHome);
+    let appended = false;
+    const originalRead = deps.readSync;
+    deps.readSync = (fd, buffer, offset, length, position) => {
+      const read = originalRead(fd, buffer, offset, length, position);
+      if (!appended) {
+        appendFileSync(configPath, "  ProxyCommand sh -c whoami\n", "utf8");
+        appended = true;
+      }
+      return read;
+    };
+    expect(resolveCanonicalSupermemoryProjectScope({ projectRoot: gitProject(remote), remotes: [], sshConfig: deps }).ok).toBe(false);
+    expect(appended).toBe(true);
   });
 
   test("reads SSH config from the validated descriptor and ignores path replacement before read", () => {
@@ -283,6 +310,142 @@ describe("canonical Supermemory project scope", () => {
     const unsafePasswd = passwdHome("Host github-work\n  HostName github.com\n", "deck:x:1001:1001:Deck:__HOME__:/bin/sh\n");
     expect(resolveCanonicalSupermemoryProjectScope({ projectRoot: gitProject(remote), remotes: [], sshConfig: accountDeps(unsafePasswd.passwd, () => 1001) }).ok).toBe(false);
     expect(resolveCanonicalSupermemoryProjectScope({ projectRoot: gitProject(remote), remotes: [], sshConfig: accountDeps(unsafePasswd.passwd, (path) => path.endsWith("passwd") ? 0 : 1001, (path, mode) => path.endsWith("passwd") ? (mode | 0o020) : mode) }).ok).toBe(false);
+  });
+
+  test("Darwin account lookup derives an exact protected SSH alias without trusting ambient identity", () => {
+    const home = sshHome("Host work\n  HostName github.com\n");
+    const uid = Number(lstatSync(home).uid);
+    const calls: unknown[] = [];
+    const previous = Object.fromEntries(["HOME", "PATH", "USER", "SHELL", "GIT_CONFIG_COUNT", "DYLD_INSERT_LIBRARIES"].map((key) => [key, process.env[key]]));
+    try {
+      Object.assign(process.env, {
+        HOME: "/attacker/home",
+        PATH: "/attacker/bin",
+        USER: "attacker",
+        SHELL: "/attacker/shell",
+        GIT_CONFIG_COUNT: "1",
+        DYLD_INSERT_LIBRARIES: "/attacker/loader.dylib",
+      });
+      const result = resolveCanonicalSupermemoryProjectScope({
+        projectRoot: manualProject("git@work:comodin-software/espritec-theme.git"),
+        remotes: [],
+        sshConfig: {
+          platform: "darwin",
+          effectiveUid: () => uid,
+          lstatSync: (path: string) => {
+            const stat = lstatSync(path === "/usr/bin/dscacheutil" ? join(home, ".ssh", "config") : home);
+            return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, {
+              uid: 0,
+              mode: path === "/usr/bin/dscacheutil" ? 0o100755 : stat.mode,
+            }) as Stats;
+          },
+          darwinAccountLookup: (input: unknown) => {
+            calls.push(input);
+            return {
+              status: 0,
+              signal: null,
+              stdout: Buffer.from(`name: deck\nuid: ${uid}\ngid: ${uid}\ndir: ${home}\nshell: /bin/zsh\n\n`, "utf8"),
+              stderr: Buffer.alloc(0),
+            };
+          },
+        },
+      });
+
+      expect(result).toMatchObject({ ok: true, scope: "sm_project_v1_comodin_software_espritec_theme" });
+      expect(calls).toEqual([{
+        executable: "/usr/bin/dscacheutil",
+        args: ["-q", "user", "-a", "uid", String(uid)],
+        cwd: "/",
+        env: { LC_ALL: "C" },
+        timeout: 1_000,
+        maxBuffer: 64 * 1024,
+        shell: false,
+        encoding: "buffer",
+      }]);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  test("Darwin account lookup fails closed for unsafe execution and ambiguous account responses", () => {
+    const home = sshHome("Host work\n  HostName github.com\n");
+    const uid = Number(lstatSync(home).uid);
+    const projectRoot = manualProject("git@work:comodin-software/espritec-theme.git");
+    const executableStat = lstatSync(join(home, ".ssh", "config"));
+    const trustedExecutable = (path: string) => {
+      const stat = path === "/usr/bin/dscacheutil" ? executableStat : lstatSync(home);
+      return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: 0, mode: path === "/usr/bin/dscacheutil" ? 0o100755 : 0o40755 }) as Stats;
+    };
+    const validOutput = `name: deck\nuid: ${uid}\ngid: ${uid}\ndir: ${home}\nshell: /bin/zsh\n\n`;
+    const rejectedOutputs = [
+      validOutput.slice(0, -1),
+      "name: deck\nuid: nope\ngid: 20\ndir: /Users/deck\nshell: /bin/zsh\n",
+      `name: deck\nuid: ${uid}\nuid: ${uid}\ngid: ${uid}\ndir: ${home}\nshell: /bin/zsh\n`,
+      `name: deck\nuid: ${uid}\ngid: ${uid}\ndir: ${home}\ndir: ${home}\nshell: /bin/zsh\n`,
+      `name: deck\nuid: ${uid}\ngid: ${uid}\ndir: relative-home\nshell: /bin/zsh\n`,
+      `name: deck\nuid: ${uid + 1}\ngid: ${uid}\ndir: ${home}\nshell: /bin/zsh\n`,
+      `${validOutput}\nname: second\nuid: ${uid}\ngid: ${uid}\ndir: ${home}\nshell: /bin/zsh\n`,
+      `name: deck\nuid: ${uid}\ngid: ${uid}\ndir: ${home}\u0001\nshell: /bin/zsh\n`,
+    ];
+
+    for (const output of rejectedOutputs) {
+      const result = resolveCanonicalSupermemoryProjectScope({
+        projectRoot,
+        remotes: [],
+        sshConfig: {
+          platform: "darwin",
+          effectiveUid: () => uid,
+          lstatSync: trustedExecutable,
+          darwinAccountLookup: () => ({ status: 0, signal: null, stdout: Buffer.from(output, "utf8"), stderr: Buffer.alloc(0) }),
+        },
+      });
+      expect(result.ok).toBe(false);
+    }
+
+    for (const result of [
+      { status: 1, signal: null, stdout: Buffer.from(validOutput), stderr: Buffer.alloc(0) },
+      { status: null, signal: "SIGTERM", stdout: Buffer.from(validOutput), stderr: Buffer.alloc(0) },
+      { status: 0, signal: null, stdout: Buffer.alloc(64 * 1024 + 1), stderr: Buffer.alloc(0) },
+      { status: 0, signal: null, stdout: Buffer.from([0xc3, 0x28]), stderr: Buffer.alloc(0) },
+    ]) {
+      expect(resolveCanonicalSupermemoryProjectScope({
+        projectRoot,
+        remotes: [],
+        sshConfig: { platform: "darwin", effectiveUid: () => uid, lstatSync: trustedExecutable, darwinAccountLookup: () => result },
+      }).ok).toBe(false);
+    }
+
+    let unsafeExecutableCalled = false;
+    expect(resolveCanonicalSupermemoryProjectScope({
+      projectRoot,
+      remotes: [],
+      sshConfig: {
+        platform: "darwin",
+        effectiveUid: () => uid,
+        lstatSync: (path: string) => {
+          const stat = path === "/usr/bin/dscacheutil" ? executableStat : lstatSync(home);
+          return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { uid: path === "/usr/bin/dscacheutil" ? uid : 0, mode: path === "/usr/bin/dscacheutil" ? 0o100777 : 0o40755 }) as Stats;
+        },
+        darwinAccountLookup: () => { unsafeExecutableCalled = true; return { status: 0, signal: null, stdout: Buffer.from(validOutput), stderr: Buffer.alloc(0) }; },
+      },
+    }).ok).toBe(false);
+    expect(unsafeExecutableCalled).toBe(false);
+
+    let unsupportedPlatformCalled = false;
+    expect(resolveCanonicalSupermemoryProjectScope({
+      projectRoot,
+      remotes: [],
+      sshConfig: {
+        platform: "win32",
+        effectiveUid: () => uid,
+        lstatSync: trustedExecutable,
+        darwinAccountLookup: () => { unsupportedPlatformCalled = true; return { status: 0, signal: null, stdout: Buffer.from(validOutput), stderr: Buffer.alloc(0) }; },
+      },
+    }).ok).toBe(false);
+    expect(unsupportedPlatformCalled).toBe(false);
   });
 
   test("ambient HOME, including before a fresh Bun module load, cannot authorize SSH aliases", () => {

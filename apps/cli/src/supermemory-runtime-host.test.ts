@@ -334,6 +334,34 @@ describe("Supermemory runner loopback bridge", () => {
     }
   });
 
+  test("unresolvable SSH aliases disable the production runtime before any provider effect", async () => {
+    const projectRoot = await gitProject("git@untrusted-deck-alias:comodin-software/espritec-theme.git");
+    const providerCalls: string[] = [];
+    try {
+      const host = await createSupermemoryRuntimeHost({
+        projectRoot,
+        stateHome: await mkdtemp(join(tmpdir(), "deck-sm-unresolved-alias-state-")),
+        deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } },
+        runnerId: "opencode",
+        role: "lead",
+        launchMode: "interactive",
+        observabilitySink: testObservabilitySink(),
+        transport: {
+          async health() { providerCalls.push("health"); },
+          async profile() { providerCalls.push("profile"); return { profile: { static: [], dynamic: [] } }; },
+          async search() { providerCalls.push("search"); return { results: [] }; },
+          async add() { providerCalls.push("add"); },
+        },
+      });
+
+      expect(host.enabled).toBe(false);
+      expect(host.diagnostics.map((diagnostic) => diagnostic.code)).toContain("supermemory-runtime-scope-missing");
+      expect(providerCalls).toEqual([]);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   test("observability sink and callback failures stay categorical without leaking raw diagnostics", async () => {
     const projectRoot = await gitProject("https://github.com/acme/observability-fail-open.git");
     const sentinelPath = "/tmp/deck-observability-secret-path/supermemory-runtime.jsonl";

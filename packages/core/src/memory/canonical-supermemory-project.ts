@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync, type Stats } from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 
@@ -28,6 +29,28 @@ const SSH_CONFIG_MAX_HOST_BLOCKS = 256;
 const PASSWD_MAX_BYTES = 256 * 1024;
 const GIT_FILE_MAX_BYTES = 1024;
 const GIT_CONFIG_MAX_BYTES = 256 * 1024;
+const DARWIN_ACCOUNT_UTILITY = "/usr/bin/dscacheutil";
+const DARWIN_ACCOUNT_QUERY_TIMEOUT_MS = 1_000;
+const DARWIN_ACCOUNT_QUERY_MAX_OUTPUT_BYTES = 64 * 1024;
+
+type DarwinAccountLookupInput = Readonly<{
+  executable: typeof DARWIN_ACCOUNT_UTILITY;
+  args: readonly ["-q", "user", "-a", "uid", string];
+  cwd: "/";
+  env: Readonly<{ LC_ALL: "C" }>;
+  timeout: typeof DARWIN_ACCOUNT_QUERY_TIMEOUT_MS;
+  maxBuffer: typeof DARWIN_ACCOUNT_QUERY_MAX_OUTPUT_BYTES;
+  shell: false;
+  encoding: "buffer";
+}>;
+
+type DarwinAccountLookupResult = Readonly<{
+  status: number | null;
+  signal: string | null;
+  stdout: Buffer | string | undefined;
+  stderr: Buffer | string | undefined;
+  error?: unknown;
+}>;
 
 type SshConfigTrustDeps = Readonly<{
   /** Test-only trusted account home override; production derives this structurally from the OS account database. */
@@ -38,7 +61,11 @@ type SshConfigTrustDeps = Readonly<{
   readSync?: (fd: number, buffer: Buffer, offset: number, length: number, position: number | null) => number;
   closeSync?: (fd: number) => void;
   noFollowFlag?: number;
+  nonBlockFlag?: number;
   effectiveUid?: () => number | undefined;
+  platform?: NodeJS.Platform;
+  lstatSync?: (path: string) => Stats;
+  darwinAccountLookup?: (input: DarwinAccountLookupInput) => DarwinAccountLookupResult;
 }>;
 
 export function isCanonicalSupermemoryProjectScope(value: string): value is CanonicalSupermemoryProjectScope {
@@ -298,21 +325,23 @@ function parsePathWithOptionalHost(host: string, path: string, options: { allowS
 function isTrustedSshGithubAlias(alias: string, deps: SshConfigTrustDeps = {}): boolean {
   if (!alias || CANONICAL_GITHUB_SSH_HOSTS.has(alias)) return false;
   if (/[*?!%\s\\/]/.test(alias)) return false;
-  const home = resolveTrustedAccountHome(deps);
-  if (!home) return false;
-  const configPath = join(home, ".ssh", "config");
+  const account = resolveTrustedAccount(deps);
+  if (!account) return false;
+  const configPath = join(account.home, ".ssh", "config");
+  const sshDirectory = lstatSafe(join(account.home, ".ssh"));
   const noFollow = "noFollowFlag" in deps ? deps.noFollowFlag : fsConstants.O_NOFOLLOW;
-  if (noFollow === undefined) return false;
+  const nonBlock = "nonBlockFlag" in deps ? deps.nonBlockFlag : fsConstants.O_NONBLOCK;
+  if (noFollow === undefined || nonBlock === undefined || !sshDirectory?.isDirectory() || sshDirectory.isSymbolicLink() || !hasNoSymlinkPath(configPath)) return false;
   let fd: number | undefined;
   try {
-    fd = (deps.openSync ?? openSync)(configPath, fsConstants.O_RDONLY | noFollow);
+    fd = (deps.openSync ?? openSync)(configPath, fsConstants.O_RDONLY | noFollow | nonBlock);
     const stat = (deps.fstatSync ?? fstatSync)(fd);
     if (!stat.isFile() || stat.isSymbolicLink()) return false;
-    const uid = deps.effectiveUid?.() ?? (typeof process.geteuid === "function" ? process.geteuid() : undefined);
-    if (uid !== undefined && Number(stat.uid) !== uid) return false;
+    if (Number(stat.uid) !== account.uid) return false;
     if ((Number(stat.mode) & 0o022) !== 0) return false;
-    if (Number(stat.size) > SSH_CONFIG_MAX_BYTES) return false;
-    const buffer = Buffer.alloc(Number(stat.size));
+    const size = Number(stat.size);
+    if (!Number.isSafeInteger(size) || size < 0 || size > SSH_CONFIG_MAX_BYTES) return false;
+    const buffer = Buffer.alloc(size);
     let offset = 0;
     while (offset < buffer.length) {
       const read = (deps.readSync ?? readSync)(fd, buffer, offset, buffer.length - offset, offset);
@@ -320,6 +349,9 @@ function isTrustedSshGithubAlias(alias: string, deps: SshConfigTrustDeps = {}): 
       offset += read;
     }
     if (offset !== buffer.length) return false;
+    const finalStat = (deps.fstatSync ?? fstatSync)(fd);
+    if (!finalStat.isFile() || finalStat.isSymbolicLink()) return false;
+    if (Number(finalStat.uid) !== account.uid || (Number(finalStat.mode) & 0o022) !== 0 || Number(finalStat.size) !== size) return false;
     const config = buffer.toString("utf8");
     if (config.includes("\0") || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(config)) return false;
     return sshConfigMapsAliasToCanonicalGithub(alias, config);
@@ -332,11 +364,19 @@ function isTrustedSshGithubAlias(alias: string, deps: SshConfigTrustDeps = {}): 
   }
 }
 
-function resolveTrustedAccountHome(deps: SshConfigTrustDeps): string | undefined {
-  if (deps.homeDir !== undefined) return canonicalDirectory(deps.homeDir);
-  if (process.platform !== "linux" && deps.passwdPath === undefined) return undefined;
+function resolveTrustedAccount(deps: SshConfigTrustDeps): Readonly<{ home: string; uid: number }> | undefined {
   const uid = deps.effectiveUid?.() ?? (typeof process.geteuid === "function" ? process.geteuid() : undefined);
-  if (uid === undefined) return undefined;
+  if (uid === undefined || !Number.isSafeInteger(uid) || uid < 0) return undefined;
+  if (deps.homeDir !== undefined) {
+    const home = canonicalDirectory(deps.homeDir);
+    return home ? { home, uid } : undefined;
+  }
+  const platform = deps.platform ?? process.platform;
+  if (platform === "darwin" && deps.passwdPath === undefined) {
+    const home = resolveTrustedDarwinAccountHome(uid, deps);
+    return home ? { home, uid } : undefined;
+  }
+  if (platform !== "linux" && deps.passwdPath === undefined) return undefined;
   const passwd = readTrustedPasswdFile(deps);
   if (passwd === undefined) return undefined;
   let home: string | undefined;
@@ -362,7 +402,99 @@ function resolveTrustedAccountHome(deps: SshConfigTrustDeps): string | undefined
     if (matchingEntries > 1) return undefined;
     home = candidateHome;
   }
-  return matchingEntries === 1 && home !== undefined ? canonicalDirectory(home) : undefined;
+  const canonicalHome = matchingEntries === 1 && home !== undefined ? canonicalDirectory(home) : undefined;
+  return canonicalHome ? { home: canonicalHome, uid } : undefined;
+}
+
+function resolveTrustedDarwinAccountHome(uid: number, deps: SshConfigTrustDeps): string | undefined {
+  if (!isTrustedDarwinAccountUtility(deps)) return undefined;
+  const input: DarwinAccountLookupInput = {
+    executable: DARWIN_ACCOUNT_UTILITY,
+    args: ["-q", "user", "-a", "uid", String(uid)],
+    cwd: "/",
+    env: { LC_ALL: "C" },
+    timeout: DARWIN_ACCOUNT_QUERY_TIMEOUT_MS,
+    maxBuffer: DARWIN_ACCOUNT_QUERY_MAX_OUTPUT_BYTES,
+    shell: false,
+    encoding: "buffer",
+  };
+  let result: DarwinAccountLookupResult;
+  try {
+    result = deps.darwinAccountLookup?.(input) ?? spawnSync(input.executable, input.args, {
+      cwd: input.cwd,
+      env: input.env,
+      timeout: input.timeout,
+      maxBuffer: input.maxBuffer,
+      shell: input.shell,
+      encoding: input.encoding,
+      windowsHide: true,
+    });
+  } catch {
+    return undefined;
+  }
+  if (result.error || result.status !== 0 || result.signal !== null) return undefined;
+  const stdout = boundedUtf8Buffer(result.stdout);
+  const stderr = boundedUtf8Buffer(result.stderr);
+  if (!stdout || !stderr || stdout.length + stderr.length > DARWIN_ACCOUNT_QUERY_MAX_OUTPUT_BYTES) return undefined;
+  const home = parseDarwinAccountHome(stdout.toString("utf8"), uid);
+  return home ? validateDarwinAccountHome(home, uid) : undefined;
+}
+
+function isTrustedDarwinAccountUtility(deps: SshConfigTrustDeps): boolean {
+  try {
+    const stat = deps.lstatSync ?? lstatSync;
+    for (const directory of ["/", "/usr", "/usr/bin"]) {
+      const directoryStat = stat(directory);
+      if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink() || Number(directoryStat.uid) !== 0 || (Number(directoryStat.mode) & 0o022) !== 0) return false;
+    }
+    const executableStat = stat(DARWIN_ACCOUNT_UTILITY);
+    return executableStat.isFile()
+      && !executableStat.isSymbolicLink()
+      && Number(executableStat.uid) === 0
+      && (Number(executableStat.mode) & 0o022) === 0;
+  } catch {
+    return false;
+  }
+}
+
+function boundedUtf8Buffer(value: Buffer | string | undefined): Buffer | undefined {
+  if (value === undefined) return undefined;
+  const buffer = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
+  if (buffer.length > DARWIN_ACCOUNT_QUERY_MAX_OUTPUT_BYTES) return undefined;
+  const decoded = buffer.toString("utf8");
+  return Buffer.from(decoded, "utf8").equals(buffer) ? buffer : undefined;
+}
+
+function parseDarwinAccountHome(output: string, uid: number): string | undefined {
+  if (!output || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(output)) return undefined;
+  if (!output.endsWith("\n\n") || output.endsWith("\n\n\n")) return undefined;
+  const fields = new Map<string, string>();
+  const record = output.slice(0, -2);
+  if (!record || record.includes("\n\n")) return undefined;
+  const lines = record.split("\n");
+  for (const line of lines) {
+    const match = line.match(/^(name|password|uid|gid|dir|shell|gecos): ([^\r]*)$/);
+    if (!match || fields.has(match[1]!)) return undefined;
+    fields.set(match[1]!, match[2]!);
+  }
+  const name = fields.get("name");
+  const accountUid = fields.get("uid");
+  const gid = fields.get("gid");
+  const home = fields.get("dir");
+  const shell = fields.get("shell");
+  if (!name || !accountUid || !gid || !home || !shell) return undefined;
+  if (!isValidPasswdStructuralField(name) || parseCanonicalPasswdDecimal(accountUid) !== uid || parseCanonicalPasswdDecimal(gid) === undefined) return undefined;
+  if (!isValidPasswdHomeField(home) || !isValidPasswdHomeField(shell)) return undefined;
+  return home;
+}
+
+function validateDarwinAccountHome(home: string, uid: number): string | undefined {
+  const canonicalHome = canonicalDirectory(home);
+  if (!canonicalHome) return undefined;
+  const stat = lstatSafe(canonicalHome);
+  if (!stat || !stat.isDirectory() || stat.isSymbolicLink()) return undefined;
+  if (Number(stat.uid) !== uid || (Number(stat.mode) & 0o022) !== 0) return undefined;
+  return canonicalHome;
 }
 
 function isValidPasswdStructuralField(value: string): boolean {
@@ -476,6 +608,8 @@ function validateAllowedSshAliasDirective(keyword: string, value: string): boole
       return true;
     case "identitiesonly":
       return /^(?:yes|no)$/i.test(value);
+    case "addkeystoagent":
+      return /^(?:yes|no|ask|confirm)$/i.test(value) || /^(?:[1-9][0-9]*[smhdw])+$/i.test(value);
     case "port":
       return /^(?:[1-9][0-9]{0,4})$/.test(value) && Number(value) <= 65535;
     default:
