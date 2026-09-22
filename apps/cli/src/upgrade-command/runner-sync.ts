@@ -255,8 +255,11 @@ export async function runRunnerSync(
     }
 
     // 5. Record files in the manifest.
+    const releasedPaths = new Set(plan.ownershipReleases ?? []);
+    for (const path of releasedPaths) manifestRemovals.push({ path, owner: `runner:${runnerId}` });
     const filePaths: string[] = [];
     for (const file of plan.files) {
+      if (releasedPaths.has(file.path)) continue;
       manifestEntries.push({
         path: file.path,
         owner: `runner:${runnerId}` as const,

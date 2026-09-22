@@ -83,7 +83,7 @@ import {
 } from "./codex-model-discovery";
 import { inspectCodexProject, type CodexPreflightEffects } from "./preflight";
 import { applyCodexMutationPlan, NODE_PATH_CAS_RESIDUAL_RISK, rollbackCodexTransaction, type CodexFileEffects } from "./transaction";
-import type { CodexMutationPlan } from "./types";
+import type { CodexMutationPlan, CodexPreimage } from "./types";
 
 export type CodexRunnerAdapterOptions = {
   preflight?: CodexPreflightEffects;
@@ -110,6 +110,8 @@ export type CodexRunnerAdapterOptions = {
   webSearchProvider?: WebSearchProviderDescriptorV1;
   /** Resolve the selected provider without putting provider metadata in Core. */
   webSearchProviderResolver?: (provider: string | undefined) => WebSearchProviderDescriptorV1 | undefined;
+  /** Test seam: runs after the no-follow AGENTS.md snapshot and before manifest path scanning. */
+  onAgentsFileSnapshot?: () => void;
 };
 
 export type CodexGitEffects = {
@@ -434,6 +436,11 @@ type SafeProjectReadPath =
   | { state: "missing" | "unsafe" }
   | { state: "ready"; stat: Stats };
 
+type AgentsPlanFile =
+  | { state: "absent" }
+  | { state: "file"; content: string; mode: number }
+  | { state: "unsafe"; reason: string };
+
 function inspectSafeProjectReadPath(projectRoot: string, candidate: string, expected: "file" | "directory"): SafeProjectReadPath {
   const root = resolve(projectRoot);
   const absolute = resolve(candidate);
@@ -446,6 +453,30 @@ function inspectSafeProjectReadPath(projectRoot: string, candidate: string, expe
   const stat = inspectSafeProjectPath(root, absolute);
   if (!stat || (expected === "file" ? !stat.isFile() : !stat.isDirectory())) return { state: "unsafe" };
   return { state: "ready", stat };
+}
+
+function inspectAgentsPlanFile(projectRoot: string): AgentsPlanFile {
+  const absolute = join(projectRoot, "AGENTS.md");
+  try {
+    lstatSync(absolute);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? { state: "absent" }
+      : { state: "unsafe", reason: "the target could not be inspected" };
+  }
+  const stat = inspectSafeProjectPath(projectRoot, absolute);
+  if (!stat) return { state: "unsafe", reason: "the target or an ancestor is a symlink or otherwise unsafe" };
+  if (!stat.isFile()) return { state: "unsafe", reason: "the target is not a regular file" };
+  try {
+    return { state: "file", content: readFileSync(absolute, "utf8"), mode: stat.mode & 0o777 };
+  } catch {
+    return { state: "unsafe", reason: "the regular target is unreadable" };
+  }
+}
+
+function matchesAgentsPreimage(state: AgentsPlanFile, expected: CodexPreimage): boolean {
+  if (expected.kind === "absent") return state.state === "absent";
+  return state.state === "file" && sha256(state.content) === expected.hash && state.mode === expected.mode;
 }
 
 function defaultProbe(): ReturnType<CodexPreflightEffects["probe"]> {
@@ -477,11 +508,18 @@ function defaultProjectSnapshot(projectRoot: string) {
 function readExistingPlanFiles(
   projectRoot: string,
   materializationScope: "full" | "content-only" = "full",
-): { files: Map<string, string>; modes: Map<string, number> } {
+  onAgentsFileSnapshot?: () => void,
+): { files: Map<string, string>; modes: Map<string, number>; agentsFile: AgentsPlanFile } {
   const empty = buildCodexDeveloperTeamInstallPlan({ projectRoot, existingFiles: new Map(), materializationScope });
   const existing = new Map<string, string>();
   const modes = new Map<string, number>();
-  for (const relativePath of new Set([...empty.mutations.map((mutation) => mutation.relativePath), "AGENTS.md", ".codex/config.toml"])) {
+  const agentsFile = inspectAgentsPlanFile(projectRoot);
+  if (agentsFile.state === "file") {
+    existing.set("AGENTS.md", agentsFile.content);
+    modes.set("AGENTS.md", agentsFile.mode);
+  }
+  onAgentsFileSnapshot?.();
+  for (const relativePath of new Set([...empty.mutations.map((mutation) => mutation.relativePath), ".codex/config.toml"])) {
     const absolute = join(projectRoot, relativePath);
     const stat = inspectSafeProjectPath(projectRoot, absolute);
     if (stat?.isFile()) {
@@ -510,6 +548,7 @@ function readExistingPlanFiles(
       const parsed = JSON.parse(ownershipManifest) as { files?: Record<string, unknown> };
       for (const relativePath of Object.keys(parsed.files ?? {})) {
         const absolutePath = resolve(projectRoot, relativePath);
+        if (absolutePath === join(resolve(projectRoot), "AGENTS.md")) continue;
         const stat = inspectSafeProjectPath(projectRoot, absolutePath);
         if (!stat?.isFile()) continue;
         existing.set(relativePath, readFileSync(absolutePath, "utf8"));
@@ -537,7 +576,7 @@ function readExistingPlanFiles(
       }
     }
   }
-  return { files: existing, modes };
+  return { files: existing, modes, agentsFile };
 }
 
 const CODEX_PROTECTED_CONTROL_IDS = new Set([
@@ -599,6 +638,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly #serenaProxyProbe: NonNullable<CodexRunnerAdapterOptions["serenaProxyProbe"]>;
   readonly #webSearchProvider?: WebSearchProviderDescriptorV1;
   readonly #webSearchProviderResolver?: CodexRunnerAdapterOptions["webSearchProviderResolver"];
+  readonly #onAgentsFileSnapshot?: CodexRunnerAdapterOptions["onAgentsFileSnapshot"];
   /** One-use Serena and effective Deck proxy evidence for a matching full plan. */
   readonly #pendingSerenaPreparationByProject = new Map<string, PendingSerenaPreparation>();
   readonly #serenaReadinessByPlan = new WeakMap<object, ReadySerenaReadiness>();
@@ -627,6 +667,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#serenaBootstrap = options.serenaBootstrap ?? ((request, effects) => bootstrapSerena(request, effects));
     this.#webSearchProvider = options.webSearchProvider;
     this.#webSearchProviderResolver = options.webSearchProviderResolver;
+    this.#onAgentsFileSnapshot = options.onAgentsFileSnapshot;
     this.#journalRoot = options.journalRoot ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "deck", "backups", "codex");
   }
 
@@ -1175,7 +1216,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   }
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput) {
     const materializationScope = input.materializationScope ?? "full";
-    const existing = readExistingPlanFiles(input.projectRoot, materializationScope);
+    const existing = readExistingPlanFiles(input.projectRoot, materializationScope, this.#onAgentsFileSnapshot);
     const config = requireDeckConfig(input.deckConfig, "operation");
     const webSearchProvider = this.resolveWebSearchProvider(config.webSearch.provider);
     const derivedSupermemoryProjectScope = (() => {
@@ -1224,6 +1265,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       projectRoot: input.projectRoot,
       existingFiles: existing.files,
       existingModes: existing.modes,
+      agentsFile: existing.agentsFile,
       modelAssignments: input.modelAssignments,
       thinkingAssignments: input.thinkingAssignments,
       capabilityInstructions,
@@ -1272,7 +1314,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
         const composed = composeLocalOnlyExclude(existing, exactPaths);
         if (composed.blocked) throw new Error(composed.diagnostic);
         const excludeMode = excludeExists ? lstatSync(excludePath).mode & 0o777 : 0o644;
-        localPlan = {
+        const local: CodexMutationPlan = {
           projectRoot: dirname(excludePath),
           blocked: false,
           diagnostics: [],
@@ -1294,7 +1336,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
             content: composed.content,
           }],
         };
-        files.push(...localPlan.mutations.map((mutation) => ({ path: `git-info-exclude:${excludePath}`, content: mutation.content, kind: "other" as const })));
+        localPlan = local;
+        files.push(...local.mutations.map((mutation) => ({ path: `git-info-exclude:${excludePath}`, content: mutation.content, kind: "other" as const })));
         if (visiblePaths.length > 0) {
           native = {
             ...native,
@@ -1320,6 +1363,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
 
     const plan = {
       files,
+      ownershipReleases: native.ownershipReleases,
       diagnostics: native.diagnostics.map((diagnostic) => diagnostic.message),
       blocked: native.blocked,
       mutationPreview: [
@@ -1440,7 +1484,15 @@ class CodexRunnerAdapter implements RunnerAdapter {
       }
     } else {
       const agentsPath = join(projectRoot, "AGENTS.md");
-      if (existsSync(agentsPath) && readFileSync(agentsPath, "utf8").includes("<!-- deck:developer-team:start -->")) managedPaths.push(agentsPath);
+      if (inspectSafeProjectPath(projectRoot, agentsPath)?.isFile()) {
+        const agents = readFileSync(agentsPath, "utf8");
+        const start = "<!-- deck:developer-team:start -->";
+        const end = "<!-- deck:developer-team:end -->";
+        if (agents.split(start).length - 1 === 1 && agents.split(end).length - 1 === 1 && agents.indexOf(start) < agents.indexOf(end)) {
+          managedPaths.push(agentsPath);
+          diagnostics.push("Legacy Deck AGENTS.md markers require ownership-verified remediation before any write.");
+        }
+      }
     }
     return { installed: managedPaths.length > 0, managedPaths: [...new Set(managedPaths)].sort(), diagnostics };
   }
@@ -1580,6 +1632,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
       if ((expected.kind === "agent-skill" || expected.kind === "bootstrap-skill")
         && (!content.startsWith("---\n") || !parseSkillDescriptor(content, expected.relativePath.split("/").at(-2)).ok)) {
         problems.push(`Invalid skill descriptor: ${expected.relativePath}`);
+      }
+    }
+    for (const release of native.ownershipReleaseChecks ?? []) {
+      if (!matchesAgentsPreimage(inspectAgentsPlanFile(native.projectRoot), release.postcondition)) {
+        problems.push(`Ownership release post-state drifted: ${release.relativePath}`);
       }
     }
     if (serenaReadiness) {

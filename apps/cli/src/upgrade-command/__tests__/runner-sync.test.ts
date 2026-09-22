@@ -684,4 +684,60 @@ describe("applyRunnerSyncToManifest", () => {
     const removed = applyRunnerSyncToManifest(next, { outcomes: [], manifestEntries: [], manifestRemovals: [{ path: file.path, owner: "runner:test-runner" }] }, "1.0.0");
     expect(removed.files).toHaveLength(0);
   });
+
+  it("releases ownership only after a verified sync and never immediately re-adds the released path", async () => {
+    const releasedPath = "AGENTS.md";
+    const adapter = makeAdapter({
+      runnerId: "codex",
+      detectDeckInstall: async () => ({ installed: true, managedPaths: [".codex/deck-manifest.json"] }),
+      buildDeveloperTeamInstallPlan: () => ({
+        files: [{ path: releasedPath, content: "repository guide" }],
+        ownershipReleases: [releasedPath],
+      }),
+    });
+    const base = applyRunnerSyncToManifest(buildDefaultManifest("1.0.0"), {
+      outcomes: [],
+      manifestEntries: [{ path: releasedPath, owner: "runner:codex", checksum: { algorithm: "sha256", value: "0".repeat(64) }, deck_version: "1.0.0", kind: "content", lastWrittenAt: new Date().toISOString() }],
+    }, "1.0.0");
+    const result = await runRunnerSync({ config: makeConfig(), registry: makeRegistry([adapter]), projectRoot: "/tmp", deckVersion: "next", runnerIds: ["codex"] });
+    expect(result.manifestRemovals).toContainEqual({ path: releasedPath, owner: "runner:codex" });
+    expect(result.manifestEntries.some((entry) => entry.path === releasedPath)).toBe(false);
+    expect(applyRunnerSyncToManifest(base, result, "next").files.some((file) => file.path === releasedPath)).toBe(false);
+  });
+
+  it("does not release ownership when apply or verification fails", async () => {
+    const adapter = makeAdapter({
+      runnerId: "codex",
+      detectDeckInstall: async () => ({ installed: true, managedPaths: [".codex/deck-manifest.json"] }),
+      buildDeveloperTeamInstallPlan: () => ({ files: [], ownershipReleases: ["AGENTS.md"] }),
+      verifyDeveloperTeamInstall: () => ({ valid: false, diagnostics: ["cleanup did not verify"] }),
+    });
+    const result = await runRunnerSync({ config: makeConfig(), registry: makeRegistry([adapter]), projectRoot: "/tmp", deckVersion: "next", runnerIds: ["codex"] });
+    expect(result.outcomes[0]?.status).toBe("failed");
+    expect(result.manifestRemovals).not.toContainEqual({ path: "AGENTS.md", owner: "runner:codex" });
+  });
+
+  it("re-emits a durable Codex AGENTS.md release after interrupted external reconciliation", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runner-sync-codex-release-"));
+    const journalRoot = await mkdtemp(join(tmpdir(), "deck-runner-sync-codex-release-journal-"));
+    try {
+      const legacy = "before\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nafter\n";
+      await mkdir(join(projectRoot, ".codex"), { recursive: true });
+      await writeFile(join(projectRoot, "AGENTS.md"), legacy, "utf8");
+      await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(legacy).digest("hex") } })}\n`);
+      const adapter = createCodexRunnerAdapter({ journalRoot });
+      const fullPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: makeConfig() });
+      await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan: fullPlan });
+      expect((await adapter.verifyDeveloperTeamInstall(fullPlan)).valid).toBe(true);
+
+      const first = await runRunnerSync({ config: makeConfig(), registry: makeRegistry([adapter]), projectRoot, deckVersion: "next", runnerIds: ["codex"] });
+      expect(first.manifestRemovals).toContainEqual({ path: "AGENTS.md", owner: "runner:codex" });
+
+      const second = await runRunnerSync({ config: makeConfig(), registry: makeRegistry([adapter]), projectRoot, deckVersion: "next", runnerIds: ["codex"] });
+      expect(second.manifestRemovals).toContainEqual({ path: "AGENTS.md", owner: "runner:codex" });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
 });

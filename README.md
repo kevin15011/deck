@@ -42,7 +42,7 @@ deck codex developer resume <session-id>
 deck codex developer resume --last
 ```
 
-Deck previews project-local changes before applying `.codex/config.toml`, `.codex/agents/deck-*.toml`, `.agents/skills/**`, and its marker-owned `AGENTS.md` section. Deck never enables repository trust. Interactive, exec, resume-by-ID, and resume-latest are public `static-compatible` routes; the adapter does not install or expose a trusted-hook host surface.
+Deck previews project-local changes before applying `.codex/config.toml`, native Codex roles and skills under `.codex/agents/deck-*.toml` and `.agents/skills/**`, plus ownership-verified legacy `AGENTS.md` cleanup when applicable. Deck never enables repository trust. Interactive, exec, resume-by-ID, and resume-latest are public `static-compatible` routes; the adapter does not install or expose a trusted-hook host surface.
 
 > **Warning:** Every non-install-only Codex Developer Team launch passes `--dangerously-bypass-approvals-and-sandbox`. Sandboxing and command approvals are disabled for that Codex process, so it may modify or delete files and run commands without approval. Deck does not persist this per-launch bypass in project or global Codex configuration.
 

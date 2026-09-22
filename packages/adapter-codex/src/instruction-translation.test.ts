@@ -37,7 +37,7 @@ describe("Codex package-instruction translation", () => {
     const canonical = buildCapabilityInstructionBundle(PACKAGE_IDS);
     const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/project", existingFiles: new Map(), capabilityInstructions: canonical });
     const installed = plan.expectedFiles
-      .filter((file) => file.relativePath === "AGENTS.md" || file.relativePath === ".codex/agents/deck-lead.toml")
+      .filter((file) => file.relativePath === ".codex/agents/deck-lead.toml" || file.relativePath === ".agents/skills/deck-apply-fast/SKILL.md")
       .map((file) => file.content)
       .join("\n");
     expect(plan.blocked).toBe(false);

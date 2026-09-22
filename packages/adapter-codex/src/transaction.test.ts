@@ -234,4 +234,21 @@ describe("Codex durable transaction", () => {
     await expect(applyCodexMutationPlan(createdPlan, fakeEffects({ "/project/.codex/agents/deck-lead.toml": { content: "", kind: "symlink" } }).effects)).rejects.toThrow("symlink");
     await expect(applyCodexMutationPlan(createdPlan, fakeEffects({ "/project/.codex": { content: "", kind: "symlink" } }).effects)).rejects.toThrow("symlink");
   });
+
+  test("rejects an ownership-only AGENTS.md release whose reviewed absence changed before mutations commit", async () => {
+    const plan = {
+      ...createdPlan,
+      ownershipReleaseChecks: [{
+        relativePath: "AGENTS.md",
+        precondition: { kind: "absent" as const },
+        postcondition: { kind: "absent" as const },
+      }],
+    } as CodexMutationPlan & {
+      ownershipReleaseChecks: readonly { relativePath: string; precondition: { kind: "absent" }; postcondition: { kind: "absent" } }[];
+    };
+    const fake = fakeEffects({ "/project/AGENTS.md": { content: "user guide", kind: "file" } });
+
+    await expect(applyCodexMutationPlan(plan, fake.effects)).rejects.toThrow("ownership release precondition");
+    expect(fake.files.has("/project/.codex/agents/deck-lead.toml")).toBe(false);
+  });
 });

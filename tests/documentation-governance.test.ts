@@ -376,6 +376,36 @@ describe("documentation governance predicates", () => {
 });
 
 describe("documentation governance", () => {
+  test("root AGENTS.md remains an architecture and contribution guide, not a managed runtime instruction surface", () => {
+    const text = content("AGENTS.md");
+    for (const required of ["@deck/core", "@deck/sdd-runtime", "adapter-pi", "adapter-opencode", "adapter-codex", "deck-canary", "Focused verification"]) {
+      expect(text).toContain(required);
+    }
+    expect(text).not.toContain("<!-- deck:developer-team:start -->");
+    expect(text).not.toContain("<!-- deck:developer-team:end -->");
+    expect(text).not.toMatch(/Adaptive memory is provided|Conversation Capture|Project Scope Binding/);
+  });
+
+  test("Codex guidance uses native role and skill delivery with ownership-verified legacy cleanup", () => {
+    const agents = content("AGENTS.md");
+    expect(agents).toContain("## Architecture and invariants");
+    expect(agents).toContain("bun run canary:install");
+    expect(agents).toContain("deck-canary <runner> developer");
+    expect(agents).toContain("[runners](docs/runners.md)");
+    expect(agents).toContain("[support matrix](docs/reference/support-matrix.md)");
+    expect(agents).not.toContain("## Safe editing");
+    expect((agents.match(/Do not hand-edit generated/g) ?? [])).toHaveLength(1);
+
+    const readme = content("README.md");
+    expect(readme).not.toContain("marker-owned `AGENTS.md` section");
+    expect(readme).toContain("native Codex roles and skills");
+
+    const support = content("docs/runner-support.md");
+    expect(support).not.toContain("exact Deck marker span in `AGENTS.md`");
+    expect(support).toContain("ownership-verified legacy cleanup");
+    expect(content("docs/runners.md")).toContain("[Codex adapter](../packages/adapter-codex/src/runner-adapter.ts)");
+  });
+
   test("product entry points reference the maintained Deck brand assets", () => {
     const readme = content("README.md");
     expect(readme).toContain("![Deck command deck with modular signal paths and a reserved runner panel](docs/assets/brand/deck-hero-dark.png)");

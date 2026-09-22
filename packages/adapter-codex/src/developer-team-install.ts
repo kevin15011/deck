@@ -22,16 +22,21 @@ import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/exter
 import { mergeCodexProjectConfig, mergeCodexTrustedHookConfig } from "./codex-config";
 import { translateCodexCapabilityInstructions, validateCodexInstructionTranslation } from "./instruction-translation";
 import { buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers } from "./mcp-config";
-import type { CodexExpectedFile, CodexMutation, CodexMutationPlan } from "./types";
+import type { CodexExpectedFile, CodexMutation, CodexMutationPlan, CodexOwnershipReleaseCheck } from "./types";
 
 const OWNED_MARKER = "deck-codex-v1";
 const AGENTS_START = "<!-- deck:developer-team:start -->";
 const AGENTS_END = "<!-- deck:developer-team:end -->";
+const AGENTS_OWNERSHIP_RELEASE = "AGENTS.md";
 
 export type BuildCodexInstallPlanInput = {
   projectRoot: string;
   existingFiles: ReadonlyMap<string, string>;
   existingModes?: ReadonlyMap<string, number>;
+  agentsFile?:
+    | { state: "absent" }
+    | { state: "file"; content: string; mode: number }
+    | { state: "unsafe"; reason: string };
   modelAssignments?: DeveloperTeamModelAssignments;
   thinkingAssignments?: DeveloperTeamThinkingAssignments;
   capabilityInstructions?: CapabilityInstructionBundle;
@@ -87,31 +92,17 @@ function roleContent(agent: { agentId: string; displayName: string; instruction:
   ].join("\n");
 }
 
-function instructionBlock(bundle: CapabilityInstructionBundle | undefined): string {
-  const base = [
-    AGENTS_START,
-    "## Deck Developer Team (static-compatible)",
-    "Use the Deck-provided native roles and skills for collaboration.",
-    "Protected invocation authorization, controlled effects, centralized registry writes, and bound verification are not host-enforced on this launch route.",
-  ].join("\n");
-  return [
-    composeCapabilityInstructions(base, bundle, { surface: "session", teamId: "developer-team" }).trimEnd(),
-    AGENTS_END,
-  ].join("\n");
-}
-
-function mergeAgents(source: string, bundle: CapabilityInstructionBundle | undefined): { content?: string; collision?: string } {
+function retireLegacyAgentsBlock(source: string, ownedHash: string | undefined): { content?: string; collision?: string } {
   const starts = source.split(AGENTS_START).length - 1;
   const ends = source.split(AGENTS_END).length - 1;
-  if (starts !== ends || starts > 1) return { collision: "AGENTS.md contains duplicate or malformed Deck markers." };
-  const block = instructionBlock(bundle);
-  if (starts === 0) {
-    const separator = source.length === 0 || source.endsWith("\n") ? "" : "\n";
-    return { content: `${source}${separator}${block}\n` };
-  }
+  if (starts === 0 && ends === 0) return {};
+  if (starts !== 1 || ends !== 1) return { collision: "AGENTS.md legacy cleanup is blocked because Deck markers are duplicate or malformed." };
   const start = source.indexOf(AGENTS_START);
-  const end = source.indexOf(AGENTS_END, start) + AGENTS_END.length;
-  return { content: source.slice(0, start) + block + source.slice(end) };
+  const endStart = source.indexOf(AGENTS_END);
+  if (endStart < start) return { collision: "AGENTS.md legacy cleanup is blocked because Deck markers are reversed." };
+  if (ownedHash === undefined) return { collision: "AGENTS.md legacy cleanup is blocked because no prior Codex ownership hash exists." };
+  if (hash(source) !== ownedHash) return { collision: "AGENTS.md legacy cleanup is blocked because its bytes no longer match the prior Codex ownership hash." };
+  return { content: source.slice(0, start) + source.slice(endStart + AGENTS_END.length) };
 }
 
 function ensureNativeSkillFrontmatter(content: string, skillId: string): string {
@@ -158,14 +149,22 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   let blocked = diagnostics.some((diagnostic) => diagnostic.severity === "error");
   const priorManifestSource = input.existingFiles.get(manifestPath);
   let priorHashes: Record<string, string> = {};
+  let hasPendingAgentsOwnershipRelease = false;
   if (priorManifestSource !== undefined) {
     try {
-      const parsed = JSON.parse(priorManifestSource) as { version?: unknown; files?: unknown };
+      const parsed = JSON.parse(priorManifestSource) as { version?: unknown; files?: unknown; releases?: unknown };
       if (parsed.version !== 1 || !parsed.files || typeof parsed.files !== "object" || Array.isArray(parsed.files)) throw new Error("invalid manifest");
       priorHashes = Object.fromEntries(Object.entries(parsed.files).map(([path, value]) => {
         if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) throw new Error("invalid manifest hash");
         return [safeRelativePath(path), value];
       }));
+      if (parsed.releases !== undefined) {
+        if (!Array.isArray(parsed.releases) || parsed.releases.length !== 1 || parsed.releases[0] !== AGENTS_OWNERSHIP_RELEASE) {
+          throw new Error("invalid manifest release");
+        }
+        hasPendingAgentsOwnershipRelease = true;
+      }
+      if (hasPendingAgentsOwnershipRelease && priorHashes[AGENTS_OWNERSHIP_RELEASE] !== undefined) throw new Error("conflicting manifest release");
     } catch {
       blocked = true;
       diagnostics.push({ code: "ownership-manifest-invalid", severity: "error", message: "The existing Codex ownership manifest is malformed; managed files cannot be updated safely." });
@@ -199,11 +198,13 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   if (shadowingInstructions.length > 0) diagnostics.push({
     code: "agents-instructions-shadowed",
     severity: "warning",
-    message: `Codex instruction precedence may shadow Deck's root block: ${shadowingInstructions.join(", ")}.`,
+    message: `Codex instruction precedence may shadow local instructions: ${shadowingInstructions.join(", ")}.`,
   });
 
   const mutations: CodexMutation[] = [];
   const expected = new Map<string, CodexExpectedFile>();
+  const ownershipReleases: string[] = [];
+  const ownershipReleaseChecks: CodexOwnershipReleaseCheck[] = [];
   const add = (
     rawPath: string,
     content: string,
@@ -273,12 +274,59 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
     const content = composeCapabilityInstructions(skill.content, capabilityInstructions, { surface: "skill", teamId: "developer-team", skillId: skill.skillId });
     addSkill(`.agents/skills/${safeRelativePath(skill.relativePath)}`, ensureNativeSkillFrontmatter(content, skill.skillId), "bootstrap-skill", skill.skillId);
   }
-  const agentsMerge = mergeAgents(input.existingFiles.get("AGENTS.md") ?? "", capabilityInstructions);
-  if (agentsMerge.collision) {
+  const agentsFile = input.agentsFile
+    ?? (input.existingFiles.has(AGENTS_OWNERSHIP_RELEASE)
+      ? { state: "file" as const, content: input.existingFiles.get(AGENTS_OWNERSHIP_RELEASE)!, mode: input.existingModes?.get(AGENTS_OWNERSHIP_RELEASE) ?? 0o644 }
+      : { state: "absent" as const });
+  const mappedAgentsContent = input.existingFiles.get(AGENTS_OWNERSHIP_RELEASE);
+  const mappedAgentsMode = input.existingModes?.get(AGENTS_OWNERSHIP_RELEASE) ?? 0o644;
+  const agentsSnapshotConsistent = input.agentsFile === undefined
+    || (agentsFile.state === "file"
+      ? mappedAgentsContent === agentsFile.content && mappedAgentsMode === agentsFile.mode
+      : mappedAgentsContent === undefined);
+  if (!agentsSnapshotConsistent) {
     blocked = true;
-    diagnostics.push({ code: "agents-marker-collision", severity: "error", message: agentsMerge.collision });
-  } else if (agentsMerge.content !== undefined) {
-    add("AGENTS.md", agentsMerge.content, "instructions", "marker-span", `${AGENTS_START}|${AGENTS_END}`);
+    diagnostics.push({
+      code: "agents-file-snapshot-inconsistent",
+      severity: "error",
+      message: "AGENTS.md planner inputs disagree; the authoritative safe snapshot must match the mutation preimage.",
+    });
+  }
+  const requestAgentsOwnershipRelease = (check?: CodexOwnershipReleaseCheck): void => {
+    if (!ownershipReleases.includes(AGENTS_OWNERSHIP_RELEASE)) ownershipReleases.push(AGENTS_OWNERSHIP_RELEASE);
+    if (check) ownershipReleaseChecks.push(check);
+  };
+  if (!agentsSnapshotConsistent) {
+    // Do not derive a cleanup mutation from one view and a preimage from another.
+  } else if (agentsFile.state === "unsafe") {
+    blocked = true;
+    diagnostics.push({
+      code: "agents-file-unsafe",
+      severity: "error",
+      message: `AGENTS.md is unsafe for ownership review (${agentsFile.reason}); it must be a readable regular file or confirmed absent.`,
+    });
+  } else if (agentsFile.state === "file") {
+    const agentsCleanup = retireLegacyAgentsBlock(agentsFile.content, priorHashes[AGENTS_OWNERSHIP_RELEASE]);
+    if (agentsCleanup.collision) {
+      blocked = true;
+      diagnostics.push({ code: "agents-marker-cleanup-blocked", severity: "error", message: agentsCleanup.collision });
+    } else if (agentsCleanup.content !== undefined) {
+      add(AGENTS_OWNERSHIP_RELEASE, agentsCleanup.content, "instructions", "marker-span", `${AGENTS_START}|${AGENTS_END}`);
+      requestAgentsOwnershipRelease();
+    } else if (priorHashes[AGENTS_OWNERSHIP_RELEASE] !== undefined) {
+      const checkedState = { kind: "file" as const, hash: hash(agentsFile.content), mode: agentsFile.mode };
+      requestAgentsOwnershipRelease({ relativePath: AGENTS_OWNERSHIP_RELEASE, precondition: checkedState, postcondition: checkedState });
+    } else if (hasPendingAgentsOwnershipRelease) {
+      requestAgentsOwnershipRelease();
+    }
+  } else if (priorHashes[AGENTS_OWNERSHIP_RELEASE] !== undefined) {
+    requestAgentsOwnershipRelease({
+      relativePath: AGENTS_OWNERSHIP_RELEASE,
+      precondition: { kind: "absent" },
+      postcondition: { kind: "absent" },
+    });
+  } else if (hasPendingAgentsOwnershipRelease) {
+    requestAgentsOwnershipRelease();
   }
 
   if (materializationScope === "full") {
@@ -366,6 +414,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   }
 
   for (const priorPath of Object.keys(priorHashes)) {
+    if (priorPath === "AGENTS.md") continue;
     if (priorPath === manifestPath || expected.has(priorPath)) continue;
     if (materializationScope === "content-only" && isPreservedRuntimePath(priorPath)) continue;
     const existing = input.existingFiles.get(priorPath);
@@ -391,11 +440,17 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
   const preservedRuntimeHashes = materializationScope === "content-only"
     ? Object.fromEntries(Object.entries(priorHashes).filter(([path]) => isPreservedRuntimePath(path)))
     : {};
+  const retainedLegacyAgentsHash = ownershipReleases.includes(AGENTS_OWNERSHIP_RELEASE) ? undefined : priorHashes[AGENTS_OWNERSHIP_RELEASE];
   const ownedFiles = Object.fromEntries([
     ...Object.entries(preservedRuntimeHashes),
-    ...[...expected.values()].map((file) => [file.relativePath, file.hash] as const),
+    ...(retainedLegacyAgentsHash ? [["AGENTS.md", retainedLegacyAgentsHash] as const] : []),
+    ...[...expected.values()].filter((file) => file.relativePath !== "AGENTS.md").map((file) => [file.relativePath, file.hash] as const),
   ].sort(([left], [right]) => left.localeCompare(right)));
-  const manifestContent = `${JSON.stringify({ version: 1, files: ownedFiles }, null, 2)}\n`;
+  const manifestContent = `${JSON.stringify({
+    version: 1,
+    files: ownedFiles,
+    ...(ownershipReleases.includes(AGENTS_OWNERSHIP_RELEASE) ? { releases: [AGENTS_OWNERSHIP_RELEASE] } : {}),
+  }, null, 2)}\n`;
   add(manifestPath, manifestContent, "ownership-manifest", "deck-manifest", "deck-codex-manifest-v1");
 
   return {
@@ -408,6 +463,8 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       externalStandaloneSkillIds: externalIds,
       bootstrapSkillIds: bootstrap.map((skill) => skill.skillId),
     },
+    ownershipReleases,
+    ownershipReleaseChecks,
     diagnostics,
     blocked,
   };
