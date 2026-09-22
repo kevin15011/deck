@@ -45,6 +45,7 @@ describe("RollbackScreen (REQ-RBK-002)", () => {
     expect(output).toContain("2"); // entries.length
     expect(output).toContain("v1.1.0");
     expect(output).toContain("v1.2.0");
+    expect(output).not.toContain("vv1.1.0");
     expect(output).toContain("Run rollback");
     expect(output).toContain("Cancel");
   });

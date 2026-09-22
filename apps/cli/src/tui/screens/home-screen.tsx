@@ -1,7 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 
-import { getHomeMenuOptions } from "../../menu-options";
+import { getHomeMenuOptions, type RollbackAvailability } from "../../menu-options";
 import { MenuList } from "../components/menu-list";
 import type { ReleaseCheckState } from "../release-check";
 import { summarizeReleaseItems } from "../release-check";
@@ -15,6 +15,7 @@ type HomeScreenProps = {
    * `none` produce no banner (REQ-TUI-007).
    */
   releaseCheck?: ReleaseCheckState;
+  rollbackAvailability?: RollbackAvailability | null;
 };
 
 /**
@@ -26,7 +27,7 @@ type HomeScreenProps = {
  * applicable; the upgrade available banner only appears for `available`
  * results.
  */
-export function HomeScreen({ cursor, releaseCheck }: HomeScreenProps) {
+export function HomeScreen({ cursor, releaseCheck, rollbackAvailability }: HomeScreenProps) {
   return (
     <Box flexDirection="column">
       <Text>Your AI environment, configured.</Text>
@@ -35,7 +36,7 @@ export function HomeScreen({ cursor, releaseCheck }: HomeScreenProps) {
         <Text bold>Menu</Text>
       </Box>
       <Box marginTop={1}>
-        <MenuList items={getHomeMenuOptions(releaseCheck).map((option) => ({ label: option.label }))} cursor={cursor} />
+        <MenuList items={getHomeMenuOptions(releaseCheck, rollbackAvailability).map((option) => ({ label: option.label }))} cursor={cursor} />
       </Box>
     </Box>
   );

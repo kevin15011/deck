@@ -3541,7 +3541,13 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
   return (
     <ScreenFrame title={screenTitle(screen, dashboardRunnerLabel)} help={HELP} width={stdout.columns || 72} height={stdout.rows || undefined} logs={logs}>
-      {screen === "home" ? <HomeScreen cursor={homeCursor} releaseCheck={releaseCheck} /> : null}
+      {screen === "home" ? (
+        <HomeScreen
+          cursor={homeCursor}
+          releaseCheck={releaseCheck}
+          rollbackAvailability={rollbackAvailability()}
+        />
+      ) : null}
       {screen === "upgrade-confirm" ? (
         releaseCheck.kind === "available" ? (
           <UpgradeConfirmScreen

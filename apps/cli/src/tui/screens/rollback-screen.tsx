@@ -77,7 +77,7 @@ function ConfirmBody({ cursor, targetVersion }: { cursor: number; targetVersion:
   return (
     <Box flexDirection="column">
       <Text>
-        This will restore Deck to v{""}<Text color="yellow">v{targetVersion}</Text>{" "}
+        This will restore Deck to <Text color="yellow">v{targetVersion}</Text>{" "}
         using the backup above. State, manifest, and runner files will be restored.
       </Text>
       <Box marginTop={1}>
