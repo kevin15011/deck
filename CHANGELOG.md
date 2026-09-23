@@ -9,6 +9,21 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-22
+
+### Added
+
+- OpenCode Developer Team sessions can search project and user skills for the current task, prepare an exact observed candidate, and confirm native loading independently for Lead and delegated specialists. A ready project skill registry is preferred; missing or stale registries use bounded read-only discovery.
+
+### Fixed
+
+- Ordinary nested skill frontmatter such as `metadata.author` and `metadata.version` no longer makes discovery incomplete. Unsafe YAML constructs and malformed descriptors remain rejected.
+- Corrected TUI exit and rollback menu actions.
+
+### Upgrade note
+
+- After updating Deck, restart it and launch OpenCode through the updated Deck binary to reapply the managed plugin. If launching OpenCode directly, reapply the Developer Team installation from the updated Deck first. Verified native skill loading is OpenCode-only; Pi and Codex parity is not claimed.
+
 ## [0.4.3] - 2026-09-21
 
 ### Changed
@@ -140,7 +155,8 @@ All notable release changes to Deck are recorded here. Current release procedure
 - OpenCode model selection now uses the model inventory resolved by the active runner.
 - Streamlined project documentation and strengthened contributor, architecture, release, and documentation-governance guidance.
 
-[Unreleased]: https://github.com/kevin15011/deck/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/kevin15011/deck/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/kevin15011/deck/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/kevin15011/deck/releases/tag/v0.4.3
 [0.4.2]: https://github.com/kevin15011/deck/releases/tag/v0.4.2
 [0.4.1]: https://github.com/kevin15011/deck/releases/tag/v0.4.1
