@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { createOpenCodeRunnerAdapter } from "./runner-adapter";
+import { createOpenCodeRunnerAdapter, createOpenCodeSkillDiscoveryProvider } from "./runner-adapter";
 import type { OpenCodeToolsReview } from "./required-tools";
 import { getStandaloneSkills } from "@deck/core/skills/external";
 import { discoverSkillsFromProvider } from "../../core/src/skill-discovery/discovery";
@@ -207,6 +207,56 @@ describe("OpenCode RunnerAdapter developer team install plan", () => {
     expect(sourceIds).toEqual(["opencode-config-skills", "opencode-legacy-skills"]);
     expect(sourceIds).not.toContain("pi-project-skills");
     expect(JSON.stringify(result)).not.toContain("/.config/opencode/");
+  });
+
+  test("preserves the public runner-adapter skill discovery provider export", async () => {
+    const provider = createOpenCodeSkillDiscoveryProvider({
+      configDir: join(tmpdir(), "deck-opencode-public-provider-config"),
+      homeDir: join(tmpdir(), "deck-opencode-public-provider-home"),
+    });
+    const result = await provider.listSources({ projectRoot: "/tmp/project" });
+
+    expect(provider.runnerId).toBe("opencode");
+    expect(result.outcome).toBe("complete");
+    expect(result.sources.map((source) => source.declaration.sourceId)).toEqual(["opencode-config-skills", "opencode-legacy-skills"]);
+  });
+
+  test("scopes opaque inventory snapshots to one source listing evaluation", async () => {
+    let calls = 0;
+    const provider = createOpenCodeSkillDiscoveryProvider({
+      configDir: join(tmpdir(), "deck-opencode-scoped-provider-config"),
+      homeDir: join(tmpdir(), "deck-opencode-scoped-provider-home"),
+      skillInventoryDiscovery: async () => {
+        calls += 1;
+        return { outcome: "complete", observations: [{ opaqueId: `skill-${calls}`, name: `Skill ${calls}` }], diagnostics: [] };
+      },
+    });
+
+    const first = await provider.listSources({ projectRoot: "/tmp/project" });
+    const firstInventory = first.sources.find((source) => source.kind === "opaque_inventory");
+    expect((await firstInventory!.readInventory()).observations).toEqual([{ opaqueId: "skill-1", name: "Skill 1" }]);
+    expect((await firstInventory!.readInventory()).observations).toEqual([{ opaqueId: "skill-1", name: "Skill 1" }]);
+
+    const second = await provider.listSources({ projectRoot: "/tmp/project" });
+    const secondInventory = second.sources.find((source) => source.kind === "opaque_inventory");
+    expect((await secondInventory!.readInventory()).observations).toEqual([{ opaqueId: "skill-2", name: "Skill 2" }]);
+    expect(calls).toBe(2);
+  });
+
+  test("reports the absent native skill-loading host port without fabricating a load", async () => {
+    const adapter = createOpenCodeRunnerAdapter();
+
+    expect(adapter.skillLoading?.schema).toBe("skill-native-load-port-v1");
+    expect(await adapter.skillLoading?.prepare({
+      activeRunnerId: "opencode",
+      selectionId: "sha256:test-selection",
+      loadReference: "private-native-reference",
+    })).toEqual({ outcome: "unsupported" });
+    expect(await adapter.skillLoading?.load({
+      activeRunnerId: "opencode",
+      selectionId: "sha256:test-selection",
+      loadReference: "private-native-reference",
+    })).toEqual({ outcome: "unobserved" });
   });
 
   test("composes Core generic roots with OpenCode sources and excludes Pi roots", async () => {

@@ -29,7 +29,7 @@ import type {
   WebSearchReadinessResult,
 } from "./web-search-capability";
 import type { NormalizedDeckConfig, PackageInstructionPackageId } from "./config/deck-config";
-import type { SkillDiscoverySourceProviderV1 } from "./skill-discovery/contracts";
+import type { SkillDiscoverySourceProviderV1, SkillNativeLoadPortV1 } from "./skill-discovery/contracts";
 import type {
   SerenaBootstrapAuthorization,
   SerenaMcpWriteStatus,
@@ -847,6 +847,9 @@ export interface RunnerAdapter {
    * Adapters that do not expose discovery remain valid RunnerAdapter values.
    */
   readonly skillDiscovery?: SkillDiscoverySourceProviderV1;
+
+  /** Optional active-runner native skill-loading port. Absence is unsupported, never success. */
+  readonly skillLoading?: SkillNativeLoadPortV1;
 
   // -------------------------------------------------------------------------
   // Developer Team installation

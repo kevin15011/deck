@@ -273,3 +273,83 @@ export interface SkillRegistryWriterV1 {
     authority: SkillRegistryWriteAuthorityV1,
   ): Promise<SkillRegistryWriteResultV1>;
 }
+
+/** Bounded, untrusted task-scoped candidate query. It never selects a skill. */
+export interface SkillCandidateQueryV1 {
+  readonly schema: "skill-candidate-query-v1";
+  readonly terms: readonly string[];
+  readonly target_paths?: readonly string[];
+  readonly target_extensions?: readonly string[];
+  readonly technologies?: readonly string[];
+  readonly techniques?: readonly string[];
+  readonly limit: number;
+}
+
+/** Privacy-safe candidate projection; locators and load references stay runtime-private. */
+export interface SkillCandidateV1 {
+  readonly observation_id: string;
+  readonly name: string;
+  readonly source_category: SkillDiscoverySourceCategoryV1;
+  readonly scope: SkillDiscoveryScopeV1;
+  readonly runner_id?: string;
+  readonly description?: string;
+  readonly task_signals: readonly string[];
+  readonly technology_signals: readonly string[];
+  readonly path_signals: readonly string[];
+}
+
+export interface SkillCandidateSearchResultV1 {
+  readonly schema: "skill-candidate-search-result-v1";
+  readonly source_mode: "registry" | "direct_discovery";
+  readonly completeness: "complete" | "indeterminate";
+  readonly candidates: readonly SkillCandidateV1[];
+  readonly truncated: boolean;
+  readonly diagnostics: readonly SkillDiscoveryDiagnosticV1[];
+}
+
+/** Opaque-to-callers reference bound by the runtime to one task, runner, and observation. */
+export interface SkillSelectionReferenceV1 {
+  readonly schema: "skill-selection-reference-v1";
+  readonly selection_id: SkillDiscoveryDigestV1;
+  readonly session_id: string;
+  readonly task_id: string;
+  readonly active_runner_id: RunnerId;
+  readonly observation_id: string;
+}
+
+export type SkillSelectionResultV1 =
+  | { readonly outcome: "selected"; readonly reference: SkillSelectionReferenceV1 }
+  | { readonly outcome: "missing" }
+  | { readonly outcome: "ambiguous" };
+
+/** Preparation is separate from native loading and never reports a fabricated success. */
+export type SkillLoadPreparationResultV1 =
+  | { readonly outcome: "loadable" }
+  | { readonly outcome: "missing" }
+  | { readonly outcome: "ambiguous" }
+  | { readonly outcome: "not_exposed" }
+  | { readonly outcome: "denied" }
+  | { readonly outcome: "unsupported" }
+  | { readonly outcome: "rejected" };
+
+/** A native runner may claim loaded only after it observes the native success. */
+export type SkillLoadOutcomeV1 =
+  | { readonly outcome: "loaded" }
+  | { readonly outcome: "failed" }
+  | { readonly outcome: "unobserved" };
+
+/** Adapter-only native loading port. Its reference is never persisted, delegated, or rendered. */
+export interface SkillNativeLoadPortV1 {
+  readonly schema: "skill-native-load-port-v1";
+  prepare(input: {
+    readonly activeRunnerId: RunnerId;
+    readonly selectionId: SkillDiscoveryDigestV1;
+    readonly expectedName?: string;
+    readonly loadReference: string;
+  }): Promise<SkillLoadPreparationResultV1>;
+  load(input: {
+    readonly activeRunnerId: RunnerId;
+    readonly selectionId: SkillDiscoveryDigestV1;
+    readonly loadReference: string;
+  }): Promise<SkillLoadOutcomeV1>;
+}

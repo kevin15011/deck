@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { parseDocument } from "yaml";
+import { isAlias, isMap, isPair, isScalar, isSeq, parseDocument } from "yaml";
 
 import type { RunnerId } from "../runner-adapter";
 import {
@@ -424,7 +424,7 @@ export function parseSkillDescriptor(
       uniqueKeys: true,
     });
     const inspection = inspectYamlNode(document.contents);
-    if (inspection.hasAlias || inspection.hasTag || inspection.maxDepth > SKILL_DISCOVERY_V1_BOUNDS.maxFrontmatterDepth) {
+    if (inspection.hasAlias || inspection.hasMergeKey || inspection.hasTag || inspection.maxDepth > SKILL_DISCOVERY_V1_BOUNDS.maxFrontmatterDepth) {
       return parseFailure("unsafe_frontmatter", "Descriptor frontmatter exceeds the safe YAML policy.");
     }
     if (document.errors.length > 0 || document.warnings.length > 0) {
@@ -993,51 +993,46 @@ function extractFrontmatter(content: string):
   return { present: true, yaml: lines.slice(1, closingIndex).join("\n"), error: false };
 }
 
-function inspectYamlNode(node: unknown, depth = 0, seen = new Set<object>()): {
+function inspectYamlNode(node: unknown, parentCollectionDepth = -1, seen = new Set<object>()): {
   readonly maxDepth: number;
   readonly hasAlias: boolean;
+  readonly hasMergeKey: boolean;
   readonly hasTag: boolean;
 } {
-  if (!node || typeof node !== "object") return { maxDepth: depth, hasAlias: false, hasTag: false };
-  if (seen.has(node)) return { maxDepth: depth, hasAlias: true, hasTag: false };
+  if (!node || typeof node !== "object") return { maxDepth: parentCollectionDepth, hasAlias: false, hasMergeKey: false, hasTag: false };
+  if (seen.has(node)) return { maxDepth: parentCollectionDepth, hasAlias: true, hasMergeKey: false, hasTag: false };
   seen.add(node);
 
-  const value = node as {
-    readonly type?: unknown;
-    readonly tag?: unknown;
-    readonly items?: readonly unknown[];
-    readonly value?: unknown;
-    readonly key?: unknown;
-  };
-  const type = typeof value.type === "string" ? value.type : "";
-  if (type === "ALIAS") return { maxDepth: depth, hasAlias: true, hasTag: false };
-  let maxDepth = depth;
+  if (isAlias(node)) return { maxDepth: parentCollectionDepth, hasAlias: true, hasMergeKey: false, hasTag: false };
+  const isCollection = isMap(node) || isSeq(node);
+  const collectionDepth = isCollection ? parentCollectionDepth + 1 : parentCollectionDepth;
+  let maxDepth = collectionDepth;
   let hasAlias = false;
-  let hasTag = typeof value.tag === "string" && value.tag.length > 0;
-  const isCollection = type === "MAP" || type === "SEQ";
-  if (isCollection) maxDepth = depth;
+  let hasMergeKey = false;
+  let hasTag = typeof (node as { readonly tag?: unknown }).tag === "string" && (node as { readonly tag: string }).tag.length > 0;
 
-  const visit = (child: unknown, childDepth: number): void => {
-    const result = inspectYamlNode(child, childDepth, seen);
+  const visit = (child: unknown): void => {
+    const result = inspectYamlNode(child, collectionDepth, seen);
     maxDepth = Math.max(maxDepth, result.maxDepth);
     hasAlias ||= result.hasAlias;
+    hasMergeKey ||= result.hasMergeKey;
     hasTag ||= result.hasTag;
   };
 
-  if (Array.isArray(value.items)) {
-    for (const item of value.items) {
-      if (type === "MAP" && item && typeof item === "object") {
-        const pair = item as { readonly key?: unknown; readonly value?: unknown };
-        visit(pair.key, depth + 1);
-        visit(pair.value, depth + 1);
-      } else {
-        visit(item, depth + 1);
+  if (isMap(node)) {
+    for (const item of node.items) {
+      if (!isPair(item)) {
+        visit(item);
+        continue;
       }
+      if (isScalar(item.key) && item.key.value === "<<") hasMergeKey = true;
+      visit(item.key);
+      visit(item.value);
     }
-  } else if (value.value && typeof value.value === "object") {
-    visit(value.value, depth + 1);
+  } else if (isSeq(node)) {
+    for (const item of node.items) visit(item);
   }
-  return { maxDepth, hasAlias, hasTag };
+  return { maxDepth, hasAlias, hasMergeKey, hasTag };
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

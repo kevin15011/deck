@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   createInvocationAuthorizationServiceV1,
   parseExecutionDossierHistoryV1,
@@ -7,7 +9,11 @@ import {
   type InvocationAuthorizationServiceV1,
   type QaRunnerHostAuthorityV1,
 } from "@deck/sdd-runtime";
+import type { SkillDiscoverySourceProviderV1, SkillRegistryRecordV1, TaskSkillDiscoveryBindingV1, TaskSkillDiscoveryHostV1 } from "@deck/core";
 import { createOpenCodeDeveloperTeamExecutionBridgeV1 } from "../../../src/developer-team-execution-bridge";
+import { createOpenCodeSkillDiscoveryProvider } from "../../../src/skill-discovery-provider";
+import { discoverSkills, discoverSkillsFromProvider, type BoundedSkillDiscoveryResultV1 } from "../../../../core/src/skill-discovery/discovery";
+import { canonicalizeSkillRegistry, parseSkillRegistryDocument, readSkillRegistryStatus, SKILL_REGISTRY_PATH_V1 } from "../../../../core/src/skill-discovery/registry";
 import {
   classifyManagedProjectMemoryRecallFailure,
   parseManagedProjectMemoryRecallToolInput,
@@ -15,7 +21,9 @@ import {
 } from "../../../../core/src/memory/managed-project-memory-recall";
 
 import {
+  createTaskSkillDiscoveryHostV1,
   consumeSessionPreparationAuthorizationV1,
+  type TaskSkillDiscoveryHostInputV1,
   type SessionPreparationAuthorizationExpectationV1,
   type SessionPreparationAuthorizationServiceV1,
 } from "@deck/sdd-runtime";
@@ -24,11 +32,23 @@ const APPLY_AGENTS = new Set([
   "deck-apply-deep",
 ]);
 type OpenCodePluginInput = { sessionID: string; messageID?: string; callID?: string; tool?: string; agent?: string; model?: string; variant?: string };
-type OpenCodePluginOutput = { message?: unknown; parts?: unknown[]; args?: Record<string, unknown>; result?: unknown };
+type OpenCodePluginOutput = { message?: unknown; parts?: unknown[]; args?: Record<string, unknown>; result?: unknown; metadata?: unknown; error?: unknown };
 type OpenCodeModelMessageTransformOutput = { messages: { info: Record<string, unknown>; parts: Record<string, unknown>[] }[] };
 type OpenCodeSystemTransformInput = { sessionID?: string };
 type OpenCodeSystemTransformOutput = { system: string[] };
-type OpenCodeToolExecutionContext = { sessionID?: unknown; sessionId?: unknown; callID?: unknown; callId?: unknown; toolCallID?: unknown; toolCallId?: unknown; invocationID?: unknown; invocationId?: unknown };
+type OpenCodeToolExecutionContext = { sessionID?: unknown; sessionId?: unknown; messageID?: unknown; messageId?: unknown; callID?: unknown; callId?: unknown; toolCallID?: unknown; toolCallId?: unknown; invocationID?: unknown; invocationId?: unknown };
+type OpenCodeCustomToolV1 = { description: string; args: Record<string, unknown>; execute(args: unknown, context?: OpenCodeToolExecutionContext): Promise<string> };
+type OpenCodeToolMapV1 = Record<string, OpenCodeCustomToolV1> & { deck_project_memory_recall: OpenCodeCustomToolV1; deck_skill_discovery: OpenCodeCustomToolV1 };
+type OpenCodeDeveloperTeamExecutionHooksV1 = {
+  tool?: OpenCodeToolMapV1;
+  "experimental.chat.messages.transform": (input: Record<string, never>, output: OpenCodeModelMessageTransformOutput) => Promise<void>;
+  "experimental.chat.system.transform": (input: OpenCodeSystemTransformInput, output: OpenCodeSystemTransformOutput) => Promise<void>;
+  "chat.message": (input: OpenCodePluginInput, output: OpenCodePluginOutput) => Promise<void>;
+  "tool.execute.before": (input: OpenCodePluginInput, output: OpenCodePluginOutput) => Promise<void>;
+  "tool.execute.after": (input: OpenCodePluginInput, output: OpenCodePluginOutput) => Promise<void>;
+  event: (input: { event: Record<string, unknown> & { type?: string; properties?: { info?: { id?: string } } } }) => Promise<void>;
+};
+type OpenCodeNativePluginInputV1 = { readonly client?: unknown; readonly directory?: unknown; readonly worktree?: unknown };
 
 export interface OpenCodeDeveloperTeamExecutionPluginOptionsV1 {
   readonly authorizationService?: InvocationAuthorizationServiceV1;
@@ -37,6 +57,9 @@ export interface OpenCodeDeveloperTeamExecutionPluginOptionsV1 {
   readonly resolveExecutionEvent?: (input: OpenCodePluginInput, args: Readonly<Record<string, unknown>>) => unknown | Promise<unknown>;
   readonly qaAuthority?: QaRunnerHostAuthorityV1;
   readonly memoryLoopback?: MemoryLoopbackOptionsV1;
+  readonly skillDiscoveryHost?: TaskSkillDiscoveryHostV1;
+  readonly skillDiscovery?: OpenCodeSkillDiscoveryHostOptionsV1;
+  readonly skillDiscoveryInspector?: (snapshot: SkillToolStateSnapshotV1) => void;
 }
 
 const HOST_CONTEXT = Symbol.for("deck.developer-team.execution-context.v1");
@@ -48,7 +71,32 @@ type OpenCodeHostProviderV1 = {
   readonly clearSessionPreparationSession?: (sessionId: string) => unknown | Promise<unknown>;
   readonly qaAuthority?: QaRunnerHostAuthorityV1;
   readonly memoryLoopback?: MemoryLoopbackOptionsV1;
+  readonly skillDiscoveryHost?: TaskSkillDiscoveryHostV1;
+  readonly skillDiscovery?: OpenCodeSkillDiscoveryHostOptionsV1;
 };
+
+type OpenCodeSkillDiscoveryHostOptionsV1 = Omit<TaskSkillDiscoveryHostInputV1, "activeRunnerId" | "nativeLoader" | "verifyNativeLoad"> & {
+  readonly activeRunnerId?: "opencode";
+};
+
+type SkillToolState = {
+  readonly activeBySession: Map<string, { readonly binding: TaskSkillDiscoveryBindingV1; readonly timestamp: number }>;
+  readonly bindings: Map<string, { readonly binding: TaskSkillDiscoveryBindingV1; readonly timestamp: number }>;
+  readonly candidateNames: Map<string, { readonly names: Map<string, string>; readonly timestamp: number }>;
+  readonly preparedBySessionName: Map<string, { readonly binding: TaskSkillDiscoveryBindingV1; readonly timestamp: number }>;
+  readonly calls: Map<string, { readonly binding: TaskSkillDiscoveryBindingV1; readonly name: string; readonly timestamp: number }>;
+  inspector?: (snapshot: SkillToolStateSnapshotV1) => void;
+};
+type SkillToolStateSnapshotV1 = { readonly activeGenerations: number; readonly bindings: number; readonly calls: number; readonly prepared: number; readonly candidateNames: number };
+
+const SKILL_TOOL_STATE_TTL_MS = 10 * 60_000;
+const MAX_SKILL_TOOL_BINDINGS = 64;
+const MAX_SKILL_TOOL_CALLS = 128;
+const MAX_NATIVE_SKILL_ROWS = 64;
+const MAX_NATIVE_SKILL_BYTES = 64 * 1024;
+const NATIVE_SKILL_TIMEOUT_MS = 750;
+
+type NativeSkillExposure = { readonly name: string; readonly directory: string; readonly opaqueId: string; readonly taskSignals?: readonly string[]; readonly technologySignals?: readonly string[]; readonly pathSignals?: readonly string[] };
 
 type MemoryLoopbackOptionsV1 = Readonly<{
   endpoint?: string;
@@ -197,7 +245,370 @@ function managedRecallResponseEnvelope(result: MemoryLoopbackResultV1): { value:
   return { value: renderManagedProjectMemoryRecallFailure(reason), cacheable: false };
 }
 
-function createManagedRecallTool(options: ManagedMemoryLoopbackV1, state: { readonly limiter: Map<string, number[]>; readonly inFlight: Map<string, Promise<string>>; readonly replay: Map<string, ManagedRecallReplayEntry> }) {
+function taskIdentity(context: OpenCodeToolExecutionContext): { readonly sessionId: string; readonly taskId: string } | undefined {
+  const sessionId = nativeSessionId(context);
+  const taskId = typeof context.messageID === "string" && context.messageID.length > 0 ? context.messageID : typeof context.messageId === "string" && context.messageId.length > 0 ? context.messageId : undefined;
+  return sessionId && taskId ? { sessionId, taskId } : undefined;
+}
+
+function safeSkillToken(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized && normalized.length <= 128 && !/[\u0000-\u001F\u007F]/.test(normalized) ? normalized : undefined;
+}
+
+function nativeSkillMetadata(value: unknown): { readonly name: string; readonly directory: string } | undefined {
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  return typeof record.name === "string" && record.name.length > 0 && typeof record.dir === "string" && record.dir.length > 0 ? { name: record.name, directory: record.dir } : undefined;
+}
+
+function pruneSkillToolState(state: SkillToolState, host: TaskSkillDiscoveryHostV1, now = Date.now()): void {
+  for (const [key, entry] of state.activeBySession) {
+    if (now - entry.timestamp > SKILL_TOOL_STATE_TTL_MS) {
+      host.retire(entry.binding);
+      state.candidateNames.delete(entry.binding.binding_id);
+      state.activeBySession.delete(key);
+    }
+  }
+  for (const [key, entry] of state.bindings) {
+    if (now - entry.timestamp > SKILL_TOOL_STATE_TTL_MS) {
+      host.retire(entry.binding);
+      state.candidateNames.delete(entry.binding.binding_id);
+      state.bindings.delete(key);
+    }
+  }
+  for (const [key, entry] of state.preparedBySessionName) if (now - entry.timestamp > SKILL_TOOL_STATE_TTL_MS) state.preparedBySessionName.delete(key);
+  for (const [key, entry] of state.candidateNames) if (now - entry.timestamp > SKILL_TOOL_STATE_TTL_MS) state.candidateNames.delete(key);
+  for (const [key, entry] of state.calls) if (now - entry.timestamp > SKILL_TOOL_STATE_TTL_MS) state.calls.delete(key);
+  while (state.bindings.size > MAX_SKILL_TOOL_BINDINGS) {
+    const key = state.bindings.keys().next().value as string;
+    const entry = state.bindings.get(key);
+    if (entry) host.retire(entry.binding);
+    if (entry) state.candidateNames.delete(entry.binding.binding_id);
+    state.bindings.delete(key);
+  }
+  while (state.activeBySession.size > MAX_SKILL_TOOL_BINDINGS) {
+    const key = state.activeBySession.keys().next().value as string;
+    const entry = state.activeBySession.get(key);
+    if (entry) host.retire(entry.binding);
+    if (entry) state.candidateNames.delete(entry.binding.binding_id);
+    state.activeBySession.delete(key);
+  }
+  while (state.preparedBySessionName.size > MAX_SKILL_TOOL_BINDINGS) state.preparedBySessionName.delete(state.preparedBySessionName.keys().next().value as string);
+  while (state.candidateNames.size > MAX_SKILL_TOOL_BINDINGS) state.candidateNames.delete(state.candidateNames.keys().next().value as string);
+  while (state.calls.size > MAX_SKILL_TOOL_CALLS) state.calls.delete(state.calls.keys().next().value as string);
+  reportSkillToolState(state);
+}
+
+function reportSkillToolState(state: SkillToolState): void {
+  state.inspector?.({ activeGenerations: state.activeBySession.size, bindings: state.bindings.size, calls: state.calls.size, prepared: state.preparedBySessionName.size, candidateNames: state.candidateNames.size });
+}
+
+function parseSkillDiscoveryToolInput(args: unknown):
+  | { readonly operation: "search"; readonly terms: readonly string[] }
+  | { readonly operation: "prepare"; readonly observationId: string }
+  | { readonly operation: "status" }
+  | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const input = args as Record<string, unknown>;
+  if (input.operation === "status") return { operation: "status" };
+  if (input.operation === "prepare") {
+    const observationId = safeSkillToken(input.observation_id);
+    return observationId ? { operation: "prepare", observationId } : undefined;
+  }
+  if (input.operation !== "search" || !Array.isArray(input.terms) || input.terms.length < 1 || input.terms.length > 16) return undefined;
+  const terms: string[] = [];
+  for (const term of input.terms) {
+    const normalized = safeSkillToken(term);
+    if (!normalized) return undefined;
+    terms.push(normalized);
+  }
+  return { operation: "search", terms };
+}
+
+function createOpenCodeNativeSkillLoader(resolveExposure?: (loadReference: string, expectedName?: string) => Promise<NativeSkillExposure | undefined>) {
+  return {
+    schema: "skill-native-load-port-v1" as const,
+    async prepare(input: { readonly expectedName?: string; readonly loadReference: string }) {
+      const exposed = await resolveExposure?.(input.loadReference, input.expectedName) ?? parseNativeSkillExposure(input.loadReference, input.expectedName);
+      return exposed && (!input.expectedName || input.expectedName === exposed.name) ? { outcome: "loadable" as const, expected_name: exposed.name, expected_directory: exposed.directory } : { outcome: "rejected" as const };
+    },
+    async load() { return { outcome: "unobserved" as const }; },
+  };
+}
+
+function safeNativeDirectory(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length < 1 || value.length > 1_024 || /[\u0000\r\n]/.test(value)) return undefined;
+  const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "");
+  return normalized || undefined;
+}
+
+function nativeSkillDirectory(row: Record<string, unknown>): string | undefined {
+  const direct = safeNativeDirectory(row.dir ?? row.directory);
+  if (direct) return direct;
+  const location = safeNativeDirectory(row.location);
+  if (location) return location.endsWith("/SKILL.md") ? location.slice(0, -"/SKILL.md".length) : location;
+  const path = safeNativeDirectory(row.path);
+  return path?.endsWith("/SKILL.md") ? path.slice(0, -"/SKILL.md".length) : undefined;
+}
+
+function safeStringArray(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 16) return undefined;
+  const output: string[] = [];
+  for (const item of value) {
+    const token = safeSkillToken(item);
+    if (!token) return undefined;
+    output.push(token);
+  }
+  return output;
+}
+
+function hasSuccessfulSdkResponseEnvelope(root: Record<string, unknown> | undefined): boolean {
+  if (!root || root.error !== undefined || !Array.isArray(root.data)) return false;
+  const response = root.response;
+  if (!response || typeof response !== "object" || Array.isArray(response)) return false;
+  const status = (response as Record<string, unknown>).status;
+  const ok = (response as Record<string, unknown>).ok;
+  return typeof status === "number" && Number.isInteger(status) && status >= 200 && status < 300 && ok === true;
+}
+
+function normalizeNativeSkillRows(value: unknown): { readonly outcome: "complete" | "indeterminate"; readonly exposures: readonly NativeSkillExposure[] } {
+  const root = value && typeof value === "object" ? value as Record<string, unknown> : undefined;
+  const trustedSdkEnvelope = !Array.isArray(value) && hasSuccessfulSdkResponseEnvelope(root);
+  if (root && !Array.isArray(value)) {
+    if (root.error !== undefined) return { outcome: "indeterminate", exposures: [] };
+    const status = root.status;
+    const outcome = root.outcome;
+    const completeness = root.completeness;
+    if (status !== undefined && status !== "success" && status !== "complete" && status !== "ok") return { outcome: "indeterminate", exposures: [] };
+    if (outcome !== undefined && outcome !== "complete" && outcome !== "success") return { outcome: "indeterminate", exposures: [] };
+    if (completeness !== undefined && completeness !== "complete") return { outcome: "indeterminate", exposures: [] };
+    if (!trustedSdkEnvelope && status === undefined && outcome === undefined && completeness === undefined) return { outcome: "indeterminate", exposures: [] };
+  }
+  const rows = Array.isArray(value) ? value : Array.isArray(root?.skills) ? root.skills : Array.isArray(root?.data) ? root.data : undefined;
+  if (!rows || rows.length > MAX_NATIVE_SKILL_ROWS) return { outcome: "indeterminate", exposures: [] };
+  const byName = new Set<string>();
+  const exposures: NativeSkillExposure[] = [];
+  let byteLength = 0;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (!row || typeof row !== "object" || Array.isArray(row)) return { outcome: "indeterminate", exposures: [] };
+    const record = row as Record<string, unknown>;
+    const name = safeSkillToken(record.name);
+    const directory = nativeSkillDirectory(record);
+    const taskSignals = safeStringArray(record.taskSignals ?? record.task_signals);
+    const technologySignals = safeStringArray(record.technologySignals ?? record.technology_signals);
+    const pathSignals = safeStringArray(record.pathSignals ?? record.path_signals);
+    if (!name || !directory || taskSignals === undefined && (record.taskSignals !== undefined || record.task_signals !== undefined) || technologySignals === undefined && (record.technologySignals !== undefined || record.technology_signals !== undefined) || pathSignals === undefined && (record.pathSignals !== undefined || record.path_signals !== undefined)) return { outcome: "indeterminate", exposures: [] };
+    for (const piece of [name, directory, ...(taskSignals ?? []), ...(technologySignals ?? []), ...(pathSignals ?? [])]) {
+      byteLength += Buffer.byteLength(piece, "utf8");
+      if (byteLength > MAX_NATIVE_SKILL_BYTES) return { outcome: "indeterminate", exposures: [] };
+    }
+    if (byName.has(name)) return { outcome: "indeterminate", exposures: [] };
+    byName.add(name);
+    exposures.push({ name, directory, opaqueId: `skill-${managedRecallDigest(`${name}\0${directory}`).slice(0, 32)}`, ...(taskSignals ? { taskSignals } : {}), ...(technologySignals ? { technologySignals } : {}), pathSignals: pathSignals ?? [`${directory}/SKILL.md`] });
+  }
+  return { outcome: "complete", exposures };
+}
+
+async function readNativeSkillRows(client: unknown): Promise<unknown> {
+  const record = client && typeof client === "object" ? client as Record<string, unknown> : undefined;
+  const skillRecord = record?.skill && typeof record.skill === "object" ? record.skill as Record<string, unknown> : undefined;
+  const lowLevelClient = record?._client && typeof record._client === "object" ? record._client as Record<string, unknown> : undefined;
+  const publicList = skillRecord?.list;
+  const lowLevelGet = lowLevelClient?.get;
+  const task = typeof publicList === "function"
+    ? Promise.resolve(publicList.call(skillRecord))
+    : typeof record?.request === "function"
+      ? Promise.resolve(record.request({ method: "GET", path: "/skill" }))
+      : typeof record?.fetch === "function"
+        ? Promise.resolve(record.fetch("/skill", { method: "GET" }))
+        : typeof lowLevelGet === "function"
+          ? Promise.resolve(lowLevelGet.call(lowLevelClient, { url: "/skill" }))
+          : Promise.resolve(undefined);
+  return await Promise.race([
+    task,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("native-skill-timeout")), NATIVE_SKILL_TIMEOUT_MS)),
+  ]);
+}
+
+function createNativeSkillInventory(client: unknown) {
+  const exposuresById = new Map<string, NativeSkillExposure>();
+  const descriptorPath = (exposure: NativeSkillExposure): string | undefined => safeNativeDirectory(`${exposure.directory}/SKILL.md`);
+  const discover = async () => {
+    try {
+      const normalized = normalizeNativeSkillRows(await readNativeSkillRows(client));
+      exposuresById.clear();
+      for (const exposure of normalized.exposures) exposuresById.set(exposure.opaqueId, exposure);
+      return normalized;
+    } catch {
+      exposuresById.clear();
+      return { outcome: "indeterminate" as const, exposures: [] };
+    }
+  };
+  return {
+    discover,
+    async resolve(loadReference: string, expectedName?: string) {
+      const normalized = await discover();
+      if (normalized.outcome !== "complete") return undefined;
+      const opaque = exposuresById.get(loadReference);
+      if (opaque) return opaque;
+      const expectedPath = safeNativeDirectory(loadReference);
+      if (!expectedName || !expectedPath || !expectedPath.endsWith("/SKILL.md")) return undefined;
+      const matches = normalized.exposures.filter((exposure) => exposure.name === expectedName && descriptorPath(exposure) === expectedPath);
+      return matches.length === 1 ? matches[0] : undefined;
+    },
+  };
+}
+
+function parseNativeSkillExposure(value: string, expectedName?: string): { readonly name: string; readonly directory: string } | undefined {
+  if (value.length > 4_096) return undefined;
+  try {
+    const parsed = JSON.parse(value) as { name?: unknown; dir?: unknown; directory?: unknown };
+    const name = safeSkillToken(parsed.name);
+    const directory = typeof parsed.dir === "string" ? parsed.dir : typeof parsed.directory === "string" ? parsed.directory : undefined;
+    if (!name || !directory || directory.length > 1_024 || /[\u0000\r\n]/.test(directory)) return undefined;
+    return { name, directory };
+  } catch {
+    return undefined;
+  }
+}
+
+function createDefaultSkillDiscoveryHost(options: OpenCodeSkillDiscoveryHostOptionsV1 | undefined, resolveExposure?: (loadReference: string, expectedName?: string) => Promise<NativeSkillExposure | undefined>): TaskSkillDiscoveryHostV1 | undefined {
+  if (!options) return undefined;
+  return createTaskSkillDiscoveryHostV1({
+    ...options,
+    activeRunnerId: "opencode",
+    nativeLoader: createOpenCodeNativeSkillLoader(resolveExposure),
+  });
+}
+
+function createRegistryAwareOpenCodeDiscovery(projectRoot: string, provider: SkillDiscoverySourceProviderV1): {
+  readonly readRegistry: () => Promise<readonly SkillRegistryRecordV1[]>;
+  readonly discoverDirectly: () => Promise<BoundedSkillDiscoveryResultV1>;
+} {
+  let fallbackDiscovery: Promise<BoundedSkillDiscoveryResultV1> | undefined;
+  const evaluateCurrent = async (): Promise<{ readonly discovery: BoundedSkillDiscoveryResultV1; readonly snapshot: ReturnType<typeof canonicalizeSkillRegistry> }> => {
+    const sourceSet = await provider.listSources({ projectRoot });
+    const discovery = await discoverSkills({ projectRoot, activeRunnerId: "opencode", sourceSet });
+    const snapshot = canonicalizeSkillRegistry({
+      activeRunnerId: "opencode",
+      sourceDeclarations: sourceSet.sources.map((source) => source.declaration),
+      discovery,
+    });
+    return { discovery, snapshot };
+  };
+  return {
+    async readRegistry() {
+      let evaluated: { readonly discovery: BoundedSkillDiscoveryResultV1; readonly snapshot: ReturnType<typeof canonicalizeSkillRegistry> } | undefined;
+      const status = await readSkillRegistryStatus({ projectRoot, evaluateCurrent: async () => {
+        evaluated = await evaluateCurrent();
+        return evaluated.snapshot;
+      } });
+      if (status.status !== "ready") {
+        if (evaluated) fallbackDiscovery = Promise.resolve(evaluated.discovery);
+        throw new Error("skill-registry-not-ready");
+      }
+      const parsed = parseSkillRegistryDocument(await readFile(join(projectRoot, SKILL_REGISTRY_PATH_V1), "utf8"));
+      if (!parsed.ok || !parsed.frontmatter || parsed.frontmatter.completeness !== "complete" || parsed.frontmatter.fingerprint !== status.fingerprint) {
+        if (evaluated) fallbackDiscovery = Promise.resolve(evaluated.discovery);
+        throw new Error("skill-registry-not-ready");
+      }
+      return parsed.frontmatter.records;
+    },
+    async discoverDirectly() {
+      const pending = fallbackDiscovery;
+      fallbackDiscovery = undefined;
+      return pending ?? discoverSkillsFromProvider({ projectRoot, activeRunnerId: "opencode", provider });
+    },
+  };
+}
+
+function createDefaultSkillDiscoveryHostFromPluginInput(input: OpenCodeNativePluginInputV1 | undefined): TaskSkillDiscoveryHostV1 | undefined {
+  const projectRoot = typeof input?.worktree === "string" && input.worktree.length > 0 ? input.worktree : typeof input?.directory === "string" && input.directory.length > 0 ? input.directory : undefined;
+  if (!projectRoot || !input?.client) return undefined;
+  const inventory = createNativeSkillInventory(input.client);
+  const provider = createOpenCodeSkillDiscoveryProvider({
+    skillInventoryDiscovery: async () => {
+      const result = await inventory.discover();
+      return result.outcome === "complete"
+        ? { outcome: "complete" as const, observations: result.exposures.map((exposure) => ({ opaqueId: exposure.opaqueId, name: exposure.name, observedCategory: "runner_exposed" as const, ...(exposure.taskSignals ? { taskSignals: exposure.taskSignals } : {}), ...(exposure.technologySignals ? { technologySignals: exposure.technologySignals } : {}), ...(exposure.pathSignals ? { pathSignals: exposure.pathSignals } : {}) })), diagnostics: [] }
+        : { outcome: "indeterminate" as const, observations: [], reasonCode: "partial_source_evaluation" as const, diagnostics: [{ code: "native_inventory_unavailable", message: "OpenCode native skill inventory was unavailable." }] };
+    },
+  });
+  const discovery = createRegistryAwareOpenCodeDiscovery(projectRoot, provider);
+  return createDefaultSkillDiscoveryHost({
+    projectRoot,
+    registryStatus: "ready",
+    readRegistry: discovery.readRegistry,
+    provider,
+    discoverDirectly: discovery.discoverDirectly,
+  }, (loadReference, expectedName) => inventory.resolve(loadReference, expectedName));
+}
+
+function createTaskSkillDiscoveryTool(host: TaskSkillDiscoveryHostV1, state: SkillToolState): OpenCodeCustomToolV1 {
+  let nextGeneration = 0;
+  const clearSessionTransient = (sessionId: string) => {
+    for (const key of state.preparedBySessionName.keys()) if (key.startsWith(`${sessionId}\0`)) state.preparedBySessionName.delete(key);
+    for (const key of state.calls.keys()) if (key.startsWith(`${sessionId}\0`)) state.calls.delete(key);
+  };
+  const currentBinding = (sessionId: string): TaskSkillDiscoveryBindingV1 | undefined => {
+    pruneSkillToolState(state, host);
+    return state.activeBySession.get(sessionId)?.binding;
+  };
+  const rotateBinding = async (context: OpenCodeToolExecutionContext): Promise<{ readonly sessionId: string; readonly binding: TaskSkillDiscoveryBindingV1 } | undefined> => {
+    const sessionId = nativeSessionId(context);
+    if (!sessionId) return;
+    pruneSkillToolState(state, host);
+    const previous = state.activeBySession.get(sessionId);
+    if (previous) host.retire(previous.binding);
+    clearSessionTransient(sessionId);
+    for (const [key, entry] of state.bindings) if (key.startsWith(`${sessionId}\0`)) { state.candidateNames.delete(entry.binding.binding_id); state.bindings.delete(key); }
+    const taskId = `skill-discovery-${++nextGeneration}`;
+    const binding = await host.open({ session_id: sessionId, task_id: taskId });
+    state.activeBySession.set(sessionId, { binding, timestamp: Date.now() });
+    state.bindings.set(`${sessionId}\0${taskId}`, { binding, timestamp: Date.now() });
+    pruneSkillToolState(state, host);
+    return { sessionId, binding };
+  };
+  return {
+    description: "Search and prepare registered task skills. Native loading remains owned by OpenCode and is only observed through correlated hooks.",
+    args: { operation: { type: "string" }, observation_id: { type: "string", optional: true }, terms: { type: "array", optional: true } },
+    async execute(args: unknown, context: OpenCodeToolExecutionContext = {}): Promise<string> {
+      const input = parseSkillDiscoveryToolInput(args);
+      if (!input) return JSON.stringify({ outcome: "invalid-request" });
+      const sessionId = nativeSessionId(context);
+      if (!sessionId) return JSON.stringify({ outcome: "unavailable" });
+      if (input.operation === "search") {
+        const opened = await rotateBinding(context);
+        if (!opened) return JSON.stringify({ outcome: "unavailable" });
+        const binding = opened.binding;
+        const result = await host.search(binding, { schema: "skill-candidate-query-v1", terms: input.terms, limit: 16 });
+        state.candidateNames.set(binding.binding_id, { names: new Map(result.candidates.map((candidate) => [candidate.observation_id, candidate.name])), timestamp: Date.now() });
+        reportSkillToolState(state);
+        return JSON.stringify(result);
+      }
+      const binding = currentBinding(sessionId);
+      if (!binding) return JSON.stringify({ outcome: "unavailable" });
+      if (input.operation === "prepare") {
+        clearSessionTransient(sessionId);
+        const result = await host.prepare(binding, { observation_id: input.observationId });
+        if (result.selection.outcome === "selected" && result.preparation.outcome === "loadable") {
+          const expectedName = state.candidateNames.get(binding.binding_id)?.names.get(result.selection.reference.observation_id);
+          if (expectedName) state.preparedBySessionName.set(`${sessionId}\0${expectedName}`, { binding, timestamp: Date.now() });
+        }
+        reportSkillToolState(state);
+        return JSON.stringify({ selection: result.selection, preparation: result.preparation.outcome === "loadable" ? { outcome: "loadable" } : result.preparation });
+      }
+      if (input.operation === "status") return JSON.stringify(host.getOutcome(binding));
+      return JSON.stringify({ outcome: "invalid-request" });
+    },
+  };
+}
+
+function createManagedRecallTool(options: ManagedMemoryLoopbackV1, state: { readonly limiter: Map<string, number[]>; readonly inFlight: Map<string, Promise<string>>; readonly replay: Map<string, ManagedRecallReplayEntry> }): OpenCodeCustomToolV1 {
   return {
     description: "When available, call this before answering whether a project-specific prior decision, name, terminology, convention, rationale, discovery, or established architecture exists or applies, including conditional phrasing such as 'si existe', 'si aplica', 'if any', or 'if applicable'. Example trigger: 'Si existe alguna denominación o convención del proyecto relacionada con esta arquitectura, inclúyela únicamente si realmente aplica.' Build concise and discriminative focused recall queries from requested historical facets + relevant project subject, not by paraphrasing the full current task; preserve every historical facet requested by the user rather than collapsing to one. If a request asks about project-specific name/denomination/terminology and convention, include both facets and the relevant subject in the query. For that Spanish shape, use exactly: 'nombre interno denominación convención arquitectura de memoria proyecto'; omit incidental hypothetical implementation terms such as provider externo, integración, separación, core/adapters, unless those are themselves the historical fact being sought. Preserve requested names, conventions, rationale, decisions, and discoveries as separate query facets; do not insert facts or proper nouns the user did not provide. Repository inspection may verify current implementation but must not be used to conclude that no historical convention exists before managed recall. Do not use this for ordinary current-state implementation questions with no historical/project-convention aspect. Input is exactly { query }; never include secrets or scope/provider/limit arguments. Returns only bounded untrusted advisory context or a distinct failure result.",
     args: { query: { type: "string" } },
@@ -464,7 +875,7 @@ function preparationResolution(value: unknown): {
   };
 }
 
-export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDeveloperTeamExecutionPluginOptionsV1 = {}) {
+export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDeveloperTeamExecutionPluginOptionsV1 = {}): (pluginInput?: OpenCodeNativePluginInputV1) => Promise<OpenCodeDeveloperTeamExecutionHooksV1> {
   const authorizationService = options.authorizationService ?? createInvocationAuthorizationServiceV1();
   const bridge = options.bridge ?? createOpenCodeDeveloperTeamExecutionBridgeV1({ authorizationService, delegate: async () => {} });
   const receipts = new Map<string, `sha256:${string}`>();
@@ -476,6 +887,8 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
   const managedRecallLimiter = new Map<string, number[]>();
   const managedRecallInFlight = new Map<string, Promise<string>>();
   const managedRecallReplay = new Map<string, ManagedRecallReplayEntry>();
+  let skillDiscoveryHost = options.skillDiscoveryHost;
+  const skillState: SkillToolState = { activeBySession: new Map(), bindings: new Map(), candidateNames: new Map(), preparedBySessionName: new Map(), calls: new Map(), ...(options.skillDiscoveryInspector ? { inspector: options.skillDiscoveryInspector } : {}) };
   let nextModelContextGeneration = 0;
   let nextRequestMarkerSequence = 0;
   const beginModelContextRecall = (turn: LogicalUserTurnV1): number => {
@@ -517,6 +930,7 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
     latestRequestMarkers.set(classified.sessionId, Object.freeze({ ...classified.marker, sequence: ++nextRequestMarkerSequence }));
   };
   const provider = (globalThis as Record<PropertyKey, unknown>)[HOST_CONTEXT] as OpenCodeHostProviderV1 | undefined;
+  skillDiscoveryHost ??= provider?.skillDiscoveryHost ?? createDefaultSkillDiscoveryHost(options.skillDiscovery ?? provider?.skillDiscovery);
   // Capture every trusted host capability exactly once. Prompt/caller data is never consulted for authority.
   const preparationAuthorizationService = provider?.sessionPreparationAuthorizationService;
   const resolveSessionPreparation = provider?.resolveOpenCodeSessionPreparation;
@@ -536,10 +950,17 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
   const managedRecallTool = memoryLoopback
     ? createManagedRecallTool(memoryLoopback, { limiter: managedRecallLimiter, inFlight: managedRecallInFlight, replay: managedRecallReplay })
     : undefined;
-
-  return async function DeveloperTeamExecutionPlugin() {
+  return async function DeveloperTeamExecutionPlugin(pluginInput?: OpenCodeNativePluginInputV1) {
+    skillDiscoveryHost ??= createDefaultSkillDiscoveryHostFromPluginInput(pluginInput);
+    const skillDiscoveryTool = skillDiscoveryHost ? createTaskSkillDiscoveryTool(skillDiscoveryHost, skillState) : undefined;
+    const tools = Object.assign(
+      {},
+      managedRecallTool ? { deck_project_memory_recall: managedRecallTool } : {},
+      skillDiscoveryTool ? { deck_skill_discovery: skillDiscoveryTool } : {},
+    ) as OpenCodeToolMapV1;
+    const hasTools = Boolean(managedRecallTool || skillDiscoveryTool);
     return {
-      ...(managedRecallTool ? { tool: { deck_project_memory_recall: managedRecallTool } } : {}),
+      ...(hasTools ? { tool: tools } : {}),
       "experimental.chat.messages.transform": async (_input: Record<string, never>, _output: OpenCodeModelMessageTransformOutput) => {},
       "experimental.chat.system.transform": async (input: OpenCodeSystemTransformInput, output: OpenCodeSystemTransformOutput) => {
         if (!input.sessionID) return;
@@ -597,6 +1018,17 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
         delete args.deckPreparation;
         delete args.deckQaInvocation;
         delete args.deckQaResult;
+        if (input.tool === "skill" && skillDiscoveryHost && input.sessionID && input.callID && typeof args.name === "string") {
+          pruneSkillToolState(skillState, skillDiscoveryHost);
+          const prepared = skillState.preparedBySessionName.get(`${input.sessionID}\0${args.name}`);
+          if (prepared) {
+            const armed = await skillDiscoveryHost.beforeNativeLoad(prepared.binding, { call_id: input.callID, name: args.name });
+            if (armed.outcome !== "armed") throw new Error("invalid-evidence");
+            skillState.preparedBySessionName.delete(`${input.sessionID}\0${args.name}`);
+            skillState.calls.set(`${input.sessionID}\0${input.callID}`, { binding: prepared.binding, name: args.name, timestamp: Date.now() });
+            pruneSkillToolState(skillState, skillDiscoveryHost);
+          }
+        }
         const requestedRole = qaRole(args);
         if (requestedRole) {
           if (!isDelegationTool(input.tool) || !input.sessionID || !input.callID) throw new Error("invalid-evidence");
@@ -707,6 +1139,15 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
           delete args.deckQaInvocation;
           delete args.deckQaResult;
         }
+        const metadata = input.tool === "skill" ? nativeSkillMetadata(output.metadata) : undefined;
+        if (input.tool === "skill" && skillDiscoveryHost && input.sessionID && input.callID) {
+          const key = `${input.sessionID}\0${input.callID}`;
+          const pending = skillState.calls.get(key);
+          skillState.calls.delete(key);
+          if (pending && output.error !== undefined) await skillDiscoveryHost.observeNativeLoad(pending.binding, { call_id: input.callID, name: pending.name, failed: true });
+          else if (pending && metadata) await skillDiscoveryHost.observeNativeLoad(pending.binding, { call_id: input.callID, name: metadata.name, directory: metadata.directory });
+          else if (pending) await skillDiscoveryHost.observeNativeLoad(pending.binding, { call_id: input.callID, name: pending.name });
+        }
         if (!isDelegationTool(input.tool) || !input.sessionID || !input.callID) return;
         const key = qaPendingKey(input.sessionID, input.callID);
         const pending = pendingQa.get(key);
@@ -724,8 +1165,38 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
           settledQaKeys.add(key);
         }
       },
-      event: async ({ event }: { event: { type?: string; properties?: { info?: { id?: string } } } }) => {
+      event: async ({ event }: { event: Record<string, unknown> & { type?: string; properties?: { info?: { id?: string } }; sessionID?: unknown; sessionId?: unknown; callID?: unknown; callId?: unknown; tool?: unknown; name?: unknown; args?: unknown } }) => {
         markRequestFromEvent(event);
+        if (event.type === "tool.execute.error" && skillDiscoveryHost) {
+          const sessionId = nativeSessionId(event);
+          const callId = nativeInvocationId(event);
+          if (sessionId && callId) {
+            const key = `${sessionId}\0${callId}`;
+            const pending = skillState.calls.get(key);
+            skillState.calls.delete(key);
+            if (pending) {
+              const args = event.args && typeof event.args === "object" ? event.args as { name?: unknown } : undefined;
+              const name = typeof event.name === "string" ? event.name : typeof args?.name === "string" ? args.name : "unknown";
+              await skillDiscoveryHost.observeNativeLoad(pending.binding, { call_id: callId, name, failed: true });
+            }
+          }
+        }
+        if (event.type === "message.part.updated" && skillDiscoveryHost) {
+          const properties = event.properties && typeof event.properties === "object" ? event.properties as Record<string, unknown> : undefined;
+          const rawPart = properties?.part ?? event.part;
+          const part = rawPart && typeof rawPart === "object" ? rawPart as Record<string, unknown> : undefined;
+          const sessionId = nativeSessionId(event) ?? nativeSessionId(part ?? {});
+          const tool = typeof part?.tool === "string" ? part.tool : typeof part?.name === "string" ? part.name : undefined;
+          const state = part?.state && typeof part.state === "object" ? part.state as Record<string, unknown> : undefined;
+          const failed = state?.status === "error" || state?.state === "error" || part?.error !== undefined;
+          const callId = nativeInvocationId(part ?? {});
+          if (sessionId && callId && tool === "skill" && failed) {
+            const key = `${sessionId}\0${callId}`;
+            const pending = skillState.calls.get(key);
+            skillState.calls.delete(key);
+            if (pending) await skillDiscoveryHost.observeNativeLoad(pending.binding, { call_id: callId, name: pending.name, failed: true });
+          }
+        }
         if (event.type !== "session.deleted" || !event.properties?.info?.id) return;
         const sessionId = event.properties.info.id;
         receipts.delete(sessionId);
@@ -745,6 +1216,15 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
           const [settledSessionId] = JSON.parse(key) as [string, string];
           if (settledSessionId === sessionId) settledQaKeys.delete(key);
         }
+        for (const [key, entry] of skillState.bindings) {
+          if (!key.startsWith(`${sessionId}\0`)) continue;
+          skillDiscoveryHost?.retire(entry.binding);
+          skillState.candidateNames.delete(entry.binding.binding_id);
+          skillState.bindings.delete(key);
+        }
+        skillState.activeBySession.delete(sessionId);
+        for (const key of skillState.calls.keys()) if (key.startsWith(`${sessionId}\0`)) skillState.calls.delete(key);
+        for (const key of skillState.preparedBySessionName.keys()) if (key.startsWith(`${sessionId}\0`)) skillState.preparedBySessionName.delete(key);
         try {
           if (clearSessionPreparation) await clearSessionPreparation(sessionId);
         } finally {
@@ -756,4 +1236,6 @@ export function createOpenCodeDeveloperTeamExecutionPluginV1(options: OpenCodeDe
   };
 }
 
-export default createOpenCodeDeveloperTeamExecutionPluginV1();
+export default async function DeveloperTeamExecutionPlugin(pluginInput?: OpenCodeNativePluginInputV1): Promise<OpenCodeDeveloperTeamExecutionHooksV1> {
+  return createOpenCodeDeveloperTeamExecutionPluginV1()(pluginInput);
+}

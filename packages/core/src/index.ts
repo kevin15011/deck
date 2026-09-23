@@ -136,6 +136,9 @@ export * from "./memory/canonical-supermemory-project";
 export * from "./memory/capture-eligibility";
 export * from "./memory/managed-project-memory-recall";
 
+// Bounded, task-scoped skill candidate search and native-load boundary.
+export * from "./skill-discovery";
+
 // Runner adapter interface and DTOs (TUI-facing runner abstraction)
 // Note: RunnerId is already exported from runner-capability.ts (this avoids duplicate export)
 export type {

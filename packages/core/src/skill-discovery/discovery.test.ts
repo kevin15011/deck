@@ -195,7 +195,7 @@ describe("bounded skill discovery", () => {
     const alias = parseSkillDescriptor("---\nname: &skill one\ndescription: *skill\n---\n", "alias");
     const customTag = parseSkillDescriptor("---\nname: !!js/function one\n---\n", "tagged");
     const deep = parseSkillDescriptor(
-      "---\nname: deep\nlevel_one:\n  level_two:\n    level_three:\n      level_four: value\n---\n",
+      "---\nname: deep\nlevel_one:\n  level_two:\n    level_three:\n      level_four:\n        value: unsafe\n---\n",
       "deep",
     );
 
@@ -209,6 +209,56 @@ describe("bounded skill discovery", () => {
       ...customTag.diagnostics,
       ...deep.diagnostics,
     ]).size).toBeGreaterThan(0);
+  });
+
+  test("accepts ordinary nested metadata and counts only nested YAML collections", () => {
+    const ordinaryMetadata = parseSkillDescriptor(
+      "---\nname: documented\nmetadata:\n  author: Deck\n  version: 1\n---\n",
+      "documented",
+    );
+    const depthThreeMap = parseSkillDescriptor(
+      "---\nname: map-depth-three\nfirst:\n  second:\n    third:\n      value: safe\n---\n",
+      "map-depth-three",
+    );
+    const depthFourMap = parseSkillDescriptor(
+      "---\nname: map-depth-four\nfirst:\n  second:\n    third:\n      fourth:\n        value: unsafe\n---\n",
+      "map-depth-four",
+    );
+    const depthThreeSequence = parseSkillDescriptor(
+      "---\nname: sequence-depth-three\nsteps:\n  -\n    -\n      - safe\n---\n",
+      "sequence-depth-three",
+    );
+    const depthFourSequence = parseSkillDescriptor(
+      "---\nname: sequence-depth-four\nsteps:\n  -\n    -\n      -\n        - unsafe\n---\n",
+      "sequence-depth-four",
+    );
+
+    expect(ordinaryMetadata.ok).toBe(true);
+    expect(ordinaryMetadata.record?.name).toBe("documented");
+    expect(depthThreeMap.ok).toBe(true);
+    expect(depthFourMap.ok).toBe(false);
+    expect(depthThreeSequence.ok).toBe(true);
+    expect(depthFourSequence.ok).toBe(false);
+    expect(depthFourMap.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "unsafe_frontmatter" })]),
+    );
+    expect(depthFourSequence.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "unsafe_frontmatter" })]),
+    );
+  });
+
+  test("rejects merge and tagged keys at both root and nested collection levels", () => {
+    const rootMerge = parseSkillDescriptor("---\nname: root-merge\n<<:\n  description: untrusted\n---\n", "root-merge");
+    const nestedMerge = parseSkillDescriptor("---\nname: nested-merge\nmetadata:\n  <<:\n    author: untrusted\n---\n", "nested-merge");
+    const rootTaggedKey = parseSkillDescriptor("---\nname: root-tag\n? !!str metadata\n: value\n---\n", "root-tag");
+    const nestedTaggedKey = parseSkillDescriptor("---\nname: nested-tag\nmetadata:\n  ? !!str author\n  : value\n---\n", "nested-tag");
+
+    for (const parsed of [rootMerge, nestedMerge, rootTaggedKey, nestedTaggedKey]) {
+      expect(parsed.ok).toBe(false);
+      expect(parsed.diagnostics).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: "unsafe_frontmatter" })]),
+      );
+    }
   });
 
   test("removes controls, bidi markers, and local path material from metadata", () => {

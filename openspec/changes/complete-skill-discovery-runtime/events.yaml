@@ -1,0 +1,64 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-09-22T15:00:00Z"
+    actor: deck-investigate
+  - phase: proposal
+    status: approved
+    event: proposal.approved
+    artifact: proposal.md
+    timestamp: "2026-09-22T15:20:00Z"
+    actor: deck-lead
+    notes:
+      - "The user explicitly approved proceeding with the proposal."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-09-22T15:30:00Z"
+    actor: deck-lead
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-09-22T15:30:00Z"
+    actor: deck-lead
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-09-22T15:30:00Z"
+    actor: deck-lead
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: tasks.md
+    timestamp: "2026-09-22T15:30:00Z"
+    actor: deck-lead
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-09-22T22:51:20Z"
+    actor: deck-apply-deep
+    registry_write: non-deferred
+    notes:
+      - "Canonical generation and isolated OpenCode 1.18.31 Lead/child native acceptance passed."
+      - "Independent findings for SDK envelopes, ready-registry reachability, exact filesystem/native matching, and inventory freshness were repaired."
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-09-22T22:51:20Z"
+    actor: deck-quality
+    registry_write: non-deferred
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review-report.md
+    timestamp: "2026-09-22T22:51:20Z"
+    actor: deck-quality
+    registry_write: non-deferred
