@@ -85,7 +85,8 @@ import {
 } from "@deck/core/config/deck-config";
 import { resolveCanonicalSupermemoryProjectScope } from "@deck/core/memory/canonical-supermemory-project";
 import type { DeckConfigStore } from "../deck-config-store";
-import { buildCapabilityInstructionBundle, createOwnerOnlyFileSecretStore, discoverLiteralSshHostAliasesFromHome, getEnabledCapabilityInstructionIds, getEnabledPackageInstructionIds, inspectOpenCodeSupermemoryProfileConfiguration, listConfiguredOpenCodeSupermemoryProfiles, OPENCODE_SUPERMEMORY_PROFILE_SECRET, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
+import { buildCapabilityInstructionBundle, createOwnerOnlyFileSecretStore, getEnabledCapabilityInstructionIds, getEnabledPackageInstructionIds, prepareAndBuildDeveloperTeamInstallPlan } from "@deck/core";
+import { discoverLiteralSshHostAliasesFromHome, hasUsableOpenCodeSupermemoryProfileCredential, inspectOpenCodeSupermemoryProfileConfiguration, listConfiguredOpenCodeSupermemoryProfiles, OPENCODE_SUPERMEMORY_PROFILE_SECRET, storeOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
 import type {
   RunnerModelDiscoveryRequest,
   RunnerModelInventory,
@@ -135,6 +136,7 @@ import {
   resolveSupermemoryRuntimeCredentialReadiness,
   runRunnerReviewPlan,
   type RunnerActionRunResult,
+  type RunnerProfileCredentialEffects,
   type RunnerPackageInstallResult,
   type RunnerSerenaActionContext,
   type RunnerSerenaOutcome,
@@ -212,6 +214,13 @@ type Screen =
   | "complete";
 
 const HELP = "j/k or ↑/↓: navigate • space: toggle • enter: continue • esc: back • q: quit";
+
+/** Runtime glue: the generic dashboard never imports or interprets OpenCode profile records. */
+export const openCodeProfileCredentialEffects: RunnerProfileCredentialEffects = {
+  secretName: OPENCODE_SUPERMEMORY_PROFILE_SECRET,
+  hasUsableCredential: hasUsableOpenCodeSupermemoryProfileCredential,
+  storeCredential: storeOpenCodeSupermemoryCredential,
+};
 
 function nextRunnerOperation(
   runner: RunnerId,
@@ -744,7 +753,7 @@ export function withAuthoritativeSupermemoryRuntimeReadiness(
   runnerId?: RunnerId,
 ): RunnerDashboardState["adaptiveMemory"] {
   if (adaptiveMemory.provider !== "supermemory") return adaptiveMemory;
-  const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup: adaptiveMemory.supermemory, secretStore, runnerId });
+  const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup: adaptiveMemory.supermemory, secretStore, runnerId, profileCredentialEffects: openCodeProfileCredentialEffects });
   return {
     ...adaptiveMemory,
     supermemory: {
@@ -1090,7 +1099,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         const adapter = adapterFor(state.runnerScope);
         log(`dashboardPlanBuilder: adapter=${adapter.runnerId}`);
         const runtimeReadiness = state.adaptiveMemory.provider === "supermemory"
-          ? resolveSupermemoryRuntimeCredentialReadiness({ setup: state.adaptiveMemory.supermemory, secretStore: deckSecretStore, runnerId: adapter.runnerId })
+          ? resolveSupermemoryRuntimeCredentialReadiness({ setup: state.adaptiveMemory.supermemory, secretStore: deckSecretStore, runnerId: adapter.runnerId, profileCredentialEffects: openCodeProfileCredentialEffects })
           : undefined;
         if (process.env.DECK_DEBUG && runtimeReadiness) {
           log(`supermemory runtime readiness for plan: ${runtimeReadiness.ready ? "ready" : "not-ready"} (${runtimeReadiness.reason})`);
@@ -1434,6 +1443,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         },
         runnerAction: runSerenaAction,
         secretStore: deckSecretStore,
+        profileCredentialEffects: openCodeProfileCredentialEffects,
         validateSupermemoryReadOnlyApi: validateSupermemoryRuntimeCredentialReadOnly,
         supermemoryToken: dashboardState.adaptiveMemory.supermemory?.hasToken ? supermemorySetup.token.trim() || undefined : undefined,
          memoryProvider: resolvedMemoryProvider,
@@ -1889,6 +1899,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           makeDefault: openCodeExclusive && resolveOpenCodeSupermemoryProfileKind(supermemorySetup) === "fallback-default",
           eligibleAliases: openCodeExclusive ? discoverLiteralSshHostAliasesFromHome(process.env.HOME ?? "").aliases : [],
           secretStore: deckSecretStore,
+          profileCredentialEffects: openCodeProfileCredentialEffects,
           validateSupermemoryReadOnlyApi: dependencies.validateSupermemoryReadOnlyApi ?? validateSupermemoryRuntimeCredentialReadOnly,
         });
         setSupermemorySetup((current) => ({ ...current, token: "" }));
@@ -3071,6 +3082,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       makeDefault: runnerId === "opencode" && openCodeProfileKind === "fallback-default",
       eligibleAliases: runnerId === "opencode" ? discoverLiteralSshHostAliasesFromHome(process.env.HOME ?? "").aliases : [],
       secretStore: deckSecretStore,
+      profileCredentialEffects: openCodeProfileCredentialEffects,
       validateSupermemoryReadOnlyApi: dependencies.validateSupermemoryReadOnlyApi ?? validateSupermemoryRuntimeCredentialReadOnly,
     });
     if (!result.ok) {
@@ -3228,7 +3240,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
     if (state.adaptiveMemory.provider === "supermemory") {
       const setup = state.adaptiveMemory.supermemory;
-      const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup, secretStore: deckSecretStore, runnerId: state.runnerScope === "all" ? undefined : state.runnerScope });
+      const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup, secretStore: deckSecretStore, runnerId: state.runnerScope === "all" ? undefined : state.runnerScope, profileCredentialEffects: openCodeProfileCredentialEffects });
       if (process.env.DECK_DEBUG) log(`Supermemory runtime readiness: ${readiness.ready ? "ready" : "not-ready"} (${readiness.reason}).`);
       if (!setup?.configured && !readiness.ready) {
         diagnostics.push({ message: "Supermemory setup must be selected before Review/Install." });

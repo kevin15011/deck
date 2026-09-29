@@ -337,6 +337,33 @@ function dependencyFactsForCall(source: ts.SourceFile, target: LaunchTarget, opt
   if (target === "runOpenCodeLaunch") {
     return { hasFakeTransport: options.properties.has("supermemoryRuntimeTransport"), hasIsolatedState: options.properties.has("supermemoryRuntimeStateHome"), unresolved: [] };
   }
+  if (target === "runRunnerLaunch") {
+    const adapter = options.properties.get("adapter");
+    const adapterFacts = adapter ? resolveObjectExpression(source, adapter, declarations, functions) : objectFacts(new Map());
+    const resolvedAdapter = adapter && ts.isIdentifier(adapter) ? nearestDeclaration(adapter.text, adapter.getStart(source), declarations)?.initializer : adapter;
+    const importedOpenCodeAdapter = source.statements.some((statement) => ts.isImportDeclaration(statement)
+      && ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text === "@deck/adapter-opencode"
+      && !!statement.importClause?.namedBindings && ts.isNamedImports(statement.importClause.namedBindings)
+      && statement.importClause.namedBindings.elements.some((element) => (element.propertyName?.text ?? element.name.text) === "createOpenCodeRunnerAdapter"));
+    const isOpenCode = stringLiteralValue(adapterFacts.properties.get("runnerId")) === "opencode"
+      || (importedOpenCodeAdapter && !!resolvedAdapter && ts.isCallExpression(resolvedAdapter)
+        && ts.isIdentifier(resolvedAdapter.expression) && resolvedAdapter.expression.text === "createOpenCodeRunnerAdapter");
+    if (isOpenCode) {
+      const runtime = options.properties.get("supermemoryRuntime");
+      const runtimeFacts = runtime ? resolveObjectExpression(source, runtime, declarations, functions) : objectFacts(new Map());
+      const effects = options.properties.get("opencodeSupermemoryLaunchEffects");
+      const launchEffects = effects ? resolveObjectExpression(source, effects, declarations, functions) : objectFacts(new Map());
+      const process = options.properties.get("processEffects");
+      const processFacts = process ? resolveObjectExpression(source, process, declarations, functions) : objectFacts(new Map());
+      // OpenCode never creates the Deck memory host: require its isolated credential store,
+      // fake plugin verification effects, and fake process spawn instead of a runtime transport.
+      return {
+        hasFakeTransport: launchEffects.properties.has("inspectOwned") && launchEffects.properties.has("inspectRegistrations") && processFacts.properties.has("spawn"),
+        hasIsolatedState: runtimeFacts.properties.has("secretStore"),
+        unresolved: [...runtimeFacts.unresolved, ...launchEffects.unresolved, ...processFacts.unresolved],
+      };
+    }
+  }
   return dependencyFactsForRuntime(source, options.properties.get("supermemoryRuntime"), declarations, functions);
 }
 
@@ -477,7 +504,7 @@ describe("Supermemory launch test hermeticity", () => {
     expect(byTarget.runRunnerLaunch).toBeGreaterThan(0);
     expect(byTarget.createSupermemoryRuntimeHost).toBeGreaterThan(0);
     expect(calls.filter((call) => call.enablement === "unknown" && !call.forwardingEdge && (!call.hasFakeTransport || !call.hasIsolatedState))).toHaveLength(0);
-    expect(unsafeRequiredDependencies(calls)).toHaveLength(0);
+    expect(unsafeRequiredDependencies(calls)).toEqual([]);
     expect(unresolvedCalls(calls)).toEqual([]);
   });
 
@@ -611,6 +638,27 @@ runRunnerLaunch({ launch: { deckConfig: enabledConfig() }, supermemoryRuntime: r
 `);
 
     expect(unsafeRequiredDependencies(calls)).toEqual(["synthetic.test.ts:9 runRunnerLaunch enablement=enabled transport=true state=false"]);
+  });
+
+  test("OpenCode profile fixtures require isolated credentials, fake plugin checks, and fake spawn", () => {
+    const calls = syntheticCalls(`${SYNTHETIC_IMPORTS}
+import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
+const adapter = createOpenCodeRunnerAdapter();
+const launch = { deckConfig: { adaptiveMemory: { enabled: true, activeProvider: "supermemory" } } };
+const supermemoryRuntime = { secretStore };
+const processEffects = { spawn: async () => ({ exitCode: 0 }) };
+const opencodeSupermemoryLaunchEffects = { inspectOwned: () => ({}), inspectRegistrations: () => ({}) };
+runRunnerLaunch({ adapter, launch, supermemoryRuntime, processEffects, opencodeSupermemoryLaunchEffects });
+runRunnerLaunch({ adapter, launch, supermemoryRuntime, processEffects });
+runRunnerLaunch({ adapter, launch, processEffects, opencodeSupermemoryLaunchEffects });
+runRunnerLaunch({ adapter, launch, supermemoryRuntime, opencodeSupermemoryLaunchEffects });
+`);
+
+    expect(unsafeRequiredDependencies(calls)).toEqual([
+      "synthetic.test.ts:14 runRunnerLaunch enablement=enabled transport=false state=true",
+      "synthetic.test.ts:15 runRunnerLaunch enablement=enabled transport=true state=false",
+      "synthetic.test.ts:16 runRunnerLaunch enablement=enabled transport=false state=true",
+    ]);
   });
 
   test("follows structurally valid forwarding wrappers to their call sites", () => {

@@ -1,4 +1,4 @@
-import type { DeckSecretStore } from "../config/secret-store";
+import type { DeckSecretStore } from "@deck/core";
 import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import type { Stats } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";

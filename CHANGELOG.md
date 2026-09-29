@@ -9,6 +9,24 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-29
+
+### Changed
+
+- Deck-managed OpenCode sessions now use the pinned official Supermemory plugin for recall, capture, injection, and compaction instead of Deck-owned OpenCode memory hooks. Pi and Codex memory behavior is unchanged; Context Mode remains an MCP integration.
+- OpenCode setup offers a default credential and selectable literal Git SSH Host aliases. A uniquely matched, configured alias selects its credential; unresolved origins use the configured default. Launch stops if neither is available, without falling back to another account's credentials.
+- Verified GitHub origins retain the canonical `sm_project_v1_<owner>_<repository>` tag, including linked worktrees. Without a verified origin, the plugin selects its own fallback container; memories under older plugin-generated tags are not migrated.
+
+### Security and compatibility
+
+- The selected credential is passed only to the managed OpenCode process, not stored in OpenCode configuration or launch diagnostics. Other plugins loaded in that same process can access its environment; use only trusted plugins.
+- OpenCode Apply runs in the stable binary's `static-compatible` mode. OpenCode-native tool permissions still apply, but this mode does not provide Deck's invocation-scoped denial. Existing Pi/Codex and strict-mode checks are unchanged.
+- The official plugin is pinned to `opencode-supermemory@2.0.15`; Deck supplies a loader-only compatibility adapter for the supported OpenCode generation. Restart Deck and reapply the OpenCode Developer Team installation after upgrading.
+
+### Verification limitation
+
+- A user canary confirmed installation, canonical tagging, and a project-memory write on OpenCode 1.18.31. The full combination of profile switching, resumed/child sessions, compaction, third-party plugins, RTK, and Context Mode in one isolated OpenCode process was not independently reproduced before this release; the user explicitly accepted this remaining risk. Do not treat this release as proof of full process-level isolation or strict Apply authorization.
+
 ## [0.5.0] - 2026-09-22
 
 ### Added

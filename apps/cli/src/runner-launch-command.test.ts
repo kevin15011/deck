@@ -6,7 +6,8 @@ import { classifyExplicitMemoryIntent, createNodeRunnerProcessEffects, executeRu
 import { runRunnerLaunch } from "./runner-launch-command";
 import { deriveDeckRuntimeSessionId } from "./supermemory-runtime-host";
 import { createFreshDeckSessionId, persistNativeDeckRuntimeSessionMapping, resolveDeckRuntimeSessionId } from "./supermemory-session-store";
-import { createOwnerOnlyFileSecretStore, getDefaultDeckConfig, storeOpenCodeSupermemoryCredential, type RunnerAdapter, type RunnerLaunchInput } from "@deck/core";
+import { createOwnerOnlyFileSecretStore, getDefaultDeckConfig, type RunnerAdapter, type RunnerLaunchInput } from "@deck/core";
+import { storeOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
 import { createPiRunnerAdapter } from "@deck/adapter-pi";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { buildCodexLaunchPlan, createCodexRunnerAdapter } from "@deck/adapter-codex";
@@ -286,7 +287,7 @@ describe("runRunnerLaunch consent and status", () => {
     }
   });
 
-  test("OpenCode uses the exact SSH-alias profile without starting the Deck memory runtime", async () => {
+  test("OpenCode uses the exact SSH-alias profile without claiming an unverified canonical GitHub tag or starting the Deck memory runtime", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-opencode-profile-launch-"));
     const configHome = await mkdtemp(join(tmpdir(), "deck-opencode-profile-secrets-"));
     const sshHome = await mkdtemp(join(tmpdir(), "deck-opencode-profile-home-"));
@@ -320,7 +321,7 @@ describe("runRunnerLaunch consent and status", () => {
       expect(result.status).toBe("launched");
       expect(childEnv?.SUPERMEMORY_API_KEY).toBe("sm_work");
       expect(childEnv?.SUPERMEMORY_API_URL).toBe("https://api.supermemory.ai");
-      expect(childEnv?.SUPERMEMORY_REPO_TAG).toBe("sm_project_v1_org_repo");
+      expect(childEnv?.SUPERMEMORY_REPO_TAG).toBeUndefined();
       expect(childEnv?.OPENCODE_DECK_INVOCATION_AUTHORIZATION).toBeUndefined();
       expect(childEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_ENDPOINT");
       expect(childEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_TOKEN");
@@ -459,6 +460,7 @@ describe("runRunnerLaunch consent and status", () => {
         yes: true,
         presentPreview: async () => {},
         supermemoryRuntime: { secretStore },
+        opencodeSupermemoryLaunchEffects: readyOpenCodeSupermemoryLaunchEffects,
         processEffects: { spawn: async () => {
           spawned = true;
           return { exitCode: 0, stdout: "", stderr: "" };

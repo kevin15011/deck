@@ -24,5 +24,5 @@
 
 4.1 [x] Run focused TDD, affected process-helper tests, TypeScript and compiled-asset parity checks.
 4.2 [x] Exercise official capture/compaction and generated authorization through a mandatory hermetic published-artifact hook fixture.
-4.3 [ ] Reproduce an actual pinned OpenCode-process launch with the full Deck plugin configuration, normal user-plugin coexistence, stable-compatible/native permissions, canonical tag or non-Git fallback, Context Mode and RTK behavior; isolate network and use fake credentials.
-4.4 [ ] Independently review final runtime evidence, record any lifecycle limitations, and obtain approval before promotion/rollout. No full-readiness or release claim while 4.3 is open.
+4.3 [ ] Reproduce an actual pinned OpenCode-process launch with the full Deck plugin configuration, normal user-plugin coexistence, stable-compatible/native permissions, canonical tag or non-Git fallback, Context Mode and RTK behavior; isolate network and use fake credentials. This remains unverified; the user accepted the risk for the v0.6.0 release on 2026-09-29 rather than representing it as completed.
+4.4 [ ] Independently review final runtime evidence, record any lifecycle limitations, and obtain approval before full-readiness/promotion claims. An independent release-readiness review identified 4.3 as open; the user authorized release with that stated limitation. Do not claim full runtime readiness while 4.3 is open; release requires the explicit risk acceptance allowed by the proposal.

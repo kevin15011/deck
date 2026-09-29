@@ -5,7 +5,8 @@ import type {
   RunnerLaunchPlan,
   RunnerLaunchResult,
 } from "@deck/core";
-import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan, RUNNER_ENV_ALLOWLIST, isSensitiveRunnerEnv, sanitizeRunnerEnv, resolveCanonicalSupermemoryProjectScope, createOwnerOnlyFileSecretStore, discoverLiteralSshHostAliasesFromHome, readLogicalGitOriginRemote, resolveOpenCodeSupermemoryCredential } from "@deck/core";
+import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan, RUNNER_ENV_ALLOWLIST, isSensitiveRunnerEnv, sanitizeRunnerEnv, resolveCanonicalSupermemoryProjectScope, createOwnerOnlyFileSecretStore, readLogicalGitOriginRemote } from "@deck/core";
+import { discoverLiteralSshHostAliasesFromHome, resolveOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
 import { spawn as nodeSpawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { open, rm } from "node:fs/promises";
@@ -17,7 +18,7 @@ import type { SupermemoryObservabilitySink } from "./supermemory-observability";
 import type { DeckSecretStore } from "@deck/core";
 import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { formatSessionRuntimeReadiness, resolveSessionRuntimeReadiness } from "./session-runtime-readiness";
-import { authorizeOpenCodeSupermemoryLaunch, type OpenCodeSupermemoryLaunchEffects } from "./opencode-supermemory-launch";
+import { authorizeOpenCodeSupermemoryLaunch, VERIFIED_OPENCODE_SUPERMEMORY_BINDING, type OpenCodeSupermemoryLaunchEffects } from "./opencode-supermemory-launch";
 
 export type SpawnedRunnerResult = {
   exitCode: number;
@@ -88,7 +89,7 @@ export async function executeRunnerLaunchPlan(
     if (key.startsWith("DECK_RUNNER_MEMORY_") || key.startsWith("DECK_CODEX_BRIDGE_") || key.startsWith("SUPERMEMORY_") || key === "OPENCODE_CONFIG_CONTENT" || key === "OPENCODE_DECK_INVOCATION_AUTHORIZATION") delete env[key];
   }
   const secrets: string[] = [];
-  const authorizedSensitiveKeys = plan.sensitiveEnvAuthorization?.binding === "verified-opencode-supermemory-loader-v1"
+  const authorizedSensitiveKeys = plan.sensitiveEnvAuthorization?.binding === VERIFIED_OPENCODE_SUPERMEMORY_BINDING
     ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY"))
     : new Set<string>();
   for (const [key, entry] of Object.entries(plan.envOverlay ?? {})) {

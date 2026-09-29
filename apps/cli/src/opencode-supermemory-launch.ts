@@ -107,6 +107,8 @@ export function buildOpenCodeSupermemoryLaunchOverlay(input: {
   });
 }
 
+export const VERIFIED_OPENCODE_SUPERMEMORY_BINDING = "verified-opencode-supermemory-loader-v1";
+
 /** Bind a verified loader overlay to the only launch plan allowed to carry its credential. */
 export function authorizeOpenCodeSupermemoryLaunch(
   plan: RunnerLaunchPlan,
@@ -118,7 +120,7 @@ export function authorizeOpenCodeSupermemoryLaunch(
     ...plan,
     envOverlay: { ...(plan.envOverlay ?? {}), ...overlay },
     sensitiveEnvAuthorization: {
-      binding: "verified-opencode-supermemory-loader-v1",
+      binding: VERIFIED_OPENCODE_SUPERMEMORY_BINDING,
       keys: [SUPERMEMORY_CREDENTIAL_ENV_KEY],
     },
   };

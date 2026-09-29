@@ -11,15 +11,13 @@ import {
   buildCapabilityInstructionBundle,
   createAdapterRegistry,
   createOwnerOnlyFileSecretStore,
-  discoverLiteralSshHostAliasesFromHome,
   getDefaultDeckConfig,
   getEnabledPackageInstructionIds,
-  OPENCODE_SUPERMEMORY_PROFILE_SECRET,
-  storeOpenCodeSupermemoryCredential,
   type RunnerAdapter,
 } from "@deck/core";
+import { discoverLiteralSshHostAliasesFromHome, OPENCODE_SUPERMEMORY_PROFILE_SECRET, storeOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
 import { createDeckConfigStore } from "../deck-config-store";
-import { DeckApp } from "./app";
+import { DeckApp, openCodeProfileCredentialEffects } from "./app";
 import { createMemoryProviderForSelection, hydrateDashboardAdaptiveMemoryState, withAuthoritativeSupermemoryRuntimeReadiness } from "./app";
 import { createDefaultRunnerDashboardState } from "./runner-dashboard/state";
 import { reduceRunnerDashboard, type PlanBuilderFn } from "./runner-dashboard/reducer";
@@ -135,7 +133,7 @@ function renderOpenCodeReviewAfterCredentialEvidenceAction(
     planGeneratedForRevision: 0,
     planRevision: 0,
   });
-  const preflight = getRunnerReviewPlanRunBlockPreflight(initialState, { secretStore });
+  const preflight = getRunnerReviewPlanRunBlockPreflight(initialState, { secretStore, profileCredentialEffects: openCodeProfileCredentialEffects });
   if (!preflight.evidence) throw new Error("Expected Supermemory credential evidence");
   const state = reduceRunnerDashboard(initialState, {
     type: "apply-supermemory-runtime-credential-evidence",
@@ -213,7 +211,7 @@ describe("DeckApp synthetic runner production flow", () => {
         { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] },
         presentStore,
       );
-      expect(resolveSupermemoryRuntimeCredentialReadiness({ setup: present.state.adaptiveMemory.supermemory, secretStore: presentStore, runnerId: "opencode" })).toMatchObject({ ready: true, reason: "secret-ready" });
+      expect(resolveSupermemoryRuntimeCredentialReadiness({ setup: present.state.adaptiveMemory.supermemory, secretStore: presentStore, runnerId: "opencode", profileCredentialEffects: openCodeProfileCredentialEffects })).toMatchObject({ ready: true, reason: "secret-ready" });
       expect(present.state.adaptiveMemory.supermemory).toMatchObject({ configured: true, runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present", ephemeralTokenAvailable: false });
       expect(present.state.plan?.ready).toBe(true);
       expect(present.rendered).toContain("reason=deck-managed-ready");

@@ -1,0 +1,40 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: exploration.md
+    timestamp: "2026-09-27T00:00:00Z"
+    actor: deck-lead
+  - phase: proposal
+    status: approved
+    event: proposal.approved
+    artifact: proposal.md
+    timestamp: "2026-09-27T00:00:00Z"
+    actor: deck-lead
+    notes:
+      - "The user selected default fallback, plugin-only memory ownership, and the shared-process plugin trust boundary."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-09-27T00:00:00Z"
+    actor: deck-lead
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-09-27T00:00:00Z"
+    actor: deck-lead
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-09-27T00:00:00Z"
+    actor: deck-lead
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: tasks.md
+    timestamp: "2026-09-27T00:00:00Z"
+    actor: deck-lead

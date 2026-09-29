@@ -20,7 +20,7 @@ import {
   resolveOpenCodeWebSearchReadiness,
   writeOpenCodeWebSearchMcpConfig,
 } from "@deck/adapter-opencode";
-import { buildDashboardSupermemorySetupUpdate } from "../app";
+import { buildDashboardSupermemorySetupUpdate, openCodeProfileCredentialEffects } from "../app";
 import { getAdapter } from "../../runner-adapters";
 import type { NormalizedDeckConfig } from "@deck/core/config/deck-config";
 import {
@@ -35,7 +35,8 @@ import {
 } from "./action-runner";
 import { createDefaultPiRunnerDashboardState, createDefaultRunnerDashboardState, type PiRunnerReviewPlan } from "./state";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
-import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds, OPENCODE_SUPERMEMORY_PROFILE_SECRET } from "@deck/core";
+import { buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds } from "@deck/core";
+import { OPENCODE_SUPERMEMORY_PROFILE_SECRET } from "@deck/adapter-opencode";
 import { createDeckConfigStore } from "../../deck-config-store";
 
 const TOKEN_SENTINEL = "sk-sm-test-SHOULD-NOT-LEAK";
@@ -433,6 +434,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
       runnerCommand: "opencode",
       dashboardState: state,
       secretStore: { read: () => OPENCODE_PROFILE_STORE, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) },
+      profileCredentialEffects: openCodeProfileCredentialEffects,
       installPackages: async () => [{ id: "opencode-supermemory", outcome: "failed", success: false, message: "install failed" }],
       writeMcpConfig: async () => ({ ok: true, path: "/tmp/opencode.json", diagnostics: ["no OpenCode MCP entry was present"] }),
       writeDeckConfig: (_root, config) => { writes.push(config as NormalizedDeckConfig); return config as NormalizedDeckConfig; },
@@ -459,6 +461,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
       runnerCommand: "opencode",
       dashboardState: state,
       secretStore: { read: () => OPENCODE_PROFILE_STORE, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) },
+      profileCredentialEffects: openCodeProfileCredentialEffects,
       installPackages: async () => [{ id: "opencode-supermemory", outcome: "executed", success: true, message: "installed" }],
       writeMcpConfig: async () => ({ ok: true, path: "/tmp/opencode.json", diagnostics: ["Raw Supermemory MCP is disabled; no OpenCode MCP entry was present to retire."] }),
       writeDeckConfig: (_root, config) => { writes.push(config as NormalizedDeckConfig); return config as NormalizedDeckConfig; },
@@ -835,6 +838,7 @@ expect(setup.ok).toBe(true);
     const result = await validateAndStoreSupermemoryRuntimeCredential({
       token: TOKEN_SENTINEL,
       runnerId: "opencode",
+      profileCredentialEffects: openCodeProfileCredentialEffects,
       makeDefault: true,
       eligibleAliases: [],
       validateSupermemoryReadOnlyApi: async () => { throw new Error("OpenCode must not call the Deck memory API"); },
@@ -851,6 +855,24 @@ expect(setup.ok).toBe(true);
     expect(writes.has("supermemory-api-key")).toBe(false);
     expect(writes.get(OPENCODE_SUPERMEMORY_PROFILE_SECRET)).toContain(TOKEN_SENTINEL);
     expect(result).toMatchObject({ ok: true, diagnostics: [expect.stringContaining("plugin credential stored")] });
+  });
+
+  test("OpenCode profile readiness and storage fail closed when runtime composition omits profile handling", async () => {
+    let reads = 0;
+    let writes = 0;
+    const secretStore = {
+      read: () => { reads += 1; return OPENCODE_PROFILE_STORE; },
+      write: () => { writes += 1; return { backend: "owner-only-file" as const, path: "/tmp/redacted", limitation: "test" }; },
+    };
+    const readiness = getRunnerReviewPlanRunBlockDiagnostics(createDefaultPiRunnerDashboardState({
+      runnerScope: "opencode",
+      adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialStored: true, diagnostics: [] } },
+    }), { secretStore });
+    expect(readiness.join(" ")).toContain("cannot be verified without runner profile handling");
+    const stored = await validateAndStoreSupermemoryRuntimeCredential({ runnerId: "opencode", token: TOKEN_SENTINEL, secretStore, makeDefault: true });
+    expect(stored).toMatchObject({ ok: false });
+    expect(reads).toBe(0);
+    expect(writes).toBe(0);
   });
 
   test("executes the reviewed official Supermemory package action through the OpenCode installer", async () => {
@@ -1154,8 +1176,8 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
     };
 
     try {
-      expect(getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => OPENCODE_PROFILE_STORE } })).toEqual([]);
-      const results = await runRunnerReviewPlan(plan, { dashboardState: state, secretStore: { read: () => OPENCODE_PROFILE_STORE, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) } });
+      expect(getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => OPENCODE_PROFILE_STORE }, profileCredentialEffects: openCodeProfileCredentialEffects })).toEqual([]);
+      const results = await runRunnerReviewPlan(plan, { dashboardState: state, secretStore: { read: () => OPENCODE_PROFILE_STORE, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) }, profileCredentialEffects: openCodeProfileCredentialEffects });
       expect(results).toEqual([]);
     } finally {
       if (previous === undefined) delete process.env.DECK_DEBUG;
@@ -1176,7 +1198,7 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
     });
 
     try {
-      const diagnostics = getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => undefined } });
+      const diagnostics = getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => undefined }, profileCredentialEffects: openCodeProfileCredentialEffects });
       expect(diagnostics.join(" ")).toContain("official Supermemory plugin profile credential must be validated and stored");
       expect(diagnostics.join(" ")).not.toContain("Supermemory runtime readiness");
     } finally {
@@ -1195,7 +1217,7 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
       },
     });
 
-    const diagnostics = getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => undefined } });
+    const diagnostics = getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => undefined }, profileCredentialEffects: openCodeProfileCredentialEffects });
 
     expect(diagnostics.join(" ")).toContain("official Supermemory plugin profile credential must be validated and stored");
   });
@@ -1213,7 +1235,7 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
       JSON.stringify({ schema: "wrong", profiles: {}, defaultToken: TOKEN_SENTINEL }),
       JSON.stringify({ schema: "deck-opencode-supermemory-profiles-v1", profiles: {} }),
     ]) {
-      expect(getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => raw } }).join(" "))
+      expect(getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => raw }, profileCredentialEffects: openCodeProfileCredentialEffects }).join(" "))
         .toContain("official Supermemory plugin profile credential must be validated and stored");
     }
   });
@@ -1226,8 +1248,8 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
       adaptiveMemory: Object.freeze({ provider: "supermemory" as const, supermemory: setup }) as any,
     }));
 
-    expect(() => getRunnerReviewPlanRunBlockPreflight(state, { secretStore: { read: () => OPENCODE_PROFILE_STORE } })).not.toThrow();
-    const preflight = getRunnerReviewPlanRunBlockPreflight(state, { secretStore: { read: () => OPENCODE_PROFILE_STORE } });
+    expect(() => getRunnerReviewPlanRunBlockPreflight(state, { secretStore: { read: () => OPENCODE_PROFILE_STORE }, profileCredentialEffects: openCodeProfileCredentialEffects })).not.toThrow();
+    const preflight = getRunnerReviewPlanRunBlockPreflight(state, { secretStore: { read: () => OPENCODE_PROFILE_STORE }, profileCredentialEffects: openCodeProfileCredentialEffects });
 
     expect(preflight.diagnostics).toEqual([]);
     expect(preflight.evidence).toMatchObject({ runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present" });
@@ -1366,6 +1388,7 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
       operationId: operation.operationId,
       currentOperation: operation,
       secretStore: { read: () => { reads += 1; state.planRevision = 1; return OPENCODE_PROFILE_STORE; }, write: () => ({ backend: "owner-only-file", path: "/tmp/secret", limitation: "test" }) },
+      profileCredentialEffects: openCodeProfileCredentialEffects,
       onSupermemoryRuntimeCredentialEvidence: (item) => evidence.push(item),
     });
 
@@ -1385,7 +1408,7 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
       },
     });
 
-    const diagnostics = getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => { throw new Error(`failed to read ${TOKEN_SENTINEL}`); } } });
+    const diagnostics = getRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => { throw new Error(`failed to read ${TOKEN_SENTINEL}`); } }, profileCredentialEffects: openCodeProfileCredentialEffects });
 
     expect(diagnostics.join(" ")).toContain("credential could not be read");
     expect(diagnostics.join(" ")).not.toContain(TOKEN_SENTINEL);
@@ -1403,7 +1426,7 @@ describe("OpenCode dashboard action runner Supermemory OAuth", () => {
     });
     expect(getPiRunnerReviewPlanRunBlockDiagnostics(state).join(" ")).toContain("no Deck secret store was available");
     expect(getPiRunnerReviewPlanRunBlockDiagnostics(state, { supermemoryToken: TOKEN_SENTINEL }).join(" ")).toContain("no Deck secret store was available");
-    expect(getPiRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => OPENCODE_PROFILE_STORE } })).toEqual([]);
+    expect(getPiRunnerReviewPlanRunBlockDiagnostics(state, { secretStore: { read: () => OPENCODE_PROFILE_STORE }, profileCredentialEffects: openCodeProfileCredentialEffects })).toEqual([]);
 
     let writerInput: { serverName: string; token?: string } | undefined;
     const writeResult = await runPiRunnerAction(

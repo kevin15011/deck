@@ -27,9 +27,6 @@ import {
   type RunnerPostInstallFollowUp,
   type RunnerVerificationEvidence,
   type DeckSecretStore,
-  storeOpenCodeSupermemoryCredential,
-  OPENCODE_SUPERMEMORY_PROFILE_SECRET,
-  hasUsableOpenCodeSupermemoryProfileCredential,
 } from "@deck/core";
 import { runnerRequiresExternalSupermemoryToken, type RunnerAction, type RunnerDashboardState, type RunnerDashboardEvidenceIdentity, type RunnerReviewPlan, type SupermemoryRuntimeCredentialEvidence } from "./state";
 import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments, WebSearchProviderDescriptorV1 } from "@deck/core";
@@ -178,6 +175,13 @@ export type McpConfigWriterFn = (options: {
 export type McpConfigValidatorFn = (options: { token?: string; serverName?: string }) => { ok: boolean; diagnostics?: string[] };
 export type SupermemoryReadOnlyApiValidatorFn = (options: { apiKey: string; projectRoot?: string }) => Promise<{ ok: boolean; diagnostics?: string[] }>;
 
+/** Runner-native profile handling is supplied by the composition root, never by the generic TUI action runner. */
+export type RunnerProfileCredentialEffects = {
+  secretName: string;
+  hasUsableCredential: (raw: string | undefined) => boolean;
+  storeCredential: (input: { store: DeckSecretStore; token: string; alias?: string; makeDefault?: boolean; eligibleAliases: readonly string[] }) => void;
+};
+
 /**
  * Dependencies for the action runner.
  * Adapters inject their runtime-specific implementations.
@@ -189,6 +193,7 @@ export type RunnerActionRunnerDependencies = {
   packageInstructionIds?: readonly PackageInstructionPackageId[];
   supermemoryToken?: string;
   secretStore?: DeckSecretStore;
+  profileCredentialEffects?: RunnerProfileCredentialEffects;
   validateSupermemoryReadOnlyApi?: SupermemoryReadOnlyApiValidatorFn;
   memoryProvider?: AdaptiveMemoryProvider;
   resolvedMemoryProvider?: AdaptiveMemoryProvider;
@@ -234,6 +239,7 @@ export function resolveSupermemoryRuntimeCredentialReadiness(options: {
   setup?: { runtimeCredentialStored?: boolean; hasToken?: boolean; configured?: boolean };
   secretStore?: Pick<DeckSecretStore, "read">;
   runnerId?: string;
+  profileCredentialEffects?: RunnerProfileCredentialEffects;
 }): { ready: boolean; diagnostics: string[]; reason: "secret-ready" | "missing" | "read-error" } {
   const credentialLabel = options.runnerId === "opencode"
     ? "An official Supermemory plugin profile credential"
@@ -241,10 +247,13 @@ export function resolveSupermemoryRuntimeCredentialReadiness(options: {
   if (!options.secretStore) {
     return { ready: false, diagnostics: [`${credentialLabel} must be validated and stored before Review & Install; no Deck secret store was available for readiness verification.`], reason: "missing" };
   }
+  if (options.runnerId === "opencode" && !options.profileCredentialEffects) {
+    return { ready: false, diagnostics: [`${credentialLabel} cannot be verified without runner profile handling; Review & Install is blocked.`], reason: "missing" };
+  }
   try {
-    const stored = options.secretStore.read(options.runnerId === "opencode" ? OPENCODE_SUPERMEMORY_PROFILE_SECRET : "supermemory-api-key");
+    const stored = options.secretStore.read(options.runnerId === "opencode" ? options.profileCredentialEffects!.secretName : "supermemory-api-key");
     const ready = options.runnerId === "opencode"
-      ? hasUsableOpenCodeSupermemoryProfileCredential(stored)
+      ? options.profileCredentialEffects!.hasUsableCredential(stored)
       : Boolean(stored?.trim());
     if (ready) return { ready: true, diagnostics: [], reason: "secret-ready" };
     return { ready: false, diagnostics: [`${credentialLabel} must be validated and stored before Review & Install.`], reason: "missing" };
@@ -261,8 +270,9 @@ export function resolveSupermemoryRuntimeCredentialEvidence(options: {
   setup?: RunnerDashboardState["adaptiveMemory"]["supermemory"];
   secretStore?: Pick<DeckSecretStore, "read">;
   runnerId?: string;
+  profileCredentialEffects?: RunnerProfileCredentialEffects;
 }): { readiness: ReturnType<typeof resolveSupermemoryRuntimeCredentialReadiness>; evidence: SupermemoryRuntimeCredentialEvidence } {
-  const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup: options.setup, secretStore: options.secretStore, runnerId: options.runnerId });
+  const readiness = resolveSupermemoryRuntimeCredentialReadiness({ setup: options.setup, secretStore: options.secretStore, runnerId: options.runnerId, profileCredentialEffects: options.profileCredentialEffects });
   return {
     readiness,
     evidence: {
@@ -279,12 +289,12 @@ export function resolveSupermemoryRuntimeCredentialEvidence(options: {
 
 export function getRunnerReviewPlanRunBlockPreflight(
   state?: RunnerDashboardState,
-  options: { supermemoryToken?: string; secretStore?: Pick<DeckSecretStore, "read"> } = {},
+  options: { supermemoryToken?: string; secretStore?: Pick<DeckSecretStore, "read">; profileCredentialEffects?: RunnerProfileCredentialEffects } = {},
 ): { diagnostics: string[]; evidence?: SupermemoryRuntimeCredentialEvidence } {
   if (state?.adaptiveMemory.provider !== "supermemory") return { diagnostics: [] };
 
   const setup = state.adaptiveMemory.supermemory;
-  const { readiness, evidence } = resolveSupermemoryRuntimeCredentialEvidence({ setup, secretStore: options.secretStore, runnerId: state.runnerScope });
+  const { readiness, evidence } = resolveSupermemoryRuntimeCredentialEvidence({ setup, secretStore: options.secretStore, runnerId: state.runnerScope, profileCredentialEffects: options.profileCredentialEffects });
   const diagnostics: string[] = [];
   if (!setup?.configured && !readiness.ready) diagnostics.push("Supermemory setup is not configured for Review & Install.");
   if (!readiness.ready) diagnostics.push(...readiness.diagnostics);
@@ -295,7 +305,7 @@ export function getRunnerReviewPlanRunBlockPreflight(
 
 export function getRunnerReviewPlanRunBlockDiagnostics(
   state?: RunnerDashboardState,
-  options: { supermemoryToken?: string; secretStore?: Pick<DeckSecretStore, "read"> } = {},
+  options: { supermemoryToken?: string; secretStore?: Pick<DeckSecretStore, "read">; profileCredentialEffects?: RunnerProfileCredentialEffects } = {},
 ): string[] {
   return getRunnerReviewPlanRunBlockPreflight(state, options).diagnostics;
 }
@@ -981,6 +991,7 @@ export async function runRunnerReviewPlan(
     ? getRunnerReviewPlanRunBlockPreflight(dependencies.dashboardState, {
         supermemoryToken: dependencies.supermemoryToken,
         secretStore: dependencies.secretStore,
+        profileCredentialEffects: dependencies.profileCredentialEffects,
       })
     : { diagnostics: [] };
   if (dependencies.signal?.aborted) return [];
@@ -1761,6 +1772,7 @@ export async function validateAndStoreSupermemoryRuntimeCredential(options: {
   projectRoot?: string;
   projectScope?: string;
   secretStore?: DeckSecretStore;
+  profileCredentialEffects?: RunnerProfileCredentialEffects;
   validateSupermemoryReadOnlyApi?: SupermemoryReadOnlyApiValidatorFn;
   diagnostics?: string[];
 }): Promise<{ ok: true; diagnostics: string[] } | { ok: false; message: string; diagnostics: string[] }> {
@@ -1775,15 +1787,15 @@ export async function validateAndStoreSupermemoryRuntimeCredential(options: {
   }
 
   if (options.runnerId === "opencode") {
-    if (!options.secretStore) {
+    if (!options.secretStore || !options.profileCredentialEffects) {
       return {
         ok: false,
-        message: "Deck secret store is unavailable; OpenCode Supermemory plugin setup is not ready.",
+        message: "Deck secret store or OpenCode profile handling is unavailable; OpenCode Supermemory plugin setup is not ready.",
         diagnostics,
       };
     }
     try {
-      storeOpenCodeSupermemoryCredential({
+      options.profileCredentialEffects.storeCredential({
         store: options.secretStore,
         token,
         ...(options.alias ? { alias: options.alias } : {}),
@@ -1872,6 +1884,7 @@ async function validateAction(
       makeDefault: dependencies.runnerId === "opencode",
       projectRoot: dependencies.projectRoot,
       secretStore: dependencies.secretStore,
+      profileCredentialEffects: dependencies.profileCredentialEffects,
       validateSupermemoryReadOnlyApi: dependencies.validateSupermemoryReadOnlyApi,
       diagnostics: action.diagnostics,
     });

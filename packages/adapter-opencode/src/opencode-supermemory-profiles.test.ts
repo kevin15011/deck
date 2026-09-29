@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { createOwnerOnlyFileSecretStore } from "../config/secret-store";
+import { createOwnerOnlyFileSecretStore } from "@deck/core";
 import {
   OPENCODE_SUPERMEMORY_PROFILE_SECRET,
   discoverLiteralSshHostAliases,
@@ -240,7 +240,7 @@ Host duplicate
     const root = mkdtempSync(join(tmpdir(), "deck-profile-concurrency-"));
     roots.push(root);
     const modulePath = resolve(import.meta.dir, "opencode-supermemory-profiles.ts");
-    const secretStorePath = resolve(import.meta.dir, "../config/secret-store.ts");
+    const secretStorePath = resolve(import.meta.dir, "../../core/src/config/secret-store.ts");
     const aliases = ["one", "two", "three", "four", "five", "six"];
     const processes = aliases.map((alias) => Bun.spawn({
       cmd: [process.execPath, "-e", `

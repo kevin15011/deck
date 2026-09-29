@@ -1334,10 +1334,22 @@ test("D-REACH-SKILL-12 repeated rotations and invalidations stay bounded and usa
   const projectRoot = mkdtempSync(join(tmpdir(), "deck-skill-stress-"));
   try {
     const hooks = await createOpenCodeDeveloperTeamExecutionPluginV1({
+      skillDiscovery: {
+        projectRoot,
+        registryStatus: "missing",
+        provider: {
+          schema: "skill-discovery-source-provider-v1",
+          runnerId: "opencode",
+          listSources: async () => ({ outcome: "complete", sources: [], diagnostics: [] }),
+          resolveLocator: async () => ({ status: "missing" }),
+        },
+        discoverDirectly: async () => {
+          requests += 1;
+          return { outcome: "complete", observations: [{ name: "helper", source_category: "runner_exposed", scope: "runner", locator: "runner:opencode:inventory/helper", runner_id: "opencode", task_signals: ["native-only"], technology_signals: [], path_signals: [] }], diagnostics: [] };
+        },
+      },
       skillDiscoveryInspector: (snapshot: any) => snapshots.push(snapshot),
-    })({
-      directory: projectRoot, worktree: projectRoot, client: { request: async () => { requests += 1; return [{ name: "helper", dir: "/native/helper", taskSignals: ["native-only"] }]; } },
-    } as any);
+    } as any)();
     const tool = hooks.tool?.deck_skill_discovery;
     if (!tool) throw new Error("missing skill discovery tool");
     for (let index = 0; index < 100; index += 1) {
@@ -1349,7 +1361,7 @@ test("D-REACH-SKILL-12 repeated rotations and invalidations stay bounded and usa
     }
     const searched = JSON.parse(await tool.execute({ operation: "search", terms: ["native-only"] }, { sessionID: "native-active", messageID: "final" }));
     expect(searched.candidates[0].name).toBe("helper");
-    expect(requests).toBeLessThanOrEqual(181);
+    expect(requests).toBe(181);
     expect(snapshots.length).toBeGreaterThan(0);
     const max = snapshots.reduce((acc, item) => ({ activeGenerations: Math.max(acc.activeGenerations, item.activeGenerations), bindings: Math.max(acc.bindings, item.bindings), calls: Math.max(acc.calls, item.calls), prepared: Math.max(acc.prepared, item.prepared), candidateNames: Math.max(acc.candidateNames, item.candidateNames) }), { activeGenerations: 0, bindings: 0, calls: 0, prepared: 0, candidateNames: 0 });
     expect(max.activeGenerations).toBeLessThanOrEqual(64);
