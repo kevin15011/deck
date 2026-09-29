@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -11,8 +11,11 @@ import {
   buildCapabilityInstructionBundle,
   createAdapterRegistry,
   createOwnerOnlyFileSecretStore,
+  discoverLiteralSshHostAliasesFromHome,
   getDefaultDeckConfig,
   getEnabledPackageInstructionIds,
+  OPENCODE_SUPERMEMORY_PROFILE_SECRET,
+  storeOpenCodeSupermemoryCredential,
   type RunnerAdapter,
 } from "@deck/core";
 import { createDeckConfigStore } from "../deck-config-store";
@@ -20,11 +23,15 @@ import { DeckApp } from "./app";
 import { createMemoryProviderForSelection, hydrateDashboardAdaptiveMemoryState, withAuthoritativeSupermemoryRuntimeReadiness } from "./app";
 import { createDefaultRunnerDashboardState } from "./runner-dashboard/state";
 import { reduceRunnerDashboard, type PlanBuilderFn } from "./runner-dashboard/reducer";
-import { buildOpenCodeRunnerReviewPlan } from "@deck/adapter-opencode";
+import { buildOpenCodeRunnerReviewPlan, type OpenCodeToolInstallResultExact } from "@deck/adapter-opencode";
 import { getRunnerReviewPlanRunBlockPreflight, resolveSupermemoryRuntimeCredentialReadiness } from "./runner-dashboard/action-runner";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 
 setDefaultTimeout(15_000);
+
+function createCanonicalTempRoot(prefix: string): string {
+  return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+}
 
 function initCanonicalGitRemote(projectRoot: string): void {
   execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
@@ -93,7 +100,7 @@ function renderOpenCodeReviewAfterAuthoritativePlanReducer(
     runtime: { inspectionState: "ready", projectIdentity: "verified" },
   });
   const planBuilder: PlanBuilderFn = (state, inventory) => {
-    const adaptiveMemory = withAuthoritativeSupermemoryRuntimeReadiness(state.adaptiveMemory, secretStore);
+    const adaptiveMemory = withAuthoritativeSupermemoryRuntimeReadiness(state.adaptiveMemory, secretStore, "opencode");
     const planState = { ...state, adaptiveMemory };
     return {
       plan: buildOpenCodeRunnerReviewPlan(planState as never, inventory as never),
@@ -179,7 +186,7 @@ describe("DeckApp synthetic runner production flow", () => {
     expect(adaptiveMemory).toMatchObject({ provider: "supermemory", supermemory: { configured: true, runtimeCredentialStored: true, ephemeralTokenAvailable: false } });
     expect(JSON.stringify(adaptiveMemory)).not.toContain(token);
     expect(plan.ready).toBe(true);
-    expect(JSON.stringify(plan)).toContain("Deck runtime API credential is validated and stored");
+    expect(JSON.stringify(plan)).toContain("official Supermemory plugin credential is validated and stored");
     expect(JSON.stringify(plan)).not.toContain("must be validated and stored");
   });
 
@@ -195,9 +202,9 @@ describe("DeckApp synthetic runner production flow", () => {
   });
 
   test("authoritative secret readiness reaches Review through plan reducer state for present, missing, and read-error", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-authoritative-supermemory-secret-"));
+    const projectRoot = createCanonicalTempRoot("deck-authoritative-supermemory-secret-");
     const presentStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "present-xdg") });
-    presentStore.write("supermemory-api-key", "sk-sm-test-AUTHORITATIVE-SHOULD-NOT-LEAK");
+    storeOpenCodeSupermemoryCredential({ store: presentStore, token: "sk-sm-test-AUTHORITATIVE-SHOULD-NOT-LEAK", makeDefault: true, eligibleAliases: [] });
     const missingStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "missing-xdg") });
     const errorStore = { read: () => { throw new Error("permission denied sk-sm-test-SHOULD-NOT-LEAK"); } };
 
@@ -206,7 +213,7 @@ describe("DeckApp synthetic runner production flow", () => {
         { configured: true, hasToken: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] },
         presentStore,
       );
-      expect(resolveSupermemoryRuntimeCredentialReadiness({ setup: present.state.adaptiveMemory.supermemory, secretStore: presentStore })).toMatchObject({ ready: true, reason: "secret-ready" });
+      expect(resolveSupermemoryRuntimeCredentialReadiness({ setup: present.state.adaptiveMemory.supermemory, secretStore: presentStore, runnerId: "opencode" })).toMatchObject({ ready: true, reason: "secret-ready" });
       expect(present.state.adaptiveMemory.supermemory).toMatchObject({ configured: true, runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present", ephemeralTokenAvailable: false });
       expect(present.state.plan?.ready).toBe(true);
       expect(present.rendered).toContain("reason=deck-managed-ready");
@@ -218,7 +225,7 @@ describe("DeckApp synthetic runner production flow", () => {
       );
       expect(missing.state.adaptiveMemory.supermemory).toMatchObject({ runtimeCredentialStored: false, runtimeCredentialVerification: "verified-missing", ephemeralTokenAvailable: false });
       expect(missing.state.plan?.ready).toBe(false);
-      expect(JSON.stringify(missing.state.plan)).toContain("Deck runtime API key must be validated and stored");
+      expect(JSON.stringify(missing.state.plan)).toContain("official Supermemory plugin profile credential must be validated and stored");
       expect(missing.rendered).toContain("reason=managed-runtime-auth-missing");
       expect(missing.rendered).not.toContain("reason=deck-managed-ready");
 
@@ -237,9 +244,9 @@ describe("DeckApp synthetic runner production flow", () => {
   });
 
   test("credential preflight evidence flows through reducer action payload to Review", () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-credential-evidence-action-"));
+    const projectRoot = createCanonicalTempRoot("deck-credential-evidence-action-");
     const presentStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "present-xdg") });
-    presentStore.write("supermemory-api-key", "sk-sm-test-EVIDENCE-SHOULD-NOT-LEAK");
+    storeOpenCodeSupermemoryCredential({ store: presentStore, token: "sk-sm-test-EVIDENCE-SHOULD-NOT-LEAK", makeDefault: true, eligibleAliases: [] });
     const missingStore = createOwnerOnlyFileSecretStore({ configHome: join(projectRoot, "missing-xdg") });
     const errorStore = { read: () => { throw new Error("permission denied sk-sm-test-SHOULD-NOT-LEAK"); } };
 
@@ -285,10 +292,10 @@ describe("DeckApp synthetic runner production flow", () => {
   test("DECK_DEBUG Review to Run transition is not blocked by ready Supermemory debug diagnostic", async () => {
     const previousDebug = process.env.DECK_DEBUG;
     process.env.DECK_DEBUG = "1";
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-debug-ready-run-"));
+    const projectRoot = createCanonicalTempRoot("deck-debug-ready-run-");
     const xdgConfigHome = join(projectRoot, "xdg");
     const secretStore = createOwnerOnlyFileSecretStore({ configHome: xdgConfigHome });
-    secretStore.write("supermemory-api-key", "sk-sm-test-DEBUG-READY-SHOULD-NOT-LEAK");
+    storeOpenCodeSupermemoryCredential({ store: secretStore, token: "sk-sm-test-DEBUG-READY-SHOULD-NOT-LEAK", makeDefault: true, eligibleAliases: [] });
     let applyCount = 0;
     const adapter = {
       runnerId: "opencode",
@@ -358,7 +365,7 @@ describe("DeckApp synthetic runner production flow", () => {
     { name: "runner dashboard memory setup", dashboard: true, environments: ["opencode-development"] },
   ] as const) {
     test(`${entry.name} stores Supermemory runtime key on token submit before later install actions`, async () => {
-      const projectRoot = mkdtempSync(join(tmpdir(), "deck-token-submit-supermemory-"));
+      const projectRoot = createCanonicalTempRoot("deck-token-submit-supermemory-");
       initCanonicalGitRemote(projectRoot);
       const xdgConfigHome = join(projectRoot, "xdg");
       const previousXdg = process.env.XDG_CONFIG_HOME;
@@ -376,7 +383,23 @@ describe("DeckApp synthetic runner production flow", () => {
         async inspectEnvironment() { return {}; },
         async reviewTools() { return {}; },
         async getCapabilityInventory() { return { runnerId: "opencode", environmentId: "opencode-development", capabilities: [] }; },
-        buildReviewPlan() { return { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } }; },
+        buildReviewPlan() {
+          return {
+            ready: true,
+            diagnostics: [],
+            groups: {
+              automaticInstalls: [{ id: "adaptive-memory.supermemory.install-official-plugin", kind: "install-opencode-plugin", title: "Install memory", toolId: "opencode-supermemory", source: "opencode-supermemory@2.0.15", status: "ready" }],
+              manualSteps: [],
+              configWrites: [
+                { id: "adaptive-memory.supermemory.retire-legacy-opencode-mcp", kind: "write-mcp-config", title: "Retire legacy memory", status: "ready", dependencies: ["adaptive-memory.supermemory.install-official-plugin"] },
+                { id: "adaptive-memory.supermemory.deck-config", kind: "write-deck-config", title: "Enable memory", status: "ready", dependencies: ["adaptive-memory.supermemory.install-official-plugin", "adaptive-memory.supermemory.retire-legacy-opencode-mcp"] },
+              ],
+              teamApplications: [],
+              validations: [],
+            },
+          };
+        },
+        writeMcpConfig() { return { ok: true, path: join(projectRoot, "opencode.json"), diagnostics: ["Raw Supermemory MCP is disabled; no OpenCode MCP entry was present to retire."] }; },
         getCapability() { return undefined; },
         getCapabilityIds() { return []; },
         getTeams() { return []; },
@@ -408,11 +431,23 @@ describe("DeckApp synthetic runner production flow", () => {
             serverName: "supermemory",
             diagnostics: [],
           })}
+          installOpenCodeTools={async (_command, tools, onResult) => tools.map((tool) => {
+            const result: OpenCodeToolInstallResultExact = { toolId: tool.id, tool: tool.name, outcome: "executed", success: true, installerInvoked: true, message: `Installed ${tool.id}` };
+            onResult(result);
+            return result;
+          })}
           initialScreen="supermemory-token"
           initialSelectedEnvironments={[...entry.environments]}
-          initialSupermemorySetup={{ token }}
+          initialSupermemorySetup={{ token, profile: "default" }}
           initialDashboardSupermemorySetupActive={entry.dashboard}
-          initialDashboardState={createDefaultRunnerDashboardState({ runnerScope: "opencode" })}
+          initialDashboardState={createDefaultRunnerDashboardState({
+            runnerScope: "opencode",
+            operationId: "opencode-supermemory-profile-setup",
+            currentOperation: { runner: "opencode", operationId: "opencode-supermemory-profile-setup", explicitlySelected: false },
+            runtime: { inspectionState: "ready", projectIdentity: "verified", runnerCommand: "opencode" },
+          })}
+          initialDashboardInventory={{ runnerId: "opencode", environmentId: "opencode-development", capabilities: [] }}
+          initialDashboardEnvironmentId="opencode-development"
         />,
         { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
       );
@@ -420,12 +455,35 @@ describe("DeckApp synthetic runner production flow", () => {
       try {
         await waitForOutput(instance, harness.output, "Supermemory");
         harness.input("\r");
-        await waitForCondition(instance, () => existsSync(join(xdgConfigHome, "deck", "secrets", "supermemory-api-key.secret")), `${entry.name} secret write`);
+        await waitForCondition(instance, () => existsSync(join(xdgConfigHome, "deck", "secrets", `${OPENCODE_SUPERMEMORY_PROFILE_SECRET}.secret`)), `${entry.name} secret write`);
         await instance.waitUntilRenderFlush();
 
-        expect(calls).toEqual(["api"]);
-        expect(readFileSync(join(xdgConfigHome, "deck", "secrets", "supermemory-api-key.secret"), "utf8")).toBe(token);
-        expect(configStore.readRequired().adaptiveMemory.activeProvider, harness.output()).toBe("supermemory");
+        expect(calls).toEqual([]);
+        expect(readFileSync(join(xdgConfigHome, "deck", "secrets", `${OPENCODE_SUPERMEMORY_PROFILE_SECRET}.secret`), "utf8")).toContain(token);
+        await waitForOutput(instance, harness.output, "Continue Finish profile setup");
+        const aliasCount = discoverLiteralSshHostAliasesFromHome(process.env.HOME ?? "").aliases.length;
+        for (let index = 0; index < aliasCount + 1; index++) {
+          harness.input("j");
+          await instance.waitUntilRenderFlush();
+        }
+        harness.input("\r");
+        await instance.waitUntilRenderFlush();
+        expect(configStore.readRequired().adaptiveMemory).toMatchObject({ enabled: false, activeProvider: "none" });
+        if (entry.dashboard) {
+          await waitForOutput(instance, harness.output, "OpenCode Runner Setup Dashboard");
+          for (let index = 0; index < 4; index++) {
+            harness.input("j");
+            await instance.waitUntilRenderFlush();
+          }
+          harness.input("\r");
+          await instance.waitUntilRenderFlush();
+          expect(harness.output()).toContain("Run install");
+          const installBoundary = harness.output().length;
+          harness.input("\r");
+          await waitForCondition(instance, () => /setup (?:complete|stopped before completion)/.test(harness.output().slice(installBoundary)), "mounted install completion");
+          expect(harness.output().slice(installBoundary)).toContain("setup complete");
+          expect(configStore.readRequired().adaptiveMemory).toMatchObject({ enabled: true, activeProvider: "supermemory" });
+        }
         expect(harness.output()).not.toContain(token);
       } finally {
         instance.unmount();
@@ -438,8 +496,232 @@ describe("DeckApp synthetic runner production flow", () => {
     });
   }
 
-  test("Start installation validates and stores OpenCode Supermemory runtime key before applying Developer Team", async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-start-install-supermemory-"));
+  for (const route of [
+    { runtime: "pi", environment: "pi-development", dashboard: true, target: "Pi Runner Setup Dashboard" },
+    { runtime: "codex", environment: "codex-development", dashboard: false, target: "Developer Team will be installed to:" },
+  ] as const) {
+    for (const behavior of ["save", "escape"] as const) {
+      test(`${route.runtime} Supermemory token ${behavior} preserves its ${route.dashboard ? "dashboard" : "review"} route`, async () => {
+        const projectRoot = createCanonicalTempRoot(`deck-${route.runtime}-supermemory-${behavior}-`);
+        initCanonicalGitRemote(projectRoot);
+        const xdgConfigHome = join(projectRoot, "xdg");
+        const previousXdg = process.env.XDG_CONFIG_HOME;
+        process.env.XDG_CONFIG_HOME = xdgConfigHome;
+        const registry = createAdapterRegistry();
+        registry.register(route.runtime, {
+          runnerId: route.runtime,
+          displayName: route.runtime === "pi" ? "Pi" : "Codex",
+          environmentIds: [route.environment],
+          packageInstructionIds: [],
+          ui: { environmentLabels: { [route.environment]: route.environment }, dashboard: { defaultSelectedTeamIds: [] } },
+          async detectRuntimes() { return []; },
+          async inspectEnvironment() { return {}; },
+          async reviewTools() { return {}; },
+          async getCapabilityInventory() { return { runnerId: route.runtime, environmentId: route.environment, capabilities: [] }; },
+          buildReviewPlan() { return { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } }; },
+          getCapability() { return undefined; },
+          getCapabilityIds() { return []; },
+          getSelectableTools() { return []; },
+          getTeams() { return []; },
+          buildDeveloperTeamInstallPlan() { return { files: [], diagnostics: [], blocked: false, mutationPreview: [] }; },
+          backupDeveloperTeamFiles() { return {}; },
+          async rollbackDeveloperTeamFiles() { return { status: "rolled-back", diagnostics: [] }; },
+          async applyDeveloperTeamInstall() { return { results: [] }; },
+          verifyDeveloperTeamInstall() { return { valid: true, diagnostics: [] }; },
+        } as unknown as RunnerAdapter);
+        const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome, projectRoot });
+        configStore.write({ version: 1, adaptiveMemory: { enabled: false, activeProvider: "none" } });
+        const token = `sm_${route.runtime}_${behavior}_SHOULD_NOT_LEAK`;
+        const harness = createInkHarness();
+        const instance = render(
+          <DeckApp
+            adapterRegistry={registry}
+            configStore={configStore}
+            resolveProjectRoot={() => projectRoot}
+            runReleaseCheck={async () => ({ kind: "none" })}
+            validateSupermemoryReadOnlyApi={async () => ({ ok: true })}
+            writeSupermemoryPiMcpConfig={() => ({ ok: true, action: "unchanged", path: join(projectRoot, "pi-mcp.json"), serverName: "supermemory", diagnostics: [] })}
+            initialScreen="supermemory-token"
+            initialSelectedEnvironments={[route.environment]}
+            initialSupermemorySetup={{ token }}
+            initialDashboardSupermemorySetupActive={route.dashboard}
+            initialDashboardState={createDefaultRunnerDashboardState({ runnerScope: route.runtime })}
+          />,
+          { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
+        );
+
+        try {
+          await waitForOutput(instance, harness.output, "Supermemory API key");
+          harness.input(behavior === "save" ? "\r" : "\u001b");
+          await waitForOutput(instance, harness.output, behavior === "save" ? route.target : route.dashboard ? route.target : "Adaptive memory provider");
+          expect(configStore.readRequired().adaptiveMemory).toMatchObject(behavior === "save"
+            ? { enabled: true, activeProvider: "supermemory" }
+            : { enabled: false, activeProvider: "none" });
+          expect(harness.output()).not.toContain(token);
+          expect(harness.output()).not.toContain("Supermemory profiles (required)");
+        } finally {
+          instance.unmount();
+          await instance.waitUntilExit();
+          harness.close();
+          if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+          else process.env.XDG_CONFIG_HOME = previousXdg;
+          rmSync(projectRoot, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+
+  test("configures fallback default, literal default alias, and three OpenCode profiles while preserving replacements", async () => {
+    const projectRoot = createCanonicalTempRoot("deck-opencode-profile-menu-");
+    initCanonicalGitRemote(projectRoot);
+    const home = join(projectRoot, "home");
+    const ssh = join(home, ".ssh");
+    mkdirSync(ssh, { recursive: true, mode: 0o700 });
+    writeFileSync(join(ssh, "config"), "Host default\nHost alpha\nHost beta\nHost gamma\n", { mode: 0o600 });
+    const xdgConfigHome = join(projectRoot, "xdg");
+    const previousHome = process.env.HOME;
+    const previousXdg = process.env.XDG_CONFIG_HOME;
+    process.env.HOME = home;
+    process.env.XDG_CONFIG_HOME = xdgConfigHome;
+
+    const registry = createAdapterRegistry();
+    registry.register("opencode", {
+      runnerId: "opencode",
+      displayName: "OpenCode",
+      environmentIds: ["opencode-development"],
+      packageInstructionIds: [],
+      ui: { environmentLabels: { "opencode-development": "OpenCode Development" }, dashboard: { defaultSelectedTeamIds: [] } },
+      async detectRuntimes() { return []; },
+      async inspectEnvironment() { return {}; },
+      async reviewTools() { return {}; },
+      async getCapabilityInventory() { return { runnerId: "opencode", environmentId: "opencode-development", capabilities: [] }; },
+      buildReviewPlan() { return { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } }; },
+      getCapability() { return undefined; },
+      getCapabilityIds() { return []; },
+      getTeams() { return []; },
+      buildDeveloperTeamInstallPlan() { return { files: [], diagnostics: [], blocked: false, mutationPreview: [] }; },
+      backupDeveloperTeamFiles() { return {}; },
+      async rollbackDeveloperTeamFiles() { return { status: "rolled-back", diagnostics: [] }; },
+      async applyDeveloperTeamInstall() { return { results: [] }; },
+      verifyDeveloperTeamInstall() { return { valid: true, diagnostics: [] }; },
+    } as unknown as RunnerAdapter);
+    const configStore = createDeckConfigStore({ homeDir: home, xdgConfigHome, projectRoot });
+    configStore.write({ version: 1, adaptiveMemory: { enabled: false, activeProvider: "none" } });
+    const secretPath = join(xdgConfigHome, "deck", "secrets", `${OPENCODE_SUPERMEMORY_PROFILE_SECRET}.secret`);
+    const harness = createInkHarness();
+    const instance = render(
+      <DeckApp
+        adapterRegistry={registry}
+        configStore={configStore}
+        resolveProjectRoot={() => projectRoot}
+        runReleaseCheck={async () => ({ kind: "none" })}
+        initialScreen="supermemory-profile"
+        initialSelectedEnvironments={["opencode-development"]}
+        initialSupermemorySetup={{ token: "" }}
+        initialDashboardState={createDefaultRunnerDashboardState({ runnerScope: "opencode" })}
+      />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
+    );
+
+    const tokens = {
+      default: "sm_default_SHOULD_NOT_LEAK",
+      alpha: "sm_alpha_SHOULD_NOT_LEAK",
+      beta: "sm_beta_SHOULD_NOT_LEAK",
+      aliasDefault: "sm_alias_default_SHOULD_NOT_LEAK",
+      gamma: "sm_gamma_SHOULD_NOT_LEAK",
+      betaReplacement: "sm_beta_replacement_SHOULD_NOT_LEAK",
+    };
+    async function storeSelectedProfile(token: string) {
+      const tokenBoundary = harness.output().length;
+      harness.input("\r");
+      await waitForFreshOutput(instance, harness.output, tokenBoundary, "Supermemory API key (OpenCode plugin)");
+      harness.input(token);
+      await instance.waitUntilRenderFlush();
+      harness.input("\r");
+      await waitForCondition(instance, () => existsSync(secretPath) && readFileSync(secretPath, "utf8").includes(token), "selected profile credential write");
+      await instance.waitUntilRenderFlush();
+    }
+
+    try {
+      await waitForOutput(instance, harness.output, "default (fallback) Not configured");
+      expect(harness.output()).toContain("default (SSH alias) Not configured");
+      expect(harness.output()).toContain("alpha Not configured");
+      expect(harness.output()).toContain("beta Not configured");
+      expect(harness.output()).toContain("gamma Not configured");
+
+      for (let index = 0; index < 5; index++) {
+        harness.input("j");
+        await instance.waitUntilRenderFlush();
+      }
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Configure at least one Supermemory profile before continuing.");
+      for (let index = 0; index < 5; index++) {
+        harness.input("k");
+        await instance.waitUntilRenderFlush();
+      }
+
+      const escapeBoundary = harness.output().length;
+      harness.input("\r");
+      await waitForFreshOutput(instance, harness.output, escapeBoundary, "Supermemory API key (OpenCode plugin)");
+      harness.input("sm_discarded_SHOULD_NOT_LEAK");
+      await instance.waitUntilRenderFlush();
+      const profileBoundary = harness.output().length;
+      harness.input("\u001b");
+      await waitForFreshOutput(instance, harness.output, profileBoundary, "Supermemory profiles");
+      expect(existsSync(secretPath)).toBe(false);
+
+      await storeSelectedProfile(tokens.default);
+      harness.input("j");
+      await instance.waitUntilRenderFlush();
+      await storeSelectedProfile(tokens.alpha);
+      harness.input("j");
+      await instance.waitUntilRenderFlush();
+      await storeSelectedProfile(tokens.beta);
+      harness.input("j");
+      await instance.waitUntilRenderFlush();
+      await storeSelectedProfile(tokens.aliasDefault);
+      expect(harness.output()).toContain("default (fallback) Configured");
+      expect(harness.output()).toContain("default (SSH alias) Configured");
+      harness.input("j");
+      await instance.waitUntilRenderFlush();
+      await storeSelectedProfile(tokens.gamma);
+
+      harness.input("k");
+      await instance.waitUntilRenderFlush();
+      harness.input("k");
+      await instance.waitUntilRenderFlush();
+      await storeSelectedProfile(tokens.betaReplacement);
+      harness.input("j");
+      await instance.waitUntilRenderFlush();
+      harness.input("j");
+      await instance.waitUntilRenderFlush();
+      harness.input("j");
+      await instance.waitUntilRenderFlush();
+      harness.input("\r");
+      await instance.waitUntilRenderFlush();
+      expect(configStore.readRequired().adaptiveMemory).toMatchObject({ enabled: false, activeProvider: "none" });
+
+      const stored = JSON.parse(readFileSync(secretPath, "utf8")) as { schema: string; defaultToken?: string; profiles: Record<string, string> };
+      expect(stored).toEqual({
+        schema: "deck-opencode-supermemory-profiles-v1",
+        defaultToken: tokens.default,
+        profiles: { alpha: tokens.alpha, beta: tokens.betaReplacement, default: tokens.aliasDefault, gamma: tokens.gamma },
+      });
+      expect(harness.output()).not.toContain("SHOULD_NOT_LEAK");
+    } finally {
+      instance.unmount();
+      await instance.waitUntilExit();
+      harness.close();
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousXdg;
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("Start installation stores the OpenCode plugin credential without calling the Deck memory API", async () => {
+    const projectRoot = createCanonicalTempRoot("deck-opencode-start-install-supermemory-");
     initCanonicalGitRemote(projectRoot);
     const xdgConfigHome = join(projectRoot, "xdg");
     const previousXdg = process.env.XDG_CONFIG_HOME;
@@ -487,7 +769,7 @@ describe("DeckApp synthetic runner production flow", () => {
         initialScreen="developer-team-installing"
         initialSelectedEnvironments={["opencode-development"]}
         initialMemoryProvider={createMemoryProviderForSelection("supermemory", { token })}
-        initialSupermemorySetup={{ token }}
+        initialSupermemorySetup={{ token, profile: "default" }}
       />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
     );
@@ -496,10 +778,10 @@ describe("DeckApp synthetic runner production flow", () => {
       await waitForOutput(instance, harness.output, "Installing Developer Team");
       await waitForCondition(instance, () => order.includes("apply"), `Developer Team apply after Supermemory validation; order=${order.join(",")}`);
 
-      expect(order).toEqual(["api", "apply"]);
-      const secretPath = join(xdgConfigHome, "deck", "secrets", "supermemory-api-key.secret");
+      expect(order).toEqual(["apply"]);
+      const secretPath = join(xdgConfigHome, "deck", "secrets", `${OPENCODE_SUPERMEMORY_PROFILE_SECRET}.secret`);
       expect(existsSync(secretPath)).toBe(true);
-      expect(readFileSync(secretPath, "utf8")).toBe(token);
+      expect(readFileSync(secretPath, "utf8")).toContain(token);
       expect(harness.output()).not.toContain(token);
     } finally {
       instance.unmount();
@@ -511,8 +793,8 @@ describe("DeckApp synthetic runner production flow", () => {
     }
   });
 
-  test("Start installation stops OpenCode Developer Team apply when Supermemory runtime key is invalid", async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-start-install-invalid-supermemory-"));
+  test("Start installation does not let Deck API validation own OpenCode plugin credentials", async () => {
+    const projectRoot = createCanonicalTempRoot("deck-opencode-start-install-invalid-supermemory-");
     initCanonicalGitRemote(projectRoot);
     const xdgConfigHome = join(projectRoot, "xdg");
     const previousXdg = process.env.XDG_CONFIG_HOME;
@@ -558,18 +840,17 @@ describe("DeckApp synthetic runner production flow", () => {
         initialScreen="developer-team-installing"
         initialSelectedEnvironments={["opencode-development"]}
         initialMemoryProvider={createMemoryProviderForSelection("supermemory", { token })}
-        initialSupermemorySetup={{ token }}
+        initialSupermemorySetup={{ token, profile: "default" }}
       />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
     );
 
     try {
-      await waitForCondition(instance, () => order.includes("api") && harness.output().includes("read-only API validation failed"), "invalid Supermemory validation failure");
-      expect(order).toEqual(["api"]);
-      expect(configStore.readRequired().adaptiveMemory.activeProvider).toBe("none");
-      expect(existsSync(join(xdgConfigHome, "deck", "secrets", "supermemory-api-key.secret"))).toBe(false);
+      await waitForCondition(instance, () => order.includes("apply"), "OpenCode Developer Team apply");
+      expect(order).toEqual(["apply"]);
+      expect(configStore.readRequired().adaptiveMemory.activeProvider).toBe("supermemory");
+      expect(existsSync(join(xdgConfigHome, "deck", "secrets", `${OPENCODE_SUPERMEMORY_PROFILE_SECRET}.secret`))).toBe(true);
       expect(harness.output()).not.toContain(token);
-      expect(harness.output()).toContain("[REDACTED]");
     } finally {
       instance.unmount();
       await instance.waitUntilExit();
@@ -581,7 +862,7 @@ describe("DeckApp synthetic runner production flow", () => {
   });
 
   test("uses only selected-adapter package metadata throughout the dashboard and Home Configure Packages flows", async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-synthetic-runner-"));
+    const projectRoot = createCanonicalTempRoot("deck-synthetic-runner-");
     const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
     const calls: string[] = [];
     const initialConfig = getDefaultDeckConfig();
@@ -716,7 +997,7 @@ describe("DeckApp synthetic runner production flow", () => {
   });
 
   test("filters stale package configuration at the final dashboard team-install boundary", async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-synthetic-dashboard-"));
+    const projectRoot = createCanonicalTempRoot("deck-synthetic-dashboard-");
     const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
     const initialConfig = getDefaultDeckConfig();
     configStore.write({
@@ -814,7 +1095,7 @@ describe("DeckApp synthetic runner production flow", () => {
   });
 
   test("contains malformed dashboard inventory, shows a retryable plan error, and never calls runner effects", async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-synthetic-invalid-inventory-"));
+    const projectRoot = createCanonicalTempRoot("deck-synthetic-invalid-inventory-");
     let planBuildCalls = 0;
     let applyCalls = 0;
     const adapter = {
@@ -914,7 +1195,7 @@ describe("DeckApp synthetic runner production flow", () => {
   });
 
   test("contains adapter plan exceptions in the Review screen and retries without applying effects", async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "deck-synthetic-plan-error-"));
+    const projectRoot = createCanonicalTempRoot("deck-synthetic-plan-error-");
     const inventory = {
       runnerId: "atlas",
       environmentId: "atlas-development",

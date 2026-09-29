@@ -1,7 +1,8 @@
 import type { OpenCodeToolStatus } from "./required-tools";
 import type { CanonicalCapabilityId } from "./capability-catalog";
+import { OPENCODE_SUPERMEMORY_PACKAGE_SPEC } from "./opencode-supermemory-plugin";
 
-export type InstallableOpenCodeToolId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "serena";
+export type InstallableOpenCodeToolId = "rtk" | "context-mode" | "codebase-memory" | "context7" | "serena" | "opencode-supermemory";
 
 /** Input for buildOpenCodeInstallationPlan */
 export type BuildOpenCodeInstallationPlanOptions = {
@@ -16,13 +17,21 @@ export type InstallableOpenCodeTool = {
   name: string;
   module: string;
   required: boolean;
-  installKind: "opencode-plugin" | "external" | "mcp-server" | "npm-package" | "npm-package-plus-mcp" | "shell-script" | "shell-script-plus-mcp" | "serena-agent";
+  installKind: "opencode-plugin" | "deck-owned-opencode-plugin" | "external" | "mcp-server" | "npm-package" | "npm-package-plus-mcp" | "shell-script" | "shell-script-plus-mcp" | "serena-agent";
   /** Canonical capability ID from Core registry - used for registry validation and parity reporting */
   capabilityId?: CanonicalCapabilityId;
   /** For shell-script: curl URL to pipe to shell */
   shellInstallUrl?: string;
   /** For shell-script: command to run after successful shell install (e.g., ["rtk", "init", "-g", "--opencode"]) */
   postInstallCommand?: string[];
+};
+
+export const OPENCODE_SUPERMEMORY_INSTALLABLE_TOOL: InstallableOpenCodeTool = {
+  id: "opencode-supermemory",
+  name: "Official Supermemory plugin",
+  module: OPENCODE_SUPERMEMORY_PACKAGE_SPEC,
+  required: true,
+  installKind: "deck-owned-opencode-plugin",
 };
 
 export const OPENCODE_INSTALLABLE_TOOLS: InstallableOpenCodeTool[] = [

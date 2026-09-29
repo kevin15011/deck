@@ -9,7 +9,6 @@ import {
 import type { DeveloperTeamAgent } from "@deck/core/teams/developer/catalog";
 import {
   buildCapabilityInstructionBundle,
-  bindAdaptiveMemoryInstructionBundle,
   buildCapabilityToolPolicyBundle,
   composeCapabilityInstructions,
   getEnabledPackageInstructionIds,
@@ -63,23 +62,18 @@ function verifyInvariantPresence(
   return { pass: missing.length === 0, missing };
 }
 import {
-  composeAdaptiveMemory,
-  resolveMemoryInjection,
-  type AdaptiveMemoryCompositionResult,
   type AdaptiveMemoryProvider,
   type MemoryDiagnostic as CoreMemoryDiagnostic,
   type MemoryInjectionBundle,
-  type MemoryToolBinding,
 } from "@deck/core/memory/adaptive-memory";
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
 import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
-import { resolveCanonicalSupermemoryProjectScope, type CapabilityInstructionBundle } from "@deck/core";
+import { type CapabilityInstructionBundle } from "@deck/core";
 import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
-import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 
-import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference } from "./prompt-generation";
+import { buildPromptGenerationPlan, applyPromptGeneration, buildPromptReference, removeDeckMemoryClaimsForOpenCode } from "./prompt-generation";
 import { buildCommandGenerationPlan, applyCommandGeneration } from "./command-generation";
 import { mergeAndWrite } from "./config-merge";
 import { resolveModelConfig, DEFAULT_OPENCODE_MODELS } from "./model-config";
@@ -181,8 +175,6 @@ export type OpenCodeDeveloperTeamVerifyResult = {
 /** Re-export MemoryDiagnostic from core for backward compatibility. */
 export type MemoryDiagnostic = CoreMemoryDiagnostic;
 
-const SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS = ["supermemory"] as const;
-
 /** Options for memory injection during OpenCode Developer Team install. */
 export type MemoryInjectionOptions = {
   /** A pre-built memory injection bundle (takes precedence over provider). */
@@ -248,118 +240,12 @@ function buildStandaloneSkillFiles(
   return planned;
 }
 
-// ---------------------------------------------------------------------------
-// Memory injection resolution (delegated to core)
-// ---------------------------------------------------------------------------
-
-/**
- * Validated memory providers and their expected tool names.
- * Used for provider/tool binding validation during install.
- */
-const VALIDATED_MEMORY_PROVIDERS: Record<string, readonly string[]> = {
-  // SupercodeMemory MCP-only: tools documented in MCP v4
-  supermemory: ["memory", "recall", "whoAmI"],
-};
-
-/**
- * Validates provider/tool bindings from memory bundle.
- * Returns diagnostics for any invalid or missing tool bindings.
- * This is a fail-open validation — it logs diagnostics but doesn't block.
- */
-function validateMemoryBundleTools(
-  bundle: MemoryInjectionBundle | undefined,
-  providerId?: string,
-): MemoryDiagnostic[] {
-  const diagnostics: MemoryDiagnostic[] = [];
-
-  if (!bundle) {
-    return diagnostics; // No bundle = no validation needed (fail-open)
-  }
-
-  // Validate toolBindings exist and contain expected tools
-  const toolBindings = bundle.toolBindings;
-  if (!toolBindings || toolBindings.length === 0) {
-    // Empty toolBindings is acceptable for "none" provider scenario
-    return diagnostics;
-  }
-
-  // If provider ID known, validate against expected tools
-  if (providerId && VALIDATED_MEMORY_PROVIDERS[providerId]) {
-    const expectedTools = VALIDATED_MEMORY_PROVIDERS[providerId];
-    const providedTools = new Set<string>();
-
-    for (const binding of toolBindings) {
-      for (const tool of binding.toolNames) {
-        providedTools.add(tool);
-      }
-    }
-
-    // Check for known obsolete tools (shouldn't happen but defensive check)
-    const obsoleteTools = ["execute", "search_docs"];
-    for (const obs of obsoleteTools) {
-      if (providedTools.has(obs)) {
-        diagnostics.push({
-          code: "unsupported_memory_provider",
-          message: `Obsolete tool '${obs}' found in memory binding. Expected MCP tools: ${expectedTools.join(", ")}`,
-          providerId,
-          details: { observedTool: obs, expectedTools },
-        });
-      }
-    }
-  }
-
-  return diagnostics;
-}
-
 function resolveOpenCodeMemoryInjection(
-  options?: MemoryInjectionOptions,
+  _options?: MemoryInjectionOptions,
   _configDir?: string,
-  projectRoot?: string,
+  _projectRoot?: string,
 ): { bundle: MemoryInjectionBundle | undefined; diagnostics: MemoryDiagnostic[] } {
-  let memoryProvider = options?.memoryProvider;
-  let scopeDiagnostic: MemoryDiagnostic | undefined;
-  if (memoryProvider?.id === "supermemory") {
-    const derived = projectRoot ? resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] }) : undefined;
-    if (derived?.ok) {
-      memoryProvider = createSupermemoryMemoryProvider({
-        projectScope: derived.scope,
-      });
-    } else {
-      memoryProvider = undefined;
-      scopeDiagnostic = {
-        code: "memory_provider_unavailable",
-        providerId: "supermemory",
-        message: "Supermemory project identity is missing or invalid; omitted adaptive-memory injection with redacted diagnostics.",
-      };
-    }
-  }
-  const result = resolveMemoryInjection({
-    memoryInjection: options?.memoryInjection,
-    trustedMemoryInjection: options?.trustedMemoryInjection,
-    memoryProvider,
-    supportedProviderIds: options?.supportedMemoryProviderIds ?? SUPPORTED_OPENCODE_MEMORY_PROVIDER_IDS,
-    buildContext: { teamId: "developer-team" },
-  });
-
-  const { bundle: memoryBundle, diagnostics } = result;
-
-  let providerId: string | undefined;
-  if (options?.memoryProvider) {
-    providerId = options.memoryProvider.id;
-  } else if (memoryBundle && memoryBundle.toolBindings.length > 0) {
-    const toolNames = new Set<string>();
-    for (const b of memoryBundle.toolBindings) {
-      for (const t of b.toolNames) toolNames.add(t);
-    }
-    if (toolNames.has("memory") && toolNames.has("recall")) {
-      providerId = "supermemory";
-    }
-  }
-
-  const validationDiags = validateMemoryBundleTools(memoryBundle, providerId);
-  const allDiagnostics = [...diagnostics, ...(scopeDiagnostic ? [scopeDiagnostic] : []), ...validationDiags];
-
-  return { bundle: memoryBundle, diagnostics: allDiagnostics };
+  return { bundle: undefined, diagnostics: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -517,7 +403,7 @@ function buildSkillFileContent(
   // Skip adaptive memory injection for skill files - only apply to agent prompts
   // The installed skill files DON'T have adaptive memory sections, so planned content must match
   // This ensures byte-for-byte match for verification
-  const skillBodyPlain = content.skillBody;
+  const skillBodyPlain = removeDeckMemoryClaimsForOpenCode(content.skillBody);
 
   // deck-onboard is user-invocable (no delegate_only), others are delegated
   const isUserInvocable = agent.skillId === "deck-onboard";
@@ -590,13 +476,9 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
 
   const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options, configDir, projectRoot);
 
-  const derivedSupermemoryProjectScope = (() => {
-    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
-    return resolved.ok ? resolved.scope : undefined;
-  })();
-  const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(options?.capabilityInstructions, {
-    supermemoryProjectScope: derivedSupermemoryProjectScope,
-  });
+  const capabilityInstructions = options?.capabilityInstructions
+    ? { instructions: Object.freeze(options.capabilityInstructions.instructions.filter((fragment) => fragment.packageId !== "adaptive-memory")) }
+    : undefined;
 
   // Build tool policies from capability instructions for dynamic tool resolution
   const toolPolicyBundle =

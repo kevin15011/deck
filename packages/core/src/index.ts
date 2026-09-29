@@ -133,6 +133,7 @@ export * from "./memory/adaptive-memory-contract";
 export * from "./memory/adaptive-memory-governance";
 export * from "./memory/adaptive-context-renderer";
 export * from "./memory/canonical-supermemory-project";
+export * from "./memory/opencode-supermemory-profiles";
 export * from "./memory/capture-eligibility";
 export * from "./memory/managed-project-memory-recall";
 

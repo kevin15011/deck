@@ -39,7 +39,7 @@ describe("Pi Runner dashboard input mapping", () => {
     }
   });
 
-  test("Pi, OpenCode, and Codex expose the same five package-instruction toggles", () => {
+  test("OpenCode omits Deck adaptive-memory instructions while Pi and Codex retain them", () => {
     const expected = ["codebase-memory", "context-mode", "rtk", "adaptive-memory", "serena"] as const;
     for (const runnerId of ["pi", "opencode", "codex"] as const) {
       const adapter = getAdapter(runnerId);
@@ -47,8 +47,9 @@ describe("Pi Runner dashboard input mapping", () => {
         getSupportedPackageInstructionIds: () => adapter.packageInstructionIds ?? [],
       };
       const state = createDefaultPiRunnerDashboardState({ runnerScope: runnerId, screen: "packages-detail" });
-      expect(getToggleablePackageInstructionIds(state, resolver)).toEqual([...expected]);
-      expect(getDashboardSectionSummaries(state, resolver)[0]).toMatchObject({ totalCount: 5, selectedCount: 3 });
+      const runnerExpected = runnerId === "opencode" ? expected.filter((id) => id !== "adaptive-memory") : [...expected];
+      expect(getToggleablePackageInstructionIds(state, resolver)).toEqual(runnerExpected);
+      expect(getDashboardSectionSummaries(state, resolver)[0]).toMatchObject({ totalCount: runnerExpected.length, selectedCount: 3 });
     }
   });
 
@@ -84,7 +85,7 @@ describe("Pi Runner dashboard input mapping", () => {
     let state = createDefaultPiRunnerDashboardState({
       runnerScope: "opencode",
       screen: "packages-detail",
-      cursor: 4,
+      cursor: 3,
       operationId: operation.operationId,
       currentOperation: operation,
       selectedCapabilities: { serena: false },
@@ -140,7 +141,7 @@ describe("Pi Runner dashboard input mapping", () => {
     let state = createDefaultPiRunnerDashboardState({
       runnerScope: "opencode",
       screen: "packages-detail",
-      cursor: 4,
+      cursor: 3,
       operationId: undefined,
       currentOperation: undefined,
       selectedCapabilities: { serena: false },

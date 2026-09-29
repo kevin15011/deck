@@ -204,6 +204,11 @@ export type RunnerLaunchPlan = {
   args: readonly string[];
   cwd: string;
   envOverlay?: Readonly<Record<string, { value: string; sensitive?: boolean }>>;
+  /** Narrow authorization for sensitive values deliberately bound by a verified launch composition. */
+  sensitiveEnvAuthorization?: Readonly<{
+    binding: "verified-opencode-supermemory-loader-v1";
+    keys: readonly ["SUPERMEMORY_API_KEY"];
+  }>;
   stdio: "inherit" | "pipe";
   stdin: "inherit" | "closed";
   stdinPayload?: RunnerStdinPayload;

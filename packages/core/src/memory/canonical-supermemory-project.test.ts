@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, symlinkSync, writeFileSync, type Stats } from "node:fs";
+import { appendFileSync, chmodSync, closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, realpathSync, rmSync, symlinkSync, writeFileSync, type Stats } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +8,7 @@ import {
   fingerprintSupermemoryProjectScope,
   parseGitRemoteOwnerRepository,
   resolveCanonicalSupermemoryProjectScope,
+  resolveVerifiedGitSharedProjectBase,
 } from "./canonical-supermemory-project";
 
 describe("canonical Supermemory project scope", () => {
@@ -590,6 +591,27 @@ describe("canonical Supermemory project scope", () => {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
+    }
+  });
+
+  test("derives the shared project base from hardened common-directory evidence", () => {
+    const mainRoot = gitProject("https://github.com/acme/project-a.git");
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: mainRoot, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "Deck Test"], { cwd: mainRoot, stdio: "ignore" });
+    execFileSync("git", ["commit", "--allow-empty", "-m", "initial"], { cwd: mainRoot, stdio: "ignore" });
+    const parent = mkdtempSync(join(tmpdir(), "deck-sm-shared-base-"));
+    const linkedRoot = join(parent, "linked");
+    execFileSync("git", ["worktree", "add", linkedRoot], { cwd: mainRoot, stdio: "ignore" });
+    const nested = join(linkedRoot, "apps", "service");
+    mkdirSync(nested, { recursive: true });
+    try {
+      const canonicalMainRoot = realpathSync(mainRoot);
+      expect(resolveVerifiedGitSharedProjectBase(mainRoot)).toBe(canonicalMainRoot);
+      expect(resolveVerifiedGitSharedProjectBase(nested)).toBe(canonicalMainRoot);
+      expect(resolveVerifiedGitSharedProjectBase(join(parent, "not-git"))).toBeUndefined();
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+      rmSync(mainRoot, { recursive: true, force: true });
     }
   });
 

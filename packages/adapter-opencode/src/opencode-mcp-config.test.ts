@@ -665,7 +665,7 @@ describe("fail-open diagnostics", () => {
       const result = validateSupermemoryOpenCodeMcpConfig({ configPath: join(dir, "opencode.json"), homeDir: dir });
       expect(result.ok).toBe(true);
       expect(result.diagnostics.join(" ")).toContain("absent");
-      expect(result.diagnostics.join(" ")).toContain("Deck Runtime");
+      expect(result.diagnostics.join(" ")).toContain("official Supermemory plugin");
     } finally {
       cleanup(dir);
     }

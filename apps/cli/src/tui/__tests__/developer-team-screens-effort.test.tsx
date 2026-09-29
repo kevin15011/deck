@@ -235,6 +235,61 @@ describe("Codex normalized model and reasoning presentation", () => {
       expect(setup.status).not.toContain("secret-value-do-not-leak");
     }
   });
+
+  test("shows eligible OpenCode profile labels without exposing the token", () => {
+    const profiles = renderToString(<SupermemorySetupScreen
+      screen="supermemory-profile"
+      values={{ profile: "work", token: "secret-value-do-not-leak" }}
+      runtime="opencode"
+      profileAliases={["personal", "work"]}
+      configuredProfiles={["default", "work"]}
+      cursor={2}
+    />);
+    expect(profiles).toContain("default Configured");
+    expect(profiles).toContain("personal Not configured");
+    expect(profiles).toContain("work Configured");
+    expect(profiles).toContain("❯");
+    expect(profiles).toContain("Continue");
+    expect(profiles).not.toContain("secret-value-do-not-leak");
+
+    const token = renderToString(<SupermemorySetupScreen screen="supermemory-token" values={{ profile: "work", token: "secret-value-do-not-leak" }} runtime="opencode" />);
+    expect(token).toContain("Supermemory API key (OpenCode plugin)");
+    expect(token).not.toContain("secret-value-do-not-leak");
+  });
+
+  test("explains fail-closed SSH discovery while retaining the default profile", () => {
+    const profiles = renderToString(<SupermemorySetupScreen
+      screen="supermemory-profile"
+      values={{ token: "" }}
+      runtime="opencode"
+      profileAliases={[]}
+      configuredProfiles={[]}
+      profileDiscoveryStatus="uncertain"
+      profileStoreReadable={false}
+      cursor={0}
+    />);
+
+    expect(profiles).toContain("default Not configured");
+    expect(profiles).toContain("SSH profile discovery could not be trusted");
+    expect(profiles).toContain("Protected profile status could not be read");
+    expect(profiles).toContain("Continue");
+  });
+
+  test("renders fallback default and a literal SSH alias named default as distinct profile rows", () => {
+    const profiles = renderToString(<SupermemorySetupScreen
+      screen="supermemory-profile"
+      values={{ token: "" }}
+      runtime="opencode"
+      profileAliases={["default"]}
+      fallbackDefaultConfigured={true}
+      configuredAliases={[]}
+      cursor={0}
+    />);
+
+    expect(profiles).toContain("default (fallback) Configured");
+    expect(profiles).toContain("default (SSH alias) Not configured");
+    expect(profiles.match(/default/g)).toHaveLength(2);
+  });
 });
 
 // ============================================================================

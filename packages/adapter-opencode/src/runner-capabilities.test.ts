@@ -135,16 +135,7 @@ describe("buildDeveloperTeamManifest — memoryBundle flow", () => {
     expect(manifest.skills.every((s) => s.memoryBundle === undefined)).toBe(true);
   });
 
-  test("manifest correctly reflects plan.memoryBundle state (wiring verification)", () => {
-    // The manifest builder reads memoryBundle from plan.memoryBundle directly:
-    //   agents: plan.skills.map((s) => { ..., memoryBundle: plan.memoryBundle })
-    //   skills: plan.skills.map((s) => ({ ..., memoryBundle: plan.memoryBundle }))
-    //
-    // Case 4 (non-null bundle) is tested indirectly:
-    // buildOpenCodeDeveloperTeamInstallPlan with memoryInjection returns non-null plan.memoryBundle
-    // (tested in developer-team-install.test.ts "returns memoryBundle when Supermemory...")
-    // The manifest reads plan.memoryBundle and assigns it to each agent/skill entry.
-    // So when plan.memoryBundle is non-null, manifest agents/skill entries have the same non-null bundle.
+  test("manifest omits Deck-owned memory bundles for OpenCode", () => {
     const manifest = capabilities.teams.buildDeveloperTeamManifest({
       projectRoot: "/tmp/test-project",
       environmentId: "opencode-development",

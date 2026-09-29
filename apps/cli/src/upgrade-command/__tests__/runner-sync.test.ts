@@ -296,8 +296,8 @@ describe("runner-sync", () => {
         await readFile(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8"),
         await readFile(join(configDir, "skills", "deck-onboard", "SKILL.md"), "utf8"),
       ].join("\n");
-      expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
-      expect(content).toContain("schemas permit model-selected project scope");
+      expect(content).not.toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(content).not.toContain("schemas permit model-selected project scope");
       expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(content).toContain("Codebase Memory Package");
       expect(content).not.toContain("Adaptive-memory project operations are disabled");
@@ -331,8 +331,8 @@ describe("runner-sync", () => {
           await readFile(join(configDir, "skills", "api-and-interface-design", "SKILL.md"), "utf8"),
           await readFile(join(configDir, "skills", "deck-onboard", "SKILL.md"), "utf8"),
         ].join("\n");
-        expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
-        expect(content).toContain("schemas permit model-selected project scope");
+        expect(content).not.toContain("Runtime-managed recall and capture bind project scope server-side");
+        expect(content).not.toContain("schemas permit model-selected project scope");
         expect(content).toContain("Codebase Memory Package");
         expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
         expect(content).not.toContain(projectScope);

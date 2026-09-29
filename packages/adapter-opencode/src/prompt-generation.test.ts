@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
-import { DEVELOPER_TEAM_LANGUAGE_POLICY } from "@deck/core/teams/developer/content-registry";
+import { DEVELOPER_TEAM_LANGUAGE_POLICY, getAgentContent } from "@deck/core/teams/developer/content-registry";
 import { buildCapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
 import type { MemoryInjectionBundle } from "@deck/core/memory/adaptive-memory";
@@ -104,14 +104,17 @@ describe("adaptive memory provider filtering", () => {
     toolBindings: [{ capability: "memory.write", serverName: "supermemory", toolNames: ["memory", "recall"] }],
   });
 
-  test("removes the inactive provider section", () => {
+  test("ignores legacy caller-supplied memory bundles", () => {
     const supermemory = buildPromptGenerationPlan({
       configDir: "/tmp/.config/opencode",
       projectRoot: "/tmp/project",
       memoryBundle: providerBundle(),
     });
 
-    for (const planned of supermemory) expect(planned.content).not.toContain("### Provider: Legacy");
+    for (const planned of supermemory) {
+      expect(planned.content).not.toContain("### Provider: Supermemory");
+      expect(planned.content).not.toContain("### Provider: Legacy");
+    }
   });
 
   test("detected Supermemory MCP without materialized scope does not imply scoped recall instructions", () => {
@@ -131,7 +134,7 @@ describe("adaptive memory provider filtering", () => {
     }
   });
 
-  test("Lead and specialists get Runtime-owned Supermemory guidance without model-controlled scope arguments", () => {
+  test("legacy Supermemory bundles and raw MCP config do not add Deck memory guidance", () => {
     const root = tempDir();
     try {
       const configDir = join(root, ".config", "opencode");
@@ -146,12 +149,12 @@ describe("adaptive memory provider filtering", () => {
       const plan = buildPromptGenerationPlan({ configDir, projectRoot: root, memoryBundle });
       const combined = plan.map((planned) => planned.content).join("\n");
 
-      expect(plan.find(({ agent }) => agent.id === "deck-lead")!.content).toContain("Deck Runtime binds the verified project scope server-side");
-      expect(plan.find(({ agent }) => agent.id === "deck-investigate")!.content).toContain("Deck Runtime binds the verified project scope server-side");
+      expect(plan.find(({ agent }) => agent.id === "deck-lead")!.content).not.toContain("Deck Runtime binds the verified project scope server-side");
+      expect(plan.find(({ agent }) => agent.id === "deck-investigate")!.content).not.toContain("Deck Runtime binds the verified project scope server-side");
       expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(combined).not.toContain("supermemory_add_memory");
       expect(combined).not.toContain("supermemory_search_memory");
-      expect(combined).toContain("schemas permit model-selected project scope");
+      expect(combined).not.toContain("schemas permit model-selected project scope");
       expect(combined).not.toContain("No manual containerTag required");
       expect(combined).not.toContain("sm_project_default");
     } finally {

@@ -1,0 +1,24 @@
+schema: spec-registry-v1
+changeId: opencode-supermemory-plugin-profiles
+name: OpenCode Supermemory Plugin Profiles
+currentPhase: apply
+status: incomplete
+artifacts:
+  working_brief: working-brief.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+provenance:
+  - phase: proposal
+    agent: deck-lead
+    model: openai/gpt-6-sol
+    timestamp: "2026-09-27"
+    registryWrite: non-deferred
+    note: "User confirmed default fallback, Supermemory-only memory ownership, and co-loaded plugin trust boundary."
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-6-sol
+    timestamp: "2026-09-27"
+    registryWrite: non-deferred
+    note: "Candidate and focused checks exist; real OpenCode-process composition remains an unverified release gate."

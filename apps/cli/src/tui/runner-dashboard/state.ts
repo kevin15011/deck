@@ -222,7 +222,8 @@ export type RunnerAction = {
   source?: string;
   status: RunnerActionStatus;
   required?: boolean;
-  dependencies?: CapabilityId[];
+  /** Action ids which must complete successfully before this action can mutate state. */
+  dependencies?: string[];
   unresolvedCapabilities?: CapabilityId[];
   diagnostics?: string[];
 };

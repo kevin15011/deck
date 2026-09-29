@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync, type Stats } from "node:fs";
-import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 
 export type CanonicalSupermemoryProjectScope = `sm_project_v1_${string}_${string}`;
 
@@ -180,7 +180,7 @@ export function fingerprintSupermemoryProjectScope(scope: string): `smfp_${strin
   return `smfp_${createHash("sha256").update(scope, "utf8").digest("hex").slice(0, 16)}`;
 }
 
-function readGitOriginRemote(projectRoot: string): string | undefined {
+export function readLogicalGitOriginRemote(projectRoot: string): string | undefined {
   const repo = resolveGitRepository(projectRoot);
   if (!repo) return undefined;
   for (const configPath of [join(repo.commonDir, "config"), repo.gitDir === repo.commonDir ? undefined : join(repo.gitDir, "config")]) {
@@ -191,8 +191,24 @@ function readGitOriginRemote(projectRoot: string): string | undefined {
   return undefined;
 }
 
+const readGitOriginRemote = readLogicalGitOriginRemote;
+
 function resolveVerifiedGitTopLevel(projectRoot: string): string | undefined {
   return resolveGitRepository(projectRoot)?.workTree;
+}
+
+/**
+ * Resolves the structurally verified base used by integrations that coalesce
+ * linked worktrees through Git's common directory. This mirrors the safe path
+ * semantics of `git rev-parse --git-common-dir` without trusting command output.
+ */
+export function resolveVerifiedGitSharedProjectBase(projectRoot: string): string | undefined {
+  const repository = resolveGitRepository(projectRoot);
+  if (!repository) return undefined;
+  if (basename(repository.commonDir) === ".git" && !repository.commonDir.includes(`${sep}.git${sep}`)) {
+    return dirname(repository.commonDir);
+  }
+  return repository.workTree;
 }
 
 function resolveGitRepository(projectRoot: string): { workTree: string; gitDir: string; commonDir: string } | undefined {
@@ -235,10 +251,15 @@ function canonicalDirectory(input: string): string | undefined {
 
 function canonicalExistingDirectory(input: string): string | undefined {
   try {
-    if (!hasNoSymlinkPath(input)) return undefined;
-    const stat = lstatSync(input);
+    const absolute = resolve(input);
+    const stat = lstatSync(absolute);
     if (!stat.isDirectory() || stat.isSymbolicLink()) return undefined;
-    return realpathSync(input);
+    const real = realpathSync(absolute);
+    const isDarwinVarAlias = process.platform === "darwin"
+      && absolute.startsWith("/var/")
+      && real === `/private${absolute}`;
+    if (real !== absolute && !isDarwinVarAlias) return undefined;
+    return hasNoSymlinkPath(real) ? real : undefined;
   } catch {
     return undefined;
   }

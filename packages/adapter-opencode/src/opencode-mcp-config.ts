@@ -23,8 +23,8 @@ export type OpenCodeMcpConfigValidationResult = {
 
 /**
  * Inspects any present raw Supermemory MCP server entry in OpenCode's
- * opencode.json. Absence is valid because Deck Runtime owns Adaptive Memory
- * project isolation; present raw entries are diagnosed as stale Deck-managed
+ * opencode.json. Absence is valid because the official Supermemory plugin owns
+ * memory behavior; present raw entries are diagnosed as stale Deck-managed
  * or unmanaged/external-unobservable instead of being treated as readiness.
  *
  * @param options.configPath - Override the default opencode.json path.
@@ -37,7 +37,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
   const homeDir = options.homeDir ?? process.env.HOME ?? "/home/user";
   const configPath = options.configPath ?? join(homeDir, ".config", "opencode", "opencode.json");
   const serverName = (options.serverName ?? SUPERMEMORY_MCP_SERVER_NAME).trim() || SUPERMEMORY_MCP_SERVER_NAME;
-  const absentDiagnostic = `Raw Supermemory MCP entry '${serverName}' is absent; Deck Runtime owns Adaptive Memory project isolation.`;
+  const absentDiagnostic = `Raw Supermemory MCP entry '${serverName}' is absent; the official Supermemory plugin owns memory behavior for Deck-managed OpenCode launches.`;
 
   if (!existsSync(configPath)) {
     return {
@@ -88,7 +88,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
       path: configPath,
       serverName,
       projectScope: projectScope.trim(),
-      diagnostics: [`OpenCode MCP server '${serverName}' is a stale Deck-managed raw Supermemory MCP entry; retire it because Deck Runtime owns Adaptive Memory project isolation.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' is a stale Deck-managed raw Supermemory MCP entry; retire it because the official Supermemory plugin owns memory behavior.`],
     };
   }
 
@@ -97,7 +97,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' is unmanaged or ambiguous and external-unobservable; Deck Runtime did not authorize it as project memory.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' is unmanaged or ambiguous and external-unobservable; Deck does not treat it as official-plugin memory.`],
     };
   }
 
@@ -134,7 +134,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
       ok: false,
       path: configPath,
       serverName,
-      diagnostics: [`OpenCode MCP server '${serverName}' uses deprecated URL; raw Supermemory MCP is unmanaged/external-unobservable and should not be used for project memory. Use Deck Runtime instead of '${SUPERMEMORY_MCP_URL}' raw MCP materialization.`],
+      diagnostics: [`OpenCode MCP server '${serverName}' uses deprecated URL; raw Supermemory MCP is unmanaged/external-unobservable and should not be used for project memory. Use the official Supermemory plugin instead of '${SUPERMEMORY_MCP_URL}' raw MCP materialization.`],
     };
   } else {
     return {
@@ -188,7 +188,7 @@ export function validateSupermemoryOpenCodeMcpConfig(
     path: configPath,
     serverName,
     projectScope: projectHeader.trim(),
-    diagnostics: [`OpenCode MCP server '${serverName}' is an unmanaged raw Supermemory MCP entry and external-unobservable; Deck Runtime did not authorize it as project memory.`],
+    diagnostics: [`OpenCode MCP server '${serverName}' is an unmanaged raw Supermemory MCP entry and external-unobservable; Deck does not treat it as official-plugin memory.`],
   };
 }
 
@@ -349,14 +349,14 @@ function verifyRetiredSupermemoryConfig(configPath: string, expectedContent: str
  * OpenCode's opencode.json. It never creates a fresh raw Supermemory MCP entry.
  *
  * CONTRACT:
- * - Deck Runtime owns Supermemory project memory and secret storage.
- * - Raw OpenCode Supermemory MCP is optional ad-hoc surface only.
+ * - The official Supermemory plugin owns memory behavior; Deck owns only protected profile credential routing.
+ * - Raw OpenCode Supermemory MCP is not a Deck-managed memory surface.
  * - Absence is safe; exact stale Deck-managed entries may be retired.
  * - Unmanaged or ambiguous entries are preserved and reported.
  */
 export function writeSupermemoryOpenCodeMcpConfig(
   options: {
-    /** @deprecated OpenCode uses native OAuth; accepted only for caller compatibility and never persisted. */
+    /** @deprecated Accepted only for legacy caller compatibility and never persisted. */
     token?: string;
     serverName?: string;
     configPath?: string;
