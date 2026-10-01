@@ -321,7 +321,7 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers["context-mode"].command).toBe(join(bin, "context-mode"));
       expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers["codebase-memory"].command).toBe(join(dataRoot, "claude", "tools", "codebase-native-v0.11.0", `${process.platform}-${process.arch}`, "codebase-memory-mcp"));
       expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers.context7.command).toBe(join(bin, "context7-mcp"));
-      expect(readFileSync(join(dataRoot, "claude", receipt.plugin, "hooks", "hooks.json"), "utf8")).toContain(join(dataRoot, "claude", "tools", "rtk-v0.50.0", `${process.platform}-${process.arch}`, "rtk"));
+      expect(readFileSync(join(dataRoot, "claude", receipt.plugin, "hooks", "rtk-hook.cjs"), "utf8")).toContain(join(dataRoot, "claude", "tools", "rtk-v0.50.0", `${process.platform}-${process.arch}`, "rtk"));
       await waitForOutput(instance, harness.output, "plugin files setup complete");
       expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).toBe(true);
       expect(existsSync(join(root, ".claude"))).toBe(false);
@@ -449,7 +449,8 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(mcp).not.toContain("fixture-shared-token");
       const hooks = JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, "hooks", "hooks.json"), "utf8"));
       expect(hooks.hooks.PreToolUse[0].matcher).toBe("Bash");
-      expect(hooks.hooks.PreToolUse[0].hooks[0].command).toContain("rtk' hook claude");
+      expect(hooks.hooks.PreToolUse[0].hooks[0].command).toContain("rtk-hook.cjs");
+      expect(readFileSync(join(dataRoot, "claude", receipt.plugin, "hooks", "rtk-hook.cjs"), "utf8")).toContain(join(root, "bin", "rtk"));
       await waitForOutput(instance, harness.output, "plugin files setup complete");
       expect(configStore.readRequired().webSearch.enabled).toBe(true);
       expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).toBe(true);
