@@ -128,6 +128,22 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
+  test("codebase-memory reuses an existing shared install instead of scheduling an owned install", async () => {
+    const home = await mkdtemp(join(tmpdir(), "deck-claude-shared-codebase-"));
+    try {
+      await mkdir(join(home, ".local", "bin"), { recursive: true });
+      const shared = join(home, ".local", "bin", "codebase-memory-mcp");
+      await writeFile(shared, "fixture executable", { mode: 0o700 });
+      const plan = (verifyExistingCodebase: (executable: string) => boolean) => createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), verifyExistingCodebase })
+        .buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: getDefaultDeckConfig(), capabilityIds: ["claude-team-files", "codebase-memory"] });
+      const reused = plan((executable) => executable === shared);
+      expect(reused.blocked).toBe(false);
+      expect(reused.files.some((file) => file.content.includes(shared))).toBe(true);
+      const rejected = plan(() => false);
+      expect(rejected.files.some((file) => file.content.includes(shared))).toBe(false);
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+
   test("read-only roles expose only selected MCP lookups and Skill, never editing tools", async () => {
     const home = await mkdtemp(join(tmpdir(), "deck-claude-readonly-"));
     try {
@@ -259,7 +275,8 @@ describe("Claude Deck-owned global plugin adapter", () => {
       expect(plan.blocked).toBe(false);
       await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan });
       const hook = plan.files.find((file) => file.path.endsWith("/hooks/hooks.json"));
-      expect(hook?.content).toContain(join(dataRoot, "claude", "tools", "rtk-v0.50.0", `${process.platform}-${process.arch}`, "rtk"));
+      expect(hook?.content).toContain("rtk-hook.cjs");
+      expect(plan.files.find((file) => file.path.endsWith("/hooks/rtk-hook.cjs"))?.content).toContain(join(dataRoot, "claude", "tools", "rtk-v0.50.0", `${process.platform}-${process.arch}`, "rtk"));
       expect((await adapter.verifyDeveloperTeamInstall(plan)).valid).toBe(true);
       await expect(lstat(join(home, ".claude"))).rejects.toMatchObject({ code: "ENOENT" });
     } finally { await rm(home, { recursive: true, force: true }); }

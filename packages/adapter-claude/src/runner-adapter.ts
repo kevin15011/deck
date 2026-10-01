@@ -6,7 +6,7 @@ import { discoverClaudeModels, parseClaudeModelInfo, type ClaudeModelInfo } from
 import type { RunnerModelInventoryResult, RunnerModelAssignmentIssue } from "../../core/src/index";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { bootstrapSerena, buildCapabilityInstructionBundle, createDefaultSerenaBootstrapEffects, createSerenaReadinessRevalidator, getAgentContent, getDeveloperTeamCatalog, resolveCanonicalSupermemoryProjectScope, resolveExistingSerenaReadiness, resolveSerenaOwnedRoot, resolveWebSearchReadiness, validateSerenaBootstrapResult, validateSerenaOperationAuthorization, validateSerenaReadinessEvidence, DEVELOPER_TEAM, resolveDefaultDeckDataRoot, type RunnerAdapter, type RunnerDeveloperTeamInstallPlan, type SerenaBootstrapEffects, type SerenaBootstrapRequest, type SerenaBootstrapResult, type SerenaExistingReadinessResult, type SerenaReadinessEvidence } from "../../core/src/index";
-import { claudeCapabilityFiles, verifyClaudeExecutable, type ClaudeCapabilityOptions } from "./capabilities";
+import { claudeCapabilityFiles, verifyClaudeExecutable, verifyClaudeRtkHookRuntime, type ClaudeCapabilityOptions } from "./capabilities";
 import { spawn } from "node:child_process";
 import { CLAUDE_SUPERMEMORY_COMMIT, CLAUDE_SUPERMEMORY_FILES, inspectClaudeSupermemoryArtifact, installClaudeSupermemoryArtifact, type ClaudeSupermemoryArtifactEffects } from "./supermemory-artifact";
 import { inspectOwnedClaudeRtk, installOwnedClaudeRtk, pinnedClaudeRtkRelease, type RtkReleaseArtifact } from "./rtk-artifact";
@@ -30,6 +30,8 @@ type Options = ClaudeCapabilityOptions & {
   codebaseReleaseOverride?: CodebaseNativeRelease;
   codebaseArtifactEffects?: { fetchArchive?: (asset: string) => Promise<Uint8Array> };
   verifyCodebaseNative?: (executable: string) => boolean;
+  /** Verifies an already-installed (shared) codebase-memory-mcp; defaults to a real `--version` probe. */
+  verifyExistingCodebase?: (executable: string) => boolean;
   serenaEffects?: SerenaBootstrapEffects;
   serenaBootstrap?: (request: SerenaBootstrapRequest) => Promise<SerenaBootstrapResult>;
   serenaReadiness?: () => Promise<SerenaExistingReadinessResult>;
@@ -210,6 +212,22 @@ export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter 
     const result = Bun.spawnSync([executable, "--version"], { timeout: 3_000, stdout: "pipe", stderr: "ignore", env: { HOME: home, PATH: process.env.PATH ?? "" } });
     return result.exitCode === 0;
   });
+  // Reuse a codebase-memory-mcp already installed for another runner (PATH or ~/.local/bin). The tool talks to a
+  // shared per-user daemon and a client of a different version hangs, so an existing install wins over the pin.
+  const verifyExistingCodebase = options.verifyExistingCodebase ?? ((executable: string) => {
+    const result = Bun.spawnSync([executable, "--version"], { timeout: 3_000, stdout: "pipe", stderr: "ignore", env: { HOME: home, PATH: process.env.PATH ?? "" } });
+    const match = result.stdout.toString().trim().match(/^codebase-memory-mcp\s+(\d+)\.(\d+)\.(\d+)/i);
+    if (result.exitCode !== 0 || !match) return false;
+    const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])];
+    return major > 0 || minor > 10 || minor === 10 && patch >= 8;
+  });
+  const existingCodebase = (): string | undefined => {
+    if (options.resolveCommand) return options.resolveCommand("codebase-memory-mcp"); // privileged test seam
+    for (const candidate of [Bun.which("codebase-memory-mcp"), join(home, ".local", "bin", "codebase-memory-mcp")]) {
+      try { if (candidate && isAbsolute(candidate) && existsSync(candidate) && verifyExistingCodebase(candidate)) return candidate; } catch { /* try next */ }
+    }
+    return undefined;
+  };
   const ownedCodebaseState = () => {
     try {
       assertTrustedAncestors(ownedCodebaseRoot, home);
@@ -235,10 +253,8 @@ export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter 
       ? undefined
     : name === "rtk"
       ? (() => { const candidate = options.resolveCommand?.(name) ?? (options.resolveCommand ? undefined : Bun.which(name)); return candidate && isAbsolute(candidate) && verifyRtkCommand(candidate) ? candidate : undefined; })()
-    : name === "codebase-memory-mcp" && codebaseRelease && ownedCodebaseState() === "ready"
-      ? join(ownedCodebaseRoot, "codebase-memory-mcp")
     : name === "codebase-memory-mcp"
-      ? options.resolveCommand?.(name) // privileged test seam only; production never runs the npm self-downloading shim
+      ? (existingCodebase() ?? (codebaseRelease && ownedCodebaseState() === "ready" ? join(ownedCodebaseRoot, "codebase-memory-mcp") : undefined)) // production never runs the npm self-downloading shim
     : options.resolveCommand
       ? options.resolveCommand(name)
     : name === "tavily-mcp"
@@ -470,7 +486,9 @@ export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter 
         try { claudeCapabilityFiles(parent, [id], toolEffects, id === "web-search" ? input.deckConfig.webSearch.provider : undefined); }
         catch { executableReady = false; }
         const materialized = executableReady && selected?.capabilities.includes(id) === true && inspect(selected.location, selected.expected, home) === "ready";
-        const installable = id === "context-mode" || id === "context7" || id === "web-search" || id === "serena" && Boolean(options.serenaProxyCommand) || id === "rtk" && Boolean(rtkRelease) && ownedRtkState() !== "conflict" && ownedRtkState() !== "unusable" || id === "codebase-memory" && Boolean(codebaseRelease) && ownedCodebaseState() !== "conflict" && ownedCodebaseState() !== "unusable";
+        let rtkHookReady = true;
+        if (id === "rtk") { try { verifyClaudeRtkHookRuntime(toolEffects); } catch { rtkHookReady = false; } }
+        const installable = id === "context-mode" || id === "context7" || id === "web-search" || id === "serena" && Boolean(options.serenaProxyCommand) || id === "rtk" && rtkHookReady && Boolean(rtkRelease) && ownedRtkState() !== "conflict" && ownedRtkState() !== "unusable" || id === "codebase-memory" && (Boolean(existingCodebase()) || Boolean(codebaseRelease) && ownedCodebaseState() !== "conflict" && ownedCodebaseState() !== "unusable");
         return { capabilityId: id, label: id, description: `${id} uses the Deck-owned global Claude plugin; readiness requires the selected tool executable and verified native config.`, section: "runner-capabilities", requirementLevel: "optional" as const, installKind: "runner-native" as const, source: "deck-owned-plugin-dir", supportStatus: executableReady || installable ? "runner-specific" as const : "blocked" as const, isInstalled: materialized, isBlocked: !executableReady && !installable, diagnostics: executableReady ? [] : [installable ? `${id} must be installed through the reviewed Deck tool action.` : `${id} executable or provider bootstrap is unavailable.`] };
       });
       const provider = options.webSearchProviderResolver?.(input.deckConfig.webSearch.provider);
@@ -518,7 +536,8 @@ export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter 
           }
           if (id !== "context-mode" && id !== "context7" && id !== "codebase-memory" && id !== "web-search" && id !== "rtk") return false;
           if (id === "rtk" && (!rtkRelease || ownedRtkState() === "conflict" || ownedRtkState() === "unusable")) throw new Error("RTK pinned release is unavailable or conflicts with owned content.");
-          if (id === "codebase-memory" && (!codebaseRelease || ownedCodebaseState() === "conflict" || ownedCodebaseState() === "unusable")) throw new Error("Codebase Memory pinned native release is unavailable or conflicts with owned content.");
+          if (id === "rtk") verifyClaudeRtkHookRuntime(toolEffects);
+          if (id === "codebase-memory" && !existingCodebase() && (!codebaseRelease || ownedCodebaseState() === "conflict" || ownedCodebaseState() === "unusable")) throw new Error("Codebase Memory pinned native release is unavailable or conflicts with owned content.");
           try { verifyClaudeExecutable(id === "context7" ? "context7-mcp" : id === "codebase-memory" ? "codebase-memory-mcp" : id === "web-search" ? "tavily-mcp" : id === "rtk" ? "rtk" : "context-mode", toolEffects); return false; }
           catch { return true; }
         });

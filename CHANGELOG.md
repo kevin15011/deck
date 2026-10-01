@@ -19,6 +19,7 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ### Changed
 
+- Claude reuses an already-installed Codebase Memory binary (PATH or `~/.local/bin`, version 0.10.8 or newer) instead of installing its own pinned copy, so Claude and OpenCode share one version and the shared Codebase Memory daemon no longer hangs on a version mismatch. The pinned 0.11.0 install remains the fallback when none is found.
 - Serena bootstrap and web-search shell profile handling were adjusted so they work for Claude-managed sessions.
 
 ### Compatibility
