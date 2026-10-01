@@ -1,3 +1,4 @@
+import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "./launch-settings";
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm, lstat, mkdir, writeFile, symlink, rename, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -318,7 +319,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       const ready = await adapter.buildLaunchPlan!(input);
       expect(ready.status).toBe("ready");
       if (ready.status !== "ready") return;
-      expect(ready.plan.args).toEqual(["--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--plugin-dir", join(home, "data", "deck", "claude", `official-supermemory-${CLAUDE_SUPERMEMORY_COMMIT.slice(0, 12)}`), "--agent", "deck-developer-team:deck-lead"]);
+      expect(ready.plan.args).toEqual([...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--plugin-dir", join(home, "data", "deck", "claude", `official-supermemory-${CLAUDE_SUPERMEMORY_COMMIT.slice(0, 12)}`), "--agent", "deck-developer-team:deck-lead"]);
       expect(ready.plan.envOverlay?.SUPERMEMORY_CC_API_KEY?.sensitive).toBe(true);
       expect(ready.plan.envOverlay?.SUPERMEMORY_REPO_TAG?.value).toBe("sm_project_v1_acme_repo");
       expect(JSON.stringify(plan.files)).not.toContain("fixture-shared-memory-token");
@@ -329,7 +330,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       expect(disabled.status).toBe("ready");
       expect((await adapter.buildLaunchPlan!({ ...input, deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: false, activeProvider: "supermemory" } } as typeof config })).status).toBe("blocked");
       if (disabled.status === "ready") {
-        expect(disabled.plan.args).toEqual(["--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--agent", "deck-developer-team:deck-lead"]);
+        expect(disabled.plan.args).toEqual([...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--agent", "deck-developer-team:deck-lead"]);
         expect(disabled.plan.envOverlay?.SUPERMEMORY_CC_API_KEY).toBeUndefined();
       }
     } finally { await rm(home, { recursive: true, force: true }); }
@@ -366,7 +367,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       const launch = await adapter.buildLaunchPlan!({ projectRoot: home, teamId: "developer-team", mode: "interactive", deckConfig: config });
       expect(launch.status).toBe("ready");
       if (launch.status !== "ready") return;
-      const validated = spawnSync(claude, ["plugin", "validate", launch.plan.args[1]!, "--json"], { cwd: home, encoding: "utf8", timeout: 15_000, env: { HOME: home, PATH: process.env.PATH ?? "" } });
+      const validated = spawnSync(claude, ["plugin", "validate", launch.plan.args[launch.plan.args.indexOf("--plugin-dir") + 1]!, "--json"], { cwd: home, encoding: "utf8", timeout: 15_000, env: { HOME: home, PATH: process.env.PATH ?? "" } });
       expect(validated.status).toBe(0);
     } finally { await rm(home, { recursive: true, force: true }); }
   });
@@ -474,7 +475,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
       expect(agent?.content).toContain('\nmodel: "opus"\n');
       const launch = await adapter.buildLaunchPlan!({ projectRoot: home, teamId: "developer-team", mode: "interactive", deckConfig });
       expect(launch.status).toBe("ready");
-      expect(launch.status === "ready" && launch.plan.args[1]).toContain("developer-team-v2-");
+      expect(launch.status === "ready" && launch.plan.args[launch.plan.args.indexOf("--plugin-dir") + 1]).toContain("developer-team-v2-");
       const repeat = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig, modelAssignments: adapter.readModelAssignments(home) });
       expect(repeat.mutationPreview).toHaveLength(0);
       expect((await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan: repeat })).changedCount).toBe(0);

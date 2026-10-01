@@ -1,3 +1,4 @@
+import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "../../../packages/adapter-claude/src/launch-settings";
 import { describe, expect, test } from "bun:test";
 import { getDefaultDeckConfig, type NormalizedDeckConfig, type RunnerLaunchInput } from "@deck/core";
 import { buildClaudeLaunchPlan } from "./claude-launch-plan";
@@ -16,18 +17,18 @@ describe("Claude launch planning", () => {
     const result = buildClaudeLaunchPlan({ ...base, mode: "interactive" });
     expect(result.status).toBe("ready");
     if (result.status !== "ready") return;
-    expect(result.plan).toMatchObject({ command: "claude", args: ["--safe-mode"], cwd: base.projectRoot, stdio: "inherit", stdin: "inherit", executionClass: "static-compatible" });
+    expect(result.plan).toMatchObject({ command: "claude", args: ["--safe-mode", ...CLAUDE_ATTRIBUTION_SETTINGS_ARGS], cwd: base.projectRoot, stdio: "inherit", stdin: "inherit", executionClass: "static-compatible" });
     expect(result.plan.envOverlay).toBeUndefined();
   });
 
   test("resumes only bounded opaque session IDs", () => {
     const ready = buildClaudeLaunchPlan({ ...base, mode: "resume-by-id", sessionId: "session-123" });
-    expect(ready.status === "ready" && ready.plan.args).toEqual(["--safe-mode", "--resume", "session-123"]);
+    expect(ready.status === "ready" && ready.plan.args).toEqual(["--safe-mode", ...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--resume", "session-123"]);
     for (const sessionId of ["", "--dangerously-skip-permissions", "x\n--model", "a".repeat(1025)]) {
       expect(buildClaudeLaunchPlan({ ...base, mode: "resume-by-id", sessionId }).status).toBe("blocked");
     }
     const latest = buildClaudeLaunchPlan({ ...base, mode: "resume-latest" });
-    expect(latest.status === "ready" && latest.plan.args).toEqual(["--safe-mode", "--continue"]);
+    expect(latest.status === "ready" && latest.plan.args).toEqual(["--safe-mode", ...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--continue"]);
   });
 
   test("blocks memory-enabled launches until verified plugin handoff exists", () => {
