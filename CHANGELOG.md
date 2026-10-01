@@ -9,7 +9,9 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-09-30
+## [0.7.1] - 2026-10-01
+
+> Version 0.7.0 was tagged but never published: its release workflow failed on a stale `bun.lock` before building any artifact. 0.7.1 contains everything intended for 0.7.0 plus the release fixes below.
 
 ### Added
 
@@ -21,7 +23,13 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 - Claude reuses an already-installed Codebase Memory binary (PATH or `~/.local/bin`, version 0.10.8 or newer) instead of installing its own pinned copy, so Claude and OpenCode share one version and the shared Codebase Memory daemon no longer hangs on a version mismatch. The pinned 0.11.0 install remains the fallback when none is found.
 - The Claude RTK hook now runs through a small Node bridge that pins rewritten commands to the Deck-owned RTK binary, so rewrites no longer depend on a global `rtk`. Node.js 18+ is required for the bridge.
+- Claude sessions launched by Deck now pass `--settings` with `attribution` set to empty `commit` and `pr` strings, so commits and pull requests created in those sessions carry no Claude co-author trailer or generated-with line. The change is session-only: no Claude user or project settings file is written, and sessions started outside Deck are unaffected.
 - Serena bootstrap and web-search shell profile handling were adjusted so they work for Claude-managed sessions.
+
+### Fixed
+
+- The release workflow's frozen-lockfile install now succeeds: `bun.lock` includes the `@deck/adapter-claude` workspace.
+- The `deck version` smoke test no longer depends on the git-ignored generated build info, so it passes in a clean checkout.
 
 ### Compatibility
 
