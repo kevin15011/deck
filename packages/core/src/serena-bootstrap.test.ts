@@ -590,6 +590,8 @@ describe("serena bootstrap Core service", () => {
       "--context",
       "ide",
       "--project-from-cwd",
+      "--open-web-dashboard",
+      "false",
     ]);
   });
 });

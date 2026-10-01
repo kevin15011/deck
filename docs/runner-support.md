@@ -70,7 +70,7 @@ Lead may perform short direct research; Investigate is the primary consumer; Arc
 
 ## Ownership and recovery
 
-Deck owns only entries recorded in `.codex/deck-manifest.json`, the exact Deck marker span in `AGENTS.md`, reviewed TOML keys/tables, and exact local-only Git exclude entries. Existing user MCP servers and malformed or ambiguous TOML block automatic apply. Each reviewed operation carries its own native and optional local-only transaction IDs; rollback consumes only that receipt, restores matching postimages, and retains conflicts for explicit recovery.
+Deck owns only entries recorded in `.codex/deck-manifest.json`, reviewed TOML keys/tables, and exact local-only Git exclude entries. Codex delivers instructions through native roles and skills; ownership-verified legacy cleanup may retire a prior Deck marker span in `AGENTS.md` without taking ownership of the remaining guide. Existing user MCP servers and malformed or ambiguous TOML block automatic apply. Each reviewed operation carries its own native and optional local-only transaction IDs; rollback consumes only that receipt, restores matching postimages, and retains conflicts for explicit recovery.
 
 ## Known limits
 

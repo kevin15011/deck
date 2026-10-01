@@ -487,7 +487,7 @@ function windowsPathCandidates(directory: string, command: string, context: Open
 }
 
 function aliasesFor(toolId: InstallableOpenCodeToolId, tool: InstallableOpenCodeTool | undefined): string[] {
-  const capability = getUserFacingOpenCodeCapability(toolId);
+  const capability = toolId === "opencode-supermemory" ? undefined : getUserFacingOpenCodeCapability(toolId);
   return [...new Set([
     toolId,
     tool?.name,
@@ -498,7 +498,11 @@ function aliasesFor(toolId: InstallableOpenCodeToolId, tool: InstallableOpenCode
 }
 
 function commandForTool(toolId: InstallableOpenCodeToolId, tool: InstallableOpenCodeTool | undefined = TOOL_BY_ID.get(toolId)): string | undefined {
-  return toolId === "context7" ? "@upstash/context7-mcp" : getUserFacingOpenCodeCapability(toolId)?.detector.commands?.[0] ?? tool?.id;
+  return toolId === "context7"
+    ? "@upstash/context7-mcp"
+    : toolId === "opencode-supermemory"
+      ? tool?.id
+      : getUserFacingOpenCodeCapability(toolId)?.detector.commands?.[0] ?? tool?.id;
 }
 
 function isExactCommandToken(token: string, expected: string, context: OpenCodeEvidenceContext): boolean {

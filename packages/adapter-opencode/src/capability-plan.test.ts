@@ -192,8 +192,8 @@ describe("buildOpenCodeRunnerReviewPlan Web Search materialization", () => {
   });
 });
 
-describe("buildOpenCodeRunnerReviewPlan Supermemory auth UX", () => {
-  test("stored Deck runtime credential is ready and native OAuth is optional", () => {
+describe("buildOpenCodeRunnerReviewPlan official Supermemory plugin UX", () => {
+  test("stored plugin profile credential is ready without a Deck memory validation action", () => {
     const plan = buildOpenCodeRunnerReviewPlan(
       state({
         adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: true, mcpOAuthReady: false } },
@@ -204,15 +204,28 @@ describe("buildOpenCodeRunnerReviewPlan Supermemory auth UX", () => {
     );
 
     expect(plan.ready).toBe(true);
+    expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({
+      id: "adaptive-memory.supermemory.install-official-plugin",
+      kind: "install-opencode-plugin",
+      toolId: "opencode-supermemory",
+      source: "opencode-supermemory@2.0.15",
+      status: "ready",
+      required: true,
+    }));
     expect(JSON.stringify(plan)).not.toContain("adaptive-memory.supermemory.opencode-mcp-config");
     expect(JSON.stringify(plan)).not.toContain("Configure Supermemory OpenCode MCP");
-    expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "ready" }));
-    expect(JSON.stringify(plan)).toContain("Deck runtime API credential is validated and stored");
-    expect(JSON.stringify(plan)).toContain("OpenCode native OAuth is optional");
+    expect(plan.groups.configWrites).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.retire-legacy-opencode-mcp", status: "ready", dependencies: ["adaptive-memory.supermemory.install-official-plugin"] }));
+    expect(plan.groups.configWrites).toContainEqual(expect.objectContaining({
+      id: "adaptive-memory.supermemory.deck-config",
+      dependencies: ["adaptive-memory.supermemory.install-official-plugin", "adaptive-memory.supermemory.retire-legacy-opencode-mcp"],
+    }));
+    expect(plan.groups.validations).not.toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate" }));
+    expect(JSON.stringify(plan)).toContain("official Supermemory plugin credential is validated and stored");
+    expect(JSON.stringify(plan)).toContain("co-loaded global or project plugins can access the selected process credential");
     expect(JSON.stringify(plan)).not.toContain("uses OpenCode native OAuth; no API key or package install action is generated");
   });
 
-  test("missing Deck runtime credential blocks with runtime wording", () => {
+  test("missing plugin profile credential blocks the plan", () => {
     const plan = buildOpenCodeRunnerReviewPlan(
       state({
         adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: false, mcpOAuthReady: true } },
@@ -223,8 +236,41 @@ describe("buildOpenCodeRunnerReviewPlan Supermemory auth UX", () => {
     );
 
     expect(plan.ready).toBe(false);
-    expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "pending" }));
-    expect(JSON.stringify(plan)).toContain("Deck runtime API key must be validated and stored");
-    expect(JSON.stringify(plan)).toContain("does not satisfy Deck runtime readiness");
+    expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({
+      id: "adaptive-memory.supermemory.install-official-plugin",
+      status: "pending",
+      required: true,
+    }));
+    expect(plan.groups.configWrites).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.retire-legacy-opencode-mcp", status: "pending" }));
+    expect(plan.groups.validations).not.toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate" }));
+    expect(JSON.stringify(plan)).toContain("official Supermemory plugin profile credential must be validated and stored");
+  });
+
+  test("marks external Supermemory registrations as blockers without scheduling a duplicate loader", () => {
+    const plan = buildOpenCodeRunnerReviewPlan(
+      state({
+        adaptiveMemory: {
+          provider: "supermemory",
+          supermemory: {
+            configured: true,
+            runtimeCredentialStored: true,
+            registrationConflicts: ["opencode-supermemory@2.0.15"],
+          },
+        },
+        selectedCapabilities: {},
+      }),
+      {},
+    );
+
+    expect(plan.ready).toBe(false);
+    expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({
+      id: "adaptive-memory.supermemory.install-official-plugin",
+      status: "blocked",
+    }));
+    expect(plan.groups.configWrites.every((action) => action.status === "blocked")).toBe(true);
+    expect(plan.diagnostics).toContainEqual(expect.objectContaining({
+      code: "SUPERMEMORY_PLUGIN_REGISTRATION_CONFLICT",
+      severity: "error",
+    }));
   });
 });

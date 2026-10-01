@@ -67,7 +67,7 @@ function getSerenaToolPolicy(): CapabilityToolPolicy {
  *
  * Sources:
  * - Serena MCP server provides symbol-level tools
- * - Use "serena start-mcp-server --context ide --project-from-cwd" to start
+ * - Use "serena start-mcp-server --context ide --project-from-cwd --open-web-dashboard false" to start
  *
  * Coexistence with codebase-memory:
  * - Serena: symbol editing, refactoring, LSP diagnostics

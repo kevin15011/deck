@@ -63,7 +63,9 @@
     ".codex/agents/deck-lead.toml": "e5e7cf1e58d314232b39fed5b9f812f5f13e552589cb6f8e66ad38eae4d27800",
     ".codex/agents/deck-quality.toml": "739b6740492791e01821bb416190aa92b41ccd9879445c33257883945b0d6f48",
     ".codex/agents/deck-setup.toml": "1e89204e7ace43e5cecaf176eca2cda96a9d5be87dd636ed96904285bfc3e8a6",
-    ".codex/config.toml": "8dad75f960a760cce9da1d6cced3cfaac82b7bdc87ffbcaab22d7d0a76926c4c",
-    "AGENTS.md": "c4f26a40fc01f10355ae4c6dbe74848e216ab388194f608358780614260c1980"
-  }
+    ".codex/config.toml": "8dad75f960a760cce9da1d6cced3cfaac82b7bdc87ffbcaab22d7d0a76926c4c"
+  },
+  "releases": [
+    "AGENTS.md"
+  ]
 }

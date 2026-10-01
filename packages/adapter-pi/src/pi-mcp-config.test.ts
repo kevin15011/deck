@@ -41,7 +41,7 @@ function allDiagnosticsText(value: unknown): string {
 
 const SERENA_ROOT = "/fixtures/deck-data/tools/serena";
 const SERENA_PATH = `${SERENA_ROOT}/bin/serena`;
-const SERENA_ARGS = ["start-mcp-server", "--context", "ide", "--project-from-cwd"] as const;
+const SERENA_ARGS = ["start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"] as const;
 const SERENA_AUTHORIZATION = {
   kind: "interactive-tui-explicit-selection" as const,
   runner: "pi" as const,
@@ -109,7 +109,7 @@ function serenaWriterOptions(fileSystem: ReturnType<typeof memoryFileSystem>["fi
 }
 
 describe("Pi Serena MCP config writer", () => {
-  test("creates the exact absolute-path command and four fixed arguments atomically", async () => {
+  test("creates the exact absolute-path command and six fixed arguments atomically", async () => {
     const fixture = memoryFileSystem();
     const result = await writeEvidenceGatedSerenaMcpConfig(serenaWriterOptions(fixture.fileSystem));
 
@@ -142,24 +142,28 @@ describe("Pi Serena MCP config writer", () => {
     expect(fixture.calls.some((call) => call.startsWith("rename:"))).toBe(false);
   });
 
-  test("updates a legacy bare Serena entry while preserving unrelated config", async () => {
+  test("upgrades the previous Deck Serena command, preserves unrelated MCP entries, and is idempotent", async () => {
     const configPath = "/fixtures/pi/mcp.json";
     const original = {
       mcpServers: {
-        serena: { command: "serena", legacy: true },
+        serena: { command: SERENA_PATH, args: ["start-mcp-server", "--context", "ide", "--project-from-cwd"] },
         filesystem: { command: "npx", args: ["filesystem"] },
       },
       topLevel: "preserved",
     };
     const fixture = memoryFileSystem({ [configPath]: JSON.stringify(original) });
 
-    const result = await writeEvidenceGatedSerenaMcpConfig(serenaWriterOptions(fixture.fileSystem, configPath));
+    const first = await writeEvidenceGatedSerenaMcpConfig(serenaWriterOptions(fixture.fileSystem, configPath));
+    const second = await writeEvidenceGatedSerenaMcpConfig(serenaWriterOptions(fixture.fileSystem, configPath));
     const written = JSON.parse(fixture.files.get(configPath)!);
 
-    expect(result).toMatchObject({ ok: true, action: "updated" });
+    expect(first).toMatchObject({ ok: true, action: "updated" });
+    expect(second).toMatchObject({ ok: true, action: "unchanged" });
+    expect(fixture.calls.filter((call) => call.startsWith("write:")).length).toBe(1);
+    expect(fixture.calls.filter((call) => call.startsWith("rename:")).length).toBe(1);
     expect(written.topLevel).toBe("preserved");
     expect(written.mcpServers.filesystem).toEqual(original.mcpServers.filesystem);
-    expect(written.mcpServers.serena).toEqual({ command: SERENA_PATH, args: [...SERENA_ARGS], legacy: true });
+    expect(written.mcpServers.serena).toEqual({ command: SERENA_PATH, args: [...SERENA_ARGS] });
   });
 
   test("preserves malformed config and rejects unsafe command or exact-argument drift", async () => {

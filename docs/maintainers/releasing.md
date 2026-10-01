@@ -16,9 +16,11 @@ bun test scripts/prepare-release.test.ts
 bun test
 bun run bench:memory
 bun run verify:supermemory-compiled
-bun run build
+bun run build:dry-run
 bunx tsc --noEmit
 ```
+
+The release workflow owns the four-platform artifact matrix. A local all-target `bun run build` requires macOS because Darwin signing fails closed; Linux maintainers use the host-only dry run above and rely on the matrix for signed Darwin artifacts.
 
 3. The current workflow generates `release.json` for both the stable-tag release path and the main-branch pre-release path. Use the source-backed helper only to inspect or prepare descriptor data locally when needed:
 
@@ -44,7 +46,7 @@ Build jobs install frozen dependencies, regenerate runner assets with canonical 
 | `darwin-x64` | `macos-15-intel` |
 | `darwin-arm64` | `macos-14` |
 
-All eight cells must pass before either publishing job. Hosted runner availability depends on repository/GitHub support; unavailable native runners are blockers, not grounds to substitute cross-compilation evidence. Publication downloads the already-verified `deck-*` artifacts and never recompiles them. `compatibility-*` JSON artifacts are separate from release archives/checksum inputs. The generated hook accompanies its build artifact for the Node fixture, but is not a published release asset.
+All eight cells must pass before either publishing job. Hosted runner availability depends on repository/GitHub support; unavailable native runners are blockers, not grounds to substitute cross-compilation evidence. Publication downloads the already-verified `deck-*` artifacts and never recompiles them. `compatibility-*` JSON artifacts are separate from release archives/checksum inputs. The generated hook travels in a separate `runner-hook-*` sidecar for the same target build; it is downloaded for the Node fixture but excluded from published release assets.
 
 For local development, use [the current-source sandbox](../../CONTRIBUTING.md#native-node-compatibility-sandbox). To verify an existing native candidate without downloading Node or installing dependencies, use an already-provisioned **absolute** Node executable and the generated hook from the candidate build:
 

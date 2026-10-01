@@ -342,11 +342,10 @@ function createPathTraversalDeckArchive(archivePath: string): void {
   const archiveDir = mkdtempSync(join(tmpdir(), "deck-archive-src-"));
   try {
     writeFileSync(join(archiveDir, "deck"), "traversal");
-    const result = spawnSync(
-      "tar",
-      ["-czf", archivePath, "--transform=s#deck#../deck#", "-C", archiveDir, "deck"],
-      { encoding: "utf-8" },
-    );
+    const transform = process.platform === "darwin"
+      ? ["-s", "#deck#../deck#"]
+      : ["--transform=s#deck#../deck#"];
+    const result = spawnSync("tar", ["-czf", archivePath, ...transform, "-C", archiveDir, "deck"], { encoding: "utf-8" });
     if (result.status !== 0) {
       throw new Error(`failed to create traversal test tarball: ${result.stderr}`);
     }
@@ -857,6 +856,7 @@ describe("orchestrator", () => {
       // Force the platform triple to linux-x64 so the orchestrator
       // selects the right binary item.
       const originalPlatform = process.platform;
+      const originalArch = process.arch;
       Object.defineProperty(process, "platform", { value: "linux", configurable: true });
       Object.defineProperty(process, "arch", { value: "x64", configurable: true });
 
@@ -887,6 +887,7 @@ describe("orchestrator", () => {
         expect(after.activeOperation).toBeUndefined();
       } finally {
         Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+        Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
       }
     });
   });
@@ -923,6 +924,7 @@ describe("orchestrator", () => {
       };
 
       const originalPlatform = process.platform;
+      const originalArch = process.arch;
       Object.defineProperty(process, "platform", { value: "linux", configurable: true });
       Object.defineProperty(process, "arch", { value: "x64", configurable: true });
 
@@ -951,6 +953,7 @@ describe("orchestrator", () => {
         expect(readFileSync(binaryPath, "utf-8")).toBe("v1-binary");
       } finally {
         Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+        Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
       }
     });
   });
@@ -1089,12 +1092,12 @@ describe("orchestrator", () => {
         notes: "",
       });
 
-      const result = await runUpgradeOrchestrator({
-        descriptor: contentOnly,
-        targetVersion: "1.5.0",
-        currentVersion: "1.4.0",
-        deps: makeDeps({ installKind: "homebrew" }),
-      });
+      const result = await withPlatform("linux", "x64", () => runUpgradeOrchestrator({
+          descriptor: contentOnly,
+          targetVersion: "1.5.0",
+          currentVersion: "1.4.0",
+          deps: makeDeps({ installKind: "homebrew" }),
+        }));
       expect(result.binary.status).toBe("skipped-homebrew");
     });
   });
@@ -1136,13 +1139,13 @@ describe("orchestrator", () => {
         notes: "",
       });
 
-      const result = await runUpgradeOrchestrator({
-        descriptor: contentOnly,
-        targetVersion: "1.5.0",
-        currentVersion: "1.4.0",
-        force: true,
-        deps: makeDeps({ installKind: "homebrew" }),
-      });
+      const result = await withPlatform("linux", "x64", () => runUpgradeOrchestrator({
+          descriptor: contentOnly,
+          targetVersion: "1.5.0",
+          currentVersion: "1.4.0",
+          force: true,
+          deps: makeDeps({ installKind: "homebrew" }),
+        }));
       // Even with force=true, homebrew refuses binary self-upgrade.
       expect(result.binary.status).toBe("skipped-homebrew");
     });

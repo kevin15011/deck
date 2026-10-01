@@ -103,14 +103,23 @@ describe("reviewOpenCodeTools", () => {
   });
 
   test("reports missing tools when package manifest is missing", () => {
-    const result = reviewOpenCodeTools({
-      packageManifest: "/missing/package.json",
-      pathExists: () => false,
-    });
+    const previousConfigContent = process.env.OPENCODE_CONFIG_CONTENT;
+    process.env.OPENCODE_CONFIG_CONTENT = JSON.stringify({ plugin: ["file:///injected/opencode-supermemory-loader.mjs"] });
+    try {
+      const result = reviewOpenCodeTools({
+        evidenceContext: contextFor(),
+        packageManifest: "/missing/package.json",
+        pathExists: () => false,
+      });
 
-    expect(result.installedPackages).toEqual([]);
-    expect(result.error).toBe("OpenCode package manifest not found.");
-    expect(result.tools.every((tool) => !tool.installed)).toBe(true);
+      expect(result.installedPackages).toEqual([]);
+      expect(result.error).toBe("OpenCode package manifest not found.");
+      expect(result.tools.every((tool) => !tool.installed)).toBe(true);
+      expect(JSON.stringify(result)).not.toContain("opencode-supermemory-loader");
+    } finally {
+      if (previousConfigContent === undefined) delete process.env.OPENCODE_CONFIG_CONTENT;
+      else process.env.OPENCODE_CONFIG_CONTENT = previousConfigContent;
+    }
   });
 
   test("accepts only exact executable PATH evidence when default config files are absent", () => {

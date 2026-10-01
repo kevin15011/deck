@@ -29,7 +29,7 @@ import type {
   WebSearchReadinessResult,
 } from "./web-search-capability";
 import type { NormalizedDeckConfig, PackageInstructionPackageId } from "./config/deck-config";
-import type { SkillDiscoverySourceProviderV1 } from "./skill-discovery/contracts";
+import type { SkillDiscoverySourceProviderV1, SkillNativeLoadPortV1 } from "./skill-discovery/contracts";
 import type {
   SerenaBootstrapAuthorization,
   SerenaMcpWriteStatus,
@@ -204,6 +204,11 @@ export type RunnerLaunchPlan = {
   args: readonly string[];
   cwd: string;
   envOverlay?: Readonly<Record<string, { value: string; sensitive?: boolean }>>;
+  /** Narrow authorization for sensitive values deliberately bound by a verified launch composition. */
+  sensitiveEnvAuthorization?: Readonly<{
+    binding: string;
+    keys: readonly string[];
+  }>;
   stdio: "inherit" | "pipe";
   stdin: "inherit" | "closed";
   stdinPayload?: RunnerStdinPayload;
@@ -847,6 +852,9 @@ export interface RunnerAdapter {
    * Adapters that do not expose discovery remain valid RunnerAdapter values.
    */
   readonly skillDiscovery?: SkillDiscoverySourceProviderV1;
+
+  /** Optional active-runner native skill-loading port. Absence is unsupported, never success. */
+  readonly skillLoading?: SkillNativeLoadPortV1;
 
   // -------------------------------------------------------------------------
   // Developer Team installation

@@ -4,14 +4,18 @@ import { renderToString } from "ink";
 
 import { UpgradeConfirmScreen } from "./upgrade-screen";
 import type { ReleaseItem } from "../../upgrade-command/release-descriptor";
+import { getCurrentPlatformTriple } from "../../upgrade-command/release-descriptor";
+
+const currentPlatform = getCurrentPlatformTriple();
+const foreignPlatform = currentPlatform === "darwin-arm64" ? "linux-x64" : "darwin-arm64";
 
 const baseItems: readonly ReleaseItem[] = [
   {
     id: "binary-linux-x64",
     kind: "binary",
     required: true,
-    platform: "linux-x64",
-    asset_name: "deck_v1.2.0_linux-x64.tar.gz",
+    platform: currentPlatform,
+    asset_name: `deck_v1.2.0_${currentPlatform}.tar.gz`,
     url: "https://example.com/b.tar.gz",
     sha256: "a".repeat(64),
     notes: "",
@@ -62,8 +66,8 @@ describe("UpgradeConfirmScreen (T3.4)", () => {
             id: "binary-darwin",
             kind: "binary",
             required: true,
-            platform: "darwin-arm64",
-            asset_name: "deck_v1.2.0_darwin-arm64.tar.gz",
+            platform: foreignPlatform,
+            asset_name: `deck_v1.2.0_${foreignPlatform}.tar.gz`,
             url: "https://example.com/a.tar.gz",
             sha256: "a".repeat(64),
             notes: "",
@@ -71,7 +75,7 @@ describe("UpgradeConfirmScreen (T3.4)", () => {
         ]}
       />,
     );
-    expect(output).toContain("darwin-arm64");
+    expect(output).toContain(foreignPlatform);
     expect(output).not.toContain("this platform");
   });
 

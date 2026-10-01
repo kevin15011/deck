@@ -103,6 +103,33 @@ validate_target_regular() {
     return 0
 }
 
+verify_macos_signature() {
+    local candidate_path="$1"
+    [ "${OS:-}" = "darwin" ] || return 0
+
+    if [ "$TEST_HOOKS_ENABLED" = "true" ]; then
+        case "${DECK_INSTALL_TEST_MACOS_SIGNATURE:-}" in
+            valid) return 0 ;;
+            invalid)
+                error "Downloaded candidate does not have a valid macOS code signature."
+                return 1
+                ;;
+        esac
+    fi
+
+    if ! command -v codesign >/dev/null 2>&1; then
+        error "Cannot verify the downloaded macOS binary because codesign is unavailable."
+        return 1
+    fi
+
+    local signature_output
+    if ! signature_output="$(codesign --verify --deep --strict --verbose=2 "$candidate_path" 2>&1)"; then
+        error "Downloaded candidate does not have a valid macOS code signature: ${signature_output}"
+        return 1
+    fi
+    success "macOS code signature verified"
+}
+
 lock_owner_matches() {
     local owner_file="$1"
     local expected_token="$2"
@@ -506,8 +533,10 @@ install_binary() {
     validate_release_base_url "$release_base_url"
     if [ "${DECK_INSTALL_TEST_MODE:-}" = "1" ] && [[ "$release_base_url" == file://* ]]; then
         TEST_HOOKS_ENABLED="true"
+        export DECK_INSTALL_TEST_INSTALLER_PID="$$"
     else
         TEST_HOOKS_ENABLED="false"
+        unset DECK_INSTALL_TEST_INSTALLER_PID 2>/dev/null || true
     fi
     local download_url="${release_base_url}/${LATEST_VERSION}/${archive_name}"
     local checksums_url="${release_base_url}/${LATEST_VERSION}/checksums.txt"
@@ -664,6 +693,7 @@ install_binary() {
     mv "${TX_TMPDIR}/${BINARY_NAME}" "$candidate_path"
     TX_CANDIDATE_SHA="$(file_sha256 "$candidate_path" 2>/dev/null || true)"
     [ -z "$TX_CANDIDATE_SHA" ] && fatal "Could not compute candidate checksum before replacement."
+    verify_macos_signature "$candidate_path" || fatal "Refusing to install an unsigned or invalid macOS binary."
 
     if [ -e "$target_path" ]; then
         validate_target_regular "$target_path" || exit 1
@@ -827,9 +857,22 @@ verify_installation() {
         done
     fi
 
-    local version_output
-    if ! version_output="$("$binary_path" version 2>&1)"; then
-        error "Installed candidate failed '${BINARY_NAME} version': ${version_output}"
+    local version_output version_status failure_detail
+    set +e
+    version_output="$("$binary_path" version 2>&1)"
+    version_status=$?
+    set -e
+    if [ "$version_status" -ne 0 ]; then
+        failure_detail="exit status ${version_status}"
+        if [ "$version_status" -eq 137 ]; then
+            failure_detail="exit status 137 (SIGKILL)"
+        elif [ "$version_status" -gt 128 ]; then
+            failure_detail="exit status ${version_status} (signal $((version_status - 128)))"
+        fi
+        if [ -n "$version_output" ]; then
+            failure_detail="${failure_detail}: ${version_output}"
+        fi
+        error "Installed candidate failed '${BINARY_NAME} version': ${failure_detail}"
         return 1
     fi
 

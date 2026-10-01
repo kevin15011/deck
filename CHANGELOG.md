@@ -9,6 +9,74 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-29
+
+### Changed
+
+- Deck-managed OpenCode sessions now use the pinned official Supermemory plugin for recall, capture, injection, and compaction instead of Deck-owned OpenCode memory hooks. Pi and Codex memory behavior is unchanged; Context Mode remains an MCP integration.
+- OpenCode setup offers a default credential and selectable literal Git SSH Host aliases. A uniquely matched, configured alias selects its credential; unresolved origins use the configured default. Launch stops if neither is available, without falling back to another account's credentials.
+- Verified GitHub origins retain the canonical `sm_project_v1_<owner>_<repository>` tag, including linked worktrees. Without a verified origin, the plugin selects its own fallback container; memories under older plugin-generated tags are not migrated.
+
+### Security and compatibility
+
+- The selected credential is passed only to the managed OpenCode process, not stored in OpenCode configuration or launch diagnostics. Other plugins loaded in that same process can access its environment; use only trusted plugins.
+- OpenCode Apply runs in the stable binary's `static-compatible` mode. OpenCode-native tool permissions still apply, but this mode does not provide Deck's invocation-scoped denial. Existing Pi/Codex and strict-mode checks are unchanged.
+- The official plugin is pinned to `opencode-supermemory@2.0.15`; Deck supplies a loader-only compatibility adapter for the supported OpenCode generation. Restart Deck and reapply the OpenCode Developer Team installation after upgrading.
+
+### Verification limitation
+
+- A user canary confirmed installation, canonical tagging, and a project-memory write on OpenCode 1.18.31. The full combination of profile switching, resumed/child sessions, compaction, third-party plugins, RTK, and Context Mode in one isolated OpenCode process was not independently reproduced before this release; the user explicitly accepted this remaining risk. Do not treat this release as proof of full process-level isolation or strict Apply authorization.
+
+## [0.5.0] - 2026-09-22
+
+### Added
+
+- OpenCode Developer Team sessions can search project and user skills for the current task, prepare an exact observed candidate, and confirm native loading independently for Lead and delegated specialists. A ready project skill registry is preferred; missing or stale registries use bounded read-only discovery.
+
+### Fixed
+
+- Ordinary nested skill frontmatter such as `metadata.author` and `metadata.version` no longer makes discovery incomplete. Unsafe YAML constructs and malformed descriptors remain rejected.
+- Corrected TUI exit and rollback menu actions.
+
+### Upgrade note
+
+- After updating Deck, restart it and launch OpenCode through the updated Deck binary to reapply the managed plugin. If launching OpenCode directly, reapply the Developer Team installation from the updated Deck first. Verified native skill loading is OpenCode-only; Pi and Codex parity is not claimed.
+
+## [0.4.3] - 2026-09-21
+
+### Changed
+
+- Codex project guidance now remains architecture-focused while dynamic Developer Team and Adaptive Memory policy stays on runner-owned runtime surfaces.
+
+### Fixed
+
+- Deck-managed Adaptive Memory now resolves exact macOS SSH host aliases such as `work → github.com` from protected operating-system account configuration, so project identity and recall work without rewriting Git remotes.
+- Hardened macOS account and SSH configuration validation against ambient environment influence, unsafe paths, incomplete account records, file growth, unsupported directives, and failed-identity provider access.
+
+## [0.4.2] - 2026-09-21
+
+### Fixed
+
+- Deck-managed Serena MCP configurations now disable automatic browser opening while keeping Serena's web dashboard available when opened explicitly.
+- Existing OpenCode and Pi installations must reapply Serena configuration once after upgrading; legacy direct-launch Codex entries require the normal Deck configuration migration. Deck does not silently rewrite user-owned runner configuration during content-only sync.
+
+## [0.4.1] - 2026-09-21
+
+### Changed
+
+- Release jobs now use the repository's canonical target-aware build pipeline and Bun 1.3.12 toolchain contract instead of duplicating compile and archive commands in GitHub Actions.
+- Local canary builds validate workspace dependencies before compilation and embed the current checkout version, commit, target, date, and development channel without rewriting tracked generated metadata.
+
+### Fixed
+
+- Darwin binaries now remove Bun's malformed placeholder signature, apply an ad-hoc macOS signature, and verify it before archive creation. Extracted release artifacts are verified again and executed on matching CI architectures.
+- The macOS installer rejects unsigned or invalid candidates before replacing an existing binary and reports empty status-137 failures as `SIGKILL` before rollback.
+- macOS test and runtime smokes now account for canonical `/private` temporary paths, BSD tar behavior, host platform selection, and signed compiled executables.
+
+### Security
+
+- Runner environment sanitization now removes personal access token variables such as `GITHUB_MCP_PAT` while preserving Deck-owned loopback credentials.
+
 ## [0.4.0] - 2026-09-07
 
 ### Added
@@ -105,7 +173,11 @@ All notable release changes to Deck are recorded here. Current release procedure
 - OpenCode model selection now uses the model inventory resolved by the active runner.
 - Streamlined project documentation and strengthened contributor, architecture, release, and documentation-governance guidance.
 
-[Unreleased]: https://github.com/kevin15011/deck/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/kevin15011/deck/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/kevin15011/deck/compare/v0.4.3...v0.5.0
+[0.4.3]: https://github.com/kevin15011/deck/releases/tag/v0.4.3
+[0.4.2]: https://github.com/kevin15011/deck/releases/tag/v0.4.2
+[0.4.1]: https://github.com/kevin15011/deck/releases/tag/v0.4.1
 [0.4.0]: https://github.com/kevin15011/deck/releases/tag/v0.4.0
 [0.3.0]: https://github.com/kevin15011/deck/releases/tag/v0.3.0
 [0.2.6]: https://github.com/kevin15011/deck/releases/tag/v0.2.6

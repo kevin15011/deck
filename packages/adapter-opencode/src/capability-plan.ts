@@ -13,6 +13,7 @@ import { isWebSearchProviderDescriptor, type SerenaOperationIdentity, type WebSe
 import { writeOpenCodeMcpConfig } from "./opencode-mcp-config";
 import { appendFileSync } from "node:fs";
 import { resolveRunnerParity, type ParityReport, type ParityRuntimeHints } from "@deck/core";
+import { OPENCODE_SUPERMEMORY_PACKAGE_SPEC } from "./opencode-supermemory-plugin";
 
 const LOG = "/tmp/deck-tui.log";
 function _ts() { return new Date().toISOString().slice(11, 23); }
@@ -69,7 +70,7 @@ export type BuildOpenCodeRunnerReviewPlanState = {
   selectedCapabilities?: Partial<Record<string, boolean>>;
   adaptiveMemory?: {
     provider?: AdaptiveMemoryProviderChoice;
-    supermemory?: { configured?: boolean; hasToken?: boolean; runtimeCredentialStored?: boolean; ephemeralTokenAvailable?: boolean; mcpOAuthReady?: boolean; userId?: string; teamId?: string; organizationId?: string };
+    supermemory?: { configured?: boolean; hasToken?: boolean; runtimeCredentialStored?: boolean; ephemeralTokenAvailable?: boolean; mcpOAuthReady?: boolean; userId?: string; teamId?: string; organizationId?: string; registrationConflicts?: readonly string[] };
   };
   teams?: Record<string, { selected?: boolean; modelAssignments?: unknown; thinkingAssignments?: unknown }>;
   runtime?: { toolsReview?: OpenCodeToolsReview };
@@ -372,35 +373,64 @@ function addAdaptiveMemoryActions(
   const supermemory = state.adaptiveMemory?.supermemory;
   const configured = Boolean(supermemory?.configured);
   const runtimeCredentialReady = Boolean(supermemory?.runtimeCredentialStored ?? supermemory?.hasToken);
-  const supermemoryReady = configured && runtimeCredentialReady;
+  const registrationConflict = (supermemory?.registrationConflicts?.length ?? 0) > 0;
+  const supermemoryReady = configured && runtimeCredentialReady && !registrationConflict;
+  const installActionId = "adaptive-memory.supermemory.install-official-plugin";
+  const actionStatus: OpenCodeRunnerActionStatus = registrationConflict ? "blocked" : supermemoryReady ? "ready" : "pending";
 
+  groups.automaticInstalls.push({
+    id: installActionId,
+    kind: "install-opencode-plugin",
+    title: "Install official Supermemory plugin",
+    description: "Installs and verifies the pinned official package in Deck's owned data path, then materializes only the OpenCode loader compatibility adapter.",
+    toolId: "opencode-supermemory",
+    source: OPENCODE_SUPERMEMORY_PACKAGE_SPEC,
+    status: actionStatus,
+    required: true,
+  });
+
+  const retireActionId = "adaptive-memory.supermemory.retire-legacy-opencode-mcp";
+  groups.configWrites.push({
+    id: retireActionId,
+    kind: "write-mcp-config",
+    title: "Retire legacy raw Supermemory MCP config",
+    description: "Removes only an exact stale Deck-managed raw Supermemory MCP entry before the official plugin is used; unmanaged entries are preserved and reported.",
+    status: actionStatus,
+    required: true,
+    dependencies: [installActionId],
+  });
   groups.configWrites.push({
     id: "adaptive-memory.supermemory.deck-config",
     kind: "write-deck-config",
     title: "Write Supermemory non-secret Deck config",
-    description: "Records Supermemory as the selected Adaptive Memory provider after Deck runtime API credential validation/storage; no API key is stored in Deck config.",
-    status: supermemoryReady ? "ready" : "pending",
+    description: "Records the official Supermemory plugin as enabled for Deck-managed OpenCode launches. Credentials remain in Deck's protected profile store at rest, but co-loaded global or project plugins can access the selected process credential.",
+    status: actionStatus,
     required: true,
-    diagnostics: [runtimeCredentialReady
-      ? "Deck runtime API key is validated and stored in Deck's owner-only secret store."
-      : "Deck runtime API key is required for automatic Adaptive Memory and must be validated/stored before Review & Install."],
-  });
-  groups.validations.push({
-    id: "adaptive-memory.supermemory.validate",
-    kind: "validate",
-    title: "Validate Supermemory provider configuration",
-    description: "Validate Deck Runtime credential and non-secret config before provider injection.",
-    status: supermemoryReady ? "ready" : "pending",
-    required: true,
+    dependencies: [installActionId, retireActionId],
+    diagnostics: [registrationConflict
+      ? "A direct or conflicting external Supermemory plugin registration blocks the Deck loader-only adapter."
+      : runtimeCredentialReady
+        ? "An official Supermemory plugin profile credential is validated and stored in Deck's protected secret store."
+        : "An official Supermemory plugin profile credential must be validated and stored before Review & Install."],
   });
   diagnostics.push({
     code: "SUPERMEMORY_CONFIGURATION_REQUIRED",
-    severity: supermemoryReady ? "info" : "warning",
-    message: supermemoryReady
-      ? "Supermemory Deck runtime API credential is validated and stored. OpenCode native OAuth is optional for ad-hoc Supermemory MCP and does not participate in Deck Runtime readiness."
-      : "Supermemory Deck runtime API key must be validated and stored before Adaptive Memory can run. OpenCode native OAuth is optional and does not satisfy Deck runtime readiness.",
+    severity: registrationConflict ? "error" : supermemoryReady ? "info" : "warning",
+    message: registrationConflict
+      ? "A direct or conflicting external Supermemory plugin registration blocks Deck's loader-only compatibility adapter."
+      : supermemoryReady
+        ? "The official Supermemory plugin credential is validated and stored for Deck-managed OpenCode launches; co-loaded global or project plugins can access the selected process credential."
+        : "An official Supermemory plugin profile credential must be validated and stored before Adaptive Memory can run in a Deck-managed OpenCode launch.",
     actionId: "adaptive-memory.supermemory.deck-config",
   });
+  if (registrationConflict) {
+    diagnostics.push({
+      code: "SUPERMEMORY_PLUGIN_REGISTRATION_CONFLICT",
+      severity: "error",
+      message: "A direct or conflicting external Supermemory plugin registration must be removed explicitly before Deck can activate its loader-only compatibility adapter; unrelated plugins are preserved.",
+      actionId: installActionId,
+    });
+  }
 }
 
 function addTeamActions(

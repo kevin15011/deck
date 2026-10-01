@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 
 import { classifyExplicitMemoryIntent, createNodeRunnerProcessEffects, executeRunnerLaunchPlan } from "./runner-launch-command";
 import { runRunnerLaunch } from "./runner-launch-command";
 import { deriveDeckRuntimeSessionId } from "./supermemory-runtime-host";
 import { createFreshDeckSessionId, persistNativeDeckRuntimeSessionMapping, resolveDeckRuntimeSessionId } from "./supermemory-session-store";
 import { createOwnerOnlyFileSecretStore, getDefaultDeckConfig, type RunnerAdapter, type RunnerLaunchInput } from "@deck/core";
+import { storeOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
 import { createPiRunnerAdapter } from "@deck/adapter-pi";
 import { createOpenCodeRunnerAdapter } from "@deck/adapter-opencode";
 import { buildCodexLaunchPlan, createCodexRunnerAdapter } from "@deck/adapter-codex";
@@ -23,6 +24,21 @@ const withDeckConfig = <T extends Omit<RunnerLaunchInput, "deckConfig">>(input: 
 });
 
 const TOKEN_SENTINEL = "sk-test-runner-secret-value-123456";
+const TEST_SUPERMEMORY_LOADER_LOCATOR = "file:///test/deck/opencode/supermemory/2.0.15/opencode-supermemory-loader.mjs";
+const readyOpenCodeSupermemoryLaunchEffects = {
+  inspectOwned: () => ({
+    ready: true as const,
+    code: "ready" as const,
+    diagnostic: "verified",
+    paths: {
+      installRoot: "/test/deck/opencode/supermemory/2.0.15",
+      packageDirectory: "/test/deck/opencode/supermemory/2.0.15/node_modules/opencode-supermemory",
+      loaderPath: "/test/deck/opencode/supermemory/2.0.15/opencode-supermemory-loader.mjs",
+      loaderLocator: TEST_SUPERMEMORY_LOADER_LOCATOR,
+    },
+  }),
+  inspectRegistrations: () => ({ ok: true as const, conflicts: [] }),
+};
 
 async function loadInstalledOpenCodePlugin(pluginPath: string, memoryLoopback: { endpoint?: string; token?: string }) {
   const url = `${pathToFileURL(pluginPath).href}?cache=${Date.now()}-${Math.random()}`;
@@ -268,6 +284,194 @@ describe("runRunnerLaunch consent and status", () => {
       if (previousStateHome === undefined) delete process.env.XDG_STATE_HOME;
       else process.env.XDG_STATE_HOME = previousStateHome;
       await rm(stateHome, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenCode uses the exact SSH-alias profile without claiming an unverified canonical GitHub tag or starting the Deck memory runtime", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-opencode-profile-launch-"));
+    const configHome = await mkdtemp(join(tmpdir(), "deck-opencode-profile-secrets-"));
+    const sshHome = await mkdtemp(join(tmpdir(), "deck-opencode-profile-home-"));
+    const secretStore = createOwnerOnlyFileSecretStore({ configHome });
+    initGitRemote(projectRoot, "git@work:org/repo.git");
+    storeOpenCodeSupermemoryCredential({ store: secretStore, alias: "work", token: "sm_work", eligibleAliases: ["work"] });
+    storeOpenCodeSupermemoryCredential({ store: secretStore, token: "sm_default", makeDefault: true, eligibleAliases: ["work"] });
+    let childEnv: Record<string, string> | undefined;
+    const previousHome = process.env.HOME;
+    try {
+      mkdirSync(join(sshHome, ".ssh"), { mode: 0o700 });
+      writeFileSync(join(sshHome, ".ssh", "config"), "Host=work\n", { mode: 0o600 });
+      process.env.HOME = sshHome;
+      const result = await runRunnerLaunch({
+        adapter: adapter({ runnerId: "opencode", displayName: "OpenCode", buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } } },
+        interactive: false,
+        yes: true,
+        presentPreview: async () => {},
+        supermemoryRuntime: { secretStore },
+        opencodeSupermemoryLaunchEffects: readyOpenCodeSupermemoryLaunchEffects,
+        processEffects: {
+          inheritedEnv: { OPENCODE_DECK_INVOCATION_AUTHORIZATION: "invocation-required", SUPERMEMORY_REPO_TAG: "sm_inherited_wrong" },
+          spawn: async (_command, _args, options) => {
+            childEnv = options.env;
+            return { exitCode: 0, stdout: "", stderr: "" };
+          },
+        },
+      });
+
+      expect(result.status).toBe("launched");
+      expect(childEnv?.SUPERMEMORY_API_KEY).toBe("sm_work");
+      expect(childEnv?.SUPERMEMORY_API_URL).toBe("https://api.supermemory.ai");
+      expect(childEnv?.SUPERMEMORY_REPO_TAG).toBeUndefined();
+      expect(childEnv?.OPENCODE_DECK_INVOCATION_AUTHORIZATION).toBeUndefined();
+      expect(childEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_ENDPOINT");
+      expect(childEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_TOKEN");
+      expect(JSON.stringify(result)).toContain("co-loaded global or project plugins can access the selected process credential");
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(configHome, { recursive: true, force: true });
+      await rm(sshHome, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenCode uses only the explicit default when SSH discovery is uncertain", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-opencode-profile-uncertain-"));
+    const configHome = await mkdtemp(join(tmpdir(), "deck-opencode-profile-secrets-"));
+    const sshHome = await mkdtemp(join(tmpdir(), "deck-opencode-profile-home-"));
+    const secretStore = createOwnerOnlyFileSecretStore({ configHome });
+    initGitRemote(projectRoot, "git@work:org/repo.git");
+    storeOpenCodeSupermemoryCredential({ store: secretStore, alias: "work", token: "sm_work", eligibleAliases: ["work"] });
+    storeOpenCodeSupermemoryCredential({ store: secretStore, token: "sm_default", makeDefault: true, eligibleAliases: ["work"] });
+    let childToken: string | undefined;
+    const previousHome = process.env.HOME;
+    try {
+      mkdirSync(join(sshHome, ".ssh", "config.d"), { recursive: true, mode: 0o700 });
+      writeFileSync(join(sshHome, ".ssh", "config"), "Include config.*/work\nHost work\n", { mode: 0o600 });
+      process.env.HOME = sshHome;
+      const result = await runRunnerLaunch({
+        adapter: adapter({ runnerId: "opencode", displayName: "OpenCode", buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } } },
+        interactive: false,
+        yes: true,
+        presentPreview: async () => {},
+        supermemoryRuntime: { secretStore },
+        opencodeSupermemoryLaunchEffects: readyOpenCodeSupermemoryLaunchEffects,
+        processEffects: { spawn: async (_command, _args, options) => {
+          childToken = options.env.SUPERMEMORY_API_KEY;
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+      });
+
+      expect(result.status).toBe("launched");
+      expect(childToken).toBe("sm_default");
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(configHome, { recursive: true, force: true });
+      await rm(sshHome, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenCode canonical repository tags are clone-path independent and owner-sensitive across GitHub remote forms", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-opencode-canonical-tags-"));
+    const secretStore = createOwnerOnlyFileSecretStore({ configHome: join(root, "config") });
+    storeOpenCodeSupermemoryCredential({ store: secretStore, token: "sm_default", makeDefault: true, eligibleAliases: [] });
+    const cases = [
+      { path: "https-clone-a", remote: "https://github.com/acme/widgets.git", expected: "sm_project_v1_acme_widgets" },
+      { path: "https-clone-b", remote: "https://github.com/acme/widgets.git", expected: "sm_project_v1_acme_widgets" },
+      { path: "scp-clone", remote: "git@github.com:acme/widgets.git", expected: "sm_project_v1_acme_widgets" },
+      { path: "ssh-clone", remote: "ssh://git@github.com/acme/widgets.git", expected: "sm_project_v1_acme_widgets" },
+      { path: "other-owner", remote: "https://github.com/other/widgets.git", expected: "sm_project_v1_other_widgets" },
+    ] as const;
+    try {
+      for (const entry of cases) {
+        const projectRoot = join(root, entry.path);
+        await mkdir(projectRoot, { recursive: true });
+        initGitRemote(projectRoot, entry.remote);
+        let childEnv: Record<string, string> = {};
+        const result = await runRunnerLaunch({
+          adapter: adapter({ runnerId: "opencode", displayName: "OpenCode", buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }) }),
+          launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } } },
+          interactive: false,
+          yes: true,
+          presentPreview: async () => {},
+          supermemoryRuntime: { secretStore },
+          opencodeSupermemoryLaunchEffects: readyOpenCodeSupermemoryLaunchEffects,
+          processEffects: {
+            inheritedEnv: { SUPERMEMORY_REPO_TAG: "sm_inherited_wrong", OPENCODE_DECK_INVOCATION_AUTHORIZATION: "invocation-required" },
+            spawn: async (_command, _args, options) => { childEnv = options.env; return { exitCode: 0, stdout: "", stderr: "" }; },
+          },
+        });
+        expect(result.status).toBe("launched");
+        expect(childEnv.SUPERMEMORY_REPO_TAG).toBe(entry.expected);
+        expect(childEnv.OPENCODE_DECK_INVOCATION_AUTHORIZATION).toBeUndefined();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenCode omits inherited canonical tags for non-Git and no-origin projects and lets the official plugin use its native fallback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-opencode-native-tag-fallback-"));
+    const secretStore = createOwnerOnlyFileSecretStore({ configHome: join(root, "config") });
+    storeOpenCodeSupermemoryCredential({ store: secretStore, token: "sm_default", makeDefault: true, eligibleAliases: [] });
+    try {
+      for (const kind of ["non-git", "no-origin"] as const) {
+        const projectRoot = join(root, kind);
+        await mkdir(projectRoot, { recursive: true });
+        if (kind === "no-origin") execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
+        let childEnv: Record<string, string> = {};
+        const result = await runRunnerLaunch({
+          adapter: adapter({ runnerId: "opencode", displayName: "OpenCode", buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }) }),
+          launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } } },
+          interactive: false,
+          yes: true,
+          presentPreview: async () => {},
+          supermemoryRuntime: { secretStore },
+          opencodeSupermemoryLaunchEffects: readyOpenCodeSupermemoryLaunchEffects,
+          processEffects: {
+            inheritedEnv: { SUPERMEMORY_REPO_TAG: "sm_inherited_wrong", OPENCODE_DECK_INVOCATION_AUTHORIZATION: "invocation-required" },
+            spawn: async (_command, _args, options) => { childEnv = options.env; return { exitCode: 0, stdout: "", stderr: "" }; },
+          },
+        });
+        expect(result.status).toBe("launched");
+        expect(childEnv.SUPERMEMORY_API_KEY).toBe("sm_default");
+        expect(childEnv.SUPERMEMORY_REPO_TAG).toBeUndefined();
+        expect(childEnv.OPENCODE_DECK_INVOCATION_AUTHORIZATION).toBeUndefined();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("OpenCode blocks before spawn when no alias token and no explicit default exist", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-opencode-profile-block-"));
+    const configHome = await mkdtemp(join(tmpdir(), "deck-opencode-profile-empty-"));
+    const secretStore = createOwnerOnlyFileSecretStore({ configHome });
+    initGitRemote(projectRoot, "https://github.com/org/repo.git");
+    let spawned = false;
+    try {
+      const result = await runRunnerLaunch({
+        adapter: adapter({ runnerId: "opencode", displayName: "OpenCode", buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }) }),
+        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } } },
+        interactive: false,
+        yes: true,
+        presentPreview: async () => {},
+        supermemoryRuntime: { secretStore },
+        opencodeSupermemoryLaunchEffects: readyOpenCodeSupermemoryLaunchEffects,
+        processEffects: { spawn: async () => {
+          spawned = true;
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+      });
+
+      expect(result).toMatchObject({ status: "blocked", message: expect.stringContaining("no explicit default credential") });
+      expect(spawned).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(configHome, { recursive: true, force: true });
     }
   });
 
@@ -1165,94 +1369,18 @@ describe("runRunnerLaunch consent and status", () => {
     }
   }, 30_000);
 
-  test("real OpenCode managed launch injects same-turn automatic memory through installed hook loopback", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-opencode-managed-memory-"));
+  test("real OpenCode managed launch activates only the pinned official plugin and never calls Deck memory transport", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-opencode-official-memory-"));
     const projectRoot = join(root, "project");
     const configDir = join(root, "opencode-home");
+    const secretStore = createOwnerOnlyFileSecretStore({ configHome: join(root, "config") });
     await mkdir(projectRoot, { recursive: true });
     initGitRemote(projectRoot);
-    const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir });
-    const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
-    const transportCalls: Array<{ operation: string; payload?: unknown }> = [];
-    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
-    const childEnvKeys: string[] = [];
-    const firstPrompt = "  Decision: apply the established domain policy for this implementation boundary.  ";
-    let chatTurns = 0;
-    let explicitRecallCount = 0;
-    const contextModeSignals: string[] = [];
-    try {
-      const result = await runRunnerLaunch({
-        adapter,
-        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: cfg },
-        yes: true,
-        interactive: false,
-        presentPreview: async () => {},
-        processEffects: { spawn: async (command, args, options) => {
-          childEnvKeys.push(...Object.keys(options.env).filter((key) => /SUPERMEMORY|SM_PROJECT|X_SM_PROJECT|MCP|DECK_RUNNER_MEMORY/i.test(key)));
-          contextModeSignals.push(...[command, ...args, ...Object.keys(options.env), ...Object.values(options.env).map(String)].filter((value) => /context-mode|CONTEXT_MODE/i.test(value)));
-          const plugin = await loadInstalledOpenCodePlugin(join(configDir, "plugins", "developer-team-execution.js"), { endpoint: options.env.DECK_RUNNER_MEMORY_ENDPOINT, token: options.env.DECK_RUNNER_MEMORY_TOKEN });
-          chatTurns += 1;
-          await plugin["chat.message"]({ sessionID: "opencode-native", messageID: "user-1" }, { message: { role: "user" }, parts: [{ text: firstPrompt }] });
-          const transformed = { system: [] as string[] };
-          await plugin["experimental.chat.system.transform"]({ sessionID: "opencode-native" }, transformed);
-          expect(transformed.system).toHaveLength(1);
-          expect(transformed.system[0]).toContain("DECK_ADAPTIVE_CONTEXT_JSON_V1");
-          expect(transformed.system[0]).toContain("Orion");
-          expect(transformed.system[0]).toContain("Nebula Boundary");
-          expect(transformed.system[0]).toContain("core/adapter domain policy");
-          transportCalls.push({ operation: "agent-processing-after-recall" });
-          return { exitCode: 0, stdout: "", stderr: "" };
-        } },
-        supermemoryRuntime: { stateHome: join(root, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(root, "secret"), limitation: "test" }) }, observabilitySink: { path: "memory://opencode-managed", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: {
-          health: async (payload) => { transportCalls.push({ operation: "health", payload }); return { ok: true }; },
-          profile: async (payload) => { transportCalls.push({ operation: "profile", payload }); return { profile: { static: ["Orion confirms the core/adapter domain policy remains the production boundary."] } }; },
-          search: async (payload) => { transportCalls.push({ operation: "search", payload }); return { results: [{ id: "prior", content: "Nebula Boundary preserves the core/adapter domain policy for implementation work." }] }; },
-          add: async (payload) => { transportCalls.push({ operation: "add", payload }); return { id: "capture" }; },
-        } },
-      });
-      expect(result.status).toBe("launched");
-      const config = JSON.parse(await readFile(join(configDir, "opencode.json"), "utf-8"));
-      const installedPlugin = await readFile(join(configDir, "plugins", "developer-team-execution.js"), "utf-8");
-      const sourcePlugin = await readFile(join(process.cwd(), "packages/adapter-opencode/assets/opencode/plugins/developer-team-execution.ts"), "utf-8");
-      expect(installedPlugin).toContain("deck-runner-memory-loopback-v1");
-      expect(installedPlugin).toContain(`source-sha256:${createHash("sha256").update(sourcePlugin).digest("hex")}`);
-      expect(JSON.stringify(config.mcp ?? {})).not.toContain("supermemory");
-      expect(JSON.stringify(config.mcp ?? {})).not.toContain("context-mode");
-      expect(transportCalls.map((call) => call.operation).slice(0, 3).sort()).toEqual(["health", "profile", "search"]);
-      expect(transportCalls.map((call) => call.operation).slice(3)).toEqual(["add", "agent-processing-after-recall"]);
-      expect((transportCalls.find((call) => call.operation === "search")!.payload as { q: string }).q).toBe(firstPrompt.trim());
-      expect(transportCalls.filter((call) => call.operation === "add")).toHaveLength(1);
-      expect((transportCalls.find((call) => call.operation === "add")!.payload as { content: string }).content).toContain(firstPrompt.trim());
-      expect(metrics).toContainEqual(expect.objectContaining({ operation: "runtime_recall", dependency: "automatic", status: "succeeded" }));
-      expect(metrics).toContainEqual(expect.objectContaining({ operation: "capture", dependency: "automatic", status: "succeeded" }));
-      expect(metrics.some((metric) => metric.operation === "runtime_recall" && metric.dependency === "explicit-recall")).toBe(false);
-      explicitRecallCount = metrics.filter((metric) => metric.dependency === "explicit-recall").length;
-      expect(explicitRecallCount).toBe(0);
-      expect(contextModeSignals).toEqual([]);
-      expect(chatTurns).toBe(1);
-      expect(JSON.stringify(config.mcp ?? {})).not.toContain("supermemory");
-      expect(JSON.stringify(metrics)).not.toContain("sm_project_v1_");
-      expect(JSON.stringify(metrics)).not.toContain(firstPrompt.trim());
-      expect(metrics).toContainEqual(expect.objectContaining({ operation: "search", dependency: "automatic", inputByteCount: Buffer.byteLength(firstPrompt.trim(), "utf8"), inputSha256: createHash("sha256").update(firstPrompt.trim()).digest("hex") }));
-      expect(childEnvKeys.sort()).toEqual(["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN"]);
-      expect(JSON.stringify(result)).not.toContain(TOKEN_SENTINEL);
-      expect(JSON.stringify(result)).not.toContain("sm_project_v1_");
-      expect(metrics.filter((metric) => metric.operation === "runtime_lifecycle" && metric.reason === "normal")).toHaveLength(1);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  test("real OpenCode Quick Fix child session skips automatic profile search recall and raw MCP exposure", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-opencode-quickfix-memory-"));
-    const projectRoot = join(root, "project");
-    const configDir = join(root, "opencode-home");
-    await mkdir(projectRoot, { recursive: true });
-    initGitRemote(projectRoot);
+    storeOpenCodeSupermemoryCredential({ store: secretStore, token: TOKEN_SENTINEL, makeDefault: true, eligibleAliases: [] });
     const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir });
     const cfg = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
     const transportCalls: string[] = [];
-    const metrics: Array<import("@deck/adapter-supermemory/runtime").SupermemoryRuntimeMetric> = [];
+    let childEnv: Record<string, string> = {};
     try {
       const result = await runRunnerLaunch({
         adapter,
@@ -1261,33 +1389,29 @@ describe("runRunnerLaunch consent and status", () => {
         interactive: false,
         presentPreview: async () => {},
         processEffects: { spawn: async (_command, _args, options) => {
-          const plugin = await loadInstalledOpenCodePlugin(join(configDir, "plugins", "developer-team-execution.js"), { endpoint: options.env.DECK_RUNNER_MEMORY_ENDPOINT, token: options.env.DECK_RUNNER_MEMORY_TOKEN });
-          await plugin["tool.execute.before"]({ sessionID: "opencode-quickfix", callID: "task-1", tool: "task" }, { args: { subagent_type: "deck-apply-fast", prompt: "small typo" } });
-          await plugin["chat.message"]({ sessionID: "opencode-quickfix-child", messageID: "quickfix-user-1", agent: "deck-apply-fast" }, { message: { role: "user" }, parts: [{ text: "small typo" }] });
-          const system = { system: [] as string[] };
-          await plugin["experimental.chat.system.transform"]({ sessionID: "opencode-quickfix-child" }, system);
-          expect(system.system).toEqual([]);
-          const transformed = { messages: [] as { info: Record<string, unknown>; parts: Record<string, unknown>[] }[] };
-          await plugin["experimental.chat.messages.transform"]({}, transformed);
-          expect(transformed.messages).toEqual([]);
+          childEnv = options.env;
           return { exitCode: 0, stdout: "", stderr: "" };
         } },
-        supermemoryRuntime: { stateHome: join(root, ".state"), secretStore: { read: () => TOKEN_SENTINEL, write: () => ({ backend: "owner-only-file", path: join(root, "secret"), limitation: "test" }) }, observabilitySink: { path: "memory://opencode-quickfix", healthy: true, diagnostics: [], observe: (metric) => { metrics.push(metric); }, health: () => ({ healthy: true, diagnostics: [] }) }, transport: {
-          health: async () => { transportCalls.push("health"); return { ok: true }; },
-          profile: async () => { transportCalls.push("profile"); return { profile: { static: ["must-not-load"] } }; },
-          search: async () => { transportCalls.push("search"); return { results: [{ content: "must-not-search" }] }; },
-          add: async () => { transportCalls.push("add"); return { id: "capture" }; },
-        } },
+        supermemoryRuntime: {
+          secretStore,
+          transport: {
+            health: async () => { transportCalls.push("health"); return { ok: true }; },
+            profile: async () => { transportCalls.push("profile"); return { profile: { static: [] } }; },
+            search: async () => { transportCalls.push("search"); return { results: [] }; },
+            add: async () => { transportCalls.push("add"); return { id: "capture" }; },
+          },
+        },
+        opencodeSupermemoryLaunchEffects: readyOpenCodeSupermemoryLaunchEffects,
       });
       expect(result.status).toBe("launched");
-      const config = JSON.parse(await readFile(join(configDir, "opencode.json"), "utf-8"));
-      expect(JSON.stringify(config.mcp ?? {})).not.toContain("supermemory");
-      expect(transportCalls).toEqual(["health"]);
-      expect(metrics.filter((metric) => metric.operation === "profile" || metric.operation === "search").map((metric) => metric.status)).toEqual(["skipped", "skipped"]);
-      expect(metrics.filter((metric) => metric.operation === "profile" || metric.operation === "search").map((metric) => metric.reason)).toEqual(["role_policy_skip", "role_policy_skip"]);
-      expect(metrics.filter((metric) => metric.operation === "runtime_recall").map((metric) => metric.status)).toEqual(["attempted", "skipped"]);
-      expect(metrics.some((metric) => metric.dependency === "explicit-recall")).toBe(false);
-      expect(JSON.stringify(config.mcp ?? {})).not.toContain("supermemory");
+      expect(childEnv.SUPERMEMORY_API_KEY).toBe(TOKEN_SENTINEL);
+      expect(childEnv.SUPERMEMORY_REPO_TAG).toBe("sm_project_v1_kevin15011_deck");
+      expect(childEnv.OPENCODE_DECK_INVOCATION_AUTHORIZATION).toBeUndefined();
+      expect(JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").plugin).toEqual([TEST_SUPERMEMORY_LOADER_LOCATOR]);
+      expect(childEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_ENDPOINT");
+      expect(childEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_TOKEN");
+      expect(transportCalls).toEqual([]);
+      expect(JSON.stringify(result)).not.toContain(TOKEN_SENTINEL);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

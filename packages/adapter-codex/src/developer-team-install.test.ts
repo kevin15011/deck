@@ -17,7 +17,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(plan.inventory.bootstrapSkillIds).toEqual(["deck-onboard", "deck-archive"]);
     expect(paths).toContain(".codex/config.toml");
     expect(paths).toContain(".codex/hooks/developer-team-execution.js");
-    expect(paths).toContain("AGENTS.md");
+    expect(paths).not.toContain("AGENTS.md");
     expect(plan.diagnostics.some((diagnostic) => diagnostic.code === "trusted-bridge-unavailable")).toBe(false);
     expect(plan.expectedFiles).toHaveLength(plan.mutations.length);
     expect(paths).toContain(".codex/deck-manifest.json");
@@ -84,15 +84,143 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(plan.mutations.some((mutation) => mutation.relativePath === ".agents/skills/api-and-interface-design/SKILL.md")).toBe(false);
   });
 
-  test("preserves unowned AGENTS.md bytes inside a marker-owned update", () => {
+  test("does not create or append to an unmarked AGENTS.md while retaining native role and skill instructions", () => {
     const original = "# User instructions\nKeep this exact.\n";
     const plan = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
       existingFiles: new Map([["AGENTS.md", original]]),
+      capabilityInstructions: buildCapabilityInstructionBundle(["codebase-memory"]),
+    });
+    expect(plan.mutations.some((mutation) => mutation.relativePath === "AGENTS.md")).toBe(false);
+    expect(plan.expectedFiles.some((file) => file.relativePath === "AGENTS.md")).toBe(false);
+    expect(plan.expectedFiles.find((file) => file.relativePath === ".codex/agents/deck-lead.toml")?.content).toContain("Codebase Memory Package");
+    expect(plan.expectedFiles.find((file) => file.relativePath === ".agents/skills/deck-apply-fast/SKILL.md")?.content).toContain("Codebase Memory Package");
+    const contentOnly = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map([["AGENTS.md", original]]),
+      materializationScope: "content-only",
+    });
+    expect(contentOnly.mutations.some((mutation) => mutation.relativePath === "AGENTS.md")).toBe(false);
+  });
+
+  test("retires only a legacy AGENTS marker span with exact manifest ownership and preserves mode", () => {
+    const original = "prefix\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nsuffix\n";
+    const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(original).digest("hex") } }, null, 2)}\n`;
+    const plan = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map([["AGENTS.md", original], [".codex/deck-manifest.json", manifest]]),
+      existingModes: new Map([["AGENTS.md", 0o640]]),
     });
     const agents = plan.mutations.find((mutation) => mutation.relativePath === "AGENTS.md");
-    expect(agents?.content.startsWith(original)).toBe(true);
-    expect(agents?.content).toContain("<!-- deck:developer-team:start -->");
+    expect(plan.blocked).toBe(false);
+    expect(agents).toMatchObject({ content: "prefix\n\nsuffix\n", postimageMode: 0o640, rollback: "restore" });
+    expect(plan.expectedFiles.find((file) => file.relativePath === "AGENTS.md")?.mode).toBe(0o640);
+    const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck-manifest.json")!.content) as { files: Record<string, string> };
+    expect(nextManifest.files["AGENTS.md"]).toBeUndefined();
+    expect(plan.ownershipReleases).toEqual(["AGENTS.md"]);
+  });
+
+  test("blocks legacy cleanup and preserves AGENTS.md for missing, mismatched, malformed, duplicate, or reversed ownership evidence", () => {
+    const valid = "before\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nafter\n";
+    const cases = [
+      { name: "missing", content: valid, manifest: undefined },
+      { name: "mismatched", content: valid, manifest: `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update("different").digest("hex") } })}\n` },
+      { name: "malformed", content: "before\n<!-- deck:developer-team:start -->\nafter\n", manifest: undefined },
+      { name: "duplicate", content: `${valid}<!-- deck:developer-team:start -->\n`, manifest: undefined },
+      { name: "reversed", content: "before\n<!-- deck:developer-team:end -->\n<!-- deck:developer-team:start -->\nafter\n", manifest: undefined },
+    ];
+    for (const scenario of cases) {
+      const existing = new Map<string, string>([["AGENTS.md", scenario.content]]);
+      if (scenario.manifest) existing.set(".codex/deck-manifest.json", scenario.manifest);
+      const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: existing });
+      expect(plan.blocked, scenario.name).toBe(true);
+      expect(plan.mutations.some((mutation) => mutation.relativePath === "AGENTS.md"), scenario.name).toBe(false);
+      expect(plan.ownershipReleases, scenario.name).toEqual([]);
+      if (scenario.name === "mismatched") {
+        const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck-manifest.json")!.content) as { files: Record<string, string> };
+        expect(nextManifest.files["AGENTS.md"]).toBe(createHash("sha256").update("different").digest("hex"));
+      }
+    }
+  });
+
+  test("does not plan AGENTS.md again after legacy cleanup ownership is released", () => {
+    const plan = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map([["AGENTS.md", "prefix\n\nsuffix\n"]]),
+    });
+    expect(plan.blocked).toBe(false);
+    expect(plan.mutations.some((mutation) => mutation.relativePath === "AGENTS.md")).toBe(false);
+    expect(plan.ownershipReleases).toEqual([]);
+  });
+
+  test("releases obsolete AGENTS.md ownership without writing or deleting an absent legacy file", () => {
+    const obsoleteHash = createHash("sha256").update("retired legacy bytes").digest("hex");
+    const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": obsoleteHash } }, null, 2)}\n`;
+    const plan = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map([[".codex/deck-manifest.json", manifest]]),
+    });
+    expect(plan.blocked).toBe(false);
+    expect(plan.mutations.some((mutation) => mutation.relativePath === "AGENTS.md")).toBe(false);
+    expect(plan.ownershipReleases).toEqual(["AGENTS.md"]);
+    const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck-manifest.json")!.content) as { files: Record<string, string> };
+    expect(nextManifest.files["AGENTS.md"]).toBeUndefined();
+
+    const repeated = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map([[".codex/deck-manifest.json", `${JSON.stringify(nextManifest, null, 2)}\n`]]),
+    });
+    expect(repeated.ownershipReleases).toEqual(["AGENTS.md"]);
+    expect(repeated.mutations.some((mutation) => mutation.relativePath === "AGENTS.md")).toBe(false);
+  });
+
+  test("binds an ownership-only AGENTS.md release to the confirmed absent post-state", () => {
+    const obsoleteHash = createHash("sha256").update("retired legacy bytes").digest("hex");
+    const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": obsoleteHash } }, null, 2)}\n`;
+    const plan = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map([[".codex/deck-manifest.json", manifest]]),
+    }) as ReturnType<typeof buildCodexDeveloperTeamInstallPlan> & {
+      ownershipReleaseChecks?: readonly { relativePath: string; precondition: { kind: string }; postcondition: { kind: string } }[];
+    };
+
+    expect(plan.ownershipReleases).toEqual(["AGENTS.md"]);
+    expect(plan.ownershipReleaseChecks).toEqual([{
+      relativePath: "AGENTS.md",
+      precondition: { kind: "absent" },
+      postcondition: { kind: "absent" },
+    }]);
+  });
+
+  test("blocks unsafe AGENTS.md states without releasing its retained ownership", () => {
+    const owned = "<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\n";
+    const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(owned).digest("hex") } }, null, 2)}\n`;
+    const plan = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map([[".codex/deck-manifest.json", manifest]]),
+      agentsFile: { state: "unsafe", reason: "symlink" },
+    } as Parameters<typeof buildCodexDeveloperTeamInstallPlan>[0] & { agentsFile: { state: "unsafe"; reason: string } });
+
+    expect(plan.blocked).toBe(true);
+    expect(plan.diagnostics).toContainEqual(expect.objectContaining({ code: "agents-file-unsafe", severity: "error" }));
+    expect(plan.ownershipReleases).toEqual([]);
+    const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck-manifest.json")!.content) as { files: Record<string, string> };
+    expect(nextManifest.files["AGENTS.md"]).toBeDefined();
+  });
+
+  test("rejects direct planner inputs whose AGENTS.md map conflicts with its authoritative snapshot", () => {
+    const reviewed = "before\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nafter\n";
+    const changedOutsideMarkers = "changed before\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nafter\n";
+    const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(reviewed).digest("hex") } })}\n`;
+    const plan = buildCodexDeveloperTeamInstallPlan({
+      projectRoot: "/work/project",
+      existingFiles: new Map([["AGENTS.md", changedOutsideMarkers], [".codex/deck-manifest.json", manifest]]),
+      agentsFile: { state: "file", content: reviewed, mode: 0o644 },
+    });
+
+    expect(plan.blocked).toBe(true);
+    expect(plan.diagnostics).toContainEqual(expect.objectContaining({ code: "agents-file-snapshot-inconsistent", severity: "error" }));
+    expect(plan.mutations.some((mutation) => mutation.relativePath === "AGENTS.md")).toBe(false);
   });
 
   test("diagnoses override and nested instruction precedence without creating overrides", () => {
@@ -180,7 +308,6 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     const expected = new Map(plan.expectedFiles.map((file) => [file.relativePath, file.content]));
 
     for (const path of [
-      "AGENTS.md",
       ".codex/agents/deck-lead.toml",
       ".codex/agents/deck-apply-deep.toml",
       ".agents/skills/deck-apply-deep/SKILL.md",

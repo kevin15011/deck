@@ -13,6 +13,7 @@ import {
 } from "./required-tools";
 import {
   bootstrapSerena,
+  sanitizeRunnerEnv,
   validateSerenaBootstrapResult,
   validateSerenaOperationAuthorization,
   type SerenaBootstrapEffects,
@@ -23,6 +24,10 @@ import {
   type SerenaReadinessEvidence,
   type SerenaBootstrapRequest,
 } from "@deck/core";
+import {
+  installOwnedOpenCodeSupermemory,
+  type RunOpenCodeSupermemoryInstallCommand,
+} from "./opencode-supermemory-plugin";
 
 const MAX_SCRIPT_BYTES = 1024 * 1024;
 const MAX_CAPTURE_BYTES = 65_536;
@@ -127,6 +132,9 @@ export type InstallOpenCodeToolsOptions = {
   effects?: SerenaBootstrapEffects;
   onStage?: (stage: SerenaBootstrapStage) => void;
   stageCallback?: (stage: SerenaBootstrapStage) => void;
+  /** Test seam for the controlled, Deck-owned official Supermemory package install. */
+  supermemoryInstaller?: typeof installOwnedOpenCodeSupermemory;
+  supermemoryEnvironment?: Readonly<Record<string, string | undefined>>;
 };
 
 const singleFlights = new Map<string, Promise<OpenCodeToolInstallResultExact>>();
@@ -218,6 +226,9 @@ async function executeTool(
   context: OpenCodeEvidenceContext | undefined,
   options: InstallOpenCodeToolsOptions,
 ): Promise<OpenCodeToolInstallResultExact> {
+  if (tool.id === "opencode-supermemory" || tool.installKind === "deck-owned-opencode-plugin") {
+    return executeOwnedSupermemoryTool(tool, runInstallCommand, context, options);
+  }
   if (tool.id === "serena" || tool.installKind === "serena-agent") {
     return executeSerenaTool(tool, options);
   }
@@ -243,6 +254,38 @@ async function executeTool(
   } catch (error) {
     return failureFromText(tool, "install", "installer-exception", 1, "", error instanceof Error ? error.message : String(error), true, context);
   }
+}
+
+async function executeOwnedSupermemoryTool(
+  tool: InstallableOpenCodeTool,
+  runInstallCommand: RunInstallCommand,
+  context: OpenCodeEvidenceContext | undefined,
+  options: InstallOpenCodeToolsOptions,
+): Promise<OpenCodeToolInstallResultExact> {
+  const installer = options.supermemoryInstaller ?? installOwnedOpenCodeSupermemory;
+  const result = await installer({
+    projectRoot: options.projectRoot ?? context?.projectRoot ?? process.cwd(),
+    workspaceRoot: context?.workspaceRoot,
+    environment: sanitizeRunnerEnv(options.supermemoryEnvironment ?? context?.env ?? process.env),
+    homeDirectory: options.homeDirectory ?? context?.homeDirectory,
+    runInstallCommand: runInstallCommand as RunOpenCodeSupermemoryInstallCommand,
+  });
+  if (result.ok && result.outcome === "reused") {
+    return createInstallResult(tool, "already-present", false, `${tool.name} already present and verified; installer not run.`);
+  }
+  if (result.ok && result.outcome === "installed") {
+    return createInstallResult(tool, "executed", true, `${tool.name} installed and verified in Deck's owned path.`);
+  }
+  return failureFromText(
+    tool,
+    result.outcome === "blocked" ? "evidence" : "post-install",
+    result.outcome === "blocked" ? "supermemory-registration-conflict" : "supermemory-verification-failed",
+    undefined,
+    "",
+    result.diagnostic,
+    result.outcome !== "blocked",
+    context,
+  );
 }
 
 async function executeSerenaTool(

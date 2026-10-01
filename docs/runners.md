@@ -1,11 +1,11 @@
 # Runners
 
-Deck is runner-aware rather than runner-agnostic. The CLI registers operational adapters for Pi and OpenCode; other detected binaries remain visible without being represented as supported Deck execution targets.
+Deck is runner-aware rather than runner-agnostic. The CLI registers operational adapters for Pi, OpenCode, and Codex; other detected binaries remain visible without being represented as Deck execution targets.
 
 > **Audience:** People choosing or diagnosing a Deck runner.
 > **Authority:** Runner boundary reference; adapter registries and preflight code define current behavior.
 > **Maintainer:** Deck maintainers.
-> **Evidence:** [runtime detection](../apps/cli/src/runtime-detection.ts), [adapter registry](../apps/cli/src/runner-adapters.ts), [Pi adapter](../packages/adapter-pi/src/runner-adapter.ts), [OpenCode adapter](../packages/adapter-opencode/src/runner-adapter.ts), and [capability registry](../packages/core/src/runner-capability-registry.ts).
+> **Evidence:** [runtime detection](../apps/cli/src/runtime-detection.ts), [adapter registry](../apps/cli/src/runner-adapters.ts), [Pi adapter](../packages/adapter-pi/src/runner-adapter.ts), [OpenCode adapter](../packages/adapter-opencode/src/runner-adapter.ts), [Codex adapter](../packages/adapter-codex/src/runner-adapter.ts), and [capability registry](../packages/core/src/runner-capability-registry.ts).
 
 ## Support status
 
@@ -37,7 +37,6 @@ Pi's standalone launch path is explicit:
 deck pi developer
 deck pi developer --continue
 deck pi developer --resume
-deck pi developer --memory=supermemory
 deck pi developer --memory=supermemory
 deck pi developer --memory=none
 ```

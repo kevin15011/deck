@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildOpenCodeInstallationPlan } from "./installation-plan";
+import { buildOpenCodeInstallationPlan, getSelectableOpenCodeTools } from "./installation-plan";
 
 describe("buildOpenCodeInstallationPlan", () => {
   test("includes only selected missing OpenCode tools", () => {
@@ -44,6 +44,10 @@ describe("buildOpenCodeInstallationPlan", () => {
     });
 
     expect(plan).toEqual([]);
+  });
+
+  test("keeps the adaptive-memory-owned Supermemory package out of generic tool selection", () => {
+    expect(getSelectableOpenCodeTools().map((tool) => tool.id)).not.toContain("opencode-supermemory");
   });
 
   test("uses serena-agent as Serena's installable source identity", () => {

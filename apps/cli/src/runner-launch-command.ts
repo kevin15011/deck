@@ -5,7 +5,8 @@ import type {
   RunnerLaunchPlan,
   RunnerLaunchResult,
 } from "@deck/core";
-import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan, RUNNER_ENV_ALLOWLIST, isSensitiveRunnerEnv, sanitizeRunnerEnv, resolveCanonicalSupermemoryProjectScope, createOwnerOnlyFileSecretStore } from "@deck/core";
+import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, prepareAndBuildDeveloperTeamInstallPlan, RUNNER_ENV_ALLOWLIST, isSensitiveRunnerEnv, sanitizeRunnerEnv, resolveCanonicalSupermemoryProjectScope, createOwnerOnlyFileSecretStore, readLogicalGitOriginRemote } from "@deck/core";
+import { discoverLiteralSshHostAliasesFromHome, resolveOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
 import { spawn as nodeSpawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { open, rm } from "node:fs/promises";
@@ -17,6 +18,7 @@ import type { SupermemoryObservabilitySink } from "./supermemory-observability";
 import type { DeckSecretStore } from "@deck/core";
 import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { formatSessionRuntimeReadiness, resolveSessionRuntimeReadiness } from "./session-runtime-readiness";
+import { authorizeOpenCodeSupermemoryLaunch, VERIFIED_OPENCODE_SUPERMEMORY_BINDING, type OpenCodeSupermemoryLaunchEffects } from "./opencode-supermemory-launch";
 
 export type SpawnedRunnerResult = {
   exitCode: number;
@@ -84,11 +86,15 @@ export async function executeRunnerLaunchPlan(
   }
   const env: Record<string, string> = sanitizeRunnerEnv(effects.inheritedEnv ?? process.env);
   for (const key of Object.keys(env)) {
-    if (key.startsWith("DECK_RUNNER_MEMORY_") || key.startsWith("DECK_CODEX_BRIDGE_")) delete env[key];
+    if (key.startsWith("DECK_RUNNER_MEMORY_") || key.startsWith("DECK_CODEX_BRIDGE_") || key.startsWith("SUPERMEMORY_") || key === "OPENCODE_CONFIG_CONTENT" || key === "OPENCODE_DECK_INVOCATION_AUTHORIZATION") delete env[key];
   }
   const secrets: string[] = [];
+  const authorizedSensitiveKeys = plan.sensitiveEnvAuthorization?.binding === VERIFIED_OPENCODE_SUPERMEMORY_BINDING
+    ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY"))
+    : new Set<string>();
   for (const [key, entry] of Object.entries(plan.envOverlay ?? {})) {
-    if ((entry.sensitive || isSensitiveRunnerEnv(key, entry.value)) && !RUNNER_ENV_ALLOWLIST.has(key)) {
+    const verifiedFailClosedControl = key === "OPENCODE_DECK_INVOCATION_AUTHORIZATION" && entry.value === "invocation-required";
+    if ((entry.sensitive || isSensitiveRunnerEnv(key, entry.value)) && !RUNNER_ENV_ALLOWLIST.has(key) && !authorizedSensitiveKeys.has(key) && !verifiedFailClosedControl) {
       secrets.push(entry.value);
       continue;
     }
@@ -116,6 +122,17 @@ function withSupermemoryLoopback(plan: RunnerLaunchPlan, bridge: SupermemoryRunn
     envOverlay: { ...(plan.envOverlay ?? {}), ...bridge.envOverlay },
     executionClass: "first-class",
     bridgeBinding: { surface: "deck-runner-memory-loopback-v1", mode, evidence: "ephemeral-loopback-token" },
+  };
+}
+
+function redactSensitiveLaunchPlan(plan: RunnerLaunchPlan): RunnerLaunchPlan {
+  if (!plan.envOverlay) return plan;
+  return {
+    ...plan,
+    envOverlay: Object.fromEntries(Object.entries(plan.envOverlay).map(([key, entry]) => [
+      key,
+      entry.sensitive ? { ...entry, value: "[REDACTED]" } : entry,
+    ])),
   };
 }
 
@@ -282,6 +299,8 @@ export type RunRunnerLaunchInput = {
   confirm?: (summary: string) => Promise<boolean>;
   presentPreview: (preview: string) => Promise<void>;
   processEffects: RunnerProcessEffects;
+  /** Hermetic inspection seam; production launches use the owned package verifier. */
+  opencodeSupermemoryLaunchEffects?: OpenCodeSupermemoryLaunchEffects;
   supermemoryRuntime?: {
     secretStore?: DeckSecretStore;
     apiKey?: string;
@@ -479,6 +498,59 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     }
   }
   if (input.installOnly) return { status: "installed", diagnostics: verified.diagnostics };
+
+  if (input.adapter.runnerId === "opencode") {
+    launch = await input.adapter.buildLaunchPlan!(baseLaunch);
+    if (launch.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
+    if (launch.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
+
+    let executablePlan: RunnerLaunchPlan = launch.plan;
+    const memoryEnabled = deckConfig.adaptiveMemory.enabled === true && deckConfig.adaptiveMemory.activeProvider === "supermemory";
+    let profileDiagnostic: RunnerDiagnostic | undefined;
+    if (memoryEnabled) {
+      const store = input.supermemoryRuntime?.secretStore ?? defaultRuntimeSecretStore();
+      const aliases = discoverLiteralSshHostAliasesFromHome(process.env.HOME ?? "");
+      const credential = resolveOpenCodeSupermemoryCredential({
+        store,
+        origin: readLogicalGitOriginRemote(baseLaunch.projectRoot),
+        ambiguousAliases: aliases.ambiguousAliases,
+        sshDiscoveryStatus: aliases.status,
+      });
+      if (!credential.ok) return { status: "blocked", message: credential.message };
+      try {
+        const launchEnvironment = sanitizeRunnerEnv(process.env);
+        executablePlan = authorizeOpenCodeSupermemoryLaunch(executablePlan, {
+          token: credential.token,
+          projectRoot: baseLaunch.projectRoot,
+          ...(projectIdentity.ok ? { canonicalRepoTag: projectIdentity.scope } : {}),
+          environment: launchEnvironment,
+          homeDirectory: launchEnvironment.HOME,
+        }, input.opencodeSupermemoryLaunchEffects);
+      } catch (error) {
+        return { status: "blocked", message: error instanceof Error ? error.message : "OpenCode Supermemory launch verification failed." };
+      }
+      profileDiagnostic = {
+        code: "opencode-supermemory-profile",
+        severity: "warning",
+        message: `Official Supermemory plugin will use the ${credential.profile} profile for this Deck-managed OpenCode process; co-loaded global or project plugins can access the selected process credential.`,
+      };
+    }
+
+    try {
+      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects);
+      return {
+        status: "launched",
+        outcome,
+        launch: {
+          ...launch,
+          plan: redactSensitiveLaunchPlan(executablePlan),
+          diagnostics: [...launch.diagnostics, ...(profileDiagnostic ? [profileDiagnostic] : []), ...inspectionDiagnostics.map((message) => ({ code: "runner-inspection", severity: "warning" as const, message }))],
+        },
+      };
+    } catch (error) {
+      return { status: "blocked", message: error instanceof Error ? `Runner spawn failed: ${error.message}` : "Runner spawn failed." };
+    }
+  }
 
   const postVerifyReadiness = resolveSessionRuntimeReadiness({
     topology: "deck-managed",

@@ -416,20 +416,16 @@ describe("TUI user-initiated rollback (REQ-RBK-002)", () => {
   });
 
   test("home screen renders the Roll back Deck option when a backup is available", () => {
-    // The `releaseCheck` argument is `undefined` (pending); the
-    // `RollbackScreen` is only reached via the menu, but the home
-    // screen's `getHomeMenuOptions` call must include the rollback
-    // entry whenever a backup is present.
     const availability: RollbackAvailability = {
       backupId: fixtureBackup.backupId,
       version: fixtureBackup.deckVersionBefore,
     };
-    // The home screen does not accept a rollback prop directly;
-    // instead we exercise `getHomeMenuOptions` here to assert the
-    // contract the screen uses. This mirrors the home screen's
-    // behaviour (the screen delegates to `getHomeMenuOptions`).
-    const options = getHomeMenuOptions(undefined, availability);
-    const labels = options.map((o) => o.label);
-    expect(labels).toContain("Roll back Deck → 1.1.0");
+    const exitCursor = getHomeMenuOptions(undefined, availability).length - 1;
+    const output = renderToString(
+      <HomeScreen cursor={exitCursor} rollbackAvailability={availability} />,
+    );
+
+    expect(output).toContain("Roll back Deck → 1.1.0");
+    expect(output).toContain("❯ Exit");
   });
 });

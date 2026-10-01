@@ -50,6 +50,8 @@ describe("release workflow platform contract", () => {
 
   test("runs release hard gates before archive build", () => {
     expect(workflow.jobs.build?.needs).toEqual(["metadata", "release-verification"]);
+    expect(workflow.jobs.release?.needs).toEqual(["metadata", "build", "compatibility"]);
+    expect(workflow.jobs.artifacts?.needs).toEqual(["metadata", "build", "compatibility"]);
     const steps = workflow.jobs["release-verification"]?.steps ?? [];
     const stepRuns = steps.map((step) => step.run).filter(Boolean);
     expect(stepRuns).toContain("bun test --timeout 30000");

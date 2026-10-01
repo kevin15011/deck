@@ -85,6 +85,19 @@ function assertPreimage(mutation: CodexMutation, file: CodexInspectedFile | null
   }
 }
 
+function assertOwnershipReleasePrecondition(
+  relativePath: string,
+  expected: CodexPreimage,
+  file: CodexInspectedFile | null,
+): void {
+  if (relativePath !== "AGENTS.md") throw new Error(`Unsupported ownership release target: ${relativePath}`);
+  if (file?.kind === "symlink") throw new Error(`Unsafe symlink target: ${relativePath}`);
+  if (file && file.kind && file.kind !== "file") throw new Error(`Target is not a regular file: ${relativePath}`);
+  if (expected.kind === "absent" && file === null) return;
+  if (expected.kind === "file" && file !== null && hash(file.content) === expected.hash && (file.mode ?? 0o644) === expected.mode) return;
+  throw new Error(`ownership release precondition changed: ${relativePath}`);
+}
+
 async function assertSafeAncestors(projectRoot: string, absolutePath: string, effects: CodexFileEffects): Promise<void> {
   const rootInspection = await effects.inspect(resolve(projectRoot));
   if (rootInspection?.kind === "symlink") throw new Error(`Unsafe symlink project root: ${projectRoot}`);
@@ -112,6 +125,11 @@ export async function applyCodexMutationPlan(
   if (plan.blocked) throw new Error("Blocked Codex mutation plan cannot be applied.");
   for (const mutation of plan.mutations) {
     if (mutation.operation !== "delete" && hash(mutation.content) !== mutation.postimageHash) throw new Error(`Invalid postimage hash: ${mutation.relativePath}`);
+  }
+  for (const release of plan.ownershipReleaseChecks ?? []) {
+    const absolute = target(plan.projectRoot, release.relativePath);
+    await assertSafeAncestors(plan.projectRoot, absolute, effects);
+    assertOwnershipReleasePrecondition(release.relativePath, release.precondition, await effects.inspect(absolute));
   }
   const now = effects.now();
   const journal: CodexTransactionJournal = {
@@ -158,6 +176,11 @@ export async function applyCodexMutationPlan(
     for (const entry of journal.entries) {
       const absolute = target(plan.projectRoot, entry.mutation.relativePath);
       await assertSafeAncestors(plan.projectRoot, absolute, effects);
+      for (const release of plan.ownershipReleaseChecks ?? []) {
+        const releasePath = target(plan.projectRoot, release.relativePath);
+        await assertSafeAncestors(plan.projectRoot, releasePath, effects);
+        assertOwnershipReleasePrecondition(release.relativePath, release.precondition, await effects.inspect(releasePath));
+      }
       try {
         assertPreimage(entry.mutation, await effects.inspect(absolute));
       } catch (error) {

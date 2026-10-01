@@ -1,0 +1,72 @@
+schema: spec-registry-v1
+changeId: complete-skill-discovery-runtime
+name: Complete Skill Discovery Runtime
+currentPhase: review
+status: completed
+artifacts:
+  exploration: exploration.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+provenance:
+  - phase: explore
+    agent: deck-investigate
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T15:00:00Z"
+    registryWrite: non-deferred
+    note: "Traced the parser failure and the missing discovery-to-native-load production path."
+  - phase: proposal
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T15:20:00Z"
+    registryWrite: non-deferred
+    note: "The user approved the phased parser repair and OpenCode-first runtime capability."
+  - phase: spec
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T15:30:00Z"
+    registryWrite: non-deferred
+  - phase: design
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T15:30:00Z"
+    registryWrite: non-deferred
+  - phase: tasks
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T15:30:00Z"
+    registryWrite: non-deferred
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T15:30:00Z"
+    registryWrite: non-deferred
+    note: "Implementation authorized; strict TDD and independent quality remain required."
+  - phase: apply
+    agent: deck-lead
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T18:30:00Z"
+    registryWrite: non-deferred
+    note: "Source integration received independent GO; canonical generated/install acceptance remains blocked on the pinned Bun 1.3.12 runtime."
+  - phase: apply
+    agent: deck-apply-deep
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T22:51:20Z"
+    registryWrite: non-deferred
+    note: "Completed canonical generation, OpenCode 1.18.31 compatibility, ready-registry preference, exact filesystem/native reconciliation, and per-evaluation inventory freshness."
+  - phase: verify
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T22:51:20Z"
+    registryWrite: non-deferred
+  - phase: review
+    agent: deck-quality
+    model: openai/gpt-5.6-sol
+    timestamp: "2026-09-22T22:51:20Z"
+    registryWrite: non-deferred
+    note: "Independent final review returned GO with no actionable findings after freshness, SDK-envelope, and registry-path repairs."

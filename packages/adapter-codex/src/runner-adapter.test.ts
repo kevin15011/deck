@@ -1,5 +1,6 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -331,7 +332,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(result.changedCount).toBe(plan.files.length);
       expect((await adapter.verifyDeveloperTeamInstall(plan)).valid).toBe(true);
       expect(await readFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), "utf8")).toContain("deck-codex-v1");
-      expect(await readFile(join(projectRoot, "AGENTS.md"), "utf8")).toContain("static-compatible");
+       expect(await Bun.file(join(projectRoot, "AGENTS.md")).exists()).toBe(false);
       await chmod(join(projectRoot, ".codex", "agents", "deck-lead.toml"), 0o600);
       expect(await adapter.verifyDeveloperTeamInstall(plan)).toMatchObject({ valid: false, diagnostics: [expect.stringContaining("Mode drifted")] });
       await chmod(join(projectRoot, ".codex", "agents", "deck-lead.toml"), 0o644);
@@ -340,6 +341,111 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(unchangedPlan.files).toHaveLength(0);
       await Bun.write(join(projectRoot, ".agents", "skills", "idea-refine", "examples.md"), "tampered");
       expect((await adapter.verifyDeveloperTeamInstall(unchangedPlan)).valid).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not treat an ordinary unmarked AGENTS.md as Codex installation evidence", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-detection-"));
+    try {
+      await writeFile(join(projectRoot, "AGENTS.md"), "# Repository guide\n", "utf8");
+      const adapter = createCodexRunnerAdapter();
+      expect(await adapter.detectDeckInstall?.({ projectRoot })).toMatchObject({ installed: false, managedPaths: [] });
+
+      await writeFile(join(projectRoot, "AGENTS.md"), "<!-- deck:developer-team:start -->\nlegacy\n<!-- deck:developer-team:end -->\n", "utf8");
+      expect(await adapter.detectDeckInstall?.({ projectRoot })).toMatchObject({ installed: true, managedPaths: [join(projectRoot, "AGENTS.md")] });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("blocks symlink and directory AGENTS.md targets during plan review", async () => {
+    const symlinkRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-symlink-"));
+    const directoryRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-directory-"));
+    try {
+      await writeFile(join(symlinkRoot, "guide-target"), "user guide", "utf8");
+      await symlink(join(symlinkRoot, "guide-target"), join(symlinkRoot, "AGENTS.md"));
+      await mkdir(join(directoryRoot, "AGENTS.md"));
+      const adapter = createCodexRunnerAdapter();
+
+      for (const projectRoot of [symlinkRoot, directoryRoot]) {
+        const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+        expect(plan.blocked).toBe(true);
+        expect(plan.diagnostics).toContainEqual(expect.stringContaining("AGENTS.md is unsafe"));
+        expect(plan.ownershipReleases ?? []).not.toContain("AGENTS.md");
+      }
+    } finally {
+      await rm(symlinkRoot, { recursive: true, force: true });
+      await rm(directoryRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects ownership-only release when a confirmed-absent AGENTS.md appears before apply", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-apply-race-"));
+    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-apply-race-journal-"));
+    try {
+      const owned = "retired legacy bytes";
+      await mkdir(join(projectRoot, ".codex"), { recursive: true });
+      await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(owned).digest("hex") } })}\n`);
+      const adapter = createCodexRunnerAdapter({ journalRoot });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+      await writeFile(join(projectRoot, "AGENTS.md"), "# Newly created guide\n", "utf8");
+
+      await expect(adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan })).rejects.toThrow("ownership release precondition");
+      expect(await Bun.file(join(projectRoot, ".codex", "agents", "deck-lead.toml")).exists()).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("fails verification when an ownership-only AGENTS.md release post-state drifts", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-verify-race-"));
+    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-verify-race-journal-"));
+    try {
+      const guide = "# Repository guide\n";
+      await mkdir(join(projectRoot, ".codex"), { recursive: true });
+      await writeFile(join(projectRoot, "AGENTS.md"), guide, "utf8");
+      await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(guide).digest("hex") } })}\n`);
+      const adapter = createCodexRunnerAdapter({ journalRoot });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+      await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
+      await writeFile(join(projectRoot, "AGENTS.md"), "# Changed after apply\n", "utf8");
+
+      await expect(adapter.verifyDeveloperTeamInstall(plan)).resolves.toMatchObject({
+        valid: false,
+        diagnostics: [expect.stringContaining("Ownership release post-state drifted: AGENTS.md")],
+      });
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("fails closed when AGENTS.md changes outside the legacy markers during manifest-owned discovery", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-discovery-race-"));
+    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-discovery-race-journal-"));
+    try {
+      const reviewed = "before\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nafter\n";
+      const changed = "edited before\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nafter\n";
+      await mkdir(join(projectRoot, ".codex"), { recursive: true });
+      await writeFile(join(projectRoot, "AGENTS.md"), reviewed, "utf8");
+      await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(reviewed).digest("hex") } })}\n`);
+      let changedDuringDiscovery = false;
+      const adapter = createCodexRunnerAdapter({
+        journalRoot,
+        onAgentsFileSnapshot: () => {
+          changedDuringDiscovery = true;
+          writeFileSync(join(projectRoot, "AGENTS.md"), changed, "utf8");
+        },
+      } as Parameters<typeof createCodexRunnerAdapter>[0] & { onAgentsFileSnapshot: () => void });
+
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+      expect(changedDuringDiscovery).toBe(true);
+      await expect(adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan })).rejects.toThrow("preimage");
+      expect(await readFile(join(projectRoot, "AGENTS.md"), "utf8")).toBe(changed);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });

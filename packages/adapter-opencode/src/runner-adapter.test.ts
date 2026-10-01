@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { createOpenCodeRunnerAdapter } from "./runner-adapter";
+import { createOpenCodeRunnerAdapter, createOpenCodeSkillDiscoveryProvider } from "./runner-adapter";
 import type { OpenCodeToolsReview } from "./required-tools";
 import { getStandaloneSkills } from "@deck/core/skills/external";
 import { discoverSkillsFromProvider } from "../../core/src/skill-discovery/discovery";
@@ -41,7 +41,7 @@ function toolsReviewFor(toolId: "codebase-memory", installed: boolean): OpenCode
 describe("OpenCode package instruction boundary", () => {
   test("supports the canonical package metadata without treating baseline or capability IDs as toggles", () => {
     const adapter = createOpenCodeRunnerAdapter();
-    expect(adapter.packageInstructionIds).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
+    expect(adapter.packageInstructionIds).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "serena"]);
     const inventory = { runnerId: "opencode", environmentId: "opencode-development", capabilities: [] } as any;
     const base = { runnerId: "opencode", environmentId: "opencode-development", selectedCapabilities: {}, adaptiveMemory: { provider: "none" } } as const;
 
@@ -55,8 +55,49 @@ describe("OpenCode package instruction boundary", () => {
   });
 });
 
-describe("OpenCode RunnerAdapter Supermemory readiness mapping", () => {
-  test("forwards stored runtime credential readiness from generic dashboard state", () => {
+describe("OpenCode RunnerAdapter Supermemory plugin readiness mapping", () => {
+  test("surfaces direct external Supermemory registration as a review-plan blocker", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-opencode-supermemory-conflict-"));
+    const projectRoot = join(root, "project");
+    const configDir = join(root, "opencode-config");
+    await mkdir(projectRoot, { recursive: true });
+    await mkdir(configDir, { recursive: true });
+    await writeFile(join(configDir, "opencode.json"), JSON.stringify({
+      plugin: ["opencode-auth", "opencode-supermemory@2.0.15"],
+    }));
+    try {
+      const adapter = createOpenCodeRunnerAdapter({ developerTeamConfigDir: configDir });
+      const deckConfig = {
+        ...getDefaultDeckConfig(),
+        adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const },
+      };
+      const inventory = await adapter.getCapabilityInventory({
+        projectRoot,
+        runnerId: "opencode",
+        environmentId: "opencode-development",
+        deckConfig,
+      });
+      const plan = adapter.buildReviewPlan({
+        runnerId: "opencode",
+        environmentId: "opencode-development",
+        selectedCapabilities: {},
+        explicitlySelectedCapabilities: {},
+        packageInstructions: {},
+        adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, runtimeCredentialStored: true } },
+      } as any, inventory);
+
+      expect(plan.ready).toBe(false);
+      expect(plan.groups.automaticInstalls).toContainEqual(expect.objectContaining({
+        id: "adaptive-memory.supermemory.install-official-plugin",
+        status: "blocked",
+      }));
+      expect(JSON.stringify(plan)).toContain("SUPERMEMORY_PLUGIN_REGISTRATION_CONFLICT");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("forwards stored plugin profile readiness from generic dashboard state", () => {
     const adapter = createOpenCodeRunnerAdapter();
     const plan = adapter.buildReviewPlan({
       runnerId: "opencode",
@@ -69,11 +110,11 @@ describe("OpenCode RunnerAdapter Supermemory readiness mapping", () => {
 
     expect(plan.ready).toBe(true);
     expect(plan.groups.configWrites).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.deck-config", status: "ready" }));
-    expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "ready" }));
-    expect(JSON.stringify(plan)).toContain("Deck runtime API credential is validated and stored");
+    expect(plan.groups.validations).not.toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate" }));
+    expect(JSON.stringify(plan)).toContain("official Supermemory plugin credential is validated and stored");
   });
 
-  test("does not treat optional MCP OAuth as Deck runtime credential readiness", () => {
+  test("does not treat optional MCP OAuth as plugin profile credential readiness", () => {
     const adapter = createOpenCodeRunnerAdapter();
     const plan = adapter.buildReviewPlan({
       runnerId: "opencode",
@@ -86,8 +127,8 @@ describe("OpenCode RunnerAdapter Supermemory readiness mapping", () => {
 
     expect(plan.ready).toBe(false);
     expect(plan.groups.configWrites).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.deck-config", status: "pending" }));
-    expect(plan.groups.validations).toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate", status: "pending" }));
-    expect(JSON.stringify(plan)).toContain("does not satisfy Deck runtime readiness");
+    expect(plan.groups.validations).not.toContainEqual(expect.objectContaining({ id: "adaptive-memory.supermemory.validate" }));
+    expect(JSON.stringify(plan)).toContain("official Supermemory plugin profile credential must be validated and stored");
   });
 
   test("synthetic Supermemory MCP write without an explicit config dir does not touch a real-like OpenCode config", async () => {
@@ -169,7 +210,7 @@ describe("OpenCode RunnerAdapter developer team install plan", () => {
     }));
   });
 
-  test("uses verified Runtime-owned Supermemory scope in the generic install adapter path", async () => {
+  test("drops caller-supplied Deck memory instructions from the OpenCode install path", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-opencode-scope-"));
     try {
       execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
@@ -188,9 +229,9 @@ describe("OpenCode RunnerAdapter developer team install plan", () => {
       });
       const text = plan.files.map((file) => file.content).join("\n");
 
-      expect(text).toContain("Runtime-managed recall and capture bind project scope server-side");
-      expect(text).toContain("schemas permit model-selected project scope");
-      expect(text).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
+      expect(text).not.toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(text).not.toContain("schemas permit model-selected project scope");
+      expect(text).not.toContain("stale unscoped memory");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -207,6 +248,56 @@ describe("OpenCode RunnerAdapter developer team install plan", () => {
     expect(sourceIds).toEqual(["opencode-config-skills", "opencode-legacy-skills"]);
     expect(sourceIds).not.toContain("pi-project-skills");
     expect(JSON.stringify(result)).not.toContain("/.config/opencode/");
+  });
+
+  test("preserves the public runner-adapter skill discovery provider export", async () => {
+    const provider = createOpenCodeSkillDiscoveryProvider({
+      configDir: join(tmpdir(), "deck-opencode-public-provider-config"),
+      homeDir: join(tmpdir(), "deck-opencode-public-provider-home"),
+    });
+    const result = await provider.listSources({ projectRoot: "/tmp/project" });
+
+    expect(provider.runnerId).toBe("opencode");
+    expect(result.outcome).toBe("complete");
+    expect(result.sources.map((source) => source.declaration.sourceId)).toEqual(["opencode-config-skills", "opencode-legacy-skills"]);
+  });
+
+  test("scopes opaque inventory snapshots to one source listing evaluation", async () => {
+    let calls = 0;
+    const provider = createOpenCodeSkillDiscoveryProvider({
+      configDir: join(tmpdir(), "deck-opencode-scoped-provider-config"),
+      homeDir: join(tmpdir(), "deck-opencode-scoped-provider-home"),
+      skillInventoryDiscovery: async () => {
+        calls += 1;
+        return { outcome: "complete", observations: [{ opaqueId: `skill-${calls}`, name: `Skill ${calls}` }], diagnostics: [] };
+      },
+    });
+
+    const first = await provider.listSources({ projectRoot: "/tmp/project" });
+    const firstInventory = first.sources.find((source) => source.kind === "opaque_inventory");
+    expect((await firstInventory!.readInventory()).observations).toEqual([{ opaqueId: "skill-1", name: "Skill 1" }]);
+    expect((await firstInventory!.readInventory()).observations).toEqual([{ opaqueId: "skill-1", name: "Skill 1" }]);
+
+    const second = await provider.listSources({ projectRoot: "/tmp/project" });
+    const secondInventory = second.sources.find((source) => source.kind === "opaque_inventory");
+    expect((await secondInventory!.readInventory()).observations).toEqual([{ opaqueId: "skill-2", name: "Skill 2" }]);
+    expect(calls).toBe(2);
+  });
+
+  test("reports the absent native skill-loading host port without fabricating a load", async () => {
+    const adapter = createOpenCodeRunnerAdapter();
+
+    expect(adapter.skillLoading?.schema).toBe("skill-native-load-port-v1");
+    expect(await adapter.skillLoading?.prepare({
+      activeRunnerId: "opencode",
+      selectionId: "sha256:test-selection",
+      loadReference: "private-native-reference",
+    })).toEqual({ outcome: "unsupported" });
+    expect(await adapter.skillLoading?.load({
+      activeRunnerId: "opencode",
+      selectionId: "sha256:test-selection",
+      loadReference: "private-native-reference",
+    })).toEqual({ outcome: "unobserved" });
   });
 
   test("composes Core generic roots with OpenCode sources and excludes Pi roots", async () => {
@@ -605,7 +696,7 @@ describe("OpenCode Serena evidence handoff", () => {
       operation,
       readiness: evidence,
       command: executable,
-      args: ["start-mcp-server", "--context", "ide", "--project-from-cwd"],
+      args: ["start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"],
     });
   });
 
@@ -730,6 +821,8 @@ describe("OpenCode Serena evidence handoff", () => {
         "--context",
         "ide",
         "--project-from-cwd",
+        "--open-web-dashboard",
+        "false",
       ]);
       expect(written.mcp.unrelated).toEqual({ type: "remote", url: "https://example.test/mcp" });
     } finally {

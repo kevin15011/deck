@@ -18,16 +18,8 @@ import { DEFAULT_OPENCODE_MODELS } from "./model-config";
 import { createOpenCodeRunnerAdapter } from "./runner-adapter";
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
 import type {
-  AdaptiveMemoryProvider,
   MemoryInjectionBundle,
 } from "@deck/core/memory/adaptive-memory";
-import type {
-  AdaptiveMemoryAdapter,
-  AdaptiveMemoryProviderIdentity,
-  AdaptiveMemoryHealthResult,
-  AdaptiveMemoryCommitResult,
-  AdaptiveMemoryContextResult,
-} from "@deck/core/memory/adaptive-memory-contract";
 
 // ---------------------------------------------------------------------------
 // Runner Isolation Verification
@@ -147,7 +139,6 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     const paused = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
       promptProfileActivation: { ...compactPromptActivation, status: "rollout-paused" },
     });
-    const expected = getAgentContent("deck-apply-fast", { promptProfile: "compact" })!;
     const compactPrompt = compact.promptGenerationPlan.find(
       (planned) => planned.agent.id === "deck-apply-fast",
     )!;
@@ -159,8 +150,15 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     expect(eligible.promptProfile).toBe("compact");
     expect(paused.promptProfile).toBe("compact");
     expect(paused.promptGenerationPlan).toEqual(compact.promptGenerationPlan);
-    expect(compactPrompt.content).toContain(expected.agentBody);
-    expect(compactSkill.content).toContain(expected.skillBody);
+    expect(compactPrompt.content).toContain("# Apply Fast (deck-apply-fast)");
+    expect(compactSkill.content).toContain("# Apply Fast Skill");
+  });
+
+  test("removes Deck adaptive-context availability claims from OpenCode skill files without changing core content", () => {
+    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
+    expect(plan.skills.map(({ content }) => content).join("\n")).not.toMatch(/adaptive[ -](?:context|memory)/i);
+    expect(getAgentContent("deck-apply-fast", { promptProfile: "compact" })!.skillBody)
+      .toMatch(/adaptive (?:context|memory)/i);
   });
 
   test("orchestrator has mode: primary", () => {
@@ -905,170 +903,48 @@ describe("verifyRunnerIsolation", () => {
   });
 });
 
-describe("memoryBundle in buildOpenCodeDeveloperTeamInstallPlan", () => {
-  test("returns memoryBundle when Supermemory provider is passed with valid auth", () => {
-    // Valid auth = validateSupermemoryOpenCodeMcpConfig returns ok: true
-    // We stub the validator by providing a pre-built memoryInjection bundle instead of a live provider,
-    // which bypasses the auth probe (pre-built bundles are used directly without validation).
-    const preBuiltBundle: MemoryInjectionBundle = {
-      instructions: [],
-      toolBindings: [{
-        capability: "memory.search",
-        serverName: "supermemory",
-        toolNames: ["supermemory_memory", "supermemory_recall"],
-      }],
+describe("OpenCode official Supermemory plugin ownership", () => {
+  test("ignores legacy Deck memory bundles and providers", () => {
+    const memoryInjection: MemoryInjectionBundle = {
+      instructions: [{ surface: "agent", markdown: "legacy Deck memory instruction", teamId: "developer-team" }],
+      toolBindings: [{ capability: "memory.search", serverName: "supermemory", toolNames: ["supermemory_recall"] }],
     };
-
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      memoryInjection: preBuiltBundle,
+      memoryInjection,
       trustedMemoryInjection: true,
+      memoryProvider: {
+        id: "supermemory",
+        displayName: "Supermemory",
+        buildInjection: () => memoryInjection,
+      },
     });
 
-    expect(plan.memoryBundle).toBeDefined();
-    expect(plan.memoryBundle!.toolBindings.length).toBeGreaterThan(0);
-    expect(plan.memoryBundle!.toolBindings[0].toolNames).toContain("supermemory_memory");
-    expect(plan.memoryBundle!.toolBindings[0].toolNames).toContain("supermemory_recall");
-  });
-
-  test("returns memoryBundle: undefined when no provider is configured", () => {
-    const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project");
-
     expect(plan.memoryBundle).toBeUndefined();
+    expect(plan.memoryDiagnostics).toEqual([]);
+    expect(plan.promptGenerationPlan.map((entry) => entry.content).join("\n")).not.toContain("legacy Deck memory instruction");
   });
 
-  test("propagates scoped adaptive-memory instructions into OpenCode prompts, agent skills, standalone skills, and bootstrap skills", () => {
-    const projectRoot = createTempProject();
-    const configDir = createTempConfigDir(projectRoot);
-    try {
-      initCanonicalGitRemote(projectRoot);
-      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
-        mcp: {
-          supermemory: {
-            type: "remote",
-            url: "https://mcp.supermemory.ai/mcp",
-            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
-          },
-        },
-      }));
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
-        configDir,
-        memoryProvider: {
-          id: "supermemory",
-          displayName: "Supermemory",
-          buildInjection: (context) => ({
-            instructions: [{ surface: "agent", markdown: `provider scope ${context.supermemoryProjectScope}`, teamId: "developer-team" }],
-            toolBindings: [],
-          }),
-        },
-        capabilityInstructions: buildCapabilityInstructionBundle(["adaptive-memory"], {
-          supermemoryProjectScope: "sm_project_v1_kevin15011_deck",
-          configuredSupermemoryProjectScope: "sm_project_v1_kevin15011_deck",
-        }),
-        standaloneSkills: completeStandaloneSkills,
-      });
-      const samples = [
-        plan.promptGenerationPlan.find((planned) => planned.agent.id === "deck-lead")!.content,
-        plan.skills.find((planned) => planned.agent.id === "deck-apply-deep")!.content,
-        plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("api-and-interface-design/SKILL.md"))!.content,
-        plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("deck-onboard/SKILL.md"))!.content,
-      ];
-
-      for (const content of samples) {
-        expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
-        expect(content).toContain("schemas permit model-selected project scope");
-        expect(content).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-        expect(content).not.toContain("supermemory_add_memory");
-        expect(content).not.toContain("supermemory_search_memory");
-        expect(content).not.toContain("No manual containerTag required");
-        expect(content).not.toContain("sm_project_default");
-      }
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-
-  test("replaces caller-supplied adaptive-memory capability fragments with Runtime-owned scope guidance", () => {
-    const projectRoot = createTempProject();
-    const configDir = createTempConfigDir(projectRoot);
-    try {
-      initCanonicalGitRemote(projectRoot);
-      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({
-        mcp: {
-          supermemory: {
-            type: "remote",
-            url: "https://mcp.supermemory.ai/mcp",
-            headers: { "x-sm-project": "sm_project_v1_kevin15011_deck" },
-          },
-        },
-      }));
-      const callerBundle = {
-        instructions: [
-          { packageId: "adaptive-memory", surface: "agent", markdown: "No manual containerTag required", teamId: "developer-team" },
-          { packageId: "adaptive-memory", surface: "skill", markdown: "stale q example supermemory_search_memory({ q, containerTag: \"sm_project_default\" })", teamId: "developer-team" },
-          { packageId: "code-economy", surface: "agent", markdown: "caller-unrelated-marker", teamId: "developer-team" },
-        ],
-      } as const;
-
-      const plan = buildOpenCodeDeveloperTeamInstallPlan(projectRoot, {
-        configDir,
-        capabilityInstructions: callerBundle,
-        standaloneSkills: completeStandaloneSkills,
-      });
-      const combined = [
-        plan.promptGenerationPlan.find((planned) => planned.agent.id === "deck-lead")!.content,
-        plan.standaloneSkills.find((planned) => planned.relativePath.endsWith("api-and-interface-design/SKILL.md"))!.content,
-      ].join("\n");
-
-      expect(combined).toContain("Runtime-managed recall and capture bind project scope server-side");
-      expect(combined).toContain("schemas permit model-selected project scope");
-      expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
-      expect(combined).not.toContain("supermemory_search_memory");
-      expect(plan.capabilityInstructions?.instructions.some((fragment) => fragment.markdown === "caller-unrelated-marker")).toBe(true);
-      expect(combined).not.toContain("No manual containerTag required");
-      expect(combined).not.toContain("sm_project_default");
-      expect(combined).not.toMatch(/supermemory_search_memory\(\{\s*q\s*,/);
-    } finally {
-      cleanup(projectRoot);
-    }
-  });
-
-  test("fails closed for Supermemory memory injection when configured scope is missing", () => {
-    const mockIdentity: AdaptiveMemoryProviderIdentity = {
-      id: "supermemory",
-      displayName: "Supermemory",
-    };
-    const mockAdapter: AdaptiveMemoryAdapter = {
-      identity: mockIdentity,
-      health: async () => ({ status: "degraded" } as AdaptiveMemoryHealthResult),
-      configure: async () => {},
-      commit: async () => ({ savedCount: 0, discardedCount: 0, decisions: [] } as AdaptiveMemoryCommitResult),
-      loadContext: async () => ({ providerId: "mock", items: [] } as AdaptiveMemoryContextResult),
-      search: async () => ({ providerId: "mock", items: [] } as AdaptiveMemoryContextResult),
-    };
-    const provider: AdaptiveMemoryProvider = {
-      id: "supermemory",
-      displayName: "Supermemory",
-      adapter: mockAdapter,
-      buildInjection: (): MemoryInjectionBundle => ({
-        instructions: [],
-        toolBindings: [{
-          capability: "memory.search",
-          serverName: "supermemory",
-          toolNames: ["supermemory_memory", "supermemory_recall"],
-        }],
-      }),
-    };
-
+  test("strips adaptive-memory fragments while retaining unrelated capability instructions", () => {
     const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/project", {
-      memoryProvider: provider,
-      configDir: "/nonexistent/.config/opencode",
+      capabilityInstructions: {
+        instructions: [
+          { packageId: "adaptive-memory", surface: "agent", markdown: "legacy memory marker", teamId: "developer-team" },
+          { packageId: "adaptive-memory", surface: "skill", markdown: "legacy recall marker", teamId: "developer-team" },
+          { packageId: "code-economy", surface: "agent", markdown: "unrelated capability marker", teamId: "developer-team" },
+        ],
+      },
+      standaloneSkills: completeStandaloneSkills,
     });
+    const combined = [
+      ...plan.promptGenerationPlan.map((entry) => entry.content),
+      ...plan.skills.map((entry) => entry.content),
+      ...plan.standaloneSkills.map((entry) => entry.content),
+    ].join("\n");
 
-    expect(plan.memoryBundle).toBeUndefined();
-    expect(plan.memoryDiagnostics).toContainEqual(expect.objectContaining({
-      code: "memory_provider_unavailable",
-      providerId: "supermemory",
-    }));
+    expect(combined).not.toContain("legacy memory marker");
+    expect(combined).not.toContain("legacy recall marker");
+    expect(combined).toContain("unrelated capability marker");
+    expect(plan.capabilityInstructions?.instructions.map((fragment) => fragment.packageId)).toEqual(["code-economy"]);
   });
 });
 

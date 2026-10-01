@@ -171,7 +171,7 @@ test("prompt fails closed without exact Deck-materialized scope", () => {
 			}
 		});
 
-		test("prompts con Supermemory bundle incluyen jerarquía OpenSpec authority", () => {
+		test("caller-supplied Supermemory policy is ignored by OpenCode prompt generation", () => {
 			// Criar bundle com surface correta para o orchestrator ("session")
 			const supermemoryBundle: MemoryInjectionBundle = {
 				instructions: [
@@ -189,13 +189,10 @@ test("prompt fails closed without exact Deck-materialized scope", () => {
 				memoryBundle: supermemoryBundle,
 			});
 
-			// O prompt do orquestador deve conter a jerarquia
 			const orchestrator = plan.find((p) => p.agent.id === "deck-lead");
 			expect(orchestrator).toBeDefined();
-
-			// Verificar que se incluye la sección de Adaptive Memory y su política
-			expect(orchestrator!.content).toContain("Adaptive Memory");
-			expect(orchestrator!.content).toMatch(/OFFICIAL CONTEXT|auxiliary|ADVISORY/i);
+			expect(orchestrator!.content).not.toContain("Esta es la sección de memoria adaptativa.");
+			expect(orchestrator!.content).not.toContain("Provider: Supermemory");
 		});
 	});
 

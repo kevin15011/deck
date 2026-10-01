@@ -11,6 +11,9 @@ describe("compiled Supermemory runtime smoke", () => {
     });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("compiled-supermemory-runtime ok");
+    expect(result.stdout).toContain("compiled-darwin-ssh-alias-identity ok");
+    expect(result.stdout).toContain("compiled-darwin-account-boundary skipped");
+    expect(result.stdout).toContain("compiled-rejected-alias-no-provider-effects ok");
     expect(result.stdout).toContain("compiled-deck-cli-version ok");
     expect(result.stdout).toContain("compiled-deck-runtime-operations ok");
     expect(result.stdout).toContain("compiled-codex-hook-command ok");
@@ -18,5 +21,16 @@ describe("compiled Supermemory runtime smoke", () => {
     expect(result.stdout).toContain("extracted release archive");
     expect(result.stdout).toContain("HTTP-only");
     expect(`${result.stdout}${result.stderr}`).not.toContain("token=secret");
+  }, 120_000);
+
+  test("requires an explicit project root for the Darwin production-boundary mode", () => {
+    const result = spawnSync("bun", ["run", "scripts/verify-supermemory-compiled-runtime.ts", "--dry-run", "--darwin-account-boundary"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      timeout: 120_000,
+      env: { PATH: process.env.PATH ?? "" },
+    });
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toContain("--darwin-account-boundary requires --project-root <verified-git-project-root>");
   }, 120_000);
 });

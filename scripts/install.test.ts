@@ -1,6 +1,6 @@
 /// <reference types="bun" />
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 function tempRoot(prefix: string): string {
-  const root = mkdtempSync(join(tmpdir(), prefix));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   roots.push(root);
   return root;
 }
@@ -86,6 +86,8 @@ function runInstall(root: string, args: string[], env: Record<string, string> = 
       XDG_CONFIG_HOME: join(root, "xdg-config"),
       LC_ALL: "C",
       TERM: "dumb",
+      DECK_INSTALL_TEST_MODE: "1",
+      DECK_INSTALL_TEST_MACOS_SIGNATURE: "valid",
       ...env,
     },
   });
@@ -144,6 +146,8 @@ function spawnInstall(root: string, args: string[], env: Record<string, string> 
       XDG_CONFIG_HOME: join(root, "xdg-config"),
       LC_ALL: "C",
       TERM: "dumb",
+      DECK_INSTALL_TEST_MODE: "1",
+      DECK_INSTALL_TEST_MACOS_SIGNATURE: "valid",
       ...env,
     },
   });
@@ -426,11 +430,12 @@ exec "${realMv}" "$@"
     const realPerl = realCommandPath("perl");
     const realMv = realCommandPath("mv");
     writeCommandWrapper(join(wrapperBin, "perl"), `#!/usr/bin/env sh
-src="$3"
-dst="$4"
+src=""
+dst=""
+for arg in "$@"; do src="$dst"; dst="$arg"; done
 if [ "\${src##*/}" = "deck.candidate" ] && [ "$dst" = "${join(bin, "deck")}" ]; then
   "${realMv}" -f "$src" "$dst" || exit $?
-  kill -TERM $PPID
+  kill -TERM "\${DECK_INSTALL_TEST_INSTALLER_PID:-$PPID}"
   sleep 1
   exit 143
 fi
@@ -697,7 +702,13 @@ exec "${realPerl}" "$@"
     mkdirSync(wrapperBin, { recursive: true });
     mkdirSync(trapDir, { recursive: true });
     writeDeckBinary(join(bin, "deck"), "1.0.0");
-    createRelease(root, "9.9.29");
+    const linuxPlatform = process.arch === "arm64" ? "linux-arm64" : "linux-x64";
+    createRelease(root, "9.9.29", { platform: linuxPlatform });
+    writeCommandWrapper(join(wrapperBin, "uname"), `#!/usr/bin/env sh
+if [ "$1" = "-s" ]; then printf 'Linux\n'; exit 0; fi
+if [ "$1" = "-m" ]; then printf '${process.arch === "arm64" ? "aarch64" : "x86_64"}\n'; exit 0; fi
+exit 64
+`);
     writeHttpsFixtureCurl(join(wrapperBin, "curl"), root);
 
     const result = runInstall(root, ["--recovery", "--dir", bin, "--version", "9.9.29"], {
@@ -797,6 +808,60 @@ exec "${realCurl}" "$@"
 });
 
 describe("scripts/install.sh verification", () => {
+  test("rejects an invalid macOS signature before replacing an existing binary", () => {
+    const root = tempRoot("deck-install-darwin-signature-");
+    const bin = join(root, "bin");
+    const wrapperBin = join(root, "wrapper-bin");
+    const codesignLog = join(root, "codesign.log");
+    mkdirSync(join(root, "home"), { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(wrapperBin, { recursive: true });
+    writeDeckBinary(join(bin, "deck"), "1.0.0");
+    const before = readFileSync(join(bin, "deck"));
+    writeCommandWrapper(join(wrapperBin, "uname"), `#!/usr/bin/env sh
+if [ "$1" = "-s" ]; then printf 'Darwin\n'; exit 0; fi
+if [ "$1" = "-m" ]; then printf 'arm64\n'; exit 0; fi
+exit 64
+`);
+    writeCommandWrapper(join(wrapperBin, "codesign"), `#!/usr/bin/env sh
+printf '%s\n' "$*" > "${codesignLog}"
+exit 1
+`);
+    const release = createRelease(root, "9.9.56", { platform: "darwin-arm64" });
+
+    const result = runInstall(root, ["--recovery", "--dir", bin, "--version", "9.9.56"], {
+      DECK_INSTALL_RELEASE_BASE_URL: release.baseUrl,
+      DECK_INSTALL_TEST_MACOS_SIGNATURE: "",
+      PATH: `${wrapperBin}:${process.env.PATH ?? ""}`,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("valid macOS code signature");
+    expect(readFileSync(codesignLog, "utf-8")).toContain("--verify --deep --strict --verbose=2");
+    expect(readFileSync(join(bin, "deck"))).toEqual(before);
+    expect(directoryEntries(bin).filter((entry) => entry.includes("backup"))).toEqual([]);
+  });
+
+  test("reports an empty status-137 smoke as SIGKILL before rollback", () => {
+    const root = tempRoot("deck-install-sigkill-diagnostic-");
+    const bin = join(root, "bin");
+    mkdirSync(join(root, "home"), { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    writeDeckBinary(join(bin, "deck"), "1.0.0");
+    const before = readFileSync(join(bin, "deck"));
+    const release = createArchiveWithEntries(root, "9.9.57", [
+      { name: "deck", content: "#!/usr/bin/env sh\nkill -9 $$\n", mode: 0o755 },
+    ]);
+
+    const result = runInstall(root, ["--recovery", "--dir", bin, "--version", "9.9.57"], {
+      DECK_INSTALL_RELEASE_BASE_URL: release.baseUrl,
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("exit status 137 (SIGKILL)");
+    expect(readFileSync(join(bin, "deck"))).toEqual(before);
+  });
+
   test("normal installation verifies the exact installed path with deck version", () => {
     const root = tempRoot("deck-install-normal-verify-");
     const home = join(root, "home");

@@ -121,6 +121,39 @@ describe("skill-registry CLI command", () => {
     );
   });
 
+  test("refreshes valid ordinary metadata and preserves prior bytes when a later refresh is incomplete", async () => {
+    const { adapterRegistry } = createTestRegistry();
+    const registryPath = path.join(projectRoot, ".atl", "skill-registry.md");
+    const gitignorePath = path.join(projectRoot, ".gitignore");
+    await fs.writeFile(
+      path.join(projectRoot, ".agents", "skills", "core", "SKILL.md"),
+      "---\nname: core-agent\nmetadata:\n  author: Deck\n  version: 1\n---\n# Core agent helper\n",
+      "utf8",
+    );
+
+    const initial = await runSkillRegistryCommand(
+      { command: "skill-registry-refresh", flags: { runner: "opencode", root: projectRoot, json: true } },
+      { adapterRegistry, isInteractive: false },
+    );
+    expect(initial.json).toMatchObject({ outcome: "committed", status: "ready" });
+    const priorRegistryBytes = await fs.readFile(registryPath);
+    const priorGitignoreBytes = await fs.readFile(gitignorePath);
+
+    await fs.writeFile(
+      path.join(projectRoot, ".agents", "skills", "core", "SKILL.md"),
+      "---\nname: core-agent\nmetadata:\n  author: Deck\n  version:\n    nested:\n      fourth:\n        value: unsafe\n---\n# Core agent helper\n",
+      "utf8",
+    );
+    const failed = await runSkillRegistryCommand(
+      { command: "skill-registry-refresh", flags: { runner: "opencode", root: projectRoot, json: true } },
+      { adapterRegistry, isInteractive: false },
+    );
+
+    expect(failed.json).toMatchObject({ outcome: "rejected", reason_code: "partial_source_evaluation" });
+    expect(await fs.readFile(registryPath)).toEqual(priorRegistryBytes);
+    expect(await fs.readFile(gitignorePath)).toEqual(priorGitignoreBytes);
+  });
+
   test("refreshes a Pi registry with generic and Pi-only sources", async () => {
     const { adapterRegistry } = createPiTestRegistry(true);
     let capturedPlan: SkillRegistryWritePlanV1 | undefined;

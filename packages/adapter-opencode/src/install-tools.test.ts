@@ -43,6 +43,47 @@ function state(toolId: InstallableOpenCodeTool["id"], status: OpenCodeInstalledE
 const successfulCommand = async (): Promise<InstallCommandResult> => ({ exitCode: 0, stdout: "", stderr: "" });
 
 describe("installOpenCodeTools", () => {
+  test("routes the pinned Supermemory package through the Deck-owned installer", async () => {
+    let calls = 0;
+    const [result] = await installOpenCodeTools(
+      "opencode",
+      [{
+        id: "opencode-supermemory",
+        name: "Official Supermemory plugin",
+        module: "opencode-supermemory@2.0.15",
+        required: true,
+        installKind: "deck-owned-opencode-plugin",
+      }],
+      () => {},
+      successfulCommand,
+      {
+        projectRoot: "/project",
+        supermemoryInstaller: async () => {
+          calls += 1;
+          return {
+            ok: true,
+            outcome: "installed",
+            diagnostic: "verified",
+            paths: {
+              installRoot: "/data/deck/opencode/supermemory/2.0.15",
+              packageDirectory: "/data/deck/opencode/supermemory/2.0.15/node_modules/opencode-supermemory",
+              loaderPath: "/data/deck/opencode/supermemory/2.0.15/opencode-supermemory-loader.mjs",
+              loaderLocator: "file:///data/deck/opencode/supermemory/2.0.15/opencode-supermemory-loader.mjs",
+            },
+          };
+        },
+      },
+    );
+
+    expect(calls).toBe(1);
+    expect(result).toMatchObject({
+      toolId: "opencode-supermemory",
+      outcome: "executed",
+      success: true,
+      installerInvoked: true,
+    });
+  });
+
   test("executes npm install -g for npm-package-plus-mcp and does NOT write to plugin array", async () => {
     const plan: InstallableOpenCodeTool[] = [
       { id: "context-mode", name: "context-mode", module: "context-mode", required: false, installKind: "npm-package-plus-mcp" },

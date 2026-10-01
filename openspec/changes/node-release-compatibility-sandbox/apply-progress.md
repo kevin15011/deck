@@ -15,3 +15,10 @@ Investigation completed. Implementation is authorized by the user's request. One
 
 ## Final status
 Implementation and independent code review complete. See `verify-report.md` for reproducible evidence and explicit pending remote CI coverage. No commit, push, tag, publication, global toolchain modification, or personal Deck replacement was performed.
+
+## Follow-up: merge latest main
+The user subsequently requested updating `feature/sandbox-testing` with latest main. Merged `origin/main` at `8666619` (v0.6.0) into the feature based at `42e4b59`, using a separate worktree to preserve the original main checkout and its unrelated local `.serena/project.yml` edit.
+
+Resolved the release workflow conflict by retaining main's canonical target builder, signature verification, `dist/cli` archives and tag/package guard, together with the feature's eight native Node compatibility cells and fail-closed publication dependencies. The generated hook now uses a separate `runner-hook-*` artifact so adding the sidecar cannot change release archive download paths. Workflow commit/channel are explicitly passed into the canonical builder and asserted by regression tests.
+
+Verification of the merged tree: repository `bunx --no-install tsc --noEmit` passed; 100 focused tests across harness, both release workflow suites, canonical build contract, descriptor preparation and documentation passed (1,107 assertions). Focused strict script typecheck and independent release-boundary review passed. Native CI remains unexecuted. The requested local merge commit is authorized by this follow-up; no push, tag or publication is requested or performed.

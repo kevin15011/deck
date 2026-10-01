@@ -92,7 +92,11 @@ export function DeveloperTeamInstallingScreen({
 }
 
 export type SupermemorySetupValues = {
-  /** Token-only config: user identity is derived from token */
+  /** OpenCode-only explicit SSH Host alias, or the literal `default`. */
+  profile?: string;
+  /** Distinguishes the fallback credential from an SSH alias literally named `default`. */
+  profileKind?: "fallback-default" | "ssh-alias";
+  /** Secret credential, retained only while the masked input is active. */
   token: string;
   /** @deprecated - no longer used. User is derived from token */
   userId?: never;
@@ -132,35 +136,106 @@ export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status
 }
 
 type SupermemorySetupScreenProps = {
-  screen: "supermemory-token"; // Simplified: only token required
+  screen: "supermemory-profile" | "supermemory-token";
   values: SupermemorySetupValues;
   error?: string;
   runtime?: string;
+  profileAliases?: readonly string[];
+  configuredProfiles?: readonly string[];
+  fallbackDefaultConfigured?: boolean;
+  configuredAliases?: readonly string[];
+  profileDiscoveryStatus?: "trusted" | "uncertain";
+  profileStoreReadable?: boolean;
+  cursor?: number;
 };
 
-export function SupermemorySetupScreen({ screen, values, error, runtime = "pi" }: SupermemorySetupScreenProps) {
-  // Token-only config: no userId/teamId/orgId fields
-  const field = "token";
-  const label = "Supermemory API key (Deck Runtime)";
+export type SupermemoryProfileMenuEntry =
+  | { id: "fallback-default"; kind: "fallback-default"; profile: "default"; label: string; hint: string }
+  | { id: `ssh-alias:${string}`; kind: "ssh-alias"; profile: string; label: string; hint: string }
+  | { id: "continue"; kind: "continue"; label: "Continue"; hint: string };
+
+export function buildSupermemoryProfileMenuEntries(input: {
+  aliases: readonly string[];
+  fallbackDefaultConfigured: boolean;
+  configuredAliases: readonly string[];
+}): SupermemoryProfileMenuEntry[] {
+  const aliasConfiguration = new Set(input.configuredAliases.map((alias) => alias.toLowerCase()));
+  const hasDefaultAlias = input.aliases.some((alias) => alias.toLowerCase() === "default");
+  return [
+    {
+      id: "fallback-default",
+      kind: "fallback-default",
+      profile: "default",
+      label: hasDefaultAlias ? "default (fallback)" : "default",
+      hint: input.fallbackDefaultConfigured ? "Configured" : "Not configured",
+    },
+    ...input.aliases.map((alias): SupermemoryProfileMenuEntry => ({
+      id: `ssh-alias:${alias.toLowerCase()}`,
+      kind: "ssh-alias",
+      profile: alias,
+      label: alias.toLowerCase() === "default" ? "default (SSH alias)" : alias,
+      hint: aliasConfiguration.has(alias.toLowerCase()) ? "Configured" : "Not configured",
+    })),
+    { id: "continue", kind: "continue", label: "Continue", hint: "Finish profile setup" },
+  ];
+}
+
+export function SupermemorySetupScreen({
+  screen,
+  values,
+  error,
+  runtime = "pi",
+  profileAliases = [],
+  configuredProfiles = [],
+  fallbackDefaultConfigured = configuredProfiles.some((profile) => profile.toLowerCase() === "default"),
+  configuredAliases = configuredProfiles.filter((profile) => profile.toLowerCase() !== "default"),
+  profileDiscoveryStatus = "trusted",
+  profileStoreReadable = true,
+  cursor = 0,
+}: SupermemorySetupScreenProps) {
+  const field = screen === "supermemory-profile" ? "profile" : "token";
+  const label = field === "profile" ? "Supermemory profiles" : runtime === "opencode" ? "Supermemory API key (OpenCode plugin)" : "Supermemory API key (Deck Runtime)";
   const required = true;
-  const value = values[field];
-  const displayValue = value.length > 0 ? "[redacted]" : "";
+  const value = values[field] ?? "";
+  const displayValue = field === "token" && value.length > 0 ? "[redacted]" : value;
+  const profileItems = buildSupermemoryProfileMenuEntries({
+    aliases: profileAliases,
+    fallbackDefaultConfigured,
+    configuredAliases,
+  });
 
   return (
     <Box flexDirection="column">
       <Text bold>{label} {required ? "(required)" : ""}</Text>
-      <Text dimColor>
+      {field === "profile" ? (
+        <>
+          <Text dimColor>Select a profile to add or replace its credential. Choose Continue when finished.</Text>
+          {profileDiscoveryStatus === "uncertain" ? (
+            <Text color="yellow">SSH profile discovery could not be trusted. Only the explicit default profile is available.</Text>
+          ) : null}
+          {!profileStoreReadable ? (
+            <Text color="yellow">Protected profile status could not be read. Profiles are shown as not configured.</Text>
+          ) : null}
+          <Box marginTop={1}>
+            <MenuList items={profileItems} cursor={cursor} />
+          </Box>
+        </>
+      ) : (
+        <Text dimColor>
         {runtime === "pi"
           ? "API key is validated now and stored only in Deck's owner-only secret store. Pi MCP receives only credential-free endpoint/canonical scope config; user identity is derived from the key at runtime."
-          : "API key is validated now and stored only in Deck's owner-only secret store. Optional runner MCP OAuth is configured separately and does not replace this runtime credential."}
-      </Text>
-      <Box marginTop={1}>
+          : runtime === "opencode"
+            ? "API key is validated now and stored only in Deck's protected profile store. It is passed only to the managed OpenCode child process and overrides plugin login/config credentials."
+            : "API key is validated now and stored only in Deck's owner-only secret store. Optional runner MCP OAuth is configured separately and does not replace this runtime credential."}
+        </Text>
+      )}
+      {field === "token" ? <Box marginTop={1}>
         <Text>{label}: <Text color="cyan">{displayValue}</Text></Text>
-      </Box>
+      </Box> : null}
       {field === "token" && value.length > 0 ? <Text dimColor>Summary will show token as [redacted].</Text> : null}
       {error ? <Text color="yellow">{error}</Text> : null}
       <Box marginTop={1}>
-        <Text dimColor>Type value, Backspace to edit, Enter to continue.</Text>
+        <Text dimColor>{field === "profile" ? "↑/↓ or j/k navigate, Enter selects, Esc goes back." : "Type value, Backspace to edit, Enter to save, Esc goes back."}</Text>
       </Box>
     </Box>
   );

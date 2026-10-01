@@ -11,6 +11,13 @@ export type CodexPreimage =
   | { kind: "absent" }
   | { kind: "file"; hash: string; mode: number };
 
+/** A checked, ownership-only release for the shared repository guide. */
+export type CodexOwnershipReleaseCheck = {
+  relativePath: "AGENTS.md";
+  precondition: CodexPreimage;
+  postcondition: CodexPreimage;
+};
+
 export type CodexMutation = {
   operation?: "write" | "delete";
   relativePath: string;
@@ -38,6 +45,8 @@ export type CodexMutationPlan = {
   mutations: readonly CodexMutation[];
   expectedFiles: readonly CodexExpectedFile[];
   inventory: CodexInventory;
+  ownershipReleases?: readonly string[];
+  ownershipReleaseChecks?: readonly CodexOwnershipReleaseCheck[];
   diagnostics: readonly RunnerDiagnostic[];
   blocked: boolean;
 };

@@ -9,7 +9,7 @@
 
 `@deck/core` owns runner-neutral concepts: configuration, capability contracts, developer-team content, skills, and registry primitives. `@deck/sdd-runtime` owns SDD contracts, orchestration, runner coordination, and artifact-state operations. It is a runtime boundary rather than a documentation inventory.
 
-Adapter families translate these neutral concepts for their environments: `packages/adapter-pi` and `packages/adapter-opencode` handle runner materialization, while memory-provider adapters such as `adapter-supermemory` and `adapter-supermemory` isolate provider integration. `apps/cli` is the composition and user-interaction boundary; it selects capabilities and presents CLI/TUI workflows.
+Runner adapters—`packages/adapter-pi`, `packages/adapter-opencode`, and `packages/adapter-codex`—translate neutral concepts into runner-native materialization and verification. Provider adapters such as `adapter-supermemory` isolate provider integration. `apps/cli` is the composition and user-interaction boundary; it selects canonical capabilities while adapters contribute runner-specific effects and evidence.
 
 Deck user and runner preferences have one active source: `$XDG_CONFIG_HOME/deck/config.json`, or `~/.config/deck/config.json` when `XDG_CONFIG_HOME` is unset. Core exposes path-parameterized config read/validate/atomic patch/write primitives only; the CLI owns XDG resolution, migration-only legacy discovery, conflict reporting, and the `DeckConfigStore` composition used by TUI, Doctor, launch, upgrade, and sync paths. Project roots remain execution and materialization targets. A repository `.deck/` directory may still host OpenSpec/runtime/runner-native project artifacts or migration-only legacy inputs, but Deck no longer creates or updates `<project>/.deck/config.json` for user preferences.
 
@@ -34,7 +34,7 @@ Ownership stays split across the runtime boundaries:
 
 The public Codex adapter installs a thin hook asset for Deck-supervised adaptive memory and accepts no caller-provided binding callbacks. The CLI owns the ephemeral loopback endpoint/token at launch time. Canonical parity still marks protected invocation-authorization, dossier, controlled-effect, registry, and bound-verification controls as explicit Codex gaps. Every non-install-only Deck Codex launch passes the fixed `--dangerously-bypass-approvals-and-sandbox` argv token before the Codex subcommand; it disables sandboxing and command approvals only for that process and is not persisted in Codex configuration.
 
-Content-only synchronization reads the Codex ownership manifest and may update only verified Deck-managed roles, all skill classes/support files, bootstrap skills, and base/selected instructions. Runtime packages, MCP/provider installation, shared binaries, and optional capabilities remain outside sync.
+Content-only synchronization reads the Codex ownership manifest and may update only verified Deck-managed roles, every native and external skill class/support file, and bootstrap skills with canonical and selected capability instructions. It does not create or append root `AGENTS.md`; legacy marker cleanup is a conservative ownership-verified migration only. Runtime packages, MCP/provider installation, shared binaries, and optional capabilities remain outside sync.
 
 Codex mutation backup and apply results carry one operation receipt with exact native and optional local-only transaction IDs. Verification failure awaits rollback of that receipt only; adapters do not retain a global “last journal” rollback target.
 

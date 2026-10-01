@@ -5,7 +5,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { buildBinary, codeSign, getHostBuildTarget, getVersion, type BuildTarget } from "./build-binaries";
+import { buildBinary, codeSign, getGitCommit, getHostBuildTarget, getVersion, ROOT, type BuildTarget } from "./build-binaries";
 
 export const CANARY_BINARY_NAME = "deck-canary";
 const PAYLOAD_PREFIX = ".deck-canary.payload-";
@@ -13,6 +13,7 @@ const LOCK_DIR_NAME = ".deck-canary.lock";
 const TXN_PREFIX = ".deck-canary.txn-";
 const ALIAS_TMP_PREFIX = ".deck-canary.alias-";
 const PAYLOAD_RE = /^\.deck-canary\.payload-[a-f0-9]{64}$/;
+const REQUIRED_WORKSPACE_PACKAGES = ["@deck/adapter-codex", "@deck/provider-tavily"] as const;
 
 type ParsedCanaryArgs = { help: boolean; dryRun: boolean; installDir: string; targetPath: string };
 type CanaryFs = Pick<typeof fs,
@@ -61,6 +62,21 @@ descriptors, modify shell profiles, or replace the stable deck binary.
 
 function stripControl(value: string, limit = 2000): string {
   return value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "").slice(0, limit);
+}
+export function assertCanaryWorkspaceDependencies(
+  resolveSync: (specifier: string, from: string) => string = Bun.resolveSync,
+): void {
+  const missing = REQUIRED_WORKSPACE_PACKAGES.filter((specifier) => {
+    try {
+      resolveSync(specifier, path.join(ROOT, "apps/cli"));
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (missing.length > 0) {
+    throw new Error(`Canary build dependencies are not installed: ${missing.join(", ")}. Run 'bun install --frozen-lockfile' from ${ROOT}.`);
+  }
 }
 function isEnoent(error: unknown): boolean { return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ENOENT"; }
 function token(deps: CanaryInstallDeps): string { return deps.randomToken?.() ?? crypto.randomBytes(16).toString("hex"); }
@@ -214,9 +230,13 @@ function cleanupOwnedTransactions(installDir: string, f: CanaryFs): void {
     f.rmSync(full, { recursive: true, force: true });
   }
 }
-function smokeBinary(binaryPath: string, deps: CanaryInstallDeps, phase: string): void {
+function smokeBinary(binaryPath: string, deps: CanaryInstallDeps, phase: string, expectedVersion: string): void {
   const result = (deps.spawnSync ?? Bun.spawnSync)({ cmd: [binaryPath, "version"], env: { PATH: "" }, cwd: deps.cwd ?? process.cwd() });
-  if (!result.success) throw new Error(`${phase} deck-canary version smoke failed. ${stripControl(new TextDecoder().decode(result.stderr) || new TextDecoder().decode(result.stdout))}`.trim());
+  const output = stripControl(new TextDecoder().decode(result.stdout) || new TextDecoder().decode(result.stderr));
+  if (!result.success) throw new Error(`${phase} deck-canary version smoke failed. ${output}`.trim());
+  if (!output.split(/\r?\n/).some((line) => line.startsWith(`deck ${expectedVersion}`))) {
+    throw new Error(`${phase} deck-canary version smoke reported '${output.split(/\r?\n/)[0] ?? "no version"}'; expected deck ${expectedVersion}.`);
+  }
 }
 function createPayload(compiledPath: string, payloadPath: string, digest: string, f: CanaryFs): void {
   const existing = lstatMaybe(payloadPath, f);
@@ -227,12 +247,23 @@ function createPayload(compiledPath: string, payloadPath: string, digest: string
   validatePayload(payloadPath, digest, f);
 }
 async function defaultBuildCanaryBinary(options: { target: BuildTarget; version: string; outputDir: string }): Promise<string> {
-  const binaryPath = await buildBinary(options.target[0], options.target[1], options.target[2], options.version, { binaryName: CANARY_BINARY_NAME, outputDir: options.outputDir });
+  const targetName = `${options.target[0]}-${options.target[1]}`;
+  const binaryPath = await buildBinary(options.target[0], options.target[1], options.target[2], options.version, {
+    binaryName: CANARY_BINARY_NAME,
+    outputDir: options.outputDir,
+    buildInfo: {
+      version: options.version,
+      commit: getGitCommit(),
+      date: new Date().toISOString().split("T")[0]!,
+      target: targetName,
+      channel: "dev",
+    },
+  });
   if (options.target[0] === "darwin") codeSign(binaryPath);
   return binaryPath;
 }
 function isDirOnPath(installDir: string, env: NodeJS.ProcessEnv): boolean { return (env.PATH ?? "").split(path.delimiter).filter(Boolean).map((entry) => path.resolve(entry)).includes(path.resolve(installDir)); }
-function activateAlias(compiledPath: string, targetPath: string, deps: CanaryInstallDeps): void {
+function activateAlias(compiledPath: string, targetPath: string, expectedVersion: string, deps: CanaryInstallDeps): void {
   const f = deps.fs ?? fs;
   const installDir = path.dirname(targetPath);
   let lock: LockHandle | undefined;
@@ -244,7 +275,7 @@ function activateAlias(compiledPath: string, targetPath: string, deps: CanaryIns
     cleanupOwnedTransactions(installDir, f);
     validateExistingAlias(targetPath, installDir, f);
     const digest = digestFile(compiledPath, f);
-    smokeBinary(compiledPath, deps, "staged");
+    smokeBinary(compiledPath, deps, "staged", expectedVersion);
     deps.hooks?.afterStagedSmoke?.({ targetPath, payloadName: `${PAYLOAD_PREFIX}${digest}`, transactionDir: installDir });
     const payloadName = `${PAYLOAD_PREFIX}${digest}`;
     validatePayloadName(payloadName);
@@ -259,7 +290,7 @@ function activateAlias(compiledPath: string, targetPath: string, deps: CanaryIns
     f.renameSync(tmpAlias, targetPath);
     deps.hooks?.afterAliasCommit?.({ targetPath, payloadName, transactionDir: txnDir });
     if (f.readlinkSync(targetPath) !== payloadName) throw new Error("deck-canary alias changed during activation; refusing further writes.");
-    smokeBinary(targetPath, deps, "activated alias");
+    smokeBinary(targetPath, deps, "activated alias", expectedVersion);
     if (f.readlinkSync(targetPath) !== payloadName) throw new Error("deck-canary alias changed during activation smoke; refusing further writes.");
   } finally {
     if (tmpAlias && f.existsSync(tmpAlias)) f.rmSync(tmpAlias, { force: true });
@@ -277,9 +308,11 @@ export async function installCanary(argv: string[] = process.argv, deps: CanaryI
   let outputDir: string | undefined; const ownsOutputDir = !deps.tempDir;
   try {
     const target = getHostBuildTarget(deps.platform ?? os.platform(), deps.arch ?? os.arch());
+    if (!deps.buildCanaryBinary) assertCanaryWorkspaceDependencies();
     outputDir = deps.tempDir?.() ?? fs.mkdtempSync(path.join(os.tmpdir(), "deck-canary-build-"));
-    const compiledPath = await (deps.buildCanaryBinary ?? defaultBuildCanaryBinary)({ target, version: getVersion(), outputDir });
-    activateAlias(compiledPath, args.targetPath, deps);
+    const version = getVersion();
+    const compiledPath = await (deps.buildCanaryBinary ?? defaultBuildCanaryBinary)({ target, version, outputDir });
+    activateAlias(compiledPath, args.targetPath, version, deps);
     out.log(`Installed deck-canary: ${args.targetPath}`);
     out.log("Example: cd /path/to/project && deck-canary opencode developer");
     if (!isDirOnPath(args.installDir, deps.env ?? process.env)) out.warn(`Warning: ${args.installDir} is not on PATH. Use the absolute command: ${args.targetPath}`);

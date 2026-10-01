@@ -150,7 +150,7 @@ describe("production prompt activation", () => {
     }
   });
 
-  test("OpenCode launch binds Supermemory guidance to Runtime-owned scope across prompts and skills", async () => {
+  test("OpenCode launch omits legacy Deck-managed Supermemory guidance from prompts and skills", async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), "deck-opencode-supermemory-launch-"));
     const configDir = join(projectRoot, ".config", "opencode");
     try {
@@ -187,8 +187,8 @@ describe("production prompt activation", () => {
       const combined = [leadPrompt, standaloneSkill, bootstrapSkill].join("\n");
 
       expect(result.status).toBe("ready");
-      expect(combined).toContain("Runtime-managed recall and capture bind project scope server-side");
-      expect(combined).toContain("schemas permit model-selected project scope");
+      expect(combined).not.toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(combined).not.toContain("schemas permit model-selected project scope");
       expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(combined).not.toContain("supermemory_search_memory");
       expect(combined).not.toContain("No manual containerTag required");
@@ -296,8 +296,8 @@ describe("production prompt activation", () => {
       const combined = [leadPrompt, standaloneSkill].join("\n");
 
       expect(result.status).toBe("ready");
-      expect(combined).toContain("Runtime-managed recall and capture bind project scope server-side");
-      expect(combined).toContain("schemas permit model-selected project scope");
+      expect(combined).not.toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(combined).not.toContain("schemas permit model-selected project scope");
       expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(combined).not.toContain("sm_project_v1_other_repo");
     } finally {
@@ -342,8 +342,8 @@ describe("production prompt activation", () => {
       const combined = [leadPrompt, standaloneSkill, bootstrapSkill].join("\n");
 
       expect(result.status).toBe("ready");
-      expect(combined).toContain("Runtime-managed recall and capture bind project scope server-side");
-      expect(combined).toContain("schemas permit model-selected project scope");
+      expect(combined).not.toContain("Runtime-managed recall and capture bind project scope server-side");
+      expect(combined).not.toContain("schemas permit model-selected project scope");
       expect(combined).not.toContain('containerTag: "sm_project_v1_kevin15011_deck"');
       expect(combined).not.toContain('containerTag: "sm_project_default"');
       expect(combined).not.toContain('supermemory_search_memory({ query, containerTag: "sm_project_default" })');

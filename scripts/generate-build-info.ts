@@ -17,6 +17,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { assertCanonicalBunRuntime } from "./generate-runner-execution-assets";
 
 const PROJECT_ROOT = path.resolve(import.meta.dir, "..");
 const OUTPUT_FILE = path.join(PROJECT_ROOT, "apps/cli/src/runtime/build-info.generated.ts");
@@ -156,6 +157,7 @@ Examples:
     process.exit(0);
   }
 
+  assertCanonicalBunRuntime(PROJECT_ROOT);
   const content = generateBuildInfo(args);
   fs.writeFileSync(OUTPUT_FILE, content, "utf-8");
 

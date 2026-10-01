@@ -108,6 +108,7 @@ describe("runPiLaunch", () => {
       projectRoot: "/tmp/project",
       flags: {},
       commandExists: () => false,
+      deckConfig: getDefaultDeckConfig(),
     });
 
     expect(result.status).toBe("error");

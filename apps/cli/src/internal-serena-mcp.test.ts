@@ -32,7 +32,7 @@ describe("deck internal serena-mcp", () => {
 
     expect(calls).toEqual([{
       command: "/fixtures/deck-data/tools/serena/bin/serena",
-      args: ["start-mcp-server", "--context", "ide", "--project-from-cwd"],
+      args: ["start-mcp-server", "--context", "ide", "--project-from-cwd", "--open-web-dashboard", "false"],
     }]);
     expect(result).toEqual({ exitCode: 23 });
   });

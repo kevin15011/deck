@@ -205,6 +205,8 @@ export type DeveloperTeamInstallPlanInput = {
 
 export type RunnerDeveloperTeamInstallPlan = {
   files: readonly DeveloperTeamInstallFile[];
+  /** Paths whose durable runner-sync ownership must be released after apply and verification succeed. */
+  ownershipReleases?: readonly string[];
   diagnostics?: readonly string[];
   blocked?: boolean;
   mutationPreview?: readonly {
