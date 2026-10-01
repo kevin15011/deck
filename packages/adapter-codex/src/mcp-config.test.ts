@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { buildCodexMcpServers, inspectCodexSupermemoryMcpState, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
+import { buildCodexMcpServers,
+  inspectCodexMcpServerCommand, inspectCodexSupermemoryMcpState, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
 
 describe("Codex MCP semantic configuration", () => {
   test("does not materialize raw Supermemory MCP because scope would be model-selectable", () => {
-    const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory", "serena", "context7"], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_v1_kevin15011_deck" });
+    const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory", "serena", "context7"], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_v1_kevin15011_deck", contextModeCommand: "/opt/deck/context-mode", codebaseMemoryCommand: "/opt/deck/codebase-memory-mcp" });
     const merged = mergeCodexMcpServers("[mcp_servers.user]\ncommand = \"user-mcp\"\n", desired.servers);
     expect(desired.gaps).toContain("supermemory-raw-mcp-disabled");
     expect(merged.content).toContain("[mcp_servers.context-mode]");
@@ -69,7 +70,7 @@ describe("Codex MCP semantic configuration", () => {
   });
 
   test("is semantically idempotent and blocks same-ID collisions", () => {
-    const desired = buildCodexMcpServers({ packageIds: ["context-mode"], memoryProvider: "none" });
+    const desired = buildCodexMcpServers({ packageIds: ["context-mode"], memoryProvider: "none", contextModeCommand: "/opt/deck/context-mode" });
     const first = mergeCodexMcpServers("", desired.servers);
     expect(first.status).toBe("updated");
     expect(mergeCodexMcpServers(first.content, desired.servers).status).toBe("unchanged");
@@ -78,6 +79,35 @@ describe("Codex MCP semantic configuration", () => {
     expect(removed.content).not.toContain("mcp_servers.context-mode");
     const collision = mergeCodexMcpServers('[mcp_servers.context-mode]\ncommand = "other"\n', desired.servers);
     expect(collision).toMatchObject({ status: "blocked", collisions: ["context-mode"] });
+  });
+
+  test("pins Context Mode and Codebase Memory to verified absolute commands and never writes bare PATH names", () => {
+    const pinned = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory"], memoryProvider: "none", contextModeCommand: "/opt/deck/context-mode", codebaseMemoryCommand: "/opt/deck/codebase-memory-mcp" });
+    expect(pinned.gaps).toEqual([]);
+    const merged = mergeCodexMcpServers("", pinned.servers);
+    expect(merged.content).toContain('command = "/opt/deck/context-mode"');
+    expect(merged.content).toContain('command = "/opt/deck/codebase-memory-mcp"');
+    expect(inspectCodexMcpServerCommand(merged.content, "context-mode")).toBe("/opt/deck/context-mode");
+
+    const missing = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory"], memoryProvider: "none", contextModeCommand: "context-mode", codebaseMemoryCommand: undefined });
+    expect(missing.servers).toEqual([]);
+    expect(missing.gaps).toEqual(["context-mode-not-ready", "codebase-memory-not-ready"]);
+
+    // A previously written bare Deck-owned entry is replaced by the pinned one; a user entry is a collision.
+    const legacy = '# deck-codex-mcp:context-mode\n[mcp_servers.context-mode]\ncommand = "context-mode"\nargs = ["mcp"]\n';
+    const upgraded = mergeCodexMcpServers(legacy, pinned.servers.filter((server) => server.id === "context-mode"));
+    expect(upgraded.status).toBe("updated");
+    expect(upgraded.content).toContain('command = "/opt/deck/context-mode"');
+    expect(upgraded.content).not.toContain('command = "context-mode"');
+  });
+
+  test("retiring a managed MCP block never swallows the ownership marker of the hook block that follows it", () => {
+    const source = '# deck-codex-mcp:context7\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\n\n# deck-codex-hook:rtk:start\n[[hooks.PreToolUse]]\nmatcher = "^Bash$"\n# deck-codex-hook:rtk:end\n';
+    const retired = mergeCodexMcpServers(source, []);
+    expect(retired.status).toBe("updated");
+    expect(retired.content).not.toContain("mcp_servers.context7");
+    expect(retired.content).toContain("# deck-codex-hook:rtk:start");
+    expect(retired.content).toContain("# deck-codex-hook:rtk:end");
   });
 
   test("keeps disabled memory explicit and redacts credential-like diagnostics", () => {

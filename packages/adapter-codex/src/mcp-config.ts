@@ -87,6 +87,30 @@ export function inspectCodexMcpServerIds(source: string): readonly string[] {
   try { return [...existingServers(source).keys()].sort(); } catch { return []; }
 }
 
+/**
+ * Commands of stdio MCP servers that Deck does not own: every server in a user/global file, or every server in a
+ * project file outside Deck's `# deck-codex-mcp:` blocks. Read-only; foreign blocks are never rewritten.
+ */
+export function inspectCodexForeignMcpCommands(source: string, options: { skipDeckManaged: boolean }): ReadonlyMap<string, string> {
+  const result = new Map<string, string>();
+  try {
+    const managed = options.skipDeckManaged ? managedServerIds(source) : new Set<string>();
+    for (const [id, server] of existingServers(source)) {
+      const command = (server as Record<string, unknown>).command;
+      if (typeof command === "string" && !managed.has(id)) result.set(id, command);
+    }
+  } catch { /* malformed TOML is reported by the merge path */ }
+  return result;
+}
+
+/** The persisted `command` of a configured stdio MCP server, if any. */
+export function inspectCodexMcpServerCommand(source: string, serverId: string): string | undefined {
+  try {
+    const command = (existingServers(source).get(serverId) as Record<string, unknown> | undefined)?.command;
+    return typeof command === "string" ? command : undefined;
+  } catch { return undefined; }
+}
+
 export type CodexSupermemoryMcpState =
   | Readonly<{ ok: true; scope: string }>
   | Readonly<{ ok: false; code: "supermemory-mcp-missing" | "supermemory-endpoint-invalid" | "supermemory-project-scope-missing" | "supermemory-project-scope-invalid" | "supermemory-mcp-unmanaged" }>;
@@ -137,6 +161,8 @@ export function isCodexSerenaMcpConfigured(source: string): boolean {
 export function isCodexWebSearchMcpConfigured(
   source: string,
   provider?: WebSearchProviderDescriptorV1,
+  /** Absolute executable the entry is pinned to; defaults to the descriptor's bare command. */
+  command?: string,
 ): boolean {
   if (!isWebSearchProviderDescriptor(provider)) return false;
   try {
@@ -144,7 +170,7 @@ export function isCodexWebSearchMcpConfigured(
     const expected = normalized({
       id: provider.semanticServerId as CodexMcpServerId,
       transport: "stdio",
-      command: provider.command[0]!,
+      command: command ?? provider.command[0]!,
       args: [...provider.command.slice(1)],
       envVars: [provider.credentialEnvVar],
     });
@@ -221,7 +247,8 @@ function stripManagedServerBlocks(source: string, ids: ReadonlySet<string>): str
     index += 1;
     while (index < lines.length) {
       const trimmed = lines[index]!.trimEnd();
-      if (/^# deck-codex-mcp:([a-z0-9-]+)$/.test(trimmed)) break;
+      // Stop at any Deck-owned marker (MCP or hook) so a neighbouring owned block keeps its ownership comment.
+      if (/^# deck-codex-(?:mcp|hook):/.test(trimmed)) break;
       const section = trimmed.match(/^\[mcp_servers\.([^\].]+)(?:\.|\])/);
       if (section && section[1] !== id) break;
       if (trimmed.startsWith("[") && !section) break;
@@ -272,6 +299,10 @@ export function buildCodexMcpServers(input: {
   serenaLauncherAvailable?: boolean;
   /** The effective `deck` command has confirmed the hidden Serena proxy route. */
   serenaProxyAvailable?: boolean;
+  /** Absolute, verified Context Mode executable; a bare PATH name is never written. */
+  contextModeCommand?: string;
+  /** Absolute, verified Codebase Memory executable (shared install or Deck-owned pinned release). */
+  codebaseMemoryCommand?: string;
   /** Provider selection is validated by the CLI composition root. */
   webSearchProviderSupported?: boolean;
   /** Provider selection was supplied at all; false reports an incomplete optional setup. */
@@ -282,12 +313,20 @@ export function buildCodexMcpServers(input: {
   webSearchCredentialAvailable?: boolean;
   /** Presence-only executable prerequisite evidence. */
   webSearchExecutableAvailable?: boolean;
+  /** Absolute resolved executable for the provider command; a bare PATH name is used only when absent. */
+  webSearchCommand?: string;
 }): { servers: readonly CodexMcpServer[]; gaps: readonly string[] } {
   const selected = new Set(input.packageIds);
   const servers: CodexMcpServer[] = [];
   const gaps: string[] = [];
-  if (selected.has("context-mode")) servers.push({ id: "context-mode", transport: "stdio", command: "context-mode", args: ["mcp"] });
-  if (selected.has("codebase-memory")) servers.push({ id: "codebase-memory", transport: "stdio", command: "codebase-memory-mcp" });
+  if (selected.has("context-mode")) {
+    if (isAbsolutePinnedCommand(input.contextModeCommand)) servers.push({ id: "context-mode", transport: "stdio", command: input.contextModeCommand, args: ["mcp"] });
+    else gaps.push("context-mode-not-ready");
+  }
+  if (selected.has("codebase-memory")) {
+    if (isAbsolutePinnedCommand(input.codebaseMemoryCommand)) servers.push({ id: "codebase-memory", transport: "stdio", command: input.codebaseMemoryCommand });
+    else gaps.push("codebase-memory-not-ready");
+  }
   if (selected.has("serena")) {
     if (input.serenaLauncherAvailable !== true) {
       gaps.push("serena-launcher-not-ready");
@@ -325,13 +364,17 @@ export function buildCodexMcpServers(input: {
       servers.push({
         id: input.webSearchProvider.semanticServerId as CodexMcpServerId,
         transport: "stdio",
-        command: input.webSearchProvider.command[0]!,
+        command: isAbsolutePinnedCommand(input.webSearchCommand) ? input.webSearchCommand : input.webSearchProvider.command[0]!,
         args: [...input.webSearchProvider.command.slice(1)],
         envVars: [input.webSearchProvider.credentialEnvVar],
       });
     }
   }
   return { servers, gaps };
+}
+
+function isAbsolutePinnedCommand(command: string | undefined): command is string {
+  return typeof command === "string" && command.startsWith("/") && !/[\0\r\n]/.test(command);
 }
 
 export function redactCodexMcpDiagnostic(message: string): string {

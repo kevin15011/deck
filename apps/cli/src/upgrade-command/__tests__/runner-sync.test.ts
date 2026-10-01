@@ -3,6 +3,7 @@
  * artifacts to installed runners.
  */
 
+import { testTools } from "../../../../../packages/adapter-codex/src/test-tools";
 import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -415,7 +416,7 @@ describe("runner-sync", () => {
     const root = await mkdtemp(join(tmpdir(), "deck-codex-sync-"));
     const journalRoot = join(root, "journals");
     try {
-      const adapter = createCodexRunnerAdapter({ journalRoot });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot });
       const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
       const paths = [
@@ -453,7 +454,7 @@ describe("runner-sync", () => {
   it("treats a fully current verified Codex installation as a successful no-op sync", async () => {
     const root = await mkdtemp(join(tmpdir(), "deck-codex-sync-current-"));
     try {
-      const adapter = createCodexRunnerAdapter({ journalRoot: join(root, "journals") });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot: join(root, "journals") });
       const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), capabilityInstructions: { instructions: [] } });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
       const config = getDefaultDeckConfig();
@@ -484,7 +485,7 @@ describe("runner-sync", () => {
       return { state: "ready" as const, evidence, revalidate: async (value: import("@deck/core").SerenaReadinessEvidence) => ({ valid: true as const, evidence: value }) };
     };
     try {
-      const adapter = createCodexRunnerAdapter({
+      const adapter = createCodexRunnerAdapter({ tools: testTools(),
         journalRoot: join(root, "journals"),
         mcpCapabilityIds: ["serena"],
         serenaReadinessResolver: async () => {
@@ -725,7 +726,7 @@ describe("applyRunnerSyncToManifest", () => {
       await mkdir(join(projectRoot, ".codex"), { recursive: true });
       await writeFile(join(projectRoot, "AGENTS.md"), legacy, "utf8");
       await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(legacy).digest("hex") } })}\n`);
-      const adapter = createCodexRunnerAdapter({ journalRoot });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot });
       const fullPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: makeConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan: fullPlan });
       expect((await adapter.verifyDeveloperTeamInstall(fullPlan)).valid).toBe(true);

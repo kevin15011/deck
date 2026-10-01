@@ -116,6 +116,6 @@ The safe default keeps execution in observe/shadow mode with no cohort rollout a
 
 1. Select the active runner in the TUI.
 2. Review the package and MCP evidence before applying changes.
-3. Keep the Deck runtime API bearer in the Deck secret store and optional MCP OAuth in the runner's native OAuth surface; these are distinct credentials. Do not place bearer tokens in runner MCP config.
+3. Keep the Supermemory credential in Deck's protected secret store (a shared profile for OpenCode, Claude, and Codex; the Deck runtime key for Pi). Do not place bearer tokens in runner MCP or hook config.
 4. Run `deck doctor` after changing runner configuration.
 5. Use [Troubleshooting](troubleshooting.md) when a value is rejected or a runner remains indeterminate.

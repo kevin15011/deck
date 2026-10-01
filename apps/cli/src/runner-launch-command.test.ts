@@ -1,3 +1,4 @@
+import { testTools } from "../../../packages/adapter-codex/src/test-tools";
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -1482,7 +1483,7 @@ describe("runRunnerLaunch consent and status", () => {
     const projectRoot = join(root, "project");
     try {
       await mkdir(projectRoot, { recursive: true });
-      const adapter = createCodexRunnerAdapter({
+      const adapter = createCodexRunnerAdapter({ tools: testTools(),
         journalRoot: join(root, "journals"),
         preflight: {
           probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
@@ -1552,7 +1553,7 @@ describe("runRunnerLaunch consent and status", () => {
         }
       }
       expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(true);
-      expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).toContain("deck-codex-hook-v1");
+      expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).toContain("deck-codex-hook:memory-bridge:start");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1610,7 +1611,7 @@ describe("runRunnerLaunch consent and status", () => {
     const projectRoot = join(root, "project");
     try {
       await mkdir(projectRoot, { recursive: true });
-      const adapter = createCodexRunnerAdapter({
+      const adapter = createCodexRunnerAdapter({ tools: testTools(),
         journalRoot: join(root, "journals"),
         preflight: {
           probe: async () => ({ found: true, version: "0.146.1", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),

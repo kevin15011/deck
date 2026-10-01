@@ -6,6 +6,7 @@
  * Covers: REQ-E2E-001, REQ-E2E-002, REQ-E2E-003, REQ-E2E-004
  */
 
+import { readyTestTools } from "../../../../../packages/adapter-codex/src/test-tools";
 import React from "react";
 import { describe, expect, test, beforeEach, vi } from "bun:test";
 import { renderToString } from "ink";
@@ -396,9 +397,8 @@ describe("Codex adapter-driven render-only states", () => {
         probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex\nexec\nresume", execHelp: "Usage: codex exec", resumeHelp: "Usage: codex resume [SESSION_ID]" }),
         inspectTrust: async () => "trusted",
       },
-      sharedBinaryUsability: async (command) => ({ command, status: "ready", resolvedPath: `/bin/${command}`, diagnostics: [] }),
+      tools: readyTestTools(),
       codebaseIndexReadiness: () => true,
-      supermemoryOAuthStatus: async () => ({ state: "authenticated" }),
     });
     const inventory = await adapter.getCapabilityInventory({ projectRoot: "/tmp/deck-codex-tui-parity", environmentId: "codex-development", runnerId: "codex", deckConfig: getDefaultDeckConfig() });
     const plan = adapter.buildReviewPlan({ runnerId: "codex", environmentId: "codex-development", selectedCapabilities: {}, packageInstructions: {}, adaptiveMemory: { provider: "none" } }, inventory);
@@ -575,7 +575,7 @@ describe("Codex adapter-driven render-only states", () => {
     expect(none).toContain("Adaptive Memory disabled");
 
     const supermemory = renderToString(<RunnerDashboardScreens state={createMockedCodexDashboardState({ screen: "adaptive-memory-detail", adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: true, diagnostics: [] } } })} />);
-    expect(supermemory).toContain("without authorizing it");
+    expect(supermemory).toContain("pinned official Codex plugin");
     expect(supermemory).not.toContain("mcp login supermemory");
     expect(supermemory).not.toContain("Engram");
   });

@@ -281,7 +281,8 @@ if (parsed.command === "runner-launch") {
     process.exit(2);
   }
   if (result.status === "dry-run" || result.status === "installed") {
-    for (const diagnostic of result.diagnostics) console.log(diagnostic);
+    // The dry-run preview was already presented once through presentPreview; only verification output is new.
+    if (result.status === "installed") for (const diagnostic of result.diagnostics) console.log(diagnostic);
     process.exit(0);
   }
   if (result.status === "launched") {
@@ -325,7 +326,8 @@ if (parsed.command === "runner-launch") {
     process.exit(2);
   }
   if (result.status === "dry-run" || result.status === "installed") {
-    for (const diagnostic of result.diagnostics) console.log(diagnostic);
+    // The dry-run preview was already presented once through presentPreview; only verification output is new.
+    if (result.status === "installed") for (const diagnostic of result.diagnostics) console.log(diagnostic);
     process.exit(0);
   }
   if (result.status === "launched") {

@@ -119,14 +119,14 @@ export function MemoryProviderSelectionScreen({ cursor, selectedProvider, status
     <Box flexDirection="column">
       <Text bold>Adaptive Memory</Text>
       <Text dimColor>{isCodex
-        ? "Codex uses one Deck flow: a runtime API token is validated into Deck's secret store, while optional MCP OAuth remains separate."
+        ? "Codex uses the pinned official Supermemory plugin hooks: a profile credential is stored in Deck's protected profile store and passed only to the managed Codex child process."
             : "Enable or disable Adaptive Memory. Supermemory is the only durable backend and credentials are never written to Deck config."}</Text>
       <Box marginTop={1}>
         <MenuList
           cursor={cursor}
           items={[
             { id: "none", label: "None", hint: selectedProvider === "none" ? "active" : "disable adaptive memory" },
-            { id: "supermemory", label: "Supermemory", hint: selectedProvider === "supermemory" ? "active" : isCodex ? "requires Deck runtime token; MCP OAuth separate" : "requires Deck secret-store token" },
+            { id: "supermemory", label: "Supermemory", hint: selectedProvider === "supermemory" ? "active" : isCodex ? "requires a profile credential (official plugin)" : "requires Deck secret-store token" },
           ]}
         />
       </Box>
@@ -194,7 +194,7 @@ export function SupermemorySetupScreen({
   cursor = 0,
 }: SupermemorySetupScreenProps) {
   const field = screen === "supermemory-profile" ? "profile" : "token";
-  const label = field === "profile" ? "Supermemory profiles" : runtime === "opencode" ? "Supermemory API key (OpenCode plugin)" : "Supermemory API key (Deck Runtime)";
+  const label = field === "profile" ? "Supermemory profiles" : runtime === "opencode" ? "Supermemory API key (OpenCode plugin)" : runtime === "codex" ? "Supermemory API key (Codex plugin)" : "Supermemory API key (Deck Runtime)";
   const required = true;
   const value = values[field] ?? "";
   const displayValue = field === "token" && value.length > 0 ? "[redacted]" : value;
@@ -226,6 +226,8 @@ export function SupermemorySetupScreen({
           ? "API key is validated now and stored only in Deck's owner-only secret store. Pi MCP receives only credential-free endpoint/canonical scope config; user identity is derived from the key at runtime."
           : runtime === "opencode"
             ? "API key is validated now and stored only in Deck's protected profile store. It is passed only to the managed OpenCode child process and overrides plugin login/config credentials."
+            : runtime === "codex"
+              ? "API key is stored only in Deck's protected profile store. It is passed only to the managed Codex child process for the official Supermemory plugin hooks; no Codex config file receives it."
             : "API key is validated now and stored only in Deck's owner-only secret store. Optional runner MCP OAuth is configured separately and does not replace this runtime credential."}
         </Text>
       )}

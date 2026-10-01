@@ -32,7 +32,7 @@ deck version
 
 ### Codex CLI
 
-Codex CLI `0.145.0` or newer is a registered Developer Team environment:
+Codex CLI `0.145.0` or newer is a registered Developer Team environment (checked against 0.159.x):
 
 ```bash
 deck codex developer --dry-run
@@ -42,7 +42,7 @@ deck codex developer resume <session-id>
 deck codex developer resume --last
 ```
 
-Deck previews project-local changes before applying `.codex/config.toml`, native Codex roles and skills under `.codex/agents/deck-*.toml` and `.agents/skills/**`, plus ownership-verified legacy `AGENTS.md` cleanup when applicable. Deck never enables repository trust. Interactive, exec, resume-by-ID, and resume-latest are public `static-compatible` routes; the adapter does not install or expose a trusted-hook host surface.
+Deck previews project-local changes before applying `.codex/config.toml`, native Codex roles and skills under `.codex/agents/deck-*.toml` and `.agents/skills/**`, plus ownership-verified legacy `AGENTS.md` cleanup when applicable. Deck never enables repository trust. Interactive, exec, resume-by-ID, and resume-latest are public `static-compatible` routes; the adapter does not install or expose a trusted-hook host surface. Review & Install in the TUI also provisions the shared tools for Codex (a Deck-owned pinned RTK with a `PreToolUse` rewrite hook, Codebase Memory, Context Mode) pinned to verified absolute paths, and registers the pinned official Supermemory plugin hooks when you select Supermemory; Deck-owned hooks live in marker-delimited blocks that leave your own hooks untouched.
 
 > **Warning:** Every non-install-only Codex Developer Team launch passes `--dangerously-bypass-approvals-and-sandbox`. Sandboxing and command approvals are disabled for that Codex process, so it may modify or delete files and run commands without approval. Deck does not persist this per-launch bypass in project or global Codex configuration.
 
@@ -60,7 +60,7 @@ See [runner support](docs/runner-support.md) for MCP, memory, ownership, rollbac
 |---|---|---|
 | Pi | **Supported** | Detects Pi, reviews its packages, configures its runner surfaces, installs the Developer Team, and can launch `deck pi developer`. |
 | OpenCode | **Supported** | Detects OpenCode, reviews its package/config evidence, configures its runner surfaces, and installs the Developer Team through the TUI flow. |
-| Claude | **Detection only** | Checks whether `claude` is present in `PATH`; no operational runner adapter is exposed for it. |
+| Claude | **Supported with route limits** | Global plugin files with pinned shared tools and the official Supermemory plugin; limited Claude sessions started through the Deck CLI. |
 | Codex | **Beta** | Detects Codex CLI, installs static-compatible Developer Team content, previews project-local materialization, and launches interactive, exec, and resume flows. |
 | Adaptive memory | **Optional** | Defaults to none; Supermemory uses Deck runtime for supported supervised exec capture and optional MCP for scoped recall/list/graph/document operations. |
 | Developer Team | **Supported** | Seven adaptive roles, proportional verification, runner-native materialization, and separate lifecycle skills. |

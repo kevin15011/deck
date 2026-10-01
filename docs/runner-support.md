@@ -32,14 +32,14 @@ Codex CLI 0.146 does not provide an OpenCode-style root custom-agent selector or
 | 29 standalone bundles/support files | Supported | Complete ownership manifest verifies. |
 | `deck-onboard`, `deck-archive` | Supported | Native skill metadata verifies. |
 | Six package instruction bundles | Supported | Canonical metadata/order/tool policy are preserved; Codex translation removes OpenCode/Claude-specific hook, installer, and tool names. Only `code-economy` defaults on, independently of runtime readiness. |
-| Interactive / exec / resume | Supported with route limits | Deck-supervised launches provide an authenticated adaptive-memory loopback when hooks expose lifecycle events; protected execution controls remain static-compatible. |
+| Interactive / exec / resume | Supported with route limits | Launches pass the documented per-process bypass flags; Deck-owned hooks run without per-hook review for that process. Protected execution controls remain static-compatible. |
 | Context7 | Supported | Semantic streamable HTTP MCP config. Credentials remain external. |
-| context-mode | Shared | Usable binary plus semantic MCP config. |
-| codebase-memory | Shared | Usable binary plus semantic MCP config plus project index readiness. |
+| context-mode | Shared | Usable shared or Deck-owned pinned binary; MCP entry pinned to its absolute path. |
+| codebase-memory | Shared | Existing shared binary or Deck-owned pinned native release; MCP entry pinned to its absolute path plus project index readiness. |
 | Serena | Shared | Usable binary plus semantic project-aware MCP config. |
-| RTK | Shared | Usable binary; MCP is not required. |
+| RTK | Shared | Deck-owned pinned binary plus a marker-owned `PreToolUse` rewrite hook (Node.js 18+); MCP is not required. |
 | No memory provider | Supported | No provider MCP entry. |
-| Supermemory | Supported with route limits | Deck runtime still requires a validated API bearer in Deck's secret store. Credential-free semantic remote MCP config is optional; after Deck applies/verifies it, the user may run Codex-native OAuth when ready. MCP OAuth does not supply the runtime bearer credential. |
+| Supermemory | Supported with route limits | Pinned official `codex-supermemory` recall and flush hooks plus a shared profile credential injected into the started process only. No raw Supermemory MCP entry is written. |
 | Web Search | Supported on OpenCode, Pi, and Codex | Optional native stdio MCP materialization; readiness separately reports disabled, provider/credential/executable gaps, missing MCP materialization, conflicts, or ready. Unsupported runners report an explicit gap. |
 | `pi-mermaid` | Pi internal | Not applicable to Codex. |
 | `opencode-mermaid-renderer`, `deck-model-variants` | OpenCode internal | Not applicable to Codex. |

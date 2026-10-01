@@ -231,3 +231,8 @@ export * from "./runner-install-preflight";
 
 // Runner-neutral Serena prerequisite bootstrap and evidence-gated contracts.
 export * from "./serena-bootstrap";
+
+// Runner-neutral Deck-owned pinned tool artifacts (RTK, Codebase Memory) and the RTK PreToolUse hook bridge.
+export * from "./owned-tools/rtk-artifact";
+export * from "./owned-tools/codebase-native-artifact";
+export * from "./owned-tools/rtk-hook";

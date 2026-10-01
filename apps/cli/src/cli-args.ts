@@ -133,7 +133,7 @@ export function serializeCodexExecPrompt(tokens: readonly string[]): { ok: true;
  */
 function parseCodexArgs(rest: string[]): ParsedArgs {
   if (rest[0] !== "developer") {
-    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--local-only] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck never enables project trust; Deck-supervised launches bind adaptive memory through an ephemeral hook loopback while protected execution controls remain route-limited." };
+    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--local-only] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck never enables project trust; Supermemory uses the pinned official Codex plugin hooks with a credential passed to the Codex process only, while protected execution controls remain route-limited." };
   }
 
   const tokens = rest.slice(1);

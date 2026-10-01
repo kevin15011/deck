@@ -10,6 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export type CodexLaunchFeatures = {
+  /** Deck-owned hooks are materialized and this Codex release can skip per-hook trust review for the process. */
+  hookTrustBypass?: boolean;
   interactive: boolean;
   exec: boolean;
   resumeById: boolean;
@@ -22,6 +24,7 @@ export type CodexNewSessionBootstrap = Readonly<{
 
 const MAX_CODEX_BOOTSTRAP_BYTES = 4096;
 export const CODEX_DEVELOPER_BYPASS_ARG = "--dangerously-bypass-approvals-and-sandbox";
+export const CODEX_HOOK_TRUST_BYPASS_ARG = "--dangerously-bypass-hook-trust";
 export const CODEX_DEVELOPER_BYPASS_DIAGNOSTIC: Readonly<RunnerDiagnostic> = {
   code: "codex-dangerous-bypass",
   severity: "warning",
@@ -109,6 +112,7 @@ export function buildCodexLaunchPlan(
   if (newSession && input.modelId !== undefined && !safeCodexScalar(input.modelId)) return invalidLaunchScalar("model");
   if (newSession && input.reasoningLevel !== undefined && !safeCodexScalar(input.reasoningLevel)) return invalidLaunchScalar("reasoning");
   const args: string[] = [CODEX_DEVELOPER_BYPASS_ARG];
+  if (features.hookTrustBypass === true) args.push(CODEX_HOOK_TRUST_BYPASS_ARG);
   if (newSession && bootstrap) {
     const developerInstructions = safeTomlString(bootstrap.developerInstructions, MAX_CODEX_BOOTSTRAP_BYTES);
     if (!developerInstructions) {
@@ -184,6 +188,11 @@ export function buildCodexLaunchPlan(
     },
     diagnostics: [
       CODEX_DEVELOPER_BYPASS_DIAGNOSTIC,
+      ...(features.hookTrustBypass === true ? [{
+        code: "codex-hook-trust-bypass",
+        severity: "warning" as const,
+        message: "Deck passes --dangerously-bypass-hook-trust so its owned project hooks (RTK, Supermemory) run without per-hook review; all non-managed hooks for this Codex process skip trust review.",
+      }] : []),
       ...(newSession ? [] : [{
         code: "codex-resume-existing-history",
         severity: "info" as const,

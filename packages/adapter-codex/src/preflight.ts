@@ -66,6 +66,7 @@ export async function inspectCodexProject(projectRoot: string, effects: CodexPre
       exec: /Usage: codex exec/.test(probe.execHelp ?? ""),
       resume: /\[SESSION_ID\]/.test(probe.resumeHelp ?? ""),
       resumeLatest: /--last/.test(probe.resumeHelp ?? ""),
+      hookTrustBypass: /--dangerously-bypass-hook-trust/.test(probe.help),
       executionClass: "static-compatible",
     },
     diagnostics,

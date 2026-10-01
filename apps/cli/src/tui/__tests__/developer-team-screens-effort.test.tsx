@@ -212,13 +212,14 @@ describe("Codex normalized model and reasoning presentation", () => {
     expect(output).toContain("thinking xhigh");
   });
 
-  test("distinguishes Codex runtime token from optional MCP OAuth", () => {
+  test("presents Codex Supermemory as a profile-backed official plugin credential, never a Deck runtime key or MCP OAuth", () => {
     const providerPicker = renderToString(<MemoryProviderSelectionScreen cursor={2} selectedProvider="none" runtime="codex" />);
-    expect(providerPicker).toContain("runtime API token");
-    expect(providerPicker).toContain("MCP OAuth remains separate");
+    expect(providerPicker).toContain("official plugin");
+    expect(providerPicker).not.toContain("MCP OAuth");
     const output = renderToString(<SupermemorySetupScreen screen="supermemory-token" values={{ token: "secret-value-do-not-leak" }} runtime="codex" />);
-    expect(output).toContain("Supermemory API key (Deck Runtime)");
-    expect(output).toContain("secret store");
+    expect(output).toContain("Supermemory API key (Codex plugin)");
+    expect(output).toContain("protected profile store");
+    expect(output).toContain("managed Codex child process");
     expect(output).not.toMatch(/codex\s+mcp login\s+supermemory/);
     expect(output).not.toContain("SUPERMEMORY_API_KEY");
     expect(output).not.toContain("~/.pi");
@@ -227,8 +228,7 @@ describe("Codex normalized model and reasoning presentation", () => {
     const setup = buildDashboardSupermemorySetupUpdate({ token: "secret" }, "codex");
     expect(setup.ok).toBe(true);
     if (setup.ok) {
-      expect(setup.status).toContain("runtime credential is stored");
-      expect(setup.status).toContain("MCP OAuth remains a separate optional native step");
+      expect(setup.status).toContain("managed Codex launches");
       expect(setup.status).not.toMatch(/codex\s+mcp login\s+supermemory/);
       expect(setup.values).toMatchObject({ configured: true, runtimeCredentialStored: true, ephemeralTokenAvailable: false });
       expect(setup.status).not.toContain("Pi MCP");
