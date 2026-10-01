@@ -1,3 +1,4 @@
+import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "../../../packages/adapter-claude/src/launch-settings";
 import type { RunnerLaunchInput, RunnerLaunchResult } from "@deck/core";
 
 const MAX_SESSION_ID_BYTES = 1024;
@@ -42,7 +43,7 @@ export function buildClaudeLaunchPlan(input: RunnerLaunchInput): RunnerLaunchRes
 
   // Safe mode prevents user/project plugins, hooks and MCP from being loaded in
   // this *native-only* lane. Managed policy can still run managed hooks.
-  const args: string[] = ["--safe-mode", ...(input.mode === "resume-by-id" ? ["--resume", input.sessionId]
+  const args: string[] = ["--safe-mode", ...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, ...(input.mode === "resume-by-id" ? ["--resume", input.sessionId]
     : input.mode === "resume-latest" ? ["--continue"] : [])];
   if (input.modelId) args.push("--model", input.modelId);
   return {

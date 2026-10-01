@@ -1,3 +1,4 @@
+import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "../../../packages/adapter-claude/src/launch-settings";
 import { test, expect } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -25,7 +26,7 @@ test("default Claude composition requires verified global plugin and passes only
     const ready = await adapter.buildLaunchPlan!(input);
     expect(ready.status).toBe("ready");
     if (ready.status !== "ready") return;
-    expect(ready.plan.args).toEqual(["--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--agent", "deck-developer-team:deck-lead"]);
+    expect(ready.plan.args).toEqual([...CLAUDE_ATTRIBUTION_SETTINGS_ARGS, "--plugin-dir", dirname(dirname(plan.files[0]!.path)), "--agent", "deck-developer-team:deck-lead"]);
     expect(ready.plan.args).not.toContain("--safe-mode");
     let called = false;
     const outcome = await executeRunnerLaunchPlan(ready.plan, { inheritedEnv: { PATH: "/usr/bin", SUPERMEMORY_CC_API_KEY: "fake-inherited", SUPERMEMORY_REPO_TAG: "wrong" }, spawn: async (command, args, options) => {
