@@ -2,6 +2,7 @@ import { statSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { WebSearchProviderDescriptorV1 } from "../../core/src/index";
 import { CLAUDE_CAPABILITY_IDS, type ClaudeCapabilityId } from "./models";
+import { claudeRtkHookScript } from "./rtk-hook";
 
 export type ClaudeCapabilityOptions = {
   resolveCommand?: (name: string) => string | undefined;
@@ -11,6 +12,8 @@ export type ClaudeCapabilityOptions = {
   /** Must come from the Deck-owned Serena bootstrap/revalidation port, never PATH alone. */
   serenaReadinessVerified?: () => boolean;
   installSharedTool?: (id: "context-mode" | "context7" | "web-search") => Promise<boolean>;
+  /** Optional absolute Node.js path for the owned RTK JSON protocol bridge. */
+  rtkHookRuntimeCommand?: string;
 };
 
 export function verifyClaudeExecutable(name: string, effects: ClaudeCapabilityOptions): string {
@@ -23,6 +26,14 @@ export function verifyClaudeExecutable(name: string, effects: ClaudeCapabilityOp
 }
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+export function verifyClaudeRtkHookRuntime(effects: ClaudeCapabilityOptions): string {
+  const runtime = verifyClaudeExecutable("node", { resolveCommand: () => effects.rtkHookRuntimeCommand ?? Bun.which("node") ?? undefined });
+  const probe = Bun.spawnSync([runtime, "--version"], { timeout: 3000, stdout: "pipe", stderr: "ignore", env: { PATH: "/usr/bin:/bin" } });
+  const major = probe.stdout.toString().trim().match(/^v(\d+)\./)?.[1];
+  if (probe.exitCode !== 0 || Number(major ?? 0) < 18) throw new Error("RTK JSON hook bridge requires an installed Node.js 18+ runtime.");
+  return runtime;
+}
 
 /** Explicitly selected native plugin files. No credential value is serialized. */
 export function claudeCapabilityFiles(
@@ -48,7 +59,10 @@ export function claudeCapabilityFiles(
   }
   if (Object.keys(servers).length > 0) files.push({ path: join(root, ".mcp.json"), content: JSON.stringify({ mcpServers: servers }, null, 2) + "\n", kind: "other" });
   if (ids.includes("rtk")) {
-    const command = `${quote(verifyClaudeExecutable("rtk", effects))} hook claude`;
+    const binary = verifyClaudeExecutable("rtk", effects);
+    const runtime = verifyClaudeRtkHookRuntime(effects);
+    const command = `${quote(runtime)} "\${CLAUDE_PLUGIN_ROOT}/hooks/rtk-hook.cjs"`;
+    files.push({ path: join(root, "hooks", "rtk-hook.cjs"), content: claudeRtkHookScript(binary), kind: "other" });
     files.push({ path: join(root, "hooks", "hooks.json"), content: JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] } }, null, 2) + "\n", kind: "other" });
   }
   if (ids.some((id) => !CLAUDE_CAPABILITY_IDS.includes(id))) throw new Error("Unknown Claude capability.");
