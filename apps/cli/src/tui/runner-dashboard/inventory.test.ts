@@ -25,6 +25,10 @@ const validInventory: CapabilityInventory = {
 };
 
 describe("normalizeDashboardCapabilityInventory", () => {
+  test("retains canonical unsupported capability disposition without implying readiness", () => {
+    const unsupported = { ...validInventory, capabilities: [{ ...validInventory.capabilities[0]!, supportStatus: "unsupported" as const, isBlocked: true }] };
+    expect(normalizeDashboardCapabilityInventory(unsupported, "codex", "codex-development")).toEqual({ ok: true, inventory: unsupported });
+  });
   test("retains the complete core inventory contract for the selected runner", () => {
     const result = normalizeDashboardCapabilityInventory(validInventory, "codex", "codex-development");
 

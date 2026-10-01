@@ -240,6 +240,41 @@ describe("runRunnerLaunch consent and status", () => {
     } as unknown as RunnerAdapter;
   }
 
+  test("does not install, preview or start legacy memory host for an unverified Claude developer adapter", async () => {
+    const stateHome = await mkdtemp(join(tmpdir(), "deck-claude-guard-state-"));
+    const forbiddenTransport = {
+      add: async () => { throw new Error("must not contact memory provider"); },
+      search: async () => { throw new Error("must not contact memory provider"); },
+      profile: async () => { throw new Error("must not contact memory provider"); },
+    };
+    try {
+      for (const installOnly of [false, true]) {
+        for (const memoryEnabled of [false, true]) {
+        let calls = 0;
+        const config = getDefaultDeckConfig();
+        const result = await runRunnerLaunch({
+          adapter: adapter({
+            runnerId: "claude",
+            buildDeveloperTeamInstallPlan: () => { calls++; throw new Error("must not plan installation"); },
+            inspectProject: async () => { calls++; throw new Error("must not inspect"); },
+          }),
+          launch: { projectRoot: "/project", teamId: "developer-team", mode: "interactive", deckConfig: {
+            ...config,
+            adaptiveMemory: { ...config.adaptiveMemory, enabled: memoryEnabled },
+          } },
+          installOnly,
+          interactive: false,
+          supermemoryRuntime: { transport: forbiddenTransport, stateHome },
+          presentPreview: async () => { calls++; },
+          processEffects: { spawn: async () => { calls++; throw new Error("must not spawn"); } },
+        });
+        expect(result).toMatchObject({ status: "unsupported", code: "claude-developer-unverified" });
+        expect(calls).toBe(0);
+        }
+      }
+    } finally { await rm(stateHome, { recursive: true, force: true }); }
+  });
+
   test("prints one full mutation preview and uses a concise confirmation question", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-preview-once-"));
     initGitRemote(projectRoot);

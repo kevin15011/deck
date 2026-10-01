@@ -115,7 +115,7 @@ describe("environment options", () => {
     expect(getEnvironmentOptions()).toEqual([
       { value: "pi-development", label: "Pi Development Environment" },
       { value: "opencode-development", label: "OpenCode Development Environment" },
-      { value: "claude-development", label: `Claude Development Environment ${placeholder()}` },
+      { value: "claude-development", label: "Claude Code — adapter unavailable", available: false },
       { value: "codex-development", label: "Codex Development Environment" },
     ]);
   });

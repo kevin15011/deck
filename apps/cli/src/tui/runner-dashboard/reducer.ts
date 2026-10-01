@@ -284,6 +284,7 @@ function selectAdaptiveMemoryProvider(
 
   if (provider === "supermemory") {
     const supermemoryUi = state.runnerUi?.adaptiveMemory?.supermemory;
+    if (supermemoryUi?.supported === false) return { ...state, adaptiveMemory: { ...state.adaptiveMemory, status: supermemoryUi.selectionStatus } };
     const nativeOAuth = !runnerRequiresExternalSupermemoryToken(state);
     const next = invalidatePlan({
       ...state,

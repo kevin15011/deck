@@ -9,6 +9,24 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-30
+
+### Added
+
+- Claude Code is now a supervised Deck runner. The `claude developer` runner launches a supervised Claude session with the Developer Team plugin files, and `claude native` launches a safe-mode session without them; both are also available from the TUI runner dashboard.
+- The Claude adapter materializes pinned, checksum-verified native artifacts for Supermemory, RTK, and Codebase Memory (v0.11.0, Linux/macOS), and discovers available Claude models at launch.
+- Launch diagnostics are color-coded (warnings yellow, errors red) and honor `NO_COLOR` and `FORCE_COLOR=0|false`.
+
+### Changed
+
+- Claude reuses an already-installed Codebase Memory binary (PATH or `~/.local/bin`, version 0.10.8 or newer) instead of installing its own pinned copy, so Claude and OpenCode share one version and the shared Codebase Memory daemon no longer hangs on a version mismatch. The pinned 0.11.0 install remains the fallback when none is found.
+- The Claude RTK hook now runs through a small Node bridge that pins rewritten commands to the Deck-owned RTK binary, so rewrites no longer depend on a global `rtk`. Node.js 18+ is required for the bridge.
+- Serena bootstrap and web-search shell profile handling were adjusted so they work for Claude-managed sessions.
+
+### Compatibility
+
+- Pi, OpenCode, and Codex behavior is unchanged.
+
 ## [0.6.0] - 2026-09-29
 
 ### Changed

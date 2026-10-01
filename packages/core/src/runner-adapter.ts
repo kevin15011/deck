@@ -76,6 +76,13 @@ export type RunnerUiMetadata = Readonly<{
   environmentLabels: Readonly<Record<EnvironmentId, string>>;
   dashboard?: Readonly<{
     defaultSelectedTeamIds: readonly string[];
+    /** Runner-owned supported defaults; absent retains legacy dashboard defaults. */
+    defaultSelectedCapabilityIds?: readonly string[];
+    /** Runner-native tools not represented by Core's package-instruction IDs. */
+    extraSelectableCapabilities?: readonly Readonly<{ id: string; label: string; description: string }>[];
+    /** False means full Developer Team execution is unsupported, even if a limited static session is available. */
+    managedLaunchSupported?: boolean;
+    launchHint?: string;
     executionClass?: "first-class" | "static-compatible";
   }>;
   model: Readonly<{
@@ -87,6 +94,8 @@ export type RunnerUiMetadata = Readonly<{
   }>;
   adaptiveMemory?: Readonly<{
     supermemory: Readonly<{
+      /** False prevents an unverified runner from entering credential setup. */
+      supported?: boolean;
       requiresExternalToken: boolean;
       selectionStatus: string;
       configuredDiagnostics?: readonly string[];
@@ -425,6 +434,7 @@ export type RunnerModelDiscoveryError = {
 
 export type RunnerModelDiscoveryRequest = {
   projectRoot: string;
+  signal?: AbortSignal;
   /** Rescan bypasses Deck caches; it never authorizes a runner network refresh. */
   mode?: "prefer-cache" | "rescan";
 };
@@ -818,6 +828,10 @@ export interface RunnerAdapter {
    * If projectRoot is not provided, adapters should resolve it internally.
    */
   readThinkingAssignments(projectRoot?: string): DeveloperTeamThinkingAssignments;
+
+  /** Optional persisted runner-native selection, read from an owner-verified receipt.
+   * Does not imply the selected executable is presently ready. */
+  readSelectedCapabilityIds?(projectRoot?: string): readonly string[] | undefined;
 
   /**
    * Get the available thinking levels for this runner.

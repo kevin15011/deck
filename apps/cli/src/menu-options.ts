@@ -5,6 +5,7 @@ import type { ReleaseCheckState } from "./tui/release-check";
 export type MenuOption = {
   value: string;
   label: string;
+  available?: boolean;
 };
 
 export type RollbackAvailability = {
@@ -66,7 +67,7 @@ export function getEnvironmentOptions(): MenuOption[] {
   return [
     { value: "pi-development", label: "Pi Development Environment" },
     { value: "opencode-development", label: "OpenCode Development Environment" },
-    { value: "claude-development", label: `Claude Development Environment ${placeholder()}` },
+    { value: "claude-development", label: "Claude Code — adapter unavailable", available: false },
     { value: "codex-development", label: "Codex Development Environment" },
   ];
 }

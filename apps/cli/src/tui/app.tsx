@@ -125,6 +125,7 @@ import {
   ModelSelectionScreen,
   NoProvidersScreen,
   CodexModelDiscoveryScreen,
+  ClaudeModelDiscoveryScreen,
   OpenCodeModelDiscoveryScreen,
   MemoryProviderSelectionScreen,
   SupermemorySetupScreen,
@@ -198,6 +199,7 @@ type Screen =
   | "agent-model-assignment"
   | "opencode-model-discovery"
   | "codex-model-discovery"
+  | "claude-model-discovery"
   | "no-providers"
   | "memory-provider-selection"
   | "supermemory-profile"
@@ -333,6 +335,7 @@ export function resolveDashboardMemoryProviderForInstall(
   provider: AdaptiveMemoryActiveProvider,
   fallback: AdaptiveMemoryProvider | undefined,
 ): AdaptiveMemoryProvider | undefined {
+  if (runnerId === "claude") return undefined; // official plugin alone owns memory; never start Deck's legacy host
   if (runnerId === "codex" && provider === "supermemory") {
     return createSupermemoryMemoryProvider({ mcpServerName: "supermemory" });
   }
@@ -692,13 +695,14 @@ export function hydrateDashboardAdaptiveMemoryState(
   secretStore: Pick<import("@deck/core").DeckSecretStore, "read">,
   runnerId?: RunnerId,
 ): RunnerDashboardState["adaptiveMemory"] {
+  const pluginProfile = runnerId === "opencode" || runnerId === "claude";
   const activeProvider = config.adaptiveMemory.enabled === true ? config.adaptiveMemory.activeProvider : "none";
   if (activeProvider !== "supermemory") {
     return { provider: "none", supermemory: { configured: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] } };
   }
 
   try {
-    const stored = secretStore.read(runnerId === "opencode" ? OPENCODE_SUPERMEMORY_PROFILE_SECRET : "supermemory-api-key")?.trim();
+    const stored = secretStore.read(pluginProfile ? OPENCODE_SUPERMEMORY_PROFILE_SECRET : "supermemory-api-key")?.trim();
     if (stored) {
       return {
         provider: "supermemory",
@@ -707,12 +711,12 @@ export function hydrateDashboardAdaptiveMemoryState(
           hasToken: false,
           runtimeCredentialStored: true,
           ephemeralTokenAvailable: false,
-          diagnostics: [runnerId === "opencode"
+          diagnostics: [pluginProfile
             ? "Official Supermemory plugin credentials are stored in Deck's protected profile store."
             : "Supermemory Deck runtime API credential is stored in Deck's owner-only secret store."],
         },
-        status: runnerId === "opencode"
-          ? "Official Supermemory plugin profile credentials are stored for managed OpenCode launches."
+        status: pluginProfile
+          ? "Official Supermemory plugin profile credentials are stored for managed runner launches."
           : "Supermemory runtime credential is stored. Runner MCP OAuth remains optional and separate.",
       };
     }
@@ -726,7 +730,7 @@ export function hydrateDashboardAdaptiveMemoryState(
         ephemeralTokenAvailable: false,
         diagnostics: [redactSecret(error instanceof Error ? error.message : String(error))],
       },
-      status: runnerId === "opencode"
+      status: pluginProfile
         ? "Official Supermemory plugin profile credentials could not be read from Deck's protected secret store."
         : "Supermemory runtime credential could not be read from Deck's owner-only secret store.",
     };
@@ -739,11 +743,11 @@ export function hydrateDashboardAdaptiveMemoryState(
       hasToken: false,
       runtimeCredentialStored: false,
       ephemeralTokenAvailable: false,
-      diagnostics: [runnerId === "opencode"
+      diagnostics: [pluginProfile
         ? "No official Supermemory plugin profile credential is stored; configure a profile to enable Adaptive Memory."
         : "Supermemory Deck runtime API credential is not stored; enter the Deck Runtime API key to enable Adaptive Memory."],
     },
-    status: runnerId === "opencode" ? "Supermemory plugin profile credentials are not ready." : "Supermemory runtime credential is not ready.",
+    status: pluginProfile ? "Supermemory plugin profile credentials are not ready." : "Supermemory runtime credential is not ready.",
   };
 }
 
@@ -864,7 +868,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }
   const [cursor, setCursor] = useState(0);
   const [homeCursor, setHomeCursor] = useState(0);
-  const [selectedEnvironments, setSelectedEnvironments] = useState<EnvironmentId[]>(dependencies.initialSelectedEnvironments ?? []);
+  const [selectedEnvironments, setSelectedEnvironments] = useState<EnvironmentId[]>(
+    (dependencies.initialSelectedEnvironments ?? []).filter((id) => environmentOptions.some((option) => option.value === id && option.available !== false)),
+  );
   const [runtimeStatuses, setRuntimeStatuses] = useState<RuntimeStatus[]>([]);
   const [piPreflight, setPiPreflight] = useState<PiPreflightResult | null>(null);
   const [toolsReview, setToolsReview] = useState<PiRequiredToolsReview | null>(null);
@@ -893,6 +899,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [thinkingAssignments, setThinkingAssignments] = useState<DeveloperTeamThinkingAssignments>({});
   const [openCodeDiscovery, setOpenCodeDiscovery] = useState<TuiOpenCodeDiscoveryState>({ kind: "loading" });
   const [codexDiscovery, setCodexDiscovery] = useState<TuiCodexDiscoveryState>({ kind: "loading" });
+  const [claudeDiscovery, setClaudeDiscovery] = useState<TuiRunnerModelDiscoveryState>({ kind: "loading" });
+  const claudeDiscoveryAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => claudeDiscoveryAbort.current?.abort(), []);
+  useEffect(() => { if (screen !== "claude-model-discovery") claudeDiscoveryAbort.current?.abort(); }, [screen]);
   const [openCodeAssignmentStates, setOpenCodeAssignmentStates] = useState<Record<string, "available" | "model-unavailable" | "variant-unavailable" | "unverified">>({});
   const [codexAssignmentStates, setCodexAssignmentStates] = useState<Record<string, "available" | "model-unavailable" | "variant-unavailable" | "unverified">>({});
   const [changedOpenCodeAgentIds, setChangedOpenCodeAgentIds] = useState<ReadonlySet<string>>(new Set());
@@ -1107,7 +1117,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         const adaptiveMemory = withAuthoritativeSupermemoryRuntimeReadiness(state.adaptiveMemory, deckSecretStore, state.runnerScope === "all" ? undefined : state.runnerScope);
         const adapterState: DashboardState & {
           teams: RunnerDashboardState["teams"];
-          runtime: { toolsReview?: unknown };
+          runtime: { toolsReview?: unknown; projectIdentity?: RunnerDashboardState["runtime"]["projectIdentity"]; projectRoot?: string };
         } = {
           runnerId: normalizedInventory.inventory.runnerId,
           environmentId: normalizedInventory.inventory.environmentId,
@@ -1125,7 +1135,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             Object.entries(state.packageInstructions).map(([packageId, enabled]) => [packageId, enabled === true]),
           ),
           teams: state.teams,
-          runtime: { toolsReview: state.runtime.toolsReview },
+          runtime: { toolsReview: state.runtime.toolsReview, projectIdentity: state.runtime.projectIdentity, projectRoot: localResolvedProjectRoot ?? process.cwd() },
         };
         const plan = adapter.buildReviewPlan(
           adapterState,
@@ -1215,6 +1225,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       startCodexModelDiscovery("rescan");
       return;
     }
+    if (input === "r" && modelConfigRuntime === "claude" && (screen === "claude-model-discovery" || screen === "agent-model-config-list")) { startClaudeModelDiscovery(); return; }
 
     if (key.escape) {
       if (dashboardWebSearchCredentialEntryActive) {
@@ -1442,6 +1453,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           setDashboardSerenaStages((current) => current.includes(stage) ? current : [...current, stage]);
         },
         runnerAction: runSerenaAction,
+        runnerAdapter: { runAction: (action: import("@deck/core").RunnerAction, context: RunnerSerenaActionContext) => adapter.runAction(action, context) },
         secretStore: deckSecretStore,
         profileCredentialEffects: openCodeProfileCredentialEffects,
         validateSupermemoryReadOnlyApi: validateSupermemoryRuntimeCredentialReadOnly,
@@ -1605,9 +1617,19 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         installTeamBundle: async (projectRoot: string, options?: { memoryProvider?: AdaptiveMemoryProvider; modelAssignments?: DeveloperTeamModelAssignments; thinkingAssignments?: DeveloperTeamThinkingAssignments; capabilityIds?: readonly string[] }) => {
           // Build capability instructions through the active adapter's registered runner ID.
           const deckConfig = requiredConfigStore.readRequired();
+          const effectiveDeckConfig = adapter.runnerId === "claude" ? {
+            ...deckConfig,
+            adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: dashboardState.adaptiveMemory.provider === "supermemory", activeProvider: dashboardState.adaptiveMemory.provider },
+            webSearch: { ...deckConfig.webSearch, enabled: dashboardState.selectedCapabilities["web-search"] === true, provider: dashboardState.webSearchProvider ?? deckConfig.webSearch.provider },
+          } : deckConfig;
           const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, adapter.runnerId);
+          const claudeCapabilities = adapter.runnerId === "claude"
+            ? [...new Set([...(options?.capabilityIds ?? []).filter((id) => !(adapter.packageInstructionIds ?? []).some((packageId) => packageId === id)), ...Object.entries(dashboardState.packageInstructions).filter(([id, selected]) => selected && ["context-mode", "codebase-memory", "rtk", "serena"].includes(id)).map(([id]) => id)])]
+            : undefined;
           const capabilityInstructions = buildCapabilityInstructionBundle(
-            getEnabledSupportedCapabilityInstructionIds(adapter, enabledIds),
+            adapter.runnerId === "claude"
+              ? (claudeCapabilities ?? []).filter((id): id is "context-mode" | "codebase-memory" | "rtk" | "serena" | "web-search" => ["context-mode", "codebase-memory", "rtk", "serena", "web-search"].includes(id))
+              : getEnabledSupportedCapabilityInstructionIds(adapter, enabledIds),
           );
 
           const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
@@ -1615,10 +1637,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             environmentId,
             modelAssignments: options?.modelAssignments,
             thinkingAssignments: options?.thinkingAssignments,
-            memoryProvider: options?.memoryProvider,
+            memoryProvider: adapter.runnerId === "claude" ? undefined : options?.memoryProvider,
             capabilityInstructions,
-            capabilityIds: options?.capabilityIds,
-            deckConfig,
+            capabilityIds: claudeCapabilities ?? options?.capabilityIds,
+            deckConfig: effectiveDeckConfig,
           });
 
           const backup = adapter.backupDeveloperTeamFiles(plan);
@@ -2072,6 +2094,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         : undefined;
       dashboardOperationSequenceRef.current += 1;
       const operation = nextRunnerOperation(adapter.runnerId, dashboardOperationSequenceRef.current);
+      const receiptCapabilities = adapter.runnerId === "claude" ? adapter.readSelectedCapabilityIds?.(projectRoot) : undefined;
+      const selectedReceiptCapabilities = new Set(receiptCapabilities ?? []);
+      const packageInstructions = loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds);
+      if (adapter.runnerId === "claude" && receiptCapabilities) {
+        for (const id of adapter.packageInstructionIds ?? []) packageInstructions[id] = selectedReceiptCapabilities.has(id);
+      }
 
       setDashboardInventory(dashboardCapabilityInventory);
       setDashboardEnvironmentId(environmentId);
@@ -2079,7 +2107,14 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         runnerScope: adapter.runnerId,
         runnerDisplayName: adapter.displayName,
         runnerUi: adapter.ui,
-         selectedCapabilities: { "web-search": config.webSearch.enabled },
+          selectedCapabilities: adapter.ui?.dashboard?.defaultSelectedCapabilityIds
+            ? Object.fromEntries([
+                 ...Object.keys(createDefaultRunnerDashboardState().selectedCapabilities),
+                 "web-search",
+                 ...[...selectedReceiptCapabilities].filter((id) => !(adapter.packageInstructionIds ?? []).some((packageId) => packageId === id)),
+                 ...adapter.ui.dashboard.defaultSelectedCapabilityIds,
+               ].map((id) => [id, adapter.ui!.dashboard!.defaultSelectedCapabilityIds!.includes(id) || !(adapter.packageInstructionIds ?? []).some((packageId) => packageId === id) && selectedReceiptCapabilities.has(id) || id === "web-search" && adapter.runnerId === "claude" && config.webSearch.enabled]))
+            : { "web-search": config.webSearch.enabled },
          webSearchProvider: config.webSearch.provider,
          webSearchProviderDescriptor,
          webSearch: {
@@ -2108,7 +2143,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           entry.isBlocked ? "blocked" : entry.isInstalled ? "ready" : "missing",
         ])),
         teams,
-        packageInstructions: loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds),
+         packageInstructions,
       }));
       setDashboardActionResults([]);
       setDashboardSerenaStages([]);
@@ -2180,6 +2215,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
     if (screen === "opencode-model-discovery") return openCodeDiscovery.kind === "loading" ? 0 : 1;
     if (screen === "codex-model-discovery") return codexDiscovery.kind === "loading" ? 0 : 1;
+    if (screen === "claude-model-discovery") return claudeDiscovery.kind === "loading" ? 0 : 1;
     if (screen === "no-providers") return 0;
     if (screen === "personality-selection") return 1; // 2 options: guia, pragmatica
     if (screen === "configure-packages-runner-selection") return runnerOptions.length - 1;
@@ -2205,7 +2241,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   function toggleCurrent() {
     if (screen === "environment-selection") {
       const option = environmentOptions[cursor];
-      if (!option) return;
+      if (!option || option.available === false) return;
       const id = option.value as EnvironmentId;
       setSelectedEnvironments((current) =>
         current.includes(id) ? current.filter((environment) => environment !== id) : [...current, id],
@@ -2305,7 +2341,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
     if (screen === "model-environment-selection") {
       const option = environmentOptions[modelEnvironmentCursor];
-      if (!option) return;
+      if (!option || option.available === false) return;
       const environment = option.value as EnvironmentId;
       setSelectedModelEnvironment(environment);
 
@@ -2334,13 +2370,15 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           startOpenCodeModelDiscovery();
         } else if (runtime === "codex") {
           startCodexModelDiscovery();
+        } else if (runtime === "claude") {
+          startClaudeModelDiscovery();
         } else if (selectedAdapter.getModelInventory) {
           const result = await selectedAdapter.getModelInventory({ projectRoot: localResolvedProjectRoot ?? process.cwd(), mode: "prefer-cache" });
           const inventory = buildTuiInventoryFromAdapterInventory(result && result.state !== "blocked" ? result.inventory : null);
           setDetectedProviders(inventory.providers);
           setModelsByProvider(inventory.modelsByProvider);
           resetCursor(inventory.providers.length > 0 ? "agent-model-config-list" : "no-providers");
-        } else {
+        } else if (runtime === "pi") {
           const inventory = detectPiModelInventoryForTui();
           setDetectedProviders(inventory.providers);
           setModelsByProvider(inventory.modelsByProvider);
@@ -2349,6 +2387,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           } else {
             resetCursor("agent-model-config-list");
           }
+        } else {
+          setDetectedProviders([]);
+          setModelsByProvider({});
+          resetCursor("no-providers");
         }
       }
       return;
@@ -2511,12 +2553,18 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           startOpenCodeModelDiscovery();
         } else if (runtime === "codex") {
           startCodexModelDiscovery();
-        } else {
+        } else if (runtime === "claude") {
+          startClaudeModelDiscovery();
+        } else if (runtime === "pi") {
           const inventory = detectPiModelInventoryForTui();
           setDetectedProviders(inventory.providers);
           setModelsByProvider(inventory.modelsByProvider);
           if (inventory.providers.length === 0) resetCursor("no-providers");
           else resetCursor("agent-model-config-list");
+        } else {
+          setDetectedProviders([]);
+          setModelsByProvider({});
+          resetCursor("no-providers");
         }
         return;
       }
@@ -2545,6 +2593,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         resetCursor("codex-model-discovery");
         return;
       }
+      if (modelConfigRuntime === "claude" && claudeDiscovery.kind !== "ready") { resetCursor("claude-model-discovery"); return; }
       if (cursor === DEVELOPER_TEAM_AGENTS.length) {
         // Finish button
         if (modelConfigSource === "install") {
@@ -2554,7 +2603,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         } else if (modelConfigSource === "dashboard") {
           // For OpenCode and Pi, the dashboard plan builder has no team-application actions,
           // so persist model changes to disk immediately on Finish.
-          if (modelConfigRuntime === "opencode" || modelConfigRuntime === "pi") {
+          if (modelConfigRuntime === "opencode" || modelConfigRuntime === "pi" || modelConfigRuntime === "claude") {
             await applyDeveloperTeamModelConfig();
           }
           syncDashboardDeveloperTeamModelConfig();
@@ -2588,7 +2637,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             delete next[agent.id];
             return next;
           });
-          if (modelConfigRuntime === "opencode" || modelConfigRuntime === "codex") {
+          if (modelConfigRuntime === "opencode" || modelConfigRuntime === "codex" || modelConfigRuntime === "claude") {
             setChangedOpenCodeAgentIds((current) => new Set(current).add(agent.id));
           }
         }
@@ -2627,7 +2676,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         else delete next[agent.id];
         return next;
       });
-      if (modelConfigRuntime === "opencode" || modelConfigRuntime === "codex") {
+      if (modelConfigRuntime === "opencode" || modelConfigRuntime === "codex" || modelConfigRuntime === "claude") {
         setChangedOpenCodeAgentIds((current) => new Set(current).add(agent.id));
       }
       setSelectedModel(null);
@@ -2650,6 +2699,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       else goBack();
       return;
     }
+    if (screen === "claude-model-discovery") { const action = getOpenCodeDiscoveryAction(claudeDiscovery, cursor); if (action === "retry") startClaudeModelDiscovery(); else if (action !== "wait") { claudeDiscoveryAbort.current?.abort(); goBack(); } return; }
 
     if (screen === "no-providers") {
       if (modelConfigSource === "install") {
@@ -2669,7 +2719,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       setSupermemoryError(undefined);
       if (choice === "supermemory") {
         setDashboardSupermemorySetupActive(false);
-        resetCursor((dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope) === "opencode" ? "supermemory-profile" : "supermemory-token");
+        resetCursor(["opencode", "claude"].includes(dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope) ? "supermemory-profile" : "supermemory-token");
         return;
       }
       persistMemoryProviderSelection(choice, supermemorySetup);
@@ -2877,10 +2927,15 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         return;
       case "select-supermemory-and-open-setup":
         safeDispatch(effect.action);
+        if (dashboardState.runnerScope === "claude" && resolveSupermemoryRuntimeCredentialReadiness({ secretStore: deckSecretStore, runnerId: "claude", profileCredentialEffects: openCodeProfileCredentialEffects }).ready) {
+          setDashboardState((current) => ({ ...current, screen: "dashboard", cursor: 0, backStack: [], adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present", ephemeralTokenAvailable: false, diagnostics: [] }, status: "Existing shared Supermemory profile is ready; no new enrollment is needed." }, plan: undefined, planRevision: current.planRevision + 1, planGeneratedForRevision: undefined }));
+          resetCursor("pi-runner-dashboard");
+          return;
+        }
         setDashboardSupermemorySetupActive(true);
         setMemoryProviderChoice("supermemory");
         setSupermemoryError(undefined);
-        resetCursor((dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope) === "opencode" ? "supermemory-profile" : "supermemory-token");
+        resetCursor(["opencode", "claude"].includes(dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope) ? "supermemory-profile" : "supermemory-token");
         return;
       case "open-developer-team-model-config": {
         const runtime = dashboardState.runnerScope;
@@ -2900,6 +2955,24 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         }
         if (runtime === "codex") {
           startCodexModelDiscovery();
+          return;
+        }
+        if (runtime === "claude") { startClaudeModelDiscovery(); return; }
+        if (runtime !== "pi") {
+          const adapter = adapterFor(runtime);
+          if (adapter.getModelInventory) {
+            try {
+              const discovered = await adapter.getModelInventory({ projectRoot: localResolvedProjectRoot ?? process.cwd(), mode: "prefer-cache" });
+              const inventory = buildTuiInventoryFromAdapterInventory(discovered.state === "blocked" ? null : discovered.inventory);
+              setDetectedProviders(inventory.providers);
+              setModelsByProvider(inventory.modelsByProvider);
+              resetCursor(inventory.providers.length > 0 ? "agent-model-config-list" : "no-providers");
+              return;
+            } catch { /* Do not substitute Pi models for another runner. */ }
+          }
+          setDetectedProviders([]);
+          setModelsByProvider({});
+          resetCursor("no-providers");
           return;
         }
         const inventory = detectPiModelInventoryForTui();
@@ -3064,7 +3137,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       setSupermemoryError("Unable to resolve verified project root; Supermemory runtime credential was not stored.");
       return false;
     }
-    const resolved = runnerId === "opencode" ? undefined : resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
+    const profileBacked = runnerId === "opencode" || runnerId === "claude";
+    const resolved = profileBacked ? undefined : resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
     if (resolved && !resolved.ok) {
       requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));
       setMemoryProvider(undefined);
@@ -3078,9 +3152,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       projectRoot,
       ...(resolved?.ok ? { projectScope: resolved.scope } : {}),
       runnerId,
-      ...(runnerId === "opencode" && openCodeProfileKind === "ssh-alias" ? { alias: values.profile } : {}),
-      makeDefault: runnerId === "opencode" && openCodeProfileKind === "fallback-default",
-      eligibleAliases: runnerId === "opencode" ? discoverLiteralSshHostAliasesFromHome(process.env.HOME ?? "").aliases : [],
+      ...(profileBacked && openCodeProfileKind === "ssh-alias" ? { alias: values.profile } : {}),
+      makeDefault: profileBacked && openCodeProfileKind === "fallback-default",
+      eligibleAliases: profileBacked ? discoverLiteralSshHostAliasesFromHome(process.env.HOME ?? "").aliases : [],
       secretStore: deckSecretStore,
       profileCredentialEffects: openCodeProfileCredentialEffects,
       validateSupermemoryReadOnlyApi: dependencies.validateSupermemoryReadOnlyApi ?? validateSupermemoryRuntimeCredentialReadOnly,
@@ -3324,7 +3398,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     // raw until the user intentionally changes that agent.
     setModelAssignments(modelAssigns);
     setThinkingAssignments(thinkingAssigns);
-    if (effectiveRuntime === "opencode") setChangedOpenCodeAgentIds(new Set());
+    if (effectiveRuntime === "opencode" || effectiveRuntime === "claude") setChangedOpenCodeAgentIds(new Set());
   }
 
   /**
@@ -3388,7 +3462,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       return;
     }
     const adapter = adapterFor(modelConfigRuntime);
-    const requiresDynamicValidation = modelConfigRuntime === "opencode" || modelConfigRuntime === "codex";
+    const requiresDynamicValidation = modelConfigRuntime === "opencode" || modelConfigRuntime === "codex" || modelConfigRuntime === "claude";
     const changedAgentIds = requiresDynamicValidation ? [...changedOpenCodeAgentIds] : [];
     let validatedInventoryFingerprint: string | undefined;
 
@@ -3587,6 +3661,19 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     });
   }
 
+  function startClaudeModelDiscovery() {
+    claudeDiscoveryAbort.current?.abort();
+    const controller = new AbortController(); claudeDiscoveryAbort.current = controller;
+    setClaudeDiscovery({ kind: "loading" }); setDetectedProviders([]); setModelsByProvider({});
+    resetCursor("claude-model-discovery");
+    const projectRoot = projectRootFor({ require: true }) ?? process.cwd();
+    void adapterFor("claude").getModelInventory!({ projectRoot, mode: "rescan", signal: controller.signal }).then((result) => {
+      if (controller.signal.aborted || claudeDiscoveryAbort.current !== controller) return;
+      const discovery = buildTuiInventoryFromDiscoveryResult(result); setClaudeDiscovery(discovery);
+      if (discovery.kind === "ready") { setDetectedProviders(discovery.inventory.providers); setModelsByProvider(discovery.inventory.modelsByProvider); resetCursor("agent-model-config-list"); }
+    }).catch(() => { if (!controller.signal.aborted) setClaudeDiscovery({ kind: "blocked", source: "none", diagnostics: [], errorMessage: "Claude model discovery failed; retry." }); });
+  }
+
   function runPiCommand(command: string, args: string[]) {
     const result = spawnSync(command, args);
     return {
@@ -3658,6 +3745,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         "agent-model-assignment": "model-selection",
         "opencode-model-discovery": "agent-model-config-list",
         "codex-model-discovery": "agent-model-config-list",
+        "claude-model-discovery": "agent-model-config-list",
         "no-providers": "team-selection",
         "memory-provider-selection": "agent-model-config-list",
         "supermemory-profile": "memory-provider-selection",
@@ -3798,7 +3886,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           cursor={agentConfigCursor}
             modelAssignments={modelAssignments}
             thinkingAssignments={thinkingAssignments}
-            assignmentStates={modelConfigRuntime === "opencode" ? openCodeAssignmentStates : modelConfigRuntime === "codex" ? codexAssignmentStates : undefined}
+            assignmentStates={modelConfigRuntime === "opencode" ? openCodeAssignmentStates : modelConfigRuntime === "codex" ? codexAssignmentStates : modelConfigRuntime === "claude" ? Object.fromEntries(Object.keys(modelAssignments).map((role) => [role, "unverified" as const])) : undefined}
           discoveryState={modelConfigRuntime === "opencode" && openCodeDiscovery.kind === "stale" ? "stale" : undefined}
           dashboardContext={dashboardDeveloperTeamContext()}
           runtime={modelConfigRuntime}
@@ -3836,6 +3924,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           state={codexDiscovery}
         />
       ) : null}
+      {screen === "claude-model-discovery" ? <ClaudeModelDiscoveryScreen cursor={cursor} state={claudeDiscovery} /> : null}
       {screen === "no-providers" ? <NoProvidersScreen dashboardContext={dashboardDeveloperTeamContext()} runtime={modelConfigRuntime} runnerLabel={adapterFor(modelConfigRuntime).displayName} modelUi={adapterFor(modelConfigRuntime).ui?.model} /> : null}
       {screen === "memory-provider-selection" ? (
         <MemoryProviderSelectionScreen cursor={cursor} selectedProvider={memoryProviderChoice} status={memoryStatus} runtime={dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope} />
@@ -3908,6 +3997,7 @@ function screenTitle(screen: Screen, runnerLabel?: string): string {
     "agent-model-assignment": "Select reasoning level",
     "opencode-model-discovery": "OpenCode model discovery",
     "codex-model-discovery": "Codex model discovery",
+    "claude-model-discovery": "Claude model discovery",
     "no-providers": "No providers detected",
     "memory-provider-selection": "Adaptive memory provider",
     // Removed: userId/teamId/orgId screens — token-only config

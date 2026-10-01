@@ -576,6 +576,11 @@ type NoProvidersScreenProps = {
   modelUi?: RunnerUiMetadata["model"];
 };
 
+export function ClaudeModelDiscoveryScreen({ cursor, state }: CodexModelDiscoveryScreenProps) {
+  if (state.kind === "loading") return <Box flexDirection="column"><Text bold>Reading models from installed Claude…</Text><Text dimColor>Metadata only; no inference prompt or account entitlement check.</Text></Box>;
+  return <Box flexDirection="column"><Text bold color="yellow">Claude model discovery is unavailable.</Text>{state.kind === "blocked" || state.kind === "stale" ? <Text>{state.errorMessage}</Text> : null}<Text>Persisted assignments remain unchanged. No hardcoded fallback.</Text><MenuList cursor={cursor} items={[{ id: "retry", label: "Retry discovery" }, { id: "back", label: "Back" }]} /></Box>;
+}
+
 export function NoProvidersScreen({ dashboardContext, runtime = "pi", runnerLabel, modelUi }: NoProvidersScreenProps) {
   const metadata = modelUiMetadata(runtime, runnerLabel, modelUi);
   return (

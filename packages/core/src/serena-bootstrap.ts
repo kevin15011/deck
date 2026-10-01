@@ -36,7 +36,7 @@ export const SERENA_CHILD_TIMEOUT_MS = 120_000;
 export const SERENA_TERMINATION_GRACE_MS = 2_000;
 const SERENA_UV_INSTALLER_MAX_REDIRECTS = 5;
 
-export type SerenaRunner = "opencode" | "pi" | "codex";
+export type SerenaRunner = "opencode" | "pi" | "codex" | "claude";
 
 export type SerenaBootstrapAuthorization = Readonly<{
   kind: "interactive-tui-explicit-selection";
@@ -883,7 +883,7 @@ export function validateSerenaOperationAuthorization(
   if (value.kind !== "interactive-tui-explicit-selection") {
     return { valid: false, code: "authorization-invalid" };
   }
-  if (value.runner !== "opencode" && value.runner !== "pi" && value.runner !== "codex") {
+  if (value.runner !== "opencode" && value.runner !== "pi" && value.runner !== "codex" && value.runner !== "claude") {
     return { valid: false, code: "authorization-invalid" };
   }
   if (!isSafeOperationId(value.operationId)) {

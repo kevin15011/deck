@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import {
   DECK_WEB_SEARCH_PROFILE_END,
   DECK_WEB_SEARCH_PROFILE_START,
+  readOwnedTavilyCredential,
   writeTavilyCredentialToActiveShellProfile,
 } from "./web-search-shell-profile";
 
@@ -27,6 +28,20 @@ afterEach(() => {
 });
 
 describe("writeTavilyCredentialToActiveShellProfile", () => {
+  test("reuses only the selected owned credential block without sourcing user shell code", () => {
+    const home = temporaryHome();
+    const token = "fixture-shared-key'with-quote";
+    expect(readOwnedTavilyCredential({ home, shell: "/bin/bash" })).toBeUndefined();
+    writeFileSync(profile(home), "export UNRELATED=do-not-execute\n");
+    expect(writeTavilyCredentialToActiveShellProfile(token, { home, shell: "/bin/bash" }).ok).toBe(true);
+    expect(readOwnedTavilyCredential({ home, shell: "/bin/bash" })).toBe(token);
+    expect(readOwnedTavilyCredential({ home, shell: "/bin/zsh" })).toBeUndefined();
+    writeFileSync(profile(home), `${readFileSync(profile(home), "utf8")}${DECK_WEB_SEARCH_PROFILE_START}\nexport TAVILY_API_KEY='other'\n${DECK_WEB_SEARCH_PROFILE_END}\n`);
+    expect(readOwnedTavilyCredential({ home, shell: "/bin/bash" })).toBeUndefined();
+    rmSync(profile(home));
+    symlinkSync(join(home, "outside"), profile(home));
+    expect(readOwnedTavilyCredential({ home, shell: "/bin/bash" })).toBeUndefined();
+  });
   test("selects only the supported bash and zsh profile paths", () => {
     const home = temporaryHome();
 

@@ -17,6 +17,8 @@ import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, type RunnerStdinPayload } from "@deck/c
 export type ParsedArgs =
   | { command: "tui" }
   | { command: "doctor" }
+  | { command: "claude-native-launch"; launch: { mode: "interactive" } | { mode: "resume-by-id"; sessionId: string } | { mode: "resume-latest" } }
+  | { command: "claude-team-launch" }
   | {
       command: "supermemory-migration-dry-run";
       flags: {
@@ -398,6 +400,20 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (first === "skill-registry") {
     return parseSkillRegistryArgs(rest);
+  }
+
+  if (first === "claude") {
+    if (rest.length === 1 && rest[0] === "developer") return { command: "claude-team-launch" };
+    const usage = "Usage: deck claude developer | deck claude native [resume <session-id> | resume --last]. Developer is a limited plugin-file session; memory and protected execution are unsupported. Native uses safe mode without Deck team files.";
+    if (rest[0] !== "native") return { command: "error", message: usage };
+    if (rest.length === 1) return { command: "claude-native-launch", launch: { mode: "interactive" } };
+    if (rest.length === 3 && rest[1] === "resume") {
+      if (rest[2] === "--last") return { command: "claude-native-launch", launch: { mode: "resume-latest" } };
+      if (rest[2] && !rest[2].startsWith("-") && !/[\0\r\n]/.test(rest[2]) && Buffer.byteLength(rest[2], "utf8") <= 1024) {
+        return { command: "claude-native-launch", launch: { mode: "resume-by-id", sessionId: rest[2] } };
+      }
+    }
+    return { command: "error", message: usage };
   }
 
   if (first === "codex") {

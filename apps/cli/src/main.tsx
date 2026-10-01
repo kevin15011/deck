@@ -1,3 +1,4 @@
+import { formatLaunchDiagnostic, shouldColorStderr } from "./launch-diagnostic-format";
 import React from "react";
 import { render, renderToString } from "ink";
 
@@ -5,7 +6,8 @@ import { parseArgs } from "./cli-args";
 import { getBuildInfo } from "./runtime/build-info";
 import { resolveProjectRoot } from "./project-root";
 import { createDefaultAdapterRegistry } from "./runner-adapters";
-import { createNodeRunnerProcessEffects, runRunnerLaunch } from "./runner-launch-command";
+import { createNodeRunnerProcessEffects, executeRunnerLaunchPlan, runRunnerLaunch } from "./runner-launch-command";
+import { buildClaudeLaunchPlan } from "./claude-launch-plan";
 import { INTERNAL_SERENA_MCP_PROBE_TOKEN, runInternalSerenaMcp } from "./internal-serena-mcp";
 import { DeckApp } from "./tui/app";
 import { ScreenFrame } from "./tui/screen-frame";
@@ -14,7 +16,10 @@ import { inspectStandaloneWebSearchReadiness, isStandaloneWebSearchSmokeSuccessf
 import { createDeckConfigStoreFromEnvironment } from "./deck-config-store";
 
 // One authoritative operational registry is shared by direct commands and the TUI.
-const adapterRegistry = createDefaultAdapterRegistry();
+// Version and other standalone commands must not instantiate runner adapters:
+// release smoke checks deliberately run without HOME or runner configuration.
+let adapterRegistry: ReturnType<typeof createDefaultAdapterRegistry> | undefined;
+const getAdapterRegistry = () => adapterRegistry ??= createDefaultAdapterRegistry();
 
 // Drop the runtime/script args — Bun passes them as argv[0] and argv[1]
 const userArgs = process.argv.slice(2);
@@ -32,7 +37,7 @@ if (parsed.command === "error") {
 if (process.env.DECK_STANDALONE_WEB_SEARCH_SMOKE === "1") {
   const report = await inspectStandaloneWebSearchReadiness({
     projectRoot: resolveProjectRoot() ?? process.cwd(),
-    adapters: adapterRegistry.list(),
+    adapters: getAdapterRegistry().list(),
     deckConfig: configStore.readRequired(),
   });
   console.log(JSON.stringify(report));
@@ -201,10 +206,48 @@ if (
   }
 }
 
+if (parsed.command === "claude-native-launch") {
+  try {
+    const projectRoot = resolveProjectRoot() ?? process.cwd();
+    const planned = buildClaudeLaunchPlan({ ...parsed.launch, projectRoot, teamId: "developer-team", deckConfig: configStore.readRequired() });
+    if (planned.status !== "ready") {
+      console.error(planned.diagnostics.map((diagnostic) => diagnostic.message).join("; "));
+      process.exit(planned.status === "blocked" ? 1 : 2);
+    }
+    for (const diagnostic of planned.diagnostics) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
+    const outcome = await executeRunnerLaunchPlan(planned.plan, createNodeRunnerProcessEffects());
+    if (outcome.stderr) console.error(outcome.stderr);
+    if (outcome.signal) process.kill(process.pid, outcome.signal);
+    process.exit(outcome.exitCode);
+  } catch (error) {
+    console.error("Claude native launch failed:", error instanceof Error ? error.message : "unknown error");
+    process.exit(1);
+  }
+}
+
+if (parsed.command === "claude-team-launch") {
+  try {
+    const adapter = getAdapterRegistry().get("claude");
+    const launch = await adapter.buildLaunchPlan!({ mode: "interactive", projectRoot: resolveProjectRoot() ?? process.cwd(), teamId: "developer-team", deckConfig: configStore.readRequired() });
+    if (launch.status !== "ready") {
+      console.error(launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "));
+      process.exit(launch.status === "blocked" ? 1 : 2);
+    }
+    for (const diagnostic of launch.diagnostics) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
+    const outcome = await executeRunnerLaunchPlan(launch.plan, createNodeRunnerProcessEffects());
+    if (outcome.stderr) console.error(outcome.stderr);
+    if (outcome.signal) process.kill(process.pid, outcome.signal);
+    process.exit(outcome.exitCode);
+  } catch (error) {
+    console.error("Claude plugin session failed:", error instanceof Error ? error.message : "unknown error");
+    process.exit(1);
+  }
+}
+
 if (parsed.command === "runner-launch") {
   const projectRoot = resolveProjectRoot() ?? process.cwd();
   const deckConfig = configStore.readRequired();
-  const adapter = adapterRegistry.get(parsed.runnerId);
+  const adapter = getAdapterRegistry().get(parsed.runnerId);
   const launch = { ...parsed.launch, projectRoot, teamId: parsed.teamId, deckConfig };
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
   const result = await runRunnerLaunch({
@@ -242,7 +285,7 @@ if (parsed.command === "runner-launch") {
     process.exit(0);
   }
   if (result.status === "launched") {
-    for (const diagnostic of result.launch.diagnostics) console.error(`[${diagnostic.code}] ${diagnostic.message}`);
+    for (const diagnostic of result.launch.diagnostics) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
     if (result.outcome.stdout) process.stdout.write(result.outcome.stdout);
     if (result.outcome.stderr) process.stderr.write(result.outcome.stderr);
     if (result.outcome.truncated) console.error("Runner output was truncated; it is not complete verification evidence.");
@@ -251,7 +294,7 @@ if (parsed.command === "runner-launch") {
 } else if (parsed.command === "pi-launch") {
   const projectRoot = resolveProjectRoot() ?? process.cwd();
   const deckConfig = configStore.readRequired();
-  const adapter = adapterRegistry.get("pi");
+  const adapter = getAdapterRegistry().get("pi");
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
   const result = await runRunnerLaunch({
     adapter,
@@ -286,14 +329,14 @@ if (parsed.command === "runner-launch") {
     process.exit(0);
   }
   if (result.status === "launched") {
-    for (const diagnostic of result.launch.diagnostics) console.error(`[${diagnostic.code}] ${diagnostic.message}`);
+    for (const diagnostic of result.launch.diagnostics) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
     if (result.outcome.stdout) process.stdout.write(result.outcome.stdout);
     if (result.outcome.stderr) process.stderr.write(result.outcome.stderr);
     if (result.outcome.truncated) console.error("Runner output was truncated; it is not complete verification evidence.");
     process.exit(result.outcome.exitCode);
   }
 } else if (process.stdin.isTTY) {
-  render(<DeckApp adapterRegistry={adapterRegistry} configStore={configStore} />, {
+  render(<DeckApp adapterRegistry={getAdapterRegistry()} configStore={configStore} />, {
     alternateScreen: true,
     exitOnCtrlC: true,
     incrementalRendering: true,
