@@ -9,6 +9,8 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-01
+
 ### Added
 
 - Codex Review & Install now provisions the shared tools like Claude and OpenCode: a Deck-owned pinned RTK with a `PreToolUse` rewrite hook, Codebase Memory (an existing shared binary is reused, otherwise the pinned native release), and Context Mode. MCP entries and hooks are pinned to verified absolute paths instead of bare `PATH` names.

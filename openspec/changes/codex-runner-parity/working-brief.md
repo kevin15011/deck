@@ -1,6 +1,6 @@
 # Working Brief: Codex runner parity
 
-Status: implemented on branch `feat/codex-parity` (not committed). Route: Working Brief (no Full SDD; no durable cross-package contract beyond the decisions below).
+Status: implementation committed on branch `feat/codex-parity`; v0.8.0 release preparation in progress. The user will create the PR manually. Route: Working Brief (no Full SDD; no durable cross-package contract beyond the decisions below).
 
 ## Intent
 
