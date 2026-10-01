@@ -28,7 +28,7 @@ Pi and OpenCode are operational Deck runners. Codex and Claude have route-limite
 | Binary detection | Supported | Supported | Supported |
 | Version/config preflight | Supported | Supported | Supported |
 | Package and MCP review | Supported | Supported | Supported with static-compatible route limits |
-| Developer Team materialization | Supported | Supported | Supported with static-compatible route limits |
+| Developer Team materialization | Supported | Supported | Supported with static-compatible route limits; global (Codex home and `~/.agents/skills`), never into projects |
 | Model discovery and per-role assignment | Supported | Supported | Supported |
 | Adaptive-memory runner configuration | Runner-specific | Runner-specific | Runner-specific; the pinned official plugin hooks receive the stored profile credential in the started process only |
 | Shared tool installs (RTK, Codebase Memory, Context Mode) | Supported | Supported | Supported; Deck-owned pinned binaries, MCP and hooks pinned to verified absolute paths |

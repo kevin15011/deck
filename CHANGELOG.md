@@ -17,6 +17,7 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ### Changed
 
+- The Codex install is now global, like Claude's plugin and OpenCode's config: agents go to `$CODEX_HOME/agents`, skills to `~/.agents/skills`, MCP servers and hooks into marker blocks in `$CODEX_HOME/config.toml`, and Deck's manifest and hook scripts under `$CODEX_HOME/deck/`. Running Deck in a project writes nothing there, project trust is no longer required, and model assignments are global. A previous per-project install is reported (its files shadow the global agents and skills) and removed only with the explicit `--cleanup-legacy` flag; `--local-only` is accepted but has no effect.
 - Codex custom agents are named by their canonical role id (for example `deck-lead`) with the catalog description, matching how Codex identifies agents.
 - Docs now describe the Claude and Codex route-limited adapters instead of "detection only".
 

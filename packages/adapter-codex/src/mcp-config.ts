@@ -343,16 +343,8 @@ export function buildCodexMcpServers(input: {
     }
   }
   if (selected.has("context7")) servers.push({ id: "context7", transport: "streamable-http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } });
-  if (input.memoryProvider === "supermemory") {
-    const scope = input.supermemoryProjectScope?.trim();
-    if (!scope) {
-      gaps.push("supermemory-project-scope-missing");
-    } else if (!CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(scope)) {
-      gaps.push("supermemory-project-scope-invalid");
-    } else {
-      gaps.push("supermemory-raw-mcp-disabled");
-    }
-  }
+  // The official plugin owns memory and derives its repository tag per launch, so a global install needs no project scope.
+  if (input.memoryProvider === "supermemory") gaps.push("supermemory-raw-mcp-disabled");
   if (selected.has(WEB_SEARCH_CAPABILITY_ID)) {
     if (input.webSearchProviderConfigured !== true) {
       gaps.push("web-search-provider-unconfigured");

@@ -7,7 +7,7 @@ import { gzipSync } from "node:zlib";
 import { getDefaultDeckConfig, validateDeckConfig } from "@deck/core";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
 import { createCodexRunnerAdapter } from "./runner-adapter";
-import { readyTestTools, testTools } from "./test-tools";
+import { layout, readyTestTools, testTools } from "./test-tools";
 import type { CodexPreflightEffects } from "./preflight";
 
 setDefaultTimeout(30_000);
@@ -59,7 +59,7 @@ function tarball(binary: Buffer, name: string) {
 describe("Codex shared tool installation through the reviewed plan", () => {
   test("offers Deck-owned install actions for every missing shared tool and Supermemory plugin hooks", async () => {
     await withProject(async (root, journalRoot) => {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(root), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
       const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: deckConfig() });
       const review = adapter.buildReviewPlan({
         runnerId: "codex",
@@ -83,7 +83,7 @@ describe("Codex shared tool installation through the reviewed plan", () => {
 
   test("offers no install action when every tool and the plugin artifact already verify", async () => {
     await withProject(async (root, journalRoot) => {
-      const adapter = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true }), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
+      const adapter = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true }), ...layout(root), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
       const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: deckConfig() });
       const review = adapter.buildReviewPlan({
         runnerId: "codex",
@@ -160,7 +160,7 @@ describe("Codex shared tool installation through the reviewed plan", () => {
 describe("Codex materialization pins tools and hooks to verified executables", () => {
   test("writes absolute MCP commands, the RTK hook and the plugin-only Supermemory hooks, then launches with hook-trust bypass", async () => {
     await withProject(async (root, journalRoot) => {
-      const adapter = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true }), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
+      const adapter = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true }), ...layout(root), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
       const input = {
         projectRoot: root,
         environmentId: "codex-development" as const,
@@ -180,9 +180,9 @@ describe("Codex materialization pins tools and hooks to verified executables", (
       expect(config).toContain("# deck-codex-hook:supermemory:start");
       expect(config).not.toContain("memory-bridge");
       expect(config).not.toContain("mcp_servers.supermemory");
-      const script = await readFile(join(root, ".codex", "hooks", "deck-rtk-hook.cjs"), "utf8");
+      const script = await readFile(join(root, ".codex", "deck", "hooks", "deck-rtk-hook.cjs"), "utf8");
       expect(script).toContain("/codex/tools/rtk-v0.50.0/");
-      expect((await stat(join(root, ".codex", "hooks", "deck-rtk-hook.cjs"))).isFile()).toBe(true);
+      expect((await stat(join(root, ".codex", "deck", "hooks", "deck-rtk-hook.cjs"))).isFile()).toBe(true);
 
       const launch = await adapter.buildLaunchPlan!({ projectRoot: root, teamId: "developer-team", mode: "interactive", deckConfig: supermemoryConfig() });
       expect(launch).toMatchObject({ status: "ready" });
@@ -202,14 +202,14 @@ describe("Codex materialization pins tools and hooks to verified executables", (
 
   test("does not request hook-trust bypass when Deck hooks are absent or the Codex release lacks the flag", async () => {
     await withProject(async (root, journalRoot) => {
-      const plain = createCodexRunnerAdapter({ tools: testTools(), journalRoot, preflight: preflight() });
+      const plain = createCodexRunnerAdapter({ tools: testTools(), ...layout(root), journalRoot, preflight: preflight() });
       const noHooks = await plain.buildLaunchPlan!({ projectRoot: root, teamId: "developer-team", mode: "interactive", deckConfig: deckConfig() });
       if (noHooks.status === "ready") expect(noHooks.plan.args).toEqual(["--dangerously-bypass-approvals-and-sandbox", ...noHooks.plan.args.slice(1)].filter((arg) => arg !== "--dangerously-bypass-hook-trust"));
       if (noHooks.status === "ready") expect(noHooks.plan.args).not.toContain("--dangerously-bypass-hook-trust");
 
       await mkdir(join(root, ".codex"), { recursive: true });
       await writeFile(join(root, ".codex", "config.toml"), "# deck-codex-hook:rtk:start\n# deck-codex-hook:rtk:end\n");
-      const oldCodex = createCodexRunnerAdapter({ tools: testTools(), journalRoot, preflight: preflight("Usage: codex [OPTIONS]\nexec\nresume\n") });
+      const oldCodex = createCodexRunnerAdapter({ tools: testTools(), ...layout(root), journalRoot, preflight: preflight("Usage: codex [OPTIONS]\nexec\nresume\n") });
       const launch = await oldCodex.buildLaunchPlan!({ projectRoot: root, teamId: "developer-team", mode: "interactive", deckConfig: deckConfig() });
       if (launch.status === "ready") expect(launch.plan.args).not.toContain("--dangerously-bypass-hook-trust");
       await chmod(join(root, ".codex", "config.toml"), 0o600);
@@ -221,7 +221,7 @@ describe("Codex materialization pins tools and hooks to verified executables", (
       await mkdir(join(root, ".codex"), { recursive: true });
       const userConfig = '[features]\nmulti_agent = true\n\n[[hooks.Stop]]\nmatcher = "*"\n\n[[hooks.Stop.hooks]]\ntype = "command"\ncommand = "echo mine"\n';
       await writeFile(join(root, ".codex", "config.toml"), userConfig);
-      const adapter = createCodexRunnerAdapter({ tools: readyTestTools(), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
+      const adapter = createCodexRunnerAdapter({ tools: readyTestTools(), ...layout(root), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
       const on = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: noPackagesConfig(), capabilityIds: ["rtk"] });
       expect(on.blocked).toBe(false);
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: on });
@@ -234,54 +234,56 @@ describe("Codex materialization pins tools and hooks to verified executables", (
       const final = await readFile(join(root, ".codex", "config.toml"), "utf8");
       expect(final).toContain("echo mine");
       expect(final).not.toContain("deck-codex-hook:rtk");
-      await expect(stat(join(root, ".codex", "hooks", "deck-rtk-hook.cjs"))).rejects.toThrow();
+      await expect(stat(join(root, ".codex", "deck", "hooks", "deck-rtk-hook.cjs"))).rejects.toThrow();
     });
   });
 
   test("does not add a duplicate Codebase Memory server beside the user's own registration of the same executable and never edits it", async () => {
     await withProject(async (root, journalRoot) => {
       const tools = testTools({ resolveCommand: (name) => name === "codebase-memory-mcp" ? process.execPath : name === "context-mode" ? "/bin/sh" : undefined });
-      const codexHome = join(tools.homeDir!, ".codex");
+      const { codexHome } = layout(root);
       await mkdir(codexHome, { recursive: true });
       const userConfig = `[features]\nhooks = true\n# >>> codebase-memory-mcp MCP >>>\n[mcp_servers.codebase-memory-mcp]\ncommand = "${process.execPath}"\nargs = []\n# <<< codebase-memory-mcp MCP <<<\n`;
       await writeFile(join(codexHome, "config.toml"), userConfig);
-      const adapter = createCodexRunnerAdapter({ tools, codexHome, journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
+      const adapter = createCodexRunnerAdapter({ tools, ...layout(root), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena });
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: deckConfig(), capabilityIds: ["codebase-memory", "context-mode"] });
       expect(plan.blocked).toBe(false);
       expect((plan.diagnostics ?? []).join(" ")).toContain("Deck did not add MCP server 'codebase-memory'");
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan });
-      const config = await readFile(join(root, ".codex", "config.toml"), "utf8");
+      const config = await readFile(join(codexHome, "config.toml"), "utf8");
       expect(config).not.toContain("mcp_servers.codebase-memory]");
       expect(config).toContain("[mcp_servers.context-mode]");
-      expect(await readFile(join(codexHome, "config.toml"), "utf8")).toBe(userConfig);
+      expect(config).toContain("# >>> codebase-memory-mcp MCP >>>\n[mcp_servers.codebase-memory-mcp]\ncommand = ");
+      expect(config).toContain("# <<< codebase-memory-mcp MCP <<<\n");
       const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: deckConfig() });
       expect(inventory.capabilities.find((capability) => capability.capabilityId === "codebase-memory")).toMatchObject({ isInstalled: true, diagnostics: [] });
-
-      // A same-name unmanaged project entry is still a collision, not a duplicate to hide.
-      const solo = createCodexRunnerAdapter({ tools, codexHome: join(tools.homeDir!, "none"), journalRoot, preflight: preflight(), ...noSerena });
-      const again = solo.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: deckConfig(), capabilityIds: ["codebase-memory"] });
-      expect((again.diagnostics ?? []).join(" ")).not.toContain("Deck did not add");
     });
   });
 });
 
-describe("Codex project scan limit", () => {
-  test("a directory too large for the AGENTS.md precedence scan yields a clean blocked plan before any mutation", async () => {
+describe("Codex global install", () => {
+  test("planning and applying from a huge project directory neither scans nor writes anything in the project", async () => {
     await withProject(async (root, journalRoot) => {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot, preflight: preflight(), ...noSerena });
+      const globalRoot = await mkdtemp(join(tmpdir(), "deck-codex-global-"));
+      const project = join(root, "big");
+      await mkdir(project, { recursive: true });
       for (let index = 0; index < 101; index += 1) {
-        const dir = join(root, `d${index}`);
+        const dir = join(project, `d${index}`);
         await mkdir(dir);
         await Promise.all(Array.from({ length: 100 }, (_, file) => writeFile(join(dir, `f${file}.txt`), "")));
       }
-      const input = { projectRoot: root, environmentId: "codex-development" as const, deckConfig: deckConfig() };
-      const prepared = await adapter.prepareDeveloperTeamInstall!(input);
-      expect(prepared).toContainEqual(expect.objectContaining({ code: "codex-project-too-large", severity: "error" }));
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(globalRoot), journalRoot, preflight: preflight(), ...noSerena });
+      const input = { projectRoot: project, environmentId: "codex-development" as const, deckConfig: deckConfig() };
+      expect(await adapter.prepareDeveloperTeamInstall!(input)).toEqual([]);
       const plan = adapter.buildDeveloperTeamInstallPlan(input);
-      expect(plan.blocked).toBe(true);
-      expect(plan.diagnostics?.join(" ")).toContain("too large to inspect safely");
-      expect(plan.diagnostics?.join(" ")).toContain("Run Deck from inside a project directory");
-      await expect(stat(join(root, ".codex"))).rejects.toThrow();
+      expect(plan.blocked).toBe(false);
+      await adapter.applyDeveloperTeamInstall({ projectRoot: project, environmentId: "codex-development", plan });
+      await expect(stat(join(project, ".codex"))).rejects.toThrow();
+      await expect(stat(join(project, ".agents"))).rejects.toThrow();
+      expect((await stat(join(globalRoot, ".codex", "agents", "deck-lead.toml"))).isFile()).toBe(true);
+      expect((await stat(join(globalRoot, ".agents", "skills", "deck-lead", "SKILL.md"))).isFile()).toBe(true);
+      expect((await stat(join(globalRoot, ".codex", "deck", "manifest.json"))).isFile()).toBe(true);
+      await rm(globalRoot, { recursive: true, force: true });
     });
   }, 60_000);
 });
@@ -290,7 +292,8 @@ describe("Upgrade from the previous Deck version", () => {
   const OLD_WEB_SEARCH = '# deck-codex-mcp:web-search\n[mcp_servers.web-search]\ncommand = "npx"\nargs = ["-y", "tavily-mcp@0.2.22"]\nenv_vars = ["TAVILY_API_KEY"]\n';
   const OLD_V1_HOOKS = `# deck-codex-hook-v1\n${["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "Stop"].map((event) => `[[hooks.${event}]]\nmatcher = "*"\nhooks = [{ type = "command", command = "deck internal codex-memory-hook" }]\n`).join("\n")}`;
   const OLD_SUPERMEMORY_MCP = '# deck-codex-mcp:supermemory\n[mcp_servers.supermemory]\nurl = "https://mcp.supermemory.ai/mcp"\nhttp_headers = { "x-sm-project" = "sm_project_v1_kevin15011_deck" }\n';
-  const webSearchAdapter = (journalRoot: string) => createCodexRunnerAdapter({
+  const webSearchAdapter = (root: string, journalRoot: string) => createCodexRunnerAdapter({
+    ...layout(root),
     tools: testTools({ resolveCommand: (name) => name === "npx" ? process.execPath : undefined }),
     journalRoot,
     webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
@@ -305,7 +308,7 @@ describe("Upgrade from the previous Deck version", () => {
     await withProject(async (root, journalRoot) => {
       await mkdir(join(root, ".codex"), { recursive: true });
       await writeFile(join(root, ".codex", "config.toml"), `[features]\nmulti_agent = true\n${OLD_SUPERMEMORY_MCP}\n${OLD_WEB_SEARCH}\n${OLD_V1_HOOKS}`);
-      const adapter = webSearchAdapter(journalRoot);
+      const adapter = webSearchAdapter(root, journalRoot);
       const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: webSearchConfig() });
       const entry = inventory.capabilities.find((capability) => capability.capabilityId === "web-search");
       expect(entry).toMatchObject({ isBlocked: false, isInstalled: false, webSearchReadiness: expect.objectContaining({ code: "mcp-not-materialized" }) });
@@ -334,7 +337,7 @@ describe("Upgrade from the previous Deck version", () => {
       await mkdir(join(root, ".codex"), { recursive: true });
       const foreign = '[mcp_servers.web-search]\ncommand = "npx"\nargs = ["-y", "tavily-mcp@0.2.22"]\nenv_vars = ["TAVILY_API_KEY"]\n';
       await writeFile(join(root, ".codex", "config.toml"), foreign);
-      const adapter = webSearchAdapter(journalRoot);
+      const adapter = webSearchAdapter(root, journalRoot);
       const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: webSearchConfig() });
       expect(inventory.capabilities.find((capability) => capability.capabilityId === "web-search")).toMatchObject({ isBlocked: true });
       expect(adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: webSearchConfig(), capabilityIds: ["web-search"] }).blocked).toBe(true);
@@ -347,7 +350,7 @@ describe("Upgrade from the previous Deck version", () => {
       await mkdir(join(root, ".codex"), { recursive: true });
       await writeFile(join(root, ".codex", "config.toml"), '[features]\nmulti_agent = true\n# deck-codex-mcp:context-mode\n[mcp_servers.context-mode]\ncommand = "context-mode"\nargs = ["mcp"]\n\n# deck-codex-mcp:codebase-memory\n[mcp_servers.codebase-memory]\ncommand = "codebase-memory-mcp"\n');
       const tools = testTools({ resolveCommand: (name) => name === "context-mode" ? process.execPath : name === "codebase-memory-mcp" ? "/bin/sh" : undefined });
-      const adapter = createCodexRunnerAdapter({ tools, codexHome: join(tools.homeDir!, "none"), journalRoot, preflight: preflight(), ...noSerena });
+      const adapter = createCodexRunnerAdapter({ tools, ...layout(root), journalRoot, preflight: preflight(), ...noSerena });
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: deckConfig(), capabilityIds: ["context-mode", "codebase-memory"] });
       expect(plan.blocked).toBe(false);
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan });
@@ -355,6 +358,153 @@ describe("Upgrade from the previous Deck version", () => {
       expect(config).toContain(`command = ${JSON.stringify(process.execPath)}`);
       expect(config).toContain('command = "/bin/sh"');
       expect(config).not.toMatch(/command = "(context-mode|codebase-memory-mcp)"/);
+    });
+  });
+});
+
+describe("Codex global ownership and migration", () => {
+  const sha = (value: string) => createHash("sha256").update(value).digest("hex");
+  const globalAdapter = async (root: string, journalRoot: string, extra: Record<string, unknown> = {}) => {
+    const cwd = join(root, "cwd");
+    await mkdir(cwd, { recursive: true });
+    const g = join(root, "global");
+    await mkdir(g, { recursive: true });
+    return { cwd, g, adapter: createCodexRunnerAdapter({ tools: testTools(), ...layout(g), journalRoot, preflight: preflight(), codebaseIndexReadiness: () => true, ...noSerena, ...extra }) };
+  };
+  const plan = (adapter: ReturnType<typeof createCodexRunnerAdapter>, cwd: string, extra: Record<string, unknown> = {}) =>
+    adapter.buildDeveloperTeamInstallPlan({ projectRoot: cwd, environmentId: "codex-development", deckConfig: deckConfig(), ...extra });
+
+  test("installs only under the Codex home and ~/.agents/skills, preserving foreign agents, hooks.json and AGENTS.md", async () => {
+    await withProject(async (root, journalRoot) => {
+      const { cwd, g, adapter } = await globalAdapter(root, journalRoot);
+      await mkdir(join(g, ".codex", "agents"), { recursive: true });
+      const foreignAgent = 'name = "codebase-memory"\ndescription = "mine"\ndeveloper_instructions = "x"\n';
+      await writeFile(join(g, ".codex", "agents", "codebase-memory.toml"), foreignAgent);
+      await writeFile(join(g, ".codex", "hooks.json"), '{"hooks":{"Stop":[]}}');
+      await writeFile(join(g, ".codex", "AGENTS.md"), "# my global rules\n");
+      const first = plan(adapter, cwd);
+      expect(first.blocked).toBe(false);
+      await adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "codex-development", plan: first });
+      expect(await readFile(join(g, ".codex", "agents", "codebase-memory.toml"), "utf8")).toBe(foreignAgent);
+      expect(await readFile(join(g, ".codex", "hooks.json"), "utf8")).toBe('{"hooks":{"Stop":[]}}');
+      expect(await readFile(join(g, ".codex", "AGENTS.md"), "utf8")).toBe("# my global rules\n");
+      for (const role of ["deck-lead", "deck-investigate", "deck-quality"]) expect((await stat(join(g, ".codex", "agents", `${role}.toml`))).isFile()).toBe(true);
+      expect((await stat(join(g, ".agents", "skills", "deck-lead", "SKILL.md"))).isFile()).toBe(true);
+      expect((await stat(join(g, ".codex", "deck", "manifest.json"))).isFile()).toBe(true);
+      for (const name of [".codex", ".agents", "AGENTS.md"]) await expect(stat(join(cwd, name))).rejects.toThrow();
+      expect(first.mutationPreview?.every((entry) => entry.path.startsWith(g))).toBe(true);
+      expect(first.diagnostics?.join(" ")).not.toMatch(/project[- ]trust|trust is absent|inactive/i);
+      expect(await adapter.verifyDeveloperTeamInstall(first)).toMatchObject({ valid: true });
+      expect(plan(adapter, cwd).mutationPreview).toEqual([]);
+      const detected = await adapter.detectDeckInstall!({ projectRoot: cwd });
+      expect(detected).toMatchObject({ installed: true });
+      expect(detected.managedPaths).toContain(join(g, ".codex", "deck", "manifest.json"));
+      expect(detected.managedPaths.every((path) => path.startsWith(g))).toBe(true);
+    });
+  });
+
+  test("blocks, without overwriting, when a foreign agent or skill already uses a Deck name", async () => {
+    await withProject(async (root, journalRoot) => {
+      const { cwd, g, adapter } = await globalAdapter(root, journalRoot);
+      await mkdir(join(g, ".codex", "agents"), { recursive: true });
+      await mkdir(join(g, ".agents", "skills", "api-and-interface-design"), { recursive: true });
+      const agent = 'name = "deck-lead"\ndescription = "not Deck"\ndeveloper_instructions = "x"\n';
+      const skill = "---\nname: api-and-interface-design\ndescription: mine\n---\nmine\n";
+      await writeFile(join(g, ".codex", "agents", "deck-lead.toml"), agent);
+      await writeFile(join(g, ".agents", "skills", "api-and-interface-design", "SKILL.md"), skill);
+      const blocked = plan(adapter, cwd);
+      expect(blocked.blocked).toBe(true);
+      expect(blocked.diagnostics?.filter((message) => message.startsWith("Refusing to overwrite")).length).toBeGreaterThanOrEqual(2);
+      await expect(adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "codex-development", plan: blocked })).rejects.toThrow();
+      expect(await readFile(join(g, ".codex", "agents", "deck-lead.toml"), "utf8")).toBe(agent);
+      expect(await readFile(join(g, ".agents", "skills", "api-and-interface-design", "SKILL.md"), "utf8")).toBe(skill);
+      await expect(stat(join(g, ".codex", "deck", "manifest.json"))).rejects.toThrow();
+    });
+  });
+
+  test("a failure in the Codex home after skills were written restores the skills root (all-or-nothing across roots)", async () => {
+    await withProject(async (root, journalRoot) => {
+      const { createNodeCodexFileEffects } = await import("./node-effects");
+      const base = createNodeCodexFileEffects({ journalRoot });
+      const g = join(root, "global");
+      await mkdir(g, { recursive: true });
+      const failing = { ...base, writeAtomic: async (path: string, content: string, mode: number, guard: never) => {
+        if (path.endsWith(`${join(".codex", "config.toml")}`)) throw new Error("injected config write failure");
+        return base.writeAtomic(path, content, mode, guard);
+      } };
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(g), journalRoot, fileEffects: failing, preflight: preflight(), ...noSerena });
+      const cwd = join(root, "cwd");
+      await mkdir(cwd, { recursive: true });
+      const reviewed = plan(adapter, cwd);
+      await expect(adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "codex-development", plan: reviewed })).rejects.toThrow(/injected config write failure/);
+      await expect(stat(join(g, ".agents", "skills", "deck-lead", "SKILL.md"))).rejects.toThrow();
+      await expect(stat(join(g, ".codex", "agents", "deck-lead.toml"))).rejects.toThrow();
+    });
+  });
+
+  test("reports a legacy per-project install, never deletes it implicitly, and removes only unmodified Deck files on opt-in", async () => {
+    await withProject(async (root, journalRoot) => {
+      const { cwd, adapter } = await globalAdapter(root, journalRoot);
+      const files: Record<string, string> = {
+        ".codex/agents/deck-lead.toml": "name = \"Lead\"\n",
+        ".agents/skills/deck-lead/SKILL.md": "---\nname: deck-lead\ndescription: d\n---\nbody\n",
+        ".agents/skills/deck-modified/SKILL.md": "---\nname: deck-modified\ndescription: d\n---\noriginal\n",
+        ".codex/config.toml": "[features]\nmulti_agent = true\n# deck-codex-mcp:context7\n[mcp_servers.context7]\nurl = \"https://mcp.context7.com/mcp\"\n\n[profiles.mine]\nmodel = \"x\"\n",
+      };
+      for (const [path, content] of Object.entries(files)) {
+        await mkdir(join(cwd, path, ".."), { recursive: true });
+        await writeFile(join(cwd, path), content);
+      }
+      const recorded = Object.fromEntries(Object.entries(files).map(([path, content]) => [path, sha(path === ".agents/skills/deck-modified/SKILL.md" ? "original-changed-later" : content)]));
+      await writeFile(join(cwd, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: recorded })}\n`);
+      await writeFile(join(cwd, "unrelated.txt"), "keep");
+
+      const reviewed = plan(adapter, cwd);
+      const legacy = reviewed.diagnostics?.find((message) => message.includes("previous per-project Deck install"));
+      expect(legacy).toContain("override the global ones");
+      expect(legacy).toContain("--cleanup-legacy");
+      expect(await readFile(join(cwd, ".codex", "agents", "deck-lead.toml"), "utf8")).toBe(files[".codex/agents/deck-lead.toml"]);
+
+      const result = await adapter.cleanupLegacyInstall!(cwd);
+      expect(result.removed).toEqual(expect.arrayContaining([".codex/agents/deck-lead.toml", ".agents/skills/deck-lead/SKILL.md", ".codex/deck-manifest.json"]));
+      expect(result.preserved).toEqual([".agents/skills/deck-modified/SKILL.md"]);
+      await expect(stat(join(cwd, ".codex", "agents", "deck-lead.toml"))).rejects.toThrow();
+      await expect(stat(join(cwd, ".codex", "deck-manifest.json"))).rejects.toThrow();
+      expect(await readFile(join(cwd, ".agents", "skills", "deck-modified", "SKILL.md"), "utf8")).toBe(files[".agents/skills/deck-modified/SKILL.md"]);
+      const config = await readFile(join(cwd, ".codex", "config.toml"), "utf8");
+      expect(config).toContain("[profiles.mine]");
+      expect(config).not.toContain("mcp_servers.context7");
+      expect(await readFile(join(cwd, "unrelated.txt"), "utf8")).toBe("keep");
+      expect((await adapter.cleanupLegacyInstall!(cwd)).diagnostics).toEqual(["No legacy per-project Deck install was found."]);
+    });
+  });
+
+  test("a launch-time plan keeps Deck-managed servers chosen in the TUI (for example Context7) instead of dropping them", async () => {
+    await withProject(async (root, journalRoot) => {
+      const { cwd, g, adapter } = await globalAdapter(root, journalRoot);
+      const tuiPlan = plan(adapter, cwd, { capabilityIds: ["context7"] });
+      await adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "codex-development", plan: tuiPlan });
+      expect(await readFile(join(g, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.context7]");
+      const launchPlan = plan(adapter, cwd);
+      expect(launchPlan.mutationPreview).toEqual([]);
+      const dropped = plan(adapter, cwd, { capabilityIds: [] });
+      expect(dropped.mutationPreview?.length).toBeGreaterThan(0);
+    });
+  });
+
+  test("assignments are global: read from and written to the Codex home agents whatever project is open", async () => {
+    await withProject(async (root, journalRoot) => {
+      const { cwd, g, adapter } = await globalAdapter(root, journalRoot);
+      const modelAssignments = { "deck-lead": "openai-codex/gpt-5.6-sol" };
+      const thinkingAssignments = { "deck-lead": "high" };
+      const withModels = plan(adapter, cwd, { modelAssignments, thinkingAssignments });
+      expect(withModels.blocked).toBe(false);
+      await adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "codex-development", plan: withModels });
+      expect(adapter.readModelAssignments(cwd)).toEqual({});
+      const toml = await readFile(join(g, ".codex", "agents", "deck-lead.toml"), "utf8");
+      await writeFile(join(g, ".codex", "agents", "deck-lead.toml"), `${toml}`.replace("developer_instructions", 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "high"\ndeveloper_instructions'));
+      expect(adapter.readModelAssignments(join(root, "some-other-project"))).toEqual({ "deck-lead": "openai-codex/gpt-5.6-sol" });
+      expect(adapter.readThinkingAssignments(cwd)).toEqual({ "deck-lead": "high" });
     });
   });
 });

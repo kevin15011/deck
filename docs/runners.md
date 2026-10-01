@@ -29,7 +29,7 @@ Pi-specific setup can include:
 - MCP configuration for shared services;
 - model/provider discovery from Pi settings, `pi --list-models`, and configured environment variables;
 - per-agent model and thinking assignments;
-- project-local Developer Team materialization.
+- global Developer Team materialization.
 
 Pi's standalone launch path is explicit:
 
@@ -57,9 +57,11 @@ The interactive dashboard presents packages, adaptive memory, teams, and a revie
 
 ## Codex
 
-Codex preflight requires Codex 0.145.0 or newer, checks the launch routes (`exec`, `resume`, `resume --last`) from the installed help output, and verified the config, hooks, custom-agent, and `codex debug models` contracts against 0.159.x. Materialization is project-local: `.codex/agents/*.toml` (one custom agent per canonical role, named by its role id, with the model and `model_reasoning_effort` assigned in the model screen), `.agents/skills/`, `.codex/config.toml`, and an ownership manifest. Model choices come from `codex debug models` for the signed-in account.
+Codex preflight requires Codex 0.145.0 or newer, checks the launch routes (`exec`, `resume`, `resume --last`) from the installed help output, and verified the config, hooks, custom-agent, and `codex debug models` contracts against 0.159.x. Materialization is global, like the Claude plugin and the OpenCode config, and never touches a project: custom agents in `$CODEX_HOME/agents/deck-*.toml` (default `~/.codex`; one per canonical role, named by its role id, with the model and `model_reasoning_effort` assigned in the model screen), skills in `~/.agents/skills/`, marker-delimited blocks in `$CODEX_HOME/config.toml`, and Deck's own files (ownership manifest, hook scripts) under `$CODEX_HOME/deck/`. Model choices come from `codex debug models` for the signed-in account and are global. Running the Deck CLI in any project creates or changes no project files.
 
-Before the first launch, sign in with `codex login` and trust the project in Codex: project-level `.codex/config.toml` (MCP servers, hooks, custom agents) is ignored by Codex until the project is trusted, and Deck never changes trust.
+Before the first launch, sign in with `codex login`. Because the configuration is global, project trust is not required for Deck's agents, skills, MCP servers or hooks, and Deck never changes trust.
+
+Ownership is strict: Deck writes only files recorded in its manifest (with their hashes) and its own marker blocks in `config.toml`. Your `hooks.json`, `AGENTS.md`, other agents and skills, and your own MCP servers are never edited; a file or skill that already uses a Deck name blocks the plan with a clear message instead of being overwritten. If you already registered the same executable as one of Deck's MCP servers (for example `codebase-memory-mcp`), Deck leaves yours in place and does not add a second server.
 
 Review & Install for Codex can include:
 
@@ -69,14 +71,23 @@ Review & Install for Codex can include:
 - **Serena**: Deck's owned launcher through Deck's hidden Serena MCP proxy, after explicit selection.
 - **Supermemory**: only the official `supermemoryai/codex-supermemory` plugin, pinned to one npm release and limited to its two documented lifecycle hooks (`UserPromptSubmit` recall and `Stop` flush). The profile credential entered in the TUI is stored in Deck's protected profile store and injected into the Codex process Deck starts, and nowhere else (`SUPERMEMORY_CODEX_API_KEY`); it is never written to Codex configuration. Deck does not register the Supermemory MCP server or its own memory loopback beside the plugin, and a launch is blocked if another Supermemory plugin or MCP registration exists in your Codex configuration.
 
-Deck adds and removes only its own marker-delimited hook blocks (`# deck-codex-hook:<id>:start` … `:end`) in `.codex/config.toml`, so your inline hooks and `hooks.json` entries keep working beside them. Codex requires review of non-managed hooks; the Deck CLI launch passes `--dangerously-bypass-hook-trust` when Deck-owned hooks are present, so they run without per-hook review for that process. When you start `codex` directly instead, open `/hooks` and trust Deck's entries. The launch continues to pass `--dangerously-bypass-approvals-and-sandbox`.
+Deck adds and removes only its own marker-delimited hook blocks (`# deck-codex-hook:<id>:start` … `:end`) in the global `config.toml`, so your inline hooks and `hooks.json` entries keep working beside them. Codex requires review of non-managed hooks; the Deck CLI launch passes `--dangerously-bypass-hook-trust` when Deck-owned hooks are present, so they run without per-hook review for that process. When you start `codex` directly instead, open `/hooks` and trust Deck's entries. The launch continues to pass `--dangerously-bypass-approvals-and-sandbox`.
 
 ```sh
 deck codex developer --dry-run
 deck codex developer --yes
 ```
 
-Add the `--install-only` flag to apply and verify without starting Codex, or `--memory=supermemory` to select the memory provider for one run.
+Add the `--install-only` flag to apply and verify without starting Codex, or `--memory=supermemory` to select the memory provider for one run. The `--local-only` flag is accepted for compatibility but has no effect, because nothing is written into projects.
+
+### Migrating a previous per-project install
+
+Earlier versions wrote `.codex/`, `.agents/skills/` and a manifest into each project. Those project files override the global agents and skills that share a name, so they shadow the global install in that project. Deck detects them through the old manifest, reports them on every plan, and never deletes them by itself. Run the Codex developer command once from that project with the `--cleanup-legacy` flag (add `--yes` to skip the prompt) to remove only the files whose bytes still match what Deck recorded and Deck's marker blocks from the project `config.toml`; anything you changed is kept. If the files are tracked in Git, the removal shows up as ordinary deletions you can review and commit, or restore. You can also delete them yourself.
+
+### Known limits
+
+- Deck does not set `sandbox_mode = "read-only"` on the Investigate and Quality agents: the launch runs with the sandbox bypass, and Deck could not verify that a per-agent sandbox setting is honored under it, so read-only behavior remains guidance in the agent instructions, not enforcement.
+- Serena resolves the project from the working directory of the Codex process, so one global entry serves every project.
 
 ## Shared capabilities, runner-specific effects
 

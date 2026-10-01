@@ -250,6 +250,7 @@ if (parsed.command === "runner-launch") {
   const adapter = getAdapterRegistry().get(parsed.runnerId);
   const launch = { ...parsed.launch, projectRoot, teamId: parsed.teamId, deckConfig };
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+  const presented: string[] = [];
   const result = await runRunnerLaunch({
     adapter,
     launch,
@@ -257,6 +258,7 @@ if (parsed.command === "runner-launch") {
     dryRun: parsed.dryRun,
     yes: parsed.yes,
     localOnly: parsed.localOnly,
+    cleanupLegacy: parsed.cleanupLegacy,
     cliMemoryProvider: parsed.memoryProvider,
     interactive,
     confirm: interactive ? async (question) => {
@@ -269,7 +271,7 @@ if (parsed.command === "runner-launch") {
         prompt.close();
       }
     } : undefined,
-    presentPreview: async (preview) => { console.log(preview); },
+    presentPreview: async (preview) => { presented.push(preview); console.log(preview); },
     processEffects: createNodeRunnerProcessEffects(),
   });
   if (result.status === "blocked") {
@@ -286,7 +288,9 @@ if (parsed.command === "runner-launch") {
     process.exit(0);
   }
   if (result.status === "launched") {
-    for (const diagnostic of result.launch.diagnostics) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
+    // Each warning is printed once: anything already shown in the pre-launch preview is not repeated.
+    const shown = presented.join("\n");
+    for (const diagnostic of result.launch.diagnostics) if (!shown.includes(diagnostic.message)) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
     if (result.outcome.stdout) process.stdout.write(result.outcome.stdout);
     if (result.outcome.stderr) process.stderr.write(result.outcome.stderr);
     if (result.outcome.truncated) console.error("Runner output was truncated; it is not complete verification evidence.");

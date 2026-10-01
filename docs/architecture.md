@@ -36,7 +36,7 @@ The public Codex adapter installs a thin hook asset for Deck-supervised adaptive
 
 Content-only synchronization reads the Codex ownership manifest and may update only verified Deck-managed roles, every native and external skill class/support file, and bootstrap skills with canonical and selected capability instructions. It does not create or append root `AGENTS.md`; legacy marker cleanup is a conservative ownership-verified migration only. Runtime packages, MCP/provider installation, shared binaries, and optional capabilities remain outside sync.
 
-Codex mutation backup and apply results carry one operation receipt with exact native and optional local-only transaction IDs. Verification failure awaits rollback of that receipt only; adapters do not retain a global “last journal” rollback target.
+Codex mutation backup and apply results carry one operation receipt with exact transaction IDs for the Codex home and the user skills root. Verification failure awaits rollback of that receipt only; adapters do not retain a global “last journal” rollback target.
 
 For runner materialization, core definitions flow through an adapter, then the CLI writes or invokes the runner-native result. External skill Markdown under `packages/core/src/skills/external/` is handwritten product input; [the skill-bundle generator](../scripts/generate-skill-bundle.ts) materializes its generated output. [The build-info generator](../scripts/generate-build-info.ts) owns release build metadata.
 

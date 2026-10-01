@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { execSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import { posix } from "node:path";
 import executionHookAssetPath from "../assets/codex/hooks/developer-team-execution.generated.js" with { type: "file" };
@@ -15,7 +14,6 @@ import {
   type RunnerDiagnostic,
   type WebSearchProviderDescriptorV1,
   parseSkillDescriptor,
-  resolveCanonicalSupermemoryProjectScope,
 } from "@deck/core";
 import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
@@ -57,6 +55,8 @@ export type BuildCodexInstallPlanInput = {
   webSearchCredentialAvailable?: boolean;
   webSearchExecutableAvailable?: boolean;
   webSearchCommand?: string;
+  /** Absolute Codex home the virtual `.codex/**` paths map to; defaults to `<projectRoot>/.codex`. */
+  codexHome?: string;
   /** Resolved executable paths already registered by foreign (non-Deck) MCP servers; Deck does not add a duplicate server for them. */
   foreignMcpCommands?: ReadonlyMap<string, string>;
   /** Absolute, verified executables written into MCP tables; bare PATH names are never persisted. */
@@ -83,10 +83,18 @@ function safeRelativePath(path: string): string {
 }
 
 
-const RTK_HOOK_SCRIPT_PATH = ".codex/hooks/deck-rtk-hook.cjs";
+/**
+ * The planner works in a virtual layout: `.codex/**` lives under the Codex home (honouring CODEX_HOME) and
+ * `.agents/skills/**` under the user's home. The adapter maps these to real roots; Deck-owned support files
+ * (manifest, hook scripts) live under `.codex/deck/` so nothing Deck-private is mixed into Codex's own directories.
+ */
+export const CODEX_MANIFEST_PATH = ".codex/deck/manifest.json";
+export const CODEX_RTK_HOOK_SCRIPT_PATH = ".codex/deck/hooks/deck-rtk-hook.cjs";
+export const CODEX_EXECUTION_HOOK_PATH = ".codex/deck/hooks/developer-team-execution.js";
+const RTK_HOOK_SCRIPT_PATH = CODEX_RTK_HOOK_SCRIPT_PATH;
 
 function isPreservedRuntimePath(path: string): boolean {
-  return path === ".codex/config.toml" || path === ".codex/hooks/developer-team-execution.js" || path === RTK_HOOK_SCRIPT_PATH;
+  return path === ".codex/config.toml" || path === CODEX_EXECUTION_HOOK_PATH || path === RTK_HOOK_SCRIPT_PATH;
 }
 
 function shellQuote(value: string): string {
@@ -141,28 +149,11 @@ function ensureNativeSkillFrontmatter(content: string, skillId: string): string 
   ].join("\n");
 }
 
-function resolveCodexSupermemoryProjectScope(projectRoot: string): string | undefined {
-  try {
-    const remote = execSync("git remote get-url origin", {
-      cwd: projectRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: remote ? [remote] : [] });
-    return resolved.ok ? resolved.scope : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanInput): CodexMutationPlan {
   const materializationScope = input.materializationScope ?? "full";
-  const manifestPath = ".codex/deck-manifest.json";
+  const manifestPath = CODEX_MANIFEST_PATH;
   const diagnostics: RunnerDiagnostic[] = [];
   const capabilityInstructions = translateCodexCapabilityInstructions(input.capabilityInstructions);
-  const derivedSupermemoryProjectScope = input.memoryProvider === "supermemory"
-    ? (input.supermemoryProjectScope ?? resolveCodexSupermemoryProjectScope(input.projectRoot))
-    : undefined;
   if (capabilityInstructions) {
     for (const message of validateCodexInstructionTranslation(capabilityInstructions)) diagnostics.push({ code: "codex-instruction-translation-invalid", severity: "error", message });
   }
@@ -351,7 +342,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
 
   if (materializationScope === "full") {
     add(
-      ".codex/hooks/developer-team-execution.js",
+      CODEX_EXECUTION_HOOK_PATH,
       readFileSync(typeof executionHookAssetPath === "string" ? executionHookAssetPath : new URL("../assets/codex/hooks/developer-team-execution.generated.js", import.meta.url), "utf-8"),
       "bridge-hook",
       "deck-file",
@@ -366,7 +357,6 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
       let desiredMcp = buildCodexMcpServers({
         packageIds: input.mcpCapabilityIds ?? [],
         memoryProvider: input.memoryProvider ?? "none",
-        supermemoryProjectScope: derivedSupermemoryProjectScope,
         serenaLauncherAvailable: input.serenaLauncherAvailable,
         serenaProxyAvailable: input.serenaProxyAvailable,
         contextModeCommand: input.contextModeCommand,
@@ -452,7 +442,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
             hooks: [{
               event: "PreToolUse",
               matcher: "^Bash$",
-              command: `${shellQuote(input.rtkHook.nodeCommand)} ${shellQuote(posix.join(input.projectRoot, RTK_HOOK_SCRIPT_PATH))}`,
+              command: `${shellQuote(input.rtkHook.nodeCommand)} ${shellQuote(posix.join(input.codexHome ?? posix.join(input.projectRoot, ".codex"), RTK_HOOK_SCRIPT_PATH.slice(".codex/".length)))}`,
               timeout: 10,
               statusMessage: "Optimizing command with RTK",
             }],
@@ -477,14 +467,14 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           diagnostics.push({ code: "codex-hooks-feature-disabled", severity: "warning", message: "Codex hooks are disabled by [features] hooks=false; Deck-owned hooks are materialized but will not run until it is enabled." });
         }
         if (input.existingFiles.has(".codex/hooks.json") && hookBlocks.length > 0) {
-          diagnostics.push({ code: "codex-hooks-json-coexistence", severity: "warning", message: "A project .codex/hooks.json exists beside Deck's inline [hooks] entries; Codex loads both and warns. Deck preserves your hooks.json untouched." });
+          diagnostics.push({ code: "codex-hooks-json-coexistence", severity: "warning", message: "Your Codex hooks.json exists beside Deck's inline [hooks] entries in config.toml; Codex loads both and may warn. Deck leaves hooks.json untouched." });
         }
         const hooks = mergeCodexOwnedHooks(mcp.content, hookBlocks);
         if (hooks.status === "blocked") {
           blocked = true;
           diagnostics.push(...hooks.diagnostics.map((message) => ({ code: "trusted-hook-config-collision", severity: "error" as const, message })));
         } else {
-          if (hookBlocks.length > 0) diagnostics.push({ code: "codex-hook-trust-review", severity: "info", message: "Codex requires review of non-managed hooks. Deck's launch passes --dangerously-bypass-hook-trust for Deck-owned hooks; if you start Codex directly, open /hooks and trust Deck's entries." });
+          if (hookBlocks.length > 0) diagnostics.push({ code: "codex-hook-trust-review", severity: "info", message: "If you start codex directly instead of through Deck, open /hooks once and trust Deck's entries." });
           add(".codex/config.toml", hooks.content, "config", "toml-key", "features.multi_agent|mcp_servers|hooks");
         }
       }

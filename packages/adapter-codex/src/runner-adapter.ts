@@ -36,6 +36,7 @@ import {
   type RunnerActionContext,
   type RunnerActionRunResult,
   type RunnerAdapter,
+  type RunnerDiagnostic,
   type RunnerDeveloperTeamInstallPlan,
   type RunnerLaunchInput,
   type RunnerLaunchResult,
@@ -63,7 +64,7 @@ function requireDeckConfig(config: NormalizedDeckConfig | undefined, context: st
 }
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 
-import { buildCodexDeveloperTeamInstallPlan } from "./developer-team-install";
+import { CODEX_MANIFEST_PATH, buildCodexDeveloperTeamInstallPlan } from "./developer-team-install";
 import { CODEX_CAPABILITY_CATALOG, CODEX_RUNNER_CAPABILITY_CONTRIBUTION } from "./capability-catalog";
 import { inspectCodexOwnedHookIds, mergeCodexOwnedHooks, mergeCodexProjectConfig } from "./codex-config";
 import {
@@ -71,7 +72,6 @@ import {
   buildCodexLaunchPlan,
   isSafeCodexLaunchScalar,
 } from "./launch";
-import { composeLocalOnlyExclude } from "./local-only";
 import { type CodexMcpServerId, buildCodexMcpServers, inspectCodexForeignMcpCommands, inspectCodexMcpServerCommand, inspectCodexMcpServerIds, inspectCodexSupermemoryMcpState, isCodexSerenaMcpConfigured, isCodexSupermemoryMcpConfigured, isCodexWebSearchMcpConfigured, isDeckManagedCodexMcpServer, mergeCodexMcpServers } from "./mcp-config";
 import { createCodexTools, type CodexTools, type CodexToolOptions } from "./tools";
 import { createNodeCodexFileEffects } from "./node-effects";
@@ -81,13 +81,14 @@ import {
 } from "./codex-model-discovery";
 import { inspectCodexProject, type CodexPreflightEffects } from "./preflight";
 import { applyCodexMutationPlan, NODE_PATH_CAS_RESIDUAL_RISK, rollbackCodexTransaction, type CodexFileEffects } from "./transaction";
-import type { CodexMutationPlan, CodexPreimage } from "./types";
+import type { CodexMutation, CodexMutationPlan, CodexPreimage } from "./types";
 
 export type CodexRunnerAdapterOptions = {
   preflight?: CodexPreflightEffects;
   fileEffects?: CodexFileEffects;
   journalRoot?: string;
-  gitEffects?: CodexGitEffects;
+  /** The user's home, where `~/.agents/skills` lives; defaults to HOME. */
+  userHome?: string;
   mcpCapabilityIds?: readonly string[];
   /** Injected Codex CLI inventory for deterministic adapter tests. */
   inventoryDiscovery?: (request: RunnerModelDiscoveryRequest) => Promise<RunnerModelInventoryResult>;
@@ -111,15 +112,7 @@ export type CodexRunnerAdapterOptions = {
   webSearchCredential?: () => string | undefined;
   /** Resolve the selected provider without putting provider metadata in Core. */
   webSearchProviderResolver?: (provider: string | undefined) => WebSearchProviderDescriptorV1 | undefined;
-  /** Test seam: runs after the no-follow AGENTS.md snapshot and before manifest path scanning. */
-  onAgentsFileSnapshot?: () => void;
 };
-
-export type CodexGitEffects = {
-  resolveExcludePath(projectRoot: string): string;
-  isTracked(projectRoot: string, relativePath: string): boolean;
-};
-
 
 export type DeckSerenaProxyReadiness =
   | Readonly<{ state: "ready" }>
@@ -297,29 +290,30 @@ function blockedUnsafeCodexLaunchScalar(): RunnerLaunchResult {
   };
 }
 
-function readCodexRoleAssignments(projectRoot?: string): CodexRoleAssignmentRead {
+function readCodexRoleAssignments(codexHome?: string): CodexRoleAssignmentRead {
   const modelAssignments: import("@deck/core").DeveloperTeamModelAssignments = {};
   const thinkingAssignments: import("@deck/core").DeveloperTeamThinkingAssignments = {};
   const diagnostics: string[] = [];
-  if (!projectRoot || projectRoot.trim().length === 0) return { modelAssignments, thinkingAssignments, diagnostics };
+  if (!codexHome || codexHome.trim().length === 0) return { modelAssignments, thinkingAssignments, diagnostics };
 
-  const root = resolve(projectRoot);
-  const codexRoot = join(root, ".codex");
-  const codexDirectory = inspectSafeProjectReadPath(root, codexRoot, "directory");
+  // Assignments live in the user's Codex home (the global install); the "root" for path safety is that directory.
+  const root = resolve(codexHome);
+  const codexRoot = root;
+  const codexDirectory = inspectSafeReadRoot(root);
   if (codexDirectory.state === "missing") return { modelAssignments, thinkingAssignments, diagnostics };
   if (codexDirectory.state === "unsafe") {
-    diagnostics.push(".codex is unsafe or ambiguous; role assignments were ignored.");
+    diagnostics.push("The Codex home is unsafe or ambiguous; role assignments were ignored.");
     return { modelAssignments, thinkingAssignments, diagnostics };
   }
   const agentsRoot = join(codexRoot, "agents");
   const agentsDirectory = inspectSafeProjectReadPath(root, agentsRoot, "directory");
   if (agentsDirectory.state === "missing") return { modelAssignments, thinkingAssignments, diagnostics };
   if (agentsDirectory.state === "unsafe") {
-    diagnostics.push(".codex/agents is unsafe or ambiguous; role assignments were ignored.");
+    diagnostics.push("The Codex agents directory is unsafe or ambiguous; role assignments were ignored.");
     return { modelAssignments, thinkingAssignments, diagnostics };
   }
   for (const agent of DEVELOPER_TEAM_AGENTS) {
-    const relativePath = `.codex/agents/${agent.id}.toml`;
+    const relativePath = `agents/${agent.id}.toml`;
     const filePath = join(agentsRoot, `${agent.id}.toml`);
     const safeFile = inspectSafeProjectReadPath(root, filePath, "file");
     if (safeFile.state !== "ready") {
@@ -390,18 +384,6 @@ function operationReceiptFrom(value: unknown): DeveloperTeamOperationReceipt | u
   return candidate as DeveloperTeamOperationReceipt;
 }
 
-const defaultGitEffects: CodexGitEffects = {
-  resolveExcludePath(projectRoot) {
-    const result = spawnSync("git", ["rev-parse", "--git-path", "info/exclude"], { cwd: projectRoot, encoding: "utf8" });
-    if (result.status !== 0) throw new Error("Unable to resolve Git's effective info/exclude path.");
-    const value = `${result.stdout}`.trim();
-    return isAbsolute(value) ? value : join(projectRoot, value);
-  },
-  isTracked(projectRoot, relativePath) {
-    return spawnSync("git", ["ls-files", "--error-unmatch", "--", relativePath], { cwd: projectRoot, stdio: "ignore" }).status === 0;
-  },
-};
-
 function sha256(content: string): string { return createHash("sha256").update(content).digest("hex"); }
 
 function findCodexModel(inventory: RunnerModelInventory | undefined, modelId: string): RunnerModelEntry | undefined {
@@ -426,6 +408,16 @@ function inspectSafeProjectPath(projectRoot: string, candidate: string) {
     return lstatSync(absolute);
   } catch {
     return null;
+  }
+}
+
+/** The root itself must be a real directory (not a symlink); everything below it is checked by inspectSafeProjectReadPath. */
+function inspectSafeReadRoot(root: string): { state: "missing" | "unsafe" | "ready" } {
+  try {
+    const stat = lstatSync(root);
+    return stat.isDirectory() && !stat.isSymbolicLink() ? { state: "ready" } : { state: "unsafe" };
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? { state: "missing" } : { state: "unsafe" };
   }
 }
 
@@ -486,102 +478,84 @@ function defaultProbe(): ReturnType<CodexPreflightEffects["probe"]> {
   return Promise.resolve({ found: true, version: match?.[1] ?? "0.0.0", help: `${help.stdout}`, execHelp: `${exec.stdout}`, resumeHelp: `${resume.stdout}` });
 }
 
-function defaultProjectSnapshot(projectRoot: string) {
-  const configPath = join(projectRoot, ".codex", "config.toml");
-  const listDirectories = (path: string): string[] => {
-    if (!existsSync(path)) return [];
-    return readdirSync(path, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() || entry.isFile())
-      .map((entry) => entry.name);
+/** Where the global Codex install lives: the Codex home (CODEX_HOME or ~/.codex) and the user's home (~/.agents/skills). */
+export type CodexInstallRoots = Readonly<{ codexHome: string; userHome: string }>;
+
+const VIRTUAL_CODEX_PREFIX = ".codex/";
+
+/** Maps a planner path (`.codex/**`, `.agents/skills/**`) to its real absolute location and owning root. */
+function mapVirtualPath(roots: CodexInstallRoots, virtualPath: string): { root: string; relative: string; absolute: string } {
+  if (virtualPath.startsWith(VIRTUAL_CODEX_PREFIX)) {
+    const relativePath = virtualPath.slice(VIRTUAL_CODEX_PREFIX.length);
+    return { root: roots.codexHome, relative: relativePath, absolute: join(roots.codexHome, relativePath) };
+  }
+  return { root: roots.userHome, relative: virtualPath, absolute: join(roots.userHome, virtualPath) };
+}
+
+function globalConfigPath(roots: CodexInstallRoots): string { return join(roots.codexHome, "config.toml"); }
+
+function readGlobalConfigSource(roots: CodexInstallRoots): string | null {
+  const stat = inspectSafeProjectPath(roots.codexHome, globalConfigPath(roots));
+  return stat?.isFile() ? readFileSync(globalConfigPath(roots), "utf8") : null;
+}
+
+function defaultGlobalSnapshot(roots: CodexInstallRoots) {
+  const listEntries = (path: string): string[] => {
+    try {
+      return readdirSync(path, { withFileTypes: true }).filter((entry) => entry.isDirectory() || entry.isFile()).map((entry) => entry.name);
+    } catch { return []; }
   };
   return {
-    config: existsSync(configPath) ? readFileSync(configPath, "utf8") : null,
-    roles: listDirectories(join(projectRoot, ".codex", "agents")),
-    skills: listDirectories(join(projectRoot, ".agents", "skills")),
-    agentsInstructions: existsSync(join(projectRoot, "AGENTS.md")),
+    config: readGlobalConfigSource(roots),
+    roles: listEntries(join(roots.codexHome, "agents")),
+    skills: listEntries(join(roots.userHome, ".agents", "skills")),
+    agentsInstructions: false,
   };
 }
 
-/** Raised before any mutation when the project is too large to scan for AGENTS.md precedence (for example a home directory). */
-export class CodexProjectScanLimitError extends Error {
-  constructor(readonly projectRoot: string, readonly limit: number) {
-    super(`${projectRoot} is too large to inspect safely (more than ${limit} paths while checking AGENTS.md precedence). Run Deck from inside a project directory, such as a Git repository root, instead of a home or other very large directory. Nothing was changed.`);
-    this.name = "CodexProjectScanLimitError";
-  }
-}
-
-function readExistingPlanFiles(
-  projectRoot: string,
+/**
+ * Reads the current state of every planner-visible path from the real global roots, keyed by virtual path.
+ * Reads never leave the two roots and never follow symlinks; a symlinked target is simply not recorded as an existing
+ * regular file, so planning refuses to write through it.
+ */
+function readExistingGlobalFiles(
+  roots: CodexInstallRoots,
   materializationScope: "full" | "content-only" = "full",
-  onAgentsFileSnapshot?: () => void,
 ): { files: Map<string, string>; modes: Map<string, number>; agentsFile: AgentsPlanFile } {
-  const empty = buildCodexDeveloperTeamInstallPlan({ projectRoot, existingFiles: new Map(), materializationScope });
+  const empty = buildCodexDeveloperTeamInstallPlan({ projectRoot: roots.userHome, codexHome: roots.codexHome, existingFiles: new Map(), materializationScope });
   const existing = new Map<string, string>();
   const modes = new Map<string, number>();
-  const agentsFile = inspectAgentsPlanFile(projectRoot);
-  if (agentsFile.state === "file") {
-    existing.set("AGENTS.md", agentsFile.content);
-    modes.set("AGENTS.md", agentsFile.mode);
-  }
-  onAgentsFileSnapshot?.();
-  for (const relativePath of new Set([...empty.mutations.map((mutation) => mutation.relativePath), ".codex/config.toml"])) {
-    const absolute = join(projectRoot, relativePath);
-    const stat = inspectSafeProjectPath(projectRoot, absolute);
+  const record = (virtualPath: string) => {
+    const mapped = mapVirtualPath(roots, virtualPath);
+    const stat = inspectSafeProjectPath(mapped.root, mapped.absolute);
     if (stat?.isFile()) {
-      existing.set(relativePath, readFileSync(absolute, "utf8"));
-      modes.set(relativePath, stat.mode & 0o777);
+      existing.set(virtualPath, readFileSync(mapped.absolute, "utf8"));
+      modes.set(virtualPath, stat.mode & 0o777);
     }
-  }
-  const scanManagedDirectory = (relativeDirectory: string, nestedSkill: boolean): void => {
-    const directory = join(projectRoot, relativeDirectory);
-    if (!inspectSafeProjectPath(projectRoot, directory)?.isDirectory()) return;
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  };
+  for (const virtualPath of new Set([...empty.mutations.map((mutation) => mutation.relativePath), ".codex/config.toml", ".codex/hooks.json", CODEX_MANIFEST_PATH])) record(virtualPath);
+  const scanManagedDirectory = (virtualDirectory: string, nestedSkill: boolean): void => {
+    const mapped = mapVirtualPath(roots, virtualDirectory);
+    if (!inspectSafeProjectPath(mapped.root, mapped.absolute)?.isDirectory()) return;
+    for (const entry of readdirSync(mapped.absolute, { withFileTypes: true })) {
       if (!entry.name.startsWith("deck-") || entry.isSymbolicLink()) continue;
-      const relativePath = nestedSkill ? `${relativeDirectory}/${entry.name}/SKILL.md` : `${relativeDirectory}/${entry.name}`;
-      const absolutePath = join(projectRoot, relativePath);
-      const stat = inspectSafeProjectPath(projectRoot, absolutePath);
-      if (!stat?.isFile()) continue;
-      existing.set(relativePath, readFileSync(absolutePath, "utf8"));
-      modes.set(relativePath, stat.mode & 0o777);
+      record(nestedSkill ? `${virtualDirectory}/${entry.name}/SKILL.md` : `${virtualDirectory}/${entry.name}`);
     }
   };
   scanManagedDirectory(".codex/agents", false);
   scanManagedDirectory(".agents/skills", true);
-  const ownershipManifest = existing.get(".codex/deck-manifest.json");
+  const ownershipManifest = existing.get(CODEX_MANIFEST_PATH);
   if (ownershipManifest) {
     try {
       const parsed = JSON.parse(ownershipManifest) as { files?: Record<string, unknown> };
-      for (const relativePath of Object.keys(parsed.files ?? {})) {
-        const absolutePath = resolve(projectRoot, relativePath);
-        if (absolutePath === join(resolve(projectRoot), "AGENTS.md")) continue;
-        const stat = inspectSafeProjectPath(projectRoot, absolutePath);
-        if (!stat?.isFile()) continue;
-        existing.set(relativePath, readFileSync(absolutePath, "utf8"));
-        modes.set(relativePath, stat.mode & 0o777);
+      for (const virtualPath of Object.keys(parsed.files ?? {})) {
+        if (virtualPath.startsWith(".codex/") || virtualPath.startsWith(".agents/skills/")) record(virtualPath);
       }
     } catch {
       // The planner reads the malformed manifest itself and blocks safely.
     }
   }
-  const queue = [{ directory: projectRoot, relativeDirectory: "" }];
-  let visitedPaths = 0;
-  const maxVisitedPaths = 10_000;
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    for (const entry of readdirSync(current.directory, { withFileTypes: true })) {
-      visitedPaths += 1;
-      if (visitedPaths > maxVisitedPaths) throw new CodexProjectScanLimitError(projectRoot, maxVisitedPaths);
-      if ([".git", "node_modules", "dist", "build"].includes(entry.name) || entry.isSymbolicLink()) continue;
-      const relativePath = current.relativeDirectory ? `${current.relativeDirectory}/${entry.name}` : entry.name;
-      const absolutePath = join(current.directory, entry.name);
-      if (entry.isDirectory()) queue.push({ directory: absolutePath, relativeDirectory: relativePath });
-      else if (entry.isFile() && (entry.name === "AGENTS.md" || entry.name === "AGENTS.override.md") && relativePath !== "AGENTS.md") {
-        existing.set(relativePath, readFileSync(absolutePath, "utf8"));
-        modes.set(relativePath, lstatSync(absolutePath).mode & 0o777);
-      }
-    }
-  }
-  return { files: existing, modes, agentsFile };
+  return { files: existing, modes, agentsFile: { state: "absent" } };
 }
 
 const CODEX_PROTECTED_CONTROL_IDS = new Set([
@@ -630,7 +604,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly #preflight: CodexPreflightEffects;
   readonly #fileEffects?: CodexFileEffects;
   readonly #journalRoot: string;
-  readonly #gitEffects: CodexGitEffects;
+  readonly #userHome?: string;
   readonly #mcpCapabilityIds: readonly string[];
   readonly #inventoryDiscovery: (request: RunnerModelDiscoveryRequest) => Promise<RunnerModelInventoryResult>;
   #latestReadyInventory: Extract<RunnerModelInventoryResult, { state: "ready" }> | null = null;
@@ -645,22 +619,20 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly #webSearchProvider?: WebSearchProviderDescriptorV1;
   readonly #webSearchProviderResolver?: CodexRunnerAdapterOptions["webSearchProviderResolver"];
   readonly #webSearchCredential: () => string | undefined;
-  readonly #onAgentsFileSnapshot?: CodexRunnerAdapterOptions["onAgentsFileSnapshot"];
   /** One-use Serena and effective Deck proxy evidence for a matching full plan. */
   readonly #pendingSerenaPreparationByProject = new Map<string, PendingSerenaPreparation>();
   readonly #serenaReadinessByPlan = new WeakMap<object, ReadySerenaReadiness>();
   readonly #nativePlans = new WeakMap<object, CodexMutationPlan>();
-  readonly #localPlans = new WeakMap<object, CodexMutationPlan>();
   readonly #planOperations = new WeakMap<object, CodexOperationRecord>();
 
   constructor(options: CodexRunnerAdapterOptions = {}) {
     this.#preflight = options.preflight ?? {
       probe: defaultProbe,
       inspectTrust: async () => "indeterminate",
-      readProject: async (projectRoot) => defaultProjectSnapshot(projectRoot),
+      readProject: async () => defaultGlobalSnapshot(this.#roots),
     };
     this.#fileEffects = options.fileEffects;
-    this.#gitEffects = options.gitEffects ?? defaultGitEffects;
+    this.#userHome = options.userHome;
     this.#mcpCapabilityIds = options.mcpCapabilityIds ?? [];
     this.#inventoryDiscovery = options.inventoryDiscovery
       ?? createDefaultCodexModelInventoryDiscovery(options.productionModelDiscoveryDependencies);
@@ -675,21 +647,24 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#webSearchProvider = options.webSearchProvider;
     this.#webSearchProviderResolver = options.webSearchProviderResolver;
     this.#webSearchCredential = options.webSearchCredential ?? (() => process.env.TAVILY_API_KEY?.trim() || undefined);
-    this.#onAgentsFileSnapshot = options.onAgentsFileSnapshot;
     this.#journalRoot = options.journalRoot ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "deck", "backups", "codex");
   }
 
-  /** MCP servers registered outside Deck (user/global Codex config, and unmarked project entries): name to command. */
-  #foreignMcpCommands(projectConfig: string): ReadonlyMap<string, string> {
-    const merged = new Map<string, string>();
+  /** Real install roots: CODEX_HOME (default ~/.codex) and the user's home. Nothing is ever written under a project. */
+  get #roots(): CodexInstallRoots {
+    const fromEnv = process.env.CODEX_HOME && isAbsolute(process.env.CODEX_HOME) ? process.env.CODEX_HOME : undefined;
+    return {
+      codexHome: resolve(this.#codexHome ?? fromEnv ?? join(this.#tools.home, ".codex")),
+      userHome: resolve(this.#userHome ?? this.#tools.home),
+    };
+  }
+
+  /** MCP servers the user registered themselves in the global Codex config (Deck-marked blocks excluded): name to command. */
+  #foreignMcpCommands(globalConfig?: string): ReadonlyMap<string, string> {
     try {
-      const codexHome = this.#codexHome ?? process.env.CODEX_HOME ?? join(this.#tools.home, ".codex");
-      const path = join(codexHome, "config.toml");
-      const stat = lstatSync(path);
-      if (stat.isFile() && stat.size <= 512 * 1024) for (const [name, command] of inspectCodexForeignMcpCommands(readFileSync(path, "utf8"), { skipDeckManaged: false })) merged.set(`${name} (user config)`, command);
-    } catch { /* absent or unreadable user config contributes nothing */ }
-    for (const [name, command] of inspectCodexForeignMcpCommands(projectConfig, { skipDeckManaged: true })) merged.set(name, command);
-    return merged;
+      const source = globalConfig ?? readGlobalConfigSource(this.#roots) ?? "";
+      return inspectCodexForeignMcpCommands(source, { skipDeckManaged: true });
+    } catch { return new Map(); }
   }
 
   get #tools(): CodexTools {
@@ -783,6 +758,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
   ): readonly string[] {
     const ids = new Set(codexMcpCapabilityIds(capabilityInstructions, this.#mcpCapabilityIds, input.capabilityIds));
     if (isDeckManagedCodexMcpServer(configSource, "serena")) ids.add("serena");
+    // A launch-time plan carries no explicit TUI selection: keep what the reviewed install already put in the global
+    // config instead of silently dropping it (a TUI-only choice such as Context7 must survive `deck codex developer`).
+    if (input.capabilityIds === undefined) {
+      for (const id of ["context7", "context-mode", "codebase-memory"] as const) if (isDeckManagedCodexMcpServer(configSource, id)) ids.add(id);
+    }
     if (webSearchEnabled) ids.add("web-search");
     return [...ids];
   }
@@ -790,12 +770,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
   async inspectProject(projectRoot: string): Promise<RunnerProjectInspection> {
     return inspectCodexProject(projectRoot, this.#preflight);
   }
-  /** True when the project's Codex config carries Deck-owned RTK or Supermemory hook blocks. */
-  #deckHooksMaterialized(projectRoot: string): boolean {
+  /** True when the global Codex config carries Deck-owned RTK or Supermemory hook blocks. */
+  #deckHooksMaterialized(): boolean {
     try {
-      const path = join(projectRoot, ".codex", "config.toml");
-      if (!inspectSafeProjectPath(projectRoot, path)?.isFile()) return false;
-      return inspectCodexOwnedHookIds(readFileSync(path, "utf8")).some((id) => id === "rtk" || id === "supermemory");
+      const source = readGlobalConfigSource(this.#roots);
+      return source !== null && inspectCodexOwnedHookIds(source).some((id) => id === "rtk" || id === "supermemory");
     } catch { return false; }
   }
   getLaunchPolicyDiagnostics() { return [CODEX_DEVELOPER_BYPASS_DIAGNOSTIC]; }
@@ -803,7 +782,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     return this.#withWebSearchCredential(await this.#buildBaseLaunchPlan(input), input);
   }
   /**
-   * Hands the shared Web Search credential to the Codex child process only when Web Search is enabled and the project's
+   * Hands the shared Web Search credential to the Codex child process only when Web Search is enabled and the global
    * Deck-owned MCP entry will read it through `env_vars`. The value is marked sensitive and never reaches config files.
    */
   #withWebSearchCredential(launch: RunnerLaunchResult, input: RunnerLaunchInput): RunnerLaunchResult {
@@ -814,9 +793,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
     try { token = this.#webSearchCredential()?.trim(); } catch { token = undefined; }
     if (!token) return launch;
     try {
-      const path = join(input.projectRoot, ".codex", "config.toml");
-      if (!inspectSafeProjectPath(input.projectRoot, path)?.isFile()) return launch;
-      if (!isCodexWebSearchMcpConfigured(readFileSync(path, "utf8"), provider, this.#webSearchCommand(provider))) return launch;
+      const source = readGlobalConfigSource(this.#roots);
+      if (source === null || !isCodexWebSearchMcpConfigured(source, provider, this.#webSearchCommand(provider))) return launch;
     } catch { return launch; }
     return {
       ...launch,
@@ -840,7 +818,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       exec: inspection.evidence.exec === true,
       resumeById: inspection.evidence.resume === true,
       resumeLatest: inspection.evidence.resumeLatest === true,
-      hookTrustBypass: inspection.evidence.hookTrustBypass === true && this.#deckHooksMaterialized(input.projectRoot),
+      hookTrustBypass: inspection.evidence.hookTrustBypass === true && this.#deckHooksMaterialized(),
     };
     if (!newSession) {
       const launch = buildCodexLaunchPlan(input, features);
@@ -906,7 +884,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     serenaProxy?: DeckSerenaProxyReadiness,
   ): Promise<CapabilityInventory> {
     const inspection = await this.inspectProject(input.projectRoot);
-    const config = inspection.evidence.projectConfig === true ? defaultProjectSnapshot(input.projectRoot).config ?? "" : "";
+    const config = readGlobalConfigSource(this.#roots) ?? "";
     const deckConfig = requireDeckConfig(input.deckConfig, "operation");
     const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
     const mcp = new Set(inspectCodexMcpServerIds(config));
@@ -1239,12 +1217,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   async prepareDeveloperTeamInstall(input: DeveloperTeamAdapterInstallInput) {
     if (input.materializationScope === "content-only") return [];
     const config = requireDeckConfig(input.deckConfig, "operation");
-    let existingConfig: string;
-    try { existingConfig = readExistingPlanFiles(input.projectRoot).files.get(".codex/config.toml") ?? ""; }
-    catch (error) {
-      if (error instanceof CodexProjectScanLimitError) return [{ code: "codex-project-too-large", severity: "error" as const, message: error.message }];
-      throw error;
-    }
+    const existingConfig = readGlobalConfigSource(this.#roots) ?? "";
     const derivedSupermemoryProjectScope = (() => {
       const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
       return resolved.ok ? resolved.scope : undefined;
@@ -1372,8 +1345,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#latestReadyInventory = result.state === "ready" ? result : null;
     return result;
   }
-  readModelAssignments(projectRoot?: string) { return readCodexRoleAssignments(projectRoot).modelAssignments; }
-  readThinkingAssignments(projectRoot?: string) { return readCodexRoleAssignments(projectRoot).thinkingAssignments; }
+  /** Assignments are global: they live in the user's Codex home, whatever project is open. */
+  readModelAssignments(_projectRoot?: string) { return readCodexRoleAssignments(this.#roots.codexHome).modelAssignments; }
+  readThinkingAssignments(_projectRoot?: string) { return readCodexRoleAssignments(this.#roots.codexHome).thinkingAssignments; }
   getThinkingLevels(modelId?: string): readonly string[] {
     return modelId ? findCodexModel(this.#latestReadyInventory?.inventory, modelId)?.variants ?? [] : [];
   }
@@ -1404,57 +1378,30 @@ class CodexRunnerAdapter implements RunnerAdapter {
   }
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan & { diagnostics: readonly string[] } {
     const materializationScope = input.materializationScope ?? "full";
-    let existing: ReturnType<typeof readExistingPlanFiles>;
-    try { existing = readExistingPlanFiles(input.projectRoot, materializationScope, this.#onAgentsFileSnapshot); }
-    catch (error) {
-      if (error instanceof CodexProjectScanLimitError) return { files: [], diagnostics: [error.message], blocked: true, mutationPreview: [] };
-      throw error;
-    }
+    const roots = this.#roots;
+    const existing = readExistingGlobalFiles(roots, materializationScope);
     const config = requireDeckConfig(input.deckConfig, "operation");
     const webSearchProvider = this.resolveWebSearchProvider(config.webSearch.provider);
-    const derivedSupermemoryProjectScope = (() => {
-      const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
-      return resolved.ok ? resolved.scope : undefined;
-    })();
     const existingCodexConfig = existing.files.get(".codex/config.toml") ?? "";
-    const existingConfiguredSupermemoryProjectScope = (() => {
-      const inspected = inspectCodexSupermemoryMcpState(existingCodexConfig);
-      return inspected.ok ? inspected.scope : undefined;
-    })();
     const memoryProviderId = (input.memoryProvider?.id ?? config.adaptiveMemory.activeProvider) as "none" | "supermemory";
     // The official Codex plugin owns memory alone; Deck's runtime-backed adaptive-memory prose would misdescribe it.
     const enabledCapabilityInstructionIds = getEnabledCapabilityInstructionIds(config, "codex").filter((id) => id !== "adaptive-memory");
-    const selectionCapabilityInstructions = withoutAdaptiveMemoryFragments(input.capabilityInstructions
-      ?? buildCapabilityInstructionBundle(enabledCapabilityInstructionIds, {
-        supermemoryProjectScope: derivedSupermemoryProjectScope,
-      }));
+    const capabilityInstructions = withoutAdaptiveMemoryFragments(input.capabilityInstructions
+      ?? buildCapabilityInstructionBundle(enabledCapabilityInstructionIds));
     const mcpCapabilityIds = materializationScope === "full"
-      ? this.#selectedMcpCapabilityIds(input, selectionCapabilityInstructions, existingCodexConfig, config.webSearch.enabled)
+      ? this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingCodexConfig, config.webSearch.enabled)
       : [];
     const serenaPreparation = mcpCapabilityIds.includes("serena")
       ? this.#takePendingSerenaPreparation(input.projectRoot)
       : undefined;
-    const configuredSupermemoryProjectScope = materializationScope === "full"
-      ? this.#inspectEffectiveConfiguredSupermemoryProjectScope({
-        existingCodexConfig,
-        deckConfig: config,
-        memoryProviderId,
-        derivedSupermemoryProjectScope,
-        mcpCapabilityIds,
-        serenaPreparation,
-      })
-      : existingConfiguredSupermemoryProjectScope;
-    const capabilityInstructions = withoutAdaptiveMemoryFragments(input.capabilityInstructions
-      ?? buildCapabilityInstructionBundle(enabledCapabilityInstructionIds, {
-        supermemoryProjectScope: derivedSupermemoryProjectScope,
-      }));
     const tools = this.#tools;
     const nodeCommand = tools.node.command();
     const rtkBinary = tools.rtk.command();
     const supermemoryScripts = tools.supermemory.scripts();
     const rtkRequested = mcpCapabilityIds.includes("rtk") || (materializationScope === "full" && inspectCodexOwnedHookIds(existingCodexConfig).includes("rtk") && input.capabilityIds === undefined);
     let native = buildCodexDeveloperTeamInstallPlan({
-      projectRoot: input.projectRoot,
+      projectRoot: roots.userHome,
+      codexHome: roots.codexHome,
       existingFiles: existing.files,
       existingModes: existing.modes,
       agentsFile: existing.agentsFile,
@@ -1462,18 +1409,17 @@ class CodexRunnerAdapter implements RunnerAdapter {
       thinkingAssignments: input.thinkingAssignments,
       capabilityInstructions,
       memoryProvider: memoryProviderId,
-      supermemoryProjectScope: derivedSupermemoryProjectScope,
       mcpCapabilityIds,
       contextModeCommand: tools.contextMode.command(),
       codebaseMemoryCommand: tools.codebase.command(),
       foreignMcpCommands: this.#foreignMcpCommands(existingCodexConfig),
       ...(rtkRequested && rtkBinary && nodeCommand ? { rtkHook: { nodeCommand, rtkBinary } } : {}),
       ...(memoryProviderId === "supermemory" && supermemoryScripts && nodeCommand ? { supermemoryHooks: { nodeCommand, recallScript: supermemoryScripts.recall, flushScript: supermemoryScripts.flush } } : {}),
-       webSearchProviderSupported: webSearchProvider !== undefined,
-       webSearchProviderConfigured: config.webSearch.provider !== undefined,
-       webSearchProvider,
-       webSearchCredentialAvailable: this.#webSearchCredentialAvailable(webSearchProvider),
-       webSearchExecutableAvailable: this.#webSearchCommand(webSearchProvider) !== undefined,
+      webSearchProviderSupported: webSearchProvider !== undefined,
+      webSearchProviderConfigured: config.webSearch.provider !== undefined,
+      webSearchProvider,
+      webSearchCredentialAvailable: this.#webSearchCredentialAvailable(webSearchProvider),
+      webSearchExecutableAvailable: this.#webSearchCommand(webSearchProvider) !== undefined,
       webSearchCommand: this.#webSearchCommand(webSearchProvider),
       materializationScope,
       serenaLauncherAvailable: serenaPreparation?.readiness.state === "ready",
@@ -1485,119 +1431,74 @@ class CodexRunnerAdapter implements RunnerAdapter {
         ? Object.fromEntries(Object.values(this.#latestReadyInventory.inventory.modelsByProvider).flat().map((model) => [model.id, model.variants ?? []]))
         : {},
     });
-    native = {
-      ...native,
-      diagnostics: [...native.diagnostics, {
-        code: "node-path-cas-residual-risk",
+    const extraDiagnostics: RunnerDiagnostic[] = [{ code: "node-path-cas-residual-risk", severity: "warning", message: NODE_PATH_CAS_RESIDUAL_RISK }];
+    if (input.localOnly) {
+      extraDiagnostics.push({ code: "codex-local-only-ignored", severity: "info", message: "--local-only has no effect for Codex: Deck installs globally under your Codex home and ~/.agents/skills and writes nothing into projects." });
+    }
+    const legacy = this.#detectLegacyProject(input.projectRoot);
+    if (legacy.found) {
+      extraDiagnostics.push({
+        code: "codex-legacy-project-install",
         severity: "warning",
-        message: NODE_PATH_CAS_RESIDUAL_RISK,
-      }],
-    };
+        message: `A previous per-project Deck install was found in ${input.projectRoot} (${legacy.unmodified.length} unmodified and ${legacy.modified.length} modified Deck-owned files). Project-level agents and skills override the global ones with the same name, so they shadow this install in that project. Deck never deletes them automatically; run the Codex developer command with --cleanup-legacy once to remove only the unmodified Deck-owned files (modified files are kept), or delete them yourself.`,
+      });
+    }
+    native = { ...native, diagnostics: [...native.diagnostics, ...extraDiagnostics] };
     const files = native.mutations.filter((mutation) => mutation.operation !== "delete").map((mutation) => ({
       path: mutation.relativePath,
       content: mutation.content,
       kind: mutation.relativePath.includes("/skills/") ? "skill" as const : mutation.relativePath.includes("/agents/") ? "agent" as const : "other" as const,
     }));
-    let localPlan: CodexMutationPlan | undefined;
-
-    if (input.localOnly) {
-      try {
-        const excludePath = this.#gitEffects.resolveExcludePath(input.projectRoot);
-        const excludeExists = existsSync(excludePath);
-        const existing = excludeExists ? readFileSync(excludePath, "utf8") : "";
-        const exactPaths = native.mutations
-          .filter((mutation) => mutation.expected.kind === "absent" && mutation.ownership.kind === "deck-file" && !this.#gitEffects.isTracked(input.projectRoot, mutation.relativePath))
-          .map((mutation) => mutation.relativePath);
-        const visiblePaths = native.mutations.map((mutation) => mutation.relativePath).filter((path) => !exactPaths.includes(path));
-        const composed = composeLocalOnlyExclude(existing, exactPaths);
-        if (composed.blocked) throw new Error(composed.diagnostic);
-        const excludeMode = excludeExists ? lstatSync(excludePath).mode & 0o777 : 0o644;
-        const local: CodexMutationPlan = {
-          projectRoot: dirname(excludePath),
-          blocked: false,
-          diagnostics: [],
-          expectedFiles: [{
-            relativePath: basename(excludePath),
-            hash: sha256(composed.content),
-            content: composed.content,
-            mode: excludeMode,
-            kind: "git-exclude",
-          }],
-          inventory: { agentRoleIds: [], agentBoundSkillIds: [], externalStandaloneSkillIds: [], bootstrapSkillIds: [] },
-          mutations: composed.content === existing ? [] : [{
-            relativePath: basename(excludePath),
-            expected: excludeExists ? { kind: "file", hash: sha256(existing), mode: excludeMode } : { kind: "absent" },
-            postimageHash: sha256(composed.content),
-            postimageMode: excludeMode,
-            ownership: { kind: "git-exclude-block", marker: "deck:codex-local-only" },
-            rollback: excludeExists ? "restore" : "delete",
-            content: composed.content,
-          }],
-        };
-        localPlan = local;
-        files.push(...local.mutations.map((mutation) => ({ path: `git-info-exclude:${excludePath}`, content: mutation.content, kind: "other" as const })));
-        if (visiblePaths.length > 0) {
-          native = {
-            ...native,
-            diagnostics: [...native.diagnostics, {
-              code: "local-only-visible-mutations",
-              severity: "warning",
-              message: `Tracked or shared mutations remain visible: ${visiblePaths.join(", ")}.`,
-            }],
-          };
-        }
-      } catch (error) {
-        native = {
-          ...native,
-          blocked: true,
-          diagnostics: [...native.diagnostics, {
-            code: "local-only-blocked",
-            severity: "error",
-            message: error instanceof Error ? error.message : "Unable to prepare exact local-only exclusions.",
-          }],
-        };
-      }
-    }
-
     const plan = {
       files,
       ownershipReleases: native.ownershipReleases,
       diagnostics: native.diagnostics.map((diagnostic) => diagnostic.message),
       blocked: native.blocked,
-      mutationPreview: [
-        ...native.mutations.map((mutation) => ({
+      mutationPreview: native.mutations.map((mutation) => ({
         action: mutation.operation === "delete" ? "delete" as const : mutation.expected.kind === "absent" ? "create" as const : "update" as const,
-        path: mutation.relativePath,
+        path: mapVirtualPath(roots, mutation.relativePath).absolute,
         preimage: mutation.expected.kind === "absent" ? "absent" : mutation.expected.hash,
         postimage: mutation.operation === "delete" ? "absent" : mutation.postimageHash,
         ownership: `${mutation.ownership.kind}:${mutation.ownership.marker}`,
-        })),
-        ...(localPlan?.mutations ?? []).map((mutation) => ({
-          action: mutation.operation === "delete" ? "delete" as const : mutation.expected.kind === "absent" ? "create" as const : "update" as const,
-          path: `git-info-exclude:${join(localPlan!.projectRoot, mutation.relativePath)}`,
-          preimage: mutation.expected.kind === "absent" ? "absent" : mutation.expected.hash,
-          postimage: mutation.operation === "delete" ? "absent" : mutation.postimageHash,
-          ownership: `${mutation.ownership.kind}:${mutation.ownership.marker}`,
-        })),
-      ],
+      })),
     };
     this.#nativePlans.set(plan, native);
     if (serenaPreparation?.readiness.state === "ready" && serenaPreparation.proxy.state === "ready") {
       this.#serenaReadinessByPlan.set(plan, serenaPreparation.readiness);
     }
-    if (localPlan) this.#localPlans.set(plan, localPlan);
     const receipt: DeveloperTeamOperationReceipt = Object.freeze({
       runnerId: "codex",
       operationId: randomUUID(),
       transactions: Object.freeze([
         Object.freeze({ kind: "native", id: randomUUID() }),
-        ...(localPlan ? [Object.freeze({ kind: "local-only", id: randomUUID() })] : []),
+        Object.freeze({ kind: "native-skills", id: randomUUID() }),
       ]),
     });
     const operation: CodexOperationRecord = { receipt, state: "planned" };
     this.#planOperations.set(plan, operation);
     return plan;
   }
+
+  /** Splits the virtual plan into one transaction per real root: the Codex home and the user's home (skills). */
+  #splitPlan(native: CodexMutationPlan): ReadonlyArray<{ kind: "native-skills" | "native"; plan: CodexMutationPlan }> {
+    const roots = this.#roots;
+    const part = (kind: "native-skills" | "native", root: string, owns: (virtualPath: string) => boolean, strip: (virtualPath: string) => string) => ({
+      kind,
+      plan: {
+        projectRoot: root,
+        mutations: native.mutations.filter((mutation) => owns(mutation.relativePath)).map((mutation) => ({ ...mutation, relativePath: strip(mutation.relativePath) })),
+        expectedFiles: native.expectedFiles.filter((file) => owns(file.relativePath)).map((file) => ({ ...file, relativePath: strip(file.relativePath) })),
+        inventory: native.inventory,
+        diagnostics: [],
+        blocked: native.blocked,
+      } satisfies CodexMutationPlan,
+    });
+    return [
+      part("native-skills", roots.userHome, (path) => !path.startsWith(VIRTUAL_CODEX_PREFIX), (path) => path),
+      part("native", roots.codexHome, (path) => path.startsWith(VIRTUAL_CODEX_PREFIX), (path) => path.slice(VIRTUAL_CODEX_PREFIX.length)),
+    ];
+  }
+
   async applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
     const native = this.#nativePlans.get(input.plan as object);
     const operation = this.#planOperations.get(input.plan as object);
@@ -1618,19 +1519,19 @@ class CodexRunnerAdapter implements RunnerAdapter {
       }
     }
     const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
-    const nativeTransaction = operation.receipt.transactions.find((entry) => entry.kind === "native");
-    const localTransaction = operation.receipt.transactions.find((entry) => entry.kind === "local-only");
-    if (!nativeTransaction) throw new Error("Codex operation is missing its native transaction identity.");
     try {
-      const applied = await applyCodexMutationPlan(native, effects, { journalId: nativeTransaction.id, operationId: operation.receipt.operationId, operationKind: nativeTransaction.kind });
-      const local = this.#localPlans.get(input.plan as object);
+      const appliedJournals: Awaited<ReturnType<typeof applyCodexMutationPlan>>["journal"][] = [];
       try {
-        if (local) {
-          if (!localTransaction) throw new Error("Codex local-only operation is missing its transaction identity.");
-          await applyCodexMutationPlan(local, effects, { journalId: localTransaction.id, operationId: operation.receipt.operationId, operationKind: localTransaction.kind });
+        for (const part of this.#splitPlan(native)) {
+          if (part.plan.mutations.length === 0) continue;
+          const transaction = operation.receipt.transactions.find((entry) => entry.kind === part.kind);
+          if (!transaction) throw new Error("Codex operation is missing a transaction identity.");
+          const applied = await applyCodexMutationPlan(part.plan, effects, { journalId: transaction.id, operationId: operation.receipt.operationId, operationKind: transaction.kind });
+          appliedJournals.push(applied.journal);
         }
       } catch (error) {
-        await rollbackCodexTransaction(applied.journal, effects);
+        // A later root failed after an earlier root committed: restore the earlier root so the install stays all-or-nothing.
+        for (const journal of appliedJournals.reverse()) await rollbackCodexTransaction(journal, effects);
         throw error;
       }
       operation.state = "applied";
@@ -1646,10 +1547,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
       for (const mutation of native.mutations.filter((entry) => entry.operation === "delete")) {
         results.push({ agentId: mutation.relativePath, kind: mutation.ownership.kind, status: "updated" });
       }
-      const changedCount = native.mutations.length + (local?.mutations.length ?? 0);
       return {
         results,
-        changedCount,
+        changedCount: native.mutations.length,
         unchangedCount: results.filter((result) => result.status === "unchanged").length,
         operation: operation.receipt,
       };
@@ -1661,38 +1561,116 @@ class CodexRunnerAdapter implements RunnerAdapter {
   getNextScreen(state: FlowState): NextScreen { return state.currentScreen === "preflight-checking" ? "team-selection" : state.currentScreen; }
   inspectEnvironment(): Promise<unknown> { return this.inspectProject(process.cwd()); }
 
-  async detectDeckInstall(input?: import("@deck/core").RunnerDeckInstallInput): Promise<import("@deck/core").RunnerDeckInstallStatus> {
-    const projectRoot = input?.projectRoot ?? process.cwd();
-    const manifestPath = join(projectRoot, ".codex", "deck-manifest.json");
+  async detectDeckInstall(_input?: import("@deck/core").RunnerDeckInstallInput): Promise<import("@deck/core").RunnerDeckInstallStatus> {
+    const roots = this.#roots;
+    const manifestPath = mapVirtualPath(roots, CODEX_MANIFEST_PATH).absolute;
     const diagnostics: string[] = [];
     const managedPaths: string[] = [];
-    if (inspectSafeProjectPath(projectRoot, manifestPath)?.isFile()) {
+    if (inspectSafeProjectPath(roots.codexHome, manifestPath)?.isFile()) {
       try {
         const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { version?: unknown; files?: unknown };
         if (manifest.version !== 1 || !manifest.files || typeof manifest.files !== "object" || Array.isArray(manifest.files)) throw new Error("invalid manifest");
         managedPaths.push(manifestPath);
-        for (const relativePath of Object.keys(manifest.files)) {
-          const absolute = resolve(projectRoot, relativePath);
-          if (inspectSafeProjectPath(projectRoot, absolute)?.isFile()) managedPaths.push(absolute);
-          else if (existsSync(absolute)) diagnostics.push(`Codex ownership manifest contains an unsafe managed path: ${relativePath}.`);
+        for (const virtualPath of Object.keys(manifest.files)) {
+          if ((!virtualPath.startsWith(".codex/") && !virtualPath.startsWith(".agents/skills/")) || virtualPath.split("/").includes("..")) {
+            diagnostics.push(`Codex ownership manifest contains an unsafe managed path: ${virtualPath}.`);
+            continue;
+          }
+          const mapped = mapVirtualPath(roots, virtualPath);
+          if (inspectSafeProjectPath(mapped.root, mapped.absolute)?.isFile()) managedPaths.push(mapped.absolute);
+          else if (existsSync(mapped.absolute)) diagnostics.push(`Codex ownership manifest contains an unsafe managed path: ${virtualPath}.`);
         }
       } catch {
         diagnostics.push("Codex Deck ownership manifest is malformed; sync is blocked until it is repaired.");
         return { installed: true, managedPaths: [manifestPath], diagnostics };
       }
-    } else {
-      const agentsPath = join(projectRoot, "AGENTS.md");
-      if (inspectSafeProjectPath(projectRoot, agentsPath)?.isFile()) {
-        const agents = readFileSync(agentsPath, "utf8");
-        const start = "<!-- deck:developer-team:start -->";
-        const end = "<!-- deck:developer-team:end -->";
-        if (agents.split(start).length - 1 === 1 && agents.split(end).length - 1 === 1 && agents.indexOf(start) < agents.indexOf(end)) {
-          managedPaths.push(agentsPath);
-          diagnostics.push("Legacy Deck AGENTS.md markers require ownership-verified remediation before any write.");
+    }
+    return { installed: managedPaths.length > 0, managedPaths: [...new Set(managedPaths)].sort(), diagnostics };
+  }
+
+  /**
+   * Finds a pre-global, per-project Deck install through its old ownership manifest. Read-only: files whose bytes still
+   * match the recorded hash are "unmodified" (safe to remove on request); anything else is reported and preserved.
+   */
+  #detectLegacyProject(projectRoot: string): { found: boolean; manifestPath: string; unmodified: string[]; modified: string[] } {
+    const result = { found: false, manifestPath: join(projectRoot, ".codex", "deck-manifest.json"), unmodified: [] as string[], modified: [] as string[] };
+    try {
+      if (!inspectSafeProjectPath(projectRoot, result.manifestPath)?.isFile()) return result;
+      const manifest = JSON.parse(readFileSync(result.manifestPath, "utf8")) as { version?: unknown; files?: Record<string, unknown> };
+      if (manifest.version !== 1 || !manifest.files || typeof manifest.files !== "object") return result;
+      result.found = true;
+      for (const [relativePath, expectedHash] of Object.entries(manifest.files)) {
+        if (relativePath === "AGENTS.md" || typeof expectedHash !== "string" || relativePath.startsWith("/") || relativePath.split("/").includes("..")) continue;
+        const absolute = join(projectRoot, relativePath);
+        const stat = inspectSafeProjectPath(projectRoot, absolute);
+        if (!stat?.isFile()) continue;
+        (sha256(readFileSync(absolute, "utf8")) === expectedHash ? result.unmodified : result.modified).push(relativePath);
+      }
+    } catch { /* an unreadable legacy manifest is simply not reported as an install */ }
+    return result;
+  }
+
+  /**
+   * Opt-in removal of a legacy per-project Deck install. Only files whose bytes still equal the legacy manifest hash are
+   * deleted (transactionally, with rollback); project config keeps everything outside Deck's marked blocks; modified or
+   * unknown files are never touched. The caller must have obtained explicit consent before calling this.
+   */
+  async cleanupLegacyInstall(projectRoot: string): Promise<{ removed: readonly string[]; preserved: readonly string[]; diagnostics: readonly string[] }> {
+    const legacy = this.#detectLegacyProject(projectRoot);
+    if (!legacy.found) return { removed: [], preserved: [], diagnostics: ["No legacy per-project Deck install was found."] };
+    const mutations: CodexMutation[] = [];
+    const preserved = [...legacy.modified];
+    const diagnostics: string[] = [];
+    const manifest = JSON.parse(readFileSync(legacy.manifestPath, "utf8")) as { files: Record<string, string> };
+    for (const relativePath of legacy.unmodified) {
+      if (relativePath === ".codex/config.toml") continue; // handled below: only Deck's marker-owned blocks leave the file
+      const absolute = join(projectRoot, relativePath);
+      const content = readFileSync(absolute, "utf8");
+      const mode = lstatSync(absolute).mode & 0o777;
+      mutations.push({ operation: "delete", relativePath, expected: { kind: "file", hash: sha256(content), mode }, postimageHash: sha256(""), postimageMode: mode, ownership: { kind: "deck-file", marker: `legacy:${relativePath}` }, rollback: "restore", content: "" });
+    }
+    // A project config keeps everything outside Deck's marker-owned MCP and hook blocks, whether or not the user edited it.
+    const configIndex = preserved.indexOf(".codex/config.toml");
+    if (configIndex >= 0) preserved.splice(configIndex, 1);
+    const configPath = join(projectRoot, ".codex", "config.toml");
+    if (inspectSafeProjectPath(projectRoot, configPath)?.isFile() && (legacy.unmodified.includes(".codex/config.toml") || legacy.modified.includes(".codex/config.toml"))) {
+      const source = readFileSync(configPath, "utf8");
+      const withoutHooks = mergeCodexOwnedHooks(source, []);
+      const withoutMcp = withoutHooks.status === "blocked" ? undefined : mergeCodexMcpServers(withoutHooks.content, []);
+      if (!withoutMcp || withoutMcp.status === "blocked") {
+        preserved.push(".codex/config.toml");
+        diagnostics.push("The project's .codex/config.toml could not be edited safely and was kept; remove Deck's marked blocks yourself.");
+      } else if (withoutMcp.content !== source) {
+        const mode = lstatSync(configPath).mode & 0o777;
+        const remaining = withoutMcp.content.trim();
+        if (remaining === "" || remaining === "[features]\nmulti_agent = true") {
+          mutations.push({ operation: "delete", relativePath: ".codex/config.toml", expected: { kind: "file", hash: sha256(source), mode }, postimageHash: sha256(""), postimageMode: mode, ownership: { kind: "toml-key", marker: "legacy:deck-only-config" }, rollback: "restore", content: "" });
+        } else {
+          mutations.push({ relativePath: ".codex/config.toml", expected: { kind: "file", hash: sha256(source), mode }, postimageHash: sha256(withoutMcp.content), postimageMode: mode, ownership: { kind: "toml-key", marker: "legacy:deck-marked-blocks" }, rollback: "restore", content: withoutMcp.content });
+          diagnostics.push("Removed only Deck's marker-owned blocks from the project's .codex/config.toml; the rest of the file is yours and was kept.");
         }
       }
     }
-    return { installed: managedPaths.length > 0, managedPaths: [...new Set(managedPaths)].sort(), diagnostics };
+    mutations.push(...(() => {
+      const absolute = legacy.manifestPath;
+      const content = readFileSync(absolute, "utf8");
+      const mode = lstatSync(absolute).mode & 0o777;
+      return [{ operation: "delete" as const, relativePath: ".codex/deck-manifest.json", expected: { kind: "file" as const, hash: sha256(content), mode }, postimageHash: sha256(""), postimageMode: mode, ownership: { kind: "deck-manifest" as const, marker: "legacy:manifest" }, rollback: "restore" as const, content: "" }];
+    })());
+    void manifest;
+    if (mutations.length > 0) {
+      const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
+      await applyCodexMutationPlan({
+        projectRoot,
+        mutations,
+        expectedFiles: [],
+        inventory: { agentRoleIds: [], agentBoundSkillIds: [], externalStandaloneSkillIds: [], bootstrapSkillIds: [] },
+        diagnostics: [],
+        blocked: false,
+      }, effects, { operationKind: "legacy-cleanup" });
+    }
+    if (preserved.length > 0) diagnostics.push(`Kept ${preserved.length} file(s) that no longer match Deck's recorded bytes: ${preserved.join(", ")}. Review them yourself.`);
+    return { removed: mutations.filter((mutation) => mutation.operation === "delete").map((mutation) => mutation.relativePath), preserved, diagnostics };
   }
 
   async diagnoseProject(projectRoot: string, deckConfig: NormalizedDeckConfig): Promise<ReadonlyArray<{ category: string; status: "ok" | "warning" | "error"; message: string; suggestion?: string }>> {
@@ -1710,7 +1688,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       freshReadiness,
       freshProxy,
     );
-    const roleAssignmentRead = readCodexRoleAssignments(projectRoot);
+    const roleAssignmentRead = readCodexRoleAssignments(this.#roots.codexHome);
     const effects = this.#fileEffects ?? createNodeCodexFileEffects({ journalRoot: this.#journalRoot });
     const journals = await effects.listJournals();
     const checks: Array<{ category: string; status: "ok" | "warning" | "error"; message: string; suggestion?: string }> = [];
@@ -1803,7 +1781,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const problems: string[] = [];
     const serenaReadiness = this.#serenaReadinessByPlan.get(plan as object);
     for (const expected of native.expectedFiles) {
-      const path = join(native.projectRoot, expected.relativePath);
+      const path = mapVirtualPath(this.#roots, expected.relativePath).absolute;
       if (!existsSync(path)) {
         problems.push(`Missing: ${expected.relativePath}`);
         continue;
@@ -1825,16 +1803,10 @@ class CodexRunnerAdapter implements RunnerAdapter {
         problems.push(`Invalid skill descriptor: ${expected.relativePath}`);
       }
     }
-    for (const release of native.ownershipReleaseChecks ?? []) {
-      if (!matchesAgentsPreimage(inspectAgentsPlanFile(native.projectRoot), release.postcondition)) {
-        problems.push(`Ownership release post-state drifted: ${release.relativePath}`);
-      }
-    }
     if (serenaReadiness) {
       const config = native.expectedFiles.find((expected) => expected.kind === "config");
-      const configured = config && existsSync(join(native.projectRoot, config.relativePath))
-        ? isCodexSerenaMcpConfigured(readFileSync(join(native.projectRoot, config.relativePath), "utf8"))
-        : false;
+      const configPath = config ? mapVirtualPath(this.#roots, config.relativePath).absolute : undefined;
+      const configured = configPath && existsSync(configPath) ? isCodexSerenaMcpConfigured(readFileSync(configPath, "utf8")) : false;
       if (!configured) problems.push("Serena MCP launcher configuration is missing or drifted.");
       try {
         const refreshed = await serenaReadiness.revalidate(serenaReadiness.evidence);
@@ -1845,35 +1817,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
         problems.push("Serena launcher reachability could not be verified after configuration.");
       }
     }
-    const local = this.#localPlans.get(plan as object);
-    if (local) {
-      for (const expected of local.expectedFiles) {
-        const path = join(local.projectRoot, expected.relativePath);
-        if (!existsSync(path)) {
-          problems.push(`Missing or drifted: git-info-exclude:${path}`);
-          continue;
-        }
-        const stat = lstatSync(path);
-        if (!stat.isFile() || sha256(readFileSync(path, "utf8")) !== expected.hash || (stat.mode & 0o777) !== expected.mode) {
-          problems.push(`Missing or drifted: git-info-exclude:${path}`);
-        }
-      }
-    }
-    const verificationEvidence = problems.length === 0
-      && native.expectedFiles.some((expected) => expected.kind === "config" && isCodexSupermemoryMcpConfigured(expected.content))
-      ? [{ id: "mcp:supermemory" }]
-      : [];
-    const postInstallFollowUps = verificationEvidence.length > 0
-      ? [{
-          id: "supermemory-user-authorization",
-          message: "Run codex mcp login supermemory when you are ready to authorize Supermemory.",
-        }]
-      : [];
     return {
       valid: problems.length === 0,
       diagnostics: problems,
-      ...(verificationEvidence.length > 0 ? { verificationEvidence } : {}),
-      ...(postInstallFollowUps.length > 0 ? { postInstallFollowUps } : {}),
     };
   }
   resolveThinking(modelId: string, existingAssignment?: string): string | undefined {

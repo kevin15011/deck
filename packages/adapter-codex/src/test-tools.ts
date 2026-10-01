@@ -58,3 +58,17 @@ export function readyTestTools(overrides: Partial<CodexToolOptions> & { supermem
     ...rest,
   };
 }
+
+/**
+ * Test-only install layout that reproduces the former per-project paths (`<root>/.codex/**`, `<root>/.agents/skills/**`)
+ * under a throwaway directory, so assertions can read files where they used to be. Production never does this: the
+ * real roots are CODEX_HOME (default ~/.codex) and the user's home.
+ */
+export function layout(root: string): { codexHome: string; userHome: string } {
+  return { codexHome: join(root, ".codex"), userHome: root };
+}
+
+/** A throwaway install layout for tests that never read the written files back. */
+export function freshLayout(): { codexHome: string; userHome: string } {
+  return layout(realpathSync(mkdtempSync(join(tmpdir(), "deck-codex-layout-"))));
+}

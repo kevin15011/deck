@@ -299,6 +299,8 @@ export type RunRunnerLaunchInput = {
   dryRun?: boolean;
   yes?: boolean;
   localOnly?: boolean;
+  /** Explicit consent to remove a superseded per-project Deck install (unmodified Deck-owned files only). */
+  cleanupLegacy?: boolean;
   cliMemoryProvider?: string;
   interactive: boolean;
   confirm?: (summary: string) => Promise<boolean>;
@@ -429,6 +431,22 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     if (inspection.state === "unsupported") return { status: "unsupported", code: "runner-version-unsupported", message: inspection.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: inspection.diagnostics };
   }
 
+  if (input.cleanupLegacy && input.adapter.cleanupLegacyInstall) {
+    if (input.dryRun) {
+      await input.presentPreview("Legacy cleanup requested: a dry run removes nothing. Rerun without --dry-run to remove the unmodified Deck-owned per-project files.");
+    } else {
+      if (!input.yes && (!input.interactive || !input.confirm || !(await input.confirm("Remove the previous per-project Deck install (unmodified Deck-owned files only)? [y/N]")))) {
+        return { status: "blocked", message: "Legacy cleanup needs --yes or an interactive confirmation; nothing was removed." };
+      }
+      try {
+        const cleaned = await input.adapter.cleanupLegacyInstall(input.launch.projectRoot);
+        await input.presentPreview([`Legacy cleanup removed ${cleaned.removed.length} file(s).`, ...cleaned.diagnostics.map((message) => `! ${message}`)].join("\n"));
+      } catch (error) {
+        return { status: "blocked", message: `Legacy cleanup failed and was rolled back: ${error instanceof Error ? error.message : "unknown error"}` };
+      }
+    }
+  }
+
   const codexAssignments = input.adapter.runnerId === "codex"
     ? {
         modelAssignments: input.adapter.readModelAssignments(input.launch.projectRoot),
@@ -489,8 +507,8 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   if (safeMutations.length > 0 && !input.yes) {
     if (!input.interactive || !input.confirm) return { status: "blocked", message: "Mutation requires --yes in non-interactive mode." };
     const confirmationQuestion = input.installOnly
-      ? "Apply these project changes? [y/N]"
-      : `Apply these project changes and launch ${input.adapter.displayName}? [y/N]`;
+      ? "Apply these changes? [y/N]"
+      : `Apply these changes and launch ${input.adapter.displayName}? [y/N]`;
     if (!(await input.confirm(confirmationQuestion))) return { status: "blocked", message: "Mutation was not confirmed." };
   }
   if (launch?.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };

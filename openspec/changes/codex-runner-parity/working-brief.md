@@ -33,6 +33,14 @@ A user can run `bun run canary:install`, complete Review & Install for Codex in 
 
 See `apply-progress.md`.
 
+## Global install (user decision)
+
+- Roots: Codex home (`CODEX_HOME`, default `~/.codex`) for `agents/`, `config.toml` blocks and `deck/{manifest.json,hooks/*}`; user home for `~/.agents/skills/**`. The planner keeps a virtual `.codex/**` / `.agents/skills/**` layout; the adapter maps it to the two roots and applies one transaction per root (skills first, rolled back if the Codex-home transaction fails).
+- Ownership: manifest hashes as before; a foreign file or skill with a Deck name blocks the plan; `hooks.json`, `AGENTS.md`, foreign agents and MCP servers are never edited; duplicate detection compares only against the user's own entries in the global config.
+- Verified on codex 0.159.3: `~/.agents/skills` and `$CODEX_HOME/skills` both load as user skills; global inline hooks (source `user`, untrusted until reviewed) and global MCP servers load in any project. Global agents rely on the documented `$CODEX_HOME/agents` location (not observable through the app-server).
+- Migration: legacy per-project installs are detected through `.codex/deck-manifest.json`, reported on each plan, and removed only by `--cleanup-legacy` (unmodified Deck files only, transactional; config.toml loses only Deck's marker blocks).
+- Not done: `sandbox_mode = "read-only"` on Investigate/Quality (could not verify it is honored under the sandbox bypass); documented as a limit.
+
 ## Follow-up findings (real-install validation)
 
 - Web Search: credential via `webSearchCredential` (env, then Deck-owned shell profile) -> child env through binding `deck-codex-launch-v1` (Tavily + Supermemory keys only); MCP command pinned to the resolved `npx`; `env_vars` forwarding and server start verified on codex 0.159.3.

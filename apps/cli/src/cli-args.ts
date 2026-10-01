@@ -90,6 +90,7 @@ export type ParsedArgs =
       installOnly?: boolean;
       dryRun?: boolean;
       localOnly?: boolean;
+      cleanupLegacy?: boolean;
       yes?: boolean;
       memoryProvider?: "supermemory" | "none";
     }
@@ -133,7 +134,7 @@ export function serializeCodexExecPrompt(tokens: readonly string[]): { ok: true;
  */
 function parseCodexArgs(rest: string[]): ParsedArgs {
   if (rest[0] !== "developer") {
-    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--local-only] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck never enables project trust; Supermemory uses the pinned official Codex plugin hooks with a credential passed to the Codex process only, while protected execution controls remain route-limited." };
+    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--cleanup-legacy] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck installs globally (your Codex home and ~/.agents/skills) and writes nothing into projects; --local-only is accepted but has no effect; Supermemory uses the pinned official Codex plugin hooks with a credential passed to the Codex process only, while protected execution controls remain route-limited." };
   }
 
   const tokens = rest.slice(1);
@@ -141,6 +142,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
   const deckFlagRegion = separatorIndex >= 0 ? tokens.slice(0, separatorIndex) : tokens;
   const dryRun = deckFlagRegion.includes("--dry-run");
   const localOnly = deckFlagRegion.includes("--local-only");
+  const cleanupLegacy = deckFlagRegion.includes("--cleanup-legacy");
   const yes = deckFlagRegion.includes("--yes");
   const installOnly = deckFlagRegion.includes("--install-only");
   let memoryProvider: "supermemory" | "none" | undefined;
@@ -152,7 +154,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
       memoryProvider = value;
     }
   }
-  const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only"]);
+  const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only", "--cleanup-legacy"]);
   const filtered = [
     ...deckFlagRegion.filter((token) => !deckFlags.has(token) && !token.startsWith("--memory=")),
     ...(separatorIndex >= 0 ? ["--", ...tokens.slice(separatorIndex + 1)] : []),
@@ -189,6 +191,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
     ...(installOnly ? { installOnly: true } : {}),
     ...(dryRun ? { dryRun: true } : {}),
     ...(localOnly ? { localOnly: true } : {}),
+    ...(cleanupLegacy ? { cleanupLegacy: true } : {}),
     ...(yes ? { yes: true } : {}),
     ...(memoryProvider ? { memoryProvider } : {}),
   };

@@ -13,7 +13,7 @@ import {
   SERENA_PROXY_PROBE_TIMEOUT_MS,
 } from "./runner-adapter";
 import { createNodeCodexFileEffects } from "./node-effects";
-import { readyTestTools, testTools } from "./test-tools";
+import { freshLayout, layout, readyTestTools, testTools } from "./test-tools";
 import { CURRENT_CODEX_MODELS_FIXTURE } from "./__fixtures__/codex/models";
 import { parseCodexModels } from "./codex-model-discovery";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
@@ -236,7 +236,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-parity-project-"));
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-parity-journal-"));
     try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: {
           probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex\nexec\nresume", execHelp: "Usage: codex exec", resumeHelp: "Usage: codex resume [SESSION_ID]" }),
@@ -306,7 +306,7 @@ describe("Codex RunnerAdapter production composition", () => {
     }));
   });
   test("gates launch modes from inspected installed Codex help evidence", async () => {
-    const adapter = createCodexRunnerAdapter({ tools: testTools(),
+    const adapter = createCodexRunnerAdapter({ tools: testTools(), ...freshLayout(),
       preflight: {
         probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex [OPTIONS]\nexec\nresume", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID]" }),
         inspectTrust: async () => "trusted",
@@ -323,7 +323,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-project-"));
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-journal-"));
     try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot), journalRoot });
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       expect(plan.files.length).toBeGreaterThan(40);
       expect(plan.diagnostics).toContainEqual(expect.stringContaining("renameat2/openat"));
@@ -346,111 +346,6 @@ describe("Codex RunnerAdapter production composition", () => {
     }
   });
 
-  test("does not treat an ordinary unmarked AGENTS.md as Codex installation evidence", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-detection-"));
-    try {
-      await writeFile(join(projectRoot, "AGENTS.md"), "# Repository guide\n", "utf8");
-      const adapter = createCodexRunnerAdapter({ tools: testTools() });
-      expect(await adapter.detectDeckInstall?.({ projectRoot })).toMatchObject({ installed: false, managedPaths: [] });
-
-      await writeFile(join(projectRoot, "AGENTS.md"), "<!-- deck:developer-team:start -->\nlegacy\n<!-- deck:developer-team:end -->\n", "utf8");
-      expect(await adapter.detectDeckInstall?.({ projectRoot })).toMatchObject({ installed: true, managedPaths: [join(projectRoot, "AGENTS.md")] });
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  test("blocks symlink and directory AGENTS.md targets during plan review", async () => {
-    const symlinkRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-symlink-"));
-    const directoryRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-directory-"));
-    try {
-      await writeFile(join(symlinkRoot, "guide-target"), "user guide", "utf8");
-      await symlink(join(symlinkRoot, "guide-target"), join(symlinkRoot, "AGENTS.md"));
-      await mkdir(join(directoryRoot, "AGENTS.md"));
-      const adapter = createCodexRunnerAdapter({ tools: testTools() });
-
-      for (const projectRoot of [symlinkRoot, directoryRoot]) {
-        const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
-        expect(plan.blocked).toBe(true);
-        expect(plan.diagnostics).toContainEqual(expect.stringContaining("AGENTS.md is unsafe"));
-        expect(plan.ownershipReleases ?? []).not.toContain("AGENTS.md");
-      }
-    } finally {
-      await rm(symlinkRoot, { recursive: true, force: true });
-      await rm(directoryRoot, { recursive: true, force: true });
-    }
-  });
-
-  test("rejects ownership-only release when a confirmed-absent AGENTS.md appears before apply", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-apply-race-"));
-    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-apply-race-journal-"));
-    try {
-      const owned = "retired legacy bytes";
-      await mkdir(join(projectRoot, ".codex"), { recursive: true });
-      await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(owned).digest("hex") } })}\n`);
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
-      await writeFile(join(projectRoot, "AGENTS.md"), "# Newly created guide\n", "utf8");
-
-      await expect(adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan })).rejects.toThrow("ownership release precondition");
-      expect(await Bun.file(join(projectRoot, ".codex", "agents", "deck-lead.toml")).exists()).toBe(false);
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-      await rm(journalRoot, { recursive: true, force: true });
-    }
-  });
-
-  test("fails verification when an ownership-only AGENTS.md release post-state drifts", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-verify-race-"));
-    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-verify-race-journal-"));
-    try {
-      const guide = "# Repository guide\n";
-      await mkdir(join(projectRoot, ".codex"), { recursive: true });
-      await writeFile(join(projectRoot, "AGENTS.md"), guide, "utf8");
-      await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(guide).digest("hex") } })}\n`);
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
-      await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
-      await writeFile(join(projectRoot, "AGENTS.md"), "# Changed after apply\n", "utf8");
-
-      await expect(adapter.verifyDeveloperTeamInstall(plan)).resolves.toMatchObject({
-        valid: false,
-        diagnostics: [expect.stringContaining("Ownership release post-state drifted: AGENTS.md")],
-      });
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-      await rm(journalRoot, { recursive: true, force: true });
-    }
-  });
-
-  test("fails closed when AGENTS.md changes outside the legacy markers during manifest-owned discovery", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-discovery-race-"));
-    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-agents-discovery-race-journal-"));
-    try {
-      const reviewed = "before\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nafter\n";
-      const changed = "edited before\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nafter\n";
-      await mkdir(join(projectRoot, ".codex"), { recursive: true });
-      await writeFile(join(projectRoot, "AGENTS.md"), reviewed, "utf8");
-      await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(reviewed).digest("hex") } })}\n`);
-      let changedDuringDiscovery = false;
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
-        journalRoot,
-        onAgentsFileSnapshot: () => {
-          changedDuringDiscovery = true;
-          writeFileSync(join(projectRoot, "AGENTS.md"), changed, "utf8");
-        },
-      } as Parameters<typeof createCodexRunnerAdapter>[0] & { onAgentsFileSnapshot: () => void });
-
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
-      expect(changedDuringDiscovery).toBe(true);
-      await expect(adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan })).rejects.toThrow("preimage");
-      expect(await readFile(join(projectRoot, "AGENTS.md"), "utf8")).toBe(changed);
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-      await rm(journalRoot, { recursive: true, force: true });
-    }
-  });
-
   test("plans, applies, and re-inspects an ordinary missing Web Search MCP entry without treating it as a collision", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-web-search-project-"));
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-web-search-journal-"));
@@ -465,7 +360,7 @@ describe("Codex RunnerAdapter production composition", () => {
     process.env.PATH = `${executableRoot}${previousPath ? `:${previousPath}` : ""}`;
     try {
       const deckConfig = validateDeckConfig({ webSearch: { enabled: true, provider: "tavily" } });
-      const adapter = createCodexRunnerAdapter({ tools: testTools({ resolveCommand: (name) => name === "npx" ? join(executableRoot, "npx") : undefined }),
+      const adapter = createCodexRunnerAdapter({ tools: testTools({ resolveCommand: (name) => name === "npx" ? join(executableRoot, "npx") : undefined }), ...layout(projectRoot),
         journalRoot,
         webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
         preflight: {
@@ -552,31 +447,32 @@ describe("Codex RunnerAdapter production composition", () => {
     try {
       const secret = "outside-project";
       await writeFile(join(externalRoot, "secret.txt"), secret);
-      await mkdir(join(projectRoot, ".codex"), { recursive: true });
-      await symlink(externalRoot, join(projectRoot, "escape"), "dir");
-      await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({
+      await mkdir(join(projectRoot, ".codex", "deck"), { recursive: true });
+      await mkdir(join(projectRoot, ".agents", "skills"), { recursive: true });
+      await symlink(externalRoot, join(projectRoot, ".agents", "skills", "escape"), "dir");
+      await writeFile(join(projectRoot, ".codex", "deck", "manifest.json"), `${JSON.stringify({
         version: 1,
-        files: { "escape/secret.txt": createHash("sha256").update(secret).digest("hex") },
+        files: { ".agents/skills/escape/secret.txt": createHash("sha256").update(secret).digest("hex") },
       })}\n`);
 
-      const adapter = createCodexRunnerAdapter({ tools: testTools() });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot) });
       const detected = await adapter.detectDeckInstall?.({ projectRoot });
-      expect(detected?.managedPaths).toEqual([join(projectRoot, ".codex", "deck-manifest.json")]);
+      expect(detected?.managedPaths).toEqual([join(projectRoot, ".codex", "deck", "manifest.json")]);
       expect(detected?.diagnostics).toContainEqual(expect.stringContaining("unsafe managed path"));
 
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
-      expect(plan.files).not.toContainEqual(expect.objectContaining({ path: "escape/secret.txt" }));
+      expect(plan.files).not.toContainEqual(expect.objectContaining({ path: ".agents/skills/escape/secret.txt" }));
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(externalRoot, { recursive: true, force: true });
     }
   });
 
-  test("allows plain launch after fresh materialization when Codex trust is indeterminate", async () => {
+  test("launches after a global install without any project-trust warning because Deck writes nothing into the project", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-untrusted-project-"));
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-untrusted-journal-"));
     try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: {
           probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
@@ -593,7 +489,7 @@ describe("Codex RunnerAdapter production composition", () => {
 
       const launch = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });
       expect(launch?.status).toBe("ready");
-      expect(launch?.diagnostics).toContainEqual(expect.objectContaining({ code: "materialized-but-inactive", severity: "warning" }));
+      expect(launch?.diagnostics).not.toContainEqual(expect.objectContaining({ code: "materialized-but-inactive" }));
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
@@ -604,7 +500,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-unbound-project-"));
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-unbound-journal-"));
     try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: {
           probe: async () => ({ found: true, version: "0.146.1", help: "Usage: codex [OPTIONS]\nexec\nresume", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
@@ -614,7 +510,7 @@ describe("Codex RunnerAdapter production composition", () => {
       });
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
-      expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(true);
+      expect(await Bun.file(join(projectRoot, ".codex", "deck", "hooks", "developer-team-execution.js")).exists()).toBe(true);
       expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).toContain("deck-codex-hook:memory-bridge:start");
       expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).not.toContain("dangerously-bypass-approvals-and-sandbox");
 
@@ -642,7 +538,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(publicApi).not.toHaveProperty("createCodexTrustedHookHostV1");
       expect(publicApi).not.toHaveProperty("createCodexDeveloperTeamExecutionBridgeV1");
       expect(publicApi).not.toHaveProperty("mergeCodexTrustedHookConfig");
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: {
           probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
@@ -660,7 +556,7 @@ describe("Codex RunnerAdapter production composition", () => {
       });
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
-      expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(true);
+      expect(await Bun.file(join(projectRoot, ".codex", "deck", "hooks", "developer-team-execution.js")).exists()).toBe(true);
 
       const interactive = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });
       expect(interactive).toMatchObject({ status: "ready", plan: { executionClass: "static-compatible" } });
@@ -677,7 +573,7 @@ describe("Codex RunnerAdapter production composition", () => {
     try {
       const parsed = parseCodexModels(CURRENT_CODEX_MODELS_FIXTURE);
       if (!parsed.ok) throw new Error("expected Codex fixture to parse");
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         inventoryDiscovery: async () => ({ state: "ready", source: "live", discoveredAt: 1, fingerprint: "current-codex", inventory: parsed.inventory }),
       });
@@ -722,7 +618,7 @@ describe("Codex RunnerAdapter production composition", () => {
     try {
       const parsed = parseCodexModels(CURRENT_CODEX_MODELS_FIXTURE);
       if (!parsed.ok) throw new Error("expected Codex fixture to parse");
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         inventoryDiscovery: async () => ({ state: "ready", source: "live", discoveredAt: 1, fingerprint: "current-codex", inventory: parsed.inventory }),
       });
@@ -765,11 +661,10 @@ describe("Codex RunnerAdapter production composition", () => {
       await writeFile(join(agents, "deck-architect.toml"), "model = \"unterminated\n");
       await writeFile(join(agents, "deck-apply-fast.toml"), `model = "${"x".repeat(512 * 1024)}"\n`);
       await writeFile(join(agents, "deck-unrelated.toml"), 'model = "ignored"\nmodel_reasoning_effort = "ignored"\n');
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot), journalRoot });
 
       expect(adapter.readModelAssignments(projectRoot)).toEqual({ "deck-lead": "openai-codex/gpt-5.6-sol" });
       expect(adapter.readThinkingAssignments(projectRoot)).toEqual({});
-      expect(adapter.readModelAssignments("")).toEqual({});
 
       const diagnostics = await adapter.diagnoseProject?.(projectRoot, getDefaultDeckConfig()) ?? [];
       expect(diagnostics).toContainEqual(expect.objectContaining({
@@ -794,7 +689,7 @@ describe("Codex RunnerAdapter production composition", () => {
         await mkdir(agents, { recursive: true });
         await writeFile(join(agents, "deck-lead.toml"), 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "high"\n');
       };
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot), journalRoot });
 
       await writeRole(projectRoot);
       expect(adapter.readModelAssignments(projectRoot)).toEqual({ "deck-lead": "openai-codex/gpt-5.6-sol" });
@@ -845,7 +740,7 @@ describe("Codex RunnerAdapter production composition", () => {
       await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "high"\n');
       const parsed = parseCodexModels(CURRENT_CODEX_MODELS_FIXTURE);
       if (!parsed.ok) throw new Error("expected Codex fixture to parse");
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: {
           probe: async () => ({ found: true, version: "0.146.1", help: "Usage: codex [OPTIONS]\nexec\nresume", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
@@ -894,7 +789,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-unsafe-root-assignment-journal-"));
     try {
       await mkdir(join(projectRoot, ".codex", "agents"), { recursive: true });
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: {
           probe: async () => ({ found: true, version: "0.146.1", help: "Usage: codex [OPTIONS]\nexec\nresume", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
@@ -935,7 +830,7 @@ describe("Codex RunnerAdapter production composition", () => {
   test("exposes exact current Codex reasoning levels and the runner's default", async () => {
     const parsed = parseCodexModels(CURRENT_CODEX_MODELS_FIXTURE);
     if (!parsed.ok) throw new Error("expected Codex fixture to parse");
-    const adapter = createCodexRunnerAdapter({ tools: testTools(),
+    const adapter = createCodexRunnerAdapter({ tools: testTools(), ...freshLayout(),
       inventoryDiscovery: async () => ({ state: "ready", source: "live", discoveredAt: 1, fingerprint: "current-codex", inventory: parsed.inventory }),
     });
     const inventory = await adapter.getModelInventory?.({ projectRoot: "/project", mode: "prefer-cache" });
@@ -964,7 +859,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-readiness-journal-"));
     try {
       await writeGitOrigin(projectRoot);
-      const adapter = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true }),
+      const adapter = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true }), ...layout(projectRoot),
         journalRoot,
         preflight: hermeticCodexPreflight(),
         mcpCapabilityIds: ["context7"],
@@ -1037,7 +932,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const executable = TEST_SERENA_EXECUTABLE;
     let launcherReachable = true;
     try {
-      const ready = createCodexRunnerAdapter({ tools: testTools(),
+      const ready = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: hermeticCodexPreflight(),
         serenaReadinessResolver: async () => {
@@ -1084,7 +979,7 @@ describe("Codex RunnerAdapter production composition", () => {
       try {
         await mkdir(join(legacyProjectRoot, ".codex"), { recursive: true });
         await writeFile(join(legacyProjectRoot, ".codex", "config.toml"), '# deck-codex-mcp:serena\n[mcp_servers.serena]\ncommand = "serena"\nargs = ["start-mcp-server", "--project-from-cwd"]\n');
-        const legacy = createCodexRunnerAdapter({ tools: testTools(),
+        const legacy = createCodexRunnerAdapter({ tools: testTools(), ...layout(legacyProjectRoot),
           journalRoot,
           serenaReadinessResolver: async () => readySerenaReadiness(),
            serenaProxyProbe: readySerenaProxy,
@@ -1098,7 +993,7 @@ describe("Codex RunnerAdapter production composition", () => {
 
       const preApplyProjectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-preapply-"));
       try {
-        const staleBeforeApply = createCodexRunnerAdapter({ tools: testTools(),
+        const staleBeforeApply = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
           journalRoot,
           serenaReadinessResolver: async () => {
             const readiness = readySerenaReadiness();
@@ -1118,7 +1013,7 @@ describe("Codex RunnerAdapter production composition", () => {
         await rm(preApplyProjectRoot, { recursive: true, force: true });
       }
 
-      const missing = createCodexRunnerAdapter({ tools: testTools(),
+      const missing = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         serenaReadinessResolver: async () => ({ state: "missing" as const, diagnostic: { code: "serena-not-ready", message: "Serena is unavailable." } }),
       } as never);
@@ -1174,7 +1069,7 @@ describe("Codex RunnerAdapter production composition", () => {
   test("blocks full Serena composition when the effective Deck executable lacks the proxy route", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-proxy-"));
     try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot: join(projectRoot, "journals"),
         serenaReadinessResolver: async () => readySerenaReadiness(),
         serenaProxyProbe: async () => ({
@@ -1202,7 +1097,7 @@ describe("Codex RunnerAdapter production composition", () => {
 
   test("uses the authorized Core Serena bootstrap and reuses ready evidence without a reinstall", async () => {
     let bootstrapCalls = 0;
-    const adapter = createCodexRunnerAdapter({ tools: testTools(),
+    const adapter = createCodexRunnerAdapter({ tools: testTools(), ...freshLayout(),
       serenaReadinessResolver: async () => readySerenaReadiness(),
       serenaProxyProbe: readySerenaProxy,
       serenaBootstrap: async (request: import("@deck/core").SerenaBootstrapRequest) => {
@@ -1274,7 +1169,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const probe = async () => ({ found: true as const, version: "0.146.1", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" });
     try {
       await writeGitOrigin(projectRoot);
-      const ready = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true }),
+      const ready = createCodexRunnerAdapter({ tools: readyTestTools({ supermemory: true }), ...layout(projectRoot),
         journalRoot,
         preflight: {
           probe,
@@ -1301,7 +1196,7 @@ describe("Codex RunnerAdapter production composition", () => {
         expect(healthy).toContainEqual(expect.objectContaining({ category: `Execution route: ${mode}`, status: "warning", message: expect.stringContaining("static-compatible") }));
       }
 
-      const unauthorized = createCodexRunnerAdapter({ tools: testTools(),
+      const unauthorized = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: {
           probe,
@@ -1316,7 +1211,7 @@ describe("Codex RunnerAdapter production composition", () => {
         message: expect.stringContaining("hooks are not installed"),
       }));
 
-      const brokenSupermemory = createCodexRunnerAdapter({ tools: testTools(),
+      const brokenSupermemory = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: {
           probe,
@@ -1331,7 +1226,7 @@ describe("Codex RunnerAdapter production composition", () => {
         message: expect.stringContaining("hooks are not installed"),
       }));
 
-      const untrusted = createCodexRunnerAdapter({ tools: testTools(),
+      const untrusted = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: { probe, inspectTrust: async () => "untrusted", readProject: async () => ({ config: "[features]\nmulti_agent = true\n", roles: [], skills: [], agentsInstructions: true }) },
       });
@@ -1340,13 +1235,13 @@ describe("Codex RunnerAdapter production composition", () => {
       await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), "user drift", "utf8");
       expect(await ready.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({ category: "Managed content", status: "error", message: expect.stringContaining("ownership evidence") }));
 
-      const blocked = createCodexRunnerAdapter({ tools: testTools(),
+      const blocked = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config: "[broken", roles: [], skills: [], agentsInstructions: true }) },
       });
       expect(await blocked.diagnoseProject?.(projectRoot, getDefaultDeckConfig())).toContainEqual(expect.objectContaining({ category: "Binary and version", status: "error" }));
 
-      const unsupported = createCodexRunnerAdapter({ tools: testTools(),
+      const unsupported = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: { probe: async () => ({ found: true, version: "0.100.0", help: "" }) },
       });
@@ -1375,7 +1270,7 @@ describe("Codex RunnerAdapter production composition", () => {
       await writeFile(join(projectRoot, ".codex", "config.toml"), config);
       const probe = async () => ({ found: true as const, version: "0.146.1", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" });
       let readyThenMissingCalls = 0;
-      const readyThenMissing = createCodexRunnerAdapter({ tools: testTools(),
+      const readyThenMissing = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config, roles: [], skills: [], agentsInstructions: true }) },
         serenaReadinessResolver: async () => {
@@ -1393,7 +1288,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(readyThenMissingCalls).toBe(2);
 
       let missingThenReadyCalls = 0;
-      const missingThenReady = createCodexRunnerAdapter({ tools: testTools(),
+      const missingThenReady = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config, roles: [], skills: [], agentsInstructions: true }) },
         serenaReadinessResolver: async () => {
@@ -1412,7 +1307,7 @@ describe("Codex RunnerAdapter production composition", () => {
 
       let doctorCalls = 0;
       let doctorProxyCalls = 0;
-      const doctor = createCodexRunnerAdapter({ tools: testTools(),
+      const doctor = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config, roles: [], skills: [], agentsInstructions: true }) },
         serenaReadinessResolver: async () => {
@@ -1431,7 +1326,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(doctorProxyCalls).toBe(1);
 
       let missingDoctorCalls = 0;
-      const missingDoctor = createCodexRunnerAdapter({ tools: testTools(),
+      const missingDoctor = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config, roles: [], skills: [], agentsInstructions: true }) },
         serenaReadinessResolver: async () => {
@@ -1471,7 +1366,7 @@ describe("Codex RunnerAdapter production composition", () => {
     try {
       await mkdir(join(projectRoot, ".codex"), { recursive: true });
       await writeFile(join(projectRoot, ".codex", "config.toml"), config);
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         preflight: {
           probe: async () => ({ found: true, version: "0.146.1", help: "Usage: codex", execHelp: "Usage: codex exec", resumeHelp: "Usage: codex resume" }),
           inspectTrust: async () => "trusted",
@@ -1506,39 +1401,6 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(proxyCalls).toBe(3);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  test("applies local-only through the effective Git exclude path with exact entries", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-local-project-"));
-    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-local-journal-"));
-    const excludePath = join(projectRoot, ".git", "info", "exclude");
-    try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
-        journalRoot,
-        gitEffects: {
-          resolveExcludePath: () => excludePath,
-          isTracked: (_root, relativePath) => relativePath === "AGENTS.md",
-        },
-      });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), localOnly: true });
-      expect(plan.files.some((file) => file.path.startsWith("git-info-exclude:"))).toBe(true);
-      await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
-      const exclude = await readFile(excludePath, "utf8");
-      expect(exclude).toContain("/.codex/agents/deck-lead.toml");
-      expect(exclude.split("\n")).not.toContain("/.codex/");
-      expect(exclude).not.toContain("/AGENTS.md");
-      const journals = (await readdir(journalRoot)).filter((name) => name.endsWith(".json"));
-      expect(journals).toHaveLength(2);
-      expect(new Set(journals).size).toBe(2);
-      const unchanged = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), localOnly: true });
-      expect(unchanged.files).toHaveLength(0);
-      expect(await adapter.verifyDeveloperTeamInstall(unchanged)).toMatchObject({ valid: true });
-      await Bun.write(excludePath, "# independently changed\n");
-      expect(await adapter.verifyDeveloperTeamInstall(unchanged)).toMatchObject({ valid: false, diagnostics: [expect.stringContaining("git-info-exclude")] });
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-      await rm(journalRoot, { recursive: true, force: true });
     }
   });
 
@@ -1577,85 +1439,4 @@ describe("Codex RunnerAdapter production composition", () => {
     }
   });
 
-  test("operation-scoped rollback of a later native apply cannot affect earlier local-only state", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-codex-operation-scope-"));
-    const firstRoot = join(root, "first");
-    const secondRoot = join(root, "second");
-    const journalRoot = join(root, "journals");
-    try {
-      await mkdir(firstRoot, { recursive: true });
-      await mkdir(secondRoot, { recursive: true });
-      const nodeEffects = createNodeCodexFileEffects({ journalRoot });
-      let journalPersistCount = 0;
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
-        journalRoot,
-        fileEffects: {
-          ...nodeEffects,
-          persistJournalAtomic: async (journal) => {
-            journalPersistCount += 1;
-            await nodeEffects.persistJournalAtomic(journal);
-          },
-        },
-        gitEffects: {
-          resolveExcludePath: (projectRoot) => join(projectRoot, ".git", "info", "exclude"),
-          isTracked: (_projectRoot, relativePath) => relativePath === "AGENTS.md",
-        },
-      });
-      const firstPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: firstRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), localOnly: true });
-      const firstBackup = adapter.backupDeveloperTeamFiles(firstPlan);
-      const firstApply = await adapter.applyDeveloperTeamInstall({ projectRoot: firstRoot, environmentId: "codex-development", plan: firstPlan });
-      const firstReceipt = firstBackup.payload as NonNullable<typeof firstApply.operation>;
-      expect(firstApply.operation).toEqual(firstReceipt);
-      expect(firstReceipt.transactions.map((entry) => entry.kind)).toEqual(["native", "local-only"]);
-      for (const transaction of firstReceipt.transactions) {
-        const journal = JSON.parse(await readFile(join(journalRoot, `${transaction.id}.json`), "utf8")) as { operationId: string; operationKind: string };
-        expect(journal).toMatchObject({ operationId: firstReceipt.operationId, operationKind: transaction.kind });
-      }
-      const firstRole = join(firstRoot, ".codex", "agents", "deck-lead.toml");
-      const firstExclude = join(firstRoot, ".git", "info", "exclude");
-      expect(await Bun.file(firstRole).exists()).toBe(true);
-      expect(await readFile(firstExclude, "utf8")).toContain("/.codex/agents/deck-lead.toml");
-
-      const secondPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: secondRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
-      const secondBackup = adapter.backupDeveloperTeamFiles(secondPlan);
-      const secondApply = await adapter.applyDeveloperTeamInstall({ projectRoot: secondRoot, environmentId: "codex-development", plan: secondPlan });
-      expect(journalPersistCount).toBe(9);
-      expect(secondApply.operation).toEqual(secondBackup.payload as typeof secondApply.operation);
-      const forged = { payload: { ...(secondBackup.payload as NonNullable<typeof secondApply.operation>), operationId: "forged-operation" }, diagnostics: [] };
-      expect(await adapter.rollbackDeveloperTeamFiles(forged)).toMatchObject({ status: "conflict", diagnostics: [expect.stringContaining("does not belong")] });
-      expect(journalPersistCount).toBe(9);
-      expect(await Bun.file(join(secondRoot, ".codex", "agents", "deck-lead.toml")).exists()).toBe(true);
-      expect(await adapter.rollbackDeveloperTeamFiles(secondBackup)).toMatchObject({ status: "rolled-back", conflicts: [] });
-      expect(journalPersistCount).toBe(11);
-      expect(await Bun.file(join(secondRoot, ".codex", "agents", "deck-lead.toml")).exists()).toBe(false);
-      expect(await Bun.file(firstRole).exists()).toBe(true);
-      expect(await readFile(firstExclude, "utf8")).toContain("/.codex/agents/deck-lead.toml");
-
-      expect(await adapter.rollbackDeveloperTeamFiles(firstBackup)).toMatchObject({ status: "rolled-back", conflicts: [] });
-      expect(journalPersistCount).toBe(15);
-      expect(await Bun.file(firstRole).exists()).toBe(false);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, 30_000);
-
-  test("concurrent reviewed operations retain independent transaction receipts", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-codex-concurrent-operations-"));
-    const roots = [join(root, "one"), join(root, "two")];
-    try {
-      await Promise.all(roots.map((projectRoot) => mkdir(projectRoot, { recursive: true })));
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot: join(root, "journals") });
-      const plans = roots.map((projectRoot) => adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() }));
-      const backups = plans.map((plan) => adapter.backupDeveloperTeamFiles(plan));
-      const applied = await Promise.all(plans.map((plan, index) => adapter.applyDeveloperTeamInstall({ projectRoot: roots[index]!, environmentId: "codex-development", plan })));
-      expect(new Set(applied.map((result) => result.operation?.operationId)).size).toBe(2);
-      expect(applied.map((result) => result.operation)).toEqual(backups.map((backup) => backup.payload as typeof applied[number]["operation"]));
-
-      await adapter.rollbackDeveloperTeamFiles(backups[1]);
-      expect(await Bun.file(join(roots[0]!, ".codex", "agents", "deck-lead.toml")).exists()).toBe(true);
-      expect(await Bun.file(join(roots[1]!, ".codex", "agents", "deck-lead.toml")).exists()).toBe(false);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, 30_000);
 });

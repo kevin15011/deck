@@ -16,11 +16,11 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(plan.inventory.externalStandaloneSkillIds).toHaveLength(29);
     expect(plan.inventory.bootstrapSkillIds).toEqual(["deck-onboard", "deck-archive"]);
     expect(paths).toContain(".codex/config.toml");
-    expect(paths).toContain(".codex/hooks/developer-team-execution.js");
+    expect(paths).toContain(".codex/deck/hooks/developer-team-execution.js");
     expect(paths).not.toContain("AGENTS.md");
     expect(plan.diagnostics.some((diagnostic) => diagnostic.code === "trusted-bridge-unavailable")).toBe(false);
     expect(plan.expectedFiles).toHaveLength(plan.mutations.length);
-    expect(paths).toContain(".codex/deck-manifest.json");
+    expect(paths).toContain(".codex/deck/manifest.json");
   });
 
   test("keeps all native Deck skill descriptors valid with YAML frontmatter at byte zero", () => {
@@ -35,7 +35,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
 
   test("uses the durable manifest, not marker substrings, to authorize canonical updates", () => {
     const fresh = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/p", existingFiles: new Map() });
-    const manifest = fresh.expectedFiles.find((file) => file.relativePath === ".codex/deck-manifest.json")!;
+    const manifest = fresh.expectedFiles.find((file) => file.relativePath === ".codex/deck/manifest.json")!;
     const skill = fresh.expectedFiles.find((file) => file.relativePath === ".agents/skills/api-and-interface-design/SKILL.md")!;
     const prior = new Map([[manifest.relativePath, manifest.content], [skill.relativePath, skill.content]]);
     const updated = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/p", existingFiles: prior });
@@ -48,7 +48,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
 
   test("uses manifest hashes for standalone support updates and reports stale support files", () => {
     const fresh = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/p", existingFiles: new Map() });
-    const manifestFile = fresh.expectedFiles.find((file) => file.relativePath === ".codex/deck-manifest.json")!;
+    const manifestFile = fresh.expectedFiles.find((file) => file.relativePath === ".codex/deck/manifest.json")!;
     const manifest = JSON.parse(manifestFile.content) as { version: 1; files: Record<string, string> };
     const support = fresh.expectedFiles.find((file) => file.kind === "external-skill" && !file.relativePath.endsWith("/SKILL.md"))!;
     const old = "old managed support";
@@ -108,14 +108,14 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(original).digest("hex") } }, null, 2)}\n`;
     const plan = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
-      existingFiles: new Map([["AGENTS.md", original], [".codex/deck-manifest.json", manifest]]),
+      existingFiles: new Map([["AGENTS.md", original], [".codex/deck/manifest.json", manifest]]),
       existingModes: new Map([["AGENTS.md", 0o640]]),
     });
     const agents = plan.mutations.find((mutation) => mutation.relativePath === "AGENTS.md");
     expect(plan.blocked).toBe(false);
     expect(agents).toMatchObject({ content: "prefix\n\nsuffix\n", postimageMode: 0o640, rollback: "restore" });
     expect(plan.expectedFiles.find((file) => file.relativePath === "AGENTS.md")?.mode).toBe(0o640);
-    const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck-manifest.json")!.content) as { files: Record<string, string> };
+    const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck/manifest.json")!.content) as { files: Record<string, string> };
     expect(nextManifest.files["AGENTS.md"]).toBeUndefined();
     expect(plan.ownershipReleases).toEqual(["AGENTS.md"]);
   });
@@ -131,13 +131,13 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     ];
     for (const scenario of cases) {
       const existing = new Map<string, string>([["AGENTS.md", scenario.content]]);
-      if (scenario.manifest) existing.set(".codex/deck-manifest.json", scenario.manifest);
+      if (scenario.manifest) existing.set(".codex/deck/manifest.json", scenario.manifest);
       const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: existing });
       expect(plan.blocked, scenario.name).toBe(true);
       expect(plan.mutations.some((mutation) => mutation.relativePath === "AGENTS.md"), scenario.name).toBe(false);
       expect(plan.ownershipReleases, scenario.name).toEqual([]);
       if (scenario.name === "mismatched") {
-        const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck-manifest.json")!.content) as { files: Record<string, string> };
+        const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck/manifest.json")!.content) as { files: Record<string, string> };
         expect(nextManifest.files["AGENTS.md"]).toBe(createHash("sha256").update("different").digest("hex"));
       }
     }
@@ -158,17 +158,17 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": obsoleteHash } }, null, 2)}\n`;
     const plan = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
-      existingFiles: new Map([[".codex/deck-manifest.json", manifest]]),
+      existingFiles: new Map([[".codex/deck/manifest.json", manifest]]),
     });
     expect(plan.blocked).toBe(false);
     expect(plan.mutations.some((mutation) => mutation.relativePath === "AGENTS.md")).toBe(false);
     expect(plan.ownershipReleases).toEqual(["AGENTS.md"]);
-    const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck-manifest.json")!.content) as { files: Record<string, string> };
+    const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck/manifest.json")!.content) as { files: Record<string, string> };
     expect(nextManifest.files["AGENTS.md"]).toBeUndefined();
 
     const repeated = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
-      existingFiles: new Map([[".codex/deck-manifest.json", `${JSON.stringify(nextManifest, null, 2)}\n`]]),
+      existingFiles: new Map([[".codex/deck/manifest.json", `${JSON.stringify(nextManifest, null, 2)}\n`]]),
     });
     expect(repeated.ownershipReleases).toEqual(["AGENTS.md"]);
     expect(repeated.mutations.some((mutation) => mutation.relativePath === "AGENTS.md")).toBe(false);
@@ -179,7 +179,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": obsoleteHash } }, null, 2)}\n`;
     const plan = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
-      existingFiles: new Map([[".codex/deck-manifest.json", manifest]]),
+      existingFiles: new Map([[".codex/deck/manifest.json", manifest]]),
     }) as ReturnType<typeof buildCodexDeveloperTeamInstallPlan> & {
       ownershipReleaseChecks?: readonly { relativePath: string; precondition: { kind: string }; postcondition: { kind: string } }[];
     };
@@ -197,14 +197,14 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(owned).digest("hex") } }, null, 2)}\n`;
     const plan = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
-      existingFiles: new Map([[".codex/deck-manifest.json", manifest]]),
+      existingFiles: new Map([[".codex/deck/manifest.json", manifest]]),
       agentsFile: { state: "unsafe", reason: "symlink" },
     } as Parameters<typeof buildCodexDeveloperTeamInstallPlan>[0] & { agentsFile: { state: "unsafe"; reason: string } });
 
     expect(plan.blocked).toBe(true);
     expect(plan.diagnostics).toContainEqual(expect.objectContaining({ code: "agents-file-unsafe", severity: "error" }));
     expect(plan.ownershipReleases).toEqual([]);
-    const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck-manifest.json")!.content) as { files: Record<string, string> };
+    const nextManifest = JSON.parse(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck/manifest.json")!.content) as { files: Record<string, string> };
     expect(nextManifest.files["AGENTS.md"]).toBeDefined();
   });
 
@@ -214,7 +214,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     const manifest = `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(reviewed).digest("hex") } })}\n`;
     const plan = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
-      existingFiles: new Map([["AGENTS.md", changedOutsideMarkers], [".codex/deck-manifest.json", manifest]]),
+      existingFiles: new Map([["AGENTS.md", changedOutsideMarkers], [".codex/deck/manifest.json", manifest]]),
       agentsFile: { state: "file", content: reviewed, mode: 0o644 },
     });
 
@@ -237,47 +237,17 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     const manifest = `${JSON.stringify({ version: 1, files: { ".codex/agents/deck-retired.toml": Bun.CryptoHasher.hash("sha256", stale, "hex") } }, null, 2)}\n`;
     const plan = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
-      existingFiles: new Map([[".codex/deck-manifest.json", manifest], [".codex/agents/deck-retired.toml", stale]]),
+      existingFiles: new Map([[".codex/deck/manifest.json", manifest], [".codex/agents/deck-retired.toml", stale]]),
     });
     expect(plan.diagnostics.some((diagnostic) => diagnostic.code === "stale-managed-file-removal")).toBe(true);
     expect(plan.mutations).toContainEqual(expect.objectContaining({ operation: "delete", relativePath: ".codex/agents/deck-retired.toml", rollback: "restore" }));
 
     const tampered = buildCodexDeveloperTeamInstallPlan({
       projectRoot: "/work/project",
-      existingFiles: new Map([[".codex/deck-manifest.json", manifest], [".codex/agents/deck-retired.toml", `${stale}user edit`]]),
+      existingFiles: new Map([[".codex/deck/manifest.json", manifest], [".codex/agents/deck-retired.toml", `${stale}user edit`]]),
     });
     expect(tampered.diagnostics.some((diagnostic) => diagnostic.code === "stale-managed-file-collision")).toBe(true);
     expect(tampered.mutations.some((mutation) => mutation.operation === "delete" && mutation.relativePath.includes("deck-retired"))).toBe(false);
-  });
-
-  test("blocks invalid Supermemory project scopes with provider-specific diagnostics", () => {
-    const missing = buildCodexDeveloperTeamInstallPlan({
-      projectRoot: "/work/project",
-      existingFiles: new Map(),
-      memoryProvider: "supermemory",
-      supermemoryProjectScope: " ",
-    });
-    expect(missing.blocked).toBe(true);
-    expect(missing.diagnostics).toContainEqual(expect.objectContaining({
-      code: "supermemory-project-scope-missing",
-      severity: "error",
-    }));
-    expect(JSON.stringify(missing.diagnostics)).not.toContain("Engram");
-
-    const invalid = buildCodexDeveloperTeamInstallPlan({
-      projectRoot: "/work/project",
-      existingFiles: new Map(),
-      memoryProvider: "supermemory",
-      supermemoryProjectScope: "raw/project/name",
-    });
-    expect(invalid.blocked).toBe(true);
-    expect(invalid.diagnostics).toContainEqual(expect.objectContaining({
-      code: "supermemory-project-scope-invalid",
-      severity: "error",
-    }));
-    expect(JSON.stringify(invalid.diagnostics)).toContain("redacted");
-    expect(JSON.stringify(invalid.diagnostics)).not.toContain("raw/project/name");
-    expect(JSON.stringify(invalid.diagnostics)).not.toContain("Engram");
   });
 
   test("diagnoses unmarked raw Supermemory MCP as unmanaged and not authorized project memory", () => {
@@ -354,12 +324,12 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(config).toContain("# deck-codex-hook:memory-bridge:start");
     expect(config).toContain("# deck-codex-hook:rtk:start");
     expect(config).toContain('matcher = "^Bash$"');
-    expect(config).toContain("'/usr/bin/node' '/work/project/.codex/hooks/deck-rtk-hook.cjs'");
-    const script = plan.expectedFiles.find((file) => file.relativePath === ".codex/hooks/deck-rtk-hook.cjs")!;
+    expect(config).toContain("'/usr/bin/node' '/work/project/.codex/deck/hooks/deck-rtk-hook.cjs'");
+    const script = plan.expectedFiles.find((file) => file.relativePath === ".codex/deck/hooks/deck-rtk-hook.cjs")!;
     expect(script.kind).toBe("bridge-hook");
     expect(script.content).toContain('"/deck/tools/rtk"');
     expect(script.content).toContain('["hook", "codex"]');
-    expect(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck-manifest.json")!.content).toContain(".codex/hooks/deck-rtk-hook.cjs");
+    expect(plan.mutations.find((mutation) => mutation.relativePath === ".codex/deck/manifest.json")!.content).toContain(".codex/deck/hooks/deck-rtk-hook.cjs");
   });
 
   test("omits tools without verified executables with non-blocking diagnostics instead of bare PATH names", () => {
@@ -369,7 +339,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(config).not.toContain("mcp_servers.context-mode");
     expect(config).not.toContain("mcp_servers.codebase-memory");
     expect(config).not.toContain("deck-codex-hook:rtk");
-    expect(plan.expectedFiles.some((file) => file.relativePath === ".codex/hooks/deck-rtk-hook.cjs")).toBe(false);
+    expect(plan.expectedFiles.some((file) => file.relativePath === ".codex/deck/hooks/deck-rtk-hook.cjs")).toBe(false);
     expect(plan.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(expect.arrayContaining(["context-mode-not-ready", "codebase-memory-not-ready"]));
   });
 

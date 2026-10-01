@@ -127,13 +127,6 @@ describe("Codex MCP semantic configuration", () => {
     expect(JSON.stringify(merged)).not.toContain("SUPERMEMORY_API_KEY");
   });
 
-  test("rejects invalid Supermemory project scopes instead of serializing legacy/default containers", () => {
-    const desired = buildCodexMcpServers({ packageIds: [], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_default" });
-
-    expect(desired.servers).toEqual([]);
-    expect(desired.gaps).toContain("supermemory-project-scope-invalid");
-  });
-
   test("classifies Codex Supermemory scope failures with provider-specific blocking codes", () => {
     expect(inspectCodexSupermemoryMcpState(`
 # deck-codex-mcp:supermemory

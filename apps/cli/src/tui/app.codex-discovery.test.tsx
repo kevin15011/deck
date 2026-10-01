@@ -146,6 +146,8 @@ describe("DeckApp Codex discovery composition", () => {
       }],
     });
     const adapter = createCodexRunnerAdapter({
+      codexHome: join(projectRoot, ".codex"),
+      userHome: projectRoot,
       productionModelDiscoveryDependencies: {
         now: () => 1,
         commandRunner: {
@@ -226,6 +228,8 @@ describe("DeckApp Codex discovery composition", () => {
           inspectTrust: async () => "trusted",
         },
         tools: readyTestTools(),
+        codexHome: join(projectRoot, ".codex"),
+        userHome: projectRoot,
         codebaseIndexReadiness: () => true,
       },
     });

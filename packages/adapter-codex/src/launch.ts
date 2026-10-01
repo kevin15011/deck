@@ -191,7 +191,7 @@ export function buildCodexLaunchPlan(
       ...(features.hookTrustBypass === true ? [{
         code: "codex-hook-trust-bypass",
         severity: "warning" as const,
-        message: "Deck passes --dangerously-bypass-hook-trust so its owned project hooks (RTK, Supermemory) run without per-hook review; all non-managed hooks for this Codex process skip trust review.",
+        message: "Deck passes --dangerously-bypass-hook-trust so Deck's hooks (RTK, Supermemory) run without per-hook review; every non-managed hook in this Codex process skips trust review.",
       }] : []),
       ...(newSession ? [] : [{
         code: "codex-resume-existing-history",

@@ -3,7 +3,7 @@
  * artifacts to installed runners.
  */
 
-import { testTools } from "../../../../../packages/adapter-codex/src/test-tools";
+import { layout, testTools } from "../../../../../packages/adapter-codex/src/test-tools";
 import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -416,7 +416,7 @@ describe("runner-sync", () => {
     const root = await mkdtemp(join(tmpdir(), "deck-codex-sync-"));
     const journalRoot = join(root, "journals");
     try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(root), journalRoot });
       const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
       const paths = [
@@ -424,7 +424,7 @@ describe("runner-sync", () => {
         ".agents/skills/idea-refine/examples.md",
         ".agents/skills/deck-onboard/SKILL.md",
       ];
-      const manifestPath = join(root, ".codex", "deck-manifest.json");
+      const manifestPath = join(root, ".codex", "deck", "manifest.json");
       const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { files: Record<string, string> };
       const removedPath = ".agents/skills/removed-skill/reference.md";
       await mkdir(join(root, ".agents", "skills", "removed-skill"), { recursive: true });
@@ -444,7 +444,7 @@ describe("runner-sync", () => {
       expect(result.outcomes[0]?.filesWritten).toEqual(expect.arrayContaining(paths));
       for (const relativePath of paths) expect(await readFile(join(root, relativePath), "utf8")).not.toContain("old-release-content");
       expect(existsSync(join(root, removedPath))).toBe(false);
-      expect(result.manifestRemovals).toContainEqual({ path: removedPath, owner: "runner:codex" });
+      expect(result.manifestRemovals).toContainEqual({ path: join(root, removedPath), owner: "runner:codex" });
       expect(result.outcomes[0]?.diagnostics.join(" ")).not.toMatch(/install runtime|install MCP|reinstall/i);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -454,7 +454,7 @@ describe("runner-sync", () => {
   it("treats a fully current verified Codex installation as a successful no-op sync", async () => {
     const root = await mkdtemp(join(tmpdir(), "deck-codex-sync-current-"));
     try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot: join(root, "journals") });
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(root), journalRoot: join(root, "journals") });
       const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(), capabilityInstructions: { instructions: [] } });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
       const config = getDefaultDeckConfig();
@@ -485,7 +485,7 @@ describe("runner-sync", () => {
       return { state: "ready" as const, evidence, revalidate: async (value: import("@deck/core").SerenaReadinessEvidence) => ({ valid: true as const, evidence: value }) };
     };
     try {
-      const adapter = createCodexRunnerAdapter({ tools: testTools(),
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(root),
         journalRoot: join(root, "journals"),
         mcpCapabilityIds: ["serena"],
         serenaReadinessResolver: async () => {
@@ -504,7 +504,7 @@ describe("runner-sync", () => {
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial.plan });
 
       const configPath = join(root, ".codex", "config.toml");
-      const manifestPath = join(root, ".codex", "deck-manifest.json");
+      const manifestPath = join(root, ".codex", "deck", "manifest.json");
       const originalManifest = JSON.parse(await readFile(manifestPath, "utf8")) as { files: Record<string, string> };
       const legacyConfig = [
         "[features]",
@@ -690,7 +690,7 @@ describe("applyRunnerSyncToManifest", () => {
     const releasedPath = "AGENTS.md";
     const adapter = makeAdapter({
       runnerId: "codex",
-      detectDeckInstall: async () => ({ installed: true, managedPaths: [".codex/deck-manifest.json"] }),
+      detectDeckInstall: async () => ({ installed: true, managedPaths: [".codex/deck/manifest.json"] }),
       buildDeveloperTeamInstallPlan: () => ({
         files: [{ path: releasedPath, content: "repository guide" }],
         ownershipReleases: [releasedPath],
@@ -709,7 +709,7 @@ describe("applyRunnerSyncToManifest", () => {
   it("does not release ownership when apply or verification fails", async () => {
     const adapter = makeAdapter({
       runnerId: "codex",
-      detectDeckInstall: async () => ({ installed: true, managedPaths: [".codex/deck-manifest.json"] }),
+      detectDeckInstall: async () => ({ installed: true, managedPaths: [".codex/deck/manifest.json"] }),
       buildDeveloperTeamInstallPlan: () => ({ files: [], ownershipReleases: ["AGENTS.md"] }),
       verifyDeveloperTeamInstall: () => ({ valid: false, diagnostics: ["cleanup did not verify"] }),
     });
@@ -718,27 +718,4 @@ describe("applyRunnerSyncToManifest", () => {
     expect(result.manifestRemovals).not.toContainEqual({ path: "AGENTS.md", owner: "runner:codex" });
   });
 
-  it("re-emits a durable Codex AGENTS.md release after interrupted external reconciliation", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "deck-runner-sync-codex-release-"));
-    const journalRoot = await mkdtemp(join(tmpdir(), "deck-runner-sync-codex-release-journal-"));
-    try {
-      const legacy = "before\n<!-- deck:developer-team:start -->\nmanaged\n<!-- deck:developer-team:end -->\nafter\n";
-      await mkdir(join(projectRoot, ".codex"), { recursive: true });
-      await writeFile(join(projectRoot, "AGENTS.md"), legacy, "utf8");
-      await writeFile(join(projectRoot, ".codex", "deck-manifest.json"), `${JSON.stringify({ version: 1, files: { "AGENTS.md": createHash("sha256").update(legacy).digest("hex") } })}\n`);
-      const adapter = createCodexRunnerAdapter({ tools: testTools(), journalRoot });
-      const fullPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: makeConfig() });
-      await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan: fullPlan });
-      expect((await adapter.verifyDeveloperTeamInstall(fullPlan)).valid).toBe(true);
-
-      const first = await runRunnerSync({ config: makeConfig(), registry: makeRegistry([adapter]), projectRoot, deckVersion: "next", runnerIds: ["codex"] });
-      expect(first.manifestRemovals).toContainEqual({ path: "AGENTS.md", owner: "runner:codex" });
-
-      const second = await runRunnerSync({ config: makeConfig(), registry: makeRegistry([adapter]), projectRoot, deckVersion: "next", runnerIds: ["codex"] });
-      expect(second.manifestRemovals).toContainEqual({ path: "AGENTS.md", owner: "runner:codex" });
-    } finally {
-      await rm(projectRoot, { recursive: true, force: true });
-      await rm(journalRoot, { recursive: true, force: true });
-    }
-  });
 });

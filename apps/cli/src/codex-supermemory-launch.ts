@@ -1,6 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   CODEX_LAUNCH_ENV_BINDING,
   CODEX_SUPERMEMORY_ENV_KEY,
@@ -82,18 +82,19 @@ export function assertCodexSupermemoryReady(projectRoot: string, effects: CodexS
   const tools = createCodexTools({ homeDir: effects.home, ...(effects.tools ?? {}) });
   if (tools.supermemory.state() !== "ready") throw new Error("Codex Supermemory launch blocked: the pinned official plugin hooks are not installed and verified (run Review & Install).");
   if (tools.node.command() === undefined) throw new Error("Codex Supermemory launch blocked: a Node.js 18+ runtime is required by the official plugin hooks.");
-  const projectConfig = readBounded(join(projectRoot, ".codex", "config.toml")) ?? "";
-  if (!inspectCodexOwnedHookIds(projectConfig).includes("supermemory")) throw new Error("Codex Supermemory launch blocked: the project has no Deck-owned Supermemory plugin hooks (run Review & Install).");
-  const codexHome = effects.codexHome ?? process.env.CODEX_HOME ?? join(effects.home ?? process.env.HOME ?? homedir(), ".codex");
+  const codexHome = effects.codexHome ?? (process.env.CODEX_HOME && isAbsolute(process.env.CODEX_HOME) ? process.env.CODEX_HOME : join(effects.home ?? process.env.HOME ?? homedir(), ".codex"));
+  const globalConfig = readBounded(join(codexHome, "config.toml")) ?? "";
+  if (!inspectCodexOwnedHookIds(globalConfig).includes("supermemory")) throw new Error("Codex Supermemory launch blocked: the global Codex config has no Deck-owned Supermemory plugin hooks (run Review & Install).");
+  // Deck's own blocks are excluded from the user-level scan; anything else, in user files or in the project, would double-integrate.
+  if (/supermemory/i.test(withoutDeckHookBlocks(globalConfig))) throw new Error("Codex Supermemory launch blocked: your Codex configuration contains a non-Deck Supermemory registration that would double-integrate with Deck's official plugin; preserve it and remove the conflict explicitly before retrying.");
   const foreign = [
-    [join(codexHome, "hooks.json"), "user Codex hooks"],
-    [join(codexHome, "config.toml"), "user Codex configuration"],
-    [join(projectRoot, ".codex", "hooks.json"), "project Codex hooks"],
+    [join(codexHome, "hooks.json"), "your Codex hooks.json"],
+    [join(projectRoot, ".codex", "hooks.json"), "the project's Codex hooks"],
+    [join(projectRoot, ".codex", "config.toml"), "the project's Codex configuration (a previous per-project Deck install can cause this; remove it with --cleanup-legacy)"],
   ] as const;
   for (const [path, label] of foreign) {
     if (/supermemory/i.test(readBounded(path) ?? "")) throw new Error(`Codex Supermemory launch blocked: ${label} already register a Supermemory plugin or MCP server that would double-integrate with Deck's official plugin; preserve it and remove the conflict explicitly before retrying.`);
   }
-  if (/supermemory/i.test(withoutDeckHookBlocks(projectConfig))) throw new Error("Codex Supermemory launch blocked: the project Codex configuration contains a non-Deck Supermemory registration; preserve it and remove the conflict explicitly before retrying.");
 }
 
 /** Builds the child-process-only overlay; the token is never written to a file, argv or config. */

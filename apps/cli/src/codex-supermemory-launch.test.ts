@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCodexRunnerAdapter } from "@deck/adapter-codex";
@@ -106,12 +106,14 @@ describe("official Codex Supermemory plugin launch", () => {
     expect(printed).not.toContain(TOKEN);
     expect(printed).toContain("[REDACTED]");
     expect(printed).toContain("codex-supermemory-profile");
-    const config = await Bun.file(join(f.projectRoot, ".codex", "config.toml")).text();
+    expect(existsSync(join(f.projectRoot, ".codex")), "no project files are created").toBe(false);
+    expect(existsSync(join(f.projectRoot, ".agents"))).toBe(false);
+    const config = await Bun.file(join(f.effects.codexHome, "config.toml")).text();
     expect(config).toContain("deck-codex-hook:supermemory:start");
     expect(config).not.toContain("memory-bridge");
     expect(config).not.toContain(TOKEN);
     expect(config).not.toContain("mcp_servers.supermemory");
-    for (const file of ["hooks.json", "config.toml"]) expect(await Bun.file(join(f.projectRoot, ".codex", file)).text().catch(() => "")).not.toContain(TOKEN);
+    for (const file of ["hooks.json", "config.toml"]) expect(await Bun.file(join(f.effects.codexHome, file)).text().catch(() => "")).not.toContain(TOKEN);
   });
 
   test("a launch without Supermemory carries no plugin credential and keeps Deck's bridge", async () => {
@@ -119,7 +121,7 @@ describe("official Codex Supermemory plugin launch", () => {
     const { result, childEnv } = await launch(f, { deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: false, activeProvider: "none" } } });
     expect(result.status).toBe("launched");
     expect(childEnv).not.toHaveProperty("SUPERMEMORY_CODEX_API_KEY");
-    expect(await Bun.file(join(f.projectRoot, ".codex", "config.toml")).text()).toContain("deck-codex-hook:memory-bridge:start");
+    expect(await Bun.file(join(f.effects.codexHome, "config.toml")).text()).toContain("deck-codex-hook:memory-bridge:start");
   });
 
   test("blocks without a stored credential, a user Supermemory plugin or a project-level conflict (no double integration)", async () => {
@@ -173,7 +175,7 @@ describe("official Codex Supermemory plugin launch", () => {
     expect(childEnv?.TAVILY_API_KEY).toBe("tvly-test-credential-value");
     expect(childEnv?.SUPERMEMORY_CODEX_API_KEY).toBe(TOKEN);
     expect(childArgs.join(" ")).not.toContain("tvly-test-credential-value");
-    const config = await Bun.file(join(f.projectRoot, ".codex", "config.toml")).text();
+    const config = await Bun.file(join(f.effects.codexHome, "config.toml")).text();
     expect(config).toContain("[mcp_servers.web-search]");
     expect(config).toContain('env_vars = ["TAVILY_API_KEY"]');
     expect(config).not.toContain("tvly-test-credential-value");

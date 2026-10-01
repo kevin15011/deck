@@ -58,7 +58,7 @@ describe("mergeCodexProjectConfig", () => {
   });
 });
 
-const RTK_BLOCK: CodexOwnedHookBlock = { id: "rtk", hooks: [{ event: "PreToolUse", matcher: "^Bash$", command: "'/usr/bin/node' '/p/.codex/hooks/deck-rtk-hook.cjs'", timeout: 10, statusMessage: "Optimizing" }] };
+const RTK_BLOCK: CodexOwnedHookBlock = { id: "rtk", hooks: [{ event: "PreToolUse", matcher: "^Bash$", command: "'/usr/bin/node' '/p/.codex/deck/hooks/deck-rtk-hook.cjs'", timeout: 10, statusMessage: "Optimizing" }] };
 const SM_BLOCK: CodexOwnedHookBlock = { id: "supermemory", hooks: [{ event: "UserPromptSubmit", command: "node recall.js", timeout: 60 }, { event: "Stop", command: "node flush.js", timeout: 30 }] };
 
 describe("mergeCodexOwnedHooks", () => {
