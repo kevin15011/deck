@@ -3,6 +3,8 @@ import {
   closeSync,
   constants,
   fsyncSync,
+  fstatSync,
+  readSync,
   lstatSync,
   openSync,
   readFileSync,
@@ -198,6 +200,43 @@ function isValidCredential(value: string): boolean {
     && value.trim().length > 0
     && Buffer.byteLength(value, "utf8") <= MAX_CREDENTIAL_BYTES
     && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
+}
+
+/** Read only Deck's exact owned shell-profile block; never execute or source the profile. */
+export function readOwnedTavilyCredential(options: ShellProfileWriterOptions = {}): string | undefined {
+  const resolved = resolveProfilePath(options);
+  if (!resolved.ok) return undefined;
+  let fd: number | undefined;
+  try {
+    const initial = inspectTarget(resolved.path);
+    if (initial.kind !== "safe" || !initial.snapshot.exists || (initial.snapshot.size ?? 0) > 128 * 1024) return undefined;
+    fd = openSync(resolved.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.dev !== initial.snapshot.dev || opened.ino !== initial.snapshot.ino || opened.size > 128 * 1024) return undefined;
+    const pieces: Buffer[] = [];
+    const chunk = Buffer.alloc(8192);
+    let total = 0;
+    while (true) {
+      const length = Math.min(chunk.length, 128 * 1024 + 1 - total);
+      const bytes = readSync(fd, chunk, 0, length, null);
+      if (bytes === 0) break;
+      total += bytes;
+      if (total > 128 * 1024) return undefined;
+      pieces.push(Buffer.from(chunk.subarray(0, bytes)));
+    }
+    if (!sameSnapshot(initial.snapshot, snapshotFor(fstatSync(fd)))) return undefined;
+    const content = Buffer.concat(pieces, total);
+    const owned = locateOwnedBlock(content);
+    if (owned.kind !== "present") return undefined;
+    const lines = content.subarray(owned.start, owned.end).toString("utf8").split(/\r?\n/u);
+    if (lines.length !== 3 || lines[0] !== DECK_WEB_SEARCH_PROFILE_START || lines[2] !== DECK_WEB_SEARCH_PROFILE_END) return undefined;
+    const prefix = "export TAVILY_API_KEY=";
+    const encoded = lines[1]?.startsWith(prefix) ? lines[1].slice(prefix.length) : undefined;
+    if (!encoded?.startsWith("'") || !encoded.endsWith("'")) return undefined;
+    const token = encoded.slice(1, -1).replaceAll("'\\''", "'");
+    return isValidCredential(token) && quoteForPosixShell(token) === encoded ? token : undefined;
+  } catch { return undefined; }
+  finally { if (fd !== undefined) closeSync(fd); }
 }
 
 function resolveProfilePath(options: ShellProfileWriterOptions):

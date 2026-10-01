@@ -303,6 +303,23 @@ describe("serena bootstrap Core service", () => {
     expect(state.calls.processes).toHaveLength(0);
   });
 
+  it("keeps Claude bootstrap behind a same-runner, same-operation explicit TUI authorization", async () => {
+    const authorization = { kind: "interactive-tui-explicit-selection" as const, runner: "claude" as const, operationId: "claude-operation" };
+    for (const currentOperation of [
+      { runner: "claude" as const, operationId: "claude-operation", explicitlySelected: false },
+      { runner: "opencode" as const, operationId: "claude-operation", explicitlySelected: true },
+      { runner: "claude" as const, operationId: "other-operation", explicitlySelected: true },
+    ]) {
+      const { effects, state } = makeEffects();
+      expect((await bootstrapSerena({ authorization, currentOperation, effects })).outcome).toBe("failed");
+      expect(state.calls.canonicalize).toHaveLength(0);
+      expect(state.calls.processes).toHaveLength(0);
+    }
+    const { effects, state } = makeEffects();
+    await bootstrapSerena({ authorization, currentOperation: { runner: "claude", operationId: "claude-operation", explicitlySelected: true }, effects });
+    expect(state.calls.canonicalize.length).toBeGreaterThan(0);
+  });
+
   it("reuses fresh ready Serena evidence without bootstrap or reinstall", async () => {
     const { effects, state } = makeEffects();
     state.inspections.set(SERENA_PATH, [readyInspection(SERENA_PATH, "serena-fp")]);

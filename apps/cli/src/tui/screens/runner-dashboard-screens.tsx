@@ -53,7 +53,7 @@ export function RunnerDashboardScreens({ state, installResults = [], completionS
     case "install-progress":
       return <InstallProgressScreen state={state} results={installResults} serenaStages={serenaStages} serenaOutcome={serenaOutcome} cancellationRequested={cancellationRequested} />;
     case "complete":
-      return <DashboardCompleteScreen results={installResults} completionStatus={completionStatus} runnerLabel={runnerLabel ?? state.runnerDisplayName ?? state.runnerScope} />;
+      return <DashboardCompleteScreen results={installResults} completionStatus={completionStatus} runnerLabel={runnerLabel ?? state.runnerDisplayName ?? state.runnerScope} contentOnly={state.runnerUi?.dashboard?.managedLaunchSupported === false} />;
     case "dashboard":
     default:
       return <DashboardOverview state={state} resolver={capabilityResolver} runnerLabel={runnerLabel ?? state.runnerDisplayName ?? state.runnerScope} />;
@@ -310,7 +310,9 @@ function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { sta
       <Text bold>Review &amp; Install</Text>
       <Text dimColor>{counts.total} actions planned: {counts.automatic} automatic, {counts.manual} manual, {counts.config} config, {counts.team} team, {counts.validation} validation.</Text>
       <Text dimColor>{formatSessionRuntimeReadiness(readiness)}</Text>
-      <Text dimColor>After review/install, launch through the CLI-managed session: deck {state.runnerScope} developer. Automatic Adaptive Memory requires this Deck-managed session; direct runner launches remain static-compatible.</Text>
+      {state.runnerUi?.dashboard?.managedLaunchSupported === false
+        ? <Text dimColor>{state.runnerUi.dashboard.launchHint ?? "Full Deck-managed launch is not verified for this runner. Installation here provides native content only; memory and protected execution remain unsupported."}</Text>
+        : <Text dimColor>After review/install, launch through the CLI-managed session: deck {state.runnerScope} developer. Automatic Adaptive Memory requires this Deck-managed session; direct runner launches remain static-compatible.</Text>}
       {state.plan?.diagnostics && state.plan.diagnostics.length > 0 && (
         <Box marginTop={1} flexDirection="column">
           <Text bold>Plan diagnostics:</Text>
@@ -542,7 +544,7 @@ function InstallProgressScreen({
 // Dashboard Complete Screen
 // ---------------------------------------------------------------------------
 
-function DashboardCompleteScreen({ results, completionStatus, runnerLabel }: { results: RunnerActionRunResult[]; completionStatus?: string; runnerLabel: string }) {
+function DashboardCompleteScreen({ results, completionStatus, runnerLabel, contentOnly }: { results: RunnerActionRunResult[]; completionStatus?: string; runnerLabel: string; contentOnly?: boolean }) {
   const failed = results.filter((r) => r.status === "failed");
   const stoppedSerena = serenaOutcomeFromResults(results);
   const completedSuccessfully = failed.length === 0 && stoppedSerena !== "cancelled" && stoppedSerena !== "partial";
@@ -553,7 +555,7 @@ function DashboardCompleteScreen({ results, completionStatus, runnerLabel }: { r
     <Box flexDirection="column">
       <Text bold color={completedSuccessfully ? "green" : "yellow"}>
         {completedSuccessfully
-          ? `${runnerSetupName(runnerLabel)} setup complete`
+          ? contentOnly ? `${runnerSetupName(runnerLabel)} plugin files setup complete (full Developer Team execution unsupported)` : `${runnerSetupName(runnerLabel)} setup complete`
           : `${runnerSetupName(runnerLabel)} setup stopped before completion`}
       </Text>
       {completionStatus && <Text dimColor>{completionStatus}</Text>}

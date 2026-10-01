@@ -241,18 +241,18 @@ export function resolveSupermemoryRuntimeCredentialReadiness(options: {
   runnerId?: string;
   profileCredentialEffects?: RunnerProfileCredentialEffects;
 }): { ready: boolean; diagnostics: string[]; reason: "secret-ready" | "missing" | "read-error" } {
-  const credentialLabel = options.runnerId === "opencode"
+  const credentialLabel = (options.runnerId === "opencode" || options.runnerId === "claude")
     ? "An official Supermemory plugin profile credential"
     : "Supermemory Deck runtime API credential";
   if (!options.secretStore) {
     return { ready: false, diagnostics: [`${credentialLabel} must be validated and stored before Review & Install; no Deck secret store was available for readiness verification.`], reason: "missing" };
   }
-  if (options.runnerId === "opencode" && !options.profileCredentialEffects) {
+  if ((options.runnerId === "opencode" || options.runnerId === "claude") && !options.profileCredentialEffects) {
     return { ready: false, diagnostics: [`${credentialLabel} cannot be verified without runner profile handling; Review & Install is blocked.`], reason: "missing" };
   }
   try {
-    const stored = options.secretStore.read(options.runnerId === "opencode" ? options.profileCredentialEffects!.secretName : "supermemory-api-key");
-    const ready = options.runnerId === "opencode"
+    const stored = options.secretStore.read((options.runnerId === "opencode" || options.runnerId === "claude") ? options.profileCredentialEffects!.secretName : "supermemory-api-key");
+    const ready = (options.runnerId === "opencode" || options.runnerId === "claude")
       ? options.profileCredentialEffects!.hasUsableCredential(stored)
       : Boolean(stored?.trim());
     if (ready) return { ready: true, diagnostics: [], reason: "secret-ready" };
@@ -724,7 +724,7 @@ function hasSerenaAction(plan: RunnerReviewPlan): boolean {
 function serenaActionKind(action: RunnerAction): "install" | "config" | undefined {
   if (action.capabilityId !== "serena") return undefined;
   if (action.kind === "write-mcp-config" || action.kind === "write-pi-mcp-config") return "config";
-  if (action.kind === "install-opencode-plugin" || action.kind === "install-pi-package" || action.kind === "install") return "install";
+  if (action.kind === "install-opencode-plugin" || action.kind === "install-pi-package" || action.kind === "install" || action.kind === "install-serena") return "install";
   return undefined;
 }
 
@@ -737,7 +737,7 @@ function getSerenaActionContext(
   const operation = dependencies.currentOperation ?? state?.currentOperation;
   const operationId = dependencies.operationId ?? state?.operationId ?? operation?.operationId;
 
-  if (runner !== "pi" && runner !== "opencode" && runner !== "codex") return { error: "Serena requires a selected runner operation." };
+  if (runner !== "pi" && runner !== "opencode" && runner !== "codex" && runner !== "claude") return { error: "Serena requires a selected runner operation." };
   if (!operation || operation.runner !== runner || operation.operationId !== operationId || operation.explicitlySelected !== true) {
     return { error: "Serena requires explicit selection in the current runner operation." };
   }
@@ -1214,6 +1214,20 @@ export async function runRunnerAction(
       case "install-opencode-plugin":
       case "npm-install":
         return await runPackageInstall(action, dependencies);
+      case "install-claude-supermemory":
+      case "install-claude-rtk":
+      case "install-claude-codebase":
+      case "install-claude-tool": {
+        if (!dependencies.runnerAdapter) return { actionId: action.id, status: "failed", message: "Claude tool installer is unavailable.", diagnostics: [] };
+        const value = await dependencies.runnerAdapter.runAction(action, {
+          projectRoot: dependencies.projectRoot ?? "",
+          runnerId: dependencies.runnerId ?? "claude",
+          environmentId: "claude-development",
+          operationId: dependencies.operationId ?? "",
+        } as RunnerSerenaActionContext);
+        if (!isObjectRecord(value) || !["executed", "failed", "skipped", "informational"].includes(String(value.status))) return { actionId: action.id, status: "failed", message: "Claude tool install returned invalid evidence.", diagnostics: [] };
+        return value as RunnerActionRunResult;
+      }
       case "write-deck-config":
         return writeDeckConfigAction(action, dependencies);
       case "write-pi-mcp-config":
@@ -1777,7 +1791,7 @@ export async function validateAndStoreSupermemoryRuntimeCredential(options: {
   diagnostics?: string[];
 }): Promise<{ ok: true; diagnostics: string[] } | { ok: false; message: string; diagnostics: string[] }> {
   const diagnostics = redactDiagnostics(options.diagnostics ?? []);
-  const token = options.token?.trim() || (options.runnerId === "opencode" ? undefined : options.secretStore?.read("supermemory-api-key")?.trim());
+  const token = options.token?.trim() || ((options.runnerId === "opencode" || options.runnerId === "claude") ? undefined : options.secretStore?.read("supermemory-api-key")?.trim());
   if (!token) {
     return {
       ok: false,
@@ -1786,11 +1800,11 @@ export async function validateAndStoreSupermemoryRuntimeCredential(options: {
     };
   }
 
-  if (options.runnerId === "opencode") {
+  if ((options.runnerId === "opencode" || options.runnerId === "claude")) {
     if (!options.secretStore || !options.profileCredentialEffects) {
       return {
         ok: false,
-        message: "Deck secret store or OpenCode profile handling is unavailable; OpenCode Supermemory plugin setup is not ready.",
+        message: options.runnerId === "claude" ? "Deck shared profile store is unavailable; Claude Supermemory setup is not ready." : "Deck secret store or OpenCode profile handling is unavailable; OpenCode Supermemory plugin setup is not ready.",
         diagnostics,
       };
     }
@@ -1802,12 +1816,12 @@ export async function validateAndStoreSupermemoryRuntimeCredential(options: {
         makeDefault: options.makeDefault ?? !options.alias,
         eligibleAliases: options.eligibleAliases ?? [],
       });
-      diagnostics.push("OpenCode Supermemory plugin credential stored in the protected Deck profile store.");
+      diagnostics.push(options.runnerId === "claude" ? "Claude Supermemory profile credential stored in the shared protected Deck profile store." : "OpenCode Supermemory plugin credential stored in the protected Deck profile store.");
       return { ok: true, diagnostics };
     } catch (error) {
       return {
         ok: false,
-        message: "OpenCode Supermemory plugin credential could not be stored; setup is not ready.",
+        message: options.runnerId === "claude" ? "Shared Claude Supermemory profile credential could not be stored; setup is not ready." : "OpenCode Supermemory plugin credential could not be stored; setup is not ready.",
         diagnostics: [...diagnostics, redact(error instanceof Error ? error.message : String(error))],
       };
     }

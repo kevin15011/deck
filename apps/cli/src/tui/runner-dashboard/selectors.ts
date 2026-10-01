@@ -226,19 +226,28 @@ export function getDashboardSectionSummaries(state: RunnerDashboardState, resolv
  * This matches what the UI renders in PackagesDetail.
  */
 export function getPackageInstructionSummaries(state: RunnerDashboardState, resolver?: CapabilityResolver): CapabilityOptionSummary[] {
-  return getConfigurablePackageInstructionMetadata(resolver?.getSupportedPackageInstructionIds?.() ?? []).map((entry) => ({
+  const standard = getConfigurablePackageInstructionMetadata(resolver?.getSupportedPackageInstructionIds?.() ?? []).map((entry) => ({
     capabilityId: entry.id,
     label: entry.label,
-    requirementLevel: "configurable",
+    requirementLevel: "configurable" as const,
     selected: state.packageInstructions[entry.id] === true,
-    status: state.capabilityStatuses[entry.id] ?? "unknown",
+    status: (state.capabilityStatuses[entry.id] ?? "unknown") as CapabilityStatus | "unknown",
     runnerScope: state.runnerScope,
     detail: entry.description,
   }));
+  return [...standard, ...(state.runnerUi?.dashboard?.extraSelectableCapabilities ?? []).map((entry) => ({
+    capabilityId: entry.id,
+    label: entry.label,
+    requirementLevel: "optional" as const,
+    selected: state.selectedCapabilities[entry.id] === true,
+    status: (state.capabilityStatuses[entry.id] ?? "unknown") as CapabilityStatus | "unknown",
+    runnerScope: state.runnerScope,
+    detail: entry.description,
+  }))];
 }
 
-export function getToggleablePackageInstructionIds(state: RunnerDashboardState, resolver?: CapabilityResolver): CanonicalInstructionPackageId[] {
-  return getPackageInstructionSummaries(state, resolver).map((summary) => summary.capabilityId as CanonicalInstructionPackageId);
+export function getToggleablePackageInstructionIds(state: RunnerDashboardState, resolver?: CapabilityResolver): CapabilityId[] {
+  return getPackageInstructionSummaries(state, resolver).map((summary) => summary.capabilityId);
 }
 
 export function getAdaptiveMemorySummary(state: RunnerDashboardState): AdaptiveMemorySummary {

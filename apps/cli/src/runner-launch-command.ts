@@ -91,7 +91,9 @@ export async function executeRunnerLaunchPlan(
   const secrets: string[] = [];
   const authorizedSensitiveKeys = plan.sensitiveEnvAuthorization?.binding === VERIFIED_OPENCODE_SUPERMEMORY_BINDING
     ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY"))
-    : new Set<string>();
+    : plan.sensitiveEnvAuthorization?.binding === "deck-claude-web-search-v1" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1"
+      ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1" && key === "SUPERMEMORY_CC_API_KEY"))
+      : new Set<string>();
   for (const [key, entry] of Object.entries(plan.envOverlay ?? {})) {
     const verifiedFailClosedControl = key === "OPENCODE_DECK_INVOCATION_AUTHORIZATION" && entry.value === "invocation-required";
     if ((entry.sensitive || isSensitiveRunnerEnv(key, entry.value)) && !RUNNER_ENV_ALLOWLIST.has(key) && !authorizedSensitiveKeys.has(key) && !verifiedFailClosedControl) {
@@ -396,6 +398,11 @@ function withSingleFinalReadinessDiagnostic<T extends { code?: string; severity:
 
 /** Generic CLI-owned install/verify/consent/spawn orchestration. */
 export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunRunnerLaunchResult> {
+  // The native Claude lane is separate. No Claude Developer Team adapter is verified yet;
+  // never let a newly registered adapter inherit this legacy Deck memory-host pipeline.
+  if (input.adapter.runnerId === "claude") {
+    return { status: "unsupported", code: "claude-developer-unverified", message: "Claude Developer Team installation and launch are not verified. Use deck claude native for the safe-mode-only route." };
+  }
   const inspectionDiagnostics: string[] = [];
   if (input.adapter.inspectProject) {
     const inspection = await input.adapter.inspectProject(input.launch.projectRoot);

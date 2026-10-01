@@ -59,7 +59,10 @@ export function getDashboardToggleAction(
     };
     const packageIds = getToggleablePackageInstructionIds(state, effectiveResolver);
     const packageId = packageIds[state.cursor];
-    return packageId ? { type: "toggle-package-instruction", packageId } : undefined;
+    if (!packageId) return undefined;
+    return state.runnerUi?.dashboard?.extraSelectableCapabilities?.some((entry) => entry.id === packageId)
+      ? { type: "toggle-capability", capabilityId: packageId }
+      : { type: "toggle-package-instruction", packageId: packageId as import("./state").CanonicalInstructionPackageId };
   }
 
   if (state.screen === "teams-detail" && state.cursor === 0) {

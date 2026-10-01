@@ -17,7 +17,12 @@ import {
 } from "@deck/core";
 import { discoverLiteralSshHostAliasesFromHome, OPENCODE_SUPERMEMORY_PROFILE_SECRET, storeOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
 import { createDeckConfigStore } from "../deck-config-store";
-import { DeckApp, openCodeProfileCredentialEffects } from "./app";
+import { createDefaultAdapterRegistry } from "../runner-adapters";
+import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
+import type { SerenaBootstrapRequest, SerenaReadinessEvidence } from "@deck/core";
+import { createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
+import { DeckApp, openCodeProfileCredentialEffects, resolveDashboardMemoryProviderForInstall } from "./app";
 import { createMemoryProviderForSelection, hydrateDashboardAdaptiveMemoryState, withAuthoritativeSupermemoryRuntimeReadiness } from "./app";
 import { createDefaultRunnerDashboardState } from "./runner-dashboard/state";
 import { reduceRunnerDashboard, type PlanBuilderFn } from "./runner-dashboard/reducer";
@@ -149,6 +154,535 @@ function renderOpenCodeReviewAfterCredentialEvidenceAction(
 }
 
 describe("DeckApp synthetic runner production flow", () => {
+  test("Claude TUI explicitly authorizes Serena bootstrap and verifies the native Deck proxy", async () => {
+    const root = createCanonicalTempRoot("deck-claude-tui-serena-bridge-");
+    const dataRoot = join(root, "data", "deck");
+    const owned = join(dataRoot, "tools", "serena");
+    const executable = join(owned, "bin", "serena");
+    mkdirSync(join(owned, "bin"), { recursive: true, mode: 0o700 });
+    writeFileSync(executable, "fixture Serena", { mode: 0o700 });
+    const deckCli = join(root, "deck-cli");
+    writeFileSync(deckCli, "fixture Deck", { mode: 0o700 });
+    const evidence: SerenaReadinessEvidence = { capabilityId: "serena", state: "ready", resolvedExecutablePath: executable, source: "installed-deck-tool", probe: "serena-help", fingerprint: "fixture-serena" };
+    const calls: SerenaBootstrapRequest[] = [];
+    const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: join(root, "xdg"), projectRoot: root });
+    configStore.write(getDefaultDeckConfig());
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, serenaOwnedRoot: owned, serenaProxyCommand: [deckCli, "internal", "serena-mcp"], serenaReadiness: async () => ({ state: "missing", diagnostic: { code: "serena-not-ready", message: "fixture missing" } }), serenaBootstrap: async (request) => { calls.push(request); return { outcome: "installed", evidence }; }, serenaRevalidate: async () => true } });
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => root} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose one or more environments.");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
+      for (let i = 0; i < 3; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      const boundary = harness.output().length;
+      harness.input("\u001b"); await waitForFreshOutput(instance, harness.output, boundary, "Claude Code Setup Dashboard");
+      for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Run install");
+      harness.input("\r");
+      try { await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude Serena plugin publication"); }
+      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; calls=${calls.length}; signals=${harness.output().split("\n").filter((line) => /Serena|serena|Blocked|failed|skipped|review|install|Claude/.test(line)).slice(-25).join(" | ")}`); }
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.authorization).toMatchObject({ runner: "claude", kind: "interactive-tui-explicit-selection" });
+      const receipt = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8"));
+      expect(receipt.capabilities).toEqual(["serena"]);
+      expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers.serena).toEqual({ command: deckCli, args: ["internal", "serena-mcp"] });
+      expect(existsSync(join(root, ".claude"))).toBe(false);
+    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
+  });
+  test("Claude TUI reuses the protected shared profile, installs official plugin, then activates memory", async () => {
+    expect(resolveDashboardMemoryProviderForInstall("claude", "supermemory", createMemoryProviderForSelection("supermemory", { token: "fixture-not-used-by-legacy-host" }))).toBeUndefined();
+    const root = createCanonicalTempRoot("deck-claude-tui-official-memory-");
+    initCanonicalGitRemote(root);
+    const dataRoot = join(root, "data", "deck");
+    const configHome = join(root, "xdg");
+    const store = createOwnerOnlyFileSecretStore({ configHome });
+    storeOpenCodeSupermemoryCredential({ store, token: "fixture-profile-once-only", makeDefault: true, eligibleAliases: [] });
+    const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: configHome, projectRoot: root });
+    configStore.write(getDefaultDeckConfig());
+    const plugin = Buffer.from('{"name":"supermemory"}\n');
+    const entries = [[".claude-plugin/plugin.json", createHash("sha256").update(plugin).digest("hex"), plugin.length]] as const;
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, officialPluginManifest: entries, supermemoryArtifactEffects: { fetchFile: async () => plugin }, resolveMemoryCredential: () => ({ token: "fixture-profile-once-only", profile: "default", canonicalRepoTag: "sm_project_v1_acme_deck_example" }) } });
+    const adapter = registry.get("claude");
+    const inspection = await adapter.inspectProject?.(root);
+    expect(inspection?.state).toBe("ready");
+    const observedReview: string[] = [];
+    const originalReview = adapter.buildReviewPlan.bind(adapter);
+    adapter.buildReviewPlan = (state, inventory) => { observedReview.push(`identity=${(state as { runtime?: { projectIdentity?: string } }).runtime?.projectIdentity} configured=${state.adaptiveMemory.supermemory?.configured}`); return originalReview(state, inventory); };
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} secretStore={store} resolveProjectRoot={() => root} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose one or more environments.");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Adaptive Memory");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      const beforeSelection = harness.output().length;
+      harness.input("\r");
+      try { await waitForFreshOutput(instance, harness.output, beforeSelection, "Provider selected: supermemory"); }
+      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; memory screens=${harness.output().split("\n").filter((line) => /Supermemory|Adaptive Memory|profile|API key|Claude|Blocked/.test(line)).slice(-25).join(" | ")}`); }
+      expect(harness.output()).not.toContain("Enter an API key");
+      for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+      try { await waitForOutput(instance, harness.output, "Run install"); }
+      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; reviews=${observedReview.join(";")}; signals=${harness.output().split("\n").filter((line) => /canonical|identity|profile|plugin|Blocked|Supermemory|readiness/i.test(line)).slice(-15).join(" | ")}`); }
+      expect(harness.output()).toContain("co-loaded");
+      expect(harness.output().split("\n").filter((line) => line.includes("actions planned:")).at(-1)).toContain("3 actions planned: 1 automatic");
+      harness.input("\r");
+      await waitForCondition(instance, () => configStore.readRequired().adaptiveMemory.enabled === true, "official memory activation after verification");
+      expect(existsSync(join(dataRoot, "claude", "official-supermemory-915aba1b8056", ".claude-plugin", "plugin.json"))).toBe(true);
+      expect(existsSync(join(root, ".claude"))).toBe(false);
+      expect(JSON.stringify(configStore.readRequired())).not.toContain("fixture-profile-once-only");
+    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
+  });
+  test("Claude TUI reviews missing Codebase Memory, Context Mode, pinned RTK and Context7 before native materialization", async () => {
+    const root = createCanonicalTempRoot("deck-claude-tui-tool-install-");
+    const dataRoot = join(root, "data", "deck");
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    const available = new Map<string, string>();
+    const installations: string[] = [];
+    const rtkBinary = Buffer.from("fixture RTK binary; never executed by this test");
+    const rtkHeader = Buffer.alloc(512);
+    rtkHeader.write("rtk");
+    rtkHeader.write(`${rtkBinary.length.toString(8).padStart(11, "0")}\0`, 124);
+    rtkHeader[156] = 48;
+    const rtkArchive = gzipSync(Buffer.concat([rtkHeader, rtkBinary, Buffer.alloc((512 - rtkBinary.length % 512) % 512), Buffer.alloc(1024)]));
+    const checksum = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+    const rtkRelease = { asset: "rtk-fixture.tar.gz", archiveBytes: rtkArchive.length, archiveSha256: checksum(rtkArchive), binaryBytes: rtkBinary.length, binarySha256: checksum(rtkBinary) };
+    let rtkDownloads = 0;
+    const codebaseBinary = Buffer.from("fixture Codebase Memory native binary, never executed");
+    const tarMember = (name: string, content: Buffer) => {
+      const header = Buffer.alloc(512);
+      header.write(name);
+      header.write(`${content.length.toString(8).padStart(11, "0")}\0`, 124);
+      header[156] = 48;
+      return Buffer.concat([header, content, Buffer.alloc((512 - content.length % 512) % 512)]);
+    };
+    const codebaseArchive = gzipSync(Buffer.concat([tarMember("codebase-memory-mcp", codebaseBinary), tarMember("LICENSE", Buffer.from("MIT")), tarMember("install.sh", Buffer.from("not run")), tarMember("THIRD_PARTY_NOTICES.md", Buffer.from("fixture")), Buffer.alloc(1024)]));
+    const codebaseRelease = { asset: "codebase-fixture.tar.gz", archiveBytes: codebaseArchive.length, archiveSha256: checksum(codebaseArchive), binaryBytes: codebaseBinary.length, binarySha256: checksum(codebaseBinary) };
+    let codebaseDownloads = 0;
+    const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: join(root, "xdg"), projectRoot: root });
+    configStore.write(getDefaultDeckConfig());
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, rtkReleaseOverride: rtkRelease, rtkArtifactEffects: { fetchArchive: async () => { rtkDownloads++; return rtkArchive; } }, verifyRtkCommand: () => true, codebaseReleaseOverride: codebaseRelease, codebaseArtifactEffects: { fetchArchive: async () => { codebaseDownloads++; return codebaseArchive; } }, verifyCodebaseNative: () => true, resolveCommand: (name) => available.get(name), installSharedTool: async (id) => {
+      installations.push(id);
+      if (id !== "context-mode" && id !== "context7") return false;
+      const command = id === "context7" ? "context7-mcp" : "context-mode";
+      const path = join(bin, command);
+      writeFileSync(path, "fixture", { mode: 0o700 });
+      available.set(command, path);
+      return true;
+    } } });
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => root} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose one or more environments.");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      for (let i = 0; i < 2; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      expect(harness.output().split("\n").filter((line) => line.includes("Context7")).at(-1)).toContain("[x] Context7");
+      const beforeReturn = harness.output().length;
+      harness.input("\u001b"); await waitForFreshOutput(instance, harness.output, beforeReturn, "Claude Code Setup Dashboard");
+      for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Run install");
+      expect(harness.output().split("\n").filter((line) => line.includes("actions planned:")).at(-1)).toContain("6 actions planned: 4 automatic");
+      harness.input("\r");
+      await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude verified tool materialization");
+      expect(installations).toEqual(["context-mode", "context7"]);
+      expect(codebaseDownloads).toBe(1);
+      expect(rtkDownloads).toBe(1);
+      const receipt = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8"));
+      expect(receipt.capabilities).toEqual(["codebase-memory", "context-mode", "context7", "rtk"]);
+      expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers["context-mode"].command).toBe(join(bin, "context-mode"));
+      expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers["codebase-memory"].command).toBe(join(dataRoot, "claude", "tools", "codebase-native-v0.11.0", `${process.platform}-${process.arch}`, "codebase-memory-mcp"));
+      expect(JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8")).mcpServers.context7.command).toBe(join(bin, "context7-mcp"));
+      expect(readFileSync(join(dataRoot, "claude", receipt.plugin, "hooks", "hooks.json"), "utf8")).toContain(join(dataRoot, "claude", "tools", "rtk-v0.50.0", `${process.platform}-${process.arch}`, "rtk"));
+      await waitForOutput(instance, harness.output, "plugin files setup complete");
+      expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).toBe(true);
+      expect(existsSync(join(root, ".claude"))).toBe(false);
+    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
+  });
+  test("reopened Claude dashboard hydrates Context7 from the verified global plugin receipt", async () => {
+    const root = createCanonicalTempRoot("deck-claude-tui-context7-reopen-");
+    const dataRoot = join(root, "data", "deck");
+    const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: join(root, "xdg"), projectRoot: root });
+    configStore.write(getDefaultDeckConfig());
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, resolveCommand: (name) => name === "context7-mcp" ? process.execPath : undefined } });
+    const adapter = registry.get("claude");
+    const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "claude-development", deckConfig: configStore.readRequired(), capabilityIds: ["claude-team-files", "context7"] });
+    expect(plan.blocked).toBe(false);
+    await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "claude-development", plan });
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => root} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose one or more environments.");
+      for (let i = 0; i < 2; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
+      expect(harness.output().split("\n").filter((line) => line.includes("Context7")).at(-1)).toContain("[x] Context7");
+    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
+  });
+  test("reopened Claude package selections can be unchecked, reviewed, and removed from the published plugin", async () => {
+    const root = createCanonicalTempRoot("deck-claude-tui-package-removal-");
+    const dataRoot = join(root, "data", "deck");
+    const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: join(root, "xdg"), projectRoot: root });
+    configStore.write(getDefaultDeckConfig());
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, resolveCommand: (name) => ["context-mode", "context7-mcp"].includes(name) ? process.execPath : undefined } });
+    const adapter = registry.get("claude");
+    const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "claude-development", deckConfig: configStore.readRequired(), capabilityIds: ["claude-team-files", "context-mode", "context7"] });
+    expect(initial.blocked).toBe(false);
+    await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "claude-development", plan: initial });
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => root} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose one or more environments.");
+      for (let i = 0; i < 2; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
+      expect(harness.output().split("\n").filter((line) => line.includes("Context Mode")).at(-1)).toContain("[x] Context Mode");
+      expect(harness.output().split("\n").filter((line) => line.includes("Context7")).at(-1)).toContain("[x] Context7");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      expect(harness.output().split("\n").filter((line) => line.includes("Context Mode")).at(-1)).toContain("[ ] Context Mode");
+      for (let i = 0; i < 3; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      expect(harness.output().split("\n").filter((line) => line.includes("Context Mode")).at(-1)).toContain("[ ] Context Mode");
+      expect(harness.output().split("\n").filter((line) => line.includes("Context7")).at(-1)).toContain("[ ] Context7");
+      const beforeReturn = harness.output().length;
+      harness.input("\u001b"); await waitForFreshOutput(instance, harness.output, beforeReturn, "Claude Code Setup Dashboard");
+      for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Run install");
+      harness.input("\r");
+      const metadata = join(dataRoot, "claude", "model-assignments.json");
+      await waitForCondition(instance, () => {
+        const receipt = JSON.parse(readFileSync(metadata, "utf8"));
+        return (receipt.capabilities ?? []).length === 0 && !existsSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"));
+      }, "Claude deselected package publication");
+      expect(adapter.readSelectedCapabilityIds?.(root)).toEqual([]);
+      expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).not.toBe(true);
+      expect(existsSync(initial.files.find((file) => file.path.endsWith("/.mcp.json"))!.path)).toBe(true);
+    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
+  });
+  test("Claude TUI reviews selected Context Mode, RTK hook and shared Tavily without project MCP or token file", async () => {
+    const root = createCanonicalTempRoot("deck-claude-tui-web-search-");
+    const dataRoot = join(root, "data", "deck");
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    for (const command of ["context-mode", "rtk"]) writeFileSync(join(bin, command), "fixture executable", { mode: 0o700 });
+    const configStore = createDeckConfigStore({ homeDir: join(root, "home"), xdgConfigHome: join(root, "xdg"), projectRoot: root });
+    configStore.write({ ...getDefaultDeckConfig(), webSearch: { enabled: true, provider: "tavily" } });
+    expect(configStore.readRequired().webSearch.enabled).toBe(true);
+    const commands = new Map(["context-mode", "rtk"].map((name) => [name, join(bin, name)]));
+    const installations: string[] = [];
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot, resolveCommand: (name) => commands.get(name), verifyRtkCommand: () => true, webSearchCredential: () => "fixture-shared-token", installSharedTool: async (id) => {
+      installations.push(id);
+      if (id !== "web-search") return false;
+      const path = join(bin, "tavily-mcp");
+      writeFileSync(path, "fixture executable", { mode: 0o700 });
+      commands.set("tavily-mcp", path);
+      return true;
+    } } });
+    const adapter = registry.get("claude");
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => root} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose one or more environments.");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      const beforeReturn = harness.output().length;
+      harness.input("\u001b"); await waitForFreshOutput(instance, harness.output, beforeReturn, "Claude Code Setup Dashboard");
+      for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+      try { await waitForOutput(instance, harness.output, "Run install"); }
+      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; signals=${harness.output().split("\n").filter((line) => /Claude|Blocked|Review|Web Search|Context Mode|capabilit|missing|provider|failed/i.test(line)).slice(-24).join(" | ")}`); }
+      harness.input("\r");
+      await waitForCondition(instance, () => adapter.readModelAssignments(root) !== undefined && existsSync(join(dataRoot, "claude", "model-assignments.json")), "global capability receipt");
+      const receipt = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8"));
+      expect(receipt.capabilities).toEqual(["context-mode", "rtk", "web-search"]);
+      const mcp = readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8");
+      expect(JSON.parse(mcp).mcpServers["context-mode"].command).toBe(join(bin, "context-mode"));
+      expect(JSON.parse(mcp).mcpServers["web-search"].command).toBe(join(bin, "tavily-mcp"));
+      expect(installations).toEqual(["web-search"]);
+      expect(mcp).not.toContain("fixture-shared-token");
+      const hooks = JSON.parse(readFileSync(join(dataRoot, "claude", receipt.plugin, "hooks", "hooks.json"), "utf8"));
+      expect(hooks.hooks.PreToolUse[0].matcher).toBe("Bash");
+      expect(hooks.hooks.PreToolUse[0].hooks[0].command).toContain("rtk' hook claude");
+      await waitForOutput(instance, harness.output, "plugin files setup complete");
+      expect(configStore.readRequired().webSearch.enabled).toBe(true);
+      expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).toBe(true);
+      expect(configStore.readRequired().packageInstructions.claude?.rtk).toBe(true);
+      expect(existsSync(join(root, ".mcp.json"))).toBe(false);
+      expect(existsSync(join(root, ".claude"))).toBe(false);
+    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
+  });
+  test("TUI shows Claude global installation as unavailable and does not select it", async () => {
+    const projectRoot = createCanonicalTempRoot("deck-claude-tui-unavailable-");
+    const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
+    configStore.write(getDefaultDeckConfig());
+    const harness = createInkHarness();
+    const instance = render(
+      <DeckApp adapterRegistry={createAdapterRegistry()} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false },
+    );
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Choose one or more environments.");
+      expect(harness.output()).toContain("Claude Code — adapter unavailable");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      expect(harness.output()).not.toContain("[x] Claude Code");
+      harness.input("\r"); await instance.waitUntilRenderFlush();
+      expect(harness.output()).not.toContain("Choose Lead personality");
+      expect(existsSync(join(projectRoot, ".claude"))).toBe(false);
+    } finally {
+      instance.unmount(); await instance.waitUntilExit(); harness.close();
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+  test("registered Claude TUI review runs the global plugin installer with isolated Deck data", async () => {
+    const projectRoot = createCanonicalTempRoot("deck-claude-tui-plugin-");
+    const dataRoot = join(projectRoot, "data", "deck");
+    const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
+    configStore.write(getDefaultDeckConfig());
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: projectRoot, dataRoot } });
+    const adapter = registry.get("claude");
+    const installSignals: string[] = [];
+    const build = adapter.buildDeveloperTeamInstallPlan.bind(adapter);
+    adapter.buildDeveloperTeamInstallPlan = (input) => { const plan = build(input); installSignals.push(`plan blocked=${plan.blocked} memory=${input.deckConfig.adaptiveMemory.enabled}/${input.deckConfig.adaptiveMemory.activeProvider}/${Boolean(input.memoryProvider)} capabilities=${input.capabilityIds?.join(",")} models=${Object.keys(input.modelAssignments ?? {}).join(",")} thinking=${Object.keys(input.thinkingAssignments ?? {}).join(",")} diagnostics=${plan.diagnostics?.join(";")}`); return plan; };
+    const apply = adapter.applyDeveloperTeamInstall.bind(adapter);
+    adapter.applyDeveloperTeamInstall = async (input) => { try { return await apply(input); } catch (error) { installSignals.push(`apply error=${error instanceof Error ? error.message : String(error)}`); throw error; } };
+    const inventory = await adapter.getCapabilityInventory({ runnerId: "claude", environmentId: "claude-development", projectRoot, deckConfig: configStore.readRequired() });
+    expect(inventory.capabilities.find((entry) => entry.capabilityId === "adaptive-memory")).toMatchObject({ supportStatus: "runner-specific", isInstalled: false });
+    expect(inventory.capabilities.find((entry) => entry.capabilityId === "protected-execution")?.supportStatus).toBe("unsupported");
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Choose one or more environments.");
+      expect(harness.output()).toContain("Claude Code Development (global plugin files only)");
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input("j"); await instance.waitUntilRenderFlush();
+      harness.input(" "); await instance.waitUntilRenderFlush();
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Choose Lead personality");
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
+      for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+      try { await waitForOutput(instance, harness.output, "Run install"); }
+      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; signals=${harness.output().split("\n").filter((line) => /Claude|Review|Blocked|install|Team|Unsupported|Capability|Choose/i.test(line)).slice(-35).join(" | ")}`); }
+      expect(harness.output()).toContain("Create 15 owner-only files in");
+      harness.input("\r");
+       try { await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "global Claude plugin publication"); }
+      catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; signals=${installSignals.join(" | ")}; TUI signals: ${harness.output().split("\n").filter((line) => /Claude|Blocked|failed|Run install|Review|Developer Team|skipped|manual/i.test(line)).slice(-14).join(" | ")}`); }
+      await waitForOutput(instance, harness.output, "plugin files setup complete");
+       const installed = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "claude-development", deckConfig: configStore.readRequired() });
+       expect((await adapter.verifyDeveloperTeamInstall(installed)).valid).toBe(true);
+       const selectedPlugin = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8")).plugin as string;
+       expect(existsSync(join(dataRoot, "claude", selectedPlugin, ".mcp.json"))).toBe(false);
+       expect(existsSync(join(dataRoot, "claude", selectedPlugin, "hooks", "hooks.json"))).toBe(false);
+      expect(installSignals.some((signal) => signal.startsWith("plan blocked=false"))).toBe(true);
+      expect(existsSync(join(projectRoot, ".claude"))).toBe(false);
+    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(projectRoot, { recursive: true, force: true }); }
+  });
+  test("Claude model configuration exposes runtime-reported models without borrowing Pi's OpenAI providers", async () => {
+    const projectRoot = createCanonicalTempRoot("deck-claude-models-");
+    const piDir = join(projectRoot, "pi-agent");
+    mkdirSync(piDir);
+    writeFileSync(join(piDir, "settings.json"), JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-4" }));
+    const previousPiDir = process.env.PI_CODING_AGENT_DIR;
+    const previousPath = process.env.PATH;
+    process.env.PI_CODING_AGENT_DIR = piDir;
+    process.env.PATH = "";
+    const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
+    configStore.write(getDefaultDeckConfig());
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: projectRoot, dataRoot: join(projectRoot, "data", "deck"), modelDiscovery: async () => [{ value: "vendor/model-2030", displayName: "Runtime Custom", description: "fixture" }] } });
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      for (let i = 0; i < 3; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select runner for model config");
+      for (let i = 0; i < 2; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select team for model config");
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select an agent to configure");
+      harness.input("\r");
+       await waitForOutput(instance, harness.output, "Select a Claude Code provider");
+       expect(harness.output()).toContain("Claude runtime-reported models");
+       expect(harness.output()).not.toContain("gpt-4");
+       harness.input("\r"); await waitForOutput(instance, harness.output, "Select a model for Claude runtime-reported models");
+       harness.input("\r"); await waitForOutput(instance, harness.output, "Availability unverified");
+       for (let i = 0; i < 7; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+       harness.input("\r");
+       await waitForCondition(instance, () => registry.get("claude").readModelAssignments(projectRoot)["deck-lead"] === "vendor/model-2030", "Home exact runtime model save");
+    } finally {
+      instance.unmount(); await instance.waitUntilExit(); harness.close();
+      if (previousPiDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previousPiDir;
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+  test("Home TUI saves an arbitrary runtime Claude identifier and exact generated frontmatter", async () => {
+    const projectRoot = createCanonicalTempRoot("deck-claude-model-save-");
+    const dataRoot = join(projectRoot, "data", "deck");
+    const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
+    configStore.write(getDefaultDeckConfig());
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: projectRoot, dataRoot, modelDiscovery: async () => [{ value: "runtime/model-2030", displayName: "Runtime Custom", description: "fixture", supportsEffort: true, supportedEffortLevels: ["medium", "max"] }] } });
+    const adapter = registry.get("claude");
+    const defaultPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "claude-development", deckConfig: configStore.readRequired() });
+    await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "claude-development", plan: defaultPlan });
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Your AI environment, configured.");
+      for (let i = 0; i < 3; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select runner for model config");
+      for (let i = 0; i < 2; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select team for model config");
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select an agent to configure");
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select a Claude Code provider");
+      harness.input("\r");
+       await waitForOutput(instance, harness.output, "Select a model for Claude runtime-reported models");
+       expect(harness.output()).toContain("Runtime Custom");
+       expect(harness.output()).not.toContain("gpt-4");
+       harness.input("\r");
+       await waitForOutput(instance, harness.output, "Select reasoning for");
+       expect(harness.output()).toContain("thinking medium");
+       expect(harness.output()).toContain("thinking max");
+       harness.input("j"); await instance.waitUntilRenderFlush();
+       harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select an agent to configure");
+      expect(harness.output()).toContain("Availability unverified");
+      for (let i = 0; i < 7; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+       await waitForCondition(instance, () => adapter.readModelAssignments(projectRoot)["deck-lead"] === "runtime/model-2030", "Claude global model assignment");
+       const pluginPath = join(dataRoot, "claude", JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8")).plugin as string);
+      expect(existsSync(pluginPath)).toBe(true); // previous immutable version remains intact
+       expect(adapter.readModelAssignments(projectRoot)).toEqual({ "deck-lead": "runtime/model-2030" });
+       expect(adapter.readThinkingAssignments(projectRoot)).toEqual({ "deck-lead": "max" });
+      const updated = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "claude-development", deckConfig: configStore.readRequired() });
+      expect(updated.mutationPreview).toHaveLength(0);
+      expect((await adapter.verifyDeveloperTeamInstall(updated)).valid).toBe(true);
+       expect(updated.files.find((file) => file.path.endsWith("agents/deck-lead.md"))?.content).toContain('\nmodel: "runtime/model-2030"\neffort: max\n');
+      expect(existsSync(join(projectRoot, ".claude"))).toBe(false);
+    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(projectRoot, { recursive: true, force: true }); }
+  });
+  test("Claude dashboard Configure models shows runtime metadata instead of Pi providers", async () => {
+    const projectRoot = createCanonicalTempRoot("deck-claude-dashboard-models-");
+    const piDir = join(projectRoot, "pi-agent");
+    mkdirSync(piDir);
+    writeFileSync(join(piDir, "settings.json"), JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-4" }));
+    const previousPiDir = process.env.PI_CODING_AGENT_DIR;
+    const previousPath = process.env.PATH;
+    process.env.PI_CODING_AGENT_DIR = piDir;
+    process.env.PATH = "";
+    const configStore = createDeckConfigStore({ homeDir: join(projectRoot, "home"), xdgConfigHome: join(projectRoot, "xdg"), projectRoot });
+    configStore.write(getDefaultDeckConfig());
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: projectRoot, dataRoot: join(projectRoot, "data", "deck"), modelDiscovery: async () => [{ value: "vendor/model-2030", displayName: "Runtime Custom", description: "fixture" }] } });
+    const harness = createInkHarness();
+    const dashboardState = createDefaultRunnerDashboardState({
+      runnerScope: "claude", runnerDisplayName: "Claude Code", runnerUi: registry.get("claude").ui,
+      screen: "developer-team-detail", cursor: 0,
+      teams: { "developer-team": { teamId: "developer-team", label: "Developer Team", selected: true } },
+    });
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} initialScreen="pi-runner-dashboard" initialDashboardState={dashboardState} />,
+      { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Configure models per agent");
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select an agent to configure");
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Select a Claude Code provider");
+       expect(harness.output()).toContain("Claude runtime-reported models");
+      expect(harness.output()).not.toContain("gpt-4");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Select a model for Claude runtime-reported models");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Availability unverified");
+      for (let i = 0; i < 7; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+      await waitForCondition(instance, () => registry.get("claude").readModelAssignments(projectRoot)["deck-lead"] === "vendor/model-2030", "dashboard exact runtime model save");
+    } finally {
+      instance.unmount(); await instance.waitUntilExit(); harness.close();
+      if (previousPiDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previousPiDir;
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+  test("Claude metadata discovery shows pending/error/retry without a hardcoded fallback", async () => {
+    const root = createCanonicalTempRoot("deck-claude-model-retry-");
+    const configStore = createDeckConfigStore({ homeDir: root, xdgConfigHome: join(root, "xdg"), projectRoot: root }); configStore.write(getDefaultDeckConfig());
+    let rejectFirst: ((error: Error) => void) | undefined;
+    let calls = 0;
+    const registry = createDefaultAdapterRegistry({ claude: { homeDir: root, dataRoot: join(root, "data", "deck"), modelDiscovery: async () => { calls++; if (calls === 1) return await new Promise<never>((_resolve, reject) => { rejectFirst = reject; }); return [{ value: "retry-model-id", displayName: "Retry Model", description: "fixture" }]; } } });
+    const dashboardState = createDefaultRunnerDashboardState({ runnerScope: "claude", runnerDisplayName: "Claude Code", runnerUi: registry.get("claude").ui, screen: "developer-team-detail", cursor: 0 });
+    const harness = createInkHarness();
+    const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => root} runReleaseCheck={async () => ({ kind: "none" })} initialScreen="pi-runner-dashboard" initialDashboardState={dashboardState} />, { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
+    try {
+      await waitForOutput(instance, harness.output, "Configure models per agent"); harness.input("\r");
+      await waitForOutput(instance, harness.output, "Reading models from installed Claude");
+      rejectFirst!(new Error("fixture-not-disclosed"));
+      await waitForOutput(instance, harness.output, "Claude model discovery is unavailable");
+      expect(harness.output()).toContain("No hardcoded fallback"); expect(harness.output()).not.toContain("fixture-not-disclosed");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Select an agent to configure");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Select a Claude Code provider");
+      harness.input("\r"); await waitForOutput(instance, harness.output, "Retry Model"); expect(calls).toBe(2);
+    } finally { instance.unmount(); await instance.waitUntilExit(); harness.close(); rmSync(root, { recursive: true, force: true }); }
+  });
   test("restart hydration disables Adaptive Memory when config is disabled", () => {
     const state = hydrateDashboardAdaptiveMemoryState(
       { version: 1, adaptiveMemory: { enabled: false, activeProvider: "none" } } as never,

@@ -22,6 +22,7 @@ const SUPPORT_STATUSES = new Set([
   "manual-verified",
   "gap",
   "blocked",
+  "unsupported",
   "not-applicable",
 ]);
 

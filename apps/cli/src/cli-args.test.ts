@@ -3,6 +3,24 @@ import { describe, expect, test } from "bun:test";
 import { parseArgs, serializeCodexExecPrompt, type ParsedArgs } from "./cli-args";
 
 describe("parseArgs", () => {
+  test("keeps the bounded Claude native route separate from Developer Team", () => {
+    expect(parseArgs(["claude", "native"])).toEqual({ command: "claude-native-launch", launch: { mode: "interactive" } });
+    expect(parseArgs(["claude", "native", "resume", "session-1"])).toEqual({ command: "claude-native-launch", launch: { mode: "resume-by-id", sessionId: "session-1" } });
+    expect(parseArgs(["claude", "native", "resume", "--last"])).toEqual({ command: "claude-native-launch", launch: { mode: "resume-latest" } });
+    for (const args of [["claude"], ["claude", "native", "exec"], ["claude", "native", "--dangerously-skip-permissions"], ["claude", "native", "resume"], ["claude", "native", "resume", "x", "extra"]]) {
+      expect(parseArgs(args).command).toBe("error");
+    }
+  });
+
+  test("rejects project-scoped Claude installation commands; only native mode is routed", () => {
+    for (const args of [
+      ["claude", "team"], ["claude", "team", "--dry-run"], ["claude", "team", "--yes"],
+      ["claude", "mcp", "context-mode"], ["claude", "mcp", "context-mode", "--dry-run"],
+      ["claude", "mcp", "context-mode", "--yes"], ["claude", "developer", "--yes"],
+    ]) expect(parseArgs(args).command).toBe("error");
+    expect(parseArgs(["claude", "developer"])).toEqual({ command: "claude-team-launch" });
+  });
+
   test("parses the exact Codex developer grammar", () => {
     expect(parseArgs(["codex", "developer"])).toMatchObject({ command: "runner-launch", runnerId: "codex", launch: { mode: "interactive" } });
     expect(parseArgs(["codex", "developer", "--install-only", "--dry-run"])).toMatchObject({ command: "runner-launch", installOnly: true, dryRun: true });

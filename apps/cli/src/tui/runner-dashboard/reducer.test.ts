@@ -356,6 +356,14 @@ describe("Pi Runner dashboard reducer", () => {
     expect(allActionIds(state.plan).some((id) => id.includes("engram") || id.includes("supermemory"))).toBe(false);
   });
 
+  test("Claude unverified memory handoff cannot enter credential setup", () => {
+    const state = createDefaultPiRunnerDashboardState({ runnerScope: "claude", runnerUi: { environmentLabels: {}, model: { providerSource: "none", missingChecks: [], remediation: "none", defaultThinkingLevels: [] }, adaptiveMemory: { supermemory: { supported: false, requiresExternalToken: true, selectionStatus: "Claude official plugin handoff is unverified." } } } });
+    const selected = reduce(state, { type: "select-adaptive-memory", provider: "supermemory" });
+    expect(selected.adaptiveMemory.provider).toBe("none");
+    expect(selected.adaptiveMemory.status).toContain("unverified");
+    expect(selected.adaptiveMemory.supermemory).toBeUndefined();
+  });
+
   test("OpenCode requires runtime token setup before optional MCP OAuth", () => {
     let state = createDefaultPiRunnerDashboardState({
       runnerScope: "opencode",
