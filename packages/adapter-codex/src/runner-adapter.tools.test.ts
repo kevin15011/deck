@@ -461,7 +461,7 @@ describe("Codex global ownership and migration", () => {
 
       const reviewed = plan(adapter, cwd);
       const legacy = reviewed.diagnostics?.find((message) => message.includes("previous per-project Deck install"));
-      expect(legacy).toContain("override the global ones");
+      expect(legacy).toContain("overrides the global team files");
       expect(legacy).toContain("--cleanup-legacy");
       expect(await readFile(join(cwd, ".codex", "agents", "deck-lead.toml"), "utf8")).toBe(files[".codex/agents/deck-lead.toml"]);
 

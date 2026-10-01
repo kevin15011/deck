@@ -91,6 +91,7 @@ export type ParsedArgs =
       dryRun?: boolean;
       localOnly?: boolean;
       cleanupLegacy?: boolean;
+      verbose?: boolean;
       yes?: boolean;
       memoryProvider?: "supermemory" | "none";
     }
@@ -134,7 +135,7 @@ export function serializeCodexExecPrompt(tokens: readonly string[]): { ok: true;
  */
 function parseCodexArgs(rest: string[]): ParsedArgs {
   if (rest[0] !== "developer") {
-    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--cleanup-legacy] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck installs globally (your Codex home and ~/.agents/skills) and writes nothing into projects; --local-only is accepted but has no effect; Supermemory uses the pinned official Codex plugin hooks with a credential passed to the Codex process only, while protected execution controls remain route-limited." };
+    return { command: "error", message: "Usage: deck codex developer [--install-only] [--dry-run] [--yes] [--verbose] [--cleanup-legacy] [exec -- <prompt...> | resume <session-id> | resume --last]\nCodex 0.145.0+ is supported. Deck installs globally and writes nothing into projects; use --dry-run or --verbose for details." };
   }
 
   const tokens = rest.slice(1);
@@ -143,6 +144,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
   const dryRun = deckFlagRegion.includes("--dry-run");
   const localOnly = deckFlagRegion.includes("--local-only");
   const cleanupLegacy = deckFlagRegion.includes("--cleanup-legacy");
+  const verbose = deckFlagRegion.includes("--verbose");
   const yes = deckFlagRegion.includes("--yes");
   const installOnly = deckFlagRegion.includes("--install-only");
   let memoryProvider: "supermemory" | "none" | undefined;
@@ -154,7 +156,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
       memoryProvider = value;
     }
   }
-  const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only", "--cleanup-legacy"]);
+  const deckFlags = new Set(["--dry-run", "--local-only", "--yes", "--install-only", "--cleanup-legacy", "--verbose"]);
   const filtered = [
     ...deckFlagRegion.filter((token) => !deckFlags.has(token) && !token.startsWith("--memory=")),
     ...(separatorIndex >= 0 ? ["--", ...tokens.slice(separatorIndex + 1)] : []),
@@ -192,6 +194,7 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
     ...(dryRun ? { dryRun: true } : {}),
     ...(localOnly ? { localOnly: true } : {}),
     ...(cleanupLegacy ? { cleanupLegacy: true } : {}),
+    ...(verbose ? { verbose: true } : {}),
     ...(yes ? { yes: true } : {}),
     ...(memoryProvider ? { memoryProvider } : {}),
   };
@@ -427,7 +430,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     let memoryProvider: "supermemory" | "none" | undefined;
     const valid = rest.every((token, index) => {
       if (index === 0) return token === "developer";
-      if (["--yes", "--dry-run", "--install-only"].includes(token)) return true;
+      if (["--yes", "--dry-run", "--install-only", "--verbose"].includes(token)) return true;
       if (token.startsWith("--memory=")) {
         const value = token.slice("--memory=".length);
         if (value === "supermemory" || value === "none") {
@@ -438,7 +441,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       return false;
     });
     if (!valid) {
-      return { command: "error", message: "Usage: deck opencode developer [--install-only] [--dry-run] [--yes] [--memory=supermemory|none]" };
+      return { command: "error", message: "Usage: deck opencode developer [--install-only] [--dry-run] [--yes] [--verbose] [--memory=supermemory|none]" };
     }
     return {
       command: "runner-launch",
@@ -448,6 +451,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(rest.includes("--install-only") ? { installOnly: true } : {}),
       ...(rest.includes("--dry-run") ? { dryRun: true } : {}),
       ...(rest.includes("--yes") ? { yes: true } : {}),
+      ...(rest.includes("--verbose") ? { verbose: true } : {}),
       ...(memoryProvider ? { memoryProvider } : {}),
     };
   }

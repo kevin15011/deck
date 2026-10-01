@@ -1440,7 +1440,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       extraDiagnostics.push({
         code: "codex-legacy-project-install",
         severity: "warning",
-        message: `A previous per-project Deck install was found in ${input.projectRoot} (${legacy.unmodified.length} unmodified and ${legacy.modified.length} modified Deck-owned files). Project-level agents and skills override the global ones with the same name, so they shadow this install in that project. Deck never deletes them automatically; run the Codex developer command with --cleanup-legacy once to remove only the unmodified Deck-owned files (modified files are kept), or delete them yourself.`,
+        message: `A previous per-project Deck install in ${input.projectRoot} (${legacy.unmodified.length + legacy.modified.length} files) overrides the global team files in this project. Run the Codex developer command with --cleanup-legacy to remove it; only unmodified Deck files are deleted and anything you changed is kept.`,
       });
     }
     native = { ...native, diagnostics: [...native.diagnostics, ...extraDiagnostics] };
@@ -1453,6 +1453,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       files,
       ownershipReleases: native.ownershipReleases,
       diagnostics: native.diagnostics.map((diagnostic) => diagnostic.message),
+      diagnosticEntries: native.diagnostics.map(({ code, severity, message }) => ({ code, severity, message })),
       blocked: native.blocked,
       mutationPreview: native.mutations.map((mutation) => ({
         action: mutation.operation === "delete" ? "delete" as const : mutation.expected.kind === "absent" ? "create" as const : "update" as const,

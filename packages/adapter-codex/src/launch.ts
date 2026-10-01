@@ -28,7 +28,7 @@ export const CODEX_HOOK_TRUST_BYPASS_ARG = "--dangerously-bypass-hook-trust";
 export const CODEX_DEVELOPER_BYPASS_DIAGNOSTIC: Readonly<RunnerDiagnostic> = {
   code: "codex-dangerous-bypass",
   severity: "warning",
-  message: "Deck always launches Codex Developer Team with --dangerously-bypass-approvals-and-sandbox; sandboxing and command approvals are disabled, so Codex may modify/delete files or run commands without approval.",
+  message: "Heads up: sandboxing and command approvals are disabled for this Codex session (Deck always launches it this way), so Codex can change files and run commands without asking.",
 };
 
 function safeTomlString(value: string, limit: number): string | undefined {

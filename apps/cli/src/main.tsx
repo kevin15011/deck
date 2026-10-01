@@ -1,4 +1,4 @@
-import { formatLaunchDiagnostic, shouldColorStderr } from "./launch-diagnostic-format";
+import { formatLaunchDiagnostic, formatPlainDiagnostic, isQuietDiagnostic, shouldColorStderr } from "./launch-diagnostic-format";
 import React from "react";
 import { render, renderToString } from "ink";
 
@@ -271,7 +271,9 @@ if (parsed.command === "runner-launch") {
         prompt.close();
       }
     } : undefined,
-    presentPreview: async (preview) => { presented.push(preview); console.log(preview); },
+    verbose: parsed.verbose,
+    // Human status goes to stderr for exec runs so stdout carries only the runner's own output.
+    presentPreview: async (preview) => { presented.push(preview); (parsed.launch.mode === "exec" ? console.error : console.log)(preview); },
     processEffects: createNodeRunnerProcessEffects(),
   });
   if (result.status === "blocked") {
@@ -290,7 +292,11 @@ if (parsed.command === "runner-launch") {
   if (result.status === "launched") {
     // Each warning is printed once: anything already shown in the pre-launch preview is not repeated.
     const shown = presented.join("\n");
-    for (const diagnostic of result.launch.diagnostics) if (!shown.includes(diagnostic.message)) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
+    for (const diagnostic of result.launch.diagnostics) {
+      if (shown.includes(diagnostic.message)) continue;
+      if (parsed.verbose) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
+      else if (!isQuietDiagnostic(diagnostic)) console.error(formatPlainDiagnostic(diagnostic));
+    }
     if (result.outcome.stdout) process.stdout.write(result.outcome.stdout);
     if (result.outcome.stderr) process.stderr.write(result.outcome.stderr);
     if (result.outcome.truncated) console.error("Runner output was truncated; it is not complete verification evidence.");

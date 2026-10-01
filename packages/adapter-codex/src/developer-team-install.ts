@@ -467,7 +467,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           diagnostics.push({ code: "codex-hooks-feature-disabled", severity: "warning", message: "Codex hooks are disabled by [features] hooks=false; Deck-owned hooks are materialized but will not run until it is enabled." });
         }
         if (input.existingFiles.has(".codex/hooks.json") && hookBlocks.length > 0) {
-          diagnostics.push({ code: "codex-hooks-json-coexistence", severity: "warning", message: "Your Codex hooks.json exists beside Deck's inline [hooks] entries in config.toml; Codex loads both and may warn. Deck leaves hooks.json untouched." });
+          diagnostics.push({ code: "codex-hooks-json-coexistence", severity: "info", message: "Your Codex hooks.json exists beside Deck's inline [hooks] entries in config.toml; Codex loads both and may warn. Deck leaves hooks.json untouched." });
         }
         const hooks = mergeCodexOwnedHooks(mcp.content, hookBlocks);
         if (hooks.status === "blocked") {

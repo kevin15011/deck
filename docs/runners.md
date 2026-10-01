@@ -80,6 +80,8 @@ deck codex developer --yes
 
 Add the `--install-only` flag to apply and verify without starting Codex, or `--memory=supermemory` to select the memory provider for one run. The `--local-only` flag is accepted for compatibility but has no effect, because nothing is written into projects.
 
+A normal launch prints only a few plain lines: what is starting, the adaptive-memory status, a one-line reminder that Codex runs with sandboxing and approvals disabled, a short summary when team files change (with the usual confirmation prompt), and anything that needs your action. Routine notes and the exact file list with ownership hashes appear with the `--verbose` flag or in a dry run; the same diagnostics remain available to `deck doctor`. For `exec` runs this status goes to stderr, so stdout carries only Codex's own output.
+
 ### Migrating a previous per-project install
 
 Earlier versions wrote `.codex/`, `.agents/skills/` and a manifest into each project. Those project files override the global agents and skills that share a name, so they shadow the global install in that project. Deck detects them through the old manifest, reports them on every plan, and never deletes them by itself. Run the Codex developer command once from that project with the `--cleanup-legacy` flag (add `--yes` to skip the prompt) to remove only the files whose bytes still match what Deck recorded and Deck's marker blocks from the project `config.toml`; anything you changed is kept. If the files are tracked in Git, the removal shows up as ordinary deletions you can review and commit, or restore. You can also delete them yourself.
