@@ -31,6 +31,13 @@
         "react-devtools-core": "^7.0.1",
       },
     },
+    "packages/adapter-claude": {
+      "name": "@deck/adapter-claude",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deck/core": "workspace:*",
+      },
+    },
     "packages/adapter-codex": {
       "name": "@deck/adapter-codex",
       "version": "0.0.0",
@@ -96,6 +103,8 @@
   },
   "packages": {
     "@alcalzone/ansi-tokenize": ["@alcalzone/ansi-tokenize@0.3.0", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-p+CMKJ93HFmLkjXKlXiVGlMQEuRb6H0MokBSwUsX+S6BRX8eV5naFZpQJFfJHjRZY0Hmnqy1/r6UWl3x+19zYA=="],
+
+    "@deck/adapter-claude": ["@deck/adapter-claude@workspace:packages/adapter-claude"],
 
     "@deck/adapter-codex": ["@deck/adapter-codex@workspace:packages/adapter-codex"],
 
