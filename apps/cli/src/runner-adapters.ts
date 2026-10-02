@@ -57,6 +57,7 @@ export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOpti
   }));
   registry.register("codex", createCodexRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
+    webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     ...options.codex,
   }));
   registry.register("claude", createClaudeRunnerAdapter({

@@ -514,3 +514,12 @@ describe("parseArgs", () => {
     });
   });
 });
+
+describe("--verbose for runner launches", () => {
+  test("is accepted by the Codex and OpenCode developer commands and kept out of the runner arguments", () => {
+    expect(parseArgs(["codex", "developer", "--verbose"])).toMatchObject({ command: "runner-launch", runnerId: "codex", verbose: true });
+    expect(parseArgs(["codex", "developer", "exec", "--", "--verbose"])).toMatchObject({ command: "runner-launch", launch: { mode: "exec", prompt: ["--verbose"] } });
+    expect(parseArgs(["codex", "developer", "exec", "--", "x"])).not.toHaveProperty("verbose");
+    expect(parseArgs(["opencode", "developer", "--verbose", "--yes"])).toMatchObject({ command: "runner-launch", runnerId: "opencode", verbose: true, yes: true });
+  });
+});

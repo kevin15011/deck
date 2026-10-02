@@ -1,3 +1,4 @@
+import { readyTestTools } from "../../../../packages/adapter-codex/src/test-tools";
 import React from "react";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { EventEmitter } from "node:events";
@@ -145,6 +146,8 @@ describe("DeckApp Codex discovery composition", () => {
       }],
     });
     const adapter = createCodexRunnerAdapter({
+      codexHome: join(projectRoot, ".codex"),
+      userHome: projectRoot,
       productionModelDiscoveryDependencies: {
         now: () => 1,
         commandRunner: {
@@ -224,9 +227,10 @@ describe("DeckApp Codex discovery composition", () => {
           probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex\nexec\nresume", execHelp: "Usage: codex exec", resumeHelp: "Usage: codex resume [SESSION_ID]" }),
           inspectTrust: async () => "trusted",
         },
-        sharedBinaryUsability: async (command) => ({ command, status: "ready", resolvedPath: `/bin/${command}`, diagnostics: [] }),
+        tools: readyTestTools(),
+        codexHome: join(projectRoot, ".codex"),
+        userHome: projectRoot,
         codebaseIndexReadiness: () => true,
-        supermemoryOAuthStatus: async () => ({ state: "authenticated" }),
       },
     });
     const adapter = registry.get("codex");

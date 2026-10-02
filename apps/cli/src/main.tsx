@@ -1,4 +1,4 @@
-import { formatLaunchDiagnostic, shouldColorStderr } from "./launch-diagnostic-format";
+import { formatLaunchDiagnostic, formatPlainDiagnostic, isQuietDiagnostic, shouldColorStderr } from "./launch-diagnostic-format";
 import React from "react";
 import { render, renderToString } from "ink";
 
@@ -250,6 +250,7 @@ if (parsed.command === "runner-launch") {
   const adapter = getAdapterRegistry().get(parsed.runnerId);
   const launch = { ...parsed.launch, projectRoot, teamId: parsed.teamId, deckConfig };
   const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+  const presented: string[] = [];
   const result = await runRunnerLaunch({
     adapter,
     launch,
@@ -257,6 +258,7 @@ if (parsed.command === "runner-launch") {
     dryRun: parsed.dryRun,
     yes: parsed.yes,
     localOnly: parsed.localOnly,
+    cleanupLegacy: parsed.cleanupLegacy,
     cliMemoryProvider: parsed.memoryProvider,
     interactive,
     confirm: interactive ? async (question) => {
@@ -269,7 +271,9 @@ if (parsed.command === "runner-launch") {
         prompt.close();
       }
     } : undefined,
-    presentPreview: async (preview) => { console.log(preview); },
+    verbose: parsed.verbose,
+    // Human status goes to stderr for exec runs so stdout carries only the runner's own output.
+    presentPreview: async (preview) => { presented.push(preview); (parsed.launch.mode === "exec" ? console.error : console.log)(preview); },
     processEffects: createNodeRunnerProcessEffects(),
   });
   if (result.status === "blocked") {
@@ -281,11 +285,18 @@ if (parsed.command === "runner-launch") {
     process.exit(2);
   }
   if (result.status === "dry-run" || result.status === "installed") {
-    for (const diagnostic of result.diagnostics) console.log(diagnostic);
+    // The dry-run preview was already presented once through presentPreview; only verification output is new.
+    if (result.status === "installed") for (const diagnostic of result.diagnostics) console.log(diagnostic);
     process.exit(0);
   }
   if (result.status === "launched") {
-    for (const diagnostic of result.launch.diagnostics) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
+    // Each warning is printed once: anything already shown in the pre-launch preview is not repeated.
+    const shown = presented.join("\n");
+    for (const diagnostic of result.launch.diagnostics) {
+      if (shown.includes(diagnostic.message)) continue;
+      if (parsed.verbose) console.error(formatLaunchDiagnostic(diagnostic, shouldColorStderr()));
+      else if (!isQuietDiagnostic(diagnostic)) console.error(formatPlainDiagnostic(diagnostic));
+    }
     if (result.outcome.stdout) process.stdout.write(result.outcome.stdout);
     if (result.outcome.stderr) process.stderr.write(result.outcome.stderr);
     if (result.outcome.truncated) console.error("Runner output was truncated; it is not complete verification evidence.");
@@ -325,7 +336,8 @@ if (parsed.command === "runner-launch") {
     process.exit(2);
   }
   if (result.status === "dry-run" || result.status === "installed") {
-    for (const diagnostic of result.diagnostics) console.log(diagnostic);
+    // The dry-run preview was already presented once through presentPreview; only verification output is new.
+    if (result.status === "installed") for (const diagnostic of result.diagnostics) console.log(diagnostic);
     process.exit(0);
   }
   if (result.status === "launched") {

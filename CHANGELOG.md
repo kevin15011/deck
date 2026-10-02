@@ -9,6 +9,29 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-01
+
+### Added
+
+- Codex Review & Install now provisions the shared tools like Claude and OpenCode: a Deck-owned pinned RTK with a `PreToolUse` rewrite hook, Codebase Memory (an existing shared binary is reused, otherwise the pinned native release), and Context Mode. MCP entries and hooks are pinned to verified absolute paths instead of bare `PATH` names.
+- Codex Supermemory uses only the pinned official `codex-supermemory` recall and flush hooks. The shared profile credential is injected into the launched Codex process only; no Supermemory MCP entry or Deck memory loopback is registered beside it, and conflicting Supermemory registrations block the launch.
+- Deck-owned Codex hooks live in marker-delimited blocks, so existing user hooks (inline TOML or `hooks.json`) are preserved and removed only by their owner. The Codex launch passes `--dangerously-bypass-hook-trust` when Deck-owned hooks are present.
+
+### Changed
+
+- Codex and OpenCode launches print a short, product-level summary instead of a wall of diagnostics: routine notes move behind `--verbose` and `--dry-run`, nothing is printed twice, raw diagnostic ids are gone from normal output, and `exec` status goes to stderr. The single safety reminder about disabled sandbox and approvals stays.
+- The Codex install is now global, like Claude's plugin and OpenCode's config: agents go to `$CODEX_HOME/agents`, skills to `~/.agents/skills`, MCP servers and hooks into marker blocks in `$CODEX_HOME/config.toml`, and Deck's manifest and hook scripts under `$CODEX_HOME/deck/`. Running Deck in a project writes nothing there, project trust is no longer required, and model assignments are global. A previous per-project install is reported (its files shadow the global agents and skills) and removed only with the explicit `--cleanup-legacy` flag; `--local-only` is accepted but has no effect.
+- Codex custom agents are named by their canonical role id (for example `deck-lead`) with the catalog description, matching how Codex identifies agents.
+- Docs now describe the Claude and Codex route-limited adapters instead of "detection only".
+
+### Fixed
+
+- Codex Web Search now works: the shared Tavily credential (environment or the Deck-owned shell profile) is handed to the Codex process only through a narrow sensitive-env binding, the MCP entry is pinned to the resolved `npx` path with `env_vars`, and the false "executable prerequisite unavailable" diagnosis for symlinked shims (nvm) is gone.
+- Deck no longer adds a second Codebase Memory/Context Mode server when your own Codex config already registers the same executable; your registration is never edited.
+- Running the Codex developer command from a very large directory (for example `$HOME`) now stops with an actionable message before any change instead of crashing.
+- Dry-run output is no longer printed twice, and the memory line describes the official plugin route precisely.
+- Codex project config merging no longer fails on a pre-existing `[features]` table.
+
 ## [0.7.1] - 2026-10-01
 
 > Version 0.7.0 was tagged but never published: its release workflow failed on a stale `bun.lock` before building any artifact. 0.7.1 contains everything intended for 0.7.0 plus the release fixes below.

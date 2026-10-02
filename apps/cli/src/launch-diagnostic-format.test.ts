@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatLaunchDiagnostic, shouldColorStderr } from "./launch-diagnostic-format";
+import { formatLaunchDiagnostic, formatPlainDiagnostic, isQuietDiagnostic, shouldColorStderr } from "./launch-diagnostic-format";
 
 const YELLOW = "\u001b[33m";
 const RED = "\u001b[31m";
@@ -36,5 +36,19 @@ describe("launch diagnostic presentation", () => {
     expect(shouldColorStderr({ FORCE_COLOR: "false" }, true)).toBe(false);
     expect(shouldColorStderr({ FORCE_COLOR: "" }, false)).toBe(false);
     expect(shouldColorStderr({ NO_COLOR: "" }, true)).toBe(true);
+  });
+});
+
+describe("quiet launch diagnostics", () => {
+  test("routine notes are quiet while errors, actionable warnings and the safety disclosure are not", () => {
+    for (const code of ["node-path-cas-residual-risk", "codex-static-compatible", "codex-hook-trust-bypass", "codex-supermemory-profile", "mcp-foreign-duplicate", "runner-inspection"]) {
+      expect(isQuietDiagnostic({ code, severity: "warning", message: "m" })).toBe(true);
+    }
+    expect(isQuietDiagnostic({ code: "anything", severity: "info", message: "m" })).toBe(true);
+    expect(isQuietDiagnostic({ code: "node-path-cas-residual-risk", severity: "error", message: "m" })).toBe(false);
+    for (const code of ["codex-dangerous-bypass", "codex-legacy-project-install", "web-search-credential-missing", "context-mode-not-ready"]) {
+      expect(isQuietDiagnostic({ code, severity: "warning", message: "m" })).toBe(false);
+    }
+    expect(formatPlainDiagnostic({ code: "x", severity: "warning", message: "Do the thing." })).toBe("! Do the thing.");
   });
 });

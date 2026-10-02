@@ -12,9 +12,9 @@ Use this page to decide what Deck can configure and what still requires runner-n
 1. Install Codex CLI `0.145.0` or newer.
 2. Run `deck codex developer --dry-run` and review every path.
 3. Run `deck codex developer --yes` to apply the approved plan.
-4. Run `deck doctor` to check trust activation, managed content, MCP/shared binaries, route classification, and recovery state. If the verified setup reports pending Supermemory authorization, run `codex mcp login supermemory` yourself when ready.
+4. Run `deck doctor` to check managed content, MCP/shared binaries, route classification, and recovery state. If the verified setup reports pending Supermemory authorization, run `codex mcp login supermemory` yourself when ready.
 
-Deck writes project-local content and does **not** enable trust.
+Deck writes only to your user-level Codex locations (`$CODEX_HOME`, default `~/.codex`, and `~/.agents/skills`), never into a project, and does **not** change trust.
 
 > **High-risk launch policy:** Every non-install-only Codex Developer Team interactive, exec, resume-by-ID, and resume-latest launch adds the fixed `--dangerously-bypass-approvals-and-sandbox` argv token before the Codex subcommand. Sandboxing and command approvals are disabled for that launched process, so Codex may modify or delete files and run commands without approval. This policy is visible in the launch preview and Doctor; install-only dry-run previews disclose it as the policy for any future non-install-only launch. It applies only to Deck-spawned processes and is never persisted in project or global Codex configuration.
 
@@ -32,14 +32,14 @@ Codex CLI 0.146 does not provide an OpenCode-style root custom-agent selector or
 | 29 standalone bundles/support files | Supported | Complete ownership manifest verifies. |
 | `deck-onboard`, `deck-archive` | Supported | Native skill metadata verifies. |
 | Six package instruction bundles | Supported | Canonical metadata/order/tool policy are preserved; Codex translation removes OpenCode/Claude-specific hook, installer, and tool names. Only `code-economy` defaults on, independently of runtime readiness. |
-| Interactive / exec / resume | Supported with route limits | Deck-supervised launches provide an authenticated adaptive-memory loopback when hooks expose lifecycle events; protected execution controls remain static-compatible. |
+| Interactive / exec / resume | Supported with route limits | Launches pass the documented per-process bypass flags; Deck-owned hooks run without per-hook review for that process. Protected execution controls remain static-compatible. |
 | Context7 | Supported | Semantic streamable HTTP MCP config. Credentials remain external. |
-| context-mode | Shared | Usable binary plus semantic MCP config. |
-| codebase-memory | Shared | Usable binary plus semantic MCP config plus project index readiness. |
+| context-mode | Shared | Usable shared or Deck-owned pinned binary; MCP entry pinned to its absolute path. |
+| codebase-memory | Shared | Existing shared binary or Deck-owned pinned native release; MCP entry pinned to its absolute path plus project index readiness. |
 | Serena | Shared | Usable binary plus semantic project-aware MCP config. |
-| RTK | Shared | Usable binary; MCP is not required. |
+| RTK | Shared | Deck-owned pinned binary plus a marker-owned `PreToolUse` rewrite hook (Node.js 18+); MCP is not required. |
 | No memory provider | Supported | No provider MCP entry. |
-| Supermemory | Supported with route limits | Deck runtime still requires a validated API bearer in Deck's secret store. Credential-free semantic remote MCP config is optional; after Deck applies/verifies it, the user may run Codex-native OAuth when ready. MCP OAuth does not supply the runtime bearer credential. |
+| Supermemory | Supported with route limits | Pinned official `codex-supermemory` recall and flush hooks plus a shared profile credential injected into the started process only. No raw Supermemory MCP entry is written. |
 | Web Search | Supported on OpenCode, Pi, and Codex | Optional native stdio MCP materialization; readiness separately reports disabled, provider/credential/executable gaps, missing MCP materialization, conflicts, or ready. Unsupported runners report an explicit gap. |
 | `pi-mermaid` | Pi internal | Not applicable to Codex. |
 | `opencode-mermaid-renderer`, `deck-model-variants` | OpenCode internal | Not applicable to Codex. |
@@ -70,7 +70,7 @@ Lead may perform short direct research; Investigate is the primary consumer; Arc
 
 ## Ownership and recovery
 
-Deck owns only entries recorded in `.codex/deck-manifest.json`, reviewed TOML keys/tables, and exact local-only Git exclude entries. Codex delivers instructions through native roles and skills; ownership-verified legacy cleanup may retire a prior Deck marker span in `AGENTS.md` without taking ownership of the remaining guide. Existing user MCP servers and malformed or ambiguous TOML block automatic apply. Each reviewed operation carries its own native and optional local-only transaction IDs; rollback consumes only that receipt, restores matching postimages, and retains conflicts for explicit recovery.
+Deck owns only entries recorded in `$CODEX_HOME/deck/manifest.json` and its marker-delimited TOML blocks. Codex delivers instructions through native roles and skills; ownership-verified legacy cleanup of a previous per-project install happens solely through the explicit `--cleanup-legacy` flag; until then it is only reported. Existing user MCP servers and malformed or ambiguous TOML block automatic apply. Each reviewed operation carries one transaction per root (Codex home and user skills); rollback consumes only that receipt, restores matching postimages, and retains conflicts for explicit recovery.
 
 ## Known limits
 

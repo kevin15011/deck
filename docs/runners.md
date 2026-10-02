@@ -1,11 +1,11 @@
 # Runners
 
-Deck is runner-aware rather than runner-agnostic. The CLI registers operational adapters for Pi, OpenCode, and Codex; other detected binaries remain visible without being represented as Deck execution targets.
+Deck is runner-aware rather than runner-agnostic. The CLI registers operational adapters for Pi, OpenCode, Codex, and Claude (global plugin files); other detected binaries remain visible without being represented as Deck execution targets.
 
 > **Audience:** People choosing or diagnosing a Deck runner.
 > **Authority:** Runner boundary reference; adapter registries and preflight code define current behavior.
 > **Maintainer:** Deck maintainers.
-> **Evidence:** [runtime detection](../apps/cli/src/runtime-detection.ts), [adapter registry](../apps/cli/src/runner-adapters.ts), [Pi adapter](../packages/adapter-pi/src/runner-adapter.ts), [OpenCode adapter](../packages/adapter-opencode/src/runner-adapter.ts), [Codex adapter](../packages/adapter-codex/src/runner-adapter.ts), and [capability registry](../packages/core/src/runner-capability-registry.ts).
+> **Evidence:** [runtime detection](../apps/cli/src/runtime-detection.ts), [adapter registry](../apps/cli/src/runner-adapters.ts), [Pi adapter](../packages/adapter-pi/src/runner-adapter.ts), [OpenCode adapter](../packages/adapter-opencode/src/runner-adapter.ts), [Codex adapter](../packages/adapter-codex/src/runner-adapter.ts), [Claude adapter](../packages/adapter-claude/src/runner-adapter.ts), and [capability registry](../packages/core/src/runner-capability-registry.ts).
 
 ## Support status
 
@@ -13,10 +13,10 @@ Deck is runner-aware rather than runner-agnostic. The CLI registers operational 
 |---|---|---|
 | Pi | **Supported** | Detects the binary, runs preflight, reviews packages and MCP, configures capabilities, materializes the Developer Team, and can launch `deck pi developer`. |
 | OpenCode | **Supported** | Detects the binary, reads runner configuration and package evidence, configures capabilities, and materializes the Developer Team through the TUI. |
-| Claude | **Detection only** | Deck can observe the `claude` command in `PATH`; no operational adapter is registered. |
-| Codex | **Supported with route limits** | Deck can configure and launch the Developer Team for Codex. Deck-supervised launches bind the Supermemory runtime through the same ephemeral loopback bridge used by runner hooks; protected execution controls remain static-compatible. |
+| Claude | **Supported with route limits** | A Deck-owned global plugin carries the Developer Team files, pinned shared tools, and the official Supermemory plugin; the Deck CLI starts limited sessions. Protected execution controls and Deck's memory runtime are not part of this route. |
+| Codex | **Supported with route limits** | Deck can configure and launch the Developer Team for Codex through the TUI and the Deck CLI: native roles and skills, shared tools pinned to verified executables, an RTK `PreToolUse` hook, and the official Supermemory plugin hooks. Protected execution controls remain static-compatible. |
 
-Detection is not parity. A detected binary does not imply that Deck can install packages, write runner configuration, launch a team, or verify runner-specific effects for that runtime. Codex has a Developer Team adapter and a Deck-supervised memory loopback, but it still does not claim first-class protected execution controls.
+Detection is not parity. A detected binary does not imply that Deck can install packages, write runner configuration, launch a team, or verify runner-specific effects for that runtime. Codex has a Developer Team adapter with shared tool installs, owned hooks, and the official Supermemory plugin, but it still does not claim first-class protected execution controls.
 
 ## Pi
 
@@ -29,7 +29,7 @@ Pi-specific setup can include:
 - MCP configuration for shared services;
 - model/provider discovery from Pi settings, `pi --list-models`, and configured environment variables;
 - per-agent model and thinking assignments;
-- project-local Developer Team materialization.
+- global Developer Team materialization.
 
 Pi's standalone launch path is explicit:
 
@@ -55,15 +55,53 @@ OpenCode-specific setup can include:
 
 The interactive dashboard presents packages, adaptive memory, teams, and a review/install plan. A plan can be blocked when required setup evidence, such as Supermemory configuration, is incomplete.
 
+## Codex
+
+Codex preflight requires Codex 0.145.0 or newer, checks the launch routes (`exec`, `resume`, `resume --last`) from the installed help output, and verified the config, hooks, custom-agent, and `codex debug models` contracts against 0.159.x. Materialization is global, like the Claude plugin and the OpenCode config, and never touches a project: custom agents in `$CODEX_HOME/agents/deck-*.toml` (default `~/.codex`; one per canonical role, named by its role id, with the model and `model_reasoning_effort` assigned in the model screen), skills in `~/.agents/skills/`, marker-delimited blocks in `$CODEX_HOME/config.toml`, and Deck's own files (ownership manifest, hook scripts) under `$CODEX_HOME/deck/`. Model choices come from `codex debug models` for the signed-in account and are global. Running the Deck CLI in any project creates or changes no project files.
+
+Before the first launch, sign in with `codex login`. Because the configuration is global, project trust is not required for Deck's agents, skills, MCP servers or hooks, and Deck never changes trust.
+
+Ownership is strict: Deck writes only files recorded in its manifest (with their hashes) and its own marker blocks in `config.toml`. Your `hooks.json`, `AGENTS.md`, other agents and skills, and your own MCP servers are never edited; a file or skill that already uses a Deck name blocks the plan with a clear message instead of being overwritten. If you already registered the same executable as one of Deck's MCP servers (for example `codebase-memory-mcp`), Deck leaves yours in place and does not add a second server.
+
+Review & Install for Codex can include:
+
+- **RTK**: a Deck-owned pinned binary (the same reviewed release Claude uses) under the Deck data root, plus a Deck-owned `PreToolUse` hook for `Bash` that asks `rtk hook codex` for a rewrite and returns it through `updatedInput`, with the executable word pinned to the owned binary. The hook needs a Node.js 18+ runtime.
+- **Codebase Memory**: an existing shared executable is reused (the per-user daemon must match the client version); otherwise the pinned native release is installed into the Deck data root. The MCP entry always stores the resolved absolute path.
+- **Context Mode**: a usable shared executable is reused; otherwise the pinned npm release is installed into the Deck data root. The MCP entry stores the resolved absolute path. Context Mode's own Codex hooks are not installed: they would compete with the RTK `PreToolUse` rewrite and are not part of the Claude or OpenCode routes.
+- **Serena**: Deck's owned launcher through Deck's hidden Serena MCP proxy, after explicit selection.
+- **Supermemory**: only the official `supermemoryai/codex-supermemory` plugin, pinned to one npm release and limited to its two documented lifecycle hooks (`UserPromptSubmit` recall and `Stop` flush). The profile credential entered in the TUI is stored in Deck's protected profile store and injected into the Codex process Deck starts, and nowhere else (`SUPERMEMORY_CODEX_API_KEY`); it is never written to Codex configuration. Deck does not register the Supermemory MCP server or its own memory loopback beside the plugin, and a launch is blocked if another Supermemory plugin or MCP registration exists in your Codex configuration.
+
+Deck adds and removes only its own marker-delimited hook blocks (`# deck-codex-hook:<id>:start` … `:end`) in the global `config.toml`, so your inline hooks and `hooks.json` entries keep working beside them. Codex requires review of non-managed hooks; the Deck CLI launch passes `--dangerously-bypass-hook-trust` when Deck-owned hooks are present, so they run without per-hook review for that process. When you start `codex` directly instead, open `/hooks` and trust Deck's entries. The launch continues to pass `--dangerously-bypass-approvals-and-sandbox`.
+
+```sh
+deck codex developer --dry-run
+deck codex developer --yes
+```
+
+Add the `--install-only` flag to apply and verify without starting Codex, or `--memory=supermemory` to select the memory provider for one run. The `--local-only` flag is accepted for compatibility but has no effect, because nothing is written into projects.
+
+A normal launch prints only a few plain lines: what is starting, the adaptive-memory status, a one-line reminder that Codex runs with sandboxing and approvals disabled, a short summary when team files change (with the usual confirmation prompt), and anything that needs your action. Routine notes and the exact file list with ownership hashes appear with the `--verbose` flag or in a dry run; the same diagnostics remain available to `deck doctor`. For `exec` runs this status goes to stderr, so stdout carries only Codex's own output.
+
+### Migrating a previous per-project install
+
+Earlier versions wrote `.codex/`, `.agents/skills/` and a manifest into each project. Those project files override the global agents and skills that share a name, so they shadow the global install in that project. Deck detects them through the old manifest, reports them on every plan, and never deletes them by itself. Run the Codex developer command once from that project with the `--cleanup-legacy` flag (add `--yes` to skip the prompt) to remove only the files whose bytes still match what Deck recorded and Deck's marker blocks from the project `config.toml`; anything you changed is kept. If the files are tracked in Git, the removal shows up as ordinary deletions you can review and commit, or restore. You can also delete them yourself.
+
+### Known limits
+
+- Deck does not set `sandbox_mode = "read-only"` on the Investigate and Quality agents: the launch runs with the sandbox bypass, and Deck could not verify that a per-agent sandbox setting is honored under it, so read-only behavior remains guidance in the agent instructions, not enforcement.
+- Serena resolves the project from the working directory of the Codex process, so one global entry serves every project.
+
 ## Shared capabilities, runner-specific effects
 
 The capability registry uses scoped statuses such as `supported`, `shared`, `runner-specific`, `manual-verified`, `gap`, and `not-applicable`. Examples:
 
-| Capability | Pi | OpenCode | Interpretation |
-|---|---|---|---|
-| RTK | Shared binary | Shared binary through the OpenCode hook | Reuse is checked instead of blindly reinstalling a usable binary. |
-| Serena | Shared MCP capability with manual-verification fallback | Configured MCP capability | The adapter owns the runner-specific configuration and readiness evidence. |
-| Context7 | Shared MCP capability | Configured MCP capability | The server entry is validated in the active runner's configuration. |
+| Capability | Pi | OpenCode | Codex | Interpretation |
+|---|---|---|---|---|
+| RTK | Shared binary | Shared binary through the OpenCode hook | Deck-owned pinned binary plus a `PreToolUse` rewrite hook | Reuse is checked instead of blindly reinstalling a usable binary. |
+| Context Mode / Codebase Memory | Shared binary and MCP | Shared binary and MCP | Shared binary reused, otherwise a Deck-owned pinned install; MCP pinned to the absolute path | A bare `PATH` name is never persisted for Codex. |
+| Serena | Shared MCP capability with manual-verification fallback | Configured MCP capability | Deck-owned launcher through the Deck proxy | The adapter owns the runner-specific configuration and readiness evidence. |
+| Supermemory | Pi MCP handoff | Official plugin | Official plugin hooks | One memory integration per runner; no raw MCP beside a plugin. |
+| Context7 | Shared MCP capability | Configured MCP capability | Configured MCP capability | The server entry is validated in the active runner's configuration. |
 | Mermaid package | Pi-specific | OpenCode-specific | These are internal runner packages, not a universal product package. |
 | Developer Team | Runner-native materialization | Runner-native materialization | The canonical seven-role inventory is shared; file/config effects are not. |
 

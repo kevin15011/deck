@@ -1076,7 +1076,7 @@ describe("DeckApp synthetic runner production flow", () => {
             writeSupermemoryPiMcpConfig={() => ({ ok: true, action: "unchanged", path: join(projectRoot, "pi-mcp.json"), serverName: "supermemory", diagnostics: [] })}
             initialScreen="supermemory-token"
             initialSelectedEnvironments={[route.environment]}
-            initialSupermemorySetup={{ token }}
+            initialSupermemorySetup={route.runtime === "codex" ? { token, profile: "default", profileKind: "fallback-default" } : { token }}
             initialDashboardSupermemorySetupActive={route.dashboard}
             initialDashboardState={createDefaultRunnerDashboardState({ runnerScope: route.runtime })}
           />,

@@ -17,7 +17,7 @@ export type CodexCapabilityCatalogEntry = {
   executable?: string;
   mcpServerName?: string;
   implementationId?: string;
-  runtimeReadiness?: "binary" | "binary+mcp" | "binary+mcp+index" | "mcp" | "content" | "route-bound";
+  runtimeReadiness?: "binary" | "binary+hook" | "binary+mcp" | "binary+mcp+index" | "mcp" | "content" | "route-bound";
 };
 
 export const CODEX_CAPABILITY_CATALOG = Object.freeze([
@@ -28,14 +28,14 @@ export const CODEX_CAPABILITY_CATALOG = Object.freeze([
   { capabilityId: "interactive-launch", status: "supported", provisionMode: "mode-classified", runtimeReadiness: "route-bound" },
   { capabilityId: "exec-launch", status: "supported", provisionMode: "mode-classified", runtimeReadiness: "route-bound" },
   { capabilityId: "resume-launch", status: "supported", provisionMode: "mode-classified", runtimeReadiness: "route-bound" },
-  { capabilityId: "context-mode", status: "shared", provisionMode: "reuse-shared-binary-plus-mcp", executable: "context-mode", mcpServerName: "context-mode", runtimeReadiness: "binary+mcp" },
-  { capabilityId: "codebase-memory", status: "shared", provisionMode: "reuse-shared-binary-plus-mcp", executable: "codebase-memory-mcp", mcpServerName: "codebase-memory", runtimeReadiness: "binary+mcp+index" },
-  { capabilityId: "codebase-memory-mcp", status: "shared", provisionMode: "reuse-shared-binary-plus-mcp", executable: "codebase-memory-mcp", mcpServerName: "codebase-memory", runtimeReadiness: "binary+mcp" },
-  { capabilityId: "rtk", status: "shared", provisionMode: "reuse-shared-binary", executable: "rtk", runtimeReadiness: "binary" },
+  { capabilityId: "context-mode", status: "shared", provisionMode: "reuse-shared-binary-plus-pinned-mcp", executable: "context-mode", mcpServerName: "context-mode", runtimeReadiness: "binary+mcp" },
+  { capabilityId: "codebase-memory", status: "shared", provisionMode: "reuse-shared-or-owned-pinned-binary-plus-pinned-mcp", executable: "codebase-memory-mcp", mcpServerName: "codebase-memory", runtimeReadiness: "binary+mcp+index" },
+  { capabilityId: "codebase-memory-mcp", status: "shared", provisionMode: "reuse-shared-or-owned-pinned-binary-plus-pinned-mcp", executable: "codebase-memory-mcp", mcpServerName: "codebase-memory", runtimeReadiness: "binary+mcp" },
+  { capabilityId: "rtk", status: "shared", provisionMode: "owned-pinned-binary-plus-pretooluse-hook", executable: "rtk", runtimeReadiness: "binary+hook" },
   { capabilityId: "serena", status: "shared", provisionMode: "reuse-shared-binary-plus-mcp", executable: "serena", mcpServerName: "serena", runtimeReadiness: "binary+mcp" },
   { capabilityId: "context7", status: "supported", provisionMode: "streamable-http-mcp", mcpServerName: "context7", runtimeReadiness: "mcp" },
   { capabilityId: "web-search", label: "Web Search", status: "supported", provisionMode: "native-mcp", mcpServerName: TAVILY_MCP_SERVER_ID, implementationId: TAVILY_IMPLEMENTATION_ID, runtimeReadiness: "mcp" },
-  { capabilityId: "supermemory-tool-bindings", status: "supported", provisionMode: "streamable-http-mcp-native-oauth", mcpServerName: "supermemory", runtimeReadiness: "mcp" },
+  { capabilityId: "supermemory-tool-bindings", label: "Supermemory (official Codex plugin)", status: "supported", provisionMode: "official-plugin-hooks", runtimeReadiness: "binary+hook" },
   { capabilityId: "code-economy", status: "supported", provisionMode: "native-instruction-composition", runtimeReadiness: "content" },
   { capabilityId: "trusted-runner-host-bridge", status: "gap", provisionMode: "static-compatible-gap", reviewDisposition: "static-compatible-gap", runtimeReadiness: "route-bound" },
   { capabilityId: "invocation-authorization", status: "gap", provisionMode: "static-compatible-gap", reviewDisposition: "static-compatible-gap", runtimeReadiness: "route-bound" },
@@ -74,14 +74,14 @@ const protectedControlMappings = [
 export const CODEX_RUNNER_CAPABILITY_CONTRIBUTION = defineRunnerCapabilityContribution({
   runnerId: "codex",
   mappings: [
-    { capabilityId: "context-mode", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["context-mode"], mcpServerNames: ["context-mode"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall", "instruction-bundle-present"] },
-    { capabilityId: "codebase-memory", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall", "instruction-bundle-present"], notes: "Project index readiness is independently required." },
-    { capabilityId: "codebase-memory-mcp", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall"] },
-    { capabilityId: "rtk", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary", provisionMode: "reuse-shared-binary", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall", "instruction-bundle-present"] },
+    { capabilityId: "context-mode", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-pinned-mcp", detectors: { commands: ["context-mode"], mcpServerNames: ["context-mode"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall", "instruction-bundle-present"] },
+    { capabilityId: "codebase-memory", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-or-owned-pinned-binary-plus-pinned-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall", "instruction-bundle-present"], notes: "Project index readiness is independently required." },
+    { capabilityId: "codebase-memory-mcp", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-or-owned-pinned-binary-plus-pinned-mcp", detectors: { commands: ["codebase-memory-mcp"], mcpServerNames: ["codebase-memory"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall"] },
+    { capabilityId: "rtk", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "owned-binary-plus-hook", provisionMode: "owned-pinned-binary-plus-pretooluse-hook", detectors: { commands: ["rtk"] }, parityChecks: ["binary-usable", "no-unnecessary-reinstall", "instruction-bundle-present"], notes: "Deck-owned pinned RTK binary; a Codex PreToolUse hook rewrites Bash commands via updatedInput." },
     { capabilityId: "serena", runnerId: "codex", status: "shared", adapterSource: "@deck/adapter-codex", installKind: "shared-binary-plus-mcp", provisionMode: "reuse-shared-binary-plus-mcp", detectors: { commands: ["serena"], mcpServerNames: ["serena"] }, parityChecks: ["binary-usable", "mcp-config-present", "no-unnecessary-reinstall", "instruction-bundle-present"] },
     { capabilityId: "context7", runnerId: "codex", status: "supported", adapterSource: "@deck/adapter-codex", installKind: "remote-mcp", provisionMode: "streamable-http-mcp", detectors: { mcpServerNames: ["context7"] }, parityChecks: ["mcp-config-present"] },
     { capabilityId: "web-search", runnerId: "codex", status: "supported", adapterSource: "@deck/provider-tavily", installKind: "native-mcp", provisionMode: "native-mcp", implementationId: TAVILY_IMPLEMENTATION_ID, detectors: { mcpServerNames: [TAVILY_MCP_SERVER_ID] }, parityChecks: ["mcp-config-present", "instruction-bundle-present"] },
-    { capabilityId: "supermemory-tool-bindings", runnerId: "codex", status: "supported", adapterSource: "@deck/adapter-codex", installKind: "remote-mcp-native-oauth", provisionMode: "streamable-http-mcp-native-oauth", detectors: { mcpServerNames: ["supermemory"] }, parityChecks: ["mcp-config-present", "instruction-bundle-present"] },
+    { capabilityId: "supermemory-tool-bindings", runnerId: "codex", status: "supported", adapterSource: "@deck/adapter-codex", installKind: "official-plugin-hooks", provisionMode: "official-plugin-hooks", parityChecks: [], notes: "Pinned official supermemoryai/codex-supermemory recall and flush hooks; no raw Supermemory MCP is registered beside it." },
     { capabilityId: "code-economy", runnerId: "codex", status: "supported", adapterSource: "@deck/adapter-codex", installKind: "native-instruction-composition", provisionMode: "native-instruction-composition", parityChecks: ["instruction-bundle-present"] },
     ...protectedControlMappings,
     { capabilityId: "pi-orchestrator-prompt-persistence", runnerId: "codex", status: "not-applicable", adapterSource: "@deck/adapter-codex", provisionMode: "pi-internal" },

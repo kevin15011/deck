@@ -20,12 +20,12 @@ export type OpenCodeSupermemoryLaunchEffects = {
 const SUPERMEMORY_CREDENTIAL_ENV_KEY = "SUPERMEMORY_API_KEY";
 const MAX_PROJECT_TAG_CONFIG_BYTES = 64 * 1024;
 
-type ProjectRepoTagOverrideInspection =
+export type ProjectRepoTagOverrideInspection =
   | { status: "absent" }
   | { status: "present"; tag: string }
   | { status: "unsafe" };
 
-function inspectProjectRepoTagOverride(projectRoot: string): ProjectRepoTagOverrideInspection {
+export function inspectProjectRepoTagOverride(projectRoot: string): ProjectRepoTagOverrideInspection {
   const claudeDirectory = join(projectRoot, ".claude");
   const supermemoryDirectory = join(claudeDirectory, ".supermemory-claude");
   const configPath = join(supermemoryDirectory, "config.json");

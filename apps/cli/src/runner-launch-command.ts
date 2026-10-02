@@ -19,6 +19,8 @@ import type { DeckSecretStore } from "@deck/core";
 import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { formatSessionRuntimeReadiness, resolveSessionRuntimeReadiness } from "./session-runtime-readiness";
 import { authorizeOpenCodeSupermemoryLaunch, VERIFIED_OPENCODE_SUPERMEMORY_BINDING, type OpenCodeSupermemoryLaunchEffects } from "./opencode-supermemory-launch";
+import { isQuietDiagnostic } from "./launch-diagnostic-format";
+import { authorizeCodexSupermemoryLaunch, resolveCodexSupermemoryLaunchCredential, VERIFIED_CODEX_SUPERMEMORY_BINDING, type CodexSupermemoryLaunchEffects } from "./codex-supermemory-launch";
 
 export type SpawnedRunnerResult = {
   exitCode: number;
@@ -91,6 +93,8 @@ export async function executeRunnerLaunchPlan(
   const secrets: string[] = [];
   const authorizedSensitiveKeys = plan.sensitiveEnvAuthorization?.binding === VERIFIED_OPENCODE_SUPERMEMORY_BINDING
     ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY"))
+    : plan.sensitiveEnvAuthorization?.binding === VERIFIED_CODEX_SUPERMEMORY_BINDING
+      ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_CODEX_API_KEY" || key === "TAVILY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === "deck-claude-web-search-v1" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1"
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1" && key === "SUPERMEMORY_CC_API_KEY"))
       : new Set<string>();
@@ -296,6 +300,10 @@ export type RunRunnerLaunchInput = {
   dryRun?: boolean;
   yes?: boolean;
   localOnly?: boolean;
+  /** Explicit consent to remove a superseded per-project Deck install (unmodified Deck-owned files only). */
+  cleanupLegacy?: boolean;
+  /** Print routine notes and full mutation details too (dry runs always do). */
+  verbose?: boolean;
   cliMemoryProvider?: string;
   interactive: boolean;
   confirm?: (summary: string) => Promise<boolean>;
@@ -303,6 +311,9 @@ export type RunRunnerLaunchInput = {
   processEffects: RunnerProcessEffects;
   /** Hermetic inspection seam; production launches use the owned package verifier. */
   opencodeSupermemoryLaunchEffects?: OpenCodeSupermemoryLaunchEffects;
+  /** Hermetic seams for the official Codex Supermemory plugin launch. */
+  codexSupermemoryLaunchEffects?: CodexSupermemoryLaunchEffects;
+  codexSupermemoryCredential?: (projectRoot: string) => { token: string; profile: string; canonicalRepoTag: string };
   supermemoryRuntime?: {
     secretStore?: DeckSecretStore;
     apiKey?: string;
@@ -396,6 +407,69 @@ function withSingleFinalReadinessDiagnostic<T extends { code?: string; severity:
   return [readinessDiagnosticFromReadiness(readiness), ...withoutManagedReadinessDiagnostics(diagnostics)];
 }
 
+/** Precise, secret-free memory status for the official Codex plugin route (Deck's own runtime is intentionally not used). */
+function describeCodexPluginMemory(input: RunRunnerLaunchInput): string {
+  let credential: string;
+  try {
+    const resolved = input.codexSupermemoryCredential?.(input.launch.projectRoot) ?? resolveCodexSupermemoryLaunchCredential(input.launch.projectRoot, input.codexSupermemoryLaunchEffects);
+    credential = `profile '${resolved.profile}' will be passed to the Codex process`;
+  } catch (error) {
+    credential = `no credential resolved (${error instanceof Error ? error.message : "unavailable"}); the launch will be blocked until one is stored in Review & Install`;
+  }
+  return `Adaptive memory: official Supermemory plugin hooks (Deck's own memory runtime is not used); ${credential}.`;
+}
+
+/** Brief, secret-free memory status for a normal launch of the official Codex plugin route. */
+function describeCodexPluginMemoryBrief(input: RunRunnerLaunchInput): { text: string; problem: boolean } {
+  try {
+    const resolved = input.codexSupermemoryCredential?.(input.launch.projectRoot) ?? resolveCodexSupermemoryLaunchCredential(input.launch.projectRoot, input.codexSupermemoryLaunchEffects);
+    return { text: `Adaptive memory: Supermemory (profile '${resolved.profile}').`, problem: false };
+  } catch {
+    return { text: "Adaptive memory: Supermemory is selected but no credential is stored for this project; add one in the Deck TUI (Adaptive Memory) before launching.", problem: true };
+  }
+}
+
+function summarizeMutations(mutations: readonly { path: string }[]): string {
+  const isConfig = (path: string) => /config\.toml$/.test(path) && !path.includes("/skills/");
+  const agents = mutations.filter((mutation) => /\/agents\/[^/]+\.(?:toml|md)$/.test(mutation.path)).length;
+  const skills = new Set(mutations.map((mutation) => mutation.path.match(/\/skills\/([^/]+)\//)?.[1]).filter(Boolean)).size;
+  const parts: string[] = [];
+  if (agents > 0) parts.push(`${agents} agent${agents === 1 ? "" : "s"}`);
+  if (skills > 0) parts.push(`${skills} skill${skills === 1 ? "" : "s"}`);
+  if (mutations.some((mutation) => isConfig(mutation.path))) parts.push("configuration (MCP servers, hooks)");
+  return parts.length > 0 ? parts.join(", ") : `${mutations.length} file${mutations.length === 1 ? "" : "s"}`;
+}
+
+/** Calm, product-level launch output: what is happening and anything the user must act on. Details live behind --verbose/--dry-run. */
+function conciseLaunchSummary(context: {
+  input: RunRunnerLaunchInput;
+  mutations: readonly { path: string }[];
+  planDiagnostics: readonly { code: string; severity: "info" | "warning" | "error"; message: string }[];
+  preparationDiagnostics: readonly { code: string; severity: "info" | "warning" | "error"; message: string }[];
+  launchDiagnostics: readonly { code: string; severity: "info" | "warning" | "error"; message: string }[];
+  memoryLine?: { text: string; problem: boolean };
+  readinessBlocked?: string;
+  sessionDiagnostics: readonly string[];
+}): string {
+  const { input } = context;
+  const name = input.adapter.displayName;
+  const lines: string[] = [];
+  if (context.mutations.length > 0) lines.push(`Updating ${name} team files: ${summarizeMutations(context.mutations)}.`);
+  else if (input.installOnly) lines.push(`${name} team files are up to date.`);
+  else lines.push(`Launching ${name} Developer Team.`);
+  if (context.memoryLine) lines.push(context.memoryLine.problem ? `! ${context.memoryLine.text}` : context.memoryLine.text);
+  const seen = new Set<string>();
+  const problems = [...context.planDiagnostics, ...context.preparationDiagnostics, ...context.launchDiagnostics].filter((entry) => !isQuietDiagnostic(entry));
+  for (const entry of problems) {
+    if (seen.has(entry.message)) continue;
+    seen.add(entry.message);
+    lines.push(`! ${entry.message}`);
+  }
+  if (context.readinessBlocked) lines.push(`! ${context.readinessBlocked}`);
+  for (const message of context.sessionDiagnostics) lines.push(`! ${message}`);
+  return lines.join("\n");
+}
+
 /** Generic CLI-owned install/verify/consent/spawn orchestration. */
 export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunRunnerLaunchResult> {
   // The native Claude lane is separate. No Claude Developer Team adapter is verified yet;
@@ -409,6 +483,22 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     inspectionDiagnostics.push(...inspection.diagnostics.map((diagnostic) => diagnostic.message));
     if (inspection.state === "blocked") return { status: "blocked", message: inspection.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: inspection.diagnostics };
     if (inspection.state === "unsupported") return { status: "unsupported", code: "runner-version-unsupported", message: inspection.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: inspection.diagnostics };
+  }
+
+  if (input.cleanupLegacy && input.adapter.cleanupLegacyInstall) {
+    if (input.dryRun) {
+      await input.presentPreview("Legacy cleanup requested: a dry run removes nothing. Rerun without --dry-run to remove the unmodified Deck-owned per-project files.");
+    } else {
+      if (!input.yes && (!input.interactive || !input.confirm || !(await input.confirm("Remove the previous per-project Deck install (unmodified Deck-owned files only)? [y/N]")))) {
+        return { status: "blocked", message: "Legacy cleanup needs --yes or an interactive confirmation; nothing was removed." };
+      }
+      try {
+        const cleaned = await input.adapter.cleanupLegacyInstall(input.launch.projectRoot);
+        await input.presentPreview([`Legacy cleanup removed ${cleaned.removed.length} file(s).`, ...cleaned.diagnostics.map((message) => `! ${message}`)].join("\n"));
+      } catch (error) {
+        return { status: "blocked", message: `Legacy cleanup failed and was rolled back: ${error instanceof Error ? error.message : "unknown error"}` };
+      }
+    }
   }
 
   const codexAssignments = input.adapter.runnerId === "codex"
@@ -440,10 +530,12 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   const previewIncomplete = plan.files.length > 0 && plan.mutationPreview === undefined;
   const preApplyStaticState = staticIntegrationFromPreview({ previewIncomplete, planBlocked: plan.blocked, mutationCount: safeMutations.length, launch });
   const credentialState = await runtimeCredentialState(input.supermemoryRuntime);
+  // The official Codex plugin owns memory alone, so Deck's own runtime readiness does not apply to that route.
+  const officialPluginMemory = input.adapter.runnerId === "codex" && deckConfig.adaptiveMemory.enabled === true && deckConfig.adaptiveMemory.activeProvider === "supermemory";
   const preApplyReadiness = resolveSessionRuntimeReadiness({
     topology: "deck-managed",
     staticIntegrationState: preApplyStaticState,
-    adaptiveMemoryEnabled: deckConfig.adaptiveMemory.enabled === true,
+    adaptiveMemoryEnabled: deckConfig.adaptiveMemory.enabled === true && !officialPluginMemory,
     hasProjectIdentity: projectIdentity.ok,
     runtimeCredentialState: credentialState,
   });
@@ -453,24 +545,38 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       ? ["(no file mutations)"]
       : safeMutations.map((mutation) => `${mutation.action} ${mutation.path} pre=${mutation.preimage} post=${mutation.postimage} owner=${mutation.ownership}`)),
     ...(plan.diagnostics ?? []).map((diagnostic) => `! ${diagnostic}`),
-    ...preparationDiagnostics.map((diagnostic) => `! ${diagnostic.message}`),
+    ...preparationDiagnostics.filter((diagnostic) => !(plan.diagnostics ?? []).includes(diagnostic.message)).map((diagnostic) => `! ${diagnostic.message}`),
     ...(launch?.diagnostics ?? launchPolicyDiagnostics).map((diagnostic) => `! ${diagnostic.message}`),
-    formatSessionRuntimeReadiness(preApplyReadiness),
+    officialPluginMemory ? describeCodexPluginMemory(input) : formatSessionRuntimeReadiness(preApplyReadiness),
     ...sessionResolution.diagnostics.map((diagnostic) => `! ${diagnostic}`),
     ...inspectionDiagnostics.map((diagnostic) => `! ${diagnostic}`),
     ...(previewIncomplete ? ["! Exact mutation metadata is unavailable; apply is blocked."] : []),
   ].join("\n");
-  await input.presentPreview(preview);
+  const detailed = input.dryRun === true || input.verbose === true;
+  await input.presentPreview(detailed ? preview : conciseLaunchSummary({
+    input,
+    mutations: safeMutations,
+    planDiagnostics: plan.diagnosticEntries ?? (plan.diagnostics ?? []).map((message) => ({ code: "plan", severity: "warning" as const, message })),
+    preparationDiagnostics,
+    launchDiagnostics: launch?.diagnostics ?? launchPolicyDiagnostics,
+    memoryLine: officialPluginMemory ? describeCodexPluginMemoryBrief(input) : undefined,
+    readinessBlocked: preApplyReadiness.managedRuntime === "blocked" ? formatSessionRuntimeReadiness(preApplyReadiness) : undefined,
+    sessionDiagnostics: sessionResolution.diagnostics,
+  }));
 
   if (previewIncomplete) return { status: "blocked", message: "Exact mutation preview is required before apply." };
-  if (plan.blocked) return { status: "blocked", message: plan.diagnostics?.join("; ") ?? "Runner installation plan is blocked." };
+  if (plan.blocked) {
+    // Report the real problems; routine notes would only bury them.
+    const problems = (plan.diagnosticEntries ?? []).filter((entry) => !isQuietDiagnostic(entry)).map((entry) => entry.message);
+    return { status: "blocked", message: (problems.length > 0 ? problems : plan.diagnostics ?? []).join("; ") || "Runner installation plan is blocked." };
+  }
   if (input.dryRun) return { status: "dry-run", diagnostics: [preview] };
 
   if (safeMutations.length > 0 && !input.yes) {
     if (!input.interactive || !input.confirm) return { status: "blocked", message: "Mutation requires --yes in non-interactive mode." };
     const confirmationQuestion = input.installOnly
-      ? "Apply these project changes? [y/N]"
-      : `Apply these project changes and launch ${input.adapter.displayName}? [y/N]`;
+      ? "Apply these changes? [y/N]"
+      : `Apply these changes and launch ${input.adapter.displayName}? [y/N]`;
     if (!(await input.confirm(confirmationQuestion))) return { status: "blocked", message: "Mutation was not confirmed." };
   }
   if (launch?.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
@@ -505,6 +611,40 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     }
   }
   if (input.installOnly) return { status: "installed", diagnostics: verified.diagnostics };
+
+  if (officialPluginMemory) {
+    // The official Supermemory plugin owns memory alone: Deck's legacy runtime host and loopback are never started beside it.
+    launch = await input.adapter.buildLaunchPlan!(baseLaunch);
+    if (launch.status === "unsupported") return { status: "unsupported", code: launch.code, message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
+    if (launch.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
+    let executablePlan: RunnerLaunchPlan;
+    let profile: string;
+    try {
+      const credential = input.codexSupermemoryCredential?.(baseLaunch.projectRoot) ?? resolveCodexSupermemoryLaunchCredential(baseLaunch.projectRoot, input.codexSupermemoryLaunchEffects);
+      profile = credential.profile;
+      executablePlan = authorizeCodexSupermemoryLaunch(launch.plan, { token: credential.token, projectRoot: baseLaunch.projectRoot, canonicalRepoTag: credential.canonicalRepoTag }, input.codexSupermemoryLaunchEffects);
+    } catch (error) {
+      return { status: "blocked", message: error instanceof Error ? error.message : "Codex Supermemory launch verification failed." };
+    }
+    try {
+      const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects);
+      return {
+        status: "launched",
+        outcome,
+        launch: {
+          ...launch,
+          plan: redactSensitiveLaunchPlan(executablePlan),
+          diagnostics: [
+            ...launch.diagnostics,
+            { code: "codex-supermemory-profile", severity: "warning" as const, message: `Official Supermemory plugin will use the ${profile} profile for this Deck-managed Codex process; co-loaded plugins or hooks can access the selected process credential.` },
+            ...inspectionDiagnostics.map((message) => ({ code: "runner-inspection", severity: "warning" as const, message })),
+          ],
+        },
+      };
+    } catch (error) {
+      return { status: "blocked", message: error instanceof Error ? `Runner spawn failed: ${error.message}` : "Runner spawn failed." };
+    }
+  }
 
   if (input.adapter.runnerId === "opencode") {
     launch = await input.adapter.buildLaunchPlan!(baseLaunch);

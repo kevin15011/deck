@@ -135,6 +135,7 @@ import {
 import {
   validateAndStoreSupermemoryRuntimeCredential,
   resolveSupermemoryRuntimeCredentialReadiness,
+  isProfileBackedMemoryRunner,
   runRunnerReviewPlan,
   type RunnerActionRunResult,
   type RunnerProfileCredentialEffects,
@@ -336,9 +337,7 @@ export function resolveDashboardMemoryProviderForInstall(
   fallback: AdaptiveMemoryProvider | undefined,
 ): AdaptiveMemoryProvider | undefined {
   if (runnerId === "claude") return undefined; // official plugin alone owns memory; never start Deck's legacy host
-  if (runnerId === "codex" && provider === "supermemory") {
-    return createSupermemoryMemoryProvider({ mcpServerName: "supermemory" });
-  }
+  if (runnerId === "codex") return provider === "supermemory" ? createSupermemoryMemoryProvider({ mcpServerName: "supermemory" }) : undefined; // official Codex plugin hooks; never Deck's runtime host or raw MCP
   return fallback;
 }
 
@@ -434,12 +433,16 @@ export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupVal
         ? "Supermemory Deck runtime API credential validated and stored; Pi MCP config remains credential-free."
         : runtime === "opencode"
           ? `Official Supermemory plugin credential stored for the ${normalizedValues.profile} profile.`
+        : runtime === "codex"
+          ? "Official Codex Supermemory plugin profile credential stored in the shared protected Deck profile store; it is injected into the launched Codex process only."
         : "Supermemory Deck runtime API credential validated and stored. Runner MCP OAuth is optional and separate."],
     },
     status: runtime === "pi"
       ? "Dashboard Adaptive Memory: Supermemory runtime credential is stored. Pi MCP config remains credential-free."
       : runtime === "opencode"
         ? `Dashboard Adaptive Memory: official Supermemory plugin profile ${normalizedValues.profile} is stored for managed OpenCode launches.`
+      : runtime === "codex"
+        ? "Dashboard Adaptive Memory: the shared Supermemory profile credential is stored for managed Codex launches with the official plugin hooks."
       : "Dashboard Adaptive Memory: Supermemory runtime credential is stored. Runner MCP OAuth remains a separate optional native step.",
   };
 }
@@ -695,7 +698,7 @@ export function hydrateDashboardAdaptiveMemoryState(
   secretStore: Pick<import("@deck/core").DeckSecretStore, "read">,
   runnerId?: RunnerId,
 ): RunnerDashboardState["adaptiveMemory"] {
-  const pluginProfile = runnerId === "opencode" || runnerId === "claude";
+  const pluginProfile = isProfileBackedMemoryRunner(runnerId);
   const activeProvider = config.adaptiveMemory.enabled === true ? config.adaptiveMemory.activeProvider : "none";
   if (activeProvider !== "supermemory") {
     return { provider: "none", supermemory: { configured: false, runtimeCredentialStored: false, ephemeralTokenAvailable: false, diagnostics: [] } };
@@ -1621,6 +1624,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             ...deckConfig,
             adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: dashboardState.adaptiveMemory.provider === "supermemory", activeProvider: dashboardState.adaptiveMemory.provider },
             webSearch: { ...deckConfig.webSearch, enabled: dashboardState.selectedCapabilities["web-search"] === true, provider: dashboardState.webSearchProvider ?? deckConfig.webSearch.provider },
+          } : adapter.runnerId === "codex" ? {
+            ...deckConfig,
+            adaptiveMemory: { ...deckConfig.adaptiveMemory, enabled: dashboardState.adaptiveMemory.provider === "supermemory", activeProvider: dashboardState.adaptiveMemory.provider },
           } : deckConfig;
           const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, adapter.runnerId);
           const claudeCapabilities = adapter.runnerId === "claude"
@@ -2719,7 +2725,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       setSupermemoryError(undefined);
       if (choice === "supermemory") {
         setDashboardSupermemorySetupActive(false);
-        resetCursor(["opencode", "claude"].includes(dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope) ? "supermemory-profile" : "supermemory-token");
+        resetCursor(isProfileBackedMemoryRunner(dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope) ? "supermemory-profile" : "supermemory-token");
         return;
       }
       persistMemoryProviderSelection(choice, supermemorySetup);
@@ -2927,7 +2933,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         return;
       case "select-supermemory-and-open-setup":
         safeDispatch(effect.action);
-        if (dashboardState.runnerScope === "claude" && resolveSupermemoryRuntimeCredentialReadiness({ secretStore: deckSecretStore, runnerId: "claude", profileCredentialEffects: openCodeProfileCredentialEffects }).ready) {
+        if ((dashboardState.runnerScope === "claude" || dashboardState.runnerScope === "codex") && resolveSupermemoryRuntimeCredentialReadiness({ secretStore: deckSecretStore, runnerId: dashboardState.runnerScope, profileCredentialEffects: openCodeProfileCredentialEffects }).ready) {
           setDashboardState((current) => ({ ...current, screen: "dashboard", cursor: 0, backStack: [], adaptiveMemory: { provider: "supermemory", supermemory: { configured: true, hasToken: false, runtimeCredentialStored: true, runtimeCredentialVerification: "verified-present", ephemeralTokenAvailable: false, diagnostics: [] }, status: "Existing shared Supermemory profile is ready; no new enrollment is needed." }, plan: undefined, planRevision: current.planRevision + 1, planGeneratedForRevision: undefined }));
           resetCursor("pi-runner-dashboard");
           return;
@@ -2935,7 +2941,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         setDashboardSupermemorySetupActive(true);
         setMemoryProviderChoice("supermemory");
         setSupermemoryError(undefined);
-        resetCursor(["opencode", "claude"].includes(dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope) ? "supermemory-profile" : "supermemory-token");
+        resetCursor(isProfileBackedMemoryRunner(dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope) ? "supermemory-profile" : "supermemory-token");
         return;
       case "open-developer-team-model-config": {
         const runtime = dashboardState.runnerScope;
@@ -3137,7 +3143,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       setSupermemoryError("Unable to resolve verified project root; Supermemory runtime credential was not stored.");
       return false;
     }
-    const profileBacked = runnerId === "opencode" || runnerId === "claude";
+    const profileBacked = isProfileBackedMemoryRunner(runnerId);
     const resolved = profileBacked ? undefined : resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
     if (resolved && !resolved.ok) {
       requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));

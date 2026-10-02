@@ -208,6 +208,8 @@ export type RunnerDeveloperTeamInstallPlan = {
   /** Paths whose durable runner-sync ownership must be released after apply and verification succeed. */
   ownershipReleases?: readonly string[];
   diagnostics?: readonly string[];
+  /** Structured twin of `diagnostics` so presentation can tell routine notes from real problems. */
+  diagnosticEntries?: readonly { code: string; severity: "info" | "warning" | "error"; message: string }[];
   blocked?: boolean;
   mutationPreview?: readonly {
     action: "create" | "update" | "delete";

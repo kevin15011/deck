@@ -35,7 +35,7 @@ export async function inspectCodexProject(projectRoot: string, effects: CodexPre
   }
   const trust = await effects.inspectTrust?.(projectRoot) ?? "indeterminate";
   const snapshot = await effects.readProject?.(projectRoot) ?? { config: null, roles: [], skills: [], agentsInstructions: false };
-  const diagnostics = [];
+  const diagnostics: import("@deck/core").RunnerDiagnostic[] = [];
   if (snapshot.config !== null) {
     try {
       parseTOML(snapshot.config, { tomlVersion: "1.0.0" });
@@ -44,12 +44,9 @@ export async function inspectCodexProject(projectRoot: string, effects: CodexPre
         projectRoot,
         state: "blocked",
         evidence: { binary: true, version: probe.version, trust, projectConfig: true },
-        diagnostics: [{ code: "codex-config-malformed", severity: "error", message: "Project-local Codex TOML is malformed and cannot be inspected safely." }],
+        diagnostics: [{ code: "codex-config-malformed", severity: "error", message: "The Codex config.toml is malformed and cannot be inspected safely; Deck will not change it until it parses." }],
       };
     }
-  }
-  if (snapshot.config !== null && trust !== "trusted") {
-    diagnostics.push({ code: "materialized-but-inactive", severity: "warning" as const, message: "Project-local Codex configuration is materialized but trust is absent or indeterminate; Deck did not change trust." });
   }
   return {
     projectRoot,
@@ -66,6 +63,7 @@ export async function inspectCodexProject(projectRoot: string, effects: CodexPre
       exec: /Usage: codex exec/.test(probe.execHelp ?? ""),
       resume: /\[SESSION_ID\]/.test(probe.resumeHelp ?? ""),
       resumeLatest: /--last/.test(probe.resumeHelp ?? ""),
+      hookTrustBypass: /--dangerously-bypass-hook-trust/.test(probe.help),
       executionClass: "static-compatible",
     },
     diagnostics,

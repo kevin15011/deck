@@ -1,3 +1,4 @@
+import { layout, testTools } from "../../../packages/adapter-codex/src/test-tools";
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -284,6 +285,7 @@ describe("runRunnerLaunch consent and status", () => {
         adapter: adapter(),
         launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() },
         interactive: true,
+        verbose: true,
         presentPreview: async (preview) => { output.push(preview); },
         confirm: async (question) => { output.push(question); return true; },
         processEffects: { spawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
@@ -291,7 +293,7 @@ describe("runRunnerLaunch consent and status", () => {
 
       expect(result.status).toBe("launched");
       expect(output.join("\n").match(/create managed pre=absent post=abc owner=deck-file/g)?.length).toBe(1);
-      expect(output.at(-1)).toBe("Apply these project changes and launch Fake? [y/N]");
+      expect(output.at(-1)).toBe("Apply these changes and launch Fake? [y/N]");
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -1258,6 +1260,7 @@ describe("runRunnerLaunch consent and status", () => {
       adapter: adapter({ applyDeveloperTeamInstall: async () => { events.push("apply"); throw new Error("must not apply"); } }),
       launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }),
       interactive: false,
+      verbose: true,
       presentPreview: async (preview) => { events.push(`preview:${preview}`); },
       processEffects: { spawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
     });
@@ -1265,6 +1268,59 @@ describe("runRunnerLaunch consent and status", () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toContain("create managed pre=absent post=abc owner=deck-file");
     expect(events).not.toContain("apply");
+  });
+
+  test("a normal launch prints a short product-level summary while details stay behind --verbose and --dry-run", async () => {
+    const noisy = adapter({
+      buildDeveloperTeamInstallPlan: () => ({
+        files: [],
+        mutationPreview: [
+          { action: "create", path: "/home/u/.codex/agents/deck-lead.toml", preimage: "absent", postimage: "abc", ownership: "deck-file:x" },
+          { action: "create", path: "/home/u/.agents/skills/deck-lead/SKILL.md", preimage: "absent", postimage: "def", ownership: "deck-file:y" },
+          { action: "update", path: "/home/u/.codex/config.toml", preimage: "p", postimage: "q", ownership: "toml-key:z" },
+        ],
+        diagnostics: ["race caveat", "skipped duplicate", "real problem"],
+        diagnosticEntries: [
+          { code: "node-path-cas-residual-risk", severity: "warning", message: "race caveat" },
+          { code: "mcp-foreign-duplicate", severity: "info", message: "skipped duplicate" },
+          { code: "web-search-credential-missing", severity: "warning", message: "real problem" },
+        ],
+      }),
+      buildLaunchPlan: () => ({
+        status: "ready",
+        plan: { command: "fake", args: [], cwd: "/p", stdio: "inherit", stdin: "inherit", executionClass: "static-compatible" },
+        diagnostics: [
+          { code: "codex-dangerous-bypass", severity: "warning", message: "Heads up: sandboxing and command approvals are disabled" },
+          { code: "codex-static-compatible", severity: "warning", message: "not bridge-enforced" },
+        ],
+      }),
+    });
+    const run = async (extra: { verbose?: boolean; dryRun?: boolean }) => {
+      const shown: string[] = [];
+      await runRunnerLaunch({
+        adapter: noisy,
+        launch: withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }),
+        interactive: false,
+        yes: true,
+        supermemoryRuntime: { transport: {} as never, stateHome: "/nonexistent/deck-state-unused" },
+        presentPreview: async (preview) => { shown.push(preview); },
+        processEffects: { spawn: async () => ({ exitCode: 0, stdout: "", stderr: "" }) },
+        verbose: extra.verbose,
+        dryRun: extra.dryRun,
+      });
+      return shown.join("\n");
+    };
+    const normal = await run({});
+    expect(normal).toContain("Updating Fake team files: 1 agent, 1 skill, configuration (MCP servers, hooks).");
+    expect(normal).toContain("! real problem");
+    expect(normal).toContain("! Heads up: sandboxing and command approvals are disabled");
+    for (const hidden of ["race caveat", "skipped duplicate", "not bridge-enforced", "pre=absent", "owner=", "[codex-"]) expect(normal).not.toContain(hidden);
+    expect(normal.split("\n").length).toBeLessThanOrEqual(5);
+    for (const detailed of [await run({ verbose: true }), await run({ dryRun: true })]) {
+      expect(detailed).toContain("race caveat");
+      expect(detailed).toContain("skipped duplicate");
+      expect(detailed).toContain("owner=deck-file:x");
+    }
   });
 
   test("previews before --yes apply and preserves unsupported separately", async () => {
@@ -1482,7 +1538,7 @@ describe("runRunnerLaunch consent and status", () => {
     const projectRoot = join(root, "project");
     try {
       await mkdir(projectRoot, { recursive: true });
-      const adapter = createCodexRunnerAdapter({
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot: join(root, "journals"),
         preflight: {
           probe: async () => ({ found: true, version: "0.145.0", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
@@ -1548,11 +1604,11 @@ describe("runRunnerLaunch consent and status", () => {
             expect(result.launch.plan).toMatchObject({ executionClass: "static-compatible" });
             expect(result.launch.plan.bridgeBinding).toBeUndefined();
           }
-          expect(result.launch.diagnostics).toContainEqual(expect.objectContaining({ code: "materialized-but-inactive" }));
+          expect(result.launch.diagnostics).not.toContainEqual(expect.objectContaining({ code: "materialized-but-inactive" }));
         }
       }
-      expect(await Bun.file(join(projectRoot, ".codex", "hooks", "developer-team-execution.js")).exists()).toBe(true);
-      expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).toContain("deck-codex-hook-v1");
+      expect(await Bun.file(join(projectRoot, ".codex", "deck", "hooks", "developer-team-execution.js")).exists()).toBe(true);
+      expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).toContain("deck-codex-hook:memory-bridge:start");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1610,7 +1666,7 @@ describe("runRunnerLaunch consent and status", () => {
     const projectRoot = join(root, "project");
     try {
       await mkdir(projectRoot, { recursive: true });
-      const adapter = createCodexRunnerAdapter({
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot: join(root, "journals"),
         preflight: {
           probe: async () => ({ found: true, version: "0.146.1", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
