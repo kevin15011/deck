@@ -308,7 +308,10 @@ class OpenCodeRunnerAdapterImpl {
   readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS.filter((id) => id !== "adaptive-memory");
   readonly ui = {
     environmentLabels: { "opencode-development": "OpenCode" },
-    dashboard: { defaultSelectedTeamIds: ["developer-team"] },
+    dashboard: {
+      defaultSelectedTeamIds: ["developer-team"],
+      extraSelectableCapabilities: [{ id: "context7", label: "Context7", description: "Use Context7 MCP for library documentation." }],
+    },
     model: {
       providerSource: "Providers and models come from the active OpenCode runner.",
       missingChecks: ["~/.config/opencode/opencode.json agent model entries", "opencode models"],

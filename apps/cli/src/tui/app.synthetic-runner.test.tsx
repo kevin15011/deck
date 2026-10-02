@@ -29,6 +29,7 @@ import { reduceRunnerDashboard, type PlanBuilderFn } from "./runner-dashboard/re
 import { buildOpenCodeRunnerReviewPlan, type OpenCodeToolInstallResultExact } from "@deck/adapter-opencode";
 import { getRunnerReviewPlanRunBlockPreflight, resolveSupermemoryRuntimeCredentialReadiness } from "./runner-dashboard/action-runner";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
+import { getPackageInstructionSummaries } from "./runner-dashboard/selectors";
 
 setDefaultTimeout(15_000);
 
@@ -154,6 +155,25 @@ function renderOpenCodeReviewAfterCredentialEvidenceAction(
 }
 
 describe("DeckApp synthetic runner production flow", () => {
+  test("OpenCode Packages exposes Context7 and toggles its MCP review action independently of instructions", () => {
+    const adapter = createDefaultAdapterRegistry().get("opencode");
+    const resolver = { getSupportedPackageInstructionIds: () => adapter.packageInstructionIds ?? [] };
+    let state = createDefaultRunnerDashboardState({ runnerScope: "opencode", runnerUi: adapter.ui, selectedCapabilities: { context7: false } });
+    expect(getPackageInstructionSummaries(state, resolver)).toContainEqual(expect.objectContaining({ capabilityId: "context7", label: "Context7", selected: false }));
+    expect(adapter.packageInstructionIds).not.toContain("context7");
+    const instructions = { ...state.packageInstructions };
+    state = reduceRunnerDashboard(state, { type: "toggle-capability", capabilityId: "context7" });
+    expect(state.selectedCapabilities.context7).toBe(true);
+    expect(state.packageInstructions).toEqual(instructions);
+    expect(getPackageInstructionSummaries(state, resolver)).toContainEqual(expect.objectContaining({ capabilityId: "context7", selected: true }));
+    const inventory = { runnerId: "opencode", environmentId: "opencode-development", capabilities: [{ capabilityId: "context7", isInstalled: false, isBlocked: false, toolId: "context7", source: "@upstash/context7-mcp" }] } as any;
+    const selectedPlan = adapter.buildReviewPlan(state as any, inventory);
+    expect(selectedPlan.groups.automaticInstalls).toContainEqual(expect.objectContaining({ capabilityId: "context7", kind: "write-mcp-config" }));
+    state = reduceRunnerDashboard(state, { type: "toggle-capability", capabilityId: "context7" });
+    expect(state.selectedCapabilities.context7).toBe(false);
+    const deselectedPlan = adapter.buildReviewPlan(state as any, inventory);
+    expect(deselectedPlan.groups.automaticInstalls).not.toContainEqual(expect.objectContaining({ capabilityId: "context7" }));
+  });
   test("Claude TUI explicitly authorizes Serena bootstrap and verifies the native Deck proxy", async () => {
     const root = createCanonicalTempRoot("deck-claude-tui-serena-bridge-");
     const dataRoot = join(root, "data", "deck");
