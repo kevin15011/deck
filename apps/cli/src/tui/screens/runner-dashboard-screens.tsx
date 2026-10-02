@@ -499,6 +499,11 @@ function InstallProgressScreen({
   serenaOutcome?: RunnerSerenaOutcome;
   cancellationRequested: boolean;
 }) {
+  const [frame, setFrame] = React.useState(0);
+  React.useEffect(() => {
+    const timer = setInterval(() => setFrame((current) => (current + 1) % 4), 100);
+    return () => clearInterval(timer);
+  }, []);
   const executed = results.filter((r) => r.status === "executed");
   const failed = results.filter((r) => r.status === "failed");
   const skipped = results.filter((r) => r.status === "skipped");
@@ -509,6 +514,7 @@ function InstallProgressScreen({
   return (
     <Box flexDirection="column">
       <Text bold>Install Progress</Text>
+      <Text color="cyan">{["|", "/", "-", "\\"][frame]} Installing…</Text>
       <Text dimColor>{executed.length} executed, {failed.length} failed, {skipped.length} skipped.</Text>
       {orderedStages.length > 0 && (
         <Box marginTop={1} flexDirection="column" aria-label="Serena installation stages">

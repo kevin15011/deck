@@ -1749,6 +1749,17 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const msg = `[runDashboardInstall] FAILED: ${err instanceof Error ? err.stack : String(err)}`;
       log(msg);
       console.error(msg);
+      if (!cancelled) {
+        setDashboardActionResults((current) => [...current, {
+          actionId: "install.unexpected-error",
+          status: "failed",
+          message: "Installation stopped unexpectedly. Review the completed actions before retrying.",
+          diagnostics: [],
+        }]);
+        setDashboardCompletionStatus("Installation stopped before completion.");
+        clearDashboardSupermemoryEphemeralState();
+        setDashboardState((current) => reduceRunnerDashboard(current, { type: "complete" }, dashboardPlanBuilder));
+      }
     }).finally(() => {
       dashboardInstallActiveRef.current = false;
       dashboardAbortControllerRef.current = null;
