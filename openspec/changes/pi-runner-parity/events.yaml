@@ -1,0 +1,36 @@
+schema: spec-registry-events-v1
+events:
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: specs/
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect
+  - phase: design
+    status: in_progress
+    event: design.in_progress
+    artifact: design.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect
+    notes:
+      - "P1-P8 pending Phase 0 spike verification (pi-spike-report.md not yet available)."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect
+    notes:
+      - "P1-P8 resolved from the Phase 0 spike report; residual risks R1-R8 recorded with verification tasks."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect

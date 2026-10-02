@@ -1,0 +1,42 @@
+schema: spec-registry-v1
+changeId: pi-runner-parity
+name: Pi Runner Parity
+currentPhase: tasks
+status: in_progress
+artifacts:
+  proposal: proposal.md
+  specs:
+    pi-global-materialization: specs/pi-global-materialization/spec.md
+    pi-native-mcp: specs/pi-native-mcp/spec.md
+    pi-subagent-extension: specs/pi-subagent-extension/spec.md
+    pi-adaptive-memory: specs/pi-adaptive-memory/spec.md
+    pi-tool-interception: specs/pi-tool-interception/spec.md
+    pi-version-and-migration: specs/pi-version-and-migration/spec.md
+    pi-runner-documentation: specs/pi-runner-documentation/spec.md
+  design: design.md
+  tasks: tasks.md
+provenance:
+  - phase: proposal
+    agent: deck-architect
+    model: claude-opus-5-5
+    timestamp: "2026-10-02"
+    registryWrite: non-deferred
+    note: "User decisions: Deck-owned subagent extension (no pi-subagents), global install under the Pi agent dir honoring PI_CODING_AGENT_DIR, Pi >= 1.0.0 only."
+  - phase: design
+    agent: deck-architect
+    model: claude-opus-5-5
+    timestamp: "2026-10-02"
+    registryWrite: non-deferred
+    note: "Design decisions D1-D10 recorded; P1-P8 pending Phase 0 spike verification. Tasks skeleton written."
+  - phase: design
+    agent: deck-architect
+    model: claude-opus-5-5
+    timestamp: "2026-10-02"
+    registryWrite: non-deferred
+    note: "Task 0.6: P1-P8 resolved from pi-spike-report.md (pi 1.0.0, faux provider). New decision D11 (memory token handoff file + env scrub; MCP children inherit env). D1/D5/D9/D10 revised. Residual risks R1-R8 tracked in Phase 9 / task 5.8. Design complete; no blockers."
+  - phase: tasks
+    agent: deck-architect
+    model: claude-opus-5-5
+    timestamp: "2026-10-02"
+    registryWrite: non-deferred
+    note: "Tasks expanded to Phases 0-9; Phase 0 marked done; PI_SESSION_DIR fix (1.3), mandatory adapter removal (3.3), token isolation (5.2, 5.8) added."
