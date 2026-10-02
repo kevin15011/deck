@@ -12,6 +12,8 @@
     "@deck/sdd-runtime": "workspace:*"
   },
   "devDependencies": {
-    "@deck/adapter-supermemory": "workspace:*"
+    "@deck/adapter-supermemory": "workspace:*",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "1.0.0"
   }
 }

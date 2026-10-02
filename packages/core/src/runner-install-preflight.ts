@@ -15,7 +15,9 @@ export type RunnerInstallPreflightCheckId =
   | "nested-skills-cleanup" // No nested skill directories
   | "legacy-sdd-cleanup" // No legacy SDD agent files
   | "shared-binary-usability" // Required binaries are executable
-  | "config-manifest-presence"; // Config/manifest files present (OpenCode)
+  | "config-manifest-presence" // Config/manifest files present (OpenCode)
+  | "pi-min-version" // Pi >= 1.0.0 (Pi)
+  | "pi-agent-dir"; // PI_CODING_AGENT_DIR resolved to a valid absolute directory (Pi)
 
 // Status of an individual preflight check
 export type RunnerInstallPreflightStatus =

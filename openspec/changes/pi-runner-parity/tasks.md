@@ -10,15 +10,15 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - [x] 0.4 P6 `tool_call` mutation and block semantics (S§8).
 - [x] 0.5 P7 MCP exposure/env/conflict and P8 trust (S§4, S§5).
 - [x] 0.6 Fold the spike report into `design.md` and the specs; residual risks R1-R8 recorded.
-- 0.7 Copy the reusable spike harness pieces (faux-provider extension factory, tiny stdio MCP server that echoes env) into test fixtures under `packages/adapter-pi` (test-only).
+- [x] 0.7 Copy the reusable spike harness pieces (faux-provider extension factory, tiny stdio MCP server that echoes env) into test fixtures under `packages/adapter-pi` (test-only).
 
 ## Phase 1 — Foundations (version, agent dir, session dir, manifest, types)
 
-- 1.1 Min-version preflight: semver parse of `pi --version`, `>= 1.0.0`, upgrade hint (`preflight.test.ts` first).
-- 1.2 `resolvePiAgentDir` with `PI_CODING_AGENT_DIR` validation; thread through planner/verifier/launcher; tests isolate `HOME`.
-- 1.3 Replace `PI_SESSION_DIR` with `--session-dir` / `PI_CODING_AGENT_SESSION_DIR` in `packages/adapter-pi/src/pi-team-launch.ts:154`, `packages/adapter-pi/src/runner-adapter.ts:1051` and `packages/core/src/config/env-sanitizer.ts:17` (failing launch/sanitizer tests first).
-- 1.4 Pi manifest (hashes plus owned `settings.json` `packages` key and `mcp.json` server names) and transactional apply/rollback.
-- 1.5 Add `@earendil-works/pi-coding-agent` / `@earendil-works/pi-ai` as dev dependencies for types and the faux provider; replace the hand-rolled `PiExtensionApi` with `ExtensionAPI`/`ExtensionFactory`; keep the canonical bundle build emitting `.js`.
+- [x] 1.1 Min-version preflight: semver parse of `pi --version`, `>= 1.0.0`, upgrade hint (`preflight.test.ts` first).
+- [ ] 1.2 `resolvePiAgentDir` with `PI_CODING_AGENT_DIR` validation; thread through planner/verifier/launcher; tests isolate `HOME`.
+- [ ] 1.3 Replace `PI_SESSION_DIR` with `--session-dir` / `PI_CODING_AGENT_SESSION_DIR` in `packages/adapter-pi/src/pi-team-launch.ts:154`, `packages/adapter-pi/src/runner-adapter.ts:1051` and `packages/core/src/config/env-sanitizer.ts:17` (failing launch/sanitizer tests first).
+- [x] 1.4 Pi manifest (hashes plus owned `settings.json` `packages` key and `mcp.json` server names) and transactional apply/rollback.
+- [x] 1.5 Add `@earendil-works/pi-coding-agent` / `@earendil-works/pi-ai` as dev dependencies for types and the faux provider; replace the hand-rolled `PiExtensionApi` with `ExtensionAPI`/`ExtensionFactory`; keep the canonical bundle build emitting `.js`.
 
 ## Phase 2 — Global package materialization
 
