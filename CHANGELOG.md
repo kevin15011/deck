@@ -9,6 +9,28 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-02
+
+### Added
+
+- Temporary Linux installation sandbox with the stable Codex, OpenCode, and Claude Code CLIs. `bun run sandbox` builds and includes Deck Canary; `bun run sandbox:clean` starts with runners only; `bun run sandbox:update` refreshes the cached image. Agents can inspect the sandbox through Docker without preserving runner configuration between runs.
+- Project-local runner evolution review skill and version history for tracking runner compatibility and improvement opportunities.
+- Shared frontend design routing with 29 additional standalone design skills. Deck selects compatible aesthetic and supporting skills, records their responsibilities, and replaces superseded directions when users request a different design. Imported source licenses and provenance are retained.
+
+### Changed
+
+- Supported runner packages start selected for review while saved deselections remain respected. Selection alone does not install packages; Review & Install retains the authorization boundary.
+- Runner selection uses neutral labels. Installation, model discovery, and model saving provide visible activity; failed saves retain an actionable error and allow retry.
+- Codex Developer Team sessions allow Lead-directed delegation and consistently identify delegated team tasks.
+- Claude Code materializes the canonical standalone skill catalog with its supporting resources in the managed plugin.
+
+### Fixed
+
+- Codex Serena MCP uses the active Deck executable, including Canary installations, rather than relying on a different binary in `PATH`.
+- OpenCode exposes Context7 in package selection again.
+- Pi no longer mistakes nested skill metadata for top-level agent definitions.
+- Codex launches can continue when Supermemory is selected but the project has no verified repository identity. Memory and all Codex hooks are disabled only for that launched session; saved preferences and installed configuration are preserved. Verified projects retain credential and registration checks.
+
 ## [0.8.0] - 2026-10-01
 
 ### Added
