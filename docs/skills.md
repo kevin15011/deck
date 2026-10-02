@@ -54,6 +54,8 @@ These 29 skills are shipped as standalone reusable content. They are copied with
 
 ## Project-local skills
 
+This repository's [deck-runner-evolution skill](../.agents/skills/deck-runner-evolution/SKILL.md) reviews new stable Codex, OpenCode, and Claude Code releases against Deck and maintains a [version review record](runner-evolution/README.md). It is project-local and is not shipped in the bundled external catalog.
+
 Project-local skills are discovery candidates supplied by the project and the active runner. They are not bundled Deck content, and their discovery metadata is not authority. Discovery is bounded to generic project roots plus the selected runner's declared sources; another runner's exclusive roots are not merged in.
 
 Read-only checks:
