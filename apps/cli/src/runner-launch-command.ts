@@ -95,6 +95,8 @@ export async function executeRunnerLaunchPlan(
     ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === VERIFIED_CODEX_SUPERMEMORY_BINDING
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_CODEX_API_KEY" || key === "TAVILY_API_KEY"))
+    : plan.sensitiveEnvAuthorization?.binding === "deck-pi-web-search-v1"
+      ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === "deck-claude-web-search-v1" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1"
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1" && key === "SUPERMEMORY_CC_API_KEY"))
       : new Set<string>();

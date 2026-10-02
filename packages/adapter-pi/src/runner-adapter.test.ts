@@ -385,21 +385,19 @@ describe("Repair #21: No console.log leakage in runner-adapter", () => {
 });
 
 describe("Repair #21: MCP config write handler structure", () => {
-  test("write-pi-mcp-config handler exists and calls all MCP writers", () => {
-    // This test verifies the handler structure exists
-    // Actual persistence is tested via integration tests in TUI
+  test("write-pi-mcp-config handler keeps the evidence-gated Serena writer; other Deck servers go through the global plan", () => {
+    // Structure check only; behavior is covered by runner-adapter.global.test.ts (global mcp.json transaction).
     const runnerAdapterPath = join(__dirname, "runner-adapter.ts");
     const content = readFileSync(runnerAdapterPath, "utf-8");
 
-    // Verify handler exists with proper structure
     expect(content).toContain('action.kind === "write-pi-mcp-config"');
-
-    // Verify all MCP server writers are called
-    expect(content).toContain("writeContextModeMcpConfig");
-    expect(content).toContain("writeCodebaseMemoryMcpConfig");
     expect(content).toContain("writeSerenaMcpConfig");
-    expect(content).toContain("writeContext7McpConfig");
     expect(content).toContain("writeSupermemoryPiMcpConfig");
+    // Context Mode, Codebase Memory, Context7 and Web Search are never written by per-capability writers.
+    expect(content).not.toContain("writeContextModeMcpConfig");
+    expect(content).not.toContain("writeCodebaseMemoryMcpConfig");
+    expect(content).not.toContain("writeContext7McpConfig");
+    expect(content).not.toContain("writePiWebSearchMcpConfig");
   });
 });
 

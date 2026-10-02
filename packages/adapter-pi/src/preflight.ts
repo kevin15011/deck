@@ -137,7 +137,7 @@ function runPiPreflightChecks(params: {
 
   // 0. Agent directory and minimum Pi version (blocking)
   checks.push({
-    id: "pi-agent-dir",
+    id: "runner-config-dir",
     runner: "pi",
     status: agentDir ? "pass" : "fail",
     severity: agentDir ? "info" : "error",
@@ -146,7 +146,7 @@ function runPiPreflightChecks(params: {
     remediation: agentDir ? undefined : "Set PI_CODING_AGENT_DIR to an absolute directory or unset it.",
   });
   checks.push({
-    id: "pi-min-version",
+    id: "runner-min-version",
     runner: "pi",
     status: versionStatus.supported ? "pass" : "fail",
     severity: versionStatus.supported ? "info" : "error",

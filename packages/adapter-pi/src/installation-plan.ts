@@ -6,13 +6,12 @@ import type { RequiredToolStatus } from "./required-tools";
 export type { InternalRunnerPackageId } from "./internal-runner-packages";
 
 export type InstallablePiToolId =
-  | "sub-agents"
-  | "mcp-packages"
   | "context-mode"
   | "codebase-memory-mcp"
   | "rtk"
   | "serena"
-  | "context7";
+  | "context7"
+  | "web-search";
 
 export type InstallablePiTool = {
   id: InstallablePiToolId;
@@ -30,8 +29,9 @@ type BuildPiInstallationPlanOptions = {
 };
 
 export const PI_INSTALLABLE_TOOLS: InstallablePiTool[] = [
-  { id: "sub-agents", name: "sub-agents", source: "npm:pi-subagents", required: true, installKind: "pi-package" },
-  { id: "mcp-packages", name: "MCP packages", source: "npm:pi-mcp-adapter", required: true, installKind: "pi-package" },
+  // Deck owns subagents (the `deck-subagents` extension) and MCP (Pi built-in `mcp.json`); the community
+  // `pi-subagents` and `pi-mcp-adapter` packages are intentionally not installable here (the adapter even
+  // disables Pi's built-in MCP).
   {
     id: "context-mode",
     name: "context-mode",
@@ -72,6 +72,16 @@ export const PI_INSTALLABLE_TOOLS: InstallablePiTool[] = [
     installKind: "npm-package-plus-mcp",
     capabilityId: "context7",
   },
+  {
+    // Tavily runs through `npx` at session start; there is nothing to pre-install and the credential is never
+    // persisted (it reaches only the launched Pi process environment).
+    id: "web-search",
+    name: "Web Search",
+    source: "npm:tavily-mcp@0.2.22",
+    required: false,
+    installKind: "mcp-server",
+    capabilityId: "web-search",
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -111,6 +121,7 @@ const TOOL_TO_CAPABILITY: Partial<Record<InstallablePiToolId, CapabilityToolMapp
   rtk: "rtk",
   serena: "serena",
   context7: "context7",
+  "web-search": "web-search",
 };
 
 export function getPiInstallableTool(toolId: InstallablePiToolId): InstallablePiTool | undefined {

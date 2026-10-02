@@ -12,10 +12,15 @@
 import { inspectPiEnvironment, type PiPreflightResult } from "./preflight";
 import { piAgentPaths, resolvePiAgentDir, type PiAgentDirResolution } from "./agent-dir";
 import { buildPiGlobalMaterialization, type PiGlobalMaterialization } from "./global-materialization";
+import { createPiTools } from "./pi-owned-tools";
+import { resolveDeckPiMcpServers, selectDeckPiMcpServerIds, type DeckPiMcpToolResolver } from "./pi-deck-mcp";
+import { mcpServerForCapability } from "./pi-mcp-catalog";
 import {
   applyPiGlobalPlan,
   createNodePiFileIO,
   planPiGlobalInstall,
+  readPiManifest,
+  readPiMcpServers,
   restorePiSnapshot,
   snapshotPiPlanTargets,
   verifyPiGlobalInstall,
@@ -33,12 +38,11 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { buildPiRunnerCapabilityInventory, type PiRunnerCapabilityInventory, type PiRunnerFullCapabilityInventory } from "./capability-inventory";
 import { buildPiRunnerReviewPlan, type PiRunnerReviewPlan } from "./capability-plan";
 import { buildPiInstallationPlan, getPiInstallableTool, type InstallablePiToolId, type InstallablePiTool } from "./installation-plan";
-import { installPiTools, installInternalRunnerPackages } from "./install-tools";
+import { installPiTools, installInternalRunnerPackages, type PiOwnedToolInstaller } from "./install-tools";
 import { reviewPiRequiredTools, type PiRequiredToolsReview } from "./required-tools";
 import {
   inspectPiWebSearchMcpConfig,
   resolvePiWebSearchReadiness,
-  writePiWebSearchMcpConfig,
 } from "./web-search";
 import { getTeamsForEnvironment } from "./team-catalog";
 import { buildPiTeamLaunchPlan } from "./pi-team-launch";
@@ -51,11 +55,7 @@ import { getPiRunnerCapability, getUserFacingCapability, PI_RUNNER_CAPABILITY_CO
 import { getOptionalPiTools } from "./installation-plan";
 import {
   writeSupermemoryPiMcpConfig,
-  writeContextModeMcpConfig,
-  writeCodebaseMemoryMcpConfig,
   writeSerenaMcpConfig,
-  writeContext7McpConfig,
-  defaultPiMcpConfigPath,
   validateSupermemoryPiMcpConfig,
   type PiMcpConfigFileSystem,
   type PiMcpConfigWriteResult,
@@ -148,6 +148,10 @@ export type PiRunnerAdapterOptions = {
   readonly piCommand?: string;
   /** File effects for the global install engine (hermetic tests inject failures here). */
   readonly piFileIO?: PiFileIO;
+  /** Deck-owned tool resolution (RTK, Codebase Memory, shared commands). Defaults to the production resolver. */
+  readonly piTools?: PiToolResolution;
+  /** Shared Web Search credential resolver (composition root); the value only ever reaches the launched process env. */
+  readonly webSearchCredential?: () => string | undefined;
   /** Optional runner-exposed inventory supplied by Pi itself. */
   readonly opaqueInventory?: () => Promise<OpaqueSkillInventoryResultV1>;
   /** Deterministic Serena installer projection seam. */
@@ -169,6 +173,9 @@ export type PiRunnerAdapterOptions = {
   /** Resolve the selected provider without putting provider metadata in Core. */
   readonly webSearchProviderResolver?: (provider: string | undefined) => WebSearchProviderDescriptorV1 | undefined;
 };
+
+/** The subset of `PiTools` the adapter consumes (tests inject a fake). */
+export type PiToolResolution = DeckPiMcpToolResolver & PiOwnedToolInstaller & { rtk: { command(): string | undefined } };
 
 type PiSerenaActionContextExtensions = {
   readonly serenaRevalidator?: SerenaReadinessRevalidator;
@@ -599,6 +606,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   #piCommand: string;
   #fileIO: PiFileIO;
   #lastMaterialization: { materialization: PiGlobalMaterialization; enginePlan: PiGlobalPlan } | null = null;
+  #piTools?: PiToolResolution;
+  #webSearchCredential?: () => string | undefined;
   constructor(options: PiRunnerAdapterOptions = {}) {
     this.#homeDirectory = options.homeDirectory ?? process.env.HOME ?? homedir();
     this.#env = options.env ?? process.env;
@@ -606,14 +615,16 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     this.#piCommand = options.piCommand ?? "pi";
     this.#piVersionProbe = options.piVersionProbe ?? (() => runPiVersionProbe(this.#piCommand));
     this.#fileIO = options.piFileIO ?? createNodePiFileIO();
+    this.#piTools = options.piTools;
+    this.#webSearchCredential = options.webSearchCredential;
     this.skillDiscovery = createPiSkillDiscoveryProvider(options);
     this.#installTools = options.installTools ?? installPiTools;
-    this.#requiredToolsReview = options.requiredToolsReview ?? (() => reviewPiRequiredTools({ command: "pi" }));
+    this.#requiredToolsReview = options.requiredToolsReview ?? (() => reviewPiRequiredTools({ command: this.#piCommand, piTools: this.#tools() }));
     this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
     this.#serenaRevalidator = options.serenaRevalidator;
     this.#serenaOwnedRoot = options.serenaOwnedRoot;
     this.#writeSerenaMcpConfig = options.writeSerenaMcpConfig ?? writeSerenaMcpConfig;
-    this.#writeNamedMcpConfig = options.writeNamedMcpConfig ?? writeNamedPiMcpConfig;
+    this.#writeNamedMcpConfig = options.writeNamedMcpConfig ?? ((capabilityId, context) => this.#checkNamedMcpReadiness(capabilityId, context));
     this.#webSearchProvider = options.webSearchProvider;
     this.#webSearchProviderResolver = options.webSearchProviderResolver;
   }
@@ -628,6 +639,57 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   /** The resolved Pi agent dir for read-only consumers (falls back to the default location when the override is invalid). */
   #readAgentDir(): string {
     return this.#agentDirResolution.ok ? this.#agentDirResolution.dir : join(this.#homeDirectory, ".pi", "agent");
+  }
+
+  /**
+   * `write-pi-mcp-config` for Pi no longer writes `mcp.json` on its own: every Deck server is materialized
+   * atomically with the Deck package (one manifest-owned transaction). This action verifies that the server
+   * can actually be configured so the review plan reports failures early.
+   */
+  async #checkNamedMcpReadiness(capabilityId: string, context: RunnerActionContext): Promise<PiMcpConfigWriteResult> {
+    const configPath = (context as RunnerActionContext & PiSerenaActionContextExtensions).piMcpConfigPath ?? piAgentPaths(this.#readAgentDir()).mcp;
+    const server = mcpServerForCapability(capabilityId);
+    const fail = (message: string): PiMcpConfigWriteResult => ({
+      ok: false,
+      action: "failed",
+      path: configPath,
+      serverName: server ?? capabilityId,
+      diagnostics: [{ code: "PI_MCP_PROVIDER_UNAVAILABLE", severity: "error", message, path: configPath, serverName: server ?? capabilityId }],
+    });
+    const ok = (): PiMcpConfigWriteResult => ({
+      ok: true,
+      action: "unchanged",
+      path: configPath,
+      serverName: server ?? capabilityId,
+      diagnostics: [{ code: "PI_MCP_CONFIG_UNCHANGED", severity: "info", message: `${server ?? capabilityId} MCP server is ready; it is ${PI_MCP_DEFERRED_MARK}.`, path: configPath, serverName: server ?? capabilityId }],
+    });
+    if (!server) return { ok: false, action: "failed", path: configPath, serverName: capabilityId, diagnostics: [] };
+    if (capabilityId === "supermemory") return { ok: false, action: "failed", path: configPath, serverName: capabilityId, diagnostics: [] };
+    let resolved: ReturnType<typeof resolveDeckPiMcpServers>;
+    try {
+      resolved = resolveDeckPiMcpServers({
+        selected: [server],
+        tools: this.#tools(),
+        existingServers: readPiMcpServers(this.#fileIO, this.#readAgentDir()),
+        ownedServerNames: Object.keys(readPiManifest(this.#fileIO, this.#readAgentDir())?.mcp.servers ?? {}),
+        webSearchProvider: context.webSearchProvider ?? this.#webSearchProvider,
+      });
+    } catch (error) {
+      return fail(`Unable to resolve the ${server} MCP server: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (Object.keys(resolved.servers).length === 0) return fail(resolved.diagnostics[0]?.message ?? `The ${server} MCP server cannot be configured.`);
+    if (server === "web-search") {
+      const provider = context.webSearchProvider ?? this.#webSearchProvider;
+      if (!isWebSearchProviderDescriptor(provider)) return fail("Web Search provider selection is unavailable.");
+      const credential = (() => { try { return (this.#webSearchCredential?.() ?? this.#env[provider.credentialEnvVar])?.trim(); } catch { return undefined; } })();
+      if (!credential) return fail(`${provider.credentialEnvVar} is not available; Web Search cannot start. No credential was persisted.`);
+    }
+    return ok();
+  }
+
+  #tools(): PiToolResolution {
+    this.#piTools ??= createPiTools({ homeDir: this.#homeDirectory, env: this.#env });
+    return this.#piTools;
   }
 
   #agentDirDiagnostic(): string | undefined {
@@ -733,7 +795,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       } as any;
     }
 
-    const review = reviewPiRequiredTools({ command: "pi" });
+    const review = this.#requiredToolsReview();
 
     const piPlan: PiRunnerReviewPlan = buildPiRunnerReviewPlan(
       {
@@ -768,7 +830,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   }
 
   buildInstallationPlan(state: DashboardState): InstallationPlan {
-    const review = reviewPiRequiredTools({ command: "pi" });
+    const review = this.#requiredToolsReview();
     const requiredTools: RequiredToolStatus[] = review.requiredTools;
 
     // Collect selected optional tool IDs from state.selectedCapabilities
@@ -829,7 +891,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       const catalogTool = toolId ? getPiInstallableTool(toolId) : undefined;
 
       const installableTool: InstallablePiTool = {
-        id: toolId ?? "sub-agents",
+        id: toolId ?? "context-mode",
         name: action.title,
         source: action.source ?? catalogTool?.source ?? "",
         required: action.required ?? false,
@@ -857,7 +919,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
               serenaBootstrapEffects: this.#serenaBootstrapEffects,
               serenaSignal: context.signal,
             }
-          : undefined,
+          : { piTools: this.#tools() },
       );
       const result = results[0];
       if (!result) {
@@ -985,7 +1047,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
                 command: validatedInput.command,
                 args: validatedInput.args,
                 ownedRoot,
-                configPath: actionContext.piMcpConfigPath,
+                configPath: actionContext.piMcpConfigPath ?? piAgentPaths(this.#readAgentDir()).mcp,
                 homeDir: actionContext.homeDirectory,
                 fileSystem: actionContext.piMcpFileSystem,
               });
@@ -1024,11 +1086,13 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       }
 
       const result = await this.#writeNamedMcpConfig(capabilityId, context);
+      const deferred = result.ok ? result.diagnostics.find((diagnostic) => diagnostic.message.includes(PI_MCP_DEFERRED_MARK)) : undefined;
+      const failure = result.ok ? undefined : result.diagnostics.find((diagnostic) => diagnostic.severity === "error")?.message;
       return {
         actionId: action.id,
         status: result.ok ? "executed" : "failed",
-        message: result.ok ? `MCP configuration ${result.action} for ${capabilityId}.` : "MCP configuration was not changed.",
-        diagnostics: result.ok ? [] : ["MCP configuration was not changed."],
+        message: result.ok ? (deferred?.message ?? `MCP configuration ${result.action} for ${capabilityId}.`) : (failure ?? "MCP configuration was not changed."),
+        diagnostics: result.ok ? [] : [failure ?? "MCP configuration was not changed."],
       };
     }
 
@@ -1083,12 +1147,23 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       },
       piCommand: typeof nativeHints.piCommand === "string" && nativeHints.piCommand.trim() ? nativeHints.piCommand : this.#piCommand,
     });
-    const overlay: Record<string, { value: string }> = {
+    const overlay: Record<string, { value: string; sensitive?: boolean }> = {
       DECK_PI_SESSION: { value: "1" },
       DECK_PI_ROLE: { value: "lead" },
       // A non-default agent directory must reach Pi itself, not only the Deck process.
       ...(this.#agentDirResolution.source === "env" ? { PI_CODING_AGENT_DIR: { value: this.#agentDirResolution.dir } } : {}),
     };
+    const diagnostics: { code: string; severity: "info" | "warning" | "error"; message: string }[] = version.reason === "unavailable" && version.diagnostic
+      ? [{ code: "pi-version-unavailable", severity: "warning", message: version.diagnostic }]
+      : [];
+    const sensitiveKeys: string[] = [];
+    const webSearch = this.#webSearchLaunchCredential(input);
+    if (webSearch.kind === "ready") {
+      overlay[webSearch.envVar] = { value: webSearch.value, sensitive: true };
+      sensitiveKeys.push(webSearch.envVar);
+    } else if (webSearch.kind === "missing-credential") {
+      diagnostics.push({ code: "pi-web-search-credential-missing", severity: "warning", message: "Web search is unavailable for this session: the shared Tavily credential was not found. Deck did not write a credential anywhere." });
+    }
     return {
       status: "ready",
       plan: {
@@ -1099,8 +1174,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         stdin: "inherit",
         executionClass: "static-compatible",
         envOverlay: overlay,
+        ...(sensitiveKeys.length > 0 ? { sensitiveEnvAuthorization: { binding: PI_WEB_SEARCH_BINDING, keys: sensitiveKeys } } : {}),
       },
-      diagnostics: version.reason === "unavailable" && version.diagnostic ? [{ code: "pi-version-unavailable", severity: "warning", message: version.diagnostic }] : [],
+      diagnostics,
     };
   }
 
@@ -1110,6 +1186,27 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
 
   getModelCatalog(_context?: ModelCatalogContext): ModelCatalog {
     return getCoreModelCatalog();
+  }
+
+  /**
+   * Hands the shared Web Search credential to the launched Pi process only: Web Search is enabled, its Deck MCP
+   * entry is configured, and a credential resolves. The value never reaches `mcp.json`, settings or agent files
+   * (MCP stdio servers inherit the Pi environment, so the Tavily server receives it from there).
+   */
+  #webSearchLaunchCredential(input: import("@deck/core").RunnerLaunchInput):
+    | { kind: "disabled" }
+    | { kind: "missing-credential" }
+    | { kind: "ready"; envVar: string; value: string } {
+    const deckConfig = input.deckConfig;
+    if (!deckConfig || deckConfig.webSearch?.enabled !== true) return { kind: "disabled" };
+    const provider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
+    if (!isWebSearchProviderDescriptor(provider)) return { kind: "disabled" };
+    const agentDir = this.#readAgentDir();
+    if (!(provider.semanticServerId in readPiMcpServers(this.#fileIO, agentDir))) return { kind: "disabled" };
+    let token: string | undefined;
+    try { token = (this.#webSearchCredential?.() ?? this.#env[provider.credentialEnvVar])?.trim(); } catch { token = undefined; }
+    if (!token || /[\0\r\n]/.test(token)) return { kind: "missing-credential" };
+    return { kind: "ready", envVar: provider.credentialEnvVar, value: token };
   }
 
   readModelAssignments(projectRoot?: string): DeveloperTeamModelAssignments {
@@ -1194,9 +1291,32 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       configuredSupermemoryProjectScope,
     });
 
+    const deckConfig = requireDeckConfig(input.deckConfig, "developer team install");
+    const ownedMcp = Object.keys(readPiManifest(this.#fileIO, agentDir)?.mcp.servers ?? {});
+    let mcpServers: Record<string, Record<string, unknown>> = {};
+    try {
+      const resolved = resolveDeckPiMcpServers({
+        selected: selectDeckPiMcpServerIds({
+          capabilityIds: input.capabilityIds,
+          instructionPackageIds: capabilityInstructions?.instructions.map((fragment) => fragment.packageId) ?? [],
+          webSearchEnabled: deckConfig.webSearch.enabled === true,
+          ownedServers: ownedMcp,
+        }),
+        tools: this.#tools(),
+        existingServers: readPiMcpServers(this.#fileIO, agentDir),
+        ownedServerNames: ownedMcp,
+        webSearchProvider: this.resolveWebSearchProvider(deckConfig.webSearch.provider),
+      });
+      mcpServers = resolved.servers;
+      for (const diagnostic of resolved.diagnostics) diagnosticEntries.push(diagnostic);
+    } catch (error) {
+      diagnosticEntries.push({ code: "PI_MCP_RESOLUTION_FAILED", severity: "warning", message: `Deck MCP servers could not be resolved: ${error instanceof Error ? error.message : String(error)}` });
+    }
+
     const materialization = buildPiGlobalMaterialization({
       agentDir,
       projectRoot: input.projectRoot,
+      mcpServers,
       legacyDeckEvidence: hasLegacyDeckInstallEvidence(this.#fileIO, agentDir),
       installOptions: {
         modelAssignments: input.modelAssignments,
@@ -1424,6 +1544,9 @@ export function getPiRunnerAdapter(): RunnerAdapter {
 // ---------------------------------------------------------------------------
 
 const PI_GLOBAL_SNAPSHOT_KIND = "deck-pi-global-snapshot-v1";
+const PI_MCP_DEFERRED_MARK = "applied with the Deck package install";
+/** Binding recognized by the CLI launcher to forward exactly the Web Search credential variable. */
+export const PI_WEB_SEARCH_BINDING = "deck-pi-web-search-v1";
 
 /** `pi --version` with stdin ignored (a bare `pi` waits on a non-TTY stdin) and a bounded runtime. */
 function runPiVersionProbe(command: string): { exitCode: number; stdout: string; stderr?: string } {
@@ -1474,42 +1597,6 @@ function resolvePiSupermemoryProjectScope(projectRoot: string): string | undefin
     return resolved.ok ? resolved.scope : undefined;
   } catch {
     return undefined;
-  }
-}
-
-async function writeNamedPiMcpConfig(
-  capabilityId: string,
-  context: RunnerActionContext,
-): Promise<PiMcpConfigWriteResult> {
-  const actionContext = context as RunnerActionContext & PiSerenaActionContextExtensions;
-  const homeDir = actionContext.homeDirectory ?? process.env.HOME ?? "/home/kevinlb";
-  const configPath = actionContext.piMcpConfigPath ?? defaultPiMcpConfigPath(homeDir);
-
-  switch (capabilityId) {
-    case "context-mode":
-      return writeContextModeMcpConfig({ configPath, homeDir });
-    case "codebase-memory-mcp":
-      return writeCodebaseMemoryMcpConfig({ configPath, homeDir });
-    case "context7":
-      return writeContext7McpConfig({ configPath, homeDir });
-    case "web-search":
-      return writePiWebSearchMcpConfig({
-        configPath,
-        homeDir,
-        provider: context.webSearchProvider,
-        credentialEnvironment: process.env,
-      });
-    case "supermemory": {
-      return writeSupermemoryPiMcpConfig({ configPath, homeDir, projectScope: resolvePiSupermemoryProjectScope(context.projectRoot) ?? "" });
-    }
-    default:
-      return {
-        ok: false,
-        action: "failed",
-        path: configPath,
-        serverName: capabilityId,
-        diagnostics: [],
-      };
   }
 }
 

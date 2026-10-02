@@ -30,11 +30,11 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 
 ## Phase 3 — Native MCP, owned binaries, web search
 
-- 3.1 Global `mcp.json` writer: Deck servers with absolute commands, `"exposure": "direct"`, and `env` blanking `DECK_RUNNER_MEMORY_*`.
-- 3.2 Remove `pi-subagents`/`pi-mcp-adapter` from `PI_INSTALLABLE_TOOLS` and `required-tools.ts`.
-- 3.3 Mandatory, transactional removal of Deck-added `pi-mcp-adapter`/`pi-subagents` entries in the install plan; a user-added `pi-mcp-adapter` produces a blocking MCP diagnostic.
-- 3.4 Web Search (Tavily) installable tool; credential via shared resolution into the child env only.
-- 3.5 Generate role prompts and read-only `--tools` allowlists from the Deck server catalog using direct-exposure `mcp__*` names (with `-` mapped to `_`).
+- [x] 3.1 Global `mcp.json` writer: Deck servers with absolute commands, `"exposure": "direct"`, and `env` blanking `DECK_RUNNER_MEMORY_*`.
+- [x] 3.2 Remove `pi-subagents`/`pi-mcp-adapter` from `PI_INSTALLABLE_TOOLS` and `required-tools.ts`.
+- [x] 3.3 Mandatory, transactional removal of Deck-added `pi-mcp-adapter`/`pi-subagents` entries in the install plan; a user-added `pi-mcp-adapter` produces a blocking MCP diagnostic.
+- [x] 3.4 Web Search (Tavily) installable tool; credential via shared resolution into the child env only.
+- [x] 3.5 Generate role prompts and read-only `--tools` allowlists from the Deck server catalog using direct-exposure `mcp__*` names (with `-` mapped to `_`).
 
 ## Phase 4 — Subagent extension and per-role routing
 

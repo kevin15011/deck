@@ -77,7 +77,16 @@ type RunInstallCommand = (command: string, args: string[]) => Promise<InstallCom
  */
 type SharedBinaryUsabilityProbe = typeof checkSharedBinaryUsability;
 
+/** The subset of `PiTools` the installer needs (tests inject a fake). */
+export type PiOwnedToolInstaller = Readonly<{
+  resolveExecutable(name: string): string | undefined;
+  rtk: Readonly<{ state(): string; install(): Promise<"installed" | "unchanged">; supported(): boolean }>;
+  codebase: Readonly<{ state(): string; existing(): string | undefined; install(): Promise<"installed" | "unchanged">; supported(): boolean }>;
+}>;
+
 type PiToolInstallDependencies = Readonly<{
+  /** When present, RTK and Codebase Memory use Deck-owned pinned artifacts instead of PATH binaries. */
+  piTools?: PiOwnedToolInstaller;
   runInstallCommand: RunInstallCommand;
   checkSharedBinaryUsability: SharedBinaryUsabilityProbe;
   sharedBinaryUsabilityTimeoutMs: number;
@@ -107,6 +116,7 @@ function resolvePiToolInstallDependencies(
     return { ...defaultPiToolInstallDependencies, runInstallCommand: input };
   }
   return {
+    piTools: input?.piTools,
     runInstallCommand: input?.runInstallCommand ?? defaultPiToolInstallDependencies.runInstallCommand,
     checkSharedBinaryUsability: input?.checkSharedBinaryUsability ?? defaultPiToolInstallDependencies.checkSharedBinaryUsability,
     sharedBinaryUsabilityTimeoutMs: input?.sharedBinaryUsabilityTimeoutMs ?? defaultPiToolInstallDependencies.sharedBinaryUsabilityTimeoutMs,
@@ -174,6 +184,10 @@ async function dispatchInstallByKind(
     return installSerenaProjection(tool, dependencies);
   }
 
+  if (dependencies.piTools && (toolId === "rtk" || toolId === "codebase-memory-mcp")) {
+    return installOwnedTool(tool, dependencies.piTools);
+  }
+
   if (installKind === "external" || installKind === "manual") {
     return {
       tool: name,
@@ -221,6 +235,15 @@ async function dispatchInstallByKind(
         message: sharedResult.message,
         installKind,
       };
+    }
+
+    case "mcp-server": {
+      // Web Search (Tavily) runs through `npx` when the session starts: there is nothing to pre-install and no
+      // credential is read or persisted here.
+      const npx = dependencies.piTools ? dependencies.piTools.resolveExecutable("npx") : (Bun.which("npx") ?? undefined);
+      return npx
+        ? { tool: name, success: true, actionKind: "install-pi-package", status: "installed", message: `${name} runs through ${npx} at session start.`, installKind }
+        : { tool: name, success: false, actionKind: "install-pi-package", status: "failed", message: `${name} needs \`npx\` (Node.js), which was not found on PATH.`, installKind };
     }
 
     case "npm-package-plus-mcp": {
@@ -274,6 +297,31 @@ async function dispatchInstallByKind(
         };
       }
     }
+  }
+}
+
+/** RTK is always the pinned Deck-owned artifact; Codebase Memory prefers a usable shared binary, then the pinned release. */
+async function installOwnedTool(tool: InstallablePiTool, tools: PiOwnedToolInstaller): Promise<PiToolInstallResult> {
+  const base = { tool: tool.name, actionKind: "install-pi-package" as const, installKind: tool.installKind };
+  const isRtk = tool.id === "rtk";
+  const owned = isRtk ? tools.rtk : tools.codebase;
+  if (!isRtk) {
+    const shared = tools.codebase.existing();
+    if (shared) return { ...base, success: true, status: "reused", message: `Reusing shared ${tool.name} at ${shared}.` };
+  }
+  const state = owned.state();
+  if (state === "ready") return { ...base, success: true, status: "reused", message: `Reusing Deck-owned ${tool.name}.` };
+  if (state === "unsupported" || !owned.supported()) {
+    return { ...base, success: false, status: "blocked", message: `No pinned ${tool.name} release exists for this platform.` };
+  }
+  if (state === "conflict" || state === "unusable") {
+    return { ...base, success: false, status: "blocked", message: `The Deck-owned ${tool.name} directory is ${state}; Deck will not overwrite it. Remove it manually to reinstall.` };
+  }
+  try {
+    await owned.install();
+    return { ...base, success: true, status: "installed", message: `Installed pinned Deck-owned ${tool.name}.` };
+  } catch (error) {
+    return { ...base, success: false, status: "failed", message: error instanceof Error ? error.message : `Failed to install ${tool.name}.` };
   }
 }
 
@@ -596,7 +644,7 @@ export async function installInternalRunnerPackages(
 ): Promise<InternalRunnerInstallResult[]> {
   // Convert internal install actions to InstallablePiTool format for the executor.
   const tools: InstallablePiTool[] = actions.map((action) => ({
-    id: action.packageId as "sub-agents" | "mcp-packages" | "context-mode" | "codebase-memory-mcp" | "rtk" | "context7",
+    id: action.packageId as InstallablePiTool["id"],
     name: action.name,
     source: action.source,
     required: true,

@@ -166,7 +166,7 @@ describe("installPiTools with installKind dispatch", () => {
     const calls: string[][] = [];
     const results = await installPiTools(
       "pi",
-      [{ id: "sub-agents", name: "sub-agents", source: "npm:pi-subagents", required: true, installKind: "pi-package" }],
+      [{ id: "context-mode", name: "internal-package", source: "npm:some-internal-package", required: true, installKind: "pi-package" }],
       () => {},
       async (command, args) => {
         calls.push([command, ...args]);
@@ -174,7 +174,7 @@ describe("installPiTools with installKind dispatch", () => {
       },
     );
 
-    expect(calls).toEqual([["pi", "install", "npm:pi-subagents"]]);
+    expect(calls).toEqual([["pi", "install", "npm:some-internal-package"]]);
     expect(results[0].status).toBe("installed");
     expect(results[0].installKind).toBe("pi-package");
   });

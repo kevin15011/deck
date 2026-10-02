@@ -119,3 +119,43 @@ describe("buildPiGlobalMaterialization", () => {
     expect(readFileSync(join(agentDir, "agents", "mine.md"), "utf-8")).toBe("user agent\n");
   });
 });
+
+describe("MCP-aware role content (direct-exposure tool names)", () => {
+  const entry = { command: "/usr/bin/tool", args: [], env: {}, exposure: "direct" };
+  const withServers = (servers: Record<string, unknown>) => buildPiGlobalMaterialization({ agentDir, projectRoot, legacyDeckEvidence: false, mcpServers: servers as never }).desired;
+  const file = (desired: ReturnType<typeof withServers>, relPath: string) => desired.files.find((entry) => entry.relPath === relPath)!.content;
+  const frontmatterTools = (content: string) => /^tools: (.*)$/m.exec(content)![1];
+
+  test("the lead profile and every agent map shared tool names to the names Pi exposes", () => {
+    const desired = withServers({ "codebase-memory": entry, "context-mode": entry });
+    for (const path of ["deck/profiles/developer-team/system-prompt.md", "deck/package/agents/deck-lead.md", "deck/package/agents/deck-apply-fast.md"]) {
+      const content = file(desired, path);
+      expect(content).toContain("## Pi MCP Tool Names");
+      expect(content).toContain("mcp__codebase_memory__search_graph");
+      expect(content).toContain("mcp__context_mode__ctx_search");
+    }
+  });
+
+  test("no section is added when no MCP server is configured", () => {
+    const desired = withServers({});
+    expect(file(desired, "deck/profiles/developer-team/system-prompt.md")).not.toContain("Pi MCP Tool Names");
+    expect(file(desired, "deck/package/agents/deck-lead.md")).not.toContain("Pi MCP Tool Names");
+  });
+
+  test("read-only roles get the read-only allowlist; write roles keep their tools", () => {
+    const desired = withServers({ "codebase-memory": entry, serena: entry });
+    for (const role of ["deck-investigate", "deck-quality"]) {
+      const tools = frontmatterTools(file(desired, `deck/package/agents/${role}.md`)).split(",");
+      expect(tools.slice(0, 4)).toEqual(["read", "grep", "find", "ls"]);
+      expect(tools).toContain("mcp__codebase_memory__search_graph");
+      expect(tools).toContain("mcp__serena__find_symbol");
+      expect(tools).not.toContain("mcp__serena__replace_symbol_body");
+      for (const forbidden of ["bash", "edit", "write"]) expect(tools).not.toContain(forbidden);
+    }
+    expect(frontmatterTools(file(desired, "deck/package/agents/deck-apply-fast.md"))).toBe("read,write,bash");
+  });
+
+  test("read-only roles without MCP servers still drop write-capable tools", () => {
+    expect(frontmatterTools(file(withServers({}), "deck/package/agents/deck-investigate.md"))).toBe("read,grep,find,ls");
+  });
+});

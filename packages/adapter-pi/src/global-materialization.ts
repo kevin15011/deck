@@ -8,10 +8,28 @@ import {
 import { buildDeckPiPackageFiles } from "./package-layout";
 import type { PiGlobalDesiredState } from "./pi-global-install";
 import { adaptBunBundleForNode } from "./pi-bundle-compat";
+import { DECK_PI_MCP_SERVER_IDS, piReadOnlyToolAllowlist, renderPiMcpToolNamesSection } from "./pi-mcp-catalog";
 import { buildTeamSystemPrompt, readPiExecutionExtensionSource } from "./pi-team-profile";
 
 export const PI_DEVELOPER_TEAM_ID = "developer-team";
 export const PI_EXECUTION_EXTENSION_NAME = "developer-team-execution";
+/** Roles that never mutate the workspace (enforced by `--tools` and by the tool-policy extension). */
+export const PI_READ_ONLY_ROLE_AGENT_IDS: readonly string[] = ["deck-investigate", "deck-quality"];
+
+function configuredServerIds(mcpServers: Readonly<Record<string, unknown>>): string[] {
+  return DECK_PI_MCP_SERVER_IDS.filter((id) => id in mcpServers);
+}
+
+/** Appends the Pi tool-name section and, for read-only roles, replaces the frontmatter `tools:` allowlist. */
+function applyPiRoleContent(agentId: string, content: string, servers: readonly string[], section: string): string {
+  let next = content;
+  if (PI_READ_ONLY_ROLE_AGENT_IDS.includes(agentId)) {
+    const allowlist = piReadOnlyToolAllowlist(servers).join(",");
+    next = next.replace(/^(---\n[\s\S]*?)^tools: .*$/m, (_match, head: string) => `${head}tools: ${allowlist}`);
+  }
+  if (section) next = `${next.trimEnd()}\n\n${section}`;
+  return next.endsWith("\n") ? next : `${next}\n`;
+}
 
 export type PiGlobalMaterializationInput = {
   agentDir: string;
@@ -50,6 +68,9 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
     layout: { packageRoot: paths.packageRoot },
   });
 
+  const selectedServers = configuredServerIds(input.mcpServers ?? {});
+  const toolNamesSection = renderPiMcpToolNamesSection(selectedServers);
+
   const profile = buildTeamSystemPrompt(teamId, {
     ...(nativePlan.memoryBundle ? { memoryInjection: nativePlan.memoryBundle, trustedMemoryInjection: true } : {}),
     ...(installOptions.capabilityInstructions ? { capabilityInstructions: installOptions.capabilityInstructions } : {}),
@@ -64,7 +85,7 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
   }));
 
   const files = buildDeckPiPackageFiles({
-    agents: nativePlan.agents.map((agent) => ({ id: agent.agent.id, content: agent.content })),
+    agents: nativePlan.agents.map((agent) => ({ id: agent.agent.id, content: applyPiRoleContent(agent.agent.id, agent.content, selectedServers, toolNamesSection) })),
     skills,
     extensions: [{
       name: PI_EXECUTION_EXTENSION_NAME,
@@ -73,7 +94,7 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
       // The execution-authorization hooks belong to the lead; subagent children never register them.
       scope: "lead",
     }],
-    profile: { teamId, content: profile.content },
+    profile: { teamId, content: toolNamesSection ? `${profile.content.trimEnd()}\n\n${toolNamesSection}` : profile.content },
   });
 
   return {

@@ -49,6 +49,7 @@ export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOpti
   const registry = createAdapterRegistry();
   registry.register("pi", createPiRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
+    webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     ...options.pi,
   }));
   registry.register("opencode", createOpenCodeRunnerAdapter({

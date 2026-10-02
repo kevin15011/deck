@@ -18,20 +18,14 @@ describe("buildPiInstallationPlan", () => {
     );
   });
 
-  test("includes missing required tools and selected optional tools", () => {
+  test("plans only the selected optional tools (Deck owns subagents and MCP configuration)", () => {
     const plan = buildPiInstallationPlan({
-      requiredTools: [
-        { name: "sub-agents", installed: false },
-        { name: "MCP packages", installed: false },
-      ],
+      requiredTools: [],
       // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
       selectedOptionalToolIds: ["rtk", "codebase-memory-mcp", "context7"],
     });
 
-    // Updated for Batch C: new install kinds and sources
     expect(plan).toEqual([
-      { id: "sub-agents", name: "sub-agents", source: "npm:pi-subagents", required: true, installKind: "pi-package" },
-      { id: "mcp-packages", name: "MCP packages", source: "npm:pi-mcp-adapter", required: true, installKind: "pi-package" },
       { id: "codebase-memory-mcp", name: "codebase-memory-mcp", source: "DeusData/codebase-memory-mcp", required: false, installKind: "shared-binary-plus-mcp", capabilityId: "codebase-memory-mcp" },
       { id: "rtk", name: "RTK", source: "rtk-ai/rtk", required: false, installKind: "shared-binary", capabilityId: "rtk" },
       { id: "context7", name: "Context7", source: "npm:@upstash/context7-mcp", required: false, installKind: "npm-package-plus-mcp", capabilityId: "context7" },
@@ -40,31 +34,25 @@ describe("buildPiInstallationPlan", () => {
 
   test("does not include already installed tools", () => {
     const plan = buildPiInstallationPlan({
-      requiredTools: [
-        { name: "sub-agents", installed: true },
-        { name: "MCP packages", installed: false },
-      ],
+      requiredTools: [{ name: "context-mode", installed: true }],
       selectedOptionalToolIds: ["context-mode"],
     });
 
-    expect(plan).not.toContainEqual(
-      expect.objectContaining({ id: "sub-agents" }),
-    );
+    expect(plan).not.toContainEqual(expect.objectContaining({ id: "context-mode" }));
   });
 
-  test("includes required tools regardless of selectedOptionalToolIds", () => {
-    // buildPiInstallationPlan always includes all required tools (sub-agents, mcp-packages).
-    // selectedOptionalToolIds only affects optional tools.
-    const plan = buildPiInstallationPlan({
-      requiredTools: [],
-      selectedOptionalToolIds: ["context7"],
-    });
+  test("never plans the community pi-subagents or pi-mcp-adapter packages", () => {
+    const everything = buildPiInstallationPlan({ requiredTools: [], selectedOptionalToolIds: PI_INSTALLABLE_TOOLS.map((tool) => tool.id) });
+    expect(everything.map((tool) => tool.source)).not.toContain("npm:pi-subagents");
+    expect(everything.map((tool) => tool.source)).not.toContain("npm:pi-mcp-adapter");
+    expect(PI_INSTALLABLE_TOOLS.map((tool) => tool.id)).not.toContain("sub-agents");
+    expect(PI_INSTALLABLE_TOOLS.map((tool) => tool.id)).not.toContain("mcp-packages");
+    expect(PI_INSTALLABLE_TOOLS.some((tool) => tool.required)).toBe(false);
+  });
 
-    // Required tools are always included (sub-agents, mcp-packages)
-    expect(plan.map((t) => t.id)).toContain("sub-agents");
-    expect(plan.map((t) => t.id)).toContain("mcp-packages");
-    // Plus the selected optional tool
-    expect(plan.map((t) => t.id)).toContain("context7");
+  test("offers Web Search (Tavily) as an installable MCP tool", () => {
+    expect(PI_INSTALLABLE_TOOLS).toContainEqual(expect.objectContaining({ id: "web-search", name: "Web Search", installKind: "mcp-server", capabilityId: "web-search", required: false }));
+    expect(buildPiInstallationPlan({ requiredTools: [], selectedOptionalToolIds: ["web-search"] }).map((tool) => tool.id)).toEqual(["web-search"]);
   });
 });
 
@@ -107,8 +95,7 @@ describe("PI_INSTALLABLE_TOOLS boundary", () => {
     expect(INTERNAL_INSTALLABLE_BOUNDARY).toHaveLength(1);
     expect(INTERNAL_INSTALLABLE_BOUNDARY[0]).toBe("pi-mermaid");
 
-    // Updated for Supermemory-only Adaptive Memory: 7 tools total (2 required + 5 optional); pi-mermaid is NOT in this catalog
-    // Only codebase-memory-mcp is available (not codebase-memory) for OpenCode parity
-    expect(PI_INSTALLABLE_TOOLS).toHaveLength(7);
+    // 6 optional tools (context-mode, codebase-memory-mcp, rtk, serena, context7, web-search); pi-mermaid is NOT in this catalog
+    expect(PI_INSTALLABLE_TOOLS).toHaveLength(6);
   });
 });

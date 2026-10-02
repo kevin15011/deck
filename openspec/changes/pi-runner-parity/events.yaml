@@ -50,3 +50,11 @@ events:
     actor: deck-apply-deep
     notes:
       - "Phase 2 complete: global package layout, manifest-owned settings.json packages entry, global lead profile, activation guard, adapter plan/apply/verify/rollback/launch on the global layout; 1.2 and 1.3 closed. See design.md 'Implementation deviations' (Node-loadable execution bundle, guarded extension entries)."
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 3 complete: Deck-owned RTK/Codebase Memory tools, global mcp.json servers (absolute commands, direct exposure, memory env blanks), community pi-subagents/pi-mcp-adapter removed from required tools and removed transactionally when Deck-added, Web Search installable tool with env-only credential, direct-exposure tool names in role prompts and read-only allowlists. Verified end to end against Pi 1.0.0 (faux provider)."

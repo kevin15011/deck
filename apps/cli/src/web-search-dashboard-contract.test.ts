@@ -52,7 +52,7 @@ describe("Web Search dashboard contract", () => {
         expect(persisted.ok).toBe(true);
 
         const adapter = runner === "pi"
-          ? createPiRunnerAdapter({ homeDirectory: home, webSearchProviderResolver: getWebSearchProviderDescriptor })
+          ? createPiRunnerAdapter({ homeDirectory: home, webSearchProviderResolver: getWebSearchProviderDescriptor, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0" }) })
           : createOpenCodeRunnerAdapter({ developerTeamConfigDir: join(home, ".config", "opencode"), webSearchProviderResolver: getWebSearchProviderDescriptor });
         const environmentId = runner === "pi" ? "pi-development" : "opencode-development";
         const deckConfig = configStore.read();
@@ -79,6 +79,12 @@ describe("Web Search dashboard contract", () => {
           ...(runner === "pi" ? { homeDirectory: home } : {}),
         } as never);
         expect(result.status).toBe("executed");
+        if (runner === "pi") {
+          // Pi materializes its MCP servers with the Deck package in one manifest-owned transaction.
+          const installPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId, deckConfig, capabilityIds: ["web-search"] } as never);
+          expect(installPlan.blocked).toBeFalsy();
+          await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId, plan: installPlan } as never);
+        }
 
         const ready = await adapter.getCapabilityInventory({ projectRoot, runnerId: runner, environmentId, deckConfig });
         const webSearch = ready.capabilities.find((entry) => entry.capabilityId === "web-search");

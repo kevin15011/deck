@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 
 import {
   hasWebSearchProviderCredential,
@@ -41,6 +41,15 @@ function isExactEntry(value: unknown, provider: WebSearchProviderDescriptorV1): 
     && envIsReference;
 }
 
+/** Entry shape written by the Deck global install: absolute command, direct exposure, no credential. */
+function isDeckOwnedEntry(value: unknown, provider: WebSearchProviderDescriptorV1): boolean {
+  if (!isRecord(value) || typeof value.command !== "string" || !isAbsolute(value.command)) return false;
+  if (basename(value.command) !== provider.command[0] || value.exposure !== "direct") return false;
+  if (!Array.isArray(value.args) || value.args.length !== provider.command.length - 1 || !value.args.every((part, index) => part === provider.command[index + 1])) return false;
+  const env = isRecord(value.env) ? value.env : {};
+  return Object.entries(env).every(([name, entry]) => name.startsWith("DECK_RUNNER_MEMORY_") && entry === "");
+}
+
 export function inspectPiWebSearchMcpConfig(
   configPath: string,
   provider?: WebSearchProviderDescriptorV1,
@@ -53,7 +62,7 @@ export function inspectPiWebSearchMcpConfig(
     if (!isRecord(parsed.mcpServers)) return { configured: false, conflict: true };
     const entry = parsed.mcpServers[provider.semanticServerId];
     if (entry === undefined) return { configured: false, conflict: false };
-    return isExactEntry(entry, provider) ? { configured: true, conflict: false } : { configured: false, conflict: true };
+    return isExactEntry(entry, provider) || isDeckOwnedEntry(entry, provider) ? { configured: true, conflict: false } : { configured: false, conflict: true };
   } catch {
     return { configured: false, conflict: true };
   }

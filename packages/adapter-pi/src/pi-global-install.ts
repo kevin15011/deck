@@ -597,3 +597,22 @@ export function restorePiSnapshot(snapshot: PiSnapshot, io: PiFileIO): PiRestore
   }
   return { restored: conflicts.length === 0, conflicts };
 }
+
+/** Reads the Deck manifest; `undefined` when it is absent or unreadable (the plan reports corruption itself). */
+export function readPiManifest(io: PiFileIO, agentDir: string): PiManifestV1 | undefined {
+  try {
+    const text = io.readText(piAgentPaths(agentDir).manifest);
+    if (text === undefined) return undefined;
+    const parsed = parsePiManifest(text);
+    return parsed.ok ? parsed.manifest : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Current `mcp.json` `mcpServers` (empty when absent or malformed; the plan reports malformed files itself). */
+export function readPiMcpServers(io: PiFileIO, agentDir: string): Record<string, unknown> {
+  const result = readJsonObject(io, piAgentPaths(agentDir).mcp);
+  if (!result.ok || !isRecord(result.file.value.mcpServers)) return {};
+  return { ...result.file.value.mcpServers };
+}

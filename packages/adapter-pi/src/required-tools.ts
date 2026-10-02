@@ -31,11 +31,12 @@ type ReviewPiRequiredToolsOptions = {
   command: string;
   runCommand?: (command: string, args: string[]) => CommandResult;
   commandExists?: (command: string) => boolean;
+  /** Deck-owned tool resolution; when given, RTK and Codebase Memory are detected through it instead of PATH. */
+  piTools?: { rtk: { command(): string | undefined }; codebase: { command(): string | undefined } };
 };
 
 const REQUIRED_TOOLS = [
-  { name: "sub-agents", packageNames: ["sub-agents", "subagents", "pi-subagents"] },
-  { name: "MCP packages", packageNames: ["mcp", "mcp-packages", "pi-mcp-adapter"] },
+  // Deck owns subagents and MCP configuration; `pi-subagents` / `pi-mcp-adapter` are not requirements.
   { name: "context-mode", packageNames: ["context-mode"], capabilityId: "context-mode" as const },
   { name: "codebase-memory", packageNames: ["codebase-memory", "codebase-memory-mcp"], capabilityId: "codebase-memory-mcp" as const },
   { name: "RTK", packageNames: ["rtk"], capabilityId: "rtk" as const },
@@ -69,10 +70,12 @@ export function reviewPiRequiredTools(options: ReviewPiRequiredToolsOptions): Pi
   }
 
   const installedPackages = parsePiList(result.stdout);
-  if (commandExists("rtk")) {
+  const ownedRtk = options.piTools ? options.piTools.rtk.command() !== undefined : commandExists("rtk");
+  const ownedCodebase = options.piTools ? options.piTools.codebase.command() !== undefined : commandExists("codebase-memory-mcp");
+  if (ownedRtk) {
     installedPackages.push("rtk");
   }
-  if (commandExists("codebase-memory-mcp")) {
+  if (ownedCodebase) {
     installedPackages.push("codebase-memory-mcp");
   }
   const normalizedInstalled = new Set(installedPackages.map(normalizePackageName));

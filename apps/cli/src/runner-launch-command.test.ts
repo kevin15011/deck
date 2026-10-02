@@ -111,6 +111,19 @@ describe("executeRunnerLaunchPlan", () => {
     expect(result).toEqual({ exitCode: 7, signal: undefined, stdout: "12345", stderr: "", truncated: true });
   });
 
+  test("forwards exactly the Pi Web Search credential bound by deck-pi-web-search-v1", async () => {
+    const base = { command: "pi", args: [], cwd: "/project", stdio: "inherit", stdin: "inherit" } as const;
+    const seen: Record<string, string>[] = [];
+    const effects = { inheritedEnv: { PATH: "/bin" }, spawn: async (_c: string, _a: readonly string[], options: { env: Record<string, string> }) => { seen.push(options.env); return { exitCode: 0, stdout: "", stderr: "" }; } };
+
+    await executeRunnerLaunchPlan({ ...base, envOverlay: { TAVILY_API_KEY: { value: "tvly-pi-secret", sensitive: true }, OTHER_API_KEY: { value: "other-secret", sensitive: true } }, sensitiveEnvAuthorization: { binding: "deck-pi-web-search-v1", keys: ["TAVILY_API_KEY", "OTHER_API_KEY"] } }, effects);
+    expect(seen[0]!.TAVILY_API_KEY).toBe("tvly-pi-secret");
+    expect(seen[0]).not.toHaveProperty("OTHER_API_KEY");
+
+    await executeRunnerLaunchPlan({ ...base, envOverlay: { TAVILY_API_KEY: { value: "tvly-pi-secret", sensitive: true } } }, effects);
+    expect(seen[1]).not.toHaveProperty("TAVILY_API_KEY");
+  });
+
   test("preserves only the ephemeral loopback secret for runner-native bridge assets", async () => {
     await executeRunnerLaunchPlan({
       command: "runner",

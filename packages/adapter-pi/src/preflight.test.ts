@@ -28,13 +28,13 @@ describe("inspectPiEnvironment minimum version (Pi >= 1.0.0)", () => {
   test("supported version passes the version check", () => {
     const result = inspectPiEnvironment({ ...base, runCommand: () => ({ exitCode: 0, stdout: "1.0.0\n" }) });
     expect(result.versionStatus?.supported).toBe(true);
-    const check = result.checks!.find((c) => c.id === "pi-min-version");
+    const check = result.checks!.find((c) => c.id === "runner-min-version");
     expect(check?.status).toBe("pass");
   });
 
   test("old version fails with an upgrade hint", () => {
     const result = inspectPiEnvironment({ ...base, runCommand: () => ({ exitCode: 0, stdout: "0.99.3\n" }) });
-    const check = result.checks!.find((c) => c.id === "pi-min-version");
+    const check = result.checks!.find((c) => c.id === "runner-min-version");
     expect(check?.status).toBe("fail");
     expect(check?.severity).toBe("error");
     expect(check?.remediation).toContain("@earendil-works/pi-coding-agent");
@@ -44,13 +44,13 @@ describe("inspectPiEnvironment minimum version (Pi >= 1.0.0)", () => {
   test("unparseable output fails", () => {
     const result = inspectPiEnvironment({ ...base, runCommand: () => ({ exitCode: 0, stdout: "banana\n" }) });
     expect(result.versionStatus?.reason).toBe("unparseable");
-    expect(result.checks!.find((c) => c.id === "pi-min-version")?.status).toBe("fail");
+    expect(result.checks!.find((c) => c.id === "runner-min-version")?.status).toBe("fail");
   });
 
   test("a binary that cannot run is unavailable", () => {
     const result = inspectPiEnvironment({ ...base, runCommand: () => ({ exitCode: 1, stdout: "", stderr: "spawn pi ENOENT" }) });
     expect(result.versionStatus?.reason).toBe("unavailable");
-    expect(result.checks!.find((c) => c.id === "pi-min-version")?.status).toBe("fail");
+    expect(result.checks!.find((c) => c.id === "runner-min-version")?.status).toBe("fail");
   });
 });
 
@@ -83,7 +83,7 @@ describe("inspectPiEnvironment agent directory resolution", () => {
     });
     expect(result.agentDirDiagnostic).toContain("PI_CODING_AGENT_DIR");
     expect(result.configDirectory).toBeUndefined();
-    expect(result.checks!.find((c) => c.id === "pi-agent-dir")?.status).toBe("fail");
+    expect(result.checks!.find((c) => c.id === "runner-config-dir")?.status).toBe("fail");
   });
 });
 
