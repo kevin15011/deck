@@ -755,6 +755,17 @@ describe("Codex RunnerAdapter production composition", () => {
       const invalidOverride = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", modelId: "unknown/model", reasoningLevel: "invented", deckConfig: getDefaultDeckConfig() });
       const resume = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "session-1", modelId: "openai-codex/gpt-5.6-luna", reasoningLevel: "medium", deckConfig: getDefaultDeckConfig() });
 
+      for (const result of [interactive, exec]) {
+        expect(result.status).toBe("ready");
+        if (result.status !== "ready") throw new Error("expected new-session launch plan");
+        const instructions = result.plan.args.find((arg) => arg.startsWith("developer_instructions="));
+        expect(instructions).toContain("deck_<role>_<purpose>");
+        expect(instructions).toContain("deck_investigate_runner_support");
+        expect(instructions).toContain("agent_type");
+        expect(instructions).toContain("deck-investigate");
+        expect(instructions).toContain("task name does not select the agent role");
+      }
+
       if (interactive.status === "ready") {
         const args = [...interactive.plan.args];
         expect(args).toEqual(expect.arrayContaining(["--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="high"']));
