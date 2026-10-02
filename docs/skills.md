@@ -18,7 +18,7 @@ These are installed beside the Developer Team and are not materialized as role a
 
 ## Bundled external skills
 
-These 29 skills are shipped as standalone reusable content. They are copied with their source frontmatter and are not bound to Developer Team agents.
+These 59 skills are shipped as standalone reusable content. They are copied with their source frontmatter and are not bound to Developer Team agents.
 
 | Skill ID | User goal |
 |---|---|
@@ -51,6 +51,38 @@ These 29 skills are shipped as standalone reusable content. They are copied with
 | `web-quality-audit` | Audit web performance, accessibility, SEO, and best practices. |
 | `playwright-cli` | Automate browser interactions and work with Playwright tests. |
 | `design-lab` | Explore multiple UI variations and turn feedback into an implementation plan. |
+| `deck-frontend-design` | Select compatible aesthetic skills, establish a shared visual direction, and replace rejected directions. |
+| `animation-vocabulary` | Name motion effects and translate visual descriptions into animation terminology. |
+| `apple-design` | Create Apple-inspired interfaces with physical motion and restrained visual hierarchy. |
+| `archify` | Build explorable HTML and SVG architecture and workflow diagrams. |
+| `architecture-diagram` | Create self-contained architecture and infrastructure diagrams. |
+| `baoyu-xhs-images` | Compose illustrated social-media infographic card series. |
+| `beautiful-article` | Turn source material into a designed, offline HTML article. |
+| `better-ui` | Polish optical alignment, surfaces, controls, and interaction details. |
+| `brand-guidelines` | Apply Anthropic branding when that brand is explicitly requested. |
+| `brandkit` | Design visual brand kits, identity boards, and presentation concepts. |
+| `design-taste-frontend` | Choose distinctive visual directions for landing pages, portfolios, and redesigns. |
+| `diagram-design` | Design branded diagrams for systems, processes, and data. |
+| `excalidraw-skill` | Author and refine diagrams with an available Excalidraw canvas. |
+| `expo-native-ui` | Build native-feeling Expo interfaces with platform conventions. |
+| `field-notes-editorial-template` | Create editorial HTML reports using the Field Notes template. |
+| `flint-chart-author` | Author semantic chart specifications for an available Flint renderer. |
+| `flint-theme-author` | Translate visual identities into reusable Flint chart themes. |
+| `gsap-core` | Implement responsive animations with the GSAP core API. |
+| `gsap-scrolltrigger` | Implement scroll-linked motion, pinning, and scrubbing with GSAP. |
+| `gsap-timeline` | Sequence and coordinate GSAP animations with timelines. |
+| `high-end-visual-design` | Establish premium visual hierarchy, typography, spacing, and motion. |
+| `html-plan` | Present an implementation plan as HTML when explicitly requested. |
+| `image-to-code` | Generate and analyze visual references before implementing matching interfaces. |
+| `industrial-brutalist-ui` | Create rigid, utilitarian interfaces with Swiss typography and terminal aesthetics. |
+| `landing-page-design` | Design landing-page structure, visual hierarchy, and conversion journeys. |
+| `minimalist-ui` | Create restrained editorial interfaces with warm monochrome palettes. |
+| `redesign-existing-projects` | Audit existing interfaces and implement a distinct visual upgrade. |
+| `review-animations` | Review animation craft when the skill is explicitly invoked. |
+| `scroll-craft` | Design expressive scroll-driven landing pages and signature motion. |
+| `visual-explainer` | Create self-contained HTML explanations, diagrams, and visual reports. |
+
+For aesthetic selection and compatible combinations, see [Frontend design](frontend-design.md). A bundled skill can require project libraries or external tools; its inclusion does not install those dependencies.
 
 ## Project-local skills
 

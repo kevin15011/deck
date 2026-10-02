@@ -401,7 +401,8 @@ describe("buildDeveloperTeamInstallPlan", () => {
     });
 
     const plannedSkillIds = new Set(plan.standaloneSkills.map((skill) => skill.skillId));
-    expect(plannedSkillIds.size).toBe(29);
+    expect(plannedSkillIds.size).toBe(STANDALONE_SKILLS.length);
+    expect(plannedSkillIds.has("deck-frontend-design")).toBe(true);
     for (const { skillId } of STANDALONE_SKILLS) {
       expect(plannedSkillIds.has(skillId)).toBe(true);
       expect(plan.standaloneSkills).toContainEqual(expect.objectContaining({

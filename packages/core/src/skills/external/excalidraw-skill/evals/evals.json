@@ -1,0 +1,35 @@
+{
+  "skill_name": "excalidraw-skill",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Draw a CI/CD pipeline architecture diagram on the Excalidraw canvas with these components: GitHub (source), GitHub Actions (CI), Docker Registry (artifact store), and Kubernetes Cluster (deployment target). Use arrows to show the flow from left to right. Make sure labels fit inside each box and nothing overlaps.",
+      "expected_output": "A clean diagram with 4 labeled boxes, left-to-right flow arrows connecting them, no overlapping elements, and all text fully visible inside shapes.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "Convert this Mermaid flowchart to an Excalidraw diagram:\n```\ngraph TD\n  A[User] -->|HTTP Request| B[Load Balancer]\n  B --> C[Web Server 1]\n  B --> D[Web Server 2]\n  C --> E[(Database)]\n  D --> E\n```\nAfter converting, take a screenshot and verify the layout looks clean.",
+      "expected_output": "A valid Excalidraw diagram with all 5 nodes and arrows matching the Mermaid structure, verified with a screenshot.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Create a simple diagram on the Excalidraw canvas with two rectangles: 'Auth Service' and 'User DB', connected by an arrow labeled 'queries'. Then refine it: add a third box 'Redis Cache' positioned between the two services, connect Auth Service to Redis Cache with a 'cache hit' arrow. Verify visually that all labels are visible and no arrows cross awkwardly.",
+      "expected_output": "A 3-element diagram with Auth Service → Redis Cache → (and both connected back to) User DB, with clean arrows, visible labels, and a screenshot confirming the final state.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Without using any MCP tools (assume none are configured), use only the CLI (`npx -y mcp-excalidraw-server <command>`) to: (1) build a three-tier diagram with boxes 'Frontend', 'API', and 'Postgres' connected by arrows, (2) query for all rectangles and confirm the count is 3, (3) save a snapshot named 'v1', (4) export the scene to /tmp/three-tier.excalidraw, and (5) report the canvas status including how many browser tabs are connected.",
+      "expected_output": "All five steps completed via CLI commands only: elements created with bound arrows (the canvas server auto-starts), a query result showing 3 rectangles, a saved snapshot 'v1', a valid .excalidraw file at /tmp/three-tier.excalidraw, and a status report with element and browser-client counts.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Using only the CLI, draw two labeled boxes ('Client', 'Server') connected by an arrow, then save the diagram into an Obsidian vault at /tmp/vault/diagrams/flow.excalidraw.md (assume /tmp/vault/.obsidian exists; create the diagrams folder if needed). Clear the canvas and re-import the saved file. Confirm the saved file is in the Obsidian Excalidraw plugin's markdown format (frontmatter + '# Excalidraw Data' + a '## Drawing' code block) rather than raw JSON, and that both boxes are back on the canvas after the re-import.",
+      "expected_output": "flow.excalidraw.md written in the Obsidian new format (not raw .excalidraw JSON), format markers verified by reading the file, and the canvas restored with both labeled boxes and their arrow after `import --replace`.",
+      "files": []
+    }
+  ]
+}

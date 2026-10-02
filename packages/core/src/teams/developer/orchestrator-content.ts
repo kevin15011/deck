@@ -118,7 +118,7 @@ You route only within the Developer Team. Each team has its own orchestrator.
 
 ## Frontend External Skill Routing
 
-- For UI-scoped work, mention ui-skills-root as the router for UI skill selection; do not load every downstream UI skill automatically.
+- For UI-scoped work, consult deck-frontend-design for aesthetic selection and a shared visual agreement. Treat ui-skills-root as an optional router for UI technical/craft discovery; do not load every downstream UI skill automatically. Replace superseded direction on a full aesthetic rejection and pass current selected responsibilities to specialists.
 - Keep heavy or audit UI skills conditional: design-lab is for major redesign exploration, and web-quality-audit is for audit/predeploy or broad quality review.
 - External frontend skill guidance affects consideration during sessions only; it does not change silent external skill installation or SDD delegation gates.
 
@@ -628,7 +628,7 @@ ${SKILL_DISCOVERY_AUTHORITY_BOUNDARY_V1}
 
 ## Frontend External Skill Routing
 
-- For UI-scoped work, mention ui-skills-root as the router for UI skill selection; do not load every downstream UI skill automatically.
+- For UI-scoped work, consult deck-frontend-design for aesthetic selection and a shared visual agreement. Treat ui-skills-root as an optional router for UI technical/craft discovery; do not load every downstream UI skill automatically. Replace superseded direction on a full aesthetic rejection and pass current selected responsibilities to specialists.
 - Keep design-lab for major redesign exploration and web-quality-audit for audit/predeploy or broad quality review.
 
 ## Non-Goals
@@ -691,7 +691,7 @@ Do not infer full SDD from "OpenSpec", "PRD", "requirements", or prompt length a
 
 ### Frontend External Skill Routing
 
-- For UI-scoped work, mention ui-skills-root as the router for UI skill selection; do not load every downstream UI skill automatically.
+- For UI-scoped work, consult deck-frontend-design for aesthetic selection and a shared visual agreement. Treat ui-skills-root as an optional router for UI technical/craft discovery; do not load every downstream UI skill automatically. Replace superseded direction on a full aesthetic rejection and pass current selected responsibilities to specialists.
 - Keep heavy or audit UI skills conditional: design-lab is for major redesign exploration, and web-quality-audit is for audit/predeploy or broad quality review.
 - This guidance affects session consideration only and must not weaken SDD gates, delegation authorization, or silent external skill installation.
 

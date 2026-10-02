@@ -13,7 +13,8 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
 
     expect(paths.filter((path) => path.startsWith(".codex/agents/deck-") && path.endsWith(".toml"))).toHaveLength(7);
     expect(paths.filter((path) => path.startsWith(".agents/skills/deck-") && path.endsWith("/SKILL.md")).length).toBeGreaterThanOrEqual(9);
-    expect(plan.inventory.externalStandaloneSkillIds).toHaveLength(29);
+    expect(plan.inventory.externalStandaloneSkillIds).toHaveLength(getStandaloneSkills().length);
+    expect(paths).toContain(".agents/skills/deck-frontend-design/references/catalog.json");
     expect(plan.inventory.bootstrapSkillIds).toEqual(["deck-onboard", "deck-archive"]);
     expect(paths).toContain(".codex/config.toml");
     expect(paths).toContain(".codex/deck/hooks/developer-team-execution.js");
@@ -26,7 +27,7 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
   test("keeps all native Deck skill descriptors valid with YAML frontmatter at byte zero", () => {
     const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map() });
     const skills = plan.expectedFiles.filter((file) => file.relativePath.endsWith("/SKILL.md") && file.relativePath.includes("/deck-"));
-    expect(skills).toHaveLength(9);
+    expect(skills).toHaveLength(10);
     for (const skill of skills) {
       expect(skill.content.startsWith("---\n")).toBe(true);
       expect(parseSkillDescriptor(skill.content, skill.relativePath.split("/").at(-2))).toMatchObject({ ok: true });

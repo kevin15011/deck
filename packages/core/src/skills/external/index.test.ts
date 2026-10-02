@@ -23,7 +23,8 @@ describe("external skills", () => {
   it("returns all registered standalone skill definitions", () => {
     const skills = getStandaloneSkills();
 
-    expect(skills.length).toBe(29);
+    expect(skills.length).toBe(STANDALONE_SKILLS.length);
+    expect(skills.map((skill) => skill.skillId)).toContain("deck-frontend-design");
     expect(skills.map((s) => s.skillId)).toContain("judgment-day");
     expect(skills.map((s) => s.skillId)).toContain("cognitive-doc-design");
     expect(skills.map((s) => s.skillId)).toContain("comment-writer");

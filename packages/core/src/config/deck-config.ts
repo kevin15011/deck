@@ -72,8 +72,8 @@ export const PACKAGE_INSTRUCTION_CONFIGURATION_METADATA = Object.freeze([
   { id: "code-economy", label: "Code Economy", description: "Always-on concise implementation guidance.", configurable: false, defaultEnabled: true },
   { id: "context-mode", label: "Context Mode", description: "Inject Context Mode usage guidance.", configurable: true, defaultEnabled: true },
   { id: "rtk", label: "RTK", description: "Inject RTK command guidance.", configurable: true, defaultEnabled: true },
-  { id: "adaptive-memory", label: "Adaptive Memory", description: "Inject adaptive-memory provider guidance.", configurable: true, defaultEnabled: false },
-  { id: "serena", label: "Serena", description: "Inject Serena symbolic-editing guidance.", configurable: true, defaultEnabled: false },
+  { id: "adaptive-memory", label: "Adaptive Memory", description: "Inject adaptive-memory provider guidance.", configurable: true, defaultEnabled: true },
+  { id: "serena", label: "Serena", description: "Inject Serena symbolic-editing guidance.", configurable: true, defaultEnabled: true },
 ] as const satisfies readonly PackageInstructionConfigurationMetadata[]);
 
 function defaultPackageInstructionSelection(
@@ -100,7 +100,7 @@ export function normalizeSupportedPackageInstructionSelection(
   const supported = new Set(supportedIds);
   return Object.fromEntries(PACKAGE_INSTRUCTION_CONFIGURATION_METADATA.map((entry) => [
     entry.id,
-    entry.configurable ? supported.has(entry.id) && selection?.[entry.id] === true : entry.defaultEnabled,
+    entry.configurable ? supported.has(entry.id) && (selection === undefined ? entry.defaultEnabled : selection[entry.id] === true) : entry.defaultEnabled,
   ])) as Record<PackageInstructionPackageId, boolean>;
 }
 
@@ -1147,7 +1147,7 @@ function normalizePackageInstructionConfig(
   options?: { registry?: AdapterRegistry },
 ): NormalizedDeckConfig["packageInstructions"] {
   // Default: local package guidance is active for every registered first-class runner.
-  // Provider-bound adaptive memory and Serena remain off until their explicit selection flows.
+  // Package guidance is selected; provider activation and installation remain independently gated.
   const defaultResult: NormalizedDeckConfig["packageInstructions"] = {
     pi: defaultPackageInstructionSelection(),
     opencode: defaultPackageInstructionSelection(),

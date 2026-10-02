@@ -10,6 +10,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import designCatalog from "./deck-frontend-design/references/catalog.json";
 
 // ---------------------------------------------------------------------------
 // Error types (Task 22)
@@ -76,6 +77,10 @@ export const STANDALONE_SKILLS: readonly StandaloneSkillDefinition[] = [
   { skillId: "web-quality-audit", sourcePath: "web-quality-audit/SKILL.md" },
   { skillId: "playwright-cli", sourcePath: "playwright-cli/SKILL.md" },
   { skillId: "design-lab", sourcePath: "design-lab/SKILL.md" },
+  { skillId: "deck-frontend-design", sourcePath: "deck-frontend-design/SKILL.md" },
+  ...designCatalog.profiles.filter((profile) => profile.status === "bundled" && "source" in profile).map(({ skillId }) => ({
+    skillId, sourcePath: `${skillId}/SKILL.md`,
+  })),
 ];
 
 // ---------------------------------------------------------------------------

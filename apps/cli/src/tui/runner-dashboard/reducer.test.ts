@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { buildPiRunnerReviewPlan, type PiRunnerCapabilityInventory } from "@deck/adapter-pi";
 import { validateDeckConfig } from "@deck/core";
 import { reduce, type PlanBuilderFn } from "./reducer";
-import { createDefaultPiRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type PiRunnerReviewPlan, type RunnerDashboardState } from "./state";
+import { getInitialExtraCapabilitySelection, createDefaultPiRunnerDashboardState, loadRunnerPackageInstructionsFromConfig, type PiRunnerReviewPlan, type RunnerDashboardState } from "./state";
+import { getPackageInstructionSummaries } from "./selectors";
 import { getAdapter } from "../../runner-adapters";
 
 const piPlanBuilder: PlanBuilderFn = (state, inventory) => buildPiRunnerReviewPlan(state as any, inventory as PiRunnerCapabilityInventory);
@@ -62,19 +63,75 @@ function allActionIds(plan: PiRunnerReviewPlan | undefined): string[] {
 }
 
 describe("Pi Runner dashboard reducer", () => {
-  test("hydrates fresh local packages as selected while gated packages stay off", () => {
+  test("preselects all fresh packages without authorizing Serena or enabling a provider", () => {
     const configured = validateDeckConfig({});
     const expectedDefaults = {
       "codebase-memory": true,
       "code-economy": true,
       "context-mode": true,
       rtk: true,
-      "adaptive-memory": false,
-      serena: false,
+      "adaptive-memory": true,
+      serena: true,
     };
 
     expect(createDefaultPiRunnerDashboardState().packageInstructions).toEqual(expectedDefaults);
+    expect(createDefaultPiRunnerDashboardState().explicitlySelectedCapabilities).toEqual({});
+    expect(createDefaultPiRunnerDashboardState().adaptiveMemory.provider).toBe("none");
     expect(loadRunnerPackageInstructionsFromConfig(configured, "opencode")).toEqual(expectedDefaults);
+  });
+
+  test("only user review confirmation authorizes selected Serena in the current operation", () => {
+    const state = reduce(createDefaultPiRunnerDashboardState(), { type: "set-runner", runnerScope: "codex", operationId: "current" });
+    const operation = state.currentOperation!;
+    const builder: PlanBuilderFn = (candidate) => {
+      expect(candidate.explicitlySelectedCapabilities.serena).toBe(true);
+      expect(candidate.currentOperation?.explicitlySelected).toBe(true);
+      return { ready: true, diagnostics: [], groups: { automaticInstalls: [], manualSteps: [], configWrites: [], teamApplications: [], validations: [] } };
+    };
+    expect(reduce(state, { type: "enter-review", inventory, operation, confirmSelectedPackages: true }, builder).screen).toBe("review-plan");
+    for (const action of [
+      { type: "enter-review", inventory, operation },
+      { type: "enter-review", inventory, confirmSelectedPackages: true },
+      { type: "enter-review", inventory, operation: { ...operation, operationId: "stale" }, confirmSelectedPackages: true },
+    ] as const) {
+      const result = reduce(state, action);
+      expect(result.explicitlySelectedCapabilities.serena).toBeUndefined();
+      expect(result.currentOperation?.explicitlySelected).toBe(false);
+    }
+    const deselected = reduce(state, { type: "toggle-package-instruction", packageId: "serena" });
+    const reviewed = reduce(deselected, { type: "enter-review", inventory, operation, confirmSelectedPackages: true });
+    expect(reviewed.explicitlySelectedCapabilities.serena).toBeUndefined();
+  });
+
+  test("all available packages start selected for every runner and receipts retain omissions", () => {
+    for (const runner of ["pi", "opencode", "claude", "codex"] as const) {
+      const adapter = getAdapter(runner);
+      const supported = adapter.packageInstructionIds ?? [];
+      const config = validateDeckConfig({});
+      const fresh = createDefaultPiRunnerDashboardState({
+        runnerScope: runner, runnerUi: adapter.ui,
+        packageInstructions: loadRunnerPackageInstructionsFromConfig(config, runner, supported),
+        selectedCapabilities: getInitialExtraCapabilitySelection(adapter.ui),
+      });
+      const visible = getPackageInstructionSummaries(fresh, { getSupportedPackageInstructionIds: () => supported });
+      expect(visible.length).toBeGreaterThan(0);
+      expect(visible.every((entry) => entry.selected)).toBe(true);
+      expect(fresh.explicitlySelectedCapabilities.serena).toBeUndefined();
+      expect(fresh.adaptiveMemory.provider).toBe("none");
+      const saved = validateDeckConfig({ packageInstructions: { [runner]: { serena: false, rtk: false } } });
+      const hydrated = createDefaultPiRunnerDashboardState({
+        runnerScope: runner, runnerUi: adapter.ui,
+        packageInstructions: loadRunnerPackageInstructionsFromConfig(saved, runner, supported),
+        selectedCapabilities: getInitialExtraCapabilitySelection(adapter.ui, []),
+      });
+      expect(hydrated.packageInstructions.serena).toBe(false);
+      expect(hydrated.selectedCapabilities.serena).toBe(false);
+      expect(hydrated.packageInstructions.rtk).toBe(false);
+      const active = reduce(hydrated, { type: "set-runner", runnerScope: runner, operationId: "saved-false" });
+      const reviewed = reduce(active, { type: "enter-review", inventory, operation: active.currentOperation, confirmSelectedPackages: true });
+      expect(reviewed.explicitlySelectedCapabilities.serena).toBeUndefined();
+      for (const extra of adapter.ui?.dashboard?.extraSelectableCapabilities ?? []) expect(hydrated.selectedCapabilities[extra.id]).toBe(false);
+    }
   });
 
   test("tracks an operation for an arbitrary registered runner identity", () => {
@@ -304,6 +361,7 @@ describe("Pi Runner dashboard reducer", () => {
   test("togglea RTK, context-mode, codebase-memory-mcp, serena y pi-hud", () => {
     let state = createDefaultPiRunnerDashboardState({
       operationId: "pi-operation-toggle",
+      selectedCapabilities: { serena: false },
       currentOperation: { runner: "pi", operationId: "pi-operation-toggle", explicitlySelected: false },
     });
 

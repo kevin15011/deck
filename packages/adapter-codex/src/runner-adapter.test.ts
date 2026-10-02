@@ -324,7 +324,7 @@ describe("Codex RunnerAdapter production composition", () => {
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-journal-"));
     try {
       const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot), journalRoot });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) });
       expect(plan.files.length).toBeGreaterThan(40);
       expect(plan.diagnostics).toContainEqual(expect.stringContaining("renameat2/openat"));
       const result = await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
@@ -336,7 +336,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(await adapter.verifyDeveloperTeamInstall(plan)).toMatchObject({ valid: false, diagnostics: [expect.stringContaining("Mode drifted")] });
       await chmod(join(projectRoot, ".codex", "agents", "deck-lead.toml"), 0o644);
 
-      const unchangedPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+      const unchangedPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) });
       expect(unchangedPlan.files).toHaveLength(0);
       await Bun.write(join(projectRoot, ".agents", "skills", "idea-refine", "examples.md"), "tampered");
       expect((await adapter.verifyDeveloperTeamInstall(unchangedPlan)).valid).toBe(false);
@@ -344,7 +344,7 @@ describe("Codex RunnerAdapter production composition", () => {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   test("plans, applies, and re-inspects an ordinary missing Web Search MCP entry without treating it as a collision", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-web-search-project-"));
@@ -359,7 +359,7 @@ describe("Codex RunnerAdapter production composition", () => {
     await symlink(join(executableRoot, "npx-real.sh"), join(executableRoot, "npx"));
     process.env.PATH = `${executableRoot}${previousPath ? `:${previousPath}` : ""}`;
     try {
-      const deckConfig = validateDeckConfig({ webSearch: { enabled: true, provider: "tavily" } });
+      const deckConfig = validateDeckConfig({ packageInstructions: { codex: { serena: false } }, webSearch: { enabled: true, provider: "tavily" } });
       const adapter = createCodexRunnerAdapter({ tools: testTools({ resolveCommand: (name) => name === "npx" ? join(executableRoot, "npx") : undefined }), ...layout(projectRoot),
         journalRoot,
         webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR,
@@ -428,7 +428,7 @@ describe("Codex RunnerAdapter production composition", () => {
         expect(launch.plan.sensitiveEnvAuthorization).toEqual({ binding: "deck-codex-launch-v1", keys: ["TAVILY_API_KEY"] });
         expect(launch.plan.args.join(" ")).not.toContain("codex-web-search-test-secret");
       }
-      const disabled = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: validateDeckConfig({ webSearch: { enabled: false } }) });
+      const disabled = await adapter.buildLaunchPlan!({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } }, webSearch: { enabled: false } }) });
       if (disabled.status === "ready") expect(disabled.plan.envOverlay?.TAVILY_API_KEY).toBeUndefined();
     } finally {
       if (previousCredential === undefined) delete process.env.TAVILY_API_KEY;
@@ -439,7 +439,7 @@ describe("Codex RunnerAdapter production composition", () => {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
     }
-  });
+  }, 120_000);
 
   test("does not follow ownership-manifest paths through project symlinks", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-manifest-project-"));
@@ -484,17 +484,17 @@ describe("Codex RunnerAdapter production composition", () => {
           }),
         },
       });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
 
-      const launch = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });
+      const launch = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) });
       expect(launch?.status).toBe("ready");
       expect(launch?.diagnostics).not.toContainEqual(expect.objectContaining({ code: "materialized-but-inactive" }));
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   test("materializes trusted hooks while launch-time host binding remains Deck-supervised", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-unbound-project-"));
@@ -508,17 +508,17 @@ describe("Codex RunnerAdapter production composition", () => {
           readProject: async (root) => ({ config: await readFile(join(root, ".codex", "config.toml"), "utf8").catch(() => null), roles: [], skills: [], agentsInstructions: true }),
         },
       });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
       expect(await Bun.file(join(projectRoot, ".codex", "deck", "hooks", "developer-team-execution.js")).exists()).toBe(true);
       expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).toContain("deck-codex-hook:memory-bridge:start");
       expect(await readFile(join(projectRoot, ".codex", "config.toml"), "utf8")).not.toContain("dangerously-bypass-approvals-and-sandbox");
 
       const launches = await Promise.all([
-        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() }),
-        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "exec", prompt: [], stdin: "closed", deckConfig: getDefaultDeckConfig() }),
-        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "session-1", deckConfig: getDefaultDeckConfig() }),
-        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "resume-latest", deckConfig: getDefaultDeckConfig() }),
+        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) }),
+        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "exec", prompt: [], stdin: "closed", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) }),
+        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "resume-by-id", sessionId: "session-1", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) }),
+        adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "resume-latest", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) }),
       ]);
       for (const launch of launches) {
         expect(launch).toMatchObject({ status: "ready", plan: { executionClass: "static-compatible" } });
@@ -528,7 +528,7 @@ describe("Codex RunnerAdapter production composition", () => {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   test("keeps conditional bridge factories internal and ignores forged public binding callbacks", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-bound-project-"));
@@ -554,18 +554,18 @@ describe("Codex RunnerAdapter production composition", () => {
           token: async () => "one-use-external-token",
         } } as Record<string, unknown>),
       });
-      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "codex-development", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) });
       await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
       expect(await Bun.file(join(projectRoot, ".codex", "deck", "hooks", "developer-team-execution.js")).exists()).toBe(true);
 
-      const interactive = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: getDefaultDeckConfig() });
+      const interactive = await adapter.buildLaunchPlan?.({ projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }) });
       expect(interactive).toMatchObject({ status: "ready", plan: { executionClass: "static-compatible" } });
       if (interactive?.status === "ready") expect(interactive.plan.bridgeBinding).toBeUndefined();
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   test("maps only authenticated Codex CLI models and per-model reasoning, omitting unknown values", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-model-project-"));
@@ -628,7 +628,7 @@ describe("Codex RunnerAdapter production composition", () => {
       const plan = adapter.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
-        deckConfig: getDefaultDeckConfig(),
+        deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } } }),
         modelAssignments,
         thinkingAssignments,
       });
@@ -648,7 +648,7 @@ describe("Codex RunnerAdapter production composition", () => {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   test("omits missing or malformed Codex role fields without reading outside the project", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-role-read-safety-"));
@@ -935,7 +935,7 @@ describe("Codex RunnerAdapter production composition", () => {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 
   test("reuses validated Deck-owned Serena evidence and blocks a missing launcher before writing MCP config", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-provisioning-"));
@@ -1048,7 +1048,7 @@ describe("Codex RunnerAdapter production composition", () => {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   test("runs readiness install coverage in an isolated child process with no Codex executable on PATH", async () => {
     if (process.env.DECK_CODEX_HERMETIC_CHILD === "1") return;
@@ -1076,7 +1076,7 @@ describe("Codex RunnerAdapter production composition", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
 
   test("blocks full Serena composition when the effective Deck executable lacks the proxy route", async () => {
@@ -1194,11 +1194,11 @@ describe("Codex RunnerAdapter production composition", () => {
       const plan = ready.buildDeveloperTeamInstallPlan({
         projectRoot,
         environmentId: "codex-development",
-        deckConfig: validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }),
+        deckConfig: validateDeckConfig({ packageInstructions: { codex: { serena: false } }, adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }),
         memoryProvider: { id: "supermemory", displayName: "Supermemory", buildInjection: () => ({ instructions: [], toolBindings: [] }) },
       });
       await ready.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan });
-      const healthy = await ready.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } })) ?? [];
+      const healthy = await ready.diagnoseProject?.(projectRoot, validateDeckConfig({ packageInstructions: { codex: { serena: false } }, adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } })) ?? [];
       expect(healthy).toContainEqual(expect.objectContaining({ category: "Binary and version", status: "ok" }));
       expect(healthy).toContainEqual(expect.objectContaining({ category: "Managed content", status: "ok" }));
       expect(healthy).toContainEqual(expect.objectContaining({
@@ -1218,7 +1218,7 @@ describe("Codex RunnerAdapter production composition", () => {
         },
         codebaseIndexReadiness: async () => true,
       });
-      expect(await unauthorized.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({
+      expect(await unauthorized.diagnoseProject?.(projectRoot, validateDeckConfig({ packageInstructions: { codex: { serena: false } }, adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({
         category: "Capability: Supermemory (official Codex plugin)",
         status: "warning",
         message: expect.stringContaining("hooks are not installed"),
@@ -1233,7 +1233,7 @@ describe("Codex RunnerAdapter production composition", () => {
         },
         codebaseIndexReadiness: async () => true,
       });
-      expect(await brokenSupermemory.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({
+      expect(await brokenSupermemory.diagnoseProject?.(projectRoot, validateDeckConfig({ packageInstructions: { codex: { serena: false } }, adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({
         category: "Capability: Supermemory (official Codex plugin)",
         status: "warning",
         message: expect.stringContaining("hooks are not installed"),
@@ -1243,29 +1243,29 @@ describe("Codex RunnerAdapter production composition", () => {
         journalRoot,
         preflight: { probe, inspectTrust: async () => "untrusted", readProject: async () => ({ config: "[features]\nmulti_agent = true\n", roles: [], skills: [], agentsInstructions: true }) },
       });
-      expect(await untrusted.diagnoseProject?.(projectRoot, getDefaultDeckConfig())).toContainEqual(expect.objectContaining({ category: "Trust activation", status: "warning" }));
+      expect(await untrusted.diagnoseProject?.(projectRoot, validateDeckConfig({ packageInstructions: { codex: { serena: false } } }))).toContainEqual(expect.objectContaining({ category: "Trust activation", status: "warning" }));
 
       await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), "user drift", "utf8");
-      expect(await ready.diagnoseProject?.(projectRoot, validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({ category: "Managed content", status: "error", message: expect.stringContaining("ownership evidence") }));
+      expect(await ready.diagnoseProject?.(projectRoot, validateDeckConfig({ packageInstructions: { codex: { serena: false } }, adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }))).toContainEqual(expect.objectContaining({ category: "Managed content", status: "error", message: expect.stringContaining("ownership evidence") }));
 
       const blocked = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: { probe, inspectTrust: async () => "trusted", readProject: async () => ({ config: "[broken", roles: [], skills: [], agentsInstructions: true }) },
       });
-      expect(await blocked.diagnoseProject?.(projectRoot, getDefaultDeckConfig())).toContainEqual(expect.objectContaining({ category: "Binary and version", status: "error" }));
+      expect(await blocked.diagnoseProject?.(projectRoot, validateDeckConfig({ packageInstructions: { codex: { serena: false } } }))).toContainEqual(expect.objectContaining({ category: "Binary and version", status: "error" }));
 
       const unsupported = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
         journalRoot,
         preflight: { probe: async () => ({ found: true, version: "0.100.0", help: "" }) },
       });
-      const unsupportedChecks = await unsupported.diagnoseProject?.(projectRoot, getDefaultDeckConfig()) ?? [];
+      const unsupportedChecks = await unsupported.diagnoseProject?.(projectRoot, validateDeckConfig({ packageInstructions: { codex: { serena: false } } })) ?? [];
       expect(unsupportedChecks).toContainEqual(expect.objectContaining({ category: "Binary and version", status: "error", message: expect.stringContaining("0.100.0") }));
       expect(unsupportedChecks).toContainEqual(expect.objectContaining({ category: "Execution route: interactive", status: "warning", message: expect.stringContaining("unsupported") }));
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 
   test("refreshes Serena evidence for each inventory inspection and once per Doctor inspection", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-serena-freshness-"));

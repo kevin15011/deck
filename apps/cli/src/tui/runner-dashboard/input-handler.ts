@@ -31,6 +31,7 @@ function enterReviewAction(state: RunnerDashboardState, inventory: unknown): Run
   return {
     type: "enter-review",
     inventory,
+    confirmSelectedPackages: true,
     ...(operation ? { operation } : {}),
   };
 }

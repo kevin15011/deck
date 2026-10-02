@@ -6,7 +6,18 @@
     "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["bun"]
+    "types": [
+      "bun"
+    ]
   },
-  "include": ["apps/**/*.ts", "apps/**/*.tsx", "packages/**/*.ts"]
+  "include": [
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/**/*.ts"
+  ],
+  "exclude": [
+    "packages/core/src/skills/external/*/scripts/**",
+    "packages/core/src/skills/external/*/assets/**",
+    "packages/core/src/skills/external/visual-explainer/extension.ts"
+  ]
 }

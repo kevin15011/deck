@@ -1,0 +1,947 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-10-02",
+  "bundled": [
+    {
+      "skillId": "animation-vocabulary",
+      "status": "bundled",
+      "role": "reference",
+      "traits": [
+        "motion-glossary",
+        "effect-naming"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [],
+      "excludes": [
+        "motion-implementation"
+      ],
+      "activation": "automatic",
+      "notes": "Motion glossary, not implementation skill. Concrete task avoids initial-response pause.",
+      "source": {
+        "repository": "https://github.com/emilkowalski/skills",
+        "revision": "d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128",
+        "path": "skills/animation-vocabulary",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "apple-design",
+      "status": "bundled",
+      "role": "direction",
+      "traits": [
+        "apple-inspired",
+        "physical-motion",
+        "translucent-depth",
+        "restraint",
+        "typographic"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [],
+      "excludes": [],
+      "activation": "automatic",
+      "notes": "Apple-derived material/depth/typographic and physical motion principles for web; optional reference URLs. Concrete task avoids initial-response pause.",
+      "source": {
+        "repository": "https://github.com/emilkowalski/skills",
+        "revision": "d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128",
+        "path": "skills/apple-design",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "archify",
+      "status": "bundled",
+      "role": "artifact",
+      "traits": [
+        "technical-diagram",
+        "dark-light",
+        "typed-json",
+        "explorable"
+      ],
+      "platforms": [
+        "html",
+        "svg"
+      ],
+      "requirements": [
+        "Node for bundled renderer"
+      ],
+      "excludes": [
+        "general-product-ui"
+      ],
+      "activation": "automatic",
+      "notes": "313 UTF8 files; bin/archify.mjs and schemas/examples runtime needed, optional browser screenshots, Node runtime.",
+      "source": {
+        "repository": "https://github.com/tt-a1i/archify",
+        "revision": "d5a1333d7447c866a765adac7d4d062f2f02e4d2",
+        "path": "archify",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "architecture-diagram",
+      "status": "bundled",
+      "role": "artifact",
+      "traits": [
+        "dark",
+        "technical-diagram",
+        "cyan",
+        "semantic-colors"
+      ],
+      "platforms": [
+        "html",
+        "svg"
+      ],
+      "requirements": [],
+      "excludes": [
+        "general-product-ui"
+      ],
+      "activation": "automatic",
+      "notes": "Fixed dark cyan/emerald/violet diagram language; overlaps archify origin, choose one diagram owner.",
+      "source": {
+        "repository": "https://github.com/Cocoon-AI/architecture-diagram-generator",
+        "revision": "4b9087d55268c79a935105439dbcd37b630fc3f3",
+        "path": "architecture-diagram",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "baoyu-xhs-images",
+      "status": "bundled",
+      "role": "asset-direction",
+      "traits": [
+        "social cards",
+        "cartoon infographics"
+      ],
+      "platforms": [
+        "image"
+      ],
+      "requirements": [
+        "image generation; references external image-generator skill"
+      ],
+      "excludes": [
+        "general frontend default"
+      ],
+      "activation": "automatic",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/JimLiu/baoyu-skills",
+        "revision": "1567581c26ec29f4216c6e6835415bf30343b0e3",
+        "path": "skills/baoyu-xhs-images",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "beautiful-article",
+      "status": "bundled",
+      "role": "artifact",
+      "traits": [
+        "editorial",
+        "longform",
+        "theme-profiles",
+        "information-density"
+      ],
+      "platforms": [
+        "html",
+        "react"
+      ],
+      "requirements": [
+        "React/Vite and reacticle for scaffold workflow"
+      ],
+      "excludes": [
+        "web-app",
+        "dashboard"
+      ],
+      "activation": "automatic",
+      "notes": "HTML article only; React/Vite/TypeScript scaffold installs reacticle latest. Multiple confirmation/delegation rules are subordinate to Deck Lead. Chinese source preserve verbatim.",
+      "source": {
+        "repository": "https://github.com/ConardLi/garden-skills",
+        "revision": "aaf9a82f5efd73e87cc0998edc398e75bfc35901",
+        "path": "skills/beautiful-article",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "better-ui",
+      "status": "bundled",
+      "role": "polish",
+      "traits": [
+        "optical-alignment",
+        "surface-depth",
+        "precise-interactions"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [],
+      "excludes": [
+        "invented-sibling-skill-availability"
+      ],
+      "activation": "automatic",
+      "notes": "8 files. Exact polish values; references unselected siblings better-typography/accessibility/layout. Do not assume these bundled.",
+      "source": {
+        "repository": "https://github.com/jakubkrehel/skills",
+        "revision": "267330e1adfc66a718fb65fa6918c1f06d0a689e",
+        "path": "skills/better-ui",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "brand-guidelines",
+      "status": "bundled",
+      "role": "brand",
+      "traits": [
+        "Anthropic identity",
+        "official colors and fonts"
+      ],
+      "platforms": [
+        "any"
+      ],
+      "requirements": [
+        "explicit Anthropic brand request"
+      ],
+      "excludes": [
+        "brands other than Anthropic unless explicitly requested"
+      ],
+      "activation": "explicit-only",
+      "notes": "Anthropic identity; never a universal frontend default.",
+      "source": {
+        "repository": "https://github.com/anthropics/skills",
+        "revision": "8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4",
+        "path": "skills/brand-guidelines",
+        "license": "Apache-2.0"
+      }
+    },
+    {
+      "skillId": "brandkit",
+      "status": "bundled",
+      "role": "asset-direction",
+      "traits": [
+        "identity boards",
+        "cinematic brand systems"
+      ],
+      "platforms": [
+        "image"
+      ],
+      "requirements": [
+        "image generation"
+      ],
+      "excludes": [],
+      "activation": "explicit-artifact",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/Leonxlnx/taste-skill",
+        "revision": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b",
+        "path": "skills/brandkit",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "design-taste-frontend",
+      "status": "bundled",
+      "role": "direction",
+      "traits": [
+        "contextual anti-template",
+        "landing portfolio",
+        "audit first"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [
+        "Use available image-generation tools only within authorized scope; check dependencies before imports"
+      ],
+      "excludes": [
+        "dashboards",
+        "data tables",
+        "multi-step product UI"
+      ],
+      "activation": "automatic",
+      "notes": "Broad landing/portfolio guidance; substantial instructions. Not a data-heavy product UI direction.",
+      "source": {
+        "repository": "https://github.com/Leonxlnx/taste-skill",
+        "revision": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b",
+        "path": "skills/taste-skill",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "diagram-design",
+      "status": "bundled",
+      "role": "artifact",
+      "traits": [
+        "editorial-diagram",
+        "branded",
+        "html-svg"
+      ],
+      "platforms": [
+        "html",
+        "svg"
+      ],
+      "requirements": [
+        "Node for bundled renderer when used"
+      ],
+      "excludes": [
+        "general-product-ui"
+      ],
+      "activation": "automatic",
+      "notes": "243 UTF8 files; bundled renderer, references and assets required. Independent diagram artifact not general web aesthetic.",
+      "source": {
+        "repository": "https://github.com/cathrynlavery/diagram-design",
+        "revision": "f903933a534ba92cde1c85a28186267b3a317bb2",
+        "path": "skills/diagram-design",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "excalidraw-skill",
+      "status": "bundled",
+      "role": "artifact",
+      "traits": [
+        "handdrawn-diagram",
+        "live-canvas"
+      ],
+      "platforms": [
+        "excalidraw"
+      ],
+      "requirements": [
+        "Available Excalidraw MCP or separately authorized CLI/server"
+      ],
+      "excludes": [
+        "general-product-ui"
+      ],
+      "activation": "automatic",
+      "notes": "Live canvas needs Excalidraw MCP or npx mcp-excalidraw-server CLI/server; no auto install or service startup.",
+      "source": {
+        "repository": "https://github.com/yctimlin/mcp_excalidraw",
+        "revision": "713706e967ed21db1d9264748fa01c6af961c792",
+        "path": "skills/excalidraw-skill",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "expo-native-ui",
+      "status": "bundled",
+      "role": "platform",
+      "traits": [
+        "Apple HIG",
+        "native controls",
+        "semantic colors"
+      ],
+      "platforms": [
+        "expo"
+      ],
+      "requirements": [
+        "Expo; expo-router/expo-animation for routing/motion"
+      ],
+      "excludes": [
+        "web-only projects"
+      ],
+      "activation": "automatic",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/expo/skills",
+        "revision": "c0dadf355d4caa4e1720de372f0f8766df1a8978",
+        "path": "plugins/expo/skills/expo-native-ui",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "field-notes-editorial-template",
+      "status": "bundled",
+      "role": "artifact",
+      "traits": [
+        "paper background",
+        "serif hero",
+        "pastel insight cards"
+      ],
+      "platforms": [
+        "html-report"
+      ],
+      "requirements": [
+        "DESIGN.md; single self-contained HTML report"
+      ],
+      "excludes": [
+        "general web application",
+        "generic portfolio direction"
+      ],
+      "activation": "automatic",
+      "notes": "Complete single-file editorial report template; do not impose this fixed report composition on a general frontend.",
+      "source": {
+        "repository": "https://github.com/nexu-io/open-design",
+        "revision": "53231d40b778d88eba23f35547bf99485d3ae9fc",
+        "path": "skills/field-notes-editorial-template",
+        "license": "Apache-2.0"
+      }
+    },
+    {
+      "skillId": "flint-chart-author",
+      "status": "bundled",
+      "role": "chart",
+      "traits": [
+        "semantic-chart-spec",
+        "data-visualization"
+      ],
+      "platforms": [
+        "web",
+        "charts"
+      ],
+      "requirements": [
+        "Flint MCP or separately installed Flint library for rendering"
+      ],
+      "excludes": [
+        "automatic-library-installation"
+      ],
+      "activation": "automatic",
+      "notes": "Chart spec specialist, rendering needs flint-chart MCP or JS/TS library; no auto package install.",
+      "source": {
+        "repository": "https://github.com/microsoft/flint-chart",
+        "revision": "683d5de1ffd0c1a76001ca5aa044f297276d7734",
+        "path": "agent-skills/flint-chart-author",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "flint-theme-author",
+      "status": "bundled",
+      "role": "chart-theme",
+      "traits": [
+        "chart-theme",
+        "brand-translation",
+        "theme-spec"
+      ],
+      "platforms": [
+        "web",
+        "charts"
+      ],
+      "requirements": [
+        "Available Flint ThemeSpec contract documentation"
+      ],
+      "excludes": [
+        "global-frontend-theme"
+      ],
+      "activation": "automatic",
+      "notes": "ThemeSpec chart theme specialist not global frontend aesthetic. References external Flint contracts/docs must be available.",
+      "source": {
+        "repository": "https://github.com/microsoft/flint-chart",
+        "revision": "683d5de1ffd0c1a76001ca5aa044f297276d7734",
+        "path": "agent-skills/flint-theme-author",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "gsap-core",
+      "status": "bundled",
+      "role": "motion",
+      "traits": [
+        "tweens",
+        "easing",
+        "stagger",
+        "responsive-motion"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [
+        "gsap runtime in target project"
+      ],
+      "excludes": [
+        "automatic-library-installation"
+      ],
+      "activation": "automatic",
+      "notes": "MIT instructional file; runtime gsap dependency separately authorized; no blanket animation-library replacement.",
+      "source": {
+        "repository": "https://github.com/greensock/gsap-skills",
+        "revision": "aed9cfd3277740755f6bfc1155c7aa645403b760",
+        "path": "skills/gsap-core",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "gsap-scrolltrigger",
+      "status": "bundled",
+      "role": "motion",
+      "traits": [
+        "scroll-linked",
+        "pinning",
+        "scrub"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [
+        "gsap runtime and ScrollTrigger in target project"
+      ],
+      "excludes": [
+        "automatic-library-installation"
+      ],
+      "activation": "automatic",
+      "notes": "Complements core/timeline; runtime gsap/ScrollTrigger separately installed. References optional unselected gsap-react/plugins.",
+      "source": {
+        "repository": "https://github.com/greensock/gsap-skills",
+        "revision": "aed9cfd3277740755f6bfc1155c7aa645403b760",
+        "path": "skills/gsap-scrolltrigger",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "gsap-timeline",
+      "status": "bundled",
+      "role": "motion",
+      "traits": [
+        "sequencing",
+        "choreography",
+        "nested-timelines"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [
+        "gsap runtime in target project"
+      ],
+      "excludes": [
+        "automatic-library-installation"
+      ],
+      "activation": "automatic",
+      "notes": "Complements core/ScrollTrigger; runtime gsap separately installed. Optional unselected gsap-react reference.",
+      "source": {
+        "repository": "https://github.com/greensock/gsap-skills",
+        "revision": "aed9cfd3277740755f6bfc1155c7aa645403b760",
+        "path": "skills/gsap-timeline",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "high-end-visual-design",
+      "status": "bundled",
+      "role": "direction",
+      "traits": [
+        "agency luxury",
+        "atmospheric depth",
+        "choreographed motion"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [],
+      "excludes": [],
+      "activation": "automatic",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/Leonxlnx/taste-skill",
+        "revision": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b",
+        "path": "skills/soft-skill",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "html-plan",
+      "status": "bundled",
+      "role": "artifact",
+      "traits": [
+        "quiet",
+        "workmanlike",
+        "traceable-plan"
+      ],
+      "platforms": [
+        "html"
+      ],
+      "requirements": [],
+      "excludes": [
+        "unrequested-plan-artifact"
+      ],
+      "activation": "explicit-only",
+      "notes": "Direct invocation only except broad html routing; optional sibling design-artifact not selected. Do not broaden auto activation.",
+      "source": {
+        "repository": "https://github.com/plannotator/effective-html",
+        "revision": "2ac1dfecb0f2474e75260cb6d3c9b9d6d9b5062e",
+        "path": "skills/html-plan",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "image-to-code",
+      "status": "bundled",
+      "role": "asset-reference",
+      "traits": [
+        "section image references",
+        "faithful implementation"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [
+        "image generation"
+      ],
+      "excludes": [],
+      "activation": "automatic",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/Leonxlnx/taste-skill",
+        "revision": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b",
+        "path": "skills/image-to-code-skill",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "industrial-brutalist-ui",
+      "status": "bundled",
+      "role": "direction",
+      "traits": [
+        "Swiss grid",
+        "mechanical terminal",
+        "extreme type contrast"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [],
+      "excludes": [],
+      "activation": "automatic",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/Leonxlnx/taste-skill",
+        "revision": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b",
+        "path": "skills/brutalist-skill",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "landing-page-design",
+      "status": "bundled",
+      "role": "direction",
+      "traits": [
+        "conversion structure",
+        "strict visual tokens",
+        "copywriting"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [],
+      "excludes": [],
+      "activation": "automatic",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/elayadesign/ai-design-skills",
+        "revision": "1c1e97cb9878e236552c772092dda7adcdddbcb2",
+        "path": "skills/landing-page-design",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "minimalist-ui",
+      "status": "bundled",
+      "role": "direction",
+      "traits": [
+        "warm monochrome",
+        "editorial type",
+        "flat bento"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [],
+      "excludes": [],
+      "activation": "automatic",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/Leonxlnx/taste-skill",
+        "revision": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b",
+        "path": "skills/minimalist-skill",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "redesign-existing-projects",
+      "status": "bundled",
+      "role": "review",
+      "traits": [
+        "audit generic patterns",
+        "preserve functionality"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [
+        "existing source"
+      ],
+      "excludes": [],
+      "activation": "automatic",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/Leonxlnx/taste-skill",
+        "revision": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b",
+        "path": "skills/redesign-skill",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "review-animations",
+      "status": "bundled",
+      "role": "review",
+      "traits": [
+        "motion-craft",
+        "review-only"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [],
+      "excludes": [
+        "motion-generation"
+      ],
+      "activation": "manual-only",
+      "notes": "disable-model-invocation:true, manual-only. Empty invocation initial-response pause; provide concrete task. Review only, not generator.",
+      "source": {
+        "repository": "https://github.com/emilkowalski/skills",
+        "revision": "d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128",
+        "path": "skills/review-animations",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "scroll-craft",
+      "status": "bundled",
+      "role": "direction",
+      "traits": [
+        "cinematic",
+        "layered-hero",
+        "scrollytelling",
+        "signature-motion",
+        "mobile-composition"
+      ],
+      "platforms": [
+        "web"
+      ],
+      "requirements": [
+        "Provided assets or separately authorized generation",
+        "Node/browser tools for optional helpers"
+      ],
+      "excludes": [
+        "automatic-kie-ai-calls",
+        "automatic-credential-use"
+      ],
+      "activation": "automatic",
+      "notes": "24 UTF8 files bundled engine/scripts. Optional kie.ai credentialed asset generation must not auto execute; browser Node helpers require separate dependencies.",
+      "source": {
+        "repository": "https://github.com/nateherkai/scroll-craft",
+        "revision": "75d81f74e83692add18cd7a8a8e078b8a887a579",
+        "path": "plugins/nateherk-design/skills/scroll-craft",
+        "license": "MIT"
+      }
+    },
+    {
+      "skillId": "visual-explainer",
+      "status": "bundled",
+      "role": "explanation",
+      "traits": [
+        "self-contained HTML",
+        "technical visual explanation"
+      ],
+      "platforms": [
+        "html-artifact"
+      ],
+      "requirements": [
+        "browser; optional image generation"
+      ],
+      "excludes": [
+        "general frontend default"
+      ],
+      "activation": "automatic",
+      "notes": "",
+      "source": {
+        "repository": "https://github.com/nicobailon/visual-explainer",
+        "revision": "7163c3e10660912e0b89e1af465db9f387282b88",
+        "path": "plugins/visual-explainer",
+        "license": "MIT"
+      }
+    }
+  ],
+  "requestDecisions": [
+    {
+      "repo": "shadcn/ui",
+      "requestedSkill": null,
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "nexu-io/open-design",
+      "requestedSkill": null,
+      "status": "bundled-curated",
+      "bundled": [
+        "field-notes-editorial-template"
+      ],
+      "reason": ""
+    },
+    {
+      "repo": "JimLiu/baoyu-design",
+      "requestedSkill": "baoyu-design",
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "twostraws/SwiftUI-Agent-Skill",
+      "requestedSkill": "swiftui-pro",
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "expo/skills",
+      "requestedSkill": "expo-native-ui",
+      "status": "bundled-curated",
+      "bundled": [
+        "expo-native-ui"
+      ],
+      "reason": ""
+    },
+    {
+      "repo": "elayadesign/ai-design-skills",
+      "requestedSkill": null,
+      "status": "bundled-curated",
+      "bundled": [
+        "landing-page-design"
+      ],
+      "reason": ""
+    },
+    {
+      "repo": "anthropics/skills",
+      "requestedSkill": "theme-factory",
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "Leonxlnx/taste-skill",
+      "requestedSkill": null,
+      "status": "bundled-curated",
+      "bundled": [
+        "minimalist-ui",
+        "industrial-brutalist-ui",
+        "high-end-visual-design",
+        "design-taste-frontend",
+        "brandkit",
+        "image-to-code",
+        "redesign-existing-projects"
+      ],
+      "reason": ""
+    },
+    {
+      "repo": "anthropics/skills",
+      "requestedSkill": "brand-guidelines",
+      "status": "bundled-curated",
+      "bundled": [
+        "brand-guidelines"
+      ],
+      "reason": ""
+    },
+    {
+      "repo": "helloianneo/ian-xiaohei-illustrations",
+      "requestedSkill": null,
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "s1dashu/ip-as-logo-skill",
+      "requestedSkill": null,
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "nolangz/pixel2motion",
+      "requestedSkill": null,
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "anthropics/skills",
+      "requestedSkill": "canvas-design",
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "JimLiu/baoyu-skills",
+      "requestedSkill": "baoyu-xhs-images",
+      "status": "bundled-curated",
+      "bundled": [
+        "baoyu-xhs-images"
+      ],
+      "reason": ""
+    },
+    {
+      "repo": "LiamGvchi/gc-minimal-zine-poster",
+      "requestedSkill": null,
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "liangdabiao/ecom-details-image",
+      "requestedSkill": null,
+      "status": "discarded",
+      "bundled": [],
+      "reason": "no redistribution license"
+    },
+    {
+      "repo": "hugohe3/ppt-master",
+      "requestedSkill": null,
+      "status": "discarded",
+      "bundled": [],
+      "reason": "binary package resources"
+    },
+    {
+      "repo": "JimLiu/baoyu-skills",
+      "requestedSkill": "baoyu-slide-deck",
+      "status": "discarded",
+      "bundled": [],
+      "reason": "Upstream descriptor exceeds Deck safe YAML nesting policy; do not weaken discovery or rewrite upstream frontmatter."
+    },
+    {
+      "repo": "nicobailon/visual-explainer",
+      "requestedSkill": null,
+      "status": "bundled-curated",
+      "bundled": [
+        "visual-explainer"
+      ],
+      "reason": ""
+    },
+    {
+      "repo": "ningzimu/codex-ppt-skill",
+      "requestedSkill": null,
+      "status": "discarded",
+      "bundled": [],
+      "reason": "Upstream descriptor exceeds Deck safe YAML nesting policy; do not weaken discovery or rewrite upstream frontmatter."
+    },
+    {
+      "repo": "isjiamu/gzh-design-skill",
+      "skillId": "gzh-design",
+      "commit": "ba1f4175519b481cb3566616c9e5178705067904",
+      "reason": "AGPL-3.0-or-later redistribution treatment not implemented; excluded from embedded Deck bundle",
+      "status": "discarded",
+      "bundled": []
+    },
+    {
+      "repo": "gnipbao/story-to-handdrawn-video",
+      "skillId": "story-to-handdrawn-video",
+      "commit": "198aefa9b298af3a20d3bd757c93433623d38ccd",
+      "reason": "Skill depends on separate full Remotion renderer project, not a self-contained standalone bundle",
+      "status": "discarded",
+      "bundled": []
+    },
+    {
+      "repo": "pbakaus/impeccable",
+      "requestedSkill": "impeccable",
+      "status": "discarded",
+      "reason": "Upstream setup requires a downloaded native launcher binary even though its directory is text-only."
+    }
+  ]
+}

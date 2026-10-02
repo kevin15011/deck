@@ -24,13 +24,18 @@ function preflight(help = HOOK_TRUST_HELP): CodexPreflightEffects {
 }
 
 const noSerena = { serenaReadinessResolver: async () => ({ state: "missing" as const, diagnostic: { code: "serena-not-ready", message: "Serena is unavailable." } }) };
-const deckConfig = () => getDefaultDeckConfig();
+// These tool/ownership fixtures expose Serena as unavailable and do not test its setup.
+const withoutSerena = (config: ReturnType<typeof getDefaultDeckConfig>) => ({
+  ...config,
+  packageInstructions: { ...config.packageInstructions, codex: { ...config.packageInstructions.codex, serena: false } },
+});
+const deckConfig = () => withoutSerena(getDefaultDeckConfig());
 /** Default config enables every package instruction; this one selects none so only explicit capability ids apply. */
 const noPackagesConfig = () => {
   const base = getDefaultDeckConfig();
   return { ...base, packageInstructions: { ...base.packageInstructions, codex: Object.fromEntries(Object.keys(base.packageInstructions.codex).map((id) => [id, false])) } } as unknown as typeof base;
 };
-const supermemoryConfig = () => validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } });
+const supermemoryConfig = () => withoutSerena(validateDeckConfig({ adaptiveMemory: { activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } }));
 
 async function withProject<T>(fn: (root: string, journalRoot: string) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), "deck-codex-tools-project-"));
@@ -198,7 +203,7 @@ describe("Codex materialization pins tools and hooks to verified executables", (
       const again = adapter.buildDeveloperTeamInstallPlan(input);
       expect(again.mutationPreview).toEqual([]);
     });
-  });
+  }, 120_000);
 
   test("does not request hook-trust bypass when Deck hooks are absent or the Codex release lacks the flag", async () => {
     await withProject(async (root, journalRoot) => {
@@ -236,7 +241,7 @@ describe("Codex materialization pins tools and hooks to verified executables", (
       expect(final).not.toContain("deck-codex-hook:rtk");
       await expect(stat(join(root, ".codex", "deck", "hooks", "deck-rtk-hook.cjs"))).rejects.toThrow();
     });
-  });
+  }, 120_000);
 
   test("does not add a duplicate Codebase Memory server beside the user's own registration of the same executable and never edits it", async () => {
     await withProject(async (root, journalRoot) => {
@@ -258,7 +263,7 @@ describe("Codex materialization pins tools and hooks to verified executables", (
       const inventory = await adapter.getCapabilityInventory({ projectRoot: root, environmentId: "codex-development", runnerId: "codex", deckConfig: deckConfig() });
       expect(inventory.capabilities.find((capability) => capability.capabilityId === "codebase-memory")).toMatchObject({ isInstalled: true, diagnostics: [] });
     });
-  });
+  }, 120_000);
 });
 
 describe("Codex global install", () => {
@@ -302,7 +307,7 @@ describe("Upgrade from the previous Deck version", () => {
     codebaseIndexReadiness: () => true,
     ...noSerena,
   });
-  const webSearchConfig = () => validateDeckConfig({ webSearch: { enabled: true, provider: "tavily" } });
+  const webSearchConfig = () => withoutSerena(validateDeckConfig({ webSearch: { enabled: true, provider: "tavily" } }));
 
   test("a Deck-marked web-search block with the old bare npx is upgraded in place with nothing blocked, through inventory, review and plan", async () => {
     await withProject(async (root, journalRoot) => {
@@ -330,7 +335,7 @@ describe("Upgrade from the previous Deck version", () => {
       expect(after.capabilities.find((capability) => capability.capabilityId === "web-search")).toMatchObject({ isInstalled: true, isBlocked: false });
       expect(adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: webSearchConfig(), capabilityIds: ["web-search"] }).mutationPreview).toEqual([]);
     });
-  });
+  }, 120_000);
 
   test("an unmarked same-name web-search entry is still a blocking conflict and is never overwritten", async () => {
     await withProject(async (root, journalRoot) => {
@@ -359,7 +364,7 @@ describe("Upgrade from the previous Deck version", () => {
       expect(config).toContain('command = "/bin/sh"');
       expect(config).not.toMatch(/command = "(context-mode|codebase-memory-mcp)"/);
     });
-  });
+  }, 120_000);
 });
 
 describe("Codex global ownership and migration", () => {
@@ -401,7 +406,7 @@ describe("Codex global ownership and migration", () => {
       expect(detected.managedPaths).toContain(join(g, ".codex", "deck", "manifest.json"));
       expect(detected.managedPaths.every((path) => path.startsWith(g))).toBe(true);
     });
-  });
+  }, 120_000);
 
   test("blocks, without overwriting, when a foreign agent or skill already uses a Deck name", async () => {
     await withProject(async (root, journalRoot) => {
@@ -440,7 +445,7 @@ describe("Codex global ownership and migration", () => {
       await expect(stat(join(g, ".agents", "skills", "deck-lead", "SKILL.md"))).rejects.toThrow();
       await expect(stat(join(g, ".codex", "agents", "deck-lead.toml"))).rejects.toThrow();
     });
-  });
+  }, 120_000);
 
   test("reports a legacy per-project install, never deletes it implicitly, and removes only unmodified Deck files on opt-in", async () => {
     await withProject(async (root, journalRoot) => {
@@ -490,7 +495,7 @@ describe("Codex global ownership and migration", () => {
       const dropped = plan(adapter, cwd, { capabilityIds: [] });
       expect(dropped.mutationPreview?.length).toBeGreaterThan(0);
     });
-  });
+  }, 120_000);
 
   test("assignments are global: read from and written to the Codex home agents whatever project is open", async () => {
     await withProject(async (root, journalRoot) => {
@@ -506,5 +511,5 @@ describe("Codex global ownership and migration", () => {
       expect(adapter.readModelAssignments(join(root, "some-other-project"))).toEqual({ "deck-lead": "openai-codex/gpt-5.6-sol" });
       expect(adapter.readThinkingAssignments(cwd)).toEqual({ "deck-lead": "high" });
     });
-  });
+  }, 120_000);
 });

@@ -49,7 +49,7 @@ describe("Pi Runner dashboard input mapping", () => {
       const state = createDefaultPiRunnerDashboardState({ runnerScope: runnerId, screen: "packages-detail" });
       const runnerExpected = runnerId === "opencode" ? expected.filter((id) => id !== "adaptive-memory") : [...expected];
       expect(getToggleablePackageInstructionIds(state, resolver)).toEqual(runnerExpected);
-      expect(getDashboardSectionSummaries(state, resolver)[0]).toMatchObject({ totalCount: runnerExpected.length, selectedCount: 3 });
+      expect(getDashboardSectionSummaries(state, resolver)[0]).toMatchObject({ totalCount: runnerExpected.length, selectedCount: runnerExpected.length });
     }
   });
 
@@ -274,7 +274,7 @@ describe("Pi Runner dashboard input mapping", () => {
 
     expect(getPiRunnerDashboardContinueEffect(reviewState, { inventory, canRunPlan: true })).toEqual({
       type: "dispatch",
-      action: { type: "enter-review", inventory },
+      action: { type: "enter-review", inventory, confirmSelectedPackages: true },
     });
   });
 

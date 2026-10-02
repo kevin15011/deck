@@ -153,7 +153,7 @@ import {
 import { reduceRunnerDashboard, type RunnerDashboardAction } from "./runner-dashboard/reducer";
 import { normalizeDashboardCapabilityInventory } from "./runner-dashboard/inventory";
 import { getToggleablePackageInstructionIds } from "./runner-dashboard/selectors";
-import { createDefaultRunnerDashboardState, createRunnerReviewPlanFailure, loadRunnerPackageInstructionsFromConfig, runnerRequiresExternalSupermemoryToken, type RunnerDashboardEvidenceIdentity, type RunnerDashboardState, type RunnerOperationIdentity, type RunnerReviewPlan, type SupermemoryRuntimeCredentialEvidence } from "./runner-dashboard/state";
+import { getInitialExtraCapabilitySelection, createDefaultRunnerDashboardState, createRunnerReviewPlanFailure, loadRunnerPackageInstructionsFromConfig, runnerRequiresExternalSupermemoryToken, type RunnerDashboardEvidenceIdentity, type RunnerDashboardState, type RunnerOperationIdentity, type RunnerReviewPlan, type SupermemoryRuntimeCredentialEvidence } from "./runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 import { getAdapter, createDefaultAdapterRegistry } from "../runner-adapters";
 import { getWebSearchProviderDescriptor } from "../web-search-provider";
@@ -2117,6 +2117,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const operation = nextRunnerOperation(adapter.runnerId, dashboardOperationSequenceRef.current);
       const receiptCapabilities = adapter.runnerId === "claude" ? adapter.readSelectedCapabilityIds?.(projectRoot) : undefined;
       const selectedReceiptCapabilities = new Set(receiptCapabilities ?? []);
+      const extraCapabilitySelection = getInitialExtraCapabilitySelection(adapter.ui, receiptCapabilities);
       const packageInstructions = loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds);
       if (adapter.runnerId === "claude" && receiptCapabilities) {
         for (const id of adapter.packageInstructionIds ?? []) packageInstructions[id] = selectedReceiptCapabilities.has(id);
@@ -2134,7 +2135,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
                  "web-search",
                  ...[...selectedReceiptCapabilities].filter((id) => !(adapter.packageInstructionIds ?? []).some((packageId) => packageId === id)),
                  ...adapter.ui.dashboard.defaultSelectedCapabilityIds,
-               ].map((id) => [id, adapter.ui!.dashboard!.defaultSelectedCapabilityIds!.includes(id) || !(adapter.packageInstructionIds ?? []).some((packageId) => packageId === id) && selectedReceiptCapabilities.has(id) || id === "web-search" && adapter.runnerId === "claude" && config.webSearch.enabled]))
+                 ...Object.keys(extraCapabilitySelection),
+               ].map((id) => [id, adapter.ui!.dashboard!.defaultSelectedCapabilityIds!.includes(id) || extraCapabilitySelection[id] === true || !(adapter.packageInstructionIds ?? []).some((packageId) => packageId === id) && selectedReceiptCapabilities.has(id) || id === "web-search" && adapter.runnerId === "claude" && config.webSearch.enabled]))
             : { "web-search": config.webSearch.enabled },
          webSearchProvider: config.webSearch.provider,
          webSearchProviderDescriptor,
