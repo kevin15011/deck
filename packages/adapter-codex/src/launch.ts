@@ -113,6 +113,10 @@ export function buildCodexLaunchPlan(
   if (newSession && input.reasoningLevel !== undefined && !safeCodexScalar(input.reasoningLevel)) return invalidLaunchScalar("reasoning");
   const args: string[] = [CODEX_DEVELOPER_BYPASS_ARG];
   if (features.hookTrustBypass === true) args.push(CODEX_HOOK_TRUST_BYPASS_ARG);
+  // Leave delegation decisions to Deck Lead instead of Codex's default explicit-request hint.
+  if (input.teamId === "developer-team") {
+    args.push("-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""');
+  }
   if (newSession && bootstrap) {
     const developerInstructions = safeTomlString(bootstrap.developerInstructions, MAX_CODEX_BOOTSTRAP_BYTES);
     if (!developerInstructions) {

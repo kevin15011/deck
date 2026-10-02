@@ -212,7 +212,7 @@ describe("executeRunnerLaunchPlan", () => {
     if (launch.status !== "ready") return;
     const result = await executeRunnerLaunchPlan(launch.plan, {
       spawn: async (_command, args, options) => {
-        expect(args.slice(0, 3)).toEqual(["--dangerously-bypass-approvals-and-sandbox", "exec", "--output-last-message"]);
+        expect(args.slice(0, 5)).toEqual(["--dangerously-bypass-approvals-and-sandbox", "-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""', "exec", "--output-last-message"]);
         expect(args.at(-1)).toBe("-");
         expect(options).toMatchObject({ stdio: "pipe", stdin: "closed", stdinPayload: { type: "utf8", content: "safe" } });
         return { exitCode: 0, stdout: "", stderr: "" };
@@ -1553,8 +1553,8 @@ describe("runRunnerLaunch consent and status", () => {
       const routes = [
         { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "interactive" as const }), newSession: true },
         { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "exec" as const, prompt: [], stdin: "closed" as const }), newSession: true },
-        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-by-id" as const, sessionId: "session-1" }), args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "session-1"] },
-        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-latest" as const }), args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "--last"] },
+        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-by-id" as const, sessionId: "session-1" }), args: ["--dangerously-bypass-approvals-and-sandbox", "-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""', "resume", "session-1"] },
+        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-latest" as const }), args: ["--dangerously-bypass-approvals-and-sandbox", "-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""', "resume", "--last"] },
       ];
       for (const route of routes) {
         const events: string[] = [];

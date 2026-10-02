@@ -731,7 +731,7 @@ describe("Codex RunnerAdapter production composition", () => {
     }
   });
 
-  test("bootstraps new Codex roots as Deck Lead with persisted assignments while resumes stay untouched", async () => {
+  test("bootstraps new Codex roots as Deck Lead with persisted assignments while resumes preserve history", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-root-lead-launch-"));
     const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-root-lead-launch-journal-"));
     try {
@@ -773,7 +773,7 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(invalidOverride).toMatchObject({ status: "ready", diagnostics: expect.arrayContaining([expect.objectContaining({ code: "codex-model-omitted" }), expect.objectContaining({ code: "codex-reasoning-omitted" })]) });
       if (invalidOverride.status === "ready") expect(invalidOverride.plan.args).not.toContain("gpt-5.6-sol");
       if (resume.status === "ready") {
-        expect([...resume.plan.args]).toEqual(["--dangerously-bypass-approvals-and-sandbox", "resume", "session-1"]);
+        expect([...resume.plan.args]).toEqual(["--dangerously-bypass-approvals-and-sandbox", "-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""', "resume", "session-1"]);
         expect(resume.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: "codex-resume-existing-history" })]));
         expect(resume.plan.args.join(" ")).not.toContain("developer_instructions");
         expect(resume.plan.args.join(" ")).not.toContain("model_reasoning_effort");
