@@ -369,6 +369,19 @@ function readCodexRoleAssignments(codexHome?: string): CodexRoleAssignmentRead {
 }
 
 /** The official Codex plugin owns memory alone, so Deck-runtime adaptive-memory prose is never materialized. */
+/** Agents whose persisted assignment the caller would change; `undefined` means "keep persisted untouched". */
+function changedAssignmentAgents(
+  persisted: Readonly<Record<string, string>>,
+  requested: Readonly<Record<string, string>> | undefined,
+): readonly string[] {
+  if (requested === undefined) return [];
+  const slug = (value: string | undefined) => (value === undefined
+    ? undefined
+    : value.startsWith("openai-codex/") ? value.slice("openai-codex/".length) : value);
+  return [...new Set([...Object.keys(persisted), ...Object.keys(requested)])]
+    .filter((agentId) => slug(persisted[agentId]) !== slug(requested[agentId]));
+}
+
 function withoutAdaptiveMemoryFragments<T extends { instructions: readonly { packageId: string }[] } | undefined>(bundle: T): T {
   if (!bundle) return bundle;
   return { ...bundle, instructions: Object.freeze(bundle.instructions.filter((fragment) => fragment.packageId !== "adaptive-memory")) } as T;
@@ -1220,7 +1233,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
     };
   }
   async prepareDeveloperTeamInstall(input: DeveloperTeamAdapterInstallInput) {
-    if (input.materializationScope === "content-only") return [];
+    const assignmentEvidence = await this.#confirmModelAssignmentEvidence(input);
+    if (input.materializationScope === "content-only") return assignmentEvidence;
     const config = requireDeckConfig(input.deckConfig, "operation");
     const existingConfig = readGlobalConfigSource(this.#roots) ?? "";
     const derivedSupermemoryProjectScope = (() => {
@@ -1233,23 +1247,48 @@ class CodexRunnerAdapter implements RunnerAdapter {
       }), {
       supermemoryProjectScope: derivedSupermemoryProjectScope,
     });
-    if (!this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingConfig, config.webSearch.enabled).includes("serena")) return [];
+    if (!this.#selectedMcpCapabilityIds(input, capabilityInstructions, existingConfig, config.webSearch.enabled).includes("serena")) return assignmentEvidence;
     const preparation = await this.#prepareSerena(input.projectRoot);
     if (preparation.readiness.state !== "ready") {
-      return [{
+      return [...assignmentEvidence, {
         code: "codex-serena-launcher-not-ready",
         severity: "error" as const,
         message: "Serena is selected but no healthy Deck-owned launcher is ready. Use the explicitly authorized Serena action in Review; Deck will not write a bare MCP command.",
       }];
     }
     if (preparation.proxy.state !== "ready") {
-      return [{
+      return [...assignmentEvidence, {
         code: "codex-serena-proxy-not-ready",
         severity: "error" as const,
         message: preparation.proxy.message,
       }];
     }
-    return [];
+    return assignmentEvidence;
+  }
+
+  /**
+   * Fresh-process installs must never erase a configured assignment without evidence. When the caller expresses an
+   * assignment view, confirm it against the authenticated catalog before planning; when the catalog is unavailable the
+   * persisted assignments stay untouched and any assignment change is refused until evidence exists.
+   */
+  async #confirmModelAssignmentEvidence(input: DeveloperTeamAdapterInstallInput): Promise<RunnerDiagnostic[]> {
+    const persisted = readCodexRoleAssignments(this.#roots.codexHome);
+    const changed = [
+      ...changedAssignmentAgents(persisted.modelAssignments, input.modelAssignments),
+      ...changedAssignmentAgents(persisted.thinkingAssignments, input.thinkingAssignments),
+    ];
+    // A fresh process need not rediscover the catalog just to preserve an existing assignment.
+    // The plan checks that regeneration kept every requested field before any write is allowed.
+    if (changed.length === 0) return [];
+    try {
+      const result = await this.getModelInventory({ projectRoot: input.projectRoot, mode: "prefer-cache" });
+      if (result.state === "ready") return [];
+    } catch { /* an unusable discovery is unavailable evidence, never a reason to mutate assignments */ }
+    return [{
+      code: "codex-model-inventory-unavailable",
+      severity: "warning",
+      message: "Codex model assignments could not be confirmed against the authenticated catalog; persisted assignments are preserved and assignment changes are blocked until it is available.",
+    }];
   }
   async runAction(action: RunnerAction, context: RunnerActionContext): Promise<RunnerActionRunResult> {
     const toolResult = await this.#runToolInstallAction(action);
@@ -1385,6 +1424,11 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const materializationScope = input.materializationScope ?? "full";
     const roots = this.#roots;
     const existing = readExistingGlobalFiles(roots, materializationScope);
+    const persistedAssignments = readCodexRoleAssignments(roots.codexHome);
+    // A missing caller view means "keep persisted assignments untouched"; a view is the caller's full desired state.
+    const modelAssignments = input.modelAssignments ?? persistedAssignments.modelAssignments;
+    const thinkingAssignments = input.thinkingAssignments ?? persistedAssignments.thinkingAssignments;
+    const hasInventoryEvidence = this.#latestReadyInventory !== null;
     const config = requireDeckConfig(input.deckConfig, "operation");
     const webSearchProvider = this.resolveWebSearchProvider(config.webSearch.provider);
     const existingCodexConfig = existing.files.get(".codex/config.toml") ?? "";
@@ -1410,8 +1454,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
       existingFiles: existing.files,
       existingModes: existing.modes,
       agentsFile: existing.agentsFile,
-      modelAssignments: input.modelAssignments,
-      thinkingAssignments: input.thinkingAssignments,
+      modelAssignments,
+      thinkingAssignments,
       capabilityInstructions,
       memoryProvider: memoryProviderId,
       mcpCapabilityIds,
@@ -1430,12 +1474,14 @@ class CodexRunnerAdapter implements RunnerAdapter {
       serenaLauncherAvailable: serenaPreparation?.readiness.state === "ready",
       serenaProxyCommand: this.#serenaProxyCommand,
       serenaProxyAvailable: serenaPreparation?.readiness.state === "ready" && serenaPreparation.proxy.state === "ready",
+      // No ready inventory is not evidence of absence: persisted assignments stay mapped (fail safe) and changes
+      // to them are refused below (fail closed) instead of silently dropping the configured model.
       confirmedModels: this.#latestReadyInventory
         ? Object.values(this.#latestReadyInventory.inventory.modelsByProvider).flat().map((model) => model.id)
-        : [],
+        : undefined,
       confirmedReasoningByModel: this.#latestReadyInventory
         ? Object.fromEntries(Object.values(this.#latestReadyInventory.inventory.modelsByProvider).flat().map((model) => [model.id, model.variants ?? []]))
-        : {},
+        : undefined,
     });
     const extraDiagnostics: RunnerDiagnostic[] = [{ code: "node-path-cas-residual-risk", severity: "warning", message: NODE_PATH_CAS_RESIDUAL_RISK }];
     if (input.localOnly) {
@@ -1449,7 +1495,46 @@ class CodexRunnerAdapter implements RunnerAdapter {
         message: `A previous per-project Deck install in ${input.projectRoot} (${legacy.unmodified.length + legacy.modified.length} files) overrides the global team files in this project. Run the Codex developer command with --cleanup-legacy to remove it; only unmodified Deck files are deleted and anything you changed is kept.`,
       });
     }
-    native = { ...native, diagnostics: [...native.diagnostics, ...extraDiagnostics] };
+    const unconfirmedAssignmentChanges = hasInventoryEvidence
+      ? []
+      : [...changedAssignmentAgents(persistedAssignments.modelAssignments, input.modelAssignments),
+         ...changedAssignmentAgents(persistedAssignments.thinkingAssignments, input.thinkingAssignments)];
+    if (!hasInventoryEvidence) {
+      const preservedAgents = [...new Set([...Object.keys(modelAssignments), ...Object.keys(thinkingAssignments)])];
+      if (preservedAgents.length > 0) {
+        extraDiagnostics.push({
+          code: "codex-assignments-preserved-unconfirmed",
+          severity: "warning",
+          message: `Codex model assignments for ${preservedAgents.join(", ")} were preserved without confirmation from the authenticated catalog.`,
+        });
+      }
+    }
+    if (unconfirmedAssignmentChanges.length > 0) {
+      extraDiagnostics.push({
+        code: "codex-assignment-unconfirmed",
+        severity: "error",
+        message: `Refusing to change the Codex assignment for ${[...new Set(unconfirmedAssignmentChanges)].join(", ")} without confirmation from the authenticated catalog.`,
+      });
+    }
+    // The native planner may omit a retired model, an unsupported effort, or a reasoning-only assignment.
+    // Never treat a successful file write as proof that the requested assignment survived regeneration.
+    const plannedRole = (agentId: string) => native.expectedFiles.find((file) => file.relativePath === `.codex/agents/${agentId}.toml`)?.content;
+    const lostAssignmentFields = [...new Set([
+      ...Object.entries(modelAssignments)
+        .filter(([agentId, modelId]) => !plannedRole(agentId)?.includes(`\nmodel = ${JSON.stringify(nativeCodexModelSlug(modelId))}\n`))
+        .map(([agentId]) => agentId),
+      ...Object.entries(thinkingAssignments)
+        .filter(([agentId, effort]) => !plannedRole(agentId)?.includes(`\nmodel_reasoning_effort = ${JSON.stringify(effort)}\n`))
+        .map(([agentId]) => agentId),
+    ])];
+    if (lostAssignmentFields.length > 0) {
+      extraDiagnostics.push({
+        code: "codex-assignment-not-materialized",
+        severity: "error",
+        message: `Refusing to erase Codex assignments for ${lostAssignmentFields.join(", ")}; the generated roles do not contain the requested model or reasoning.`,
+      });
+    }
+    native = { ...native, blocked: native.blocked || unconfirmedAssignmentChanges.length > 0 || lostAssignmentFields.length > 0, diagnostics: [...native.diagnostics, ...extraDiagnostics] };
     const files = native.mutations.filter((mutation) => mutation.operation !== "delete").map((mutation) => ({
       path: mutation.relativePath,
       content: mutation.content,
@@ -1511,6 +1596,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const operation = this.#planOperations.get(input.plan as object);
     if (!native || !operation) throw new Error("Codex apply requires the exact reviewed immutable plan.");
     if (operation.state !== "planned") throw new Error(`Codex operation ${operation.receipt.operationId} is already ${operation.state}.`);
+    // Fail closed at the mutation boundary: a blocked plan (for example one that would erase a configured model
+    // assignment without catalog confirmation) is never written, even when a caller skips its own blocked check.
+    if (native.blocked) throw new Error("Codex installation plan is blocked and was not applied.");
     operation.state = "applying";
     const serenaReadiness = this.#serenaReadinessByPlan.get(input.plan as object);
     if (serenaReadiness) {

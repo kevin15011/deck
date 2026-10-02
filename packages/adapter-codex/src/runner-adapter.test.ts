@@ -18,7 +18,7 @@ import { CURRENT_CODEX_MODELS_FIXTURE } from "./__fixtures__/codex/models";
 import { parseCodexModels } from "./codex-model-discovery";
 import { DEVELOPER_TEAM_AGENTS } from "@deck/core/developer-team-catalog";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
-import { buildCapabilityInstructionBundle, getDefaultDeckConfig, validateDeckConfig } from "@deck/core";
+import { buildCapabilityInstructionBundle, getDefaultDeckConfig, prepareAndBuildDeveloperTeamInstallPlan, validateDeckConfig } from "@deck/core";
 import type { CodexPreflightEffects, CodexProjectSnapshot } from "./preflight";
 
 setDefaultTimeout(30_000);
@@ -606,6 +606,165 @@ describe("Codex RunnerAdapter production composition", () => {
       expect(luna).toContain('model = "gpt-5.6-luna"');
       expect(luna).not.toContain("model_reasoning_effort");
       expect(perModelPlan.diagnostics).toContainEqual(expect.stringContaining("for its Codex model"));
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps persisted Codex role assignments through a fresh adapter once the catalog confirms them", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-fresh-assignment-"));
+    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-fresh-assignment-journal-"));
+    try {
+      await mkdir(join(projectRoot, ".codex", "agents"), { recursive: true });
+      await mkdir(join(projectRoot, ".codex", "deck"), { recursive: true });
+      const roleContent = 'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "ultra"\n';
+      await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), roleContent);
+      // Configure models saves the role assignment together with Deck's ownership manifest.
+      await writeFile(join(projectRoot, ".codex", "deck", "manifest.json"), `${JSON.stringify({
+        version: 1,
+        files: { ".codex/agents/deck-lead.toml": createHash("sha256").update(roleContent).digest("hex") },
+      }, null, 2)}\n`);
+      const parsed = parseCodexModels(CURRENT_CODEX_MODELS_FIXTURE);
+      if (!parsed.ok) throw new Error("expected Codex fixture to parse");
+      // A fresh adapter mirrors `deck codex developer` in a new process: no model inventory has been read yet.
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
+        journalRoot,
+        inventoryDiscovery: async () => ({ state: "ready", source: "live", discoveredAt: 1, fingerprint: "current-codex", inventory: parsed.inventory }),
+      });
+      const input = {
+        projectRoot,
+        environmentId: "codex-development" as const,
+        deckConfig: getDefaultDeckConfig(),
+        capabilityInstructions: buildCapabilityInstructionBundle([]),
+        modelAssignments: adapter.readModelAssignments(projectRoot),
+        thinkingAssignments: adapter.readThinkingAssignments(projectRoot),
+      };
+      expect(input.modelAssignments).toEqual({ "deck-lead": "openai-codex/gpt-5.6-terra" });
+      const { preparationDiagnostics, plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, input);
+      const lead = plan.files.find((file) => file.path === ".codex/agents/deck-lead.toml")?.content ?? "";
+      expect(lead).toContain('model = "gpt-5.6-terra"');
+      expect(lead).toContain('model_reasoning_effort = "ultra"');
+      expect(plan.diagnostics ?? []).not.toContainEqual(expect.stringContaining("was omitted"));
+      expect(preparationDiagnostics).toEqual([]);
+      expect(plan.blocked).toBe(false);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves persisted Codex assignments and blocks unconfirmed changes when catalog discovery is unavailable", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-unconfirmed-assignment-"));
+    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-unconfirmed-assignment-journal-"));
+    try {
+      await mkdir(join(projectRoot, ".codex", "agents"), { recursive: true });
+      await mkdir(join(projectRoot, ".codex", "deck"), { recursive: true });
+      const roleContent = 'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "ultra"\n';
+      await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), roleContent);
+      await writeFile(join(projectRoot, ".codex", "deck", "manifest.json"), `${JSON.stringify({
+        version: 1,
+        files: { ".codex/agents/deck-lead.toml": createHash("sha256").update(roleContent).digest("hex") },
+      }, null, 2)}\n`);
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot),
+        journalRoot,
+        inventoryDiscovery: async () => ({ state: "blocked", source: "none", inventory: null, error: { code: "command-failed", message: "Codex model discovery failed. Run `codex debug models` to check the runner.", retryable: true } }),
+      });
+      const persisted = {
+        modelAssignments: adapter.readModelAssignments(projectRoot),
+        thinkingAssignments: adapter.readThinkingAssignments(projectRoot),
+      };
+      const preserved = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
+        projectRoot,
+        environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
+        capabilityInstructions: buildCapabilityInstructionBundle([]),
+        ...persisted,
+      });
+      // Fail safe: without catalog evidence the configured assignment is preserved instead of silently erased.
+      const lead = preserved.plan.files.find((file) => file.path === ".codex/agents/deck-lead.toml")?.content ?? "";
+      expect(lead).toContain('model = "gpt-5.6-terra"');
+      expect(lead).toContain('model_reasoning_effort = "ultra"');
+      expect(preserved.plan.blocked).toBe(false);
+      expect(preserved.preparationDiagnostics).toEqual([]);
+      expect(preserved.plan.diagnostics ?? []).toContainEqual(expect.stringContaining("preserved"));
+      // Fail closed: an assignment change without catalog evidence blocks the plan and refuses the mutation.
+      const clearing = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
+        projectRoot,
+        environmentId: "codex-development",
+        deckConfig: getDefaultDeckConfig(),
+        capabilityInstructions: buildCapabilityInstructionBundle([]),
+        modelAssignments: {},
+        thinkingAssignments: {},
+      });
+      expect(clearing.plan.blocked).toBe(true);
+      expect(clearing.plan.diagnostics?.join(" ") ?? "").toContain("confirmation");
+      await expect(adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan: clearing.plan })).rejects.toThrow(/blocked/i);
+      expect(await readFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), "utf8")).toContain('model = "gpt-5.6-terra"');
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not erase an unchanged persisted model or reasoning when the live catalog no longer lists them", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-retired-assignment-"));
+    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-retired-assignment-journal-"));
+    try {
+      await mkdir(join(projectRoot, ".codex", "agents"), { recursive: true });
+      await mkdir(join(projectRoot, ".codex", "deck"), { recursive: true });
+      const roleContent = 'model = "gpt-5.6-retired"\nmodel_reasoning_effort = "ultra"\n';
+      await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), roleContent);
+      await writeFile(join(projectRoot, ".codex", "deck", "manifest.json"), `${JSON.stringify({
+        version: 1,
+        files: { ".codex/agents/deck-lead.toml": createHash("sha256").update(roleContent).digest("hex") },
+      })}\n`);
+      const parsed = parseCodexModels(CURRENT_CODEX_MODELS_FIXTURE);
+      if (!parsed.ok) throw new Error("expected Codex fixture to parse");
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot), journalRoot,
+        inventoryDiscovery: async () => ({ state: "ready", source: "live", discoveredAt: 1, fingerprint: "current-codex", inventory: parsed.inventory }),
+      });
+      await adapter.getModelInventory?.({ projectRoot, mode: "rescan" });
+      const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
+        projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(),
+        capabilityInstructions: buildCapabilityInstructionBundle([]),
+        modelAssignments: adapter.readModelAssignments(projectRoot),
+        thinkingAssignments: adapter.readThinkingAssignments(projectRoot),
+      });
+      expect(plan.blocked).toBe(true);
+      await expect(adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan })).rejects.toThrow(/blocked/i);
+      expect(await readFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), "utf8")).toBe(roleContent);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+      await rm(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("does not erase a reasoning-only role when model discovery is unavailable", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-reasoning-only-"));
+    const journalRoot = await mkdtemp(join(tmpdir(), "deck-codex-reasoning-only-journal-"));
+    try {
+      await mkdir(join(projectRoot, ".codex", "agents"), { recursive: true });
+      await mkdir(join(projectRoot, ".codex", "deck"), { recursive: true });
+      const roleContent = 'model_reasoning_effort = "high"\n';
+      await writeFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), roleContent);
+      await writeFile(join(projectRoot, ".codex", "deck", "manifest.json"), `${JSON.stringify({
+        version: 1,
+        files: { ".codex/agents/deck-lead.toml": createHash("sha256").update(roleContent).digest("hex") },
+      })}\n`);
+      const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(projectRoot), journalRoot,
+        inventoryDiscovery: async () => ({ state: "blocked", source: "none", inventory: null,
+          error: { code: "command-failed", message: "Codex model discovery unavailable", retryable: true } }),
+      });
+      const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
+        projectRoot, environmentId: "codex-development", deckConfig: getDefaultDeckConfig(),
+        capabilityInstructions: buildCapabilityInstructionBundle([]),
+        modelAssignments: adapter.readModelAssignments(projectRoot),
+        thinkingAssignments: adapter.readThinkingAssignments(projectRoot),
+      });
+      expect(plan.blocked).toBe(true);
+      await expect(adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "codex-development", plan })).rejects.toThrow(/blocked/i);
+      expect(await readFile(join(projectRoot, ".codex", "agents", "deck-lead.toml"), "utf8")).toBe(roleContent);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
       await rm(journalRoot, { recursive: true, force: true });
