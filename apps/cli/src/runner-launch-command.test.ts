@@ -1363,6 +1363,118 @@ describe("runRunnerLaunch consent and status", () => {
     expect(preview).toContain("A runner prerequisite was checked.");
   });
 
+  for (const origin of [undefined, "unverifiable-local-origin"]) {
+    test(`Codex launches without memory when repository identity is unavailable (${origin ?? "no origin"})`, async () => {
+      const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-no-identity-"));
+      const config = { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" as const, supermemory: { mcpServerName: "supermemory" } } };
+      const previews: string[] = [];
+      let spawns = 0;
+      try {
+        if (origin) initGitRemote(projectRoot, origin);
+        const result = await runRunnerLaunch({
+          adapter: adapter({
+            runnerId: "codex",
+            readModelAssignments: () => ({}),
+            readThinkingAssignments: () => ({}),
+            buildDeveloperTeamInstallPlan: (input) => {
+              expect(input.materializationScope).toBe("content-only");
+              expect(input.deckConfig?.adaptiveMemory.enabled).toBe(true);
+              return { files: [], mutationPreview: [] };
+            },
+            buildLaunchPlan: (input) => {
+              expect(input.deckConfig?.adaptiveMemory.enabled).toBe(false);
+              return { status: "ready", plan: { command: "codex", args: ["exec", "-"], cwd: projectRoot, stdio: "pipe", stdin: "closed" }, diagnostics: [] };
+            },
+          }),
+          launch: { projectRoot, teamId: "developer-team", mode: "exec", prompt: ["implement feature"], stdin: "closed", deckConfig: config },
+          yes: true,
+          interactive: false,
+          presentPreview: async (preview) => { previews.push(preview); },
+          codexSupermemoryCredential: () => { throw new Error("must not resolve credentials without identity"); },
+          supermemoryRuntime: { stateHome: join(projectRoot, ".state"), transport: {
+            add: async () => { throw new Error("no provider add allowed"); },
+            search: async () => { throw new Error("no provider search allowed"); },
+            profile: async () => { throw new Error("no provider profile allowed"); },
+            health: async () => { throw new Error("no provider health allowed"); },
+          } },
+          processEffects: { inheritedEnv: { SUPERMEMORY_API_KEY: TOKEN_SENTINEL, SUPERMEMORY_REPO_TAG: "foreign", DECK_RUNNER_MEMORY_TOKEN: TOKEN_SENTINEL }, spawn: async (_command, args, options) => {
+            spawns += 1;
+            expect(args.join(" ")).toContain("features.hooks=false");
+            expect(Object.keys(options.env).filter((key) => /SUPERMEMORY|DECK_RUNNER_MEMORY/.test(key))).toEqual([]);
+            return { exitCode: 0, stdout: "", stderr: "" };
+          } },
+        });
+        expect(result.status).toBe("launched");
+        expect(spawns).toBe(1);
+        expect(previews.join("\n")).toContain("Supermemory is disabled for this launch");
+        expect(config.adaptiveMemory.enabled).toBe(true);
+      } finally { await rm(projectRoot, { recursive: true, force: true }); }
+    });
+  }
+
+  test("Codex with verified identity retains memory credential failures instead of falling back", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "deck-codex-verified-identity-"));
+    try {
+      initGitRemote(projectRoot, "https://github.com/acme/verified.git");
+      let spawned = false;
+      const result = await runRunnerLaunch({
+        adapter: adapter({ runnerId: "codex", readModelAssignments: () => ({}), readThinkingAssignments: () => ({}), buildDeveloperTeamInstallPlan: (input) => {
+          expect(input.materializationScope).toBeUndefined();
+          expect(input.deckConfig?.adaptiveMemory.enabled).toBe(true);
+          return { files: [], mutationPreview: [] };
+        } }),
+        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } } },
+        yes: true, interactive: false, presentPreview: async () => {},
+        codexSupermemoryCredential: () => { throw new Error("Protected shared profile store is invalid."); },
+        supermemoryRuntime: { stateHome: join(projectRoot, ".state"), transport: {
+          add: async () => { throw new Error("no provider add allowed"); },
+          search: async () => { throw new Error("no provider search allowed"); },
+          profile: async () => { throw new Error("no provider profile allowed"); },
+          health: async () => { throw new Error("no provider health allowed"); },
+        } },
+        processEffects: { spawn: async () => { spawned = true; return { exitCode: 0, stdout: "", stderr: "" }; } },
+      });
+      expect(result).toMatchObject({ status: "blocked", message: "Protected shared profile store is invalid." });
+      expect(spawned).toBe(false);
+    } finally { await rm(projectRoot, { recursive: true, force: true }); }
+  });
+
+  test("real Codex fallback preserves installed hooks and MCP config without memory provider effects", async () => {
+    const root = await mkdtemp(join(tmpdir(), "deck-codex-memory-fallback-"));
+    const projectRoot = join(root, "project");
+    const home = join(root, "home");
+    const roots = layout(home);
+    const source = '[features]\nmulti_agent = true\n\n# deck-codex-hook:supermemory:start\n[[hooks.Stop]]\nhooks = [{ type = "command", command = "node supermemory-flush.js" }]\n# deck-codex-hook:supermemory:end\n\n[mcp_servers.user]\ncommand = "user-server"\n';
+    try {
+      await mkdir(projectRoot, { recursive: true });
+      await mkdir(roots.codexHome, { recursive: true });
+      await writeFile(join(roots.codexHome, "config.toml"), source);
+      const runner = createCodexRunnerAdapter({ ...roots, tools: testTools(), journalRoot: join(root, "journals"), preflight: {
+        probe: async () => ({ found: true, version: "0.160.0", help: "Usage: codex [OPTIONS]", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
+        readProject: async () => ({ config: null, roles: [], skills: [], agentsInstructions: false }),
+      } });
+      let spawned = false;
+      const result = await runRunnerLaunch({
+        adapter: runner,
+        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory", supermemory: { mcpServerName: "supermemory" } } } },
+        yes: true, interactive: false, presentPreview: async () => {},
+        codexSupermemoryCredential: () => { throw new Error("no memory credential effect allowed"); },
+        supermemoryRuntime: { stateHome: join(root, "state"), secretStore: { read: () => { throw new Error("no memory store effect allowed"); }, write: () => { throw new Error("no memory write allowed"); } }, transport: { add: async () => { throw new Error("no provider add"); }, search: async () => { throw new Error("no provider search"); }, profile: async () => { throw new Error("no provider profile"); }, health: async () => { throw new Error("no provider health"); } } },
+        processEffects: { inheritedEnv: { SUPERMEMORY_API_KEY: TOKEN_SENTINEL, SUPERMEMORY_REPO_TAG: "ambient" }, spawn: async (_command, args, options) => {
+          spawned = true;
+          expect(args.join(" ")).toContain("features.hooks=false");
+          expect(options.env.SUPERMEMORY_API_KEY).toBeUndefined();
+          expect(options.env.SUPERMEMORY_REPO_TAG).toBeUndefined();
+          return { exitCode: 0, stdout: "", stderr: "" };
+        } },
+      });
+      expect(result.status).toBe("launched");
+      expect(spawned).toBe(true);
+      expect(await readFile(join(roots.codexHome, "config.toml"), "utf8")).toBe(source);
+      expect(existsSync(join(root, "state"))).toBe(false);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }, 120000);
+
   test("does not build a Codex launch plan or spawn for install-only", async () => {
     let launchPlanCalls = 0;
     let spawnCalls = 0;
@@ -1550,11 +1662,16 @@ describe("runRunnerLaunch consent and status", () => {
           }),
         },
       });
+      const staticConfig = <T extends Omit<RunnerLaunchInput, "deckConfig">>(input: T) => {
+        const cfg = getDefaultDeckConfig();
+        cfg.packageInstructions.codex.serena = false;
+        return { ...input, deckConfig: cfg };
+      };
       const routes = [
-        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "interactive" as const }), newSession: true },
-        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "exec" as const, prompt: [], stdin: "closed" as const }), newSession: true },
-        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-by-id" as const, sessionId: "session-1" }), args: ["--dangerously-bypass-approvals-and-sandbox", "-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""', "resume", "session-1"] },
-        { launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "resume-latest" as const }), args: ["--dangerously-bypass-approvals-and-sandbox", "-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""', "resume", "--last"] },
+        { launch: staticConfig({ projectRoot, teamId: "developer-team", mode: "interactive" as const }), newSession: true },
+        { launch: staticConfig({ projectRoot, teamId: "developer-team", mode: "exec" as const, prompt: [], stdin: "closed" as const }), newSession: true },
+        { launch: staticConfig({ projectRoot, teamId: "developer-team", mode: "resume-by-id" as const, sessionId: "session-1" }), args: ["--dangerously-bypass-approvals-and-sandbox", "-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""', "resume", "session-1"] },
+        { launch: staticConfig({ projectRoot, teamId: "developer-team", mode: "resume-latest" as const }), args: ["--dangerously-bypass-approvals-and-sandbox", "-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""', "resume", "--last"] },
       ];
       for (const route of routes) {
         const events: string[] = [];
@@ -1612,7 +1729,7 @@ describe("runRunnerLaunch consent and status", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 
   test("preserves signal outcomes and surfaces spawn failures", async () => {
     const signal = await executeRunnerLaunchPlan({ command: "fake", args: [], cwd: "/p", stdio: "pipe", stdin: "closed" }, {
@@ -1675,9 +1792,11 @@ describe("runRunnerLaunch consent and status", () => {
         },
       });
       adapter.verifyDeveloperTeamInstall = () => ({ valid: false, diagnostics: ["forced semantic mismatch"] });
+      const deckConfig = getDefaultDeckConfig();
+      deckConfig.packageInstructions.codex.serena = false;
       const result = await runRunnerLaunch({
         adapter,
-        launch: withDeckConfig({ projectRoot, teamId: "developer-team", mode: "interactive" }),
+        launch: { projectRoot, teamId: "developer-team", mode: "interactive", deckConfig },
         interactive: false,
         yes: true,
         presentPreview: async () => {},
@@ -1689,7 +1808,7 @@ describe("runRunnerLaunch consent and status", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 120_000);
 
   test("surfaces verification rollback conflicts and failures", async () => {
     const operation = { runnerId: "fake", operationId: "operation-2", transactions: [{ kind: "native", id: "transaction-2" }] } as const;

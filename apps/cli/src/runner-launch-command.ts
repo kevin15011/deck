@@ -507,19 +507,28 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
         thinkingAssignments: input.adapter.readThinkingAssignments(input.launch.projectRoot),
       }
     : undefined;
-  const deckConfig = resolveLaunchDeckConfig(input.launch.deckConfig, input.cliMemoryProvider);
+  const selectedDeckConfig = resolveLaunchDeckConfig(input.launch.deckConfig, input.cliMemoryProvider);
+  const projectIdentity = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.launch.projectRoot, remotes: [] });
+  const codexMemoryUnavailable = !input.installOnly && input.adapter.runnerId === "codex"
+    && selectedDeckConfig.adaptiveMemory.enabled === true
+    && selectedDeckConfig.adaptiveMemory.activeProvider === "supermemory" && !projectIdentity.ok;
+  // Selection stays persisted; missing identity disables memory only for this child process.
+  const deckConfig = codexMemoryUnavailable
+    ? { ...selectedDeckConfig, adaptiveMemory: { ...selectedDeckConfig.adaptiveMemory, enabled: false } }
+    : selectedDeckConfig;
+  if (codexMemoryUnavailable) inspectionDiagnostics.push("Supermemory is disabled for this launch because a verified repository identity is unavailable. Saved settings are unchanged; all Codex hooks (including user hooks and RTK) are disabled for this process to prevent unscoped memory effects.");
   const baseLaunch = { ...input.launch, deckConfig } as RunnerLaunchInput;
   const installInput = {
     projectRoot: baseLaunch.projectRoot,
     environmentId: input.adapter.environmentIds[0]!,
     localOnly: input.localOnly,
-    deckConfig,
+    deckConfig: selectedDeckConfig,
+    ...(codexMemoryUnavailable ? { materializationScope: "content-only" as const } : {}),
     ...(codexAssignments ? codexAssignments : {}),
   };
   const { preparationDiagnostics, plan } = await prepareAndBuildDeveloperTeamInstallPlan(input.adapter, installInput);
   const launchPolicyDiagnostics = input.adapter.getLaunchPolicyDiagnostics?.() ?? [];
   const sessionResolution = resolveDeckRuntimeSessionId(baseLaunch, { runnerId: input.adapter.runnerId, stateHome: input.supermemoryRuntime?.stateHome });
-  const projectIdentity = resolveCanonicalSupermemoryProjectScope({ projectRoot: baseLaunch.projectRoot, remotes: [] });
   const explicitIntent = classifyExplicitMemoryIntent(baseLaunch);
   let launch: RunnerLaunchResult | undefined;
   if (!input.installOnly) {
@@ -529,7 +538,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   const safeMutations = plan.mutationPreview ?? [];
   const previewIncomplete = plan.files.length > 0 && plan.mutationPreview === undefined;
   const preApplyStaticState = staticIntegrationFromPreview({ previewIncomplete, planBlocked: plan.blocked, mutationCount: safeMutations.length, launch });
-  const credentialState = await runtimeCredentialState(input.supermemoryRuntime);
+  const credentialState = codexMemoryUnavailable ? "deferred" : await runtimeCredentialState(input.supermemoryRuntime);
   // The official Codex plugin owns memory alone, so Deck's own runtime readiness does not apply to that route.
   const officialPluginMemory = input.adapter.runnerId === "codex" && deckConfig.adaptiveMemory.enabled === true && deckConfig.adaptiveMemory.activeProvider === "supermemory";
   const preApplyReadiness = resolveSessionRuntimeReadiness({
@@ -558,7 +567,7 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     mutations: safeMutations,
     planDiagnostics: plan.diagnosticEntries ?? (plan.diagnostics ?? []).map((message) => ({ code: "plan", severity: "warning" as const, message })),
     preparationDiagnostics,
-    launchDiagnostics: launch?.diagnostics ?? launchPolicyDiagnostics,
+    launchDiagnostics: [...(launch?.diagnostics ?? launchPolicyDiagnostics), ...(codexMemoryUnavailable ? [{ code: "codex-supermemory-identity-unavailable", severity: "warning" as const, message: inspectionDiagnostics.at(-1)! }] : [])],
     memoryLine: officialPluginMemory ? describeCodexPluginMemoryBrief(input) : undefined,
     readinessBlocked: preApplyReadiness.managedRuntime === "blocked" ? formatSessionRuntimeReadiness(preApplyReadiness) : undefined,
     sessionDiagnostics: sessionResolution.diagnostics,
@@ -767,6 +776,11 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
 
     if (!result && launch?.status === "ready") {
       const loopbackBridge = memoryHost.enabled ? await lease.startLoopbackBridge(baseLaunch.mode) : undefined;
+      // Installed official hooks would otherwise execute even with the runtime disabled.
+      // A CLI override affects this process, preserving every global/project config file.
+      if (codexMemoryUnavailable) {
+        launch = { ...launch, plan: { ...launch.plan, args: ["-c", "features.hooks=false", ...launch.plan.args] } };
+      }
       const executableLaunch = loopbackBridge
         ? { ...launch, plan: withSupermemoryLoopback(launch.plan, loopbackBridge, baseLaunch.mode) }
         : launch;
