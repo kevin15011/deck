@@ -42,7 +42,7 @@ function verifyInvariantPresence(
 
   // For agent surface, also accept profile reference (stub mode - see REQ-PROMPT-002)
   if (surface === "agent") {
-    const hasProfileReference = /\.deck\/pi\/profiles\/.*\/system-prompt\.md/.test(content);
+    const hasProfileReference = /(?:\.deck\/pi\/profiles|deck\/profiles)\/.*\/system-prompt\.md/.test(content);
     const hasInvariantHeader = /^## Orchestrator Invariants$/m.test(content);
 
     if (hasProfileReference || hasInvariantHeader) {
@@ -130,8 +130,23 @@ export type PlannedSDDSkillFile = {
   content: string;
 };
 
+/**
+ * Global Deck-managed Pi package layout. When given, every planned path lives inside `packageRoot`
+ * (`agents/`, `skills/`) and nothing is planned under the project root.
+ */
+export type DeveloperTeamInstallLayout = {
+  /** Absolute package root (e.g. `<PiAgentDir>/deck/package`). */
+  packageRoot: string;
+  /** Text used by the Lead stub to point at the global profile. Defaults to the Deck global profile location. */
+  profileReference?: string;
+};
+
+export const DEFAULT_GLOBAL_PROFILE_REFERENCE = "deck/profiles/<team>/system-prompt.md";
+
 export type DeveloperTeamInstallPlan = {
   projectRoot: string;
+  /** Present when planned for the global package layout. */
+  layout?: DeveloperTeamInstallLayout;
   agentsDir: string;
   skillsDir: string;
   agents: PlannedAgentFile[];
@@ -168,6 +183,7 @@ function buildStandaloneSkillFiles(
   projectRoot: string,
   standaloneSkills: readonly { skillId: string; body: string; files?: Record<string, string> }[],
   capabilityInstructions?: CapabilityInstructionBundle,
+  layout?: DeveloperTeamInstallLayout,
 ): PlannedStandaloneSkillFile[] {
   const planned: PlannedStandaloneSkillFile[] = [];
   for (const skill of standaloneSkills) {
@@ -178,12 +194,14 @@ function buildStandaloneSkillFiles(
     };
     for (const [packagePath, content] of Object.entries(packageFiles)) {
       validateStandalonePackagePath(packagePath);
-      const relativePath = `.pi/skills/${skill.skillId}/${packagePath}`;
+      const relativePath = layout ? `skills/${skill.skillId}/${packagePath}` : `.pi/skills/${skill.skillId}/${packagePath}`;
       planned.push({
         skillId: skill.skillId,
         packagePath,
         relativePath,
-        absolutePath: join(projectRoot, ".pi", "skills", skill.skillId, ...packagePath.split("/")),
+        absolutePath: layout
+          ? join(layout.packageRoot, "skills", skill.skillId, ...packagePath.split("/"))
+          : join(projectRoot, ".pi", "skills", skill.skillId, ...packagePath.split("/")),
         content,
       });
     }
@@ -414,6 +432,8 @@ export type DeveloperTeamInstallOptions = MemoryInjectionOptions & {
   orchestratorPersonality?: import("@deck/core/config/deck-config").OrchestratorPersonality;
   /** Retained for API compatibility; compact prompt selection no longer depends on rollout receipts. */
   promptProfileActivation?: PromptProfileActivationV1;
+  /** Plan for the global Deck-managed Pi package instead of the deprecated project-local `.pi` layout. */
+  layout?: DeveloperTeamInstallLayout;
 };
 
 // --- Legacy local resolveMemoryInjection (delegated to core) ---
@@ -523,8 +543,9 @@ export function buildDeveloperTeamInstallPlan(
   projectRoot: string,
   options?: DeveloperTeamInstallOptions,
 ): DeveloperTeamInstallPlan & { memoryDiagnostics: MemoryDiagnostic[] } {
-  const agentsDir = join(projectRoot, ".pi", "agents");
-  const skillsDir = join(projectRoot, ".pi", "skills");
+  const layout = options?.layout;
+  const agentsDir = layout ? join(layout.packageRoot, "agents") : join(projectRoot, ".pi", "agents");
+  const skillsDir = layout ? join(layout.packageRoot, "skills") : join(projectRoot, ".pi", "skills");
   const modelAssignments = options?.modelAssignments;
   const thinkingAssignments = options?.thinkingAssignments;
   const resolvedMemoryProvider = options?.memoryProvider ?? options?.dashboardMemoryProvider;
@@ -550,8 +571,8 @@ export function buildDeveloperTeamInstallPlan(
   const promptProfile = "compact" as const;
 
   const agents: PlannedAgentFile[] = DEVELOPER_TEAM_AGENTS.map((agent) => {
-    const relativePath = `.pi/agents/${agent.id}.md`;
-    const absolutePath = join(projectRoot, relativePath);
+    const relativePath = layout ? `agents/${agent.id}.md` : `.pi/agents/${agent.id}.md`;
+    const absolutePath = layout ? join(agentsDir, `${agent.id}.md`) : join(projectRoot, relativePath);
     const assignedModel = modelAssignments?.[agent.id];
     const model = supportsDeveloperTeamModel(assignedModel) ? assignedModel : undefined;
     const hasThinkingAssignment = thinkingAssignments ? Object.prototype.hasOwnProperty.call(thinkingAssignments, agent.id) : false;
@@ -566,6 +587,7 @@ export function buildDeveloperTeamInstallPlan(
       capabilityInstructions,
       personality,
       promptProfile,
+      layout ? (layout.profileReference ?? DEFAULT_GLOBAL_PROFILE_REFERENCE) : undefined,
     );
 
     return { agent, relativePath, absolutePath, content };
@@ -577,8 +599,8 @@ export function buildDeveloperTeamInstallPlan(
   // Filter out SDD bootstrap skills from agent skills to avoid duplication
   // Lifecycle skills (deck-onboard, deck-archive) are written from sddSkillFiles.
   const skills: PlannedSkillFile[] = DEVELOPER_TEAM_AGENTS.filter((agent) => !sddSkillIds.has(agent.skillId)).map((agent) => {
-    const relativePath = `.pi/skills/${agent.skillId}/SKILL.md`;
-    const absolutePath = join(projectRoot, relativePath);
+    const relativePath = layout ? `skills/${agent.skillId}/SKILL.md` : `.pi/skills/${agent.skillId}/SKILL.md`;
+    const absolutePath = layout ? join(skillsDir, agent.skillId, "SKILL.md") : join(projectRoot, relativePath);
     const content = buildSkillFileContent(
       agent,
       memoryBundle,
@@ -591,13 +613,13 @@ export function buildDeveloperTeamInstallPlan(
   });
 
   // Build standalone skill package files (verbatim, no generated frontmatter).
-  const standaloneSkills = buildStandaloneSkillFiles(projectRoot, options?.standaloneSkills ?? [], capabilityInstructions);
+  const standaloneSkills = buildStandaloneSkillFiles(projectRoot, options?.standaloneSkills ?? [], capabilityInstructions, layout);
 
   // Build standalone lifecycle skill files.
   const sddSkillFiles: PlannedSDDSkillFile[] = getBootstrapSkillFiles().map((skill) => ({
     skillId: skill.skillId,
-    relativePath: `.pi/skills/${skill.skillId}/SKILL.md`,
-    absolutePath: join(projectRoot, `.pi/skills/${skill.skillId}/SKILL.md`),
+    relativePath: layout ? `skills/${skill.skillId}/SKILL.md` : `.pi/skills/${skill.skillId}/SKILL.md`,
+    absolutePath: layout ? join(skillsDir, skill.skillId, "SKILL.md") : join(projectRoot, `.pi/skills/${skill.skillId}/SKILL.md`),
     content: buildBootstrapSkillFileContent(
       skill,
       capabilityInstructions,
@@ -608,6 +630,7 @@ export function buildDeveloperTeamInstallPlan(
 
   return {
     projectRoot,
+    ...(layout ? { layout } : {}),
     agentsDir,
     skillsDir,
     agents,
@@ -1176,6 +1199,7 @@ function buildAgentFileContent(
   capabilityInstructions?: CapabilityInstructionBundle,
   personality?: import("@deck/core/config/deck-config").OrchestratorPersonality,
   promptProfile: DeveloperTeamPromptProfileV1 = "compact",
+  globalProfileReference?: string,
 ): string {
   const isOrchestrator = agent.id === DEVELOPER_ORCHESTRATOR_AGENT_ID;
 
@@ -1198,6 +1222,7 @@ function buildAgentFileContent(
       thinking,
       memoryBundle,
       capabilityInstructions,
+      globalProfileReference,
     );
   }
 
@@ -1245,6 +1270,7 @@ function buildOrchestratorStub(
   thinking?: PiThinkingLevel,
   memoryBundle?: MemoryInjectionBundle,
   capabilityInstructions?: CapabilityInstructionBundle,
+  globalProfileReference?: string,
 ): string {
   // Build tool bindings from memory bundle - filter by surface matching "agent"
   // This follows the same contract as composeAdaptiveMemory
@@ -1274,7 +1300,7 @@ function buildOrchestratorStub(
   const profileReference = [
     "## Team Profile",
     "",
-    "The binding adaptive team contract lives in `.deck/pi/profiles/<team>/system-prompt.md`",
+    `The binding adaptive team contract lives in \`${globalProfileReference ?? ".deck/pi/profiles/<team>/system-prompt.md"}\``,
     "and is passed through `--system-prompt` when the team launches.",
   ];
 

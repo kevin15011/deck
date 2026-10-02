@@ -16,6 +16,16 @@ import { buildTeamProfileDir } from "./pi-team-launch";
 import { getTeamsForEnvironment } from "./team-catalog";
 import executionExtensionAssetPath from "../assets/pi/extensions/developer-team-execution.generated.js" with { type: "file" };
 
+/** Content of the packaged (generated) developer-team execution extension bundle. */
+export function readPiExecutionExtensionSource(): string {
+  return readFileSync(
+    typeof executionExtensionAssetPath === "string"
+      ? executionExtensionAssetPath
+      : new URL("../assets/pi/extensions/developer-team-execution.generated.js", import.meta.url),
+    "utf-8",
+  );
+}
+
 // --- Types ---
 
 const SUPPORTED_PI_PROFILE_MEMORY_PROVIDER_IDS = ["supermemory"] as const;

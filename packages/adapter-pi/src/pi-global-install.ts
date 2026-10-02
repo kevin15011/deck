@@ -439,6 +439,22 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
   return plan;
 }
 
+function missingAncestorDirs(io: PiFileIO, targets: readonly string[]): string[] {
+  const created: string[] = [];
+  const seen = new Set<string>();
+  for (const path of targets) {
+    let directory = dirname(path);
+    while (!seen.has(directory) && !io.exists(directory)) {
+      created.push(directory);
+      seen.add(directory);
+      const parent = dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  }
+  return created;
+}
+
 export type PiApplyResult = { changedCount: number; changes: readonly PiPlannedChange[] };
 
 export function applyPiGlobalPlan(plan: PiGlobalPlan, io: PiFileIO): PiApplyResult {
@@ -458,21 +474,7 @@ export function applyPiGlobalPlan(plan: PiGlobalPlan, io: PiFileIO): PiApplyResu
     snapshots.set(path, current ?? null);
   }
 
-  // Remember which ancestor directories do not exist yet so rollback can remove them.
-  const createdDirs: string[] = [];
-  const seenDirs = new Set<string>();
-  for (const { path } of touched) {
-    let directory = dirname(path);
-    const chain: string[] = [];
-    while (!seenDirs.has(directory) && !io.exists(directory)) {
-      chain.push(directory);
-      seenDirs.add(directory);
-      const parent = dirname(directory);
-      if (parent === directory) break;
-      directory = parent;
-    }
-    createdDirs.push(...chain);
-  }
+  const createdDirs = missingAncestorDirs(io, touched.map((entry) => entry.path));
 
   const done: string[] = [];
   try {
@@ -553,4 +555,45 @@ export function verifyPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileI
 /** Absolute, normalized path helper for tests and callers. */
 export function resolvePiRelative(agentDir: string, relPath: string): string {
   return normalize(resolveInside(agentDir, relPath));
+}
+
+export type PiSnapshot = {
+  agentDir: string;
+  entries: { path: string; previous: string | null; /** sha256 of the content the apply wrote, or "absent" if it deleted the path */ applied: string }[];
+  createdDirs: string[];
+};
+
+/** Captures everything a plan will touch so the adapter's backup/rollback hooks can restore it exactly. */
+export function snapshotPiPlanTargets(plan: PiGlobalPlan, io: PiFileIO): PiSnapshot {
+  const entries: PiSnapshot["entries"] = [
+    ...plan.writes.map((write) => ({ path: write.path, previous: io.readText(write.path) ?? null, applied: hashContent(write.content) })),
+    ...plan.deletes.map((del) => ({ path: del.path, previous: io.readText(del.path) ?? null, applied: "absent" })),
+  ];
+  return { agentDir: plan.agentDir, entries, createdDirs: missingAncestorDirs(io, entries.map((entry) => entry.path)) };
+}
+
+export type PiRestoreResult = { restored: boolean; conflicts: string[] };
+
+/**
+ * Restores a snapshot. A path whose current content is neither the applied nor the previous content was changed
+ * by someone else, so it is reported as a conflict and left untouched.
+ */
+export function restorePiSnapshot(snapshot: PiSnapshot, io: PiFileIO): PiRestoreResult {
+  const conflicts: string[] = [];
+  for (const entry of [...snapshot.entries].reverse()) {
+    const current = io.readText(entry.path);
+    const currentHash = current === undefined ? "absent" : hashContent(current);
+    const previousHash = entry.previous === null ? "absent" : hashContent(entry.previous);
+    if (currentHash === previousHash) continue;
+    if (currentHash !== entry.applied) {
+      conflicts.push(entry.path);
+      continue;
+    }
+    if (entry.previous === null) io.remove(entry.path);
+    else io.writeText(entry.path, entry.previous);
+  }
+  if (conflicts.length === 0) {
+    for (const directory of [...snapshot.createdDirs].sort((left, right) => right.length - left.length)) io.removeDirIfEmpty(directory);
+  }
+  return { restored: conflicts.length === 0, conflicts };
 }

@@ -349,7 +349,7 @@ describe("runner-sync", () => {
       try {
         await initCanonicalRemote(root);
         await writePiSupermemoryConfig(join(home, ".pi", "agent", "mcp.json"), "sm_project_v1_kevin15011_deck");
-        const adapter = createPiRunnerAdapter({ homeDirectory: home });
+        const adapter = createPiRunnerAdapter({ homeDirectory: home, env: {}, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0" }) });
       const detectedAdapter = Object.assign(adapter, { detectDeckInstall: async () => ({ installed: true, managedPaths: [join(home, ".pi", "agent", "mcp.json")] }) }) as RunnerAdapter;
       const result = await runRunnerSync({
         config: supermemorySyncConfig("pi"),
@@ -361,9 +361,9 @@ describe("runner-sync", () => {
 
       expect(result.outcomes[0]?.status).toBe("synced");
       const content = [
-        await readFile(join(home, ".pi", "agent", "agents", "deck-lead.md"), "utf8"),
-        await readFile(join(home, ".pi", "agent", "skills", "deck-apply-fast", "SKILL.md"), "utf8"),
-        await readFile(join(home, ".pi", "agent", "skills", "deck-onboard", "SKILL.md"), "utf8"),
+        await readFile(join(home, ".pi", "agent", "deck", "package", "agents", "deck-lead.md"), "utf8"),
+        await readFile(join(home, ".pi", "agent", "deck", "package", "skills", "deck-apply-fast", "SKILL.md"), "utf8"),
+        await readFile(join(home, ".pi", "agent", "deck", "package", "skills", "deck-onboard", "SKILL.md"), "utf8"),
       ].join("\n");
       expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
       expect(content).toContain("schemas permit model-selected project scope");
@@ -385,7 +385,7 @@ describe("runner-sync", () => {
       try {
         await initCanonicalRemote(root);
         await writePiSupermemoryConfig(join(home, ".pi", "agent", "mcp.json"), projectScope);
-        const adapter = createPiRunnerAdapter({ homeDirectory: home });
+        const adapter = createPiRunnerAdapter({ homeDirectory: home, env: {}, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0" }) });
         const detectedAdapter = Object.assign(adapter, { detectDeckInstall: async () => ({ installed: true, managedPaths: [join(home, ".pi", "agent", "mcp.json")] }) }) as RunnerAdapter;
         const result = await runRunnerSync({
           config: supermemorySyncConfig("pi"),
@@ -397,9 +397,9 @@ describe("runner-sync", () => {
 
         expect(result.outcomes[0]?.status).toBe("synced");
         const content = [
-          await readFile(join(home, ".pi", "agent", "agents", "deck-lead.md"), "utf8"),
-          await readFile(join(home, ".pi", "agent", "skills", "deck-apply-fast", "SKILL.md"), "utf8"),
-          await readFile(join(home, ".pi", "agent", "skills", "deck-onboard", "SKILL.md"), "utf8"),
+          await readFile(join(home, ".pi", "agent", "deck", "package", "agents", "deck-lead.md"), "utf8"),
+          await readFile(join(home, ".pi", "agent", "deck", "package", "skills", "deck-apply-fast", "SKILL.md"), "utf8"),
+          await readFile(join(home, ".pi", "agent", "deck", "package", "skills", "deck-onboard", "SKILL.md"), "utf8"),
         ].join("\n");
         expect(content).toContain("Runtime-managed recall and capture bind project scope server-side");
         expect(content).toContain("schemas permit model-selected project scope");

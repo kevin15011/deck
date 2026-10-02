@@ -77,7 +77,8 @@ describe("Pi active-runner skill discovery provider", () => {
     try {
       execFileSync("git", ["init"], { cwd: projectRoot, stdio: "ignore" });
       execFileSync("git", ["remote", "add", "origin", "https://github.com/kevin15011/deck.git"], { cwd: projectRoot, stdio: "ignore" });
-      const adapter = createPiRunnerAdapter();
+      // Hermetic: isolated HOME and agent dir; the version probe never spawns the real pi.
+      const adapter = createPiRunnerAdapter({ homeDirectory: join(projectRoot, "home"), env: {}, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0" }) });
 
       const plan = adapter.buildDeveloperTeamInstallPlan({
         projectRoot,
@@ -102,7 +103,7 @@ describe("Pi active-runner skill discovery provider", () => {
     const projectRoot = join(home, "project");
     try {
       mkdirSync(projectRoot, { recursive: true });
-      const adapter = createPiRunnerAdapter({ homeDirectory: home });
+      const adapter = createPiRunnerAdapter({ homeDirectory: home, env: {} });
       const provider = adapter.skillDiscovery;
 
       expect(provider?.schema).toBe("skill-discovery-source-provider-v1");
@@ -115,21 +116,24 @@ describe("Pi active-runner skill discovery provider", () => {
       expect(first.sources.map((source) => source.declaration.sourceId)).toEqual([
         "pi-project-skills",
         "pi-user-agent-skills",
+        "pi-deck-package-skills",
         "pi-user-skills",
       ]);
       expect(second.sources.map((source) => source.declaration.sourceId)).toEqual(
         first.sources.map((source) => source.declaration.sourceId),
       );
       expect(first.sources.every((source) => source.kind === "filesystem")).toBe(true);
-      expect(first.sources.map((source) => source.declaration.runnerId)).toEqual(["pi", "pi", "pi"]);
+      expect(first.sources.map((source) => source.declaration.runnerId)).toEqual(["pi", "pi", "pi", "pi"]);
       expect(first.sources.map((source) => source.declaration.sourceCategory)).toEqual([
         "project_runner",
+        "user_runner",
         "user_runner",
         "user_runner",
       ]);
       expect(first.sources.map((source) => source.declaration.safeLocatorBase)).toEqual([
         ".pi/skills",
         "pi-user-agent-skills",
+        "pi-deck-package-skills",
         "pi-user-skills",
       ]);
       expect(first.sources.some((source) => source.declaration.sourceId.startsWith("opencode"))).toBe(false);
@@ -179,7 +183,7 @@ describe("Pi active-runner skill discovery provider", () => {
       });
 
       expect(result.outcome).toBe("complete");
-      expect(result.sources).toHaveLength(3);
+      expect(result.sources).toHaveLength(4);
       expect(result.diagnostics).toEqual([]);
     } finally {
       cleanup(home);
@@ -724,5 +728,31 @@ describe("Pi Serena adapter projection", () => {
     } as any);
 
     expect(writerCalls).toBe(0);
+  });
+});
+
+describe("Pi skill discovery honors PI_CODING_AGENT_DIR", () => {
+  test("user skill roots follow the resolved agent dir and include the Deck package skills", async () => {
+    const home = tempHome();
+    const agentDir = join(home, "custom-agent");
+    const projectRoot = join(home, "project");
+    try {
+      mkdirSync(join(agentDir, "skills", "mine"), { recursive: true });
+      mkdirSync(join(agentDir, "deck", "package", "skills", "deck-lead"), { recursive: true });
+      mkdirSync(projectRoot, { recursive: true });
+      writeFileSync(join(agentDir, "skills", "mine", "SKILL.md"), "---\nname: mine\n---\n");
+      writeFileSync(join(agentDir, "deck", "package", "skills", "deck-lead", "SKILL.md"), "---\nname: deck-lead\n---\n");
+      const adapter = createPiRunnerAdapter({ homeDirectory: home, env: { PI_CODING_AGENT_DIR: agentDir } });
+      const provider = adapter.skillDiscovery!;
+
+      await expect(provider.resolveLocator({ projectRoot, locator: "runner:pi:pi-user-agent-skills/mine/SKILL.md" })).resolves.toMatchObject({ status: "available" });
+      await expect(provider.resolveLocator({ projectRoot, locator: "runner:pi:pi-deck-package-skills/deck-lead/SKILL.md" })).resolves.toMatchObject({ status: "available" });
+      // The default ~/.pi/agent location is not consulted when an override is active.
+      mkdirSync(join(home, ".pi", "agent", "skills", "stray"), { recursive: true });
+      writeFileSync(join(home, ".pi", "agent", "skills", "stray", "SKILL.md"), "# stray");
+      await expect(provider.resolveLocator({ projectRoot, locator: "runner:pi:pi-user-agent-skills/stray/SKILL.md" })).resolves.toEqual({ status: "missing" });
+    } finally {
+      cleanup(home);
+    }
   });
 });

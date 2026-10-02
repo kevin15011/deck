@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { resolvePiAgentDir } from "./agent-dir";
 import {
   runEvidenceGatedSerenaWriter,
   validateSerenaMcpWriterInput,
@@ -87,7 +88,15 @@ type MergeOutcome =
   | { ok: true; config: JsonRecord; changed: boolean; existed: boolean }
   | { ok: false; diagnostics: PiMcpConfigDiagnostic[] };
 
-export function defaultPiMcpConfigPath(homeDir = homedir()): string {
+/**
+ * Global Pi MCP config path. Without an explicit `homeDir` it follows `PI_CODING_AGENT_DIR` (when valid) so Deck and
+ * Pi agree on the agent directory; an explicit `homeDir` keeps the `<home>/.pi/agent/mcp.json` default.
+ */
+export function defaultPiMcpConfigPath(homeDir?: string, env: Readonly<Record<string, string | undefined>> = process.env): string {
+  if (homeDir === undefined) {
+    const resolved = resolvePiAgentDir(env, homedir());
+    return resolved.ok ? join(resolved.dir, "mcp.json") : join(homedir(), ".pi", "agent", "mcp.json");
+  }
   return join(homeDir, ".pi", "agent", "mcp.json");
 }
 

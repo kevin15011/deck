@@ -15,18 +15,18 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 ## Phase 1 — Foundations (version, agent dir, session dir, manifest, types)
 
 - [x] 1.1 Min-version preflight: semver parse of `pi --version`, `>= 1.0.0`, upgrade hint (`preflight.test.ts` first).
-- [ ] 1.2 `resolvePiAgentDir` with `PI_CODING_AGENT_DIR` validation; thread through planner/verifier/launcher; tests isolate `HOME`.
-- [ ] 1.3 Replace `PI_SESSION_DIR` with `--session-dir` / `PI_CODING_AGENT_SESSION_DIR` in `packages/adapter-pi/src/pi-team-launch.ts:154`, `packages/adapter-pi/src/runner-adapter.ts:1051` and `packages/core/src/config/env-sanitizer.ts:17` (failing launch/sanitizer tests first).
+- [x] 1.2 `resolvePiAgentDir` with `PI_CODING_AGENT_DIR` validation; thread through planner/verifier/launcher; tests isolate `HOME`.
+- [x] 1.3 Replace `PI_SESSION_DIR` with `--session-dir` / `PI_CODING_AGENT_SESSION_DIR` in `packages/adapter-pi/src/pi-team-launch.ts:154`, `packages/adapter-pi/src/runner-adapter.ts:1051` and `packages/core/src/config/env-sanitizer.ts:17` (failing launch/sanitizer tests first).
 - [x] 1.4 Pi manifest (hashes plus owned `settings.json` `packages` key and `mcp.json` server names) and transactional apply/rollback.
 - [x] 1.5 Add `@earendil-works/pi-coding-agent` / `@earendil-works/pi-ai` as dev dependencies for types and the faux provider; replace the hand-rolled `PiExtensionApi` with `ExtensionAPI`/`ExtensionFactory`; keep the canonical bundle build emitting `.js`.
 
 ## Phase 2 — Global package materialization
 
-- 2.1 Package layout writer: `package.json` pi manifest, peer deps, `extensions/*.js`, `skills/`, `prompts/`, `agents/*.md` (package-internal).
-- 2.2 `settings.json` `packages` merge: a relative path in `pi install` format; add/remove only the Deck entry; preserve user values.
-- 2.3 Move the team profile to a global location; lead uses `--system-prompt`; never write `SYSTEM.md`/`APPEND_SYSTEM.md`.
-- 2.4 Activation guard helper (`DECK_PI_SESSION`, `DECK_PI_ROLE`, `DECK_PI_CHILD`) shared by all Deck extensions.
-- 2.5 Remove project-local writes from `developer-team-install.ts`; contract test asserts no `<project>/.pi` or `.deck/pi` writes.
+- [x] 2.1 Package layout writer: `package.json` pi manifest, peer deps, `extensions/*.js`, `skills/`, `prompts/`, `agents/*.md` (package-internal).
+- [x] 2.2 `settings.json` `packages` merge: a relative path in `pi install` format; add/remove only the Deck entry; preserve user values.
+- [x] 2.3 Move the team profile to a global location; lead uses `--system-prompt`; never write `SYSTEM.md`/`APPEND_SYSTEM.md`.
+- [x] 2.4 Activation guard helper (`DECK_PI_SESSION`, `DECK_PI_ROLE`, `DECK_PI_CHILD`) shared by all Deck extensions.
+- [x] 2.5 Remove project-local writes from `developer-team-install.ts`; contract test asserts no `<project>/.pi` or `.deck/pi` writes.
 
 ## Phase 3 — Native MCP, owned binaries, web search
 

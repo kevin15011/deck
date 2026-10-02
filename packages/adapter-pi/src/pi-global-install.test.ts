@@ -8,6 +8,8 @@ import {
   applyPiGlobalPlan,
   createNodePiFileIO,
   planPiGlobalInstall,
+  restorePiSnapshot,
+  snapshotPiPlanTargets,
   verifyPiGlobalInstall,
   type PiFileIO,
   type PiGlobalDesiredState,
@@ -356,5 +358,40 @@ describe("verifyPiGlobalInstall", () => {
     const result = verifyPiGlobalInstall(state, io());
     expect(result.valid).toBe(false);
     expect(result.diagnostics.join(" ")).toContain("deck/package");
+  });
+});
+
+describe("snapshot and restore (adapter backup/rollback)", () => {
+  test("restores the exact pre-apply state, including newly created files and directories", () => {
+    writeFileSync(paths().settings, `${JSON.stringify({ defaultModel: "keep" })}\n`);
+    const before = snapshotTree(agentDir);
+    const plan = planPiGlobalInstall(desired(), io());
+    const snapshot = snapshotPiPlanTargets(plan, io());
+    applyPiGlobalPlan(plan, io());
+    expect(snapshotTree(agentDir)).not.toEqual(before);
+
+    const result = restorePiSnapshot(snapshot, io());
+    expect(result).toEqual({ restored: true, conflicts: [] });
+    expect(snapshotTree(agentDir)).toEqual(before);
+    expect(existsSync(join(agentDir, "deck"))).toBe(false);
+  });
+
+  test("a file changed by someone else after apply is reported as a conflict and left alone", () => {
+    const plan = planPiGlobalInstall(desired(), io());
+    const snapshot = snapshotPiPlanTargets(plan, io());
+    applyPiGlobalPlan(plan, io());
+    const lead = join(agentDir, "deck/package/agents/deck-lead.md");
+    writeFileSync(lead, "changed after apply\n");
+
+    const result = restorePiSnapshot(snapshot, io());
+    expect(result.restored).toBe(false);
+    expect(result.conflicts).toContain(lead);
+    expect(readFileSync(lead, "utf-8")).toBe("changed after apply\n");
+  });
+
+  test("a snapshot is JSON-serializable", () => {
+    const plan = planPiGlobalInstall(desired(), io());
+    const snapshot = snapshotPiPlanTargets(plan, io());
+    expect(JSON.parse(JSON.stringify(snapshot))).toEqual(snapshot);
   });
 });

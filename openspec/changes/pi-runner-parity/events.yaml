@@ -42,3 +42,11 @@ events:
     actor: deck-apply-deep
     notes:
       - "Phase 1 foundations: 0.7, 1.1, 1.4, 1.5 complete (pi-version, agent-dir, pi-manifest, pi-global-install, activation guard, launch plan --session-dir, sanitizer PI_CODING_AGENT_SESSION_DIR). 1.2 and 1.3 adapter threading completes with the Phase 2 adapter wiring."
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 2 complete: global package layout, manifest-owned settings.json packages entry, global lead profile, activation guard, adapter plan/apply/verify/rollback/launch on the global layout; 1.2 and 1.3 closed. See design.md 'Implementation deviations' (Node-loadable execution bundle, guarded extension entries)."
