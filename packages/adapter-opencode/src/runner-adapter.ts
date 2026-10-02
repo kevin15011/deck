@@ -307,7 +307,7 @@ class OpenCodeRunnerAdapterImpl {
   readonly environmentIds: readonly RunnerEnvironmentId[] = [...OPENCODE_ENVIRONMENT_IDS];
   readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS.filter((id) => id !== "adaptive-memory");
   readonly ui = {
-    environmentLabels: { "opencode-development": "OpenCode Development" },
+    environmentLabels: { "opencode-development": "OpenCode" },
     dashboard: { defaultSelectedTeamIds: ["developer-team"] },
     model: {
       providerSource: "Providers and models come from the active OpenCode runner.",

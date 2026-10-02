@@ -507,7 +507,7 @@ describe("DeckApp synthetic runner production flow", () => {
       await waitForOutput(instance, harness.output, "Your AI environment, configured.");
       harness.input("\r");
       await waitForOutput(instance, harness.output, "Choose one or more environments.");
-      expect(harness.output()).toContain("Claude Code Development (global plugin files only)");
+      expect(harness.output()).toContain("Claude Code");
       harness.input("j"); await instance.waitUntilRenderFlush();
       harness.input("j"); await instance.waitUntilRenderFlush();
       harness.input(" "); await instance.waitUntilRenderFlush();

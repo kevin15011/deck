@@ -587,7 +587,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly environmentIds = ["codex-development"] as const;
   readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS;
   readonly ui = {
-    environmentLabels: { "codex-development": "Codex Development" },
+    environmentLabels: { "codex-development": "Codex" },
     dashboard: { defaultSelectedTeamIds: ["developer-team"], executionClass: "static-compatible" },
     model: {
       providerSource: "Providers, models, and reasoning levels come from `codex debug models` for the active account.",
