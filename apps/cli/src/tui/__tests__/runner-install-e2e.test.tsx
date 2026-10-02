@@ -416,7 +416,7 @@ describe("Codex adapter-driven render-only states", () => {
     expect(toggleableIds).not.toContain("code-economy");
     const dispositions = renderToString(<RunnerDashboardScreens state={dashboardState} capabilityResolver={resolver} />);
     for (const label of ["Codebase Memory", "Context Mode", "RTK"]) expect(dispositions).toContain(`[x] ${label}`);
-    for (const label of ["Adaptive Memory", "Serena"]) expect(dispositions).toContain(`[ ] ${label}`);
+    for (const label of ["Adaptive Memory", "Serena"]) expect(dispositions).toContain(`[x] ${label}`);
     expect(dispositions).not.toContain("[ ] Code Economy");
     expect(dispositions).not.toContain("OpenCode Mermaid Renderer");
     expect(dispositions).not.toContain("Deck Model Variants");
