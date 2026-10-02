@@ -415,6 +415,8 @@ export function AgentModelAssignmentScreen({
 }
 
 type AgentModelConfigListScreenProps = {
+  saving?: boolean;
+  error?: string | null;
   cursor: number;
   modelAssignments: Record<string, string>;
   thinkingAssignments: Record<string, string>;
@@ -425,6 +427,8 @@ type AgentModelConfigListScreenProps = {
 };
 
 export function AgentModelConfigListScreen({
+  saving = false,
+  error,
   cursor,
   modelAssignments,
   thinkingAssignments,
@@ -462,6 +466,8 @@ export function AgentModelConfigListScreen({
       <Text dimColor>Current assignments are shown. Choose an agent to change its model and reasoning level.</Text>
       {discoveryState === "stale" ? <Text color="yellow">Last known OpenCode models are shown; changes are disabled until Retry discovery succeeds.</Text> : null}
       {dashboardContext?.source === "dashboard" ? <DashboardContextSummary context={dashboardContext} /> : null}
+      {saving ? <ActivityIndicator color="cyan">Saving model configuration…</ActivityIndicator> : null}
+      {!saving && error ? <Text color="red">{error}</Text> : null}
       <Box marginTop={1}>
         <MenuList cursor={cursor} items={items} />
       </Box>

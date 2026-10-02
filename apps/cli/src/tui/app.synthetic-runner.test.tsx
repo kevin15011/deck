@@ -603,6 +603,13 @@ describe("DeckApp synthetic runner production flow", () => {
     const adapter = registry.get("claude");
     const defaultPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "claude-development", deckConfig: configStore.readRequired() });
     await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "claude-development", plan: defaultPlan });
+    const originalValidation = adapter.validateModelAssignments!;
+    let releaseValidation!: (result: Awaited<ReturnType<typeof originalValidation>>) => void;
+    let validationCalls = 0;
+    adapter.validateModelAssignments = async () => {
+      validationCalls++;
+      return await new Promise((resolve) => { releaseValidation = resolve; });
+    };
     const harness = createInkHarness();
     const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
@@ -631,6 +638,28 @@ describe("DeckApp synthetic runner production flow", () => {
       await waitForOutput(instance, harness.output, "Select an agent to configure");
       expect(harness.output()).toContain("Availability unverified");
       for (let i = 0; i < 7; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Saving model configuration");
+      harness.input("\r"); harness.input("j"); harness.input("\u001b");
+      await instance.waitUntilRenderFlush();
+      expect(validationCalls).toBe(1);
+      releaseValidation({ valid: false, issues: [{ agentId: "deck-lead", code: "model-unavailable", message: "Models changed. Retry discovery." }] });
+      await waitForOutput(instance, harness.output, "Models changed. Retry discovery.");
+      expect(adapter.readModelAssignments(projectRoot)["deck-lead"]).not.toBe("runtime/model-2030");
+      adapter.validateModelAssignments = async () => { throw new Error("private-configuration-value"); };
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Could not prepare model configuration");
+      expect(harness.output()).not.toContain("private-configuration-value");
+      adapter.validateModelAssignments = originalValidation;
+      const originalVerify = adapter.verifyDeveloperTeamInstall;
+      adapter.verifyDeveloperTeamInstall = async (plan) => {
+        adapter.verifyDeveloperTeamInstall = originalVerify;
+        return { valid: false, diagnostics: ["fixture invalid installation"] };
+      };
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Verification failed.");
+      expect(harness.output()).toContain("fixture invalid installation");
+      adapter.verifyDeveloperTeamInstall = originalVerify;
       harness.input("\r");
        await waitForCondition(instance, () => adapter.readModelAssignments(projectRoot)["deck-lead"] === "runtime/model-2030", "Claude global model assignment");
        const pluginPath = join(dataRoot, "claude", JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8")).plugin as string);
