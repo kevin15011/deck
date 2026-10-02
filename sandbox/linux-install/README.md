@@ -10,11 +10,11 @@ From the repository root:
 
 ```sh
 # Only runners: manually download Deck through its official installer.
-bun run sandbox:linux -- without-deck
+bun sandbox:clean
 
 # Build this checkout's canary into a temporary directory and copy it into the session.
 # Requires Linux and installed checkout dependencies (bun install --frozen-lockfile).
-bun run sandbox:linux -- with-deck
+bun sandbox
 ```
 
 With Deck, run `deck-canary` to open the TUI. Without Deck, run:
@@ -30,13 +30,13 @@ Both modes start as the unprivileged `tester` user in `/home/tester/project`, an
 For an already-built Linux canary matching the image architecture:
 
 ```sh
-DECK_SANDBOX_CANARY=/absolute/path/to/deck-canary bun run sandbox:linux -- with-deck
+DECK_SANDBOX_CANARY=/absolute/path/to/deck-canary bun sandbox
 ```
 
 ## Refresh stable runners
 
 ```sh
-bun run sandbox:linux -- update
+bun sandbox:update
 ```
 
 OpenCode and Codex use npm's `latest` distribution tag; Claude uses its native installer's `stable` channel. Versions are not pinned. Updating re-resolves those channels and checks each CLI's version, while retaining cached Linux layers where possible. Starting a session reuses the installed image rather than downloading Linux or runners again. `/home/tester/runner-versions.txt` records the versions at build time; runners may update themselves within a session.

@@ -1,5 +1,11 @@
 # Linux installation sandbox
 
+## Short launch commands
+
+Added `bun sandbox` (with checkout canary), `bun sandbox:clean` (runners only), and `bun sandbox:update` (refresh stable runners). Documentation and launcher help use these aliases; the existing sandbox:linux entry remains available. This only simplifies command routing and does not change container behavior.
+
+Validated all three aliases through Bun with an isolated shell shim, without creating a real container. All 24 focused sandbox/documentation tests passed; Bash syntax and git diff --check passed.
+
 ## Intent and acceptance
 Provide a disposable Linux terminal for manual Deck installation through its TUI on stable OpenCode, Codex and Claude Code. Exactly two launch modes: runner-only for official Deck download tests, and checkout-built deck-canary for TUI installation tests. Resolve stable channels at image refresh, cache the base image, permit same-daemon agent inspection, and remove session configuration on exit. No host configuration or credentials are mounted.
 

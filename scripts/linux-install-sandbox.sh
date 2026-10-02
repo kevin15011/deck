@@ -8,7 +8,7 @@ if [[ $# -gt 1 ]]; then echo 'Expected one mode.' >&2; exit 2; fi
 case "$mode" in
   with-deck|without-deck|update) ;;
   help|--help|-h)
-    echo 'Usage: bun run sandbox:linux -- with-deck|without-deck|update'
+    echo 'Usage: bun sandbox | bun sandbox:clean | bun sandbox:update'
     echo 'with-deck builds this checkout into a temporary deck-canary; DECK_SANDBOX_CANARY can supply an existing Linux binary.'
     exit 0 ;;
   *) echo "Unknown mode: $mode" >&2; exit 2 ;;

@@ -34,7 +34,7 @@ Direct supported forms are `bun test tests/documentation-governance.test.ts`, `b
 
 ## Manual Linux installation sandbox
 
-Use `bun run sandbox:linux -- without-deck` to test the official Deck download, or `bun run sandbox:linux -- with-deck` to open a clean runner environment with a checkout-built canary. `bun run sandbox:linux -- update` refreshes stable runner versions while reusing cached Linux layers. See [sandbox instructions](sandbox/linux-install/README.md) for requirements, temporary session cleanup and agent inspection.
+Use `bun sandbox:clean` to test the official Deck download, or `bun sandbox` to open a clean runner environment with a checkout-built canary. `bun sandbox:update` refreshes stable runner versions while reusing cached Linux layers. See [sandbox instructions](sandbox/linux-install/README.md) for requirements, temporary session cleanup and agent inspection.
 
 ## Verification tiers
 
