@@ -955,6 +955,7 @@ describe("Codex RunnerAdapter production composition", () => {
               : { valid: false as const, code: "stale-readiness-evidence" as const, diagnostic: { code: "stale", message: "stale" } },
           };
         },
+        serenaProxyCommand: ["/fixtures/deck-canary", "internal", "serena-mcp"],
         serenaProxyProbe: readySerenaProxy,
       } as never);
       await ready.prepareDeveloperTeamInstall!({
@@ -971,7 +972,7 @@ describe("Codex RunnerAdapter production composition", () => {
       });
       const readyConfig = readyPlan.files.find((file) => file.path === ".codex/config.toml")?.content ?? "";
       expect(readyPlan.blocked).toBe(false);
-      expect(readyConfig).toContain('command = "deck"');
+      expect(readyConfig).toContain('command = "/fixtures/deck-canary"');
        expect(readyConfig).toContain('args = ["internal", "serena-mcp"]');
        expect(readyConfig).toContain('env_vars = ["HOME", "PATH", "XDG_DATA_HOME"]');
        expect(readyConfig).not.toContain(executable);
@@ -980,6 +981,7 @@ describe("Codex RunnerAdapter production composition", () => {
         isInstalled: true,
         diagnostics: expect.arrayContaining([expect.stringContaining("executable reused"), expect.stringContaining("MCP configured"), expect.stringContaining("MCP ready")]),
       });
+      await expect(ready.verifyDeveloperTeamInstall(readyPlan)).resolves.toMatchObject({ valid: true });
       launcherReachable = false;
       await expect(ready.verifyDeveloperTeamInstall(readyPlan)).resolves.toMatchObject({
         valid: false,
@@ -1450,4 +1452,12 @@ describe("Codex RunnerAdapter production composition", () => {
     }
   });
 
+});
+
+test("probes source invocation with exact argument boundaries", async () => {
+  let request: import("./runner-adapter").DeckSerenaProxyProbeRequest | undefined;
+  const command = ["/opt/bun", "/project with spaces/main.tsx", "internal", "serena-mcp"];
+  expect(await createDeckSerenaProxyProbe({ command, run: next => { request = next; return { status: 0, stdout: "deck-serena-mcp-proxy-v1" }; } })()).toEqual({ state: "ready" });
+  expect(request?.command).toBe(command[0]);
+  expect(request?.args).toEqual([...command.slice(1), "--probe"]);
 });

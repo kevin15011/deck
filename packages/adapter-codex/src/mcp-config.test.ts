@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { buildCodexMcpServers,
-  inspectCodexMcpServerCommand, inspectCodexSupermemoryMcpState, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
+  isCodexSerenaMcpConfigured, inspectCodexMcpServerCommand, inspectCodexSupermemoryMcpState, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
 
 describe("Codex MCP semantic configuration", () => {
   test("does not materialize raw Supermemory MCP because scope would be model-selectable", () => {
@@ -153,4 +153,17 @@ http_headers = { "x-sm-project" = "sm_project_default" }
 url = "https://mcp.supermemory.ai/mcp"
 `)).toMatchObject({ ok: false, code: "supermemory-project-scope-missing" });
   });
+});
+
+ test("pins Serena to the reviewed invocation and migrates only owned configs", () => {
+  const route = ["/opt/Deck Canary/deck-canary", "internal", "serena-mcp"];
+  const desired = buildCodexMcpServers({ packageIds: ["serena"], memoryProvider: "none", serenaLauncherAvailable: true, serenaProxyAvailable: true, serenaProxyCommand: route });
+  const merged = mergeCodexMcpServers("", desired.servers);
+  expect(merged.content).toContain('command = "/opt/Deck Canary/deck-canary"');
+  expect(isCodexSerenaMcpConfigured(merged.content, route)).toBe(true);
+  expect(isCodexSerenaMcpConfigured(merged.content)).toBe(false);
+  const old = mergeCodexMcpServers("", buildCodexMcpServers({ packageIds: ["serena"], memoryProvider: "none", serenaLauncherAvailable: true, serenaProxyAvailable: true }).servers).content;
+  expect(mergeCodexMcpServers(old, desired.servers)).toMatchObject({ status: "updated", content: merged.content });
+  const unmanaged = old.replace("# deck-codex-mcp:serena\n", "");
+  expect(mergeCodexMcpServers(unmanaged, desired.servers)).toMatchObject({ status: "blocked", content: unmanaged });
 });

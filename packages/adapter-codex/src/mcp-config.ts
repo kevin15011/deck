@@ -141,14 +141,14 @@ export function isCodexSupermemoryMcpConfigured(source: string): boolean {
 }
 
 /** Confirms the exact portable Deck proxy contract. */
-export function isCodexSerenaMcpConfigured(source: string): boolean {
+export function isCodexSerenaMcpConfigured(source: string, command: readonly string[] = [CODEX_SERENA_PROXY_COMMAND, ...CODEX_SERENA_PROXY_ARGS]): boolean {
   try {
     const server = existingServers(source).get("serena");
     const expected = normalized({
       id: "serena",
       transport: "stdio",
-      command: CODEX_SERENA_PROXY_COMMAND,
-      args: [...CODEX_SERENA_PROXY_ARGS],
+      command: command[0]!,
+      args: command.slice(1),
       envVars: [...CODEX_SERENA_PROXY_ENV_VARS],
     });
     return server !== undefined && JSON.stringify(canonical(server)) === JSON.stringify(canonical(expected));
@@ -299,6 +299,7 @@ export function buildCodexMcpServers(input: {
   serenaLauncherAvailable?: boolean;
   /** The effective `deck` command has confirmed the hidden Serena proxy route. */
   serenaProxyAvailable?: boolean;
+  serenaProxyCommand?: readonly string[];
   /** Absolute, verified Context Mode executable; a bare PATH name is never written. */
   contextModeCommand?: string;
   /** Absolute, verified Codebase Memory executable (shared install or Deck-owned pinned release). */
@@ -334,8 +335,8 @@ export function buildCodexMcpServers(input: {
       servers.push({
         id: "serena",
         transport: "stdio",
-        command: CODEX_SERENA_PROXY_COMMAND,
-        args: [...CODEX_SERENA_PROXY_ARGS],
+        command: input.serenaProxyCommand?.[0] ?? CODEX_SERENA_PROXY_COMMAND,
+        args: input.serenaProxyCommand?.slice(1) ?? [...CODEX_SERENA_PROXY_ARGS],
         envVars: [...CODEX_SERENA_PROXY_ENV_VARS],
       });
     } else {

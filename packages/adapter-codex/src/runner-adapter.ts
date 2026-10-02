@@ -105,6 +105,7 @@ export type CodexRunnerAdapterOptions = {
   serenaBootstrap?: (request: SerenaBootstrapRequest, effects?: SerenaBootstrapEffects) => Promise<SerenaBootstrapResult>;
   serenaBootstrapEffects?: SerenaBootstrapEffects;
   /** Checks whether the effective `deck` command can serve the portable Serena proxy. */
+  serenaProxyCommand?: readonly string[];
   serenaProxyProbe?: () => Promise<DeckSerenaProxyReadiness>;
   /** Provider descriptor selected by the CLI composition root. */
   webSearchProvider?: WebSearchProviderDescriptorV1;
@@ -137,7 +138,7 @@ export type DeckSerenaProxyProbeRequest = Readonly<{
 }>;
 
 export type DeckSerenaProxyProbeOptions = Readonly<{
-  command?: string;
+  command?: string | readonly string[];
   timeoutMs?: number;
   run?: (request: DeckSerenaProxyProbeRequest) => DeckSerenaProxyProbeResult;
 }>;
@@ -164,9 +165,12 @@ export function createDeckSerenaProxyProbe(
   const timeoutMs = typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? Math.floor(options.timeoutMs)
     : SERENA_PROXY_PROBE_TIMEOUT_MS;
+  const command = typeof options.command === "string"
+    ? [options.command, "internal", "serena-mcp"]
+    : options.command ?? ["deck", "internal", "serena-mcp"];
   const request: DeckSerenaProxyProbeRequest = {
-    command: options.command ?? "deck",
-    args: ["internal", "serena-mcp", "--probe"],
+    command: command[0]!,
+    args: [...command.slice(1), "--probe"],
     timeoutMs,
     maxOutputBytes: SERENA_PROXY_PROBE_MAX_OUTPUT_BYTES,
   };
@@ -193,10 +197,6 @@ export function createDeckSerenaProxyProbe(
       message: "The active `deck` command does not support `deck internal serena-mcp`. Update Deck on PATH, then rerun the full Codex install.",
     };
   };
-}
-
-function defaultSerenaProxyProbe(): Promise<DeckSerenaProxyReadiness> {
-  return createDeckSerenaProxyProbe()();
 }
 
 type CodexOperationRecord = {
@@ -617,6 +617,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly #serenaReadinessResolver: NonNullable<CodexRunnerAdapterOptions["serenaReadinessResolver"]>;
   readonly #serenaBootstrap: NonNullable<CodexRunnerAdapterOptions["serenaBootstrap"]>;
   readonly #serenaBootstrapEffects?: SerenaBootstrapEffects;
+  readonly #serenaProxyCommand: readonly string[];
   readonly #serenaProxyProbe: NonNullable<CodexRunnerAdapterOptions["serenaProxyProbe"]>;
   readonly #webSearchProvider?: WebSearchProviderDescriptorV1;
   readonly #webSearchProviderResolver?: CodexRunnerAdapterOptions["webSearchProviderResolver"];
@@ -642,7 +643,8 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#toolOptions = options.tools ?? {};
     this.#codexHome = options.codexHome;
     this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
-    this.#serenaProxyProbe = options.serenaProxyProbe ?? defaultSerenaProxyProbe;
+    this.#serenaProxyCommand = [...(options.serenaProxyCommand ?? ["deck", "internal", "serena-mcp"])];
+    this.#serenaProxyProbe = options.serenaProxyProbe ?? createDeckSerenaProxyProbe({ command: this.#serenaProxyCommand });
     this.#serenaReadinessResolver = options.serenaReadinessResolver
       ?? ((signal) => resolveExistingSerenaReadiness(this.#serenaBootstrapEffects, signal));
     this.#serenaBootstrap = options.serenaBootstrap ?? ((request, effects) => bootstrapSerena(request, effects));
@@ -736,6 +738,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       memoryProvider: input.memoryProviderId,
       supermemoryProjectScope: input.derivedSupermemoryProjectScope,
       serenaLauncherAvailable: input.serenaPreparation?.readiness.state === "ready",
+      serenaProxyCommand: this.#serenaProxyCommand,
       serenaProxyAvailable: input.serenaPreparation?.readiness.state === "ready" && input.serenaPreparation.proxy.state === "ready",
       webSearchProviderSupported: webSearchProvider !== undefined,
       webSearchProviderConfigured: input.deckConfig.webSearch.provider !== undefined,
@@ -894,7 +897,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     const serenaConfigured = mcp.has("serena");
     const serenaMcpReady = serenaReadiness.state === "ready"
       && serenaProxy?.state === "ready"
-      && isCodexSerenaMcpConfigured(config);
+      && isCodexSerenaMcpConfigured(config, this.#serenaProxyCommand);
     const supportStatusFor = (capabilityId: string) => CODEX_CAPABILITY_CATALOG.find((entry) => entry.capabilityId === capabilityId)?.status
       ?? getRunnerCapabilityMapping(capabilityId, this.runnerId, [CODEX_RUNNER_CAPABILITY_CONTRIBUTION])?.status
       ?? "supported";
@@ -1425,6 +1428,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       webSearchCommand: this.#webSearchCommand(webSearchProvider),
       materializationScope,
       serenaLauncherAvailable: serenaPreparation?.readiness.state === "ready",
+      serenaProxyCommand: this.#serenaProxyCommand,
       serenaProxyAvailable: serenaPreparation?.readiness.state === "ready" && serenaPreparation.proxy.state === "ready",
       confirmedModels: this.#latestReadyInventory
         ? Object.values(this.#latestReadyInventory.inventory.modelsByProvider).flat().map((model) => model.id)
@@ -1809,7 +1813,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     if (serenaReadiness) {
       const config = native.expectedFiles.find((expected) => expected.kind === "config");
       const configPath = config ? mapVirtualPath(this.#roots, config.relativePath).absolute : undefined;
-      const configured = configPath && existsSync(configPath) ? isCodexSerenaMcpConfigured(readFileSync(configPath, "utf8")) : false;
+      const configured = configPath && existsSync(configPath) ? isCodexSerenaMcpConfigured(readFileSync(configPath, "utf8"), this.#serenaProxyCommand) : false;
       if (!configured) problems.push("Serena MCP launcher configuration is missing or drifted.");
       try {
         const refreshed = await serenaReadiness.revalidate(serenaReadiness.evidence);
