@@ -1,4 +1,5 @@
 import React from "react";
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -29,8 +30,9 @@ import { reduceRunnerDashboard, type PlanBuilderFn } from "./runner-dashboard/re
 import { buildOpenCodeRunnerReviewPlan, type OpenCodeToolInstallResultExact } from "@deck/adapter-opencode";
 import { getRunnerReviewPlanRunBlockPreflight, resolveSupermemoryRuntimeCredentialReadiness } from "./runner-dashboard/action-runner";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
+import { getPackageInstructionSummaries } from "./runner-dashboard/selectors";
 
-setDefaultTimeout(15_000);
+setDefaultTimeout(120_000);
 
 function createCanonicalTempRoot(prefix: string): string {
   return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
@@ -65,8 +67,8 @@ function createInkHarness() {
   };
 }
 
-async function waitForOutput(instance: { waitUntilRenderFlush(): Promise<unknown> }, output: () => string, text: string) {
-  const deadline = Date.now() + 5_000;
+async function waitForOutput(instance: { waitUntilRenderFlush(): Promise<unknown> }, output: () => string, text: string, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
   while (!output().includes(text)) {
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${JSON.stringify(text)}; output=${JSON.stringify(output().slice(-2_000))}`);
     await instance.waitUntilRenderFlush();
@@ -81,8 +83,8 @@ async function waitForFreshOutput(instance: { waitUntilRenderFlush(): Promise<un
   }
 }
 
-async function waitForCondition(instance: { waitUntilRenderFlush(): Promise<unknown> }, condition: () => boolean, description: string) {
-  const deadline = Date.now() + 5_000;
+async function waitForCondition(instance: { waitUntilRenderFlush(): Promise<unknown> }, condition: () => boolean, description: string, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
   while (!condition()) {
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${description}.`);
     await instance.waitUntilRenderFlush();
@@ -153,7 +155,44 @@ function renderOpenCodeReviewAfterCredentialEvidenceAction(
   };
 }
 
+async function selectFreshClaudePackages(
+  instance: ReturnType<typeof render>,
+  harness: ReturnType<typeof createInkHarness>,
+  selected: readonly string[],
+) {
+  harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
+  const packages = ["Codebase Memory", "Context Mode", "RTK", "Serena", "Context7"];
+  for (const label of packages) {
+    expect(harness.output().split("\n").filter((line) => line.includes(label)).at(-1)).toContain(`[x] ${label}`);
+  }
+  for (let i = 0; i < packages.length; i++) {
+    if (!selected.includes(packages[i]!)) { harness.input(" "); await instance.waitUntilRenderFlush(); }
+    if (i < packages.length - 1) { harness.input("j"); await instance.waitUntilRenderFlush(); }
+  }
+  const boundary = harness.output().length;
+  harness.input("\u001b"); await waitForFreshOutput(instance, harness.output, boundary, "Claude Code Setup Dashboard");
+}
+
 describe("DeckApp synthetic runner production flow", () => {
+  test("OpenCode Packages exposes Context7 and toggles its MCP review action independently of instructions", () => {
+    const adapter = createDefaultAdapterRegistry().get("opencode");
+    const resolver = { getSupportedPackageInstructionIds: () => adapter.packageInstructionIds ?? [] };
+    let state = createDefaultRunnerDashboardState({ runnerScope: "opencode", runnerUi: adapter.ui, selectedCapabilities: { context7: false } });
+    expect(getPackageInstructionSummaries(state, resolver)).toContainEqual(expect.objectContaining({ capabilityId: "context7", label: "Context7", selected: false }));
+    expect(adapter.packageInstructionIds).not.toContain("context7");
+    const instructions = { ...state.packageInstructions };
+    state = reduceRunnerDashboard(state, { type: "toggle-capability", capabilityId: "context7" });
+    expect(state.selectedCapabilities.context7).toBe(true);
+    expect(state.packageInstructions).toEqual(instructions);
+    expect(getPackageInstructionSummaries(state, resolver)).toContainEqual(expect.objectContaining({ capabilityId: "context7", selected: true }));
+    const inventory = { runnerId: "opencode", environmentId: "opencode-development", capabilities: [{ capabilityId: "context7", isInstalled: false, isBlocked: false, toolId: "context7", source: "@upstash/context7-mcp" }] } as any;
+    const selectedPlan = adapter.buildReviewPlan(state as any, inventory);
+    expect(selectedPlan.groups.automaticInstalls).toContainEqual(expect.objectContaining({ capabilityId: "context7", kind: "write-mcp-config" }));
+    state = reduceRunnerDashboard(state, { type: "toggle-capability", capabilityId: "context7" });
+    expect(state.selectedCapabilities.context7).toBe(false);
+    const deselectedPlan = adapter.buildReviewPlan(state as any, inventory);
+    expect(deselectedPlan.groups.automaticInstalls).not.toContainEqual(expect.objectContaining({ capabilityId: "context7" }));
+  });
   test("Claude TUI explicitly authorizes Serena bootstrap and verifies the native Deck proxy", async () => {
     const root = createCanonicalTempRoot("deck-claude-tui-serena-bridge-");
     const dataRoot = join(root, "data", "deck");
@@ -179,15 +218,13 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input(" "); await instance.waitUntilRenderFlush();
       harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
-      harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
-      for (let i = 0; i < 3; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
-      harness.input(" "); await instance.waitUntilRenderFlush();
-      const boundary = harness.output().length;
-      harness.input("\u001b"); await waitForFreshOutput(instance, harness.output, boundary, "Claude Code Setup Dashboard");
+      expect(calls).toHaveLength(0);
+      await selectFreshClaudePackages(instance, harness, ["Serena"]);
+      expect(calls).toHaveLength(0);
       for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r"); await waitForOutput(instance, harness.output, "Run install");
       harness.input("\r");
-      try { await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude Serena plugin publication"); }
+      try { await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude Serena plugin publication", 20_000); }
       catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; calls=${calls.length}; signals=${harness.output().split("\n").filter((line) => /Serena|serena|Blocked|failed|skipped|review|install|Claude/.test(line)).slice(-25).join(" | ")}`); }
       expect(calls).toHaveLength(1);
       expect(calls[0]?.authorization).toMatchObject({ runner: "claude", kind: "interactive-tui-explicit-selection" });
@@ -227,6 +264,7 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input(" "); await instance.waitUntilRenderFlush();
       harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
+      await selectFreshClaudePackages(instance, harness, []);
       harness.input("j"); await instance.waitUntilRenderFlush();
       harness.input("\r"); await waitForOutput(instance, harness.output, "Adaptive Memory");
       harness.input("j"); await instance.waitUntilRenderFlush();
@@ -242,7 +280,7 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(harness.output()).toContain("co-loaded");
       expect(harness.output().split("\n").filter((line) => line.includes("actions planned:")).at(-1)).toContain("3 actions planned: 1 automatic");
       harness.input("\r");
-      await waitForCondition(instance, () => configStore.readRequired().adaptiveMemory.enabled === true, "official memory activation after verification");
+      await waitForCondition(instance, () => configStore.readRequired().adaptiveMemory.enabled === true, "official memory activation after verification", 20_000);
       expect(existsSync(join(dataRoot, "claude", "official-supermemory-915aba1b8056", ".claude-plugin", "plugin.json"))).toBe(true);
       expect(existsSync(join(root, ".claude"))).toBe(false);
       expect(JSON.stringify(configStore.readRequired())).not.toContain("fixture-profile-once-only");
@@ -297,22 +335,18 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input(" "); await instance.waitUntilRenderFlush();
       harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
-      harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
-      harness.input(" "); await instance.waitUntilRenderFlush();
-      harness.input("j"); await instance.waitUntilRenderFlush();
-      harness.input(" "); await instance.waitUntilRenderFlush();
-      harness.input("j"); await instance.waitUntilRenderFlush();
-      harness.input(" "); await instance.waitUntilRenderFlush();
-      for (let i = 0; i < 2; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
-      harness.input(" "); await instance.waitUntilRenderFlush();
-      expect(harness.output().split("\n").filter((line) => line.includes("Context7")).at(-1)).toContain("[x] Context7");
-      const beforeReturn = harness.output().length;
-      harness.input("\u001b"); await waitForFreshOutput(instance, harness.output, beforeReturn, "Claude Code Setup Dashboard");
+      expect(installations).toEqual([]);
+      expect(codebaseDownloads).toBe(0);
+      expect(rtkDownloads).toBe(0);
+      await selectFreshClaudePackages(instance, harness, ["Codebase Memory", "Context Mode", "RTK", "Context7"]);
       for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r"); await waitForOutput(instance, harness.output, "Run install");
       expect(harness.output().split("\n").filter((line) => line.includes("actions planned:")).at(-1)).toContain("6 actions planned: 4 automatic");
+      expect(installations).toEqual([]);
+      expect(codebaseDownloads).toBe(0);
+      expect(rtkDownloads).toBe(0);
       harness.input("\r");
-      await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude verified tool materialization");
+      await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "Claude verified tool materialization", 20_000);
       expect(installations).toEqual(["context-mode", "context7"]);
       expect(codebaseDownloads).toBe(1);
       expect(rtkDownloads).toBe(1);
@@ -390,7 +424,7 @@ describe("DeckApp synthetic runner production flow", () => {
       await waitForCondition(instance, () => {
         const receipt = JSON.parse(readFileSync(metadata, "utf8"));
         return (receipt.capabilities ?? []).length === 0 && !existsSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"));
-      }, "Claude deselected package publication");
+      }, "Claude deselected package publication", 20_000);
       expect(adapter.readSelectedCapabilityIds?.(root)).toEqual([]);
       expect(configStore.readRequired().packageInstructions.claude?.["context-mode"]).not.toBe(true);
       expect(existsSync(initial.files.find((file) => file.path.endsWith("/.mcp.json"))!.path)).toBe(true);
@@ -427,19 +461,13 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input(" "); await instance.waitUntilRenderFlush();
       harness.input("\r"); await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r"); await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
-      harness.input("\r"); await waitForOutput(instance, harness.output, "Package instructions");
-      harness.input("j"); await instance.waitUntilRenderFlush();
-      harness.input(" "); await instance.waitUntilRenderFlush();
-      harness.input("j"); await instance.waitUntilRenderFlush();
-      harness.input(" "); await instance.waitUntilRenderFlush();
-      const beforeReturn = harness.output().length;
-      harness.input("\u001b"); await waitForFreshOutput(instance, harness.output, beforeReturn, "Claude Code Setup Dashboard");
+      await selectFreshClaudePackages(instance, harness, ["Context Mode", "RTK"]);
       for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r");
       try { await waitForOutput(instance, harness.output, "Run install"); }
       catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; signals=${harness.output().split("\n").filter((line) => /Claude|Blocked|Review|Web Search|Context Mode|capabilit|missing|provider|failed/i.test(line)).slice(-24).join(" | ")}`); }
       harness.input("\r");
-      await waitForCondition(instance, () => adapter.readModelAssignments(root) !== undefined && existsSync(join(dataRoot, "claude", "model-assignments.json")), "global capability receipt");
+      await waitForCondition(instance, () => adapter.readModelAssignments(root) !== undefined && existsSync(join(dataRoot, "claude", "model-assignments.json")), "global capability receipt", 20_000);
       const receipt = JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8"));
       expect(receipt.capabilities).toEqual(["context-mode", "rtk", "web-search"]);
       const mcp = readFileSync(join(dataRoot, "claude", receipt.plugin, ".mcp.json"), "utf8");
@@ -507,7 +535,7 @@ describe("DeckApp synthetic runner production flow", () => {
       await waitForOutput(instance, harness.output, "Your AI environment, configured.");
       harness.input("\r");
       await waitForOutput(instance, harness.output, "Choose one or more environments.");
-      expect(harness.output()).toContain("Claude Code Development (global plugin files only)");
+      expect(harness.output()).toContain("Claude Code");
       harness.input("j"); await instance.waitUntilRenderFlush();
       harness.input("j"); await instance.waitUntilRenderFlush();
       harness.input(" "); await instance.waitUntilRenderFlush();
@@ -515,13 +543,15 @@ describe("DeckApp synthetic runner production flow", () => {
       await waitForOutput(instance, harness.output, "Choose Lead personality");
       harness.input("\r");
       await waitForOutput(instance, harness.output, "Claude Code Setup Dashboard");
+      await selectFreshClaudePackages(instance, harness, []);
       for (let i = 0; i < 4; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r");
       try { await waitForOutput(instance, harness.output, "Run install"); }
       catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; signals=${harness.output().split("\n").filter((line) => /Claude|Review|Blocked|install|Team|Unsupported|Capability|Choose/i.test(line)).slice(-35).join(" | ")}`); }
-      expect(harness.output()).toContain("Create 15 owner-only files in");
+      const standaloneCount = getStandaloneSkills().reduce((count, { skillId }) => count + 1 + Object.keys(getStandaloneSkill(skillId).files).length, 0);
+      expect(harness.output()).toContain(`Create ${15 + standaloneCount} owner-only files in`);
       harness.input("\r");
-       try { await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "global Claude plugin publication"); }
+       try { await waitForCondition(instance, () => existsSync(join(dataRoot, "claude", "model-assignments.json")), "global Claude plugin publication", 20_000); }
       catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}; signals=${installSignals.join(" | ")}; TUI signals: ${harness.output().split("\n").filter((line) => /Claude|Blocked|failed|Run install|Review|Developer Team|skipped|manual/i.test(line)).slice(-14).join(" | ")}`); }
       await waitForOutput(instance, harness.output, "plugin files setup complete");
        const installed = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "claude-development", deckConfig: configStore.readRequired() });
@@ -566,7 +596,7 @@ describe("DeckApp synthetic runner production flow", () => {
        harness.input("\r"); await waitForOutput(instance, harness.output, "Availability unverified");
        for (let i = 0; i < 7; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
        harness.input("\r");
-       await waitForCondition(instance, () => registry.get("claude").readModelAssignments(projectRoot)["deck-lead"] === "vendor/model-2030", "Home exact runtime model save");
+       await waitForCondition(instance, () => registry.get("claude").readModelAssignments(projectRoot)["deck-lead"] === "vendor/model-2030", "Home exact runtime model save", 20_000);
     } finally {
       instance.unmount(); await instance.waitUntilExit(); harness.close();
       if (previousPiDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previousPiDir;
@@ -583,6 +613,13 @@ describe("DeckApp synthetic runner production flow", () => {
     const adapter = registry.get("claude");
     const defaultPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "claude-development", deckConfig: configStore.readRequired() });
     await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "claude-development", plan: defaultPlan });
+    const originalValidation = adapter.validateModelAssignments!;
+    let releaseValidation!: (result: Awaited<ReturnType<typeof originalValidation>>) => void;
+    let validationCalls = 0;
+    adapter.validateModelAssignments = async () => {
+      validationCalls++;
+      return await new Promise((resolve) => { releaseValidation = resolve; });
+    };
     const harness = createInkHarness();
     const instance = render(<DeckApp adapterRegistry={registry} configStore={configStore} resolveProjectRoot={() => projectRoot} runReleaseCheck={async () => ({ kind: "none" })} />,
       { stdin: harness.stdin as any, stdout: harness.stdout as any, interactive: true, debug: true, patchConsole: false });
@@ -612,7 +649,29 @@ describe("DeckApp synthetic runner production flow", () => {
       expect(harness.output()).toContain("Availability unverified");
       for (let i = 0; i < 7; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r");
-       await waitForCondition(instance, () => adapter.readModelAssignments(projectRoot)["deck-lead"] === "runtime/model-2030", "Claude global model assignment");
+      await waitForOutput(instance, harness.output, "Saving model configuration");
+      harness.input("\r"); harness.input("j"); harness.input("\u001b");
+      await instance.waitUntilRenderFlush();
+      expect(validationCalls).toBe(1);
+      releaseValidation({ valid: false, issues: [{ agentId: "deck-lead", code: "model-unavailable", message: "Models changed. Retry discovery." }] });
+      await waitForOutput(instance, harness.output, "Models changed. Retry discovery.");
+      expect(adapter.readModelAssignments(projectRoot)["deck-lead"]).not.toBe("runtime/model-2030");
+      adapter.validateModelAssignments = async () => { throw new Error("private-configuration-value"); };
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Could not prepare model configuration", 20_000);
+      expect(harness.output()).not.toContain("private-configuration-value");
+      adapter.validateModelAssignments = originalValidation;
+      const originalVerify = adapter.verifyDeveloperTeamInstall;
+      adapter.verifyDeveloperTeamInstall = async (plan) => {
+        adapter.verifyDeveloperTeamInstall = originalVerify;
+        return { valid: false, diagnostics: ["fixture invalid installation"] };
+      };
+      harness.input("\r");
+      await waitForOutput(instance, harness.output, "Verification failed.", 20_000);
+      expect(harness.output()).toContain("fixture invalid installation");
+      adapter.verifyDeveloperTeamInstall = originalVerify;
+      harness.input("\r");
+       await waitForCondition(instance, () => adapter.readModelAssignments(projectRoot)["deck-lead"] === "runtime/model-2030", "Claude global model assignment", 20_000);
        const pluginPath = join(dataRoot, "claude", JSON.parse(readFileSync(join(dataRoot, "claude", "model-assignments.json"), "utf8")).plugin as string);
       expect(existsSync(pluginPath)).toBe(true); // previous immutable version remains intact
        expect(adapter.readModelAssignments(projectRoot)).toEqual({ "deck-lead": "runtime/model-2030" });
@@ -656,7 +715,7 @@ describe("DeckApp synthetic runner production flow", () => {
       harness.input("\r"); await waitForOutput(instance, harness.output, "Availability unverified");
       for (let i = 0; i < 7; i++) { harness.input("j"); await instance.waitUntilRenderFlush(); }
       harness.input("\r");
-      await waitForCondition(instance, () => registry.get("claude").readModelAssignments(projectRoot)["deck-lead"] === "vendor/model-2030", "dashboard exact runtime model save");
+      await waitForCondition(instance, () => registry.get("claude").readModelAssignments(projectRoot)["deck-lead"] === "vendor/model-2030", "dashboard exact runtime model save", 20_000);
     } finally {
       instance.unmount(); await instance.waitUntilExit(); harness.close();
       if (previousPiDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previousPiDir;

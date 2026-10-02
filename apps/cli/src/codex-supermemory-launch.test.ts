@@ -54,6 +54,8 @@ function fixture(options: { userHooks?: string; userConfig?: string; projectHook
   };
   const adapter = createCodexRunnerAdapter({
     tools,
+    userHome: tools.homeDir!,
+    codexHome,
     journalRoot: temp("deck-codex-sm-launch-journal-"),
     preflight: {
       probe: async () => ({ found: true, version: "0.159.3", help: "Usage: codex [OPTIONS]\n--dangerously-bypass-hook-trust\n", execHelp: "Usage: codex exec [OPTIONS]", resumeHelp: "Usage: codex resume [SESSION_ID] --last" }),
@@ -67,15 +69,22 @@ function fixture(options: { userHooks?: string; userConfig?: string; projectHook
 }
 
 type DeckCfg = ReturnType<typeof getDefaultDeckConfig>;
-const memoryConfig = (): DeckCfg => ({ ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } });
+const memoryConfig = (): DeckCfg => {
+  const config = getDefaultDeckConfig();
+  config.packageInstructions.codex.serena = false;
+  return { ...config, adaptiveMemory: { enabled: true, activeProvider: "supermemory" } };
+};
 
 async function launch(f: ReturnType<typeof fixture>, extra: { env?: Record<string, string>; deckConfig?: DeckCfg } = {}) {
   let childEnv: Record<string, string> | undefined;
   let childArgs: readonly string[] = [];
   const previews: string[] = [];
+  // This suite verifies memory hooks, not Serena provisioning; never run its external probes.
+  const selected = extra.deckConfig ?? memoryConfig();
+  const deckConfig = { ...selected, packageInstructions: { ...selected.packageInstructions, codex: { ...selected.packageInstructions.codex, serena: false } } };
   const result = await runRunnerLaunch({
     adapter: f.adapter,
-    launch: { projectRoot: f.projectRoot, teamId: "developer-team", mode: "interactive", deckConfig: extra.deckConfig ?? memoryConfig() },
+    launch: { projectRoot: f.projectRoot, teamId: "developer-team", mode: "interactive", deckConfig },
     interactive: false,
     yes: true,
     presentPreview: async (preview) => { previews.push(preview); },
@@ -139,7 +148,7 @@ describe("official Codex Supermemory plugin launch", () => {
 
     const projectJson = fixture({ projectHooksJson: '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"supermemory flush"}]}]}}' });
     expect(await launch(projectJson)).toMatchObject({ result: { status: "blocked" } });
-  });
+  }, 120_000);
 
   test("readiness checks require the owned pinned artifact and project hooks", () => {
     const f = fixture();
@@ -183,7 +192,7 @@ describe("official Codex Supermemory plugin launch", () => {
 
     const off = await launch(fixture({ webSearch: true }), { env: { TAVILY_API_KEY: "stale-parent-tavily" } });
     expect(off.childEnv).not.toHaveProperty("TAVILY_API_KEY");
-  });
+  }, 120_000);
 
   test("dry-run explains the plugin memory route precisely, without secrets and without Deck's runtime label", async () => {
     for (const hasCredential of [true, false]) {

@@ -1,3 +1,4 @@
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "./launch-settings";
 import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, realpath, rename, rm, writeFile, link } from "node:fs/promises";
@@ -70,7 +71,21 @@ function expectedFiles(root: string, assignments: ClaudeAssignments = {}, capabi
     files.push({ path: join(root, "agents", `${agent.id}.md`), content: frontmatter(agent.id) + guidance + canonical.agentBody.trim() + "\n", kind: "agent" });
     files.push({ path: join(root, "skills", agent.skillId, "SKILL.md"), content: frontmatter(agent.skillId) + guidance + canonical.skillBody.trim() + "\n", kind: "skill" });
   }
+  const skillIds = new Set(getDeveloperTeamCatalog().map((agent) => agent.skillId));
+  for (const { skillId } of getStandaloneSkills()) {
+    if (!/^[a-z][a-z0-9-]*$/.test(skillId) || skillIds.has(skillId)) throw new Error("Invalid or duplicate standalone Claude skill ID.");
+    skillIds.add(skillId);
+    const bundle = getStandaloneSkill(skillId);
+    files.push({ path: join(root, "skills", skillId, "SKILL.md"), content: bundle.SKILL, kind: "skill" });
+    for (const [packagePath, content] of Object.entries(bundle.files)) {
+      if (!packagePath || packagePath.includes("\\") || packagePath.includes("\0") || isAbsolute(packagePath)
+        || packagePath.split("/").some((segment) => !segment || segment === "." || segment === "..")
+        || packagePath === "SKILL.md") throw new Error("Invalid standalone Claude skill resource path.");
+      files.push({ path: join(root, "skills", skillId, packagePath), content, kind: "other" });
+    }
+  }
   files.push(...claudeCapabilityFiles(root, capabilities, effects, providerId));
+  if (new Set(files.map((file) => file.path)).size !== files.length) throw new Error("Duplicate Claude plugin file path.");
   if (files.some((file) => Buffer.byteLength(file.content) > 1024 * 1024)) throw new Error("Claude plugin content exceeds file bound.");
   return Object.freeze(files.map((file) => Object.freeze({ ...file })));
 }
@@ -427,7 +442,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter 
   };
   const adapter: RunnerAdapter = {
     runnerId: "claude", displayName: "Claude Code", environmentIds: [ENVIRONMENT], packageInstructionIds: ["context-mode", "codebase-memory", "rtk", "serena"],
-    ui: { environmentLabels: { [ENVIRONMENT]: "Claude Code Development (global plugin files only)" }, dashboard: { defaultSelectedTeamIds: ["developer-team"], defaultSelectedCapabilityIds: ["claude-team-files"], extraSelectableCapabilities: [{ id: "context7", label: "Context7", description: "Use a verified shared Context7 MCP binary in the Claude plugin." }], managedLaunchSupported: false, launchHint: "deck claude developer starts a supervised static-compatible session. Deck supplies the pinned official memory plugin when selected; co-loaded user plugins may also see the process credential. Protected execution remains unsupported.", executionClass: "static-compatible" }, model: { providerSource: "Installed Claude runtime-reported metadata; account entitlement not guaranteed", missingChecks: ["account entitlement", "comparison with authenticated native /model"], remediation: "Retry metadata discovery and check native Claude /model for account-specific availability.", defaultThinkingLevels: [] }, adaptiveMemory: { supermemory: { supported: true, requiresExternalToken: true, selectionStatus: "Official Claude Supermemory uses the existing protected alias/default profile store." } } },
+    ui: { environmentLabels: { [ENVIRONMENT]: "Claude Code" }, dashboard: { defaultSelectedTeamIds: ["developer-team"], defaultSelectedCapabilityIds: ["claude-team-files"], extraSelectableCapabilities: [{ id: "context7", label: "Context7", description: "Use a verified shared Context7 MCP binary in the Claude plugin." }], managedLaunchSupported: false, launchHint: "deck claude developer starts a supervised static-compatible session. Deck supplies the pinned official memory plugin when selected; co-loaded user plugins may also see the process credential. Protected execution remains unsupported.", executionClass: "static-compatible" }, model: { providerSource: "Installed Claude runtime-reported metadata; account entitlement not guaranteed", missingChecks: ["account entitlement", "comparison with authenticated native /model"], remediation: "Retry metadata discovery and check native Claude /model for account-specific availability.", defaultThinkingLevels: [] }, adaptiveMemory: { supermemory: { supported: true, requiresExternalToken: true, selectionStatus: "Official Claude Supermemory uses the existing protected alias/default profile store." } } },
     async inspectProject(projectRoot) {
       const identity = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
       return { projectRoot, state: identity.ok ? "ready" : "degraded", evidence: { interactive: true, exec: false, resume: false, resumeLatest: false, canonicalIdentityVerified: identity.ok }, diagnostics: identity.ok ? [] : [{ code: "claude-project-identity-unverified", severity: "warning" as const, message: "Canonical Git repository identity is unavailable; shared adaptive memory cannot be enabled for this project." }] };

@@ -5,6 +5,7 @@ import { buildCodexLaunchPlan } from "./launch";
 
 const features = { interactive: true, exec: true, resumeById: true, resumeLatest: true } as const;
 const withDeckConfig = <T extends object>(input: T) => ({ ...input, deckConfig: getDefaultDeckConfig() });
+const deckPolicyArgs = ["-c", 'features.multi_agent_v2.multi_agent_mode_hint_text=""'];
 const execTail = expect.arrayContaining(["exec", "--output-last-message", expect.stringContaining("deck-codex-last-message-"), "-"]);
 
 describe("buildCodexLaunchPlan", () => {
@@ -33,17 +34,17 @@ describe("buildCodexLaunchPlan", () => {
 
     expect(buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" }), features)).toMatchObject({
       status: "ready",
-      plan: { command: "codex", args: [bypass], cwd: "/p", stdio: "inherit" },
+      plan: { command: "codex", args: [bypass, ...deckPolicyArgs], cwd: "/p", stdio: "inherit" },
     });
     expect(buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "exec", prompt: ["fix", "it"], stdin: "closed", stdinPayload: { type: "utf8", content: "fix it" } }), features)).toMatchObject({
       status: "ready",
       plan: { args: execTail, stdio: "pipe", stdin: "closed", stdinPayload: { type: "utf8", content: "fix it" } },
     });
     expect(buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "resume-by-id", sessionId: "abc" }), features)).toMatchObject({
-      status: "ready", plan: { args: [bypass, "resume", "abc"] },
+      status: "ready", plan: { args: [bypass, ...deckPolicyArgs, "resume", "abc"] },
     });
     expect(buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "resume-latest" }), features)).toMatchObject({
-      status: "ready", plan: { args: [bypass, "resume", "--last"] },
+      status: "ready", plan: { args: [bypass, ...deckPolicyArgs, "resume", "--last"] },
     });
   });
 
@@ -73,7 +74,7 @@ describe("buildCodexLaunchPlan", () => {
     }
     expect(buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive", modelId: "gpt-5.6-sol", reasoningLevel: "high" }), features, ["high"])).toMatchObject({
       status: "ready",
-      plan: { args: [bypass, "--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="high"'] },
+      plan: { args: [bypass, ...deckPolicyArgs, "--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="high"'] },
     });
   });
 
@@ -106,8 +107,8 @@ describe("buildCodexLaunchPlan", () => {
       features,
       ["medium"],
     );
-    expect(accepted).toMatchObject({ status: "ready", plan: { args: ["--dangerously-bypass-approvals-and-sandbox", "-c", 'model_reasoning_effort="ultra"'] } });
-    expect(rejected).toMatchObject({ status: "ready", plan: { args: ["--dangerously-bypass-approvals-and-sandbox"] } });
+    expect(accepted).toMatchObject({ status: "ready", plan: { args: ["--dangerously-bypass-approvals-and-sandbox", ...deckPolicyArgs, "-c", 'model_reasoning_effort="ultra"'] } });
+    expect(rejected).toMatchObject({ status: "ready", plan: { args: ["--dangerously-bypass-approvals-and-sandbox", ...deckPolicyArgs] } });
   });
 
   test("injects bounded root Lead instructions only for new sessions", () => {
@@ -134,7 +135,7 @@ describe("buildCodexLaunchPlan", () => {
     expect(interactive).toMatchObject({
       status: "ready",
       plan: {
-        args: ["--dangerously-bypass-approvals-and-sandbox", "-c", `developer_instructions=${JSON.stringify(bootstrap)}`, "--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="high"'],
+        args: ["--dangerously-bypass-approvals-and-sandbox", ...deckPolicyArgs, "-c", `developer_instructions=${JSON.stringify(bootstrap)}`, "--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="high"'],
         stdio: "inherit",
         stdin: "inherit",
       },
@@ -144,8 +145,31 @@ describe("buildCodexLaunchPlan", () => {
       plan: { args: expect.arrayContaining(["--dangerously-bypass-approvals-and-sandbox", "-c", `developer_instructions=${JSON.stringify(bootstrap)}`, "--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="high"', "exec", "--output-last-message", "-"]), stdinPayload: { type: "utf8", content: "quoted line\nnext" } },
     });
     expect(JSON.stringify(exec)).not.toContain("--agent");
-    expect(resume).toMatchObject({ status: "ready", plan: { args: ["--dangerously-bypass-approvals-and-sandbox", "resume", "session-1"] } });
+    expect(resume).toMatchObject({ status: "ready", plan: { args: ["--dangerously-bypass-approvals-and-sandbox", ...deckPolicyArgs, "resume", "session-1"] } });
     expect(JSON.stringify(resume)).not.toContain("developer_instructions");
     expect(JSON.stringify(resume)).not.toContain("model_reasoning_effort");
   });
+});
+
+test("keeps Deck Lead delegation policy for every Developer Team launch mode", () => {
+  const override = 'features.multi_agent_v2.multi_agent_mode_hint_text=""';
+  const routes = [
+    withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "interactive" as const, reasoningLevel: "high" }),
+    withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "exec" as const, prompt: ["review"], stdin: "closed" as const }),
+    withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "resume-by-id" as const, sessionId: "existing" }),
+    withDeckConfig({ projectRoot: "/p", teamId: "developer-team", mode: "resume-latest" as const }),
+  ];
+  for (const input of routes) {
+    const result = buildCodexLaunchPlan(input, features, ["high"]);
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") continue;
+    expect(result.plan.args.filter(arg => arg === override)).toHaveLength(1);
+    expect(result.plan.args[result.plan.args.indexOf(override) - 1]).toBe("-c");
+    const subcommand = input.mode === "exec" ? "exec" : input.mode.startsWith("resume") ? "resume" : undefined;
+    if (subcommand) expect(result.plan.args.indexOf(override)).toBeLessThan(result.plan.args.indexOf(subcommand));
+    expect(result.plan.args).not.toContain('model_reasoning_effort="ultra"');
+  }
+  const other = buildCodexLaunchPlan(withDeckConfig({ projectRoot: "/p", teamId: "other-team", mode: "interactive" }), features);
+  expect(other.status).toBe("ready");
+  if (other.status === "ready") expect(other.plan.args).not.toContain(override);
 });

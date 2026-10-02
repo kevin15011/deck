@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "runners": {
+    "codex": {
+      "last_complete_review": null,
+      "last_runtime_validation": {
+        "version": "0.160.0",
+        "review": "reviews/2026-10-01-codex-0.160.0-session-smoke.md"
+      },
+      "reviews": [
+        {
+          "id": "2026-10-01-codex-0.160.0-session-smoke",
+          "date": "2026-10-01",
+          "baseline": null,
+          "target": "0.160.0",
+          "status": "partial",
+          "report": "reviews/2026-10-01-codex-0.160.0-session-smoke.md"
+        }
+      ]
+    },
+    "opencode": {
+      "last_complete_review": null,
+      "last_runtime_validation": null,
+      "reviews": []
+    },
+    "claude-code": {
+      "last_complete_review": null,
+      "last_runtime_validation": null,
+      "reviews": []
+    }
+  }
+}

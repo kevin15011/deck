@@ -1,0 +1,354 @@
+{
+  "evaluationKind": "independent read-only instruction feasibility exercise",
+  "catalogSha256": "347eaa317679803ae8a4282f684748f96bee8bf5b04cef7f4c63fe77486bd69a",
+  "catalogProfileCount": 35,
+  "scenarios": [
+    {
+      "scenario": "warm-editorial-portfolio",
+      "brief": "Build a portfolio for an independent documentary photographer, warm editorial tone, existing licensed portrait images, native CSS, no new dependencies.",
+      "choices": [
+        {
+          "skillId": "frontend-design",
+          "catalogActivation": "automatic",
+          "catalogRole": "direction"
+        }
+      ],
+      "responsibilities": {
+        "frontend-design": [
+          "composition",
+          "typography",
+          "palette",
+          "density",
+          "image placement"
+        ]
+      },
+      "direction": {
+        "composition": "Asymmetric project-led editorial index, large image/contact-sheet juxtaposition",
+        "typography": "Existing editorial display/body faces with deliberate hierarchy",
+        "palette": "Warm paper/ink drawn from supplied images",
+        "density": "Quiet reading rhythm with concentrated project metadata",
+        "motion": "Native modest transitions only if needed"
+      },
+      "rejectedTraits": [
+        "generic centered hero",
+        "equal feature-card grid",
+        "default cream/terracotta without subject grounding"
+      ],
+      "excludedCandidates": {
+        "field-notes-editorial-template": "HTML business report contract, not portfolio; platform/excludes prevent selection",
+        "beautiful-article": "Article only, not portfolio",
+        "minimalist-ui": "Fixed bento/corner/icon/motion mandates would unnecessarily constrain this no-dependency brief",
+        "brand-guidelines": "No Anthropic identity requested"
+      },
+      "evidence": [
+        "frontend-design/SKILL.md: Ground it in the subject; Process brainstorm/explore; brief wins even for warm cream",
+        "deck-frontend-design/references/routing.md: medium/stack gates, responsibility authority"
+      ],
+      "limits": [
+        "No implemented portfolio or screenshot; exercise checks instruction feasibility, not appearance."
+      ]
+    },
+    {
+      "scenario": "totally-different-existing-gsap",
+      "brief": "Existing marketing site is warm, serif, rounded and pastel; user asks something totally different. GSAP and ScrollTrigger already installed; preserve content and functionality.",
+      "choices": [
+        {
+          "skillId": "industrial-brutalist-ui",
+          "catalogActivation": "automatic",
+          "catalogRole": "direction"
+        },
+        {
+          "skillId": "gsap-core",
+          "catalogActivation": "automatic",
+          "catalogRole": "motion"
+        },
+        {
+          "skillId": "gsap-scrolltrigger",
+          "catalogActivation": "automatic",
+          "catalogRole": "motion"
+        }
+      ],
+      "responsibilities": {
+        "industrial-brutalist-ui": [
+          "composition",
+          "typography",
+          "palette",
+          "geometry"
+        ],
+        "gsap-core": [
+          "tweens",
+          "easing",
+          "reduced motion"
+        ],
+        "gsap-scrolltrigger": [
+          "scroll-linked behavior"
+        ]
+      },
+      "direction": {
+        "composition": "Rigid visible grid with square compartments",
+        "typography": "Heavy sans structural headlines plus technical monospace",
+        "palette": "Choose tactical dark substrate and hazard-red accent consistently",
+        "density": "Technical metadata concentrations contrasted with strong headings",
+        "motion": "Use existing GSAP only for deliberate scroll opacity/transform behavior; no ambient gradient/blur"
+      },
+      "rejectedTraits": [
+        "warm paper background",
+        "rounded pastel cards",
+        "serif as dominant display face",
+        "soft shadows"
+      ],
+      "excludedCandidates": {
+        "minimalist-ui": "Shares warm editorial traits being rejected",
+        "field-notes-editorial-template": "Reintroduces rejected paper/serif/pastel/rounded grammar",
+        "apple-design": "Translucent depth conflicts with industrial ban",
+        "baseline-ui": "MUST motion/react conflicts with retained GSAP",
+        "gsap-timeline": "Not selected unless multi-step choreography actually required"
+      },
+      "evidence": [
+        "industrial-brutalist-ui/SKILL.md: pick one archetype; zero radius; substrate/color constraints",
+        "gsap-scrolltrigger/SKILL.md: complements core/timeline",
+        "deck-frontend-design/references/routing.md: replace visual agreement, no recolor-only change"
+      ],
+      "limits": [
+        "If user dislikes industrial aesthetics, choice becomes a proposal requiring contrast selection; totally different alone does not uniquely imply industrial."
+      ]
+    },
+    {
+      "scenario": "dense-react-dashboard-no-dependencies",
+      "brief": "Improve visual hierarchy of a dense React operations dashboard; custom CSS and existing tokens/component primitives; no new dependencies or functionality changes.",
+      "choices": [
+        {
+          "skillId": "frontend-design",
+          "catalogActivation": "automatic",
+          "catalogRole": "direction"
+        },
+        {
+          "skillId": "fixing-accessibility",
+          "catalogActivation": "automatic",
+          "catalogRole": "review"
+        }
+      ],
+      "responsibilities": {
+        "frontend-design": [
+          "composition",
+          "hierarchy",
+          "typography within existing tokens",
+          "density"
+        ],
+        "fixing-accessibility": [
+          "focus",
+          "labels",
+          "contrast",
+          "keyboard checks"
+        ]
+      },
+      "direction": {
+        "composition": "Operator-task grouping and dense tables remain primary",
+        "typography": "Existing data face, tabular numerals where useful",
+        "palette": "Preserve semantic token roles",
+        "density": "Scanability and information density over marketing whitespace",
+        "motion": "No new motion"
+      },
+      "rejectedTraits": [
+        "landing-page hero",
+        "oversized decorative headers",
+        "new UI system",
+        "novel dependencies"
+      ],
+      "excludedCandidates": {
+        "design-taste-frontend": "Explicitly excludes dashboards/data tables",
+        "minimalist-ui": "Prescribed generous bento, icon choices and serif hero conflict with current dense UI",
+        "industrial-brutalist-ui": "Unrequested strong aesthetic replacement",
+        "baseline-ui": "MUST Tailwind/cn contracts conflict with custom CSS/no-dependency setup",
+        "flint-chart-author": "No chart deliverable or available rendering runtime in brief",
+        "impeccable": "Mandatory native launcher prerequisite, excluded under user scope"
+      },
+      "evidence": [
+        "design-taste-frontend/SKILL.md opening scope exclusion",
+        "frontend-design/SKILL.md: ground in subject, match complexity",
+        "baseline-ui/SKILL.md Stack mandates",
+        "deck-frontend-design/references/routing.md: preserve constraints and stack"
+      ],
+      "limits": [
+        "Catalog broad contextual directions do not encode operator design proficiency; verify actual implementation against task and accessibility."
+      ]
+    },
+    {
+      "scenario": "targeted-spacing",
+      "brief": "User likes current interface, only asks to reduce excessive spacing between form fields. Existing agreement and custom CSS, no motion changes.",
+      "choices": [],
+      "responsibilities": {
+        "existing-visual-agreement": [
+          "palette",
+          "typography",
+          "components",
+          "motion"
+        ],
+        "implementation-owner": [
+          "only field-gap values and responsive check"
+        ]
+      },
+      "direction": "Retain current direction; apply bounded spacing change without loading a new aesthetic owner.",
+      "rejectedTraits": [],
+      "excludedCandidates": {
+        "better-ui": "Contains fixed motion/shape mandates unrelated to spacing; sibling better-layout is not bundled",
+        "frontend-design": "No new identity decision required",
+        "baseline-ui": "Custom CSS conflicts with mandatory Tailwind stack; broad loading would expand scope"
+      },
+      "evidence": [
+        "deck-frontend-design/SKILL.md: preserve unaffected choices on targeted adjustment",
+        "deck-frontend-design/references/routing.md: adjust spacing normally keeps direction",
+        "better-ui/SKILL.md: layout belongs to unselected better-layout"
+      ],
+      "limits": [
+        "No additional design skill can be preferable to unnecessary instruction loading."
+      ]
+    },
+    {
+      "scenario": "anthropic-brand-explicit-versus-unrelated",
+      "brief": "Compare explicit request for Anthropic-style landing identity against unrelated local cafe brand with existing identity.",
+      "branches": [
+        {
+          "request": "Explicitly use Anthropic brand-guidelines for this landing",
+          "choices": [
+            {
+              "skillId": "brand-guidelines",
+              "catalogActivation": "explicit-only",
+              "catalogRole": "brand"
+            },
+            {
+              "skillId": "frontend-design",
+              "catalogActivation": "automatic",
+              "catalogRole": "direction"
+            }
+          ],
+          "responsibilities": {
+            "brand-guidelines": [
+              "colors",
+              "heading/body families"
+            ],
+            "frontend-design": [
+              "content-specific composition",
+              "hierarchy",
+              "responsive layout"
+            ]
+          },
+          "excludedCandidates": {
+            "minimalist-ui": "Fixed distinct type/palette/shape mandates compete with chosen brand"
+          },
+          "direction": "Anthropic #141413 / #faf9f5 and orange/blue/green accents; Poppins/Lora with existing system fallback; layout adapted to real content."
+        },
+        {
+          "request": "Improve cafe brand site without changing identity",
+          "choices": [
+            {
+              "skillId": "frontend-design",
+              "catalogActivation": "automatic",
+              "catalogRole": "direction"
+            }
+          ],
+          "responsibilities": {
+            "existing-cafe-brand": [
+              "palette",
+              "fonts",
+              "logo"
+            ],
+            "frontend-design": [
+              "composition",
+              "hierarchy"
+            ]
+          },
+          "excludedCandidates": {
+            "brand-guidelines": "explicit-only Anthropic identity, unrelated brand not requested"
+          },
+          "direction": "Retain cafe identity; no brand replacement."
+        }
+      ],
+      "rejectedTraits": [
+        "automatic Anthropic palette for unrelated brands"
+      ],
+      "evidence": [
+        "catalog.json brand-guidelines explicit-only and exclusions",
+        "brand-guidelines/SKILL.md: official Anthropic palette/fonts fallback",
+        "deck-frontend-design/SKILL.md: brand requirements take precedence"
+      ],
+      "limits": [
+        "Brand instruction is not licensing permission for trademark/logo use, and no logo is bundled here."
+      ]
+    },
+    {
+      "scenario": "unavailable-manual-animation-review",
+      "brief": "User wants animation quality checked but has not explicitly invoked review-animations; active runner cannot expose that skill. Existing GSAP available.",
+      "choices": [
+        {
+          "skillId": "gsap-core",
+          "catalogActivation": "automatic",
+          "catalogRole": "motion"
+        }
+      ],
+      "responsibilities": {
+        "gsap-core": [
+          "GSAP correctness and reduced-motion review"
+        ],
+        "implementation-owner": [
+          "review current motion against existing agreement"
+        ]
+      },
+      "direction": "Evaluate actual current animations, disclose unavailable specialist; do not install missing skill or create new animations.",
+      "rejectedTraits": [
+        "automatic invocation of manual-only skill",
+        "claiming unavailable review capability"
+      ],
+      "excludedCandidates": {
+        "review-animations": "manual-only and unavailable exposure, cannot load",
+        "animation-vocabulary": "Names effects rather than reviewing quality",
+        "baseline-ui": "Requires motion/react, conflicts with existing GSAP"
+      },
+      "evidence": [
+        "review-animations/SKILL.md: disable-model-invocation true",
+        "deck-frontend-design/SKILL.md: verify exposure, do not install missing skills",
+        "gsap-core/SKILL.md: write or review GSAP animations"
+      ],
+      "limits": [
+        "An explicit user invocation would satisfy activation but would still not solve missing exposure; continue bounded general review and report missing specialist."
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "severity": "resolved-by-parent",
+      "finding": "Impeccable mandatory initial native binary launcher attempt violates text-only user scope; exclude skill/profile.",
+      "evidence": "impeccable/SKILL.md Setup1 and scripts/impeccable download path"
+    },
+    {
+      "severity": "advisory",
+      "finding": "Field Notes profile role direction understates exclusively self-contained business-report template; medium/excludes protect routing, role artifact would be clearer.",
+      "evidence": "field-notes-editorial-template/SKILL.md description/workflow and catalog platforms html-report"
+    },
+    {
+      "severity": "advisory",
+      "finding": "baseline-ui profile requirements empty understates MUST Tailwind, motion/react and cn; full-instruction conflict check prevents incorrect combination, but notes should expose these earlier.",
+      "evidence": "baseline-ui/SKILL.md Stack"
+    },
+    {
+      "severity": "pass",
+      "finding": "Router does not guarantee unique or deterministic selection; realistic briefs can support multiple feasible choices, feedback comparison is semantic instruction.",
+      "evidence": "routing.md Validate result"
+    },
+    {
+      "severity": "pass",
+      "finding": "One accountable source per aspect allows industrial direction + GSAP helpers while rejecting competing palette/motion mandates.",
+      "evidence": "routing.md Responsibilities and compatibility"
+    },
+    {
+      "severity": "pass",
+      "finding": "Missing or manual-only skills do not grant installation/invocation authority; explicit brand request overrides catalog aesthetics without changing component stack.",
+      "evidence": "router SKILL.md and catalog activation fields"
+    }
+  ],
+  "globalLimits": [
+    "No upstream execution, product modification, rendered artifact or visual quality measurement.",
+    "Selections are independent reasoned examples, not automated routing test results or expected exact skill IDs.",
+    "Catalog/profile paths/licenses evaluated against audit manifests and selected source; no legal opinion implied."
+  ]
+}

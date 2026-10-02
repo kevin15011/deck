@@ -47,7 +47,7 @@ export type RunnerDashboardAction =
   | { type: "set-runner-scope"; runnerScope: RunnerDashboardState["runnerScope"]; operationId?: string }
   | { type: "new-operation"; runnerScope?: Exclude<RunnerDashboardState["runnerScope"], "all">; operationId: string }
   | { type: "start-operation"; runnerScope?: Exclude<RunnerDashboardState["runnerScope"], "all">; operationId: string }
-  | { type: "enter-review"; inventory: unknown; operation?: RunnerOperationIdentity }
+  | { type: "enter-review"; inventory: unknown; operation?: RunnerOperationIdentity; confirmSelectedPackages?: boolean }
   | { type: "regenerate-plan"; inventory: unknown; operation?: RunnerOperationIdentity }
   | { type: "start-install" }
   | { type: "complete" }
@@ -124,7 +124,7 @@ export function reduceRunnerDashboard(
     case "start-operation":
       return beginRunnerOperation(state, action.runnerScope ?? state.runnerScope, action.operationId);
     case "enter-review":
-      return enterReview(state, action.inventory, planBuilder, action.operation);
+      return enterReview(state, action.inventory, planBuilder, action.operation, action.confirmSelectedPackages);
     case "regenerate-plan":
       return withCurrentPlan(state, action.inventory, planBuilder, action.operation);
     case "start-install":
@@ -425,9 +425,14 @@ function enterReview(
   inventory: unknown,
   planBuilder: PlanBuilderFn,
   operation?: RunnerOperationIdentity,
+  confirmSelectedPackages = false,
 ): RunnerDashboardState {
   if (operation && !operationMatches(state, operation)) return state;
-  return withCurrentPlan(navigate(state, "review-plan"), inventory, planBuilder);
+  const confirmed = confirmSelectedPackages && operation && operationMatches(state, operation) && isCurrentOperation(state)
+    && state.packageInstructions.serena === true && state.selectedCapabilities.serena === true
+    ? updateCapabilitySelection(state, "serena", true, true)
+    : state;
+  return withCurrentPlan(navigate(confirmed, "review-plan"), inventory, planBuilder);
 }
 
 function withCurrentPlan(

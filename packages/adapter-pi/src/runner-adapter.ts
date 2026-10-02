@@ -530,7 +530,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   readonly environmentIds: readonly string[] = PI_ENVIRONMENT_IDS;
   readonly packageInstructionIds = PACKAGE_INSTRUCTION_PACKAGE_IDS;
   readonly ui = {
-    environmentLabels: { "pi-development": "Pi Development (Recommended)" },
+    environmentLabels: { "pi-development": "Pi" },
     dashboard: { defaultSelectedTeamIds: [] },
     model: {
       providerSource: "Providers come from Pi settings and detected credentials.",

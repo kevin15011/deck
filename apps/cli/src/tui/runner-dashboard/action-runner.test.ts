@@ -369,7 +369,7 @@ describe("Pi Runner dashboard action runner Supermemory safety", () => {
       "context-mode": true,
       rtk: true,
       "adaptive-memory": true,
-      serena: false,
+      serena: true,
     });
     expect(writes[0]!.packageInstructions.codex).not.toHaveProperty("pi-hud");
   });

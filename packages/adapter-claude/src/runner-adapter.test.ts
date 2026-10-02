@@ -12,8 +12,42 @@ import { createHash } from "node:crypto";
 import { CLAUDE_SUPERMEMORY_COMMIT } from "./supermemory-artifact";
 import { claudeModelMetadata } from "./models";
 import { gzipSync } from "node:zlib";
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
+
+const standaloneFileCount = () => getStandaloneSkills().reduce((total, { skillId }) => total + 1 + Object.keys(getStandaloneSkill(skillId).files).length, 0);
 
 describe("Claude Deck-owned global plugin adapter", () => {
+  test("installs every standalone bundle intact as passive private plugin skills", async () => {
+    const home = await mkdtemp(join(tmpdir(), "deck-claude-standalone-"));
+    try {
+      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck") });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: getDefaultDeckConfig(), capabilityIds: ["claude-team-files"] });
+      expect(plan.blocked).toBe(false);
+      for (const { skillId } of getStandaloneSkills()) {
+        const bundle = getStandaloneSkill(skillId);
+        const entry = plan.files.find((file) => file.path.endsWith(`/skills/${skillId}/SKILL.md`));
+        expect(entry?.content).toBe(bundle.SKILL);
+        for (const [packagePath, content] of Object.entries(bundle.files)) {
+          expect(plan.files.find((file) => file.path.endsWith(`/skills/${skillId}/${packagePath}`))?.content).toBe(content);
+        }
+      }
+      expect(plan.files.some((file) => file.path.endsWith("/skills/deck-frontend-design/references/catalog.json"))).toBe(true);
+      const manual = plan.files.find((file) => file.path.endsWith("/skills/review-animations/SKILL.md"));
+      expect(manual?.content).toContain("disable-model-invocation: true");
+      expect(plan.files.some((file) => file.path.includes("/hooks/"))).toBe(false);
+      await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan });
+      expect((await adapter.verifyDeveloperTeamInstall(plan)).valid).toBe(true);
+      const router = plan.files.find((file) => file.path.endsWith("/skills/deck-frontend-design/SKILL.md"))!;
+      expect(await readFile(router.path, "utf8")).toBe(router.content);
+      expect((await lstat(router.path)).mode & 0o777).toBe(0o600);
+      const helper = plan.files.find((file) => file.path.includes("/skills/diagram-design/scripts/") && file.path.endsWith(".py"));
+      expect(helper).toBeDefined();
+      expect((await lstat(helper!.path)).mode & 0o777).toBe(0o600);
+      await writeFile(router.path, "tampered");
+      expect((await adapter.verifyDeveloperTeamInstall(plan)).valid).toBe(false);
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+
   test("late discovery results cannot replace or clear a newer ready snapshot across roots", async () => {
     const home = await mkdtemp(join(tmpdir(), "deck-claude-model-generation-"));
     try {
@@ -419,7 +453,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     try {
       const tavily = join(root, "tavily-mcp");
       await writeFile(tavily, "fixture", { mode: 0o700 });
-      const adapter = createClaudeRunnerAdapter({ homeDir: root, dataRoot: join(root, "data", "deck"), resolveCommand: (name) => name === "tavily-mcp" ? tavily : undefined, webSearchProviderResolver: () => TAVILY_PROVIDER_DESCRIPTOR, webSearchCredential: () => undefined });
+      const adapter = createClaudeRunnerAdapter({ homeDir: root, dataRoot: join(root, "data", "deck"), resolveCommand: (name) => name === "tavily-mcp" ? tavily : undefined, webSearchProviderResolver: () => TAVILY_PROVIDER_DESCRIPTOR, webSearchCredential: () => "" });
       const config = getDefaultDeckConfig();
       expect(adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "claude-development", deckConfig: config, capabilityIds: ["claude-team-files", "serena"] }).blocked).toBe(true);
       const searchConfig = { ...config, webSearch: { enabled: true, provider: "tavily" } } as typeof config;
@@ -522,7 +556,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
         await expect(lstat(join(root, "data"))).rejects.toMatchObject({ code: "ENOENT" });
       }
       const fresh = adapter.buildDeveloperTeamInstallPlan(input);
-      expect(fresh.files).toHaveLength(15);
+      expect(fresh.files).toHaveLength(15 + standaloneFileCount());
       expect(fresh.files[0]).toEqual(original);
       expect(fresh.files[1]!.path).not.toBe(join(root, "foreign.md"));
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "claude-development", plan: fresh });
@@ -630,11 +664,11 @@ describe("Claude Deck-owned global plugin adapter", () => {
       const config = getDefaultDeckConfig();
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "claude-development", deckConfig: config });
       expect(plan.blocked).toBe(false);
-      expect(plan.files).toHaveLength(15);
-      expect(plan.mutationPreview?.length).toBe(16);
+      expect(plan.files).toHaveLength(15 + standaloneFileCount());
+      expect(plan.mutationPreview?.length).toBe(plan.files.length + 1);
       expect(plan.files.every((file) => file.path.startsWith(join(dataRoot, "claude")))).toBe(true);
       const applied = await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "claude-development", plan });
-      expect(applied.results.length).toBe(15);
+      expect(applied.results.length).toBe(plan.files.length);
       expect((await adapter.verifyDeveloperTeamInstall(plan)).valid).toBe(true);
       const plugin = dirname(dirname(plan.files[0]!.path));
       expect(JSON.parse(await readFile(join(plugin, ".claude-plugin", "plugin.json"), "utf8")).name).toBe("deck-developer-team");

@@ -417,7 +417,9 @@ describe("runner-sync", () => {
     const journalRoot = join(root, "journals");
     try {
       const adapter = createCodexRunnerAdapter({ tools: testTools(), ...layout(root), journalRoot });
-      const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: getDefaultDeckConfig() });
+      const initialConfig = getDefaultDeckConfig();
+      initialConfig.packageInstructions.codex.serena = false;
+      const initial = adapter.buildDeveloperTeamInstallPlan({ projectRoot: root, environmentId: "codex-development", deckConfig: initialConfig });
       await adapter.applyDeveloperTeamInstall({ projectRoot: root, environmentId: "codex-development", plan: initial });
       const paths = [
         ".codex/agents/deck-lead.toml",

@@ -58,6 +58,7 @@ export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOpti
   registry.register("codex", createCodexRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
+    serenaProxyCommand: [process.execPath, ...(process.argv[1] && /(?:^|[/\\])main\.[cm]?[jt]sx?$/.test(process.argv[1]) ? [resolve(process.argv[1])] : []), "internal", "serena-mcp"],
     ...options.codex,
   }));
   registry.register("claude", createClaudeRunnerAdapter({

@@ -32,6 +32,10 @@ Direct supported forms are `bun test tests/documentation-governance.test.ts`, `b
 
 `bun run canary:install -- --dir /absolute/bin` builds only the current host target, installs the binary as `deck-canary`, and runs a bounded `deck-canary version` smoke. It does not regenerate tracked source artifacts, create release archives, checksums, release descriptors, shell-profile edits, or stable `deck` replacements. The default destination is `DECK_CANARY_BIN_DIR` when set, otherwise `~/.local/bin`; use `--dry-run` to print the planned path without compiling or writing. The command stores immutable digest-named payloads next to an atomic relative `deck-canary` symlink alias; old payloads may remain for manual rollback by retargeting the alias.
 
+## Manual Linux installation sandbox
+
+Use `bun sandbox:clean` to test the official Deck download, or `bun sandbox` to open a clean runner environment with a checkout-built canary. `bun sandbox:update` refreshes stable runner versions while reusing cached Linux layers. See [sandbox instructions](sandbox/linux-install/README.md) for requirements, temporary session cleanup and agent inspection.
+
 ## Verification tiers
 
 Start with the smallest affected test, then use broader gates when the change requires them:

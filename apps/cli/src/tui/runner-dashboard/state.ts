@@ -310,7 +310,7 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
     "codebase-memory-mcp": true,
     "codebase-memory": true,
     rtk: true,
-    serena: false,
+    serena: true,
     context7: true,
   },
   explicitlySelectedCapabilities: {},
@@ -340,13 +340,23 @@ export const DEFAULT_RUNNER_DASHBOARD_STATE: RunnerDashboardState = {
     "code-economy": true,
     "context-mode": true,
     rtk: true,
-    "adaptive-memory": false,
-    serena: false,
+    "adaptive-memory": true,
+    serena: true,
   },
   plan: undefined,
   planRevision: 0,
   planGeneratedForRevision: undefined,
 };
+
+/** Fresh optional packages start selected; installed receipts preserve deselections. */
+export function getInitialExtraCapabilitySelection(
+  runnerUi: RunnerDashboardState["runnerUi"],
+  receiptCapabilities?: readonly string[],
+): Record<string, boolean> {
+  return Object.fromEntries((runnerUi?.dashboard?.extraSelectableCapabilities ?? []).map((entry) => [
+    entry.id, receiptCapabilities === undefined || receiptCapabilities.includes(entry.id),
+  ]));
+}
 
 export function createDefaultRunnerDashboardState(
   overrides: Partial<RunnerDashboardState> = {},
@@ -358,6 +368,7 @@ export function createDefaultRunnerDashboardState(
     selectedCapabilities: {
       ...DEFAULT_RUNNER_DASHBOARD_STATE.selectedCapabilities,
       ...overrides.selectedCapabilities,
+      serena: overrides.packageInstructions?.serena ?? overrides.selectedCapabilities?.serena ?? true,
     },
     explicitlySelectedCapabilities: {
       ...DEFAULT_RUNNER_DASHBOARD_STATE.explicitlySelectedCapabilities,

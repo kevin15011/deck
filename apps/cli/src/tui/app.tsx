@@ -153,7 +153,7 @@ import {
 import { reduceRunnerDashboard, type RunnerDashboardAction } from "./runner-dashboard/reducer";
 import { normalizeDashboardCapabilityInventory } from "./runner-dashboard/inventory";
 import { getToggleablePackageInstructionIds } from "./runner-dashboard/selectors";
-import { createDefaultRunnerDashboardState, createRunnerReviewPlanFailure, loadRunnerPackageInstructionsFromConfig, runnerRequiresExternalSupermemoryToken, type RunnerDashboardEvidenceIdentity, type RunnerDashboardState, type RunnerOperationIdentity, type RunnerReviewPlan, type SupermemoryRuntimeCredentialEvidence } from "./runner-dashboard/state";
+import { getInitialExtraCapabilitySelection, createDefaultRunnerDashboardState, createRunnerReviewPlanFailure, loadRunnerPackageInstructionsFromConfig, runnerRequiresExternalSupermemoryToken, type RunnerDashboardEvidenceIdentity, type RunnerDashboardState, type RunnerOperationIdentity, type RunnerReviewPlan, type SupermemoryRuntimeCredentialEvidence } from "./runner-dashboard/state";
 import { RunnerDashboardScreens } from "./screens/runner-dashboard-screens";
 import { getAdapter, createDefaultAdapterRegistry } from "../runner-adapters";
 import { getWebSearchProviderDescriptor } from "../web-search-provider";
@@ -914,6 +914,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [modelEnvironmentCursor, setModelEnvironmentCursor] = useState(0);
   const [modelTeamCursor, setModelTeamCursor] = useState(0);
   const [selectedModelEnvironment, setSelectedModelEnvironment] = useState<EnvironmentId | null>(null);
+  const modelConfigSavingRef = useRef(false);
+  const [modelConfigSaving, setModelConfigSaving] = useState(false);
+  const [modelConfigError, setModelConfigError] = useState<string | null>(null);
   const [modelConfigSource, setModelConfigSource] = useState<"install" | "menu" | "dashboard" | null>(null);
   const [modelConfigRuntime, setModelConfigRuntime] = useState<RunnerId>("pi");
   const openCodeProjectRootRef = useRef(localResolvedProjectRoot ?? process.cwd());
@@ -1179,6 +1182,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }, []);
 
   useInput((input, key) => {
+    if (modelConfigSavingRef.current) return;
     try { appendFileSync("/tmp/deck-debug.txt", `useInput TOP: key=${JSON.stringify(key)} screen=${screen}\n`); } catch {}
     try {
     if (screen === "web-search-credential") {
@@ -1749,6 +1753,17 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const msg = `[runDashboardInstall] FAILED: ${err instanceof Error ? err.stack : String(err)}`;
       log(msg);
       console.error(msg);
+      if (!cancelled) {
+        setDashboardActionResults((current) => [...current, {
+          actionId: "install.unexpected-error",
+          status: "failed",
+          message: "Installation stopped unexpectedly. Review the completed actions before retrying.",
+          diagnostics: [],
+        }]);
+        setDashboardCompletionStatus("Installation stopped before completion.");
+        clearDashboardSupermemoryEphemeralState();
+        setDashboardState((current) => reduceRunnerDashboard(current, { type: "complete" }, dashboardPlanBuilder));
+      }
     }).finally(() => {
       dashboardInstallActiveRef.current = false;
       dashboardAbortControllerRef.current = null;
@@ -2102,6 +2117,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const operation = nextRunnerOperation(adapter.runnerId, dashboardOperationSequenceRef.current);
       const receiptCapabilities = adapter.runnerId === "claude" ? adapter.readSelectedCapabilityIds?.(projectRoot) : undefined;
       const selectedReceiptCapabilities = new Set(receiptCapabilities ?? []);
+      const extraCapabilitySelection = getInitialExtraCapabilitySelection(adapter.ui, receiptCapabilities);
       const packageInstructions = loadRunnerPackageInstructionsFromConfig(config, adapter.runnerId, adapter.packageInstructionIds);
       if (adapter.runnerId === "claude" && receiptCapabilities) {
         for (const id of adapter.packageInstructionIds ?? []) packageInstructions[id] = selectedReceiptCapabilities.has(id);
@@ -2119,7 +2135,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
                  "web-search",
                  ...[...selectedReceiptCapabilities].filter((id) => !(adapter.packageInstructionIds ?? []).some((packageId) => packageId === id)),
                  ...adapter.ui.dashboard.defaultSelectedCapabilityIds,
-               ].map((id) => [id, adapter.ui!.dashboard!.defaultSelectedCapabilityIds!.includes(id) || !(adapter.packageInstructionIds ?? []).some((packageId) => packageId === id) && selectedReceiptCapabilities.has(id) || id === "web-search" && adapter.runnerId === "claude" && config.webSearch.enabled]))
+                 ...Object.keys(extraCapabilitySelection),
+               ].map((id) => [id, adapter.ui!.dashboard!.defaultSelectedCapabilityIds!.includes(id) || extraCapabilitySelection[id] === true || !(adapter.packageInstructionIds ?? []).some((packageId) => packageId === id) && selectedReceiptCapabilities.has(id) || id === "web-search" && adapter.runnerId === "claude" && config.webSearch.enabled]))
             : { "web-search": config.webSearch.enabled },
          webSearchProvider: config.webSearch.provider,
          webSearchProviderDescriptor,
@@ -2601,22 +2618,27 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       }
       if (modelConfigRuntime === "claude" && claudeDiscovery.kind !== "ready") { resetCursor("claude-model-discovery"); return; }
       if (cursor === DEVELOPER_TEAM_AGENTS.length) {
-        // Finish button
-        if (modelConfigSource === "install") {
-          // Persist model assignments before moving to next step
-          await applyDeveloperTeamModelConfig();
-          resetCursor("memory-provider-selection");
-        } else if (modelConfigSource === "dashboard") {
-          // For OpenCode and Pi, the dashboard plan builder has no team-application actions,
-          // so persist model changes to disk immediately on Finish.
-          if (modelConfigRuntime === "opencode" || modelConfigRuntime === "pi" || modelConfigRuntime === "claude") {
-            await applyDeveloperTeamModelConfig();
+        if (modelConfigSavingRef.current) return;
+        modelConfigSavingRef.current = true;
+        setModelConfigSaving(true);
+        setModelConfigError(null);
+        try {
+          // Codex dashboard stages assignments for Review; other paths apply now.
+          const stageOnly = modelConfigSource === "dashboard" && modelConfigRuntime === "codex";
+          if (!stageOnly && !(await applyDeveloperTeamModelConfig())) return;
+          if (modelConfigSource === "install") {
+            resetCursor("memory-provider-selection");
+          } else if (modelConfigSource === "dashboard") {
+            syncDashboardDeveloperTeamModelConfig();
+            resetCursor("pi-runner-dashboard");
+          } else {
+            resetCursor("complete");
           }
-          syncDashboardDeveloperTeamModelConfig();
-          resetCursor("pi-runner-dashboard");
-        } else {
-          await applyDeveloperTeamModelConfig();
-          resetCursor("complete");
+        } catch {
+          setModelConfigError("Could not save model configuration. Your selections are preserved. Retry Finish.");
+        } finally {
+          modelConfigSavingRef.current = false;
+          setModelConfigSaving(false);
         }
       } else {
         setAgentAssignmentIndex(cursor);
@@ -3394,6 +3416,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }
 
   function hydrateDeveloperTeamModelConfig(runtime?: RunnerId) {
+    setModelConfigError(null);
     const effectiveRuntime = runtime ?? modelConfigRuntime;
     const adapter = adapterFor(effectiveRuntime);
     const projectRoot = projectRootFor({ require: true });
@@ -3458,95 +3481,86 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }));
   }
 
-  async function applyDeveloperTeamModelConfig() {
-    const projectRoot = projectRootFor({ require: true });
-    if (!projectRoot) {
-      setInstallResults((current) => [
-        ...current,
-        { tool: "Developer Team models", success: false, message: "Project root not found." },
-      ]);
-      return;
-    }
-    const adapter = adapterFor(modelConfigRuntime);
-    const requiresDynamicValidation = modelConfigRuntime === "opencode" || modelConfigRuntime === "codex" || modelConfigRuntime === "claude";
-    const changedAgentIds = requiresDynamicValidation ? [...changedOpenCodeAgentIds] : [];
-    let validatedInventoryFingerprint: string | undefined;
+  async function applyDeveloperTeamModelConfig(): Promise<boolean> {
+    try {
+      const projectRoot = projectRootFor({ require: true });
+      if (!projectRoot) {
+        setModelConfigError("Project root not found. Your selections are preserved.");
+        return false;
+      }
+      const adapter = adapterFor(modelConfigRuntime);
+      const requiresDynamicValidation = modelConfigRuntime === "opencode" || modelConfigRuntime === "codex" || modelConfigRuntime === "claude";
+      const changedAgentIds = requiresDynamicValidation ? [...changedOpenCodeAgentIds] : [];
+      let validatedInventoryFingerprint: string | undefined;
 
-    if (requiresDynamicValidation && changedAgentIds.length > 0) {
-      const validation = await adapter.validateModelAssignments?.({
+      if (requiresDynamicValidation && changedAgentIds.length > 0) {
+        const validation = await adapter.validateModelAssignments?.({
+          projectRoot,
+          modelAssignments,
+          thinkingAssignments,
+          changedAgentIds,
+        });
+        if (!validation || !validation.valid) {
+          const message = !validation
+            ? `${adapter.displayName} assignment validation is unavailable. Retry discovery before changing assignments.`
+            : validation.issues.map((issue) => issue.message).join(" ");
+          setModelConfigError(message || "Model assignment validation failed. Retry discovery.");
+          return false;
+        }
+        validatedInventoryFingerprint = validation.fingerprint;
+      }
+
+      const deckConfig = requiredConfigStore.readRequired();
+      const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, modelConfigRuntime);
+      const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
+      const standaloneSkills = modelConfigRuntime === "opencode"
+        ? getStandaloneSkills().map((skill: { skillId: string }) => ({ skillId: skill.skillId, body: getStandaloneSkillBody(skill.skillId)! }))
+        : undefined;
+      const environmentId = adapter.environmentIds[0];
+      if (!environmentId) throw new Error(`Runner ${adapter.runnerId} has no registered environment.`);
+
+      const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
         projectRoot,
+        environmentId,
         modelAssignments,
         thinkingAssignments,
         changedAgentIds,
+        validatedInventoryFingerprint,
+        memoryProvider,
+        capabilityInstructions,
+        standaloneSkills,
+        deckConfig,
       });
-      if (!validation || !validation.valid) {
-        const message = !validation
-          ? `${adapter.displayName} assignment validation is unavailable. Retry discovery before changing assignments.`
-          : validation.issues.map((issue) => issue.message).join(" ");
-        setInstallResults((current) => [
-          ...current,
-          { tool: "Developer Team models", success: false, message },
-        ]);
-        return;
-      }
-      validatedInventoryFingerprint = validation.fingerprint;
-    }
+      const backup = adapter.backupDeveloperTeamFiles(plan);
+      let failureMessage = "Model configuration failed.";
 
-    const deckConfig = requiredConfigStore.readRequired();
-    const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, modelConfigRuntime);
-    const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
-    const standaloneSkills = modelConfigRuntime === "opencode"
-      ? getStandaloneSkills().map((skill: { skillId: string }) => ({ skillId: skill.skillId, body: getStandaloneSkillBody(skill.skillId)! }))
-      : undefined;
-    const environmentId = adapter.environmentIds[0];
-    if (!environmentId) throw new Error(`Runner ${adapter.runnerId} has no registered environment.`);
-
-    const { plan } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
-      projectRoot,
-      environmentId,
-      modelAssignments,
-      thinkingAssignments,
-      changedAgentIds,
-      validatedInventoryFingerprint,
-      memoryProvider,
-      capabilityInstructions,
-      standaloneSkills,
-      deckConfig,
-    });
-    const backup = adapter.backupDeveloperTeamFiles(plan);
-
-    try {
-      const applyResult = await adapter.applyDeveloperTeamInstall({
-        projectRoot,
-        plan,
-        environmentId,
-      });
-      const verifyResult = await adapter.verifyDeveloperTeamInstall(plan);
-      if (!verifyResult.valid) {
-        await rollbackOrThrow(adapter, backup);
+      try {
+        const applyResult = await adapter.applyDeveloperTeamInstall({
+          projectRoot,
+          plan,
+          environmentId,
+        });
+        const verifyResult = await adapter.verifyDeveloperTeamInstall(plan);
+        if (!verifyResult.valid) {
+          failureMessage = `Verification failed.${verifyResult.diagnostics.length > 0 ? ` ${verifyResult.diagnostics.slice(0, 3).join("; ")}` : ""}`;
+          throw new Error("Verification failed");
+        }
+        setDeveloperTeamResults(applyResult.results as any);
+        if (requiresDynamicValidation) setChangedOpenCodeAgentIds(new Set());
+        return true;
+      } catch {
         setDeveloperTeamResults([]);
-        const diagnosticsMsg = verifyResult.diagnostics.length > 0
-          ? `\nDetails: ${verifyResult.diagnostics.slice(0, 3).join(";")}${verifyResult.diagnostics.length > 3 ? ` (+${verifyResult.diagnostics.length - 3} more)` : ""}`
-          : "";
-        setInstallResults((current) => [
-          ...current,
-          { tool: "Developer Team models", success: false, message: `Verification failed. Changes rolled back.${diagnosticsMsg}` },
-        ]);
-        return;
+        try {
+          await rollbackOrThrow(adapter, backup);
+          setModelConfigError(`${failureMessage} Changes rolled back. Your selections are preserved; retry Finish.`);
+        } catch {
+          setModelConfigError(`${failureMessage} Rollback could not be completed. Review the runner files before retrying.`);
+        }
+        return false;
       }
-      setDeveloperTeamResults(applyResult.results as any);
-      if (requiresDynamicValidation) setChangedOpenCodeAgentIds(new Set());
-    } catch (error) {
-      await rollbackOrThrow(adapter, backup);
-      setDeveloperTeamResults([]);
-      setInstallResults((current) => [
-        ...current,
-        {
-          tool: "Developer Team models",
-          success: false,
-          message: `Model configuration failed. Changes rolled back.${error instanceof Error ? ` ${error.message}` : ""}`,
-        },
-      ]);
+    } catch {
+      setModelConfigError("Could not prepare model configuration. Your selections are preserved; retry Finish.");
+      return false;
     }
   }
 
@@ -3896,6 +3910,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
           discoveryState={modelConfigRuntime === "opencode" && openCodeDiscovery.kind === "stale" ? "stale" : undefined}
           dashboardContext={dashboardDeveloperTeamContext()}
           runtime={modelConfigRuntime}
+          saving={modelConfigSaving}
+          error={modelConfigError}
         />
       ) : null}
       {screen === "model-provider-selection" ? (

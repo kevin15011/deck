@@ -363,7 +363,8 @@ describe("buildOpenCodeDeveloperTeamInstallPlan", () => {
     });
 
     const plannedSkillIds = new Set(plan.standaloneSkills.map((skill) => skill.skillId));
-    expect(plannedSkillIds.size).toBe(31);
+    expect(plannedSkillIds.size).toBe(STANDALONE_SKILLS.length + 2);
+    expect(plan.standaloneSkills).toContainEqual(expect.objectContaining({ skillId: "deck-frontend-design", packagePath: "references/catalog.json" }));
     expect(plannedSkillIds.has("deck-onboard")).toBe(true);
     expect(plannedSkillIds.has("deck-archive")).toBe(true);
     for (const { skillId } of STANDALONE_SKILLS) {

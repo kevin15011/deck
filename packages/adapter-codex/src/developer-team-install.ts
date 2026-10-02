@@ -49,6 +49,7 @@ export type BuildCodexInstallPlanInput = {
   serenaLauncherAvailable?: boolean;
   /** The effective `deck` executable has confirmed portable Serena proxy support. */
   serenaProxyAvailable?: boolean;
+  serenaProxyCommand?: readonly string[];
   webSearchProviderSupported?: boolean;
   webSearchProviderConfigured?: boolean;
   webSearchProvider?: WebSearchProviderDescriptorV1;
@@ -359,6 +360,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         memoryProvider: input.memoryProvider ?? "none",
         serenaLauncherAvailable: input.serenaLauncherAvailable,
         serenaProxyAvailable: input.serenaProxyAvailable,
+        serenaProxyCommand: input.serenaProxyCommand,
         contextModeCommand: input.contextModeCommand,
         codebaseMemoryCommand: input.codebaseMemoryCommand,
         webSearchProviderSupported: input.webSearchProviderSupported,

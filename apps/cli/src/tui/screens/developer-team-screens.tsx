@@ -10,6 +10,7 @@ import type { OpenCodeThinkingLevel } from "@deck/adapter-opencode";
 import type { AdaptiveMemoryActiveProvider } from "@deck/core/config/deck-config";
 import type { RunnerUiMetadata } from "@deck/core";
 import { MenuList } from "../components/menu-list";
+import { ActivityIndicator } from "../components/activity-indicator";
 import { getAdapter } from "../../runner-adapters";
 
 type DeveloperTeamDashboardContext = {
@@ -414,6 +415,8 @@ export function AgentModelAssignmentScreen({
 }
 
 type AgentModelConfigListScreenProps = {
+  saving?: boolean;
+  error?: string | null;
   cursor: number;
   modelAssignments: Record<string, string>;
   thinkingAssignments: Record<string, string>;
@@ -424,6 +427,8 @@ type AgentModelConfigListScreenProps = {
 };
 
 export function AgentModelConfigListScreen({
+  saving = false,
+  error,
   cursor,
   modelAssignments,
   thinkingAssignments,
@@ -461,6 +466,8 @@ export function AgentModelConfigListScreen({
       <Text dimColor>Current assignments are shown. Choose an agent to change its model and reasoning level.</Text>
       {discoveryState === "stale" ? <Text color="yellow">Last known OpenCode models are shown; changes are disabled until Retry discovery succeeds.</Text> : null}
       {dashboardContext?.source === "dashboard" ? <DashboardContextSummary context={dashboardContext} /> : null}
+      {saving ? <ActivityIndicator color="cyan">Saving model configuration…</ActivityIndicator> : null}
+      {!saving && error ? <Text color="red">{error}</Text> : null}
       <Box marginTop={1}>
         <MenuList cursor={cursor} items={items} />
       </Box>
@@ -484,7 +491,7 @@ export function OpenCodeModelDiscoveryScreen({ cursor, state }: OpenCodeModelDis
   if (state.kind === "loading") {
     return (
       <Box flexDirection="column">
-        <Text bold>Reading models from OpenCode…</Text>
+        <ActivityIndicator bold>Reading models from OpenCode…</ActivityIndicator>
         <Text dimColor>Existing assignments are preserved while discovery runs.</Text>
       </Box>
     );
@@ -534,7 +541,7 @@ export function CodexModelDiscoveryScreen({ cursor, state }: CodexModelDiscovery
   if (state.kind === "loading") {
     return (
       <Box flexDirection="column">
-        <Text bold>Reading models from Codex…</Text>
+        <ActivityIndicator bold>Reading models from Codex…</ActivityIndicator>
         <Text dimColor>Only the authenticated Codex catalog can enable model changes.</Text>
       </Box>
     );
@@ -579,7 +586,7 @@ type NoProvidersScreenProps = {
 };
 
 export function ClaudeModelDiscoveryScreen({ cursor, state }: CodexModelDiscoveryScreenProps) {
-  if (state.kind === "loading") return <Box flexDirection="column"><Text bold>Reading models from installed Claude…</Text><Text dimColor>Metadata only; no inference prompt or account entitlement check.</Text></Box>;
+  if (state.kind === "loading") return <Box flexDirection="column"><ActivityIndicator bold>Reading models from installed Claude…</ActivityIndicator><Text dimColor>Metadata only; no inference prompt or account entitlement check.</Text></Box>;
   return <Box flexDirection="column"><Text bold color="yellow">Claude model discovery is unavailable.</Text>{state.kind === "blocked" || state.kind === "stale" ? <Text>{state.errorMessage}</Text> : null}<Text>Persisted assignments remain unchanged. No hardcoded fallback.</Text><MenuList cursor={cursor} items={[{ id: "retry", label: "Retry discovery" }, { id: "back", label: "Back" }]} /></Box>;
 }
 

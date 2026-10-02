@@ -43,9 +43,9 @@ const REPRESENTATIVE_SUPPORT_FILES: Record<string, readonly string[]> = {
 
 describe("external/skills content", () => {
   describe("STANDALONE_SKILLS", () => {
-    it("contains exactly 29 skills (REQ-TEST-001)", () => {
+    it("contains the expanded 59-skill catalog (REQ-TEST-001)", () => {
       const skills = getStandaloneSkills();
-      expect(skills.length).toBe(29);
+      expect(skills.length).toBe(59);
       const skillIds = skills.map((skill) => skill.skillId);
       for (const skillId of FRONTEND_EXTERNAL_SKILLS) {
         expect(skillIds).toContain(skillId);

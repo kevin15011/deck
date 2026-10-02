@@ -1,0 +1,12 @@
+schema: spec-registry-events-v1
+events:
+  - phase: verify
+    status: passed_with_warnings
+    event: verify.completed
+    artifact: verify-report.md
+    timestamp: "2026-10-02"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - Focused tests, TypeScript and Linux canary smoke passed.
+      - Actual Developer Team delegation awaits user acceptance.

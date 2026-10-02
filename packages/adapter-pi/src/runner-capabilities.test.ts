@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createPiRunnerCapabilities } from "./runner-capabilities";
 import { resolvePiRunnerParity } from "./capability-parity";
 import { getDefaultDeckConfig } from "@deck/core";
+import { getStandaloneSkills } from "@deck/core/skills/external";
 import { buildDeveloperTeamManifest } from "../../core/src/teams/developer/manifest";
 
 describe("Pi RunnerCapabilities factory", () => {
@@ -142,7 +143,8 @@ describe("Pi RunnerCapabilities factory", () => {
     expect(result).toBeDefined();
     const standaloneFiles = result!.files.filter((file) => file.kind === "standalone-skill");
     const standaloneSkillIds = new Set(standaloneFiles.map((file) => file.skillId));
-    expect(standaloneSkillIds.size).toBe(29);
+    expect(standaloneSkillIds.size).toBe(getStandaloneSkills().length);
+    expect(standaloneFiles).toContainEqual(expect.objectContaining({ path: ".pi/skills/deck-frontend-design/references/catalog.json", kind: "standalone-skill" }));
     expect(standaloneSkillIds.has("frontend-design")).toBe(true);
     expect(standaloneSkillIds.has("web-quality-audit")).toBe(true);
     expect(standaloneFiles).toContainEqual(expect.objectContaining({
@@ -152,6 +154,29 @@ describe("Pi RunnerCapabilities factory", () => {
       packagePath: "scripts/analyze.sh",
     }));
     expect(result!.files.some((file) => file.path.includes("/commands/sdd-") || file.path.startsWith("commands/sdd-"))).toBe(false);
+  });
+
+  test("standalone nested agents resources retain their package paths across apply verify and backup", async () => {
+    const home = mkdtempSync(join(tmpdir(), "deck-pi-nested-agents-home-"));
+    const projectRoot = mkdtempSync(join(tmpdir(), "deck-pi-nested-agents-project-"));
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const plan = capabilities.developerTeam!.buildInstallPlan({ projectRoot });
+      const nested = plan.files.find((file) => file.kind === "standalone-skill" && file.packagePath?.startsWith("agents/") && file.packagePath.endsWith(".yaml"));
+      expect(nested).toBeDefined();
+      await capabilities.developerTeam!.applyInstall({ projectRoot, environmentId: "pi-development", plan });
+      const installedPath = join(home, ".pi", "agent", "skills", nested!.skillId!, nested!.packagePath!);
+      expect(readFileSync(installedPath, "utf8")).toBe(nested!.content);
+      expect(existsSync(join(home, ".pi", "agent", "agents", nested!.packagePath!.split("/").pop()!))).toBe(false);
+      const verified = await capabilities.developerTeam!.verifyInstall({ projectRoot, environmentId: "pi-development" });
+      expect(verified.skillResults).toContainEqual({ agentId: nested!.skillId!, valid: true });
+      expect(capabilities.developerTeam!.backupFiles(plan).files).toContainEqual(expect.objectContaining({ path: installedPath, originalContent: nested!.content }));
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+      rmSync(home, { recursive: true, force: true });
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 
   test("capability verify checks standalone support files under ~/.pi/agent", async () => {

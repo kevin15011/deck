@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -115,11 +115,19 @@ function collectSourceFiles(directory: string, files: string[] = []): string[] {
     const entryPath = join(directory, entry.name);
 
     if (entry.isDirectory()) {
-      if (entry.name !== "__tests__") {
+      // Standalone skill folders are shipped as data, including upstream helper
+      // source. Their runner examples are not executed by core. Keep the external
+      // registry and all other production source in this audit.
+      const bundledSkillResource = directory === join(coreSourceDir, "skills", "external")
+        && existsSync(join(entryPath, "SKILL.md"));
+      if (entry.name !== "__tests__" && !bundledSkillResource) {
         collectSourceFiles(entryPath, files);
       }
       continue;
     }
+
+    // This generated module contains verbatim resource strings, not runner policy.
+    if (entryPath === join(coreSourceDir, "skills", "external", "content.generated.ts")) continue;
 
     if (!sourceExtensions.has(extname(entry.name))) {
       continue;

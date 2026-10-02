@@ -62,7 +62,7 @@ function makeConfig(overrides: Partial<NormalizedDeckConfig["packageInstructions
 test("Codex defaults preserve canonical six-package order and valid surface metadata", () => {
   const config = getDefaultDeckConfig();
   expect(Object.keys(config.packageInstructions.codex)).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
-  expect(getEnabledPackageInstructionIds(config, "codex")).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk"]);
+  expect(getEnabledPackageInstructionIds(config, "codex")).toEqual(["codebase-memory", "code-economy", "context-mode", "rtk", "adaptive-memory", "serena"]);
   const bundle = buildCapabilityInstructionBundle(["serena", "code-economy", "context-mode", "code-economy"]);
   expect([...new Set(bundle.instructions.map((fragment) => fragment.packageId))]).toEqual(["code-economy", "context-mode", "serena"]);
   expect(validateCapabilityInstructionMetadata(bundle)).toEqual([]);

@@ -99,7 +99,11 @@ function buildPiAgentInstallPlanFromFiles(projectRoot: string, files: readonly D
     agentsDir,
     skillsDir,
     agents: files
-      .filter((f) => f.kind === "agent" || f.path.includes("/agents/"))
+      .filter((file) => {
+        if (file.kind === "agent") return true;
+        if (file.kind === "skill" || file.kind === "standalone-skill" || splitSkillInstallFile(file)) return false;
+        return /^(?:\.pi\/)?agents\/[^/]+\.md$/.test(file.path);
+      })
       .map((f) => ({
         agent: { id: f.path.split("/").pop()!.replace(".md", ""), name: "", description: "" } as any,
         relativePath: f.path,

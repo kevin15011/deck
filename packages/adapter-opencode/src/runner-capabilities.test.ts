@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import { createOpenCodeRunnerCapabilities } from "./runner-capabilities";
 import { buildOpenCodeDeveloperTeamInstallPlan } from "./developer-team-install";
 import { getDefaultDeckConfig } from "@deck/core";
+import { STANDALONE_SKILLS } from "@deck/core/skills/external";
+import { getBootstrapSkillFiles } from "@deck/core/skills/bootstrap";
 import { buildDeveloperTeamManifest } from "../../core/src/teams/developer/manifest";
 import type { CapabilityInstructionBundle } from "../../core/src/teams/developer/instruction-bundles/index";
 
@@ -229,7 +231,7 @@ describe("verify reuse of built plan", () => {
     expect(result).toBeDefined();
     const standaloneFiles = result!.files.filter((file) => file.kind === "standalone-skill");
     const standaloneSkillIds = new Set(standaloneFiles.map((file) => file.skillId));
-    expect(standaloneSkillIds.size).toBe(31);
+    expect(standaloneSkillIds.size).toBe(STANDALONE_SKILLS.length + getBootstrapSkillFiles().length);
     expect(standaloneSkillIds).toContain("deck-onboard");
     expect(standaloneSkillIds).toContain("deck-archive");
     expect(standaloneSkillIds.has("frontend-design")).toBe(true);

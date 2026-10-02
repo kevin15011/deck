@@ -1,0 +1,17 @@
+schema: spec-registry-v1
+changeId: codex-lead-delegation-policy
+name: Preserve Deck Lead delegation in Codex sessions
+currentPhase: verify
+status: passed_with_warnings
+artifacts:
+  exploration: working-brief.md
+  preconditions: preconditions.md
+  apply_progress: working-brief.md
+  verify_report: verify-report.md
+provenance:
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-02"
+    registryWrite: non-deferred
+    note: Launch tests and Linux canary passed; actual model-driven delegation awaits user acceptance.

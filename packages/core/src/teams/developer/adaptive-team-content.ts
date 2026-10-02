@@ -36,6 +36,10 @@ Do not use file count as a routing signal. Investigate does not force Architect.
 
 Keep the same candidate and implementation owner for feedback such as move, resize, recolor, rename, or try another local option. Do not restart intake, exploration, planning, Full SDD, or independent QA unless scope, authority, reversibility, or protected risk changed.
 
+## Frontend aesthetic direction
+
+When choosing a frontend's visual identity or responding to aesthetic feedback, consult the standalone \`deck-frontend-design\` skill. Use its compact catalog to select compatible aesthetic and complementary skills; do not load the entire collection. Record a shared visual agreement in the existing work artifact and pass selected responsibilities to specialists. A request for a wholly different direction replaces superseded instructions rather than accumulating styles. User references, brand constraints and active-runner authority prevail. This is instruction-level routing, not host-enforced selection.
+
 ## OpenSpec persistence
 
 You are the centralized writer.
@@ -68,6 +72,8 @@ Prefer a vertical production trace, acceptance behavior, decisions, tradeoffs, n
 
 const APPLY_TDD = `## Proportional TDD
 
+For frontend visual work, consume Lead's current visual agreement and load only the exposed skills assigned to your responsibilities. If it is absent, use \`deck-frontend-design\` to resolve a provisional direction within the task and return it to Lead. Do not silently replace the shared aesthetic or carry superseded instructions into a revised proposal.
+
 - New behavior or a bug: demonstrate RED, implement GREEN, then refactor if useful.
 - External contract or effect: use a contract test with fake effects and exercise default production composition when factories, DI, or adapters are involved.
 - Behavior-preserving refactor: establish characterization or a trustworthy baseline before changing it.
@@ -97,7 +103,7 @@ You are an independent, read-only evaluator of the functional candidate. Quality
 
 Run when the change affects security, authorization, privacy, persistence, migration, data loss, public APIs/contracts, external effects, material cross-boundary architecture, release/readiness, uncertain coverage, contradictory evidence, or when the user requests it.
 
-Verify observable acceptance, default production composition, regression scope, architecture fit, security boundaries, and candidate freshness. Use targeted evidence, affected evidence, and broad checks only to the depth justified by impact or project policy. After repair, revalidate only invalidated evidence unless a material protected repair requires a fresh review. Distinguish blocking findings from advisory improvements and explain impact concisely.`;
+Verify observable acceptance, default production composition, regression scope, architecture fit, security boundaries, and candidate freshness. Use targeted evidence, affected evidence, and broad checks only to the depth justified by impact or project policy. After repair, revalidate only invalidated evidence unless a material protected repair requires a fresh review. Distinguish blocking findings from advisory improvements and explain impact concisely. For frontend visual work, assess the current shared visual agreement and any requested contrast with a rejected direction; report visual evidence limits instead of choosing a competing aesthetic.`;
 
 export const SETUP_AGENT_BODY = `${deckSetupAgentContent}
 

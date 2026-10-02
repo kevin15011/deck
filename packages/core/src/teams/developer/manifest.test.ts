@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { buildDeveloperTeamManifest, buildDeveloperTeamManifestLegacy, getDeveloperTeamAgentIds, isManifestModelComplete } from "./manifest";
 import type { DeveloperTeamManifest, ManifestBuildResult } from "./manifest";
 
+import { STANDALONE_SKILLS } from "../../skills/external/index";
 import { DEVELOPER_TEAM_AGENTS } from "./catalog";
 import { buildCapabilityInstructionBundle } from "./instruction-bundles/index";
 
@@ -80,7 +81,7 @@ describe("DeveloperTeamManifest", () => {
       });
 
       expect(result.manifest.standaloneSkills).toBeDefined();
-      expect(result.manifest.standaloneSkills).toHaveLength(29);
+      expect(result.manifest.standaloneSkills).toHaveLength(STANDALONE_SKILLS.length);
 
       const frontendDesign = result.manifest.standaloneSkills!.find((skill) => skill.skillId === "frontend-design");
       expect(frontendDesign?.body.length).toBeGreaterThan(0);

@@ -107,6 +107,7 @@ describe("DeckApp Web Search Developer Team materialization", () => {
     const configDir = join(root, "home", ".config", "opencode");
     const config = getDefaultDeckConfig();
     config.webSearch = { enabled: true, provider: "tavily" };
+    config.packageInstructions.opencode = { ...config.packageInstructions.opencode, serena: false };
     const usableOpenCodeToolIds = ["rtk", "context-mode", "codebase-memory", "context7"] as const;
     const webSearchProvider = getWebSearchProviderDescriptor("tavily");
     if (!webSearchProvider) throw new Error("Expected Tavily Web Search descriptor fixture.");
