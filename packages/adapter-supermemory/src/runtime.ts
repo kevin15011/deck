@@ -144,6 +144,13 @@ export function resolveSupermemoryRolePolicy(role: SupermemoryRuntimeRole): Supe
   }
 }
 
+/** Read-only roles never write project memory; every other role (lead, architect, apply, setup) may save explicitly. */
+export const SUPERMEMORY_READ_ONLY_ROLES: readonly SupermemoryRuntimeRole[] = Object.freeze(["investigate", "quality"] as const);
+
+export function isSupermemoryExplicitSaveAllowed(role: SupermemoryRuntimeRole): boolean {
+  return !SUPERMEMORY_READ_ONLY_ROLES.includes(role);
+}
+
 function queryObservability(query: string): Pick<SupermemoryRuntimeMetric, "inputByteCount" | "inputSha256"> {
   return inputReceipt(query);
 }

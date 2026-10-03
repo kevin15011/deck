@@ -4,6 +4,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   createSupermemoryRuntime,
   createSupermemoryHttpTransport,
+  isSupermemoryExplicitSaveAllowed,
   type SupermemoryRenderedContext,
   type SupermemoryRequestDependency,
   type SupermemoryRuntimeCorrelation,
@@ -366,6 +367,8 @@ type RunnerLoopbackEvent = Readonly<{
   content?: unknown;
   source?: unknown;
   correlationId?: unknown;
+  limit?: unknown;
+  kind?: unknown;
   eventId?: unknown;
   timestamp?: unknown;
 }>;
@@ -548,6 +551,15 @@ async function handleLoopbackRequest(
       if (capture.ok) successfulEvents.set(eventId, { timestamp: Date.now(), response });
       return response;
     }
+    if (event.event === "search" || event.event === "save") {
+      const explicitRole = event.role === undefined ? role : parseRuntimeRole(event.role);
+      if (!explicitRole) return { ok: false, diagnostics: ["invalid-role"] };
+      const response = event.event === "search"
+        ? await explicitSearchForLoopback(host, explicitRole, event, correlation)
+        : await explicitSaveForLoopback(host, explicitRole, event, correlation);
+      if (response.ok !== false) successfulEvents.set(eventId, { timestamp: Date.now(), response });
+      return response;
+    }
     if (event.event === "shutdown_flush") {
       rolesBySession.delete(sessionId);
       host.expectedInjections.retireSession(sessionId);
@@ -563,6 +575,54 @@ async function handleLoopbackRequest(
   } finally {
     inFlightEvents.delete(eventId);
   }
+}
+
+const EXPLICIT_SAVE_MAX_BYTES = 16 * 1024;
+const EXPLICIT_MEMORY_KINDS: ReadonlySet<string> = new Set(["decision", "discovery", "preference", "convention", "note"]);
+
+/** On-demand search for runners without a native memory tool (Pi extension tool, Codex MCP server). */
+async function explicitSearchForLoopback(
+  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void },
+  role: SupermemoryRuntimeRole,
+  event: RunnerLoopbackEvent,
+  correlation: LoopbackMetricCorrelation,
+): Promise<Record<string, unknown>> {
+  const parsed = parseManagedProjectMemoryRecallQuery(event.query);
+  if (!parsed.ok) return { ok: false, diagnostics: ["invalid-query"] };
+  const limit = event.limit === undefined ? undefined : typeof event.limit === "number" && Number.isSafeInteger(event.limit) && event.limit >= 1 ? event.limit : null;
+  if (limit === null) return { ok: false, diagnostics: ["invalid-limit"] };
+  const search = await host.runtime.search({ role, query: parsed.query, dependency: "explicit-recall", correlation });
+  host.observe(search.metrics);
+  if (!search.ok) {
+    if (search.reason === "role_policy_skip") return { ok: false, diagnostics: ["role-not-permitted"] };
+    return { ok: false, diagnostics: [redactSecretDiagnostic(search.diagnostics.join(" "))] };
+  }
+  const items = limit === undefined ? search.context.items : search.context.items.slice(0, limit);
+  const advisoryText = renderAdvisoryContext([{ ...search.context, items }]);
+  return { ok: true, ...(advisoryText ? { advisoryText } : {}), resultCount: advisoryText ? items.length : 0, diagnostics: [] };
+}
+
+/** On-demand save: read-only roles are refused; content passes the same eligibility and redaction as every capture. */
+async function explicitSaveForLoopback(
+  host: { runtime: SupermemoryRuntimeInstance; observe(metric: SupermemoryRuntimeMetric): void },
+  role: SupermemoryRuntimeRole,
+  event: RunnerLoopbackEvent,
+  correlation: LoopbackMetricCorrelation,
+): Promise<Record<string, unknown>> {
+  if (!isSupermemoryExplicitSaveAllowed(role)) return { ok: false, diagnostics: ["role-not-permitted"] };
+  if (typeof event.content !== "string" || !event.content.trim() || Buffer.byteLength(event.content, "utf8") > EXPLICIT_SAVE_MAX_BYTES || event.content.includes("\0")) return { ok: false, diagnostics: ["invalid-content"] };
+  if (event.kind !== undefined && (typeof event.kind !== "string" || !EXPLICIT_MEMORY_KINDS.has(event.kind))) return { ok: false, diagnostics: ["invalid-kind"] };
+  const content = event.kind ? `[${event.kind}] ${event.content}` : event.content;
+  const capture = await host.runtime.capture({
+    role: "assistant",
+    source: "explicit-remember",
+    dependency: "explicit-remember",
+    content,
+    correlation,
+    capturedAt: new Date().toISOString(),
+  });
+  host.observe(capture.metrics);
+  return { ok: capture.ok, diagnostics: capture.ok ? [] : capture.diagnostics.map(redactSecretDiagnostic) };
 }
 
 function runtimeRecallAttemptMetric(input: {
