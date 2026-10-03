@@ -36,13 +36,13 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - [x] 3.4 Web Search (Tavily) installable tool; credential via shared resolution into the child env only.
 - [x] 3.5 Generate role prompts and read-only `--tools` allowlists from the Deck server catalog using direct-exposure `mcp__*` names (with `-` mapped to `_`).
 
-## Phase 4 — Subagent extension and per-role routing
+## Phase 4 — Subagent extension and per-role routing [done]
 
-- 4.1 `deck-subagents` single mode: discover `<package>/agents/*.md`; spawn `pi --mode json -p --no-session ... --append-system-prompt <tmpfile>` with stdin ignored and no shell; parse JSONL `message_end`; map errors (exit 1 on unknown model).
-- 4.2 Parallel (max 8, 4 concurrent) and chain modes; abort with SIGTERM then SIGKILL after 5s; temp-file cleanup.
-- 4.3 Per-role `--model`/`--thinking` from model config for all roles; pre-validate thinking levels; unassigned roles inherit.
-- 4.4 Child env (`DECK_PI_CHILD=1`, `DECK_PI_ROLE`, endpoint, token-file path); no tool registration in children.
-- 4.5 Read-only roles: `--tools read,grep,find,ls,<allowlisted mcp tools>`; write roles get no allowlist.
+- [x] 4.1 `deck-subagents` single mode: discover `<package>/agents/*.md`; spawn `pi --mode json -p --no-session ... --append-system-prompt <tmpfile>` with stdin ignored and no shell; parse JSONL `message_end`; map errors (exit 1 on unknown model).
+- [x] 4.2 Parallel (max 8, 4 concurrent) and chain modes; abort with SIGTERM then SIGKILL after 5s; temp-file cleanup.
+- [x] 4.3 Per-role `--model`/`--thinking` from model config for all roles; pre-validate thinking levels; unassigned roles inherit.
+- [x] 4.4 Child env (`DECK_PI_CHILD=1`, `DECK_PI_ROLE`, endpoint, token-file path); no tool registration in children.
+- [x] 4.5 Read-only roles: `--tools read,grep,find,ls,<allowlisted mcp tools>`; write roles get no allowlist.
 
 ## Phase 5 — Memory extension and launch gate removal
 

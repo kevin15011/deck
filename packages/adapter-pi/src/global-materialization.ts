@@ -9,10 +9,12 @@ import { buildDeckPiPackageFiles } from "./package-layout";
 import type { PiGlobalDesiredState } from "./pi-global-install";
 import { adaptBunBundleForNode } from "./pi-bundle-compat";
 import { DECK_PI_MCP_SERVER_IDS, piReadOnlyToolAllowlist, renderPiMcpToolNamesSection } from "./pi-mcp-catalog";
+import { readDeckPiExtensionBundle } from "./pi-extension-assets";
 import { buildTeamSystemPrompt, readPiExecutionExtensionSource } from "./pi-team-profile";
 
 export const PI_DEVELOPER_TEAM_ID = "developer-team";
 export const PI_EXECUTION_EXTENSION_NAME = "developer-team-execution";
+export const PI_SUBAGENTS_EXTENSION_NAME = "deck-subagents";
 /** Roles that never mutate the workspace (enforced by `--tools` and by the tool-policy extension). */
 export const PI_READ_ONLY_ROLE_AGENT_IDS: readonly string[] = ["deck-investigate", "deck-quality"];
 
@@ -92,6 +94,11 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
       // Pi runs on Node; the packaged bundle is built for Bun, so emit a Node-loadable copy.
       implementation: adaptBunBundleForNode(input.executionExtensionSource ?? readPiExecutionExtensionSource()),
       // The execution-authorization hooks belong to the lead; subagent children never register them.
+      scope: "lead",
+    }, {
+      // Delegation tool: registered in the lead only; children are marked DECK_PI_CHILD=1 and never get it.
+      name: PI_SUBAGENTS_EXTENSION_NAME,
+      implementation: readDeckPiExtensionBundle("deck-subagents"),
       scope: "lead",
     }],
     profile: { teamId, content: toolNamesSection ? `${profile.content.trimEnd()}\n\n${toolNamesSection}` : profile.content },

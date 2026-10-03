@@ -58,3 +58,12 @@ events:
     actor: deck-apply-deep
     notes:
       - "Phase 3 complete: Deck-owned RTK/Codebase Memory tools, global mcp.json servers (absolute commands, direct exposure, memory env blanks), community pi-subagents/pi-mcp-adapter removed from required tools and removed transactionally when Deck-added, Web Search installable tool with env-only credential, direct-exposure tool names in role prompts and read-only allowlists. Verified end to end against Pi 1.0.0 (faux provider)."
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 4 complete: Deck-owned deck-subagents extension (single/parallel/chain, per-role model/thinking/read-only tools, child isolation env, SIGTERM/SIGKILL abort), TS sources bundled for Node by scripts/generate-pi-extension-assets.ts, verified against the real Pi 1.0.0 runtime with the faux provider. See design.md deviations 19-21."
+
