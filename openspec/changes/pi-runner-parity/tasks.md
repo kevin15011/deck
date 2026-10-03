@@ -110,5 +110,5 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - [x] 8c.4 Hermetic real-Pi normal/split contracts, failure/abort/timeouts, replay-aware identical-summary regression; regenerate extension assets.
 - [x] 8c.5 Independent Quality review and repair/re-review of repeated native entry-ID collision.
 - [x] 8c.6 Update memory spec, design decision and docs event table.
-- [ ] 8c.7 Run requested broad adapter/CLI tests and TypeScript check; record results, separate conventional commits and rebuild/install canary without push.
+- [x] 8c.7 Run requested broad adapter/CLI tests and TypeScript check; record results, separate conventional commits and rebuild/install canary without push.
 - [ ] 8c.8 Manual evidence: native threshold/overflow and live Supermemory summary ingestion (not claimed by offline tests).
