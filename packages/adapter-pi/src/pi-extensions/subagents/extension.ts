@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ExtensionAPI } from "../shared/pi-api";
@@ -87,8 +89,11 @@ export function createDeckSubagentsExtension(options: DeckSubagentsOptions = {})
     if (env.DECK_PI_CHILD === "1") return;
 
     const agentsDir = options.agentsDir ?? fileURLToPath(new URL("../../agents/", import.meta.url));
+    // `<package>/agents/` -> `<package>`; only forwarded when it is a real Pi package (has package.json).
+    const packageRoot = dirname(agentsDir.replace(/[\\/]+$/, ""));
     const runner: ChildRunner = createChildRunner({
       env,
+      ...(existsSync(join(packageRoot, "package.json")) ? { packageRoot } : {}),
       memory: () => resolveMemoryHandoff(env),
       ...(options.piInvocation ? { piInvocation: options.piInvocation } : {}),
       ...(options.killGraceMs !== undefined ? { killGraceMs: options.killGraceMs } : {}),

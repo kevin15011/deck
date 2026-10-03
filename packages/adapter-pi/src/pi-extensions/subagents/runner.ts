@@ -22,6 +22,12 @@ export type ChildRunnerOptions = {
   env?: Readonly<Record<string, string | undefined>>;
   /** Memory loopback handoff to forward explicitly (endpoint + token-file path, never the bearer token). */
   memory?: () => MemoryHandoff | undefined;
+  /**
+   * Deck package root passed to children as a CLI package source (`--extension`). Pi keeps the first skill per
+   * name and CLI package sources precede auto-discovered `<agentDir>/skills` and `~/.agents/skills`, so this makes
+   * the Deck package skills win collisions inside role processes, matching the lead launch.
+   */
+  packageRoot?: string;
   killGraceMs?: number;
   timeoutMs?: number;
 };
@@ -125,6 +131,7 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
     if (agent.model) args.push("--model", agent.model);
     if (agent.thinking) args.push("--thinking", agent.thinking);
     if (tools) args.push("--tools", tools.join(","));
+    if (options.packageRoot) args.push("--extension", options.packageRoot);
 
     let promptDir: string | undefined;
     try {

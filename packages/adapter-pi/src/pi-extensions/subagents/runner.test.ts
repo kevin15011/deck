@@ -46,6 +46,18 @@ describe("child spawn contract", () => {
     expect(record.cwd).toBe(dir);
   });
 
+  test("passes the Deck package as a CLI package source so its skills win name collisions in children", async () => {
+    await runner({ packageRoot: "/agent/deck/package" }).run({ agent: APPLY, task: "x", cwd: dir });
+    const { argv } = records()[0];
+    expect(argv[argv.indexOf("--extension") + 1]).toBe("/agent/deck/package");
+    expect(argv.indexOf("--extension")).toBeLessThan(argv.indexOf("Task: x"));
+  });
+
+  test("without a package root no --extension flag is added", async () => {
+    await runner().run({ agent: APPLY, task: "x", cwd: dir });
+    expect(records()[0].argv).not.toContain("--extension");
+  });
+
   test("stdin is ignored (never a pipe or TTY) so a non-TTY parent cannot hang the child", async () => {
     await runner().run({ agent: INVESTIGATE, task: "x", cwd: dir });
     expect(records()[0].stdinTarget).toBe("/dev/null");
