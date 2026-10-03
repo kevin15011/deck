@@ -82,6 +82,15 @@ describe("parseArgs", () => {
     });
   });
 
+  test("parses 'deck pi developer --cleanup-legacy' as the opt-in legacy cleanup", () => {
+    expect(parseArgs(["pi", "developer", "--cleanup-legacy"])).toEqual<ParsedArgs>({
+      command: "pi-launch",
+      teamId: "developer-team",
+      flags: {},
+      cleanupLegacy: true,
+    });
+  });
+
   test("parses 'deck pi developer --continue' with continue flag", () => {
     const result = parseArgs(["pi", "developer", "--continue"]);
     expect(result).toEqual<ParsedArgs>({

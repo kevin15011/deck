@@ -18,7 +18,8 @@ import { createClaudeRunnerAdapter } from "../../../packages/adapter-claude/src/
 import { getWebSearchProviderDescriptor } from "./web-search-provider";
 import { readOwnedTavilyCredential } from "./web-search-shell-profile";
 import { resolveClaudeSupermemoryLaunchCredential } from "./claude-supermemory-launch";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { getDeckStateDir } from "./runtime/paths";
 
 /**
  * Singleton registry instance for use by getAdapter() and listAdapters().
@@ -48,6 +49,7 @@ export type DefaultAdapterRegistryOptions = {
 export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOptions = {}): AdapterRegistry {
   const registry = createAdapterRegistry();
   registry.register("pi", createPiRunnerAdapter({
+    legacyBackupRoot: () => join(getDeckStateDir(), "backups", "pi-legacy"),
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     ...options.pi,

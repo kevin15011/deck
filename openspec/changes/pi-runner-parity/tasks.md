@@ -63,17 +63,17 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - [x] 6.3 Graph redirection for `bash` `grep`/`rg`/`find` over code paths and the `grep`/`find` built-ins (advisory; non-code untouched).
 - [x] 6.4 Coexistence test with the execution extension: handler order, and evidence preserved for non-blocked calls.
 
-## Phase 7 — Migration and doctor
+## Phase 7 — Migration and doctor [done]
 
-- 7.1 Legacy detection in every plan (project `.pi/agents|skills`, `.deck/pi/profiles`, Deck-added package entries).
-- 7.2 Opt-in transactional cleanup of project-local legacy artifacts with backup and hash matching (`--cleanup-legacy` parity).
-- 7.3 `deck doctor` Pi coverage: version, agent dir, package registration (cross-check via `pi list` at runtime only), manifest drift, MCP absolute commands and direct exposure, `/mcp` conflict, memory extension, legacy artifacts.
+- [x] 7.1 Legacy detection in every plan (project `.pi/agents|skills`, `.deck/pi/profiles`, Deck-added package entries).
+- [x] 7.2 Opt-in transactional cleanup of project-local legacy artifacts with backup and hash matching (`--cleanup-legacy` parity).
+- [x] 7.3 `deck doctor` Pi coverage: version, agent dir, package registration (cross-check via `pi list` at runtime only), manifest drift, MCP absolute commands and direct exposure, `/mcp` conflict, memory extension, legacy artifacts.
 
 ## Phase 8 — Documentation and closure
 
-- 8.1 Update `docs/reference/support-matrix.md` (add Claude column, Pi cells) after rebasing on `deck-product-documentation`.
-- 8.2 Update `docs/runners.md`, `docs/runner-support.md`, `docs/adaptive-memory.md`. Document that `--append-system-prompt` in subagent children replaces the user's `APPEND_SYSTEM.md`, and that MCP servers inherit non-memory env secrets.
-- 8.3 Run the gates: `bun test packages/adapter-pi`, the config strict TDD gates, `tsc --noEmit`, baseline ledger comparison; record results in `apply-progress.md`.
+- [ ] 8.1 Update `docs/reference/support-matrix.md` (add Claude column, Pi cells) after rebasing on `deck-product-documentation`.
+- [ ] 8.2 Update `docs/runners.md`, `docs/runner-support.md`, `docs/adaptive-memory.md`. Document that `--append-system-prompt` in subagent children replaces the user's `APPEND_SYSTEM.md`, and that MCP servers inherit non-memory env secrets.
+- [ ] 8.3 Run the gates: `bun test packages/adapter-pi`, the config strict TDD gates, `tsc --noEmit`, baseline ledger comparison; record results in `apply-progress.md`.
 
 ## Phase 9 — Residual-risk verification (manual canary; evidence, not test gates)
 

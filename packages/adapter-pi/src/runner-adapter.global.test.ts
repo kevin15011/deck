@@ -445,3 +445,54 @@ describe("tool-policy configuration from the production adapter", () => {
     expect(configFor(pi, ["context7"]).graphRedirect).toBe(false);
   });
 });
+
+describe("legacy detection and opt-in cleanup through the adapter", () => {
+  const writeLegacyFromTemplates = async () => {
+    const { buildDeveloperTeamInstallPlan } = await import("./developer-team-install");
+    const { bindAdaptiveMemoryInstructionBundle, buildCapabilityInstructionBundle, getEnabledCapabilityInstructionIds } = await import("@deck/core");
+    const config = validateDeckConfig({});
+    const bundle = bindAdaptiveMemoryInstructionBundle(buildCapabilityInstructionBundle(getEnabledCapabilityInstructionIds(config, "pi"), {}), {});
+    const legacy = buildDeveloperTeamInstallPlan(projectRoot, { capabilityInstructions: bundle, orchestratorPersonality: config.orchestratorPersonality, piMcpConfigPath: piAgentPaths(agentDir).mcp, piMcpHomeDir: home });
+    const lead = legacy.agents.find((entry) => entry.agent.id === "deck-lead")!;
+    mkdirSync(join(projectRoot, ".pi", "agents"), { recursive: true });
+    writeFileSync(join(projectRoot, ".pi", "agents", "deck-lead.md"), lead.content);
+    return lead;
+  };
+
+  test("every plan lists legacy project files with the cleanup hint and writes nothing", async () => {
+    await writeLegacyFromTemplates();
+    const before = tree(projectRoot);
+    const plan = adapter().buildDeveloperTeamInstallPlan(planInput());
+    const entry = plan.diagnosticEntries?.find((candidate) => candidate.code === "PI_LEGACY_ARTIFACTS");
+    expect(entry?.severity).toBe("warning");
+    expect(entry?.message).toContain(join(projectRoot, ".pi", "agents", "deck-lead.md"));
+    expect(entry?.message).toContain("--cleanup-legacy");
+    expect(tree(projectRoot)).toEqual(before);
+  });
+
+  test("a clean project reports no legacy artifacts", () => {
+    const plan = adapter().buildDeveloperTeamInstallPlan(planInput());
+    expect(plan.diagnosticEntries?.some((candidate) => candidate.code === "PI_LEGACY_ARTIFACTS")).toBe(false);
+  });
+
+  test("cleanup removes the unmodified legacy file, keeps a backup and leaves modified files alone", async () => {
+    const lead = await writeLegacyFromTemplates();
+    writeFileSync(join(projectRoot, ".pi", "agents", "deck-quality.md"), "user edited quality agent\n");
+    const backupRoot = join(root, "state", "backups", "pi-legacy");
+    const pi = adapter({ legacyBackupRoot: () => backupRoot });
+    const result = await pi.cleanupLegacyInstall!(projectRoot, { deckConfig: validateDeckConfig({}) });
+    expect(result.removed).toEqual([join(projectRoot, ".pi", "agents", "deck-lead.md")]);
+    expect(existsSync(join(projectRoot, ".pi", "agents", "deck-lead.md"))).toBe(false);
+    expect(readFileSync(join(projectRoot, ".pi", "agents", "deck-quality.md"), "utf-8")).toBe("user edited quality agent\n");
+    expect(result.preserved).toEqual([join(projectRoot, ".pi", "agents", "deck-quality.md")]);
+    const [stamp] = readdirSync(backupRoot);
+    expect(readFileSync(join(backupRoot, stamp!, "files", "0"), "utf-8")).toBe(lead.content);
+  });
+
+  test("without a Deck config nothing is provably unmodified, so nothing is removed", async () => {
+    await writeLegacyFromTemplates();
+    const result = await adapter({ legacyBackupRoot: () => join(root, "b") }).cleanupLegacyInstall!(projectRoot);
+    expect(result.removed).toEqual([]);
+    expect(existsSync(join(projectRoot, ".pi", "agents", "deck-lead.md"))).toBe(true);
+  });
+});

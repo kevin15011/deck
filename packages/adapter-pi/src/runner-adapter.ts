@@ -49,7 +49,10 @@ import { buildPiTeamLaunchPlan } from "./pi-team-launch";
 import {
   readDeveloperTeamModelAssignments,
   readDeveloperTeamThinkingAssignments,
+  type DeveloperTeamInstallOptions,
 } from "./developer-team-install";
+import { cleanupPiLegacy, describePiLegacy, detectPiLegacy, type PiLegacyReport } from "./pi-legacy";
+import { buildPiLegacyTemplates } from "./pi-legacy-templates";
 import { PI_THINKING_LEVELS, supportsThinkingForModel, getDefaultThinkingForModel, resolveThinkingForModel } from "./model-config";
 import { getPiRunnerCapability, getUserFacingCapability, PI_RUNNER_CAPABILITY_CONTRIBUTION, PI_RUNNER_CAPABILITY_IDS, type CapabilityId } from "./capability-catalog";
 import { getOptionalPiTools } from "./installation-plan";
@@ -148,6 +151,8 @@ export type PiRunnerAdapterOptions = {
   readonly piCommand?: string;
   /** File effects for the global install engine (hermetic tests inject failures here). */
   readonly piFileIO?: PiFileIO;
+  /** Directory (under the Deck state home) that receives the backup of an opt-in legacy cleanup. */
+  readonly legacyBackupRoot?: () => string;
   /** Deck-owned tool resolution (RTK, Codebase Memory, shared commands). Defaults to the production resolver. */
   readonly piTools?: PiToolResolution;
   /** Shared Web Search credential resolver (composition root); the value only ever reaches the launched process env. */
@@ -576,7 +581,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     adaptiveMemory: {
       supermemory: {
         requiresExternalToken: true,
-        selectionStatus: "Supermemory selected; provide an API key for the Pi MCP handoff.",
+        selectionStatus: "Supermemory selected; the API key stays in Deck's secret store and reaches Pi only through the Deck loopback during Deck-managed sessions.",
       },
     },
   } as const;
@@ -608,7 +613,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   #lastMaterialization: { materialization: PiGlobalMaterialization; enginePlan: PiGlobalPlan } | null = null;
   #piTools?: PiToolResolution;
   #webSearchCredential?: () => string | undefined;
+  #legacyBackupRoot?: () => string;
   constructor(options: PiRunnerAdapterOptions = {}) {
+    this.#legacyBackupRoot = options.legacyBackupRoot;
     this.#homeDirectory = options.homeDirectory ?? process.env.HOME ?? homedir();
     this.#env = options.env ?? process.env;
     this.#agentDirResolution = resolvePiAgentDir(this.#env, this.#homeDirectory);
@@ -1262,21 +1269,42 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     }
   }
 
-  buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
-    // Blocking prerequisites: a valid agent dir and a supported Pi. Nothing is planned (or written) otherwise.
-    const diagnosticEntries: { code: string; severity: "info" | "warning" | "error"; message: string }[] = [];
-    if (!this.#agentDirResolution.ok) {
-      this.#lastMaterialization = null;
-      diagnosticEntries.push({ code: "PI_AGENT_DIR_INVALID", severity: "error", message: this.#agentDirResolution.message });
-      return { files: [], mutationPreview: [], blocked: true, diagnostics: diagnosticEntries.map((entry) => entry.message), diagnosticEntries };
+  /** Read-only legacy detection; the Deck-template check runs only when a Deck-named path actually exists. */
+  #detectLegacy(projectRoot: string, agentDir: string, installOptions: DeveloperTeamInstallOptions): PiLegacyReport {
+    const quick = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot });
+    if (quick.files.length === 0) return quick;
+    try {
+      const templates = buildPiLegacyTemplates({ projectRoot, packageRoot: piAgentPaths(agentDir).packageRoot, installOptions });
+      return detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates });
+    } catch {
+      return quick;
     }
-    const agentDir = this.#agentDirResolution.dir;
-    const version = this.#evaluatePiVersion();
-    if (!version.supported && version.diagnostic) {
-      diagnosticEntries.push({ code: `PI_VERSION_${(version.reason ?? "unsupported").toUpperCase().replace(/-/g, "_")}`, severity: version.reason === "unavailable" ? "warning" : "error", message: version.diagnostic });
-    }
-    const versionBlocked = !version.supported && version.reason !== "unavailable";
+  }
 
+  /**
+   * Opt-in cleanup of legacy Deck artifacts (project `.pi/agents|skills`, `.deck/pi/profiles`, loose files in the Pi
+   * agent directory, Deck-added project package entries). Backed up first, rolled back on failure; modified files stay.
+   */
+  async cleanupLegacyInstall(projectRoot: string, context?: { readonly deckConfig?: NormalizedDeckConfig }): Promise<{ removed: readonly string[]; preserved: readonly string[]; diagnostics: readonly string[] }> {
+    if (!this.#agentDirResolution.ok) return { removed: [], preserved: [], diagnostics: [this.#agentDirResolution.message] };
+    const agentDir = this.#agentDirResolution.dir;
+    const quick = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot });
+    if (quick.files.length === 0 && quick.packages.length === 0) return { removed: [], preserved: [], diagnostics: ["No legacy Pi artifacts were found."] };
+    const backupRoot = this.#legacyBackupRoot?.();
+    if (!backupRoot) return { removed: [], preserved: [], diagnostics: ["Legacy cleanup needs a Deck state directory for its backup; nothing was changed."] };
+    let report = quick;
+    if (context?.deckConfig) {
+      const { installOptions } = this.#resolveInstallOptions({ projectRoot, environmentId: PI_ENVIRONMENT_IDS[0]!, deckConfig: context.deckConfig } as DeveloperTeamAdapterInstallInput, agentDir);
+      report = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates: buildPiLegacyTemplates({ projectRoot, packageRoot: piAgentPaths(agentDir).packageRoot, installOptions }) });
+    } else {
+      // Without a Deck config the templates cannot be reproduced: nothing is provably unmodified, so nothing is removed.
+      report = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates: new Map() });
+    }
+    return cleanupPiLegacy({ io: this.#fileIO, agentDir, projectRoot, report, backupRoot });
+  }
+
+  /** Capability instructions and install options shared by the plan and the legacy template check. */
+  #resolveInstallOptions(input: DeveloperTeamAdapterInstallInput, agentDir: string): { capabilityInstructions: ReturnType<typeof bindAdaptiveMemoryInstructionBundle>; installOptions: DeveloperTeamInstallOptions } {
     const derivedSupermemoryProjectScope = (() => {
       const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
       return resolved.ok ? resolved.scope : undefined;
@@ -1301,6 +1329,38 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       supermemoryProjectScope: derivedSupermemoryProjectScope,
       configuredSupermemoryProjectScope,
     });
+
+    return {
+      capabilityInstructions,
+      installOptions: {
+        modelAssignments: input.modelAssignments,
+        thinkingAssignments: input.thinkingAssignments,
+        memoryProvider: input.memoryProvider,
+        capabilityInstructions,
+        orchestratorPersonality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,
+        standaloneSkills: input.standaloneSkills,
+        piMcpConfigPath: piAgentPaths(agentDir).mcp,
+        piMcpHomeDir: this.#homeDirectory,
+      },
+    };
+  }
+
+  buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
+    // Blocking prerequisites: a valid agent dir and a supported Pi. Nothing is planned (or written) otherwise.
+    const diagnosticEntries: { code: string; severity: "info" | "warning" | "error"; message: string }[] = [];
+    if (!this.#agentDirResolution.ok) {
+      this.#lastMaterialization = null;
+      diagnosticEntries.push({ code: "PI_AGENT_DIR_INVALID", severity: "error", message: this.#agentDirResolution.message });
+      return { files: [], mutationPreview: [], blocked: true, diagnostics: diagnosticEntries.map((entry) => entry.message), diagnosticEntries };
+    }
+    const agentDir = this.#agentDirResolution.dir;
+    const version = this.#evaluatePiVersion();
+    if (!version.supported && version.diagnostic) {
+      diagnosticEntries.push({ code: `PI_VERSION_${(version.reason ?? "unsupported").toUpperCase().replace(/-/g, "_")}`, severity: version.reason === "unavailable" ? "warning" : "error", message: version.diagnostic });
+    }
+    const versionBlocked = !version.supported && version.reason !== "unavailable";
+
+    const { capabilityInstructions, installOptions } = this.#resolveInstallOptions(input, agentDir);
 
     const deckConfig = requireDeckConfig(input.deckConfig, "developer team install");
     const ownedMcp = Object.keys(readPiManifest(this.#fileIO, agentDir)?.mcp.servers ?? {});
@@ -1332,21 +1392,21 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       // RTK rewrite is pinned to the Deck-owned binary: an explicit selection must include RTK; a launch-time plan
       // (no explicit selection) keeps using the owned binary when it is usable.
       rtkBinary: input.capabilityIds === undefined || input.capabilityIds.includes("rtk") ? this.#ownedRtkCommand() : null,
-      installOptions: {
-        modelAssignments: input.modelAssignments,
-        thinkingAssignments: input.thinkingAssignments,
-        memoryProvider: input.memoryProvider,
-        capabilityInstructions,
-        orchestratorPersonality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,
-        standaloneSkills: input.standaloneSkills,
-        piMcpConfigPath: piAgentPaths(agentDir).mcp,
-        piMcpHomeDir: this.#homeDirectory,
-      },
+      installOptions,
     });
     const enginePlan = planPiGlobalInstall(materialization.desired, this.#fileIO);
     this.#lastMaterialization = { materialization, enginePlan };
 
     for (const diagnostic of enginePlan.diagnostics) diagnosticEntries.push({ code: diagnostic.code, severity: diagnostic.severity, message: diagnostic.message });
+    const legacy = this.#detectLegacy(input.projectRoot, agentDir, installOptions);
+    if (legacy.files.length > 0 || legacy.packages.length > 0) {
+      const lines = describePiLegacy(legacy);
+      diagnosticEntries.push({
+        code: "PI_LEGACY_ARTIFACTS",
+        severity: "warning",
+        message: `Earlier Deck versions left ${lines.length} legacy Pi item(s) that can duplicate the global Deck package: ${lines.slice(0, 8).join("; ")}${lines.length > 8 ? `; and ${lines.length - 8} more` : ""}. Run 'deck pi developer --cleanup-legacy' to remove the unmodified ones (a backup is kept; modified files are never touched).`,
+      });
+    }
     for (const kept of enginePlan.kept) diagnosticEntries.push({ code: "PI_FILE_KEPT", severity: "info", message: `${kept.relPath} ${kept.reason}.` });
     const standalone = new Set(materialization.nativePlan.standaloneSkills.map((file) => file.skillId));
     const files = materialization.desired.files.map((file) => {

@@ -13,6 +13,7 @@ installGlobalConfigRealEnvSentinel();
 // This avoids vi.mocked() which is not available in Bun's vitest.
 const mockInspectPiEnvironment = vi.fn();
 const mockReviewPiRequiredTools = vi.fn();
+const mockInspectPiDeckInstall = vi.fn(() => [] as Array<{ category: string; status: "ok" | "warning" | "error"; items: Array<{ status: "ok" | "warning" | "error"; message: string; suggestion?: string }> }>);
 const mockValidateSupermemoryPiMcpConfig = vi.fn();
 const mockInspectOpenCodeEnvironment = vi.fn();
 const mockReviewOpenCodeTools = vi.fn();
@@ -81,6 +82,7 @@ function fabDependencies() {
     detectSelectedRuntimes: mockDetectSelectedRuntimes,
     inspectPiEnvironment: mockInspectPiEnvironment,
     reviewPiRequiredTools: mockReviewPiRequiredTools,
+    inspectPiDeckInstall: mockInspectPiDeckInstall,
     validateSupermemoryPiMcpConfig: mockValidateSupermemoryPiMcpConfig,
     inspectOpenCodeEnvironment: mockInspectOpenCodeEnvironment,
     reviewOpenCodeTools: mockReviewOpenCodeTools,
@@ -185,6 +187,25 @@ describe("runDoctorDiagnostics", () => {
   });
 
   // ── Pi installed with all packages OK ─────────────────────────────────────
+
+  test("includes the global Deck Pi package inspection (drift, extensions, MCP, memory, legacy) in the Pi runtime", async () => {
+    mockDetectSelectedRuntimes.mockReturnValue([fabPiStatus()]);
+    mockInspectPiEnvironment.mockReturnValue({ version: "1.0.0", configDirectory: "/fake", packageManifest: undefined, existingConfiguration: true });
+    mockReviewPiRequiredTools.mockReturnValue({ requiredTools: [], tools: [] });
+    mockValidateSupermemoryPiMcpConfig.mockReturnValue(fabOkMcpResult());
+    mockInspectPiDeckInstall.mockReturnValue([
+      { category: "Pi Deck package", status: "error", items: [{ status: "error", message: "Deck files are missing: deck/package/agents/deck-lead.md.", suggestion: "Run 'deck pi developer' to repair." }] },
+      { category: "Pi legacy and conflicts", status: "ok", items: [{ status: "ok", message: "No legacy Deck artifacts." }] },
+    ]);
+
+    const result = await runDoctorDiagnostics(fabDependencies(), "/fake/project");
+
+    const pi = result.runtimes.find((r) => r.runtimeId === "pi")!;
+    expect(pi.checks.map((check) => check.category)).toEqual(expect.arrayContaining(["Pi Deck package", "Pi legacy and conflicts"]));
+    expect(pi.checks.find((check) => check.category === "Pi Deck package")!.items[0]!.suggestion).toContain("deck pi developer");
+    expect(mockInspectPiDeckInstall).toHaveBeenCalledWith({ command: "pi", projectRoot: "/fake/project" });
+    mockInspectPiDeckInstall.mockReturnValue([]);
+  });
 
   test("Pi with all packages OK → runtime and packages show ok status", async () => {
     mockDetectSelectedRuntimes.mockReturnValue([fabPiStatus()]);
@@ -308,7 +329,8 @@ describe("runDoctorDiagnostics", () => {
     expect(messages).toContain("Deck-supervised native loopback route matrix");
     expect(messages).toContain("OpenCode model-message transform");
     expect(messages).toContain("Codex hookSpecificOutput.additionalContext");
-    expect(messages).toContain("Pi remains unsupported unless Pi exposes a trusted final-assistant event");
+    expect(messages).toContain("Pi captures the user prompt and the assistant text of each completed turn through the deck-memory extension");
+    expect(messages).toContain("Pi deck-memory extension");
     expect(messages).toContain("No Supermemory CLI package is required");
     expect(messages).not.toContain("supported only on Deck-supervised exec paths");
     expect(messages).not.toContain("Install Supermemory");
@@ -682,6 +704,7 @@ describe("runDoctorDiagnostics dependency seam", () => {
       "fetchReleaseDescriptor",
       "inspectCodex",
       "inspectOpenCodeEnvironment",
+      "inspectPiDeckInstall",
       "inspectPiEnvironment",
       "memoryBinaryAvailable",
       "readOpenCodeMcpSection",

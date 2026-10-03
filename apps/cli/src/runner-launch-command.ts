@@ -493,11 +493,11 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     if (input.dryRun) {
       await input.presentPreview("Legacy cleanup requested: a dry run removes nothing. Rerun without --dry-run to remove the unmodified Deck-owned per-project files.");
     } else {
-      if (!input.yes && (!input.interactive || !input.confirm || !(await input.confirm("Remove the previous per-project Deck install (unmodified Deck-owned files only)? [y/N]")))) {
+      if (!input.yes && (!input.interactive || !input.confirm || !(await input.confirm("Remove the previous Deck install artifacts (unmodified Deck-owned files only; a backup is kept)? [y/N]")))) {
         return { status: "blocked", message: "Legacy cleanup needs --yes or an interactive confirmation; nothing was removed." };
       }
       try {
-        const cleaned = await input.adapter.cleanupLegacyInstall(input.launch.projectRoot);
+        const cleaned = await input.adapter.cleanupLegacyInstall(input.launch.projectRoot, { deckConfig: input.launch.deckConfig });
         await input.presentPreview([`Legacy cleanup removed ${cleaned.removed.length} file(s).`, ...cleaned.diagnostics.map((message) => `! ${message}`)].join("\n"));
       } catch (error) {
         return { status: "blocked", message: `Legacy cleanup failed and was rolled back: ${error instanceof Error ? error.message : "unknown error"}` };
