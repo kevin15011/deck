@@ -44,11 +44,17 @@ export function createLoopbackClient(input: {
   const now = input.now ?? Date.now;
   const attempt = async (body: string, timeoutMs: number): Promise<{ response?: LoopbackResponse; transient: boolean; error?: string }> => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const response = await doFetch(input.endpoint, { method: "POST", headers: { authorization: `Bearer ${input.token}`, "content-type": "application/json" }, body, signal: controller.signal });
-      if (response.status >= 500) return { transient: true, error: `host-error-${response.status}` };
-      const parsed = await response.json() as { ok?: unknown; advisoryText?: unknown; resultCount?: unknown; diagnostics?: unknown };
+      // Race the entire response (including JSON), even when a transport ignores AbortSignal.
+      const parsed = await Promise.race([
+        (async () => {
+          const response = await doFetch(input.endpoint, { method: "POST", headers: { authorization: `Bearer ${input.token}`, "content-type": "application/json" }, body, signal: controller.signal });
+          if (response.status >= 500) throw new Error(`host-error-${response.status}`);
+          return await response.json() as { ok?: unknown; advisoryText?: unknown; resultCount?: unknown; diagnostics?: unknown };
+        })(),
+        new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("timeout")); }, timeoutMs); }),
+      ]);
       return {
         transient: false,
         response: {

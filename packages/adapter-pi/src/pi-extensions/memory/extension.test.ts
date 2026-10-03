@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { clearPublishedMemoryHandoff, readPublishedMemoryHandoff } from "../shared/memory-handoff";
 import { createDeckMemoryExtension } from "./extension";
+import { startFakeLoopbackHost } from "../../__fixtures__/fake-loopback-host";
 
 const TOKEN = "deck-loopback-test-token";
 const ADVISORY = "<DECK_ADAPTIVE_CONTEXT_JSON_V1>\nadvisory\n{\"items\":[\"remember X\"]}\n</DECK_ADAPTIVE_CONTEXT_JSON_V1>";
@@ -29,7 +30,7 @@ beforeEach(() => {
       const body = JSON.parse(await request.text());
       if (behavior.delayMs && (!behavior.delayEvents || behavior.delayEvents.includes(body.event))) await Bun.sleep(behavior.delayMs);
       bucket.push({ auth: request.headers.get("authorization"), body });
-      const recall = ["session_start", "recall", "role_start"].includes(body.event);
+      const recall = ["session_start", "recall", "role_start", "compaction_recall"].includes(body.event);
       if (recall && behavior.recallOk === false) return Response.json({ ok: false, diagnostics: ["provider_error"] });
       return Response.json(recall ? { ok: true, advisoryText: behavior.advisory, diagnostics: [] } : { ok: true, diagnostics: [] });
     },
@@ -59,7 +60,7 @@ function load(overrides: Record<string, string | undefined> = {}, options: Param
   const ctx = { sessionManager: { getSessionId: () => "sess-1" }, hasUI: true, ui: { notify: (message: string) => notices.push(message) } };
   const fire = async (name: string, event: any) => {
     let result: unknown;
-    for (const handler of handlers[name] ?? []) result = (await handler({ type: name, ...event }, ctx)) ?? result;
+    for (const handler of handlers[name] ?? []) result = (await handler({ type: name, ...(name === "session_before_compact" ? { preparation: { messagesToSummarize: [], turnPrefixMessages: [] }, signal: new AbortController().signal } : {}), ...event }, ctx)) ?? result;
     return result as any;
   };
   return { env, handlers, fire, notices };
@@ -68,6 +69,88 @@ function load(overrides: Record<string, string | undefined> = {}, options: Param
 const eventsOf = (name: string) => received.filter((entry) => entry.body.event === name).map((entry) => entry.body);
 const sha = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
 const start = (prompt: string, systemPrompt = "BASE") => ({ prompt, systemPrompt, systemPromptOptions: {} });
+
+describe("native compaction memory", () => {
+  const preparation = () => ({ messagesToSummarize: [{ role: "user", content: "current task", timestamp: 1 }], turnPrefixMessages: [], previousSummary: "PREVIOUS", isSplitTurn: false });
+  test("fresh recall enriches a copy only; native result and previous summary are preserved", async () => {
+    const { fire } = load();
+    await fire("before_agent_start", start("old prompt"));
+    behavior.advisory = "FRESH_PROFILE_AND_MEMORY";
+    const p = preparation();
+    const original = p.messagesToSummarize;
+    const prefix = p.turnPrefixMessages;
+    expect(await fire("session_before_compact", { preparation: p, signal: new AbortController().signal })).toBeUndefined();
+    expect(eventsOf("compaction_recall")[0]).toMatchObject({ role: "lead", query: "current task" });
+    expect(p.messagesToSummarize).not.toBe(original);
+    expect(original).toHaveLength(1);
+    expect(JSON.stringify(p.messagesToSummarize)).toContain("FRESH_PROFILE_AND_MEMORY");
+    expect(JSON.stringify(p.messagesToSummarize)).toContain("untrusted");
+    expect(p.previousSummary).toBe("PREVIOUS");
+    expect(p.turnPrefixMessages).toBe(prefix);
+    expect(eventsOf("save")).toHaveLength(0);
+    await fire("session_compact_failed", { aborted: true });
+    expect(eventsOf("save")).toHaveLength(0);
+    for (const reason of ["manual", "threshold", "overflow"]) await fire("session_compact", { reason, compactionEntry: { id: reason, summary: `Summary ${reason}` } });
+    expect(eventsOf("save").map(e => e.content)).toEqual(["Summary manual", "Summary threshold", "Summary overflow"]);
+  });
+  test("identical summaries and repeated native entry IDs save each occurrence despite replay protection", async () => {
+    const host = startFakeLoopbackHost({ dir });
+    try {
+      const { fire } = load(host.env);
+      const event = { compactionEntry: { id: "same-entry", summary: "same summary" } };
+      await fire("session_compact", event);
+      await fire("session_compact", event);
+      expect(host.acceptedSaves.map(e => e.content)).toEqual(["same summary", "same summary"]);
+      expect(new Set(host.acceptedSaves.map(e => e.eventId)).size).toBe(2);
+    } finally { host.stop(); }
+  });
+  test("child marker and non-lead roles prohibit automatic saves", async () => {
+    for (const env of [{ DECK_PI_CHILD: "1", DECK_PI_ROLE: "lead" }, { DECK_PI_ROLE: "apply-fast" }]) {
+      const { fire } = load(env);
+      await fire("session_compact", { compactionEntry: { id: "c", summary: "Child summary" } });
+    }
+    expect(eventsOf("save")).toHaveLength(0);
+  });
+  test("failure, timeout and abort leave preparation untouched, including after late response", async () => {
+    for (const mode of ["failure", "delay", "abort"]) {
+      behavior.recallOk = mode !== "failure";
+      behavior.delayMs = mode === "failure" ? 0 : 100;
+      behavior.delayEvents = ["compaction_recall"];
+      const { fire } = load({}, { requestTimeoutMs: 15, drainTimeoutMs: 15 });
+      const p = preparation();
+      const original = p.messagesToSummarize;
+      const controller = new AbortController();
+      const pending = fire("session_before_compact", { preparation: p, signal: controller.signal });
+      if (mode === "abort") controller.abort();
+      await pending;
+      expect(p.messagesToSummarize).toBe(original);
+      await Bun.sleep(120);
+      expect(p.messagesToSummarize).toBe(original);
+    }
+  });
+  test("abort interrupts the pre-hook drain and never starts recall afterwards", async () => {
+    const { fire } = load({}, { requestTimeoutMs: 50, drainTimeoutMs: 500, fetchImpl: (() => new Promise(() => {})) as unknown as typeof fetch });
+    void fire("before_agent_start", start("pending capture"));
+    const p = preparation();
+    const original = p.messagesToSummarize;
+    const controller = new AbortController();
+    const pending = fire("session_before_compact", { preparation: p, signal: controller.signal });
+    controller.abort();
+    expect(await Promise.race([pending.then(() => "done"), Bun.sleep(100).then(() => "stalled")])).toBe("done");
+    await Bun.sleep(120);
+    expect(p.messagesToSummarize).toBe(original);
+    expect(eventsOf("compaction_recall")).toHaveLength(0);
+  });
+  test("uncooperative fetch cannot stall pre-hook drain or recall", async () => {
+    const { fire } = load({}, { requestTimeoutMs: 10, drainTimeoutMs: 10, fetchImpl: (() => new Promise(() => {})) as unknown as typeof fetch });
+    void fire("before_agent_start", start("pending capture"));
+    const p = preparation();
+    const original = p.messagesToSummarize;
+    const outcome = await Promise.race([fire("session_before_compact", { preparation: p, signal: new AbortController().signal }).then(() => "done"), Bun.sleep(100).then(() => "stalled")]);
+    expect(outcome).toBe("done");
+    expect(p.messagesToSummarize).toBe(original);
+  });
+});
 
 describe("transport and credential isolation", () => {
   test("authenticates with the token read from the 0600 file and sends the loopback v1 schema without scope fields", async () => {

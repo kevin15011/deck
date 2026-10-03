@@ -38,6 +38,51 @@ afterEach(() => {
 });
 
 describe("deck-memory through the Pi 1.0 SDK (DefaultResourceLoader extension factories + faux provider)", () => {
+  sdkTest("native split-empty history gets an extra summary call, fresh memory stays out of session messages, and completed summaries alone are saved", async () => {
+    const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = sdk!;
+    const fixtureOptions = { dir: root, advisory: "START_ONLY" };
+    host = startFakeLoopbackHost(fixtureOptions);
+    const faux = ai!.fauxProvider();
+    const requests: string[] = [];
+    const respond = (context: { messages: unknown[] }) => { requests.push(JSON.stringify(context.messages)); return ai!.fauxAssistantMessage("NATIVE_SUMMARY_OR_REPLY ".repeat(30)); };
+    faux.setResponses(Array.from({ length: 20 }, () => respond));
+    const agentDir = join(root, "agent"), cwd = join(root, "project");
+    const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: true });
+    modelRuntime.registerNativeProvider(faux.provider);
+    const env = { DECK_PI_ROLE: "lead", ...host.env };
+    let split = false;
+    let previous: string | undefined;
+    const loader = new DefaultResourceLoader({ cwd, agentDir, extensionFactories: [createDeckMemoryExtension({ env }), pi => {
+      pi.on("session_before_compact", event => { split = event.preparation.isSplitTurn; previous = event.preparation.previousSummary; });
+    }] });
+    await loader.reload();
+    const { session } = await createAgentSession({ cwd, agentDir, modelRuntime, model: faux.getModel(), resourceLoader: loader, sessionManager: SessionManager.inMemory(cwd), settingsManager: SettingsManager.inMemory({ compaction: { enabled: false, reserveTokens: 1000, keepRecentTokens: 1 } }) });
+    try {
+      await session.prompt("ACTIVE_WORK ".repeat(20));
+      // Change the provider data only after the normal turn recall: compaction must fetch fresh.
+      fixtureOptions.advisory = "FRESH_COMPACTION_PROFILE_RELEVANT";
+      const before = requests.length;
+      const result = await session.compact();
+      expect(split).toBe(true);
+      expect(previous).toBeUndefined();
+      expect(requests.slice(before)).toHaveLength(2);
+      expect(requests.slice(before).join("\n")).toContain("FRESH_COMPACTION_PROFILE_RELEVANT");
+      expect(requests.slice(before).join("\n")).not.toContain("START_ONLY");
+      expect(host.named("save").map(e => e.content)).toEqual([result.summary]);
+      const entries = session.sessionManager.getEntries();
+      expect(JSON.stringify(entries.filter(e => e.type === "message"))).not.toContain("FRESH_COMPACTION_PROFILE_RELEVANT");
+      expect(JSON.stringify(entries)).not.toContain(host.token);
+      await session.prompt("SECOND_WORK ".repeat(20));
+      const beforeSecond = requests.length;
+      await session.compact();
+      expect(previous).toBe(result.summary);
+      expect(requests.slice(beforeSecond).join("\n")).toContain(JSON.stringify(result.summary).slice(1, -1));
+      expect(host.acceptedSaves).toHaveLength(2);
+      expect(host.acceptedSaves.map(e => e.content)).toEqual([result.summary, result.summary]);
+      expect(new Set(host.acceptedSaves.map(e => e.eventId)).size).toBe(2);
+    } finally { session.dispose(); }
+  }, 60_000);
+
   sdkTest("recall reaches the model request, the turn is captured, and the explicit shutdown path flushes", async () => {
     const { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } = sdk!;
     host = startFakeLoopbackHost({ dir: root, advisory: ADVISORY });
