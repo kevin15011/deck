@@ -19,3 +19,11 @@
 - `deck-canary pi developer` installed the global package and started Pi 1.0.0's interactive TUI: `[Context]` = Deck lead profile, `[Skills]` = the 9 Deck skills, `[Extensions]` = deck-memory, deck-subagents, deck-tool-policy, developer-team-execution, no load errors; `/mcp` listed `web-search connected - 5 tools - direct - global`; clean exit 0.
 - A plain `pi` in the same agent directory lists the skills and extension names but no Deck context (extension code inert).
 - Legacy flow: a Deck-added `pi-mcp-adapter`/`pi-subagents` entry was removed by the install; a modified legacy agent file was kept and reported; `deck doctor` reported every Pi item ok.
+
+## Explicit memory tools for Pi and Codex (deck-apply-deep, 2026-10-03)
+
+- Host: loopback `search`/`save` (additive), role policy, 16 KiB/1 KiB limits, canonical tag, redaction, idempotent replay.
+- Pi: `memory_search`/`memory_save` through `deck-memory`; real Pi 1.0.0 contract tests (lead search+save, read-only child, disabled).
+- Codex: `deck internal memory-mcp`, marker-owned `deck-memory` MCP entry, loopback hosted for the Codex launch when the entry is installed (token file, cleanup, fail-open); lead-level authorization because Codex gives the MCP server no agent identity.
+- Triage: Codex "assignments are global" fails on clean `main` (pre-existing); see design deviation 50.
+- Gates and counts: see the final report of this batch.

@@ -106,3 +106,11 @@ events:
     actor: deck-apply-deep
     notes:
       - "Pi-specific package instructions and name frontmatter, cross-runner text guard, OpenCode external skill precedence measured (no fix), Pi model/thinking assignments preserved across reinstalls; deviations 40-43."
+  - phase: apply
+    status: ready_for_verify
+    event: apply.fix
+    artifact: design.md
+    timestamp: "2026-10-03T18:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "In-branch extension: explicit memory_search/memory_save for Pi and Codex over the loopback host (D12, deviations 44-50, spec codex-memory-tools and pi-adaptive-memory delta). Codex 'assignments are global' test fails on clean main (baseline)."

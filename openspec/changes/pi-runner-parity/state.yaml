@@ -10,6 +10,7 @@ artifacts:
     pi-native-mcp: specs/pi-native-mcp/spec.md
     pi-subagent-extension: specs/pi-subagent-extension/spec.md
     pi-adaptive-memory: specs/pi-adaptive-memory/spec.md
+    codex-memory-tools: specs/codex-memory-tools/spec.md
     pi-tool-interception: specs/pi-tool-interception/spec.md
     pi-version-and-migration: specs/pi-version-and-migration/spec.md
     pi-runner-documentation: specs/pi-runner-documentation/spec.md
@@ -47,3 +48,11 @@ provenance:
     registryWrite: non-deferred
     note: "Phases 0-8 complete: graph guidance made advisory, legacy detection/cleanup/doctor, documentation and gates. Ready for verify; Phase 9 residual-risk checks remain manual canary evidence."
     artifact: apply-progress.md
+  - phase: apply
+    agent: deck-apply-deep
+    model: claude-sonnet-5-5
+    timestamp: "2026-10-03"
+    registryWrite: non-deferred
+    note: "In-branch extension approved by the user: explicit memory tools for Pi and Codex without exposing the Supermemory API key to the runner. Added design D12 and deviations 44-50, spec codex-memory-tools, pi-adaptive-memory delta and tasks 8b."
+    artifact: design.md
+

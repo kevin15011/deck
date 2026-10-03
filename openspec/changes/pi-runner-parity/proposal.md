@@ -37,17 +37,20 @@ A user on Pi >= 1.0.0 (`@earendil-works/pi-coding-agent`) can complete Review & 
 | `pi-adaptive-memory` | Deck memory extension over the existing loopback host: recall on `before_agent_start` and on subagent role start, user + assistant capture, pre-compaction drain, shutdown flush; removal of the stale MCP gate. |
 | `pi-tool-interception` | `tool_call` handler: RTK rewrite pinned to the owned binary, Grep/Glob redirection to codebase-memory graph search, read-only blocking. |
 | `pi-version-and-migration` | `>= 1.0.0` preflight and doctor; detection and transactional cleanup of legacy project-local `.pi` artifacts and of Deck-written `pi-subagents` / `pi-mcp-adapter` entries. |
+| `codex-memory-tools` | (In-branch extension) Deck-owned stdio MCP server for Codex exposing `memory_search` and `memory_save` over the loopback host; marker-owned registration; loopback hosting for Codex launches. |
 | `pi-runner-documentation` | `docs/runners.md`, `docs/runner-support.md`, `docs/reference/support-matrix.md` (add Claude column), `docs/adaptive-memory.md`. |
 
 **In-branch extension (2026-10-03):** OpenCode also scans `~/.agents/skills`; the change measured that OpenCode keeps its own Deck skills (design.md deviation 42) and adds per-runner package-instruction translation and a cross-runner text guard that cover OpenCode, Codex and Claude as well as Pi.
 
+**In-branch extension (2026-10-03): explicit adaptive-memory tools for Pi and Codex.** User decision: Pi and Codex get on-demand `memory_search` and `memory_save` tools with parity to Claude (Supermemory MCP tools) and OpenCode (`supermemory` tool), without exposing the Supermemory API key to the runner process. Scope: two additive loopback operations (`search`, `save`) with host-side role policy; Pi extension tools (spec delta in `pi-adaptive-memory`); a Deck-owned stdio MCP server `deck-memory` for Codex registered as a marker-owned `config.toml` entry, with the loopback now also hosted for Codex when that entry is installed (new spec `codex-memory-tools`); per-runner instruction text and docs. The Non-goals below that forbid loopback protocol and Codex adapter changes are narrowed accordingly: only the two additive operations and the Codex MCP registration are in scope, existing events and the official Codex plugin hooks are unchanged. The shared host is also used by the active change `opencode-supermemory-plugin-profiles`; the additions are additive and change no existing event. See design D12 and deviations 44-50.
+
 ## Non-goals
 
-- No change to the Supermemory loopback wire protocol (`deck-runner-memory-loopback-v1`) or to canonical project scope derivation; Pi consumes them as-is.
+- No change to existing events of the Supermemory loopback wire protocol (`deck-runner-memory-loopback-v1`) or to canonical project scope derivation; Pi consumes them as-is. (The 2026-10-03 extension adds the `search` and `save` operations only.)
 - No support for Pi < 1.0.0 or `@mariozechner/*`; no compatibility shim for `pi-subagents`.
 - No project-scoped (`-l`) Pi package or `.pi/mcp.json`; no change to user `defaultProjectTrust`.
 - No Pi SDK embedding (`createAgentSession()`) inside the Deck CLI; Pi remains a spawned process.
-- No changes to OpenCode, Codex or Claude adapters beyond shared `@deck/core` helpers that are additive.
+- No changes to OpenCode, Codex or Claude adapters beyond shared `@deck/core` helpers that are additive. (The 2026-10-03 extension adds the Deck memory MCP entry and its launch hosting to Codex; the official Codex plugin hooks stay unchanged.)
 - No OAuth MCP servers in this change.
 
 ## Overlaps with active changes (boundaries respected)

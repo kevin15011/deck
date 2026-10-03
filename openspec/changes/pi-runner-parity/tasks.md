@@ -81,6 +81,19 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - [x] 8.6 OpenCode external-skill precedence measured; no fix needed (deviation 42).
 - [x] 8.7 Preserve Pi developer-team model/thinking assignments across reinstalls (deviation 43).
 
+## Phase 8b — Explicit memory tools for Pi and Codex (in-branch extension, 2026-10-03)
+
+- [x] 8b.1 Host: additive `search` and `save` loopback events with role policy, limits, redaction and canonical tag (`supermemory-runtime-host.explicit-tools.test.ts`; `isSupermemoryExplicitSaveAllowed`).
+- [x] 8b.2 Pi: `memory_search` / `memory_save` registered by `deck-memory` per role; read-only allowlists and tool policy include `memory_search` only; real Pi 1.0.0 contract tests; assets regenerated.
+- [x] 8b.3 Pi instructions: translation rule describing the tools.
+- [x] 8b.4 Codex: `deck internal memory-mcp` stdio MCP server (`memory-mcp-server.ts`), CLI parsing, process-level stdio test.
+- [x] 8b.5 Codex: marker-owned `deck-memory` MCP entry (`buildCodexMcpServers`, names-only `env_vars`), adapter option `deckMemoryMcpCommand` pinned to the running Deck.
+- [x] 8b.6 Codex launch: host the loopback when the entry is installed, token-file handoff, cleanup, fail-open; `assertCodexSupermemoryReady` ignores the Deck-owned block.
+- [x] 8b.7 Codex instructions: "Explicit memory tools (Codex)" section.
+- [x] 8b.8 Docs: `docs/adaptive-memory.md` route table and section, `docs/runners.md`, support matrix.
+- [x] 8b.9 Triage the previously reported Codex test "assignments are global": fails on clean `main` too (deviation 50).
+- [ ] 8b.10 Manual canary (evidence, not a gate): `deck-canary pi developer` and `deck-canary codex developer` with a real Supermemory credential; confirm the model uses the tools and that a Codex subagent calling `memory_save` is the instruction-level limit described in deviation 48.
+
 ## Phase 9 — Residual-risk verification (manual canary; evidence, not test gates)
 
 - 9.1 R1: full compaction cycle in a long canary session; recall reappears and no captures are lost.

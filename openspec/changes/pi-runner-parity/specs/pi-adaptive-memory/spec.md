@@ -130,6 +130,59 @@ The memory extension MUST be covered by at least one contract test that loads it
 - WHEN the Pi memory contract test executes
 - THEN it passes using a local fake loopback server, the faux provider and temporary Pi agent and home directories
 
+### Requirement: Loopback Explicit Search and Save Operations
+
+The Deck loopback host MUST accept two additional events on `deck-runner-memory-loopback-v1`, `search` and `save`, authenticated with the same bearer token, event-id and timestamp rules as every other event, and MUST leave the behavior of all existing events unchanged. `search` MUST take a `query` that satisfies the managed project-memory recall rules (non-empty, at most 1,024 UTF-8 bytes, no control characters, no credential-shaped text) and an optional integer `limit` of at least 1; it MUST search only the canonical project tag with the role's result and token limits, and return the bounded, escaped advisory envelope with a `resultCount`. `save` MUST take `content` of at most 16 KiB and an optional `kind` of `decision`, `discovery`, `preference`, `convention` or `note`, MUST apply the capture eligibility and secret redaction rules used for every capture, and MUST write through the canonical project tag. The host MUST bind the canonical tag itself and MUST reject any runner-supplied scope field (`containerTag`, `scope`, `projectScope`, ...) on both events. The host MUST refuse `save` for the read-only roles `investigate` and `quality` with the diagnostic `role-not-permitted`, MUST refuse `search` for roles whose recall policy is `skip` (`apply-fast`), and MUST reject an unrecognized `role` value instead of defaulting it. A replayed `eventId` MUST NOT write twice.
+
+#### Scenario: Search is bound to the canonical tag
+
+- GIVEN an authenticated `search` event whose body also carries `containerTag: "attacker"`
+- WHEN the host handles it
+- THEN it returns `scope-input-rejected` and the provider is not queried
+- AND the same event without the field queries the provider with the host-derived `sm_project_v1_*` tag only
+
+#### Scenario: Read-only role cannot save
+
+- GIVEN an authenticated `save` event with `role: "investigate"` or `role: "quality"`
+- WHEN the host handles it
+- THEN it returns `ok: false` with `role-not-permitted` and nothing is written
+- AND a `search` event from the same role succeeds with at most the role's result cap
+
+#### Scenario: Save is redacted and eligible only
+
+- GIVEN a `save` event whose content contains a credential-shaped value, or is trivial or shaped like a log
+- WHEN the host handles it
+- THEN nothing is written and the diagnostic names the reason without echoing the secret
+
+#### Scenario: Replay is idempotent
+
+- GIVEN a successful `save` event
+- WHEN the same `eventId` is sent again
+- THEN the host returns the first response and the provider receives exactly one write
+
+### Requirement: Pi Explicit Memory Tools
+
+In a Deck-supervised Pi session with a usable loopback handoff, the `deck-memory` extension MUST register the Pi tools `memory_search` (parameters `query`, optional `limit`) and `memory_save` (parameters `content`, optional `kind`) with closed JSON schemas, calling the loopback `search` and `save` events with the session role from `DECK_PI_ROLE`. Read-only roles MUST be offered `memory_search` only, `apply-fast` MUST be offered `memory_save` only, and no tool MUST be registered when `DECK_PI_MEMORY=disabled` or the endpoint or token file is missing, non-loopback or unreadable. Tool failures MUST be returned as text (fail-open) and MUST NOT throw. The read-only `--tools` allowlists and the tool policy MUST include `memory_search` and MUST NOT include `memory_save`. Pi skill and agent instructions MUST describe the tools, who may use them and that they exist only in Deck-supervised sessions with memory enabled. The Supermemory API key and the bearer token MUST NOT be exposed to the Pi process or to MCP servers.
+
+#### Scenario: Lead searches and saves in the real Pi runtime
+
+- GIVEN a Deck Pi session driven by the faux provider against a fake loopback host
+- WHEN the model calls `memory_search` and then `memory_save`
+- THEN the host receives `search` and `save` events with `runnerId: "pi"` and `role: "lead"`, authenticated with the file token, and the search result text reaches the next provider request
+
+#### Scenario: Read-only child cannot save
+
+- GIVEN a delegated `deck-investigate` child
+- WHEN the child calls `memory_search`
+- THEN the host receives `search` with `role: "investigate"`
+- AND when the child calls `memory_save` the Pi runtime reports the tool as not found and the host receives no `save`
+
+#### Scenario: Memory disabled
+
+- GIVEN `DECK_PI_MEMORY=disabled` or no loopback handoff
+- WHEN the model attempts `memory_search`
+- THEN the tool does not exist and the host receives no event
+
 ## REMOVED Requirements
 
 ### Requirement: Pi Supermemory MCP Handoff

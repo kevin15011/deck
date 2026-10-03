@@ -37,6 +37,26 @@ Native context injection uses each runner's supported model-visible field. Codex
 
 Deck stores a small owner-local project/session map so a new Deck-supervised top-level session can be reused by `resume-latest`. Explicit resume-by-id remains deterministic from the native runner session id. Specialist/delegation session propagation is available where a runner exposes a trusted host/delegation bridge; direct routes without Deck's loopback endpoint/token are diagnosed as unsupported rather than treated as parity.
 
+## Explicit memory tools (on-demand search and save)
+
+Automatic recall/capture is not the only channel: every runner also offers the model an explicit, on-demand way to search and save project memory. Pi and Codex gained theirs without ever exposing the Supermemory API key to the runner process.
+
+| Runner | Explicit search | Explicit save | Mechanism |
+|---|---|---|---|
+| Claude | Supermemory MCP `search_memory` (and related tools) | Supermemory MCP `add_memory` | Official plugin MCP tools. |
+| OpenCode | `supermemory` tool | `supermemory` tool | Official plugin tool. |
+| Pi | `memory_search` | `memory_save` | Tools registered by the `deck-memory` extension; they call the Deck loopback host. |
+| Codex | `memory_search` | `memory_save` | Deck-owned stdio MCP server `deck-memory` (the hidden `memory-mcp` internal subcommand of the Deck binary), registered in `$CODEX_HOME/config.toml` as a marker-owned entry; it calls the Deck loopback host. |
+
+The Pi and Codex tools use two additive operations on the same authenticated loopback (`deck-runner-memory-loopback-v1`, existing events unchanged):
+
+- `search` (`query`, optional `limit` 1 to 5): the query follows the managed-recall rules (at most 1,024 bytes, no control characters, no credential-shaped text). The host searches the canonical project tag with the role's result and token limits and returns the bounded, escaped advisory envelope plus `resultCount`.
+- `save` (`content`, optional `kind` of `decision`, `discovery`, `preference`, `convention` or `note`): at most 16 KiB. The host applies the same eligibility and secret redaction as every capture (a rejected save returns the reason, never the secret) and writes through the canonical tag.
+
+The host enforces the policy; the runner-side tools only mirror it. Read-only roles (investigate, quality) may search but are refused `save` (`role-not-permitted`); apply-fast has no search (its recall policy is `skip`); the lead and every write-capable role may save. Runner-supplied scope fields (`containerTag`, `scope`, ...) are rejected on every event. In Pi the read-only `--tools` allowlists include `memory_search` and never `memory_save`, and the tools are absent when memory is disabled or the loopback handoff is missing.
+
+Codex specifics: when the reviewed install registered the `deck-memory` entry, the Codex developer launch also hosts the loopback (the official plugin still owns automatic recall/capture and keeps writing to the same canonical tag through `SUPERMEMORY_REPO_TAG`). Codex forwards only the names `DECK_RUNNER_MEMORY_ENDPOINT` and `DECK_RUNNER_MEMORY_TOKEN_FILE` to that server; the bearer token is in a `0600` file in a `0700` directory (`runtime/codex-memory-*`, deleted when Codex exits), never in `config.toml`, argv or the environment. Other MCP servers receive neither variable. Codex does not tell an MCP server which agent is calling, so every call is authorized as the lead and the Codex instructions tell read-only roles not to call `memory_save`; this is an instruction-level limit, not a host guarantee.
+
 ## Pi event flow
 
 Pi memory runs only in a Deck-managed `deck pi developer` session (the Deck-session activation guard keeps the extension inert in a plain `pi`). Deck starts its loopback host, writes the per-session bearer token to a `0600` file in a `0700` directory under the Deck state home (`runtime/pi-memory-*`, swept after 24 hours and deleted when the host closes), and launches Pi with `DECK_RUNNER_MEMORY_ENDPOINT` and `DECK_RUNNER_MEMORY_TOKEN_FILE`. When memory is disabled Deck sets `DECK_PI_MEMORY=disabled` and the extension stays silent.
@@ -51,7 +71,7 @@ Pi memory runs only in a Deck-managed `deck pi developer` session (the Deck-sess
 | `session_before_compact` | Bounded drain of pending captures; never cancels compaction. The next turn recalls again. |
 | `session_shutdown` | Flushes, drains, and sends `shutdown_flush` (a `reload` drains only because the session continues). |
 
-Subagent children recall once at role start with the same ephemeral injection, never capture, and send `shutdown_flush` for their role session. MCP servers started by Pi never see the token: it is not in the environment, and Deck's `mcp.json` entries blank `DECK_RUNNER_MEMORY_*`. The non-secret endpoint remains visible to Pi's own process.
+Subagent children can also call `memory_search` (read-only roles) or both tools (write roles) as described under [Explicit memory tools](#explicit-memory-tools-on-demand-search-and-save). Subagent children recall once at role start with the same ephemeral injection, never capture, and send `shutdown_flush` for their role session. MCP servers started by Pi never see the token: it is not in the environment, and Deck's `mcp.json` entries blank `DECK_RUNNER_MEMORY_*`. The non-secret endpoint remains visible to Pi's own process.
 
 ## Supermemory setup and scoping
 
