@@ -44,17 +44,17 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - [x] 4.4 Child env (`DECK_PI_CHILD=1`, `DECK_PI_ROLE`, endpoint, token-file path); no tool registration in children.
 - [x] 4.5 Read-only roles: `--tools read,grep,find,ls,<allowlisted mcp tools>`; write roles get no allowlist.
 
-## Phase 5 — Memory extension and launch gate removal
+## Phase 5 — Memory extension and launch gate removal [done]
 
-- 5.1 Remove the `validateSupermemoryPiMcpConfig` gate from `pi-launch-command.ts`; route Pi through the host env overlay (failing launch test first).
-- 5.2 Token handoff: the CLI writes a 0600 per-session token file, passes `DECK_RUNNER_MEMORY_TOKEN_FILE`, never puts the token in the env, and deletes the file on host close.
-- 5.3 `deck-memory` lead recall: `session_start` on the first `before_agent_start`, `recall` afterwards; ephemeral `systemPrompt` append; `injection_ack`; test that no recall is persisted as `custom_message`.
-- 5.4 Child `role_start` recall plus ephemeral injection; children never capture.
-- 5.5 Capture: user prompt from `before_agent_start.prompt`; assistant text buffered from `turn_end.message`; capture on `agent_end`; stable event ids; 64 KiB truncation.
-- 5.6 Bounded drain on `session_before_compact` (never cancels compaction); flush, drain and `shutdown_flush` on `session_shutdown`.
-- 5.7 Remove memory code and the incorrect `input` handler from `developer-team-execution.ts` without changing its execution-evidence schema (coordinate with `developer-team-execution-convergence`).
-- 5.8 Token isolation test: the fake env-echo MCP server sees no token; `process.env` is scrubbed after factory load; verify extension-factory vs builtin-MCP spawn order (R6) and record the result.
-- 5.9 Real-runtime contract test: `DefaultResourceLoader({ extensionFactories })` + `createAgentSession` with the faux provider and fake loopback host; explicit shutdown invocation; skips with a reason if the dev dependency is absent.
+- [x] 5.1 Remove the `validateSupermemoryPiMcpConfig` gate from `pi-launch-command.ts`; route Pi through the host env overlay (failing launch test first).
+- [x] 5.2 Token handoff: the CLI writes a 0600 per-session token file, passes `DECK_RUNNER_MEMORY_TOKEN_FILE`, never puts the token in the env, and deletes the file on host close.
+- [x] 5.3 `deck-memory` lead recall: `session_start` on the first `before_agent_start`, `recall` afterwards; ephemeral `systemPrompt` append; `injection_ack`; test that no recall is persisted as `custom_message`.
+- [x] 5.4 Child `role_start` recall plus ephemeral injection; children never capture.
+- [x] 5.5 Capture: user prompt from `before_agent_start.prompt`; assistant text buffered from `turn_end.message`; capture on `agent_end`; stable event ids; 64 KiB truncation.
+- [x] 5.6 Bounded drain on `session_before_compact` (never cancels compaction); flush, drain and `shutdown_flush` on `session_shutdown`.
+- [x] 5.7 Remove memory code and the incorrect `input` handler from `developer-team-execution.ts` without changing its execution-evidence schema (coordinate with `developer-team-execution-convergence`).
+- [x] 5.8 Token isolation test: the fake env-echo MCP server sees no token; `process.env` is scrubbed after factory load; verify extension-factory vs builtin-MCP spawn order (R6) and record the result.
+- [x] 5.9 Real-runtime contract test: `DefaultResourceLoader({ extensionFactories })` + `createAgentSession` with the faux provider and fake loopback host; explicit shutdown invocation; skips with a reason if the dev dependency is absent.
 
 ## Phase 6 — Tool interception
 

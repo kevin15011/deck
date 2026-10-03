@@ -394,3 +394,24 @@ describe("review-plan actions on the global layout", () => {
     expect(JSON.parse(readFileSync(piAgentPaths(agentDir).settings, "utf-8"))).toEqual({ packages: ["npm:user-pkg"] });
   });
 });
+
+describe("adaptive memory switch in the launch plan", () => {
+  const launchWith = (adaptiveMemory: Record<string, unknown>) => {
+    const config = validateDeckConfig({});
+    return launchOf(adapter(), { mode: "interactive", teamId: "developer", projectRoot, prompt: [], deckConfig: { ...config, adaptiveMemory: { ...config.adaptiveMemory, ...adaptiveMemory } } });
+  };
+
+  test("tells the memory extension to stay silent when adaptive memory is disabled", () => {
+    expect(launchWith({ enabled: false }).plan.envOverlay?.DECK_PI_MEMORY).toEqual({ value: "disabled" });
+    expect(launchWith({ enabled: true, activeProvider: "none" }).plan.envOverlay?.DECK_PI_MEMORY).toEqual({ value: "disabled" });
+  });
+
+  test("does not silence it when Supermemory is the active provider", () => {
+    expect(launchWith({ enabled: true, activeProvider: "supermemory" }).plan.envOverlay).not.toHaveProperty("DECK_PI_MEMORY");
+  });
+
+  test("never writes a memory token or endpoint itself (the CLI host owns them)", () => {
+    const overlay = launchWith({ enabled: true, activeProvider: "supermemory" }).plan.envOverlay ?? {};
+    expect(Object.keys(overlay).filter((key) => key.startsWith("DECK_RUNNER_MEMORY"))).toEqual([]);
+  });
+});

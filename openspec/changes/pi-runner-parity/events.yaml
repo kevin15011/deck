@@ -66,4 +66,12 @@ events:
     actor: deck-apply-deep
     notes:
       - "Phase 4 complete: Deck-owned deck-subagents extension (single/parallel/chain, per-role model/thinking/read-only tools, child isolation env, SIGTERM/SIGKILL abort), TS sources bundled for Node by scripts/generate-pi-extension-assets.ts, verified against the real Pi 1.0.0 runtime with the faux provider. See design.md deviations 19-21."
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 5 complete: deck-memory extension (lead recall/capture, child role recall, compaction drain, shutdown flush), 0600 token-file handoff in the production launch path, DECK_PI_MEMORY switch, execution-extension memory path neutralized (generated bundle untouched), R6 resolved. Verified with SDK and real Pi 1.0.0 contract tests and an end-to-end runRunnerLaunch test. See design.md deviations 22-26."
 

@@ -59,6 +59,8 @@ describe("buildPiGlobalMaterialization", () => {
     expect(paths).toContain("deck/profiles/developer-team/system-prompt.md");
     expect(paths).toContain("deck/package/extensions/deck-subagents/index.js");
     expect(paths).toContain("deck/package/extensions/deck-subagents/impl.js");
+    expect(paths).toContain("deck/package/extensions/deck-memory/impl.js");
+    expect(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-memory/index.js")!.content).toContain('const scope = "any"');
     expect(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-subagents/index.js")!.content).toContain('const scope = "lead"');
     expect(desired.packageEntry).toBe("deck/package");
     expect(paths.every((path) => path.startsWith("deck/"))).toBe(true);

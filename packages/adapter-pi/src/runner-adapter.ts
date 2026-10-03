@@ -1150,6 +1150,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     const overlay: Record<string, { value: string; sensitive?: boolean }> = {
       DECK_PI_SESSION: { value: "1" },
       DECK_PI_ROLE: { value: "lead" },
+      // With memory off the Deck memory extension stays silent instead of reporting "unavailable" on every launch.
+      ...(input.deckConfig.adaptiveMemory.enabled === true && input.deckConfig.adaptiveMemory.activeProvider === "supermemory" ? {} : { DECK_PI_MEMORY: { value: "disabled" } }),
       // A non-default agent directory must reach Pi itself, not only the Deck process.
       ...(this.#agentDirResolution.source === "env" ? { PI_CODING_AGENT_DIR: { value: this.#agentDirResolution.dir } } : {}),
     };

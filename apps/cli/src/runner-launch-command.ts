@@ -19,6 +19,8 @@ import type { DeckSecretStore } from "@deck/core";
 import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { formatSessionRuntimeReadiness, resolveSessionRuntimeReadiness } from "./session-runtime-readiness";
 import { authorizeOpenCodeSupermemoryLaunch, VERIFIED_OPENCODE_SUPERMEMORY_BINDING, type OpenCodeSupermemoryLaunchEffects } from "./opencode-supermemory-launch";
+import { createPiMemoryTokenHandoff, withPiMemoryLoopback, type PiMemoryTokenHandoff } from "./pi-memory-token-handoff";
+import { getDeckStateDir } from "./runtime/paths";
 import { isQuietDiagnostic } from "./launch-diagnostic-format";
 import { authorizeCodexSupermemoryLaunch, resolveCodexSupermemoryLaunchCredential, VERIFIED_CODEX_SUPERMEMORY_BINDING, type CodexSupermemoryLaunchEffects } from "./codex-supermemory-launch";
 
@@ -732,6 +734,8 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   let closeDiagnostics: readonly import("./supermemory-runtime-host").SupermemoryRuntimeHostDiagnostic[] = [];
   let result: RunRunnerLaunchResult | undefined;
   let startedMemoryHost: Awaited<ReturnType<typeof createSupermemoryRuntimeHost>> | undefined;
+  // Pi receives the loopback bearer token by 0600 file (its MCP servers inherit the Pi environment); removed on close.
+  let piTokenHandoff: PiMemoryTokenHandoff | undefined;
   try {
     const { host: memoryHost } = await lease.start();
     startedMemoryHost = memoryHost;
@@ -783,8 +787,11 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       if (codexMemoryUnavailable) {
         launch = { ...launch, plan: { ...launch.plan, args: ["-c", "features.hooks=false", ...launch.plan.args] } };
       }
+      if (loopbackBridge && input.adapter.runnerId === "pi") {
+        piTokenHandoff = createPiMemoryTokenHandoff({ token: loopbackBridge.token, baseDirectory: join(input.supermemoryRuntime?.stateHome ?? getDeckStateDir(), "runtime") });
+      }
       const executableLaunch = loopbackBridge
-        ? { ...launch, plan: withSupermemoryLoopback(launch.plan, loopbackBridge, baseLaunch.mode) }
+        ? { ...launch, plan: piTokenHandoff ? withPiMemoryLoopback(launch.plan, loopbackBridge, baseLaunch.mode, piTokenHandoff.tokenFile) : withSupermemoryLoopback(launch.plan, loopbackBridge, baseLaunch.mode) }
         : launch;
       const memoryInputCapture = explicitIntent.kind === "remember" || loopbackBridge
         ? { diagnostics: [], metrics: [] }
@@ -829,7 +836,12 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     const prefix = reasonForMessage === "spawn-failed" ? "Runner spawn failed" : "Runner launch failed";
     result = { status: "blocked", message: error instanceof Error ? `${prefix}: ${error.message}` : `${prefix}.`, diagnostics: [readinessDiagnostic] };
   } finally {
-    const closed = await lease.close(closeReason);
+    let closed: Awaited<ReturnType<typeof lease.close>>;
+    try {
+      closed = await lease.close(closeReason);
+    } finally {
+      piTokenHandoff?.remove();
+    }
     closeDiagnostics = closed.diagnostics;
   }
 

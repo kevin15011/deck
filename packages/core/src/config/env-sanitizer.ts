@@ -23,6 +23,8 @@ export const RUNNER_ENV_ALLOWLIST = new Set([
   "DECK_PI_CHILD",
   "DECK_RUNNER_MEMORY_ENDPOINT",
   "DECK_RUNNER_MEMORY_TOKEN",
+  // Pi receives the bearer token through a 0600 file; only the path is exported.
+  "DECK_RUNNER_MEMORY_TOKEN_FILE",
   "DECK_CODEX_BRIDGE_ENDPOINT",
   "DECK_CODEX_BRIDGE_TOKEN",
 ]);
