@@ -49,7 +49,7 @@ export type BuildPiTeamLaunchPlanOptions = {
   piCommand?: string;
   /**
    * Resolved Pi agent directory. When set, the plan uses the Deck-managed GLOBAL layout: the lead profile lives
-   * under `<agentDir>/deck/profiles`, extensions load through the registered Deck package (no `--extension`),
+   * under `<agentDir>/deck/profiles`, the registered Deck package is also passed as `--extension <package>` so its skills win name collisions,
    * and no project-local `.pi` / `.deck/pi/profiles` path is referenced. Without it, the deprecated
    * project-local layout is used (kept only for the legacy launch module and its tests).
    */
@@ -140,8 +140,11 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
   const args: string[] = [
     "--session-dir", sessionDir,
     "--system-prompt", join(profileDir, "system-prompt.md"),
-    // Global layout: Pi loads the Deck package registered in settings.json, so no per-launch --extension.
-    ...(globalPaths ? [] : ["--extension", extensionPath]),
+    // Global layout: the Deck package is registered in settings.json, and is ALSO passed as a temporary CLI source.
+    // Pi merges CLI package sources before auto-discovered `<agentDir>/skills` and `~/.agents/skills`, and the first
+    // skill with a name wins, so the package skills beat stale legacy or other-runner copies in Deck sessions only.
+    // Pi dedupes the same package path against the settings entry (extensions load once).
+    ...(globalPaths ? ["--extension", globalPaths.packageRoot] : ["--extension", extensionPath]),
   ];
 
   const assignments = globalPaths

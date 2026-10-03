@@ -83,6 +83,59 @@ describe("legacy detection (7.1)", () => {
   });
 });
 
+const OLD_SKILL = "---\nname: deck-lead\ndescription: \"Older description.\"\n---\n## Team Contract Reference\n\nThe agent-level Adaptive Developer Team Contract remains binding for this skill.\n\nOlder body.\n";
+const OLD_AGENT = "## Adaptive Developer Team Contract\n\n- Own the user-visible outcome.\n";
+
+describe("stale Deck-authored global files from older Deck versions", () => {
+  const run = (io: PiFileIO = createNodePiFileIO()) => cleanupPiLegacy({ io, agentDir, projectRoot: project, report: detect(true, io), backupRoot: backups, now: () => new Date("2026-10-02T10:00:00Z") });
+
+  test("a global Deck-named file that differs from every template but carries Deck markers is 'stale'", () => {
+    put(join(agentDir, "skills", "deck-lead", "SKILL.md"), OLD_SKILL);
+    put(join(agentDir, "agents", "deck-lead.md"), OLD_AGENT);
+    expect(detect().files.map((file) => [file.scope, file.key, file.state])).toEqual([
+      ["global", "agents/deck-lead.md", "stale"],
+      ["global", "skills/deck-lead/SKILL.md", "stale"],
+    ]);
+  });
+
+  test("no markers, a mismatching frontmatter name, or project scope keep the file as modified", () => {
+    put(join(agentDir, "skills", "deck-lead", "SKILL.md"), "---\nname: deck-lead\n---\nmy own skill that I named like Deck's\n");
+    put(join(agentDir, "agents", "deck-lead.md"), OLD_AGENT);
+    put(join(project, ".pi", "skills", "deck-lead", "SKILL.md"), OLD_SKILL);
+    const states = Object.fromEntries(detect().files.map((file) => [`${file.scope}:${file.key}`, file.state]));
+    expect(states["global:skills/deck-lead/SKILL.md"]).toBe("modified");
+    expect(states["project:skills/deck-lead/SKILL.md"]).toBe("modified");
+    put(join(agentDir, "skills", "deck-lead", "SKILL.md"), OLD_SKILL.replace("name: deck-lead", "name: something-else"));
+    expect(detect().files.find((file) => file.scope === "global" && file.kind === "skill")?.state).toBe("modified");
+  });
+
+  test("cleanup removes stale files transactionally with a backup, keeps modified ones and never touches ~/.agents", () => {
+    put(join(agentDir, "skills", "deck-lead", "SKILL.md"), OLD_SKILL);
+    put(join(agentDir, "agents", "deck-lead.md"), OLD_AGENT);
+    const userOwn = "---\nname: deck-lead\n---\nmine\n";
+    put(join(project, ".pi", "skills", "deck-lead", "SKILL.md"), userOwn);
+    const codexCopy = join(root, "home", ".agents", "skills", "deck-lead", "SKILL.md");
+    put(codexCopy, OLD_SKILL);
+    const result = run();
+    expect([...result.removed].sort()).toEqual([join(agentDir, "agents", "deck-lead.md"), join(agentDir, "skills", "deck-lead", "SKILL.md")].sort());
+    expect(existsSync(join(agentDir, "skills"))).toBe(false);
+    expect(readFileSync(join(project, ".pi", "skills", "deck-lead", "SKILL.md"), "utf-8")).toBe(userOwn);
+    expect(readFileSync(codexCopy, "utf-8")).toBe(OLD_SKILL);
+    const index = JSON.parse(readFileSync(join(result.backupDir!, "index.json"), "utf-8"));
+    expect(index.items.map((item: { path: string }) => item.path).sort()).toEqual(result.removed.slice().sort());
+    expect(readFileSync(index.items.find((item: { path: string }) => item.path.endsWith("SKILL.md")).backup, "utf-8")).toBe(OLD_SKILL);
+  });
+
+  test("a file edited between detection and removal is kept", () => {
+    put(join(agentDir, "skills", "deck-lead", "SKILL.md"), OLD_SKILL);
+    const report = detect();
+    put(join(agentDir, "skills", "deck-lead", "SKILL.md"), `${OLD_SKILL}edited after detection\n`);
+    const result = cleanupPiLegacy({ io: createNodePiFileIO(), agentDir, projectRoot: project, report, backupRoot: backups });
+    expect(result.removed).toEqual([]);
+    expect(existsSync(join(agentDir, "skills", "deck-lead", "SKILL.md"))).toBe(true);
+  });
+});
+
 describe("opt-in transactional cleanup (7.2)", () => {
   const seed = () => {
     put(join(project, ".pi", "agents", "deck-lead.md"), AGENT);

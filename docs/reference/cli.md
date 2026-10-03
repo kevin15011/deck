@@ -61,7 +61,7 @@ All three operations accept `--root` and `--json` where applicable. `validate` a
 | `deck pi developer` | Install or refresh the global Deck package for Pi when needed, then start Pi's normal interactive TUI as the Deck lead session (Pi >= 1.0.0). |
 | `deck pi developer --continue` | Continue the current Developer Team session. |
 | `deck pi developer --resume` | Open the resume picker for a Developer Team session. |
-| `deck pi developer --cleanup-legacy` | One-time, opt-in removal of unmodified legacy Deck files from earlier versions (project `.pi/agents|skills`, `.deck/pi/profiles`, loose files in the Pi agent directory, Deck-added project package entries). Items are backed up under the Deck state directory first and restored on failure; modified files are kept. |
+| `deck pi developer --cleanup-legacy` | One-time, opt-in removal of unmodified legacy Deck files from earlier versions (project `.pi/agents|skills`, `.deck/pi/profiles`, loose files in the Pi agent directory including older-version `deck-*` agents/skills that are demonstrably Deck-authored, Deck-added project package entries). Items are backed up under the Deck state directory first and restored on failure; modified files are kept. |
 | `deck pi developer --memory=none` | Explicitly disable adaptive memory for this launch. |
 | `deck pi developer --memory=supermemory` | Select Supermemory Adaptive Memory for the launch; Deck runtime handles supported supervised effects and optional external MCP remains scoped recall-only and unobservable to Deck runtime metrics. |
 

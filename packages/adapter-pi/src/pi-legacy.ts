@@ -21,7 +21,11 @@ export const PI_LEGACY_STALE_MEMORY_MS = 24 * 3600 * 1000;
 
 export type PiLegacyScope = "project" | "global";
 export type PiLegacyKind = "agent" | "skill" | "profile";
-export type PiLegacyState = "unmodified" | "modified" | "unverified";
+/**
+ * `stale`: global, Deck-named, differs from every current template, but is demonstrably Deck-authored (older Deck
+ * version). It is removed by the opt-in cleanup (backed up first) because it shadows the package's skills.
+ */
+export type PiLegacyState = "unmodified" | "stale" | "modified" | "unverified";
 
 export type PiLegacyFileFinding = Readonly<{
   scope: PiLegacyScope;
@@ -31,6 +35,8 @@ export type PiLegacyFileFinding = Readonly<{
   /** Probe key (`agents/x.md`, `skills/x/SKILL.md`, `profiles/<team>/system-prompt.md`). */
   key: string;
   state: PiLegacyState;
+  /** Hash of the content seen by detection; cleanup keeps the file when it changed since. */
+  seenHash: string;
 }>;
 
 export type PiLegacyPackageFinding = Readonly<{
@@ -75,6 +81,23 @@ export function defaultLegacyProbeKeys(teamId = "developer-team"): string[] {
   keys.add(`profiles/${teamId}/system-prompt.md`);
   keys.add(`profiles/${teamId}/extensions/developer-team-execution.js`);
   return [...keys].sort();
+}
+
+/** Marker present in every agent and skill the earlier Deck versions wrote (the adaptive team contract). */
+const DECK_AUTHORED_MARKER = "Adaptive Developer Team Contract";
+
+/**
+ * Evidence that a Deck-named global file was authored by some Deck version: the key names a `deck-*` id, the content
+ * carries the Deck contract marker, and any frontmatter `name` matches the id. Never true for project files.
+ */
+export function looksDeckAuthored(key: string, content: string): boolean {
+  const id = /^agents\/(deck-[^/]+)\.md$/.exec(key)?.[1] ?? /^skills\/(deck-[^/]+)\/SKILL\.md$/.exec(key)?.[1];
+  if (!id || !content.includes(DECK_AUTHORED_MARKER)) return false;
+  if (!content.startsWith("---")) return !key.startsWith("skills/");
+  const end = content.indexOf("\n---", 3);
+  const head = end < 0 ? "" : content.slice(0, end);
+  const name = /^name:\s*["']?([^"'\n]+?)["']?\s*$/m.exec(head)?.[1];
+  return name === undefined ? !key.startsWith("skills/") : name === id;
 }
 
 function kindOf(key: string): PiLegacyKind {
@@ -128,8 +151,9 @@ export function detectPiLegacy(input: DetectPiLegacyInput): PiLegacyReport {
       const accepted = input.templates?.get(key);
       const state: PiLegacyState = input.templates === undefined
         ? "unverified"
-        : accepted?.includes(legacyContentHash(key, disk)) ? "unmodified" : "modified";
-      files.push({ scope, kind: kindOf(key), path, key, state });
+        : accepted?.includes(legacyContentHash(key, disk)) ? "unmodified"
+          : scope === "global" && looksDeckAuthored(key, disk) ? "stale" : "modified";
+      files.push({ scope, kind: kindOf(key), path, key, state, seenHash: hashContent(disk) });
     }
   }
 
@@ -151,7 +175,7 @@ export function detectPiLegacy(input: DetectPiLegacyInput): PiLegacyReport {
 export function describePiLegacy(report: PiLegacyReport): string[] {
   const lines: string[] = [];
   for (const file of report.files) {
-    lines.push(`${file.path} (${file.state === "unmodified" ? "unmodified Deck file" : file.state === "modified" ? "differs from the Deck template: kept on cleanup" : "Deck-named file"})`);
+    lines.push(`${file.path} (${file.state === "unmodified" ? "unmodified Deck file" : file.state === "stale" ? "Deck file from an older version that shadows the package: removed by cleanup" : file.state === "modified" ? "differs from the Deck template: kept on cleanup" : "Deck-named file"})`);
   }
   for (const entry of report.packages) {
     const note = !entry.deckAdded
@@ -199,7 +223,7 @@ function removeSettingsEntries(content: string, sources: ReadonlySet<string>): s
 }
 
 /**
- * Removes only unmodified Deck files and Deck-added package entries. Everything to be changed is backed up first
+ * Removes only unmodified or demonstrably Deck-authored stale files and Deck-added package entries. Everything to be changed is backed up first
  * (a failed backup aborts before any mutation), each file is re-verified immediately before removal, and any
  * failure restores every original.
  */
@@ -210,7 +234,7 @@ export function cleanupPiLegacy(input: CleanupPiLegacyInput): CleanupPiLegacyRes
   const originals: Original[] = [];
 
   const fileTargets = input.report.files.filter((file) => {
-    if (file.state === "unmodified") return true;
+    if (file.state === "unmodified" || file.state === "stale") return true;
     preserved.push(file.path);
     return false;
   });
@@ -235,6 +259,7 @@ export function cleanupPiLegacy(input: CleanupPiLegacyInput): CleanupPiLegacyRes
   for (const file of fileTargets) {
     const content = readSafe(io, file.path);
     if (content === undefined) continue;
+    if (hashContent(content) !== file.seenHash) { preserved.push(file.path); continue; }
     removals.push({ path: file.path, content });
   }
 

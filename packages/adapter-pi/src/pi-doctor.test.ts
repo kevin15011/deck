@@ -166,4 +166,15 @@ describe("deck doctor Pi coverage (7.3)", () => {
     expect(legacy?.message).toContain(".pi/agents/deck-lead.md");
     expect(legacy?.suggestion).toContain("--cleanup-legacy");
   });
+
+  test("legacy global skills are reported as shadowing the package, and ~/.agents is never mentioned as removable", async () => {
+    await installFull();
+    mkdirSync(join(agentDir, "skills", "deck-lead"), { recursive: true });
+    writeFileSync(join(agentDir, "skills", "deck-lead", "SKILL.md"), "---\nname: deck-lead\n---\nAdaptive Developer Team Contract\n");
+    const legacy = problems(inspect()).find((item) => item.message.includes("legacy Deck file"));
+    expect(legacy?.message).toContain("shadow");
+    expect(legacy?.message).toContain("Skill conflicts");
+    expect(legacy?.suggestion).toContain("--cleanup-legacy");
+    expect(legacy?.suggestion).toContain("~/.agents/skills");
+  });
 });

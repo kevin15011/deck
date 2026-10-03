@@ -216,7 +216,12 @@ function inspectLegacyAndPackages(input: InspectPiDeckInstallInput, agentDir: st
     items.push({ status: "warning", message: "pi-subagents is registered and would register a second 'subagent' tool next to the Deck delegation tool.", suggestion: deckAddedSet.has("pi-subagents") || report.packages.some((entry) => entry.source === "pi-subagents" && entry.deckAdded) ? "Run 'deck pi developer': Deck removes the entry it added." : "Remove npm:pi-subagents from settings.json if you do not need it." });
   }
   if (report.files.length > 0) {
-    items.push({ status: "warning", message: `${report.files.length} legacy Deck file(s) from an earlier version can duplicate the global package: ${truncated(report.files.map((file) => file.path), 4)}.`, suggestion: "Run 'deck pi developer --cleanup-legacy' (unmodified Deck files only; a backup is kept)." });
+    const shadowing = report.files.some((file) => file.scope === "global" && file.kind === "skill");
+    items.push({
+      status: "warning",
+      message: `${report.files.length} legacy Deck file(s) from an earlier version can duplicate the global package: ${truncated(report.files.map((file) => file.path), 4)}.${shadowing ? " Legacy skills in the Pi skills directory shadow the package's skills outside Deck sessions and show up as a '[Skill conflicts]' block at startup (Deck sessions already prefer the package)." : ""}`,
+      suggestion: "Run 'deck pi developer --cleanup-legacy': it removes unmodified Deck files and global deck-* files that are demonstrably Deck-authored but older than the current templates (a backup is kept; user-modified files stay). ~/.agents/skills belongs to other runners and is never touched.",
+    });
   } else if (items.length === 0) {
     items.push({ status: "ok", message: "No legacy Deck artifacts, pi-subagents or pi-mcp-adapter entries found." });
   }

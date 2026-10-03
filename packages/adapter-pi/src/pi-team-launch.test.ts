@@ -242,12 +242,17 @@ describe("buildTeamProfileDir", () => {
 describe("buildPiTeamLaunchPlan with a global Pi agent directory", () => {
   const agentDir = "/opt/pi-home";
 
-  test("references the global profile by absolute path and loads extensions through the package", () => {
+  test("references the global profile by absolute path and loads the package first so its skills win collisions", () => {
     const plan = buildPiTeamLaunchPlan({ teamId: "developer-team", projectRoot: "/work/project", agentDir });
 
     expect(plan.profileDir).toBe("/opt/pi-home/deck/profiles/developer-team");
     expect(plan.args[plan.args.indexOf("--system-prompt") + 1]).toBe("/opt/pi-home/deck/profiles/developer-team/system-prompt.md");
-    expect(plan.args).not.toContain("--extension");
+    // The Deck package is also passed as a temporary CLI source so its skills win name collisions (Pi: CLI sources are
+    // merged before auto-discovered ~/.pi/agent/skills and ~/.agents/skills). It is deduped against the settings entry.
+    expect(plan.args.filter((arg) => arg === "--extension")).toHaveLength(1);
+    expect(plan.args[plan.args.indexOf("--extension") + 1]).toBe("/opt/pi-home/deck/package");
+    expect(plan.args).not.toContain("--skill");
+    expect(plan.args).not.toContain("--no-skills");
     expect(plan.args.join(" ")).not.toContain(".deck/pi/profiles");
     expect(plan.args.join(" ")).not.toContain("/work/project/.pi");
   });

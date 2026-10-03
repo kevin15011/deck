@@ -90,4 +90,11 @@ events:
     actor: deck-apply-deep
     notes:
       - "Phases 7 and 8 complete: advisory graph guidance, legacy detection, opt-in transactional cleanup (--cleanup-legacy), Doctor coverage, documentation. Gates recorded in apply-progress.md; hermetic canary smoke against Pi 1.0.0 passed. Ready for verify; Phase 9 is manual canary evidence."
-
+  - phase: apply
+    status: ready_for_verify
+    event: apply.fix
+    artifact: design.md
+    timestamp: "2026-10-03T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Skill-collision fix: package passed as a first-priority CLI source in Deck sessions; stale Deck-authored global legacy files removed by --cleanup-legacy; docs and deviations 36-38."

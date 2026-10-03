@@ -1425,7 +1425,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       diagnosticEntries.push({
         code: "PI_LEGACY_ARTIFACTS",
         severity: "warning",
-        message: `Earlier Deck versions left ${lines.length} legacy Pi item(s) that can duplicate the global Deck package: ${lines.slice(0, 8).join("; ")}${lines.length > 8 ? `; and ${lines.length - 8} more` : ""}. Run 'deck pi developer --cleanup-legacy' to remove the unmodified ones (a backup is kept; modified files are never touched).`,
+        message: `Earlier Deck versions left ${lines.length} legacy Pi item(s) that can duplicate the global Deck package: ${lines.slice(0, 8).join("; ")}${lines.length > 8 ? `; and ${lines.length - 8} more` : ""}. ${lines.some((line) => line.includes("/skills/")) ? " Legacy skills in the Pi skills directory shadow the package skills outside Deck sessions and cause a '[Skill conflicts]' startup block (Deck sessions already prefer the package); copies in ~/.agents/skills belong to other runners and are never touched." : ""} Run 'deck pi developer --cleanup-legacy' to remove unmodified Deck files and global deck-* files that are demonstrably Deck-authored but older than the current templates (a backup is kept; user-modified files are never touched).`,
       });
     }
     for (const kept of enginePlan.kept) diagnosticEntries.push({ code: "PI_FILE_KEPT", severity: "info", message: `${kept.relPath} ${kept.reason}.` });

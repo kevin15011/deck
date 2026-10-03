@@ -170,7 +170,7 @@ describe("minimum Pi version gate (>= 1.0.0)", () => {
 describe("launch plan", () => {
   const launchInput = () => ({ mode: "interactive", teamId: "developer", projectRoot, prompt: [], deckConfig: validateDeckConfig({}) }) as never;
 
-  test("starts Pi's normal interactive TUI with the global lead profile and no per-launch extension flag", () => {
+  test("starts Pi's normal interactive TUI with the global lead profile and the Deck package as the first-priority CLI source", () => {
     const launch = launchOf(adapter(), launchInput());
     expect(launch.status).toBe("ready");
     expect(launch.plan.command).toBe("pi");
@@ -178,7 +178,7 @@ describe("launch plan", () => {
     expect(launch.plan.stdin).toBe("inherit");
     const args = launch.plan.args;
     expect(args[args.indexOf("--system-prompt") + 1]).toBe(join(agentDir, "deck/profiles/developer-team/system-prompt.md"));
-    expect(args).not.toContain("--extension");
+    expect(args[args.indexOf("--extension") + 1]).toBe(join(agentDir, "deck/package"));
     expect(args).not.toContain("-p");
     expect(args).not.toContain("--mode");
     expect(args.join(" ")).not.toContain(".deck/pi/profiles");
@@ -468,6 +468,16 @@ describe("legacy detection and opt-in cleanup through the adapter", () => {
     expect(entry?.message).toContain(join(projectRoot, ".pi", "agents", "deck-lead.md"));
     expect(entry?.message).toContain("--cleanup-legacy");
     expect(tree(projectRoot)).toEqual(before);
+  });
+
+  test("legacy global skills are reported as shadowing the package skills; other-runner copies are never offered for removal", async () => {
+    mkdirSync(join(agentDir, "skills", "deck-lead"), { recursive: true });
+    writeFileSync(join(agentDir, "skills", "deck-lead", "SKILL.md"), "---\nname: deck-lead\n---\nAdaptive Developer Team Contract\n");
+    const plan = adapter().buildDeveloperTeamInstallPlan(planInput());
+    const entry = plan.diagnosticEntries?.find((candidate) => candidate.code === "PI_LEGACY_ARTIFACTS");
+    expect(entry?.message).toContain("shadow");
+    expect(entry?.message).toContain("~/.agents/skills");
+    expect(entry?.message).toContain("--cleanup-legacy");
   });
 
   test("a clean project reports no legacy artifacts", () => {

@@ -102,3 +102,11 @@ Capture:
 4. whether the failure happened during review, install, verification, update, or rollback.
 
 Then compare the result with [Support matrix](reference/support-matrix.md) and [Operations](operations.md). Do not assume a detected runner or a package declaration implies operational support.
+
+## Pi shows a `[Skill conflicts]` block at startup
+
+Pi keeps the first skill it finds for a name and lists the others as conflicts. Pi searches `~/.pi/agent/skills` and `~/.agents/skills` (the Codex install writes there) in addition to the Deck package.
+
+- **Deck sessions** (`deck pi developer`) pass the Deck package to Pi as a launch-time source (`--extension <agent dir>/deck/package`), which Pi merges before auto-discovered skills, so the package skills always win. Your other skills still load. Plain `pi` does not get this priority.
+- **Legacy copies** in `~/.pi/agent/skills/deck-*` and `~/.pi/agent/agents/deck-*.md` come from older Deck versions. Run `deck pi developer --cleanup-legacy` once: it removes them even when they differ from the current templates, as long as they are demonstrably Deck-authored, and backs them up under `$XDG_STATE_HOME/deck/backups/pi-legacy/` first. `deck doctor` and the install plan flag them.
+- **Codex copies** in `~/.agents/skills/deck-*` are never removed by the Pi flow, so Pi may still list them as skipped conflicts (the package wins). Pi shows skill conflicts even with `quietStartup`. To hide them, add `"skills": ["!skills/deck-*"]` to `~/.pi/agent/settings.json`; it excludes auto-discovered `deck-*` skills in both directories and does not affect the Deck package.

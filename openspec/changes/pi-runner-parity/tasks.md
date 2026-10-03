@@ -75,6 +75,8 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - [x] 8.2 Update `docs/runners.md`, `docs/runner-support.md`, `docs/adaptive-memory.md`. Document that `--append-system-prompt` in subagent children replaces the user's `APPEND_SYSTEM.md`, and that MCP servers inherit non-memory env secrets.
 - [x] 8.3 Run the gates: `bun test packages/adapter-pi`, the config strict TDD gates, `tsc --noEmit`, baseline ledger comparison; record results in `apply-progress.md`.
 
+- [x] 8.4 Real-machine fix: Deck package skills win collisions in Deck-launched Pi sessions (`--extension <package>`), `--cleanup-legacy` also removes demonstrably Deck-authored stale global `deck-*` files, doctor/plan flag shadowing, troubleshooting section (design.md deviations 36-38).
+
 ## Phase 9 — Residual-risk verification (manual canary; evidence, not test gates)
 
 - 9.1 R1: full compaction cycle in a long canary session; recall reappears and no captures are lost.
