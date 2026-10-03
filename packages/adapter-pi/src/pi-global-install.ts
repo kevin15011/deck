@@ -79,6 +79,12 @@ export type PiGlobalDesiredState = {
   files: readonly PiDesiredFile[];
   /** Desired `settings.json` `packages` entry for the Deck package; undefined removes it. */
   packageEntry: string | undefined;
+  /**
+   * Names of Deck skills (as shipped in the package) to exclude from Pi's auto-discovered skill roots
+   * (`<agentDir>/skills`, `~/.agents/skills`) through `settings.json` `skills` entries `!<name>`, so Codex-owned
+   * copies never produce collision diagnostics. Empty removes every exclusion Deck added.
+   */
+  skillExclusions: readonly string[];
   /** Desired Deck MCP server entries by name. */
   mcpServers: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** Evidence (e.g. old Deck agents) that earlier Deck versions installed pi-subagents / pi-mcp-adapter. */
@@ -335,6 +341,33 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
   }
   plan.removedPackages = removedAddedPackages;
 
+  // --- settings.json `skills` exclusions (Deck-owned entries only) ---------------------------------------
+  const desiredExclusions = [...new Set(desired.skillExclusions.map((name) => `!${name}`))];
+  let nextOwnedExclusions: string[] = [];
+  if (settingsRead.ok && !plan.blocked) {
+    const currentSkills = settingsRead.file.value.skills;
+    if (currentSkills !== undefined && !Array.isArray(currentSkills)) {
+      block({ code: "PI_SETTINGS_MALFORMED", severity: "error", message: `${paths.settings} \`skills\` must be an array.` });
+    } else {
+      const owned = new Set(manifest.settings.skillExclusions);
+      let skills: unknown[] = [...(currentSkills ?? [])];
+      skills = skills.filter((entry) => !(typeof entry === "string" && owned.has(entry) && !desiredExclusions.includes(entry)));
+      for (const entry of desiredExclusions) {
+        if (skills.includes(entry)) {
+          if (owned.has(entry)) nextOwnedExclusions.push(entry);
+        } else {
+          skills.push(entry);
+          nextOwnedExclusions.push(entry);
+        }
+      }
+      if (canonicalJson(currentSkills ?? []) !== canonicalJson(skills)) {
+        const base = nextSettingsText === undefined ? settingsRead.file.value : (JSON.parse(nextSettingsText) as Record<string, unknown>);
+        const { skills: _drop, ...rest } = base;
+        nextSettingsText = serializeJson(skills.length > 0 ? { ...rest, skills } : rest);
+      }
+    }
+  }
+
   // --- mcp.json ----------------------------------------------------------------------------------------
   const mcpRead = readJsonObject(io, paths.mcp);
   let nextMcpText: string | undefined;
@@ -421,12 +454,13 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
     files: nextFiles,
     settings: {
       packages: desired.packageEntry ? [desired.packageEntry] : [],
+      skillExclusions: nextOwnedExclusions,
       addedPackages: manifest.settings.addedPackages.filter((entry) => !removedAddedPackages.some((removed) => normalizePackageSource(removed) === normalizePackageSource(entry))),
     },
     mcp: { servers: nextMcpOwned },
   };
   const nextManifestText = serializePiManifest(nextManifest);
-  const everythingEmpty = desired.files.length === 0 && !desired.packageEntry && Object.keys(desired.mcpServers).length === 0
+  const everythingEmpty = desired.files.length === 0 && !desired.packageEntry && desired.skillExclusions.length === 0 && manifest.settings.skillExclusions.length === 0 && Object.keys(desired.mcpServers).length === 0
     && Object.keys(manifest.files).length === 0 && Object.keys(manifest.mcp.servers).length === 0;
   if (!everythingEmpty && nextManifestText !== manifestRead) {
     const pre = manifestRead === undefined ? "absent" : hashContent(manifestRead);
@@ -539,6 +573,14 @@ export function verifyPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileI
     const packages = settings.ok ? settings.file.value.packages : undefined;
     const registered = Array.isArray(packages) && packages.some((entry) => entry === desired.packageEntry);
     if (!registered) diagnostics.push(`The Deck package is not registered in ${paths.settings} (expected entry ${desired.packageEntry}).`);
+  }
+
+  if (desired.skillExclusions.length > 0) {
+    const settings = readJsonObject(io, paths.settings);
+    const skills = settings.ok && Array.isArray(settings.file.value.skills) ? settings.file.value.skills : [];
+    for (const name of desired.skillExclusions) {
+      if (!skills.includes(`!${name}`)) diagnostics.push(`The Deck skill exclusion "!${name}" is missing from ${paths.settings}.`);
+    }
   }
 
   if (Object.keys(desired.mcpServers).length > 0) {

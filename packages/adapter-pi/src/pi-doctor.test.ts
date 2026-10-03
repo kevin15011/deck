@@ -99,6 +99,14 @@ describe("deck doctor Pi coverage (7.3)", () => {
     expect(found.some((item) => item.status === "warning" && item.message.includes("deck-quality.md"))).toBe(true);
   });
 
+  test("a removed Deck skill exclusion is reported as a warning with the reinstall hint", async () => {
+    await installFull();
+    const settings = piAgentPaths(agentDir).settings;
+    expect(JSON.parse(readFileSync(settings, "utf8")).skills).toContain("!deck-lead");
+    writeFileSync(settings, JSON.stringify({ packages: ["deck/package"], skills: [] }));
+    expect(problems(inspect()).some((item) => item.status === "warning" && item.message.includes("skill exclusions are missing"))).toBe(true);
+  });
+
   test("an unregistered package and a pi list that omits it are reported", async () => {
     await installFull();
     const settings = piAgentPaths(agentDir).settings;

@@ -126,6 +126,7 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
       agentDir: input.agentDir,
       files,
       packageEntry: paths.packageSettingsEntry,
+      skillExclusions: [...new Set(skills.map((skill) => skill.relPath.split("/")[0] as string))].sort(),
       mcpServers: input.mcpServers ?? {},
       legacyDeckEvidence: input.legacyDeckEvidence,
     },

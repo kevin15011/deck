@@ -15,6 +15,8 @@ export type PiManifestV1 = {
     packages: string[];
     /** Foreign package sources Deck itself added in `packages` (candidates for mandatory removal). */
     addedPackages: string[];
+    /** `settings.json` `skills` exclusion patterns (for example `!deck-lead`) that Deck itself added. */
+    skillExclusions: string[];
   };
   mcp: {
     /** `mcp.json` server names Deck owns. Value: sha256 of the canonical entry JSON. */
@@ -49,7 +51,7 @@ export function hashJsonValue(value: unknown): string {
 }
 
 export function createEmptyPiManifest(): PiManifestV1 {
-  return { schema: PI_MANIFEST_SCHEMA, files: {}, settings: { packages: [], addedPackages: [] }, mcp: { servers: {} } };
+  return { schema: PI_MANIFEST_SCHEMA, files: {}, settings: { packages: [], addedPackages: [], skillExclusions: [] }, mcp: { servers: {} } };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -87,12 +89,13 @@ export function parsePiManifest(text: string): ParsedPiManifest {
   if (!isRecord(settings)) return { ok: false, reason: "Deck Pi manifest `settings` must be an object." };
   const packages = stringArray(settings.packages);
   const addedPackages = stringArray(settings.addedPackages);
-  if (!packages || !addedPackages) return { ok: false, reason: "Deck Pi manifest package lists must be string arrays." };
+  const skillExclusions = stringArray(settings.skillExclusions);
+  if (!packages || !addedPackages || !skillExclusions) return { ok: false, reason: "Deck Pi manifest package lists must be string arrays." };
   const mcp = raw.mcp === undefined ? {} : raw.mcp;
   if (!isRecord(mcp)) return { ok: false, reason: "Deck Pi manifest `mcp` must be an object." };
   const servers = stringRecord(mcp.servers);
   if (!servers) return { ok: false, reason: "Deck Pi manifest MCP servers must map names to hashes." };
-  return { ok: true, manifest: { schema: PI_MANIFEST_SCHEMA, files, settings: { packages, addedPackages }, mcp: { servers } } };
+  return { ok: true, manifest: { schema: PI_MANIFEST_SCHEMA, files, settings: { packages, addedPackages, skillExclusions }, mcp: { servers } } };
 }
 
 export function serializePiManifest(manifest: PiManifestV1): string {
@@ -101,7 +104,7 @@ export function serializePiManifest(manifest: PiManifestV1): string {
   return `${JSON.stringify({
     schema: PI_MANIFEST_SCHEMA,
     files: sortedFiles,
-    settings: { packages: [...manifest.settings.packages], addedPackages: [...manifest.settings.addedPackages] },
+    settings: { packages: [...manifest.settings.packages], addedPackages: [...manifest.settings.addedPackages], skillExclusions: [...manifest.settings.skillExclusions] },
     mcp: { servers: sortedServers },
   }, null, 2)}\n`;
 }

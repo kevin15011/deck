@@ -113,6 +113,9 @@ export function inspectPiDeckInstall(input: InspectPiDeckInstallInput): PiDoctor
         ? { status: "ok", message: "'pi list' reports the Deck package." }
         : { status: "warning", message: "'pi list' does not report the Deck package; Pi may not load it.", suggestion: REINSTALL });
     }
+    const settingsSkills = settings.ok && Array.isArray(settings.value.skills) ? settings.value.skills : [];
+    const lostExclusions = manifest.settings.skillExclusions.filter((entry) => !settingsSkills.includes(entry));
+    if (lostExclusions.length > 0) installItems.push({ status: "warning", message: `Deck skill exclusions are missing from ${paths.settings}: ${truncated(lostExclusions)}. Pi may list Codex-owned copies as skill conflicts.`, suggestion: REINSTALL });
     const missing: string[] = [];
     const modified: string[] = [];
     for (const [relPath, expected] of Object.entries(manifest.files)) {

@@ -131,7 +131,12 @@ describe("buildPiGlobalMaterialization", () => {
     const io = createNodePiFileIO();
     applyPiGlobalPlan(planPiGlobalInstall(build().desired, io), io);
     const settings = JSON.parse(readFileSync(piAgentPaths(agentDir).settings, "utf-8"));
-    expect(settings).toEqual({ defaultModel: "keep", packages: ["npm:user-pkg", "deck/package"] });
+    expect(settings.defaultModel).toBe("keep");
+    expect(settings.packages).toEqual(["npm:user-pkg", "deck/package"]);
+    // Only the exact Deck skill names the package ships are excluded outside the package (never a deck-* wildcard).
+    expect(settings.skills).toEqual(build().desired.skillExclusions.map((name) => `!${name}`));
+    expect(settings.skills).toContain("!deck-lead");
+    expect(settings.skills.some((entry: string) => entry.includes("*"))).toBe(false);
     expect(readFileSync(join(agentDir, "agents", "mine.md"), "utf-8")).toBe("user agent\n");
   });
 });

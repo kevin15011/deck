@@ -39,6 +39,7 @@ function desired(overrides: Partial<PiGlobalDesiredState> = {}): PiGlobalDesired
       { relPath: "deck/profiles/developer-team/system-prompt.md", content: "prompt\n" },
     ],
     packageEntry: "deck/package",
+    skillExclusions: [],
     mcpServers: {},
     legacyDeckEvidence: false,
     ...overrides,
@@ -186,6 +187,44 @@ describe("settings.json preservation", () => {
 
     install(desired({ files: [], packageEntry: undefined }));
     expect(readJson(paths().settings)).toEqual(userSettings);
+  });
+
+  test("skill exclusions: added beside user entries, tracked in the manifest, and removed on uninstall without touching user entries", () => {
+    writeFileSync(paths().settings, JSON.stringify({ skills: ["~/my-skills", "!my-hidden"] }));
+    install(desired({ skillExclusions: ["deck-lead", "deck-archive"] }));
+    expect(readJson(paths().settings).skills).toEqual(["~/my-skills", "!my-hidden", "!deck-lead", "!deck-archive"]);
+    const manifest = parsePiManifest(readFileSync(paths().manifest, "utf8"));
+    expect(manifest.ok && manifest.manifest.settings.skillExclusions).toEqual(["!deck-lead", "!deck-archive"]);
+
+    // idempotent, and a shrunken set drops only the stale owned entry
+    install(desired({ skillExclusions: ["deck-lead", "deck-archive"] }));
+    install(desired({ skillExclusions: ["deck-lead"] }));
+    expect(readJson(paths().settings).skills).toEqual(["~/my-skills", "!my-hidden", "!deck-lead"]);
+
+    install(desired({ files: [], packageEntry: undefined, skillExclusions: [] }));
+    expect(readJson(paths().settings).skills).toEqual(["~/my-skills", "!my-hidden"]);
+  });
+
+  test("skill exclusions: a user-authored identical entry is never tracked or removed; an emptied skills key disappears", () => {
+    writeFileSync(paths().settings, JSON.stringify({ skills: ["!deck-lead"] }));
+    install(desired({ skillExclusions: ["deck-lead"] }));
+    install(desired({ files: [], packageEntry: undefined, skillExclusions: [] }));
+    expect(readJson(paths().settings).skills).toEqual(["!deck-lead"]);
+
+    writeFileSync(paths().settings, JSON.stringify({ theme: "dark" }));
+    install(desired({ skillExclusions: ["deck-lead"] }));
+    expect(readJson(paths().settings).skills).toEqual(["!deck-lead"]);
+    install(desired({ files: [], packageEntry: undefined, skillExclusions: [] }));
+    expect(readJson(paths().settings)).toEqual({ packages: [], theme: "dark" });
+  });
+
+  test("skill exclusions: a non-array skills setting blocks the plan; verify reports a missing exclusion", () => {
+    writeFileSync(paths().settings, JSON.stringify({ skills: "nope" }));
+    expect(planPiGlobalInstall(desired({ skillExclusions: ["deck-lead"] }), io()).blocked).toBe(true);
+    writeFileSync(paths().settings, JSON.stringify({}));
+    install(desired({ skillExclusions: ["deck-lead"] }));
+    writeFileSync(paths().settings, JSON.stringify({ packages: ["deck/package"] }));
+    expect(verifyPiGlobalInstall(desired({ skillExclusions: ["deck-lead"] }), io()).diagnostics.join(" ")).toContain("!deck-lead");
   });
 
   test("never duplicates the Deck entry if the user registered the same path", () => {

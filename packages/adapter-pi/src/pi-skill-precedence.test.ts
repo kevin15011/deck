@@ -71,3 +71,35 @@ test("the Deck launch plan's --extension package source makes the package skills
   expect(loaded.errors).toEqual([]);
   expect(loaded.extensions).toHaveLength(1);
 });
+
+async function loadWithExclusions(exclusions: readonly string[], extra: string[]) {
+  mkdirSync(join(root, "project"), { recursive: true });
+  const paths = piAgentPaths(agentDir);
+  skill(join(home, ".agents", "skills", "my-codex", "SKILL.md"), "my-codex");
+  skill(join(home, ".agents", "skills", "deck-mine", "SKILL.md"), "deck-mine");
+  await load(extra); // writes the fixture tree
+  writeFileSync(paths.settings, JSON.stringify({ packages: [paths.packageSettingsEntry], skills: exclusions }));
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const loader = new DefaultResourceLoader({ cwd: join(root, "project"), agentDir, additionalExtensionPaths: extra });
+    await loader.reload();
+    return loader.getSkills();
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+  }
+}
+
+for (const session of ["plain", "deck"] as const) {
+  test(`exact-name exclusions hide non-package copies without collisions in a ${session} Pi session`, async () => {
+    const packageRoot = piAgentPaths(agentDir).packageRoot;
+    const { skills, diagnostics } = await loadWithExclusions(["!deck-lead", "!deck-archive"], session === "deck" ? [packageRoot] : []);
+    const winner = (name: string) => skills.find((entry) => entry.name === name)?.filePath;
+    expect(diagnostics.filter((entry) => entry.type === "collision")).toEqual([]);
+    expect(winner("deck-lead")).toBe(join(packageRoot, "skills", "deck-lead", "SKILL.md"));
+    expect(winner("deck-archive")).toBe(join(packageRoot, "skills", "deck-archive", "SKILL.md"));
+    expect(winner("my-own")).toBe(join(agentDir, "skills", "my-own", "SKILL.md"));
+    expect(winner("my-codex")).toBe(join(home, ".agents", "skills", "my-codex", "SKILL.md"));
+    expect(winner("deck-mine")).toBe(join(home, ".agents", "skills", "deck-mine", "SKILL.md"));
+  });
+}
