@@ -1253,6 +1253,15 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // Developer Team installation
   // -------------------------------------------------------------------------
 
+  /** Owned RTK path, or null when the tool root is unavailable (a missing home must not break planning). */
+  #ownedRtkCommand(): string | null {
+    try {
+      return this.#tools().rtk.command() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
     // Blocking prerequisites: a valid agent dir and a supported Pi. Nothing is planned (or written) otherwise.
     const diagnosticEntries: { code: string; severity: "info" | "warning" | "error"; message: string }[] = [];
@@ -1320,6 +1329,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       projectRoot: input.projectRoot,
       mcpServers,
       legacyDeckEvidence: hasLegacyDeckInstallEvidence(this.#fileIO, agentDir),
+      // RTK rewrite is pinned to the Deck-owned binary: an explicit selection must include RTK; a launch-time plan
+      // (no explicit selection) keeps using the owned binary when it is usable.
+      rtkBinary: input.capabilityIds === undefined || input.capabilityIds.includes("rtk") ? this.#ownedRtkCommand() : null,
       installOptions: {
         modelAssignments: input.modelAssignments,
         thinkingAssignments: input.thinkingAssignments,

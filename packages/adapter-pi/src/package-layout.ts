@@ -14,7 +14,7 @@ export type DeckPiPackageInput = {
   /** Skill package files relative to `skills/` (e.g. `deck-lead/SKILL.md`). */
   skills: readonly { relPath: string; content: string }[];
   /** Extension implementations (ESM bundles). Each is wrapped by a guard entry so it is inert outside Deck sessions. */
-  extensions: readonly { name: string; implementation: string; scope?: DeckPiExtensionScope }[];
+  extensions: readonly { name: string; implementation: string; scope?: DeckPiExtensionScope; /** Static files next to the extension (e.g. `config.json`). */ extraFiles?: readonly { name: string; content: string }[] }[];
   /** Lead system prompt profile, materialized outside the package and passed via `--system-prompt`. */
   profile: { teamId: string; content: string };
 };
@@ -68,6 +68,10 @@ export function buildDeckPiPackageFiles(input: DeckPiPackageInput): PiDesiredFil
     assertIdentifier("extension", extension.name);
     add(`${PI_PACKAGE_REL_ROOT}/extensions/${extension.name}/index.js`, renderGuardedExtensionEntry({ implFile: "./impl.js", scope: extension.scope }));
     add(`${PI_PACKAGE_REL_ROOT}/extensions/${extension.name}/impl.js`, extension.implementation);
+    for (const extra of extension.extraFiles ?? []) {
+      assertIdentifier("extension file", extra.name);
+      add(`${PI_PACKAGE_REL_ROOT}/extensions/${extension.name}/${extra.name}`, extra.content);
+    }
   }
   // Pi has no Deck prompt templates yet; keep the declared directory present without adding a loadable template.
   add(`${PI_PACKAGE_REL_ROOT}/prompts/.gitkeep`, "");

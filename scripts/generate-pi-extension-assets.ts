@@ -29,9 +29,18 @@ function listSources(directory: string): string[] {
   return files;
 }
 
+/** Files outside `pi-extensions/` that the bundles import; included in the digest so the staleness test sees them. */
+const EXTERNAL_SOURCES = ["packages/adapter-pi/src/pi-mcp-catalog.ts", "packages/core/src/owned-tools/rtk-hook.ts"] as const;
+
 export function computePiExtensionSourceDigest(projectRoot = root): string {
   const sourceRoot = resolve(projectRoot, SOURCE_DIR);
   const hash = createHash("sha256");
+  for (const external of EXTERNAL_SOURCES) {
+    hash.update(external);
+    hash.update("\0");
+    hash.update(readFileSync(resolve(projectRoot, external)));
+    hash.update("\0");
+  }
   for (const file of listSources(sourceRoot)) {
     hash.update(relative(sourceRoot, file).split("\\").join("/"));
     hash.update("\0");

@@ -48,6 +48,17 @@ function snapshot(dir: string): string[] {
 describe("buildPiGlobalMaterialization", () => {
   const build = () => buildPiGlobalMaterialization({ agentDir, projectRoot, legacyDeckEvidence: false });
 
+  test("writes the tool-policy extension with its owned-RTK and graph-redirect configuration", () => {
+    const configOf = (input: Parameters<typeof buildPiGlobalMaterialization>[0]) => {
+      const { desired } = buildPiGlobalMaterialization(input);
+      expect(desired.files.map((file) => file.relPath)).toContain("deck/package/extensions/deck-tool-policy/impl.js");
+      expect(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-tool-policy/index.js")!.content).toContain('const scope = "any"');
+      return JSON.parse(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-tool-policy/config.json")!.content);
+    };
+    expect(configOf({ agentDir, projectRoot, legacyDeckEvidence: false })).toEqual({ version: 1, rtkBinary: null, graphRedirect: false });
+    expect(configOf({ agentDir, projectRoot, legacyDeckEvidence: false, rtkBinary: "/owned/tools/rtk", mcpServers: { "codebase-memory": { command: "/x/cb", args: [], env: {}, exposure: "direct" } } })).toEqual({ version: 1, rtkBinary: "/owned/tools/rtk", graphRedirect: true });
+  });
+
   test("plans the whole developer team as one global package plus a global profile", () => {
     const { desired } = build();
     const paths = desired.files.map((file) => file.relPath);

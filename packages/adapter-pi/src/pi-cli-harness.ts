@@ -11,6 +11,7 @@ import { buildPiGlobalMaterialization, type PiGlobalMaterializationInput } from 
 import { applyPiGlobalPlan, createNodePiFileIO, planPiGlobalInstall } from "./pi-global-install";
 
 const FAUX_EXTENSION = fileURLToPath(new URL("./__fixtures__/faux-cli-extension.js", import.meta.url));
+const PROBE_EXTENSION = fileURLToPath(new URL("./__fixtures__/probe-cli-extension.js", import.meta.url));
 
 export function findRealPi(): string | undefined {
   const candidates = [Bun.which("pi"), join(homedir(), ".bun", "bin", "pi")];
@@ -37,6 +38,7 @@ export function createPiHarness(materialization: Omit<PiGlobalMaterializationInp
   const project = join(root, "project");
   for (const dir of [join(agentDir, "extensions"), home, project]) mkdirSync(dir, { recursive: true });
   copyFileSync(FAUX_EXTENSION, join(agentDir, "extensions", "faux.js"));
+  copyFileSync(PROBE_EXTENSION, join(agentDir, "extensions", "probe.js"));
   const built = buildPiGlobalMaterialization({ agentDir, projectRoot: project, legacyDeckEvidence: false, ...materialization });
   const io = createNodePiFileIO();
   applyPiGlobalPlan(planPiGlobalInstall(built.desired, io), io);

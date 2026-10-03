@@ -56,12 +56,12 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - [x] 5.8 Token isolation test: the fake env-echo MCP server sees no token; `process.env` is scrubbed after factory load; verify extension-factory vs builtin-MCP spawn order (R6) and record the result.
 - [x] 5.9 Real-runtime contract test: `DefaultResourceLoader({ extensionFactories })` + `createAgentSession` with the faux provider and fake loopback host; explicit shutdown invocation; skips with a reason if the dev dependency is absent.
 
-## Phase 6 — Tool interception
+## Phase 6 — Tool interception [done]
 
-- 6.1 `deck-tool-policy`: read-only enforcement via `{ block: true, reason }`; assert the model receives an error result and no `tool_result` is required.
-- 6.2 RTK rewrite by in-place `event.input.command` mutation, pinned to the owned binary; pass-through and failure paths.
-- 6.3 Graph redirection for `bash` `grep`/`rg`/`find` over code paths and the `grep`/`find` built-ins (advisory; non-code untouched).
-- 6.4 Coexistence test with the execution extension: handler order, and evidence preserved for non-blocked calls.
+- [x] 6.1 `deck-tool-policy`: read-only enforcement via `{ block: true, reason }`; assert the model receives an error result and no `tool_result` is required.
+- [x] 6.2 RTK rewrite by in-place `event.input.command` mutation, pinned to the owned binary; pass-through and failure paths.
+- [x] 6.3 Graph redirection for `bash` `grep`/`rg`/`find` over code paths and the `grep`/`find` built-ins (advisory; non-code untouched).
+- [x] 6.4 Coexistence test with the execution extension: handler order, and evidence preserved for non-blocked calls.
 
 ## Phase 7 — Migration and doctor
 

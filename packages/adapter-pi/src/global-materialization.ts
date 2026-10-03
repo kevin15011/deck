@@ -5,6 +5,7 @@ import {
   type DeveloperTeamInstallPlan,
   type MemoryDiagnostic,
 } from "./developer-team-install";
+import { renderToolPolicyConfig } from "./pi-extensions/tool-policy/config";
 import { buildDeckPiPackageFiles } from "./package-layout";
 import type { PiGlobalDesiredState } from "./pi-global-install";
 import { adaptBunBundleForNode } from "./pi-bundle-compat";
@@ -16,6 +17,7 @@ export const PI_DEVELOPER_TEAM_ID = "developer-team";
 export const PI_EXECUTION_EXTENSION_NAME = "developer-team-execution";
 export const PI_SUBAGENTS_EXTENSION_NAME = "deck-subagents";
 export const PI_MEMORY_EXTENSION_NAME = "deck-memory";
+export const PI_TOOL_POLICY_EXTENSION_NAME = "deck-tool-policy";
 /** Roles that never mutate the workspace (enforced by `--tools` and by the tool-policy extension). */
 export const PI_READ_ONLY_ROLE_AGENT_IDS: readonly string[] = ["deck-investigate", "deck-quality"];
 
@@ -43,6 +45,8 @@ export type PiGlobalMaterializationInput = {
   mcpServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** Evidence that earlier Deck versions installed pi-subagents / pi-mcp-adapter. */
   legacyDeckEvidence: boolean;
+  /** Absolute path of the Deck-owned RTK binary when RTK is selected and usable (enables the bash rewrite). */
+  rtkBinary?: string | null;
   /** Override for tests; defaults to the packaged generated bundle. */
   executionExtensionSource?: string;
   teamId?: string;
@@ -101,6 +105,12 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
       name: PI_MEMORY_EXTENSION_NAME,
       implementation: readDeckPiExtensionBundle("deck-memory"),
       scope: "any",
+    }, {
+      // Role tool policy, RTK rewrite and graph redirection through one ordered tool_call handler (lead and children).
+      name: PI_TOOL_POLICY_EXTENSION_NAME,
+      implementation: readDeckPiExtensionBundle("deck-tool-policy"),
+      scope: "any",
+      extraFiles: [{ name: "config.json", content: renderToolPolicyConfig({ rtkBinary: input.rtkBinary ?? null, graphRedirect: selectedServers.includes("codebase-memory") }) }],
     }, {
       // Delegation tool: registered in the lead only; children are marked DECK_PI_CHILD=1 and never get it.
       name: PI_SUBAGENTS_EXTENSION_NAME,

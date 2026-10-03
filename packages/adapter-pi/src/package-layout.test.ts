@@ -51,6 +51,8 @@ describe("buildDeckPiPackageFiles", () => {
     expect(files.get("deck/package/extensions/developer-team-execution/index.js")).toContain("DECK_PI_SESSION");
     expect(files.get("deck/package/extensions/developer-team-execution/index.js")).toContain('"./impl.js"');
     expect(files.get("deck/package/extensions/developer-team-execution/impl.js")).toBe("export default function () {}\n");
+    const withExtra = buildDeckPiPackageFiles({ ...base(), extensions: [{ name: "deck-tool-policy", implementation: "export default () => {}\n", extraFiles: [{ name: "config.json", content: "{\"version\":1}\n" }] }] });
+    expect(withExtra.find((file) => file.relPath === "deck/package/extensions/deck-tool-policy/config.json")?.content).toBe("{\"version\":1}\n");
   });
 
   test("agents live inside the package (not the shared agents dir) and skills keep their package layout", () => {
@@ -84,6 +86,7 @@ describe("buildDeckPiPackageFiles", () => {
   test("rejects skill and agent identifiers that would escape the package", () => {
     expect(() => buildDeckPiPackageFiles({ ...base(), skills: [{ relPath: "../evil/SKILL.md", content: "x" }] })).toThrow(/package path/i);
     expect(() => buildDeckPiPackageFiles({ ...base(), agents: [{ id: "../evil", content: "x" }] })).toThrow(/identifier/i);
+    expect(() => buildDeckPiPackageFiles({ ...base(), extensions: [{ name: "x", implementation: "x", extraFiles: [{ name: "../escape.json", content: "{}" }] }] })).toThrow(/Invalid/);
     expect(() => buildDeckPiPackageFiles({ ...base(), extensions: [{ name: "a/b", implementation: "x" }] })).toThrow(/identifier/i);
   });
 

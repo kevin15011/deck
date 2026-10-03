@@ -415,3 +415,33 @@ describe("adaptive memory switch in the launch plan", () => {
     expect(Object.keys(overlay).filter((key) => key.startsWith("DECK_RUNNER_MEMORY"))).toEqual([]);
   });
 });
+
+describe("tool-policy configuration from the production adapter", () => {
+  const rtkTools = (command: string | undefined) => ({
+    resolveExecutable: (name: string) => (name === "codebase-memory" ? "/opt/fake/bin/codebase-memory-mcp" : undefined),
+    codebase: { command: () => "/opt/fake/tools/codebase-memory-mcp", existing: () => undefined, state: () => "ready", supported: () => true, install: async () => "unchanged", root: "/x/cb" },
+    rtk: { command: () => command, state: () => (command ? "ready" : "absent"), supported: () => true, install: async () => "unchanged", root: "/x/rtk" },
+  });
+  const configFor = (pi: ReturnType<typeof adapter>, capabilityIds?: string[]) => {
+    const plan = pi.buildDeveloperTeamInstallPlan({ ...planInput(), ...(capabilityIds ? { capabilityIds } : {}) } as never);
+    const file = plan.files.find((entry) => entry.path.endsWith("extensions/deck-tool-policy/config.json"));
+    return JSON.parse(file!.content);
+  };
+
+  test("an explicit selection that includes RTK pins the owned binary; omitting RTK disables the rewrite", () => {
+    const pi = adapter({ piTools: rtkTools("/owned/tools/rtk") });
+    expect(configFor(pi, ["rtk"]).rtkBinary).toBe("/owned/tools/rtk");
+    expect(configFor(pi, ["context7"]).rtkBinary).toBeNull();
+  });
+
+  test("a launch-time plan (no explicit selection) uses the owned RTK when it is usable", () => {
+    expect(configFor(adapter({ piTools: rtkTools("/owned/tools/rtk") })).rtkBinary).toBe("/owned/tools/rtk");
+    expect(configFor(adapter({ piTools: rtkTools(undefined) })).rtkBinary).toBeNull();
+  });
+
+  test("graph redirection follows the codebase-memory server selection", () => {
+    const pi = adapter({ piTools: rtkTools(undefined) });
+    expect(configFor(pi, ["codebase-memory-mcp"]).graphRedirect).toBe(true);
+    expect(configFor(pi, ["context7"]).graphRedirect).toBe(false);
+  });
+});
