@@ -177,6 +177,6 @@ describe("MCP-aware role content (direct-exposure tool names)", () => {
   });
 
   test("read-only roles without MCP servers still drop write-capable tools", () => {
-    expect(frontmatterTools(file(withServers({}), "deck/package/agents/deck-investigate.md"))).toBe("read,grep,find,ls");
+    expect(frontmatterTools(file(withServers({}), "deck/package/agents/deck-investigate.md"))).toBe("read,grep,find,ls,memory_search");
   });
 });

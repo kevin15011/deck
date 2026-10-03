@@ -93,4 +93,48 @@ describe("deck-memory in the real Pi 1.0 runtime (faux provider, fake loopback h
     expect(new Set(captureSources).size).toBe(1);
     for (const entry of host.events) expect(entry.auth).toBe(`Bearer ${host.token}`);
   }, 120_000);
+
+  realTest("the lead calls memory_search and memory_save through the loopback with its role; results reach the model", async () => {
+    harness = createPiHarness();
+    host = startFakeLoopbackHost({ dir: harness.root, advisory: ADVISORY });
+    const fauxLog = join(harness.root, "faux.jsonl");
+    const search = await harness.run(["find it"], { ...leadEnv(), FAUX_LOG: fauxLog, FAUX_SCRIPT: "tool", FAUX_TOOL: "memory_search", FAUX_TOOL_INPUT: JSON.stringify({ query: "earlier decision" }) });
+    expect(search.code).toBe(0);
+    expect(host.named("search")).toHaveLength(1);
+    expect(host.named("search")[0]).toMatchObject({ runnerId: "pi", role: "lead", query: "earlier decision" });
+    expect(readLog(fauxLog).filter((entry) => !entry.child).at(-1)!.text).toContain("SEARCH_HIT_7");
+
+    const save = await harness.run(["note it"], { ...leadEnv(), FAUX_SCRIPT: "tool", FAUX_TOOL: "memory_save", FAUX_TOOL_INPUT: JSON.stringify({ content: "Decision: explicit memory tools use the loopback.", kind: "decision" }) });
+    expect(save.code).toBe(0);
+    expect(host.named("save")).toHaveLength(1);
+    expect(host.named("save")[0]).toMatchObject({ role: "lead", kind: "decision", content: "Decision: explicit memory tools use the loopback." });
+    for (const entry of host.events) expect(entry.auth).toBe(`Bearer ${host.token}`);
+    expect(JSON.stringify(search.events)).not.toContain(host.token);
+  }, 120_000);
+
+  realTest("a read-only child can search but memory_save is not even available to it", async () => {
+    harness = createPiHarness();
+    host = startFakeLoopbackHost({ dir: harness.root, advisory: ADVISORY });
+    const fauxLog = join(harness.root, "faux.jsonl");
+    const delegate = JSON.stringify({ agent: "deck-investigate", task: "look around" });
+    await harness.run(["delegate"], { ...leadEnv(), FAUX_LOG: fauxLog, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: delegate, FAUX_CHILD_TOOL: "memory_search", FAUX_CHILD_TOOL_INPUT: JSON.stringify({ query: "child question" }) });
+    expect(host.named("search").map((event) => [event.role, event.query])).toEqual([["investigate", "child question"]]);
+    expect(readLog(fauxLog).filter((entry) => entry.child).at(-1)!.text).toContain("SEARCH_HIT_7");
+
+    host.events.length = 0;
+    const blocked = join(harness.root, "faux-blocked.jsonl");
+    await harness.run(["delegate"], { ...leadEnv(), FAUX_LOG: blocked, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: delegate, FAUX_CHILD_TOOL: "memory_save", FAUX_CHILD_TOOL_INPUT: JSON.stringify({ content: "Decision: a read-only child must not write memory." }) });
+    expect(host.named("save")).toHaveLength(0);
+    expect(readLog(blocked).filter((entry) => entry.child).at(-1)!.text).toContain("Tool memory_save not found");
+  }, 180_000);
+
+  realTest("with adaptive memory disabled or the handoff missing no memory tools exist", async () => {
+    harness = createPiHarness();
+    host = startFakeLoopbackHost({ dir: harness.root, advisory: ADVISORY });
+    const fauxLog = join(harness.root, "faux.jsonl");
+    const disabled = await harness.run(["x"], { ...leadEnv(), DECK_PI_MEMORY: "disabled", FAUX_LOG: fauxLog, FAUX_SCRIPT: "tool", FAUX_TOOL: "memory_search", FAUX_TOOL_INPUT: "{\"query\":\"q\"}" });
+    expect(disabled.code).toBe(0);
+    expect(host.events).toHaveLength(0);
+    expect(readLog(fauxLog).at(-1)!.text).toContain("Tool memory_search not found");
+  }, 120_000);
 });

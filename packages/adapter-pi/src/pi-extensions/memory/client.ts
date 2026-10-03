@@ -26,7 +26,7 @@ export function isLoopbackEndpoint(endpoint: string): boolean {
   }
 }
 
-export type LoopbackResponse = { ok: boolean; advisoryText?: string; diagnostics: string[] };
+export type LoopbackResponse = { ok: boolean; advisoryText?: string; resultCount?: number; diagnostics: string[] };
 
 export type LoopbackClient = {
   /** Never throws. Transport failures and `ok: false` are reported through the result. */
@@ -48,12 +48,13 @@ export function createLoopbackClient(input: {
     try {
       const response = await doFetch(input.endpoint, { method: "POST", headers: { authorization: `Bearer ${input.token}`, "content-type": "application/json" }, body, signal: controller.signal });
       if (response.status >= 500) return { transient: true, error: `host-error-${response.status}` };
-      const parsed = await response.json() as { ok?: unknown; advisoryText?: unknown; diagnostics?: unknown };
+      const parsed = await response.json() as { ok?: unknown; advisoryText?: unknown; resultCount?: unknown; diagnostics?: unknown };
       return {
         transient: false,
         response: {
           ok: parsed.ok === true,
           ...(typeof parsed.advisoryText === "string" && parsed.advisoryText.length > 0 ? { advisoryText: parsed.advisoryText } : {}),
+          ...(typeof parsed.resultCount === "number" ? { resultCount: parsed.resultCount } : {}),
           diagnostics: Array.isArray(parsed.diagnostics) ? parsed.diagnostics.filter((entry): entry is string => typeof entry === "string") : [],
         },
       };

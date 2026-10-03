@@ -14,13 +14,13 @@ describe("evaluateRolePolicy", () => {
     });
 
     test(`${role} may read: built-in read tools and read-only MCP tools proceed`, () => {
-      for (const tool of ["read", "grep", "find", "ls", "mcp__codebase_memory__search_graph", "mcp__context7__query_docs", "mcp__context_mode__ctx_search", "mcp__serena__find_symbol", "mcp__web_search__tavily_search"]) {
+      for (const tool of ["read", "grep", "find", "ls", "mcp__codebase_memory__search_graph", "mcp__context7__query_docs", "mcp__context_mode__ctx_search", "mcp__serena__find_symbol", "mcp__web_search__tavily_search", "memory_search"]) {
         expect(evaluateRolePolicy(role, tool)).toBeUndefined();
       }
     });
 
     test(`${role} cannot use mutating MCP tools or unknown tools`, () => {
-      for (const tool of ["mcp__codebase_memory__index_repository", "mcp__serena__replace_symbol_body", "mcp__context_mode__ctx_execute", "subagent", "some_user_tool"]) {
+      for (const tool of ["mcp__codebase_memory__index_repository", "mcp__serena__replace_symbol_body", "mcp__context_mode__ctx_execute", "subagent", "some_user_tool", "memory_save"]) {
         expect(evaluateRolePolicy(role, tool)?.block).toBe(true);
       }
     });

@@ -17,7 +17,7 @@ describe("deck-subagents in the real Pi 1.0 runtime (faux provider)", () => {
     const end = toolEnd(run.events);
     expect(end?.isError).toBe(false);
     expect(end?.result.content[0].text).toBe("CHILD_OK investigate");
-    expect(end?.result.details.results[0]).toMatchObject({ agent: "deck-investigate", model: "faux/faux-1", thinking: "off", tools: ["read", "grep", "find", "ls"], exitCode: 0 });
+    expect(end?.result.details.results[0]).toMatchObject({ agent: "deck-investigate", model: "faux/faux-1", thinking: "off", tools: ["read", "grep", "find", "ls", "memory_search"], exitCode: 0 });
   }, 120_000);
 
   realTest("an unknown role is an error result and the lead session continues", async () => {

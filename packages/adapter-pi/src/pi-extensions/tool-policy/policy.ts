@@ -1,10 +1,11 @@
-import { DECK_PI_MCP_CATALOG, DECK_PI_MCP_SERVER_IDS, PI_READ_ONLY_BUILTIN_TOOLS, piMcpToolName } from "../../pi-mcp-catalog";
+import { DECK_PI_MCP_CATALOG, DECK_PI_MCP_SERVER_IDS, PI_READ_ONLY_BUILTIN_TOOLS, PI_READ_ONLY_MEMORY_TOOLS, piMcpToolName } from "../../pi-mcp-catalog";
 import { isReadOnlyRole, normalizeRole } from "../shared/roles";
 
 export type PolicyDecision = Readonly<{ block: true; reason: string }>;
 
 const READ_ONLY_ALLOWED: ReadonlySet<string> = new Set([
   ...PI_READ_ONLY_BUILTIN_TOOLS,
+  ...PI_READ_ONLY_MEMORY_TOOLS,
   ...DECK_PI_MCP_SERVER_IDS.flatMap((server) => DECK_PI_MCP_CATALOG[server].readOnlyTools.map((tool) => piMcpToolName(server, tool))),
 ]);
 

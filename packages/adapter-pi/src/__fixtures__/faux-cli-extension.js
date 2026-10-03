@@ -1,6 +1,6 @@
 // Test-only global Pi extension (plain JS so Pi's loader needs no TypeScript): a scripted "faux" provider.
 // FAUX_SCRIPT selects the lead behavior: "delegate" calls the Deck `subagent` tool, anything else answers text.
-// Children (DECK_PI_CHILD=1) answer with their role so the lead can prove which child ran.
+// FAUX_CHILD_TOOL/FAUX_CHILD_TOOL_INPUT make a child call one tool first. Children (DECK_PI_CHILD=1) answer with their role so the lead can prove which child ran.
 import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import fs from "node:fs";
 
@@ -15,6 +15,7 @@ export default function (pi) {
       log({ child, role: process.env.DECK_PI_ROLE, roles: context.messages.map((message) => message.role), text: JSON.stringify(context.messages), system: context.systemPrompt ?? "" });
       let reply;
       if (process.env.FAUX_SCRIPT === "tool" && !hasResult) reply = fauxAssistantMessage([fauxToolCall(process.env.FAUX_TOOL, JSON.parse(process.env.FAUX_TOOL_INPUT ?? "{}"))], { stopReason: "toolUse" });
+      else if (child && process.env.FAUX_CHILD_TOOL && !hasResult) reply = fauxAssistantMessage([fauxToolCall(process.env.FAUX_CHILD_TOOL, JSON.parse(process.env.FAUX_CHILD_TOOL_INPUT ?? "{}"))], { stopReason: "toolUse" });
       else if (child) reply = fauxAssistantMessage(`CHILD_OK ${process.env.DECK_PI_ROLE}`);
       else if (process.env.FAUX_SCRIPT === "delegate" && !hasResult) reply = fauxAssistantMessage([fauxToolCall("subagent", JSON.parse(process.env.FAUX_DELEGATE ?? "{}"))], { stopReason: "toolUse" });
       else reply = fauxAssistantMessage(process.env.FAUX_REPLY ?? "LEAD_DONE");

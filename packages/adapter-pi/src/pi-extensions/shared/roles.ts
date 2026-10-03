@@ -23,3 +23,12 @@ export function isReadOnlyRole(value: string | undefined): boolean {
 export function isDelegableAgentId(agentId: string): boolean {
   return agentId.startsWith(DECK_AGENT_PREFIX) && normalizeRole(agentId) !== LEAD_ROLE;
 }
+
+/** Roles whose explicit memory search is denied by the host policy (apply-fast loads no recall at all). */
+export const MEMORY_SEARCH_DENIED_ROLES: readonly string[] = ["apply-fast"];
+
+/** Explicit memory tools a role is offered: search unless the policy skips it, save only for write-capable roles. */
+export function memoryToolsForRole(value: string | undefined): { search: boolean; save: boolean } {
+  const role = normalizeRole(value);
+  return { search: !MEMORY_SEARCH_DENIED_ROLES.includes(role), save: !READ_ONLY_ROLES.includes(role) };
+}

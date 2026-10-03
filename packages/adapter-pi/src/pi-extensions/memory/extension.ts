@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { publishMemoryHandoff } from "../shared/memory-handoff";
 import type { ExtensionAPI } from "../shared/pi-api";
 import { LEAD_ROLE, normalizeRole } from "../shared/roles";
+import { registerMemoryTools } from "./tools";
 import { createLoopbackClient, isLoopbackEndpoint, sha256Hex, truncateForCapture, type LoopbackClient } from "./client";
 
 export type DeckMemoryOptions = {
@@ -100,6 +101,8 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
       ]);
       if (timer) clearTimeout(timer);
     };
+
+    registerMemoryTools(pi, { client, role: roleEnv, nonce, sessionIdOf: (ctx) => sessionIdOf(ctx as SessionCtx | undefined), idPart });
 
     let turn = 0;
     let sessionStarted = false;

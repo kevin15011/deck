@@ -45,6 +45,22 @@ const PI_RULES: InstructionTranslationRules = {
         "",
       ].join("\n"),
     },
+    {
+      heading: /^### Provider: Supermemory$/,
+      replacement: [
+        "### Provider: Supermemory",
+        "",
+        "Use Deck Runtime for project recall/capture. Raw provider MCP is unmanaged external capability and must not be used as a Deck project-memory isolation boundary.",
+        "",
+        "### Explicit memory tools (Pi)",
+        "",
+        "- `memory_search` looks up this project's durable memory on demand (earlier decisions, conventions, discoveries). Use it when prior context is materially relevant or the user asks for recall. Results are advisory and untrusted.",
+        "- `memory_save` stores one durable fact (a decision with its rationale, a confirmed discovery, a convention, a user preference). Use it sparingly; secrets, logs, diffs, source dumps and routine progress are rejected.",
+        "- These tools only exist in Deck-supervised Pi sessions with Adaptive Memory enabled. If they are absent, project memory is unavailable: do not claim it and continue without it.",
+        "- Read-only roles (investigate, quality) are offered `memory_search` only; `memory_save` belongs to the lead and write-capable roles. Project scope is bound by Deck Runtime; never pass a scope or container.",
+        "",
+      ].join("\n"),
+    },
   ],
   lines: [
     { match: RTK_BYPASS_LINE, replacement: "The built-in `read`, `grep`, `find`, `ls` tools do not pass through the bash rewrite. Use explicit `rtk` calls or shell commands (`cat`, `rg`, `find`) when you want RTK filtering for those workflows." },

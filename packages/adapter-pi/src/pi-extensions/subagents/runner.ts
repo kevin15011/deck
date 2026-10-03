@@ -3,13 +3,14 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
+import { PI_READ_ONLY_BUILTIN_TOOLS, PI_READ_ONLY_MEMORY_TOOLS } from "../../pi-mcp-catalog";
 import { isThinkingLevel, PI_THINKING_LEVEL_NAMES } from "../shared/thinking";
 import type { DeckAgent } from "./agents";
 
 const DEFAULT_KILL_GRACE_MS = 5_000;
 const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 const STDERR_EXCERPT_CHARS = 1_500;
-const READ_ONLY_FALLBACK_TOOLS = ["read", "grep", "find", "ls"] as const;
+const READ_ONLY_FALLBACK_TOOLS = [...PI_READ_ONLY_BUILTIN_TOOLS, ...PI_READ_ONLY_MEMORY_TOOLS] as const;
 
 export type PiInvocation = Readonly<{ command: string; args: readonly string[] }>;
 export type { MemoryHandoff } from "../shared/memory-handoff";

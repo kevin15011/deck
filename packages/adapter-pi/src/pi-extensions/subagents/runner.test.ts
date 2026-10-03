@@ -81,7 +81,7 @@ describe("child spawn contract", () => {
     const bare = parseAgentMarkdown("deck-quality", "---\nname: deck-quality\n---\n\nQ\n");
     await runner().run({ agent: bare, task: "check", cwd: dir });
     const record = records()[0];
-    expect(record.argv[record.argv.indexOf("--tools") + 1]).toBe("read,grep,find,ls");
+    expect(record.argv[record.argv.indexOf("--tools") + 1]).toBe("read,grep,find,ls,memory_search");
   });
 
   test("an invalid thinking level is rejected before any child is spawned", async () => {

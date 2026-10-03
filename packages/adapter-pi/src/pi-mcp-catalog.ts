@@ -55,6 +55,9 @@ export const DECK_PI_MCP_CATALOG: Readonly<Record<DeckPiMcpServerId, DeckPiMcpSe
 /** Read-only Pi built-in tools available to read-only roles (`ls`/`grep`/`find` are opt-in built-ins). */
 export const PI_READ_ONLY_BUILTIN_TOOLS = ["read", "grep", "find", "ls"] as const;
 
+/** Deck explicit memory tools read-only roles may call (`memory_save` is write-capable and never allowed). */
+export const PI_READ_ONLY_MEMORY_TOOLS = ["memory_search"] as const;
+
 export function sanitizeMcpName(value: string): string {
   return value.replace(/[^a-zA-Z0-9_]/g, "_");
 }
@@ -74,7 +77,7 @@ function orderedUnique(serverIds: readonly string[]): DeckPiMcpServerId[] {
 
 /** `--tools` allowlist for read-only roles: built-in read tools plus the selected servers' read-only MCP tools. */
 export function piReadOnlyToolAllowlist(selectedServers: readonly string[]): string[] {
-  const tools: string[] = [...PI_READ_ONLY_BUILTIN_TOOLS];
+  const tools: string[] = [...PI_READ_ONLY_BUILTIN_TOOLS, ...PI_READ_ONLY_MEMORY_TOOLS];
   for (const id of orderedUnique(selectedServers)) {
     for (const tool of DECK_PI_MCP_CATALOG[id].readOnlyTools) tools.push(piMcpToolName(id, tool));
   }
