@@ -504,6 +504,16 @@ async function handleLoopbackRequest(
       if (recalled.ok !== false) successfulEvents.set(eventId, { timestamp: Date.now(), response: recalled });
       return recalled;
     }
+    // Pi compaction is an ephemeral native summary input, not an ordinary turn recall.
+    // Fetch both sources afresh; do not apply explicit-recall's profile suppression on a miss.
+    if (event.event === "compaction_recall") {
+      if (host.runnerId !== "pi") return { ok: false, diagnostics: ["unsupported-event"] };
+      const parsed = parseManagedProjectMemoryRecallQuery(event.query);
+      if (!parsed.ok) return { ok: false, diagnostics: ["invalid-query"] };
+      const recalled = await recallForLoopback(host, role, parsed.query, "automatic", correlation);
+      if (recalled.ok !== false) successfulEvents.set(eventId, { timestamp: Date.now(), response: recalled });
+      return recalled;
+    }
     if (event.event === "recall" || event.event === "explicit_recall") {
       let query = typeof event.query === "string" ? event.query : undefined;
       let recallRole = role;
