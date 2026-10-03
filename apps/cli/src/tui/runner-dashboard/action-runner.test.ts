@@ -1079,6 +1079,51 @@ describe("Serena action-runner evidence and cancellation gates", () => {
     expect(results.find((result) => result.actionId === "capability.serena.mcp-config")?.status).toBe("executed");
   });
 
+  test("does not gate Pi named MCP readiness on a PATH lookup of the Deck-owned executables", async () => {
+    const originalPath = process.env.PATH;
+    process.env.PATH = "/nonexistent-deck-path";
+    try {
+      for (const capabilityId of ["codebase-memory-mcp", "context-mode", "rtk"]) {
+        const plan: PiRunnerReviewPlan = {
+          ready: true,
+          diagnostics: [],
+          groups: {
+            automaticInstalls: [],
+            manualSteps: [],
+            configWrites: [{
+              id: `${capabilityId}.mcp-config`,
+              kind: "write-pi-mcp-config",
+              title: `Configure ${capabilityId}`,
+              capabilityId,
+              status: "ready",
+            }],
+            teamApplications: [],
+            validations: [],
+          },
+        } as never;
+        const runnerActions: string[] = [];
+        const results = await runRunnerReviewPlan(plan, {
+          dashboardState: createDefaultPiRunnerDashboardState({ runnerScope: "pi", plan, planGeneratedForRevision: 0 }),
+          runnerId: "pi",
+          runnerAdapter: {
+            runAction: async (action: { id: string }) => {
+              runnerActions.push(action.id);
+              return { actionId: action.id, status: "executed", message: "ok", diagnostics: [] };
+            },
+          } as never,
+          writeMcpConfig: async (options: { serverName: string }) => {
+            runnerActions.push(`writer:${options.serverName}`);
+            return { ok: true, path: "/fixtures/pi/mcp.json", diagnostics: [] };
+          },
+        });
+        expect(results[0]?.message ?? "").not.toContain("not found on PATH");
+        expect(results[0]?.status).not.toBe("failed");
+      }
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   test("skips the Serena writer for failed, cancelled, partial, stale, and malformed outcomes", async () => {
     const scenarios = [
       { label: "failed", outcome: "failed" as const, status: "failed" as const },

@@ -1122,7 +1122,10 @@ export async function runRunnerReviewPlan(
       }
 
       const capabilityId = action.capabilityId as string | undefined;
-      if (capabilityId && capabilityId !== "context7" && capabilityId !== "serena") {
+      // Pi resolves Deck-owned executables itself (absolute, containment-checked) in its adapter readiness
+      // check; a PATH lookup is not authoritative there and would reject valid Deck-owned installs.
+      const isPiRunner = (dependencies.runnerId ?? dependencies.dashboardState?.runnerScope) === "pi" || action.kind === "write-pi-mcp-config";
+      if (!isPiRunner && capabilityId && capabilityId !== "context7" && capabilityId !== "serena") {
         const executableName = capabilityId === "serena" ? "serena"
           : capabilityId === "rtk" ? "rtk"
           : capabilityId === "codebase-memory-mcp" ? "codebase-memory-mcp"

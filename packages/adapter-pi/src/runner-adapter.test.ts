@@ -646,6 +646,78 @@ describe("Pi Serena adapter projection", () => {
     });
   });
 
+  test("composes the Serena owned root and revalidator lazily when production options omit them", async () => {
+    const configPath = "/fixtures/pi/mcp.json";
+    const files = new Map<string, string>();
+    const fileSystem = {
+      existsSync: (path: string) => files.has(path),
+      readFileSync: (path: string) => files.get(path) ?? "",
+      mkdirSync: () => {},
+      writeFileSync: (path: string, content: string) => files.set(path, content),
+      renameSync: (from: string, to: string) => {
+        files.set(to, files.get(from) ?? "");
+        files.delete(from);
+      },
+      rmSync: (path: string) => files.delete(path),
+    };
+    const readiness = {
+      capabilityId: "serena" as const,
+      state: "ready" as const,
+      resolvedExecutablePath: "/fixtures/deck-data/tools/serena/bin/serena",
+      source: "installed-deck-tool" as const,
+      probe: "serena-help" as const,
+      fingerprint: "fingerprint-lazy-1",
+    };
+    const effects: import("@deck/core").SerenaBootstrapEffects = {
+      resolveDeckDataRoot: () => "/fixtures/deck-data",
+      canonicalizePath: (path) => path,
+      isUserOwnedPath: () => true,
+      ensureDirectory: () => undefined,
+      inspectPath: (path) => ({ state: "ready", resolvedPath: path, fingerprint: readiness.fingerprint }) as any,
+      fetchInstaller: async () => ({ status: 500, body: new Uint8Array() }) as any,
+      spawn: async () => { throw new Error("not expected"); },
+      supportsControlledBootstrap: () => true,
+      probeExecutable: (request) => ({ state: "ready", resolvedPath: request.executablePath, fingerprint: readiness.fingerprint }) as any,
+    };
+    const operation = { runner: "pi" as const, operationId: "pi-operation-lazy", explicitlySelected: true as const };
+    const authorization = { kind: "interactive-tui-explicit-selection" as const, runner: "pi" as const, operationId: operation.operationId };
+    const adapter = createPiRunnerAdapter({
+      serenaBootstrapEffects: effects,
+      installTools: async () => [{
+        tool: "Serena",
+        success: true,
+        actionKind: "install-pi-package",
+        status: "reused",
+        installKind: "shared-binary-plus-mcp",
+        serenaReadiness: readiness,
+      }] as any,
+    });
+    const plan = buildPiRunnerReviewPlan(
+      {
+        runnerScope: "pi",
+        selectedCapabilities: { serena: true },
+        explicitlySelectedCapabilities: { serena: true },
+        operationId: operation.operationId,
+        currentOperation: operation,
+      },
+      { serena: { capabilityId: "serena", status: "missing", runnerScope: "pi", installed: false, diagnostics: [] } },
+    );
+    const installAction = plan.groups.automaticInstalls.find((action) => action.capabilityId === "serena")!;
+    const configAction = plan.groups.configWrites.find((action) => action.capabilityId === "serena")!;
+    const context = {
+      projectRoot: "/fixtures/project",
+      runnerId: "pi",
+      environmentId: "pi-development",
+      serenaAuthorization: authorization,
+      currentOperation: operation,
+      piMcpConfigPath: configPath,
+      piMcpFileSystem: fileSystem,
+    };
+    await expect(adapter.runAction(installAction, context as any)).resolves.toMatchObject({ status: "executed" });
+    await expect(adapter.runAction(configAction, context as any)).resolves.toMatchObject({ status: "executed" });
+    expect(JSON.parse(files.get(configPath)!).mcpServers.serena.command).toBe(readiness.resolvedExecutablePath);
+  });
+
   test("never calls the Serena writer for missing, invalid, stale, or non-success bootstrap evidence", async () => {
     let writerCalls = 0;
     const adapter = createPiRunnerAdapter({

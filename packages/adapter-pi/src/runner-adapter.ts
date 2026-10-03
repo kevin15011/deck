@@ -118,6 +118,8 @@ import {
   getEnabledCapabilityInstructionIds,
   getConfigurablePackageInstructionMetadata,
   runEvidenceGatedSerenaWriter,
+  createSerenaReadinessRevalidator,
+  resolveSerenaOwnedRoot,
   SERENA_MCP_ARGS,
   resolveCanonicalSupermemoryProjectScope,
   validateSerenaOperationAuthorization,
@@ -636,6 +638,20 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     this.#webSearchProviderResolver = options.webSearchProviderResolver;
   }
 
+  async #ensureSerenaRuntime(explicitRoot: string | undefined, signal?: AbortSignal): Promise<void> {
+    let root = explicitRoot ?? this.#serenaOwnedRoot;
+    if (!root) {
+      try {
+        root = await resolveSerenaOwnedRoot(this.#serenaBootstrapEffects, signal ?? new AbortController().signal);
+      } catch {
+        root = undefined;
+      }
+      if (!root) return;
+      this.#serenaOwnedRoot = root;
+    }
+    this.#serenaRevalidator ??= createSerenaReadinessRevalidator(root, this.#serenaBootstrapEffects);
+  }
+
   private resolveWebSearchProvider(provider: string | undefined): WebSearchProviderDescriptorV1 | undefined {
     const selected = provider?.trim();
     if (!selected) return undefined;
@@ -1023,6 +1039,11 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         }
         const readiness = context.serenaReadiness
           ?? (operationId ? this.#serenaReadinessByOperation.get(operationId) : undefined);
+        // Mirror OpenCode: compose the Deck-owned root and the revalidator lazily
+        // when production options do not inject them. Evidence is still required.
+        if (!actionContext.serenaRevalidator && !this.#serenaRevalidator) {
+          await this.#ensureSerenaRuntime(actionContext.serenaOwnedRoot, context.signal);
+        }
         const revalidate = actionContext.serenaRevalidator ?? this.#serenaRevalidator;
         if (!readiness || !revalidate || !operation || !context.serenaAuthorization) {
           return blockedSerenaActionResult(action, "Serena readiness evidence is required before MCP configuration.");
