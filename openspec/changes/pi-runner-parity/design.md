@@ -58,7 +58,7 @@ The manifest lives at `<PiAgentDir>/deck/manifest.json` and records file hashes 
 | Extension | Owner | Events |
 |---|---|---|
 | `developer-team-execution` | `developer-team-execution-convergence` | `tool_call`, `tool_result`, `session_shutdown` (evidence only; memory code removed; `input` handler removed) |
-| `deck-memory` | this change | `before_agent_start`, `turn_end`, `agent_end`, `session_before_compact`, `session_shutdown` |
+| `deck-memory` | this change | `before_agent_start`, `turn_end`, `agent_end`, `session_before_compact`, `session_compact`, `session_shutdown` |
 | `deck-subagents` | this change | `registerTool` (lead only) |
 | `deck-tool-policy` | this change | `tool_call` |
 
@@ -74,10 +74,11 @@ All four are inert unless `DECK_PI_SESSION=1`. Children inherit env and load glo
 | lead `before_agent_start` | `capture` `trusted-user-prompt` (`event.prompt`) | none |
 | `turn_end` (lead) | buffer the assistant text from `event.message.content` text blocks | none |
 | `agent_end` (lead) | `capture` `trusted-final-assistant` (last buffered text) | none |
-| `session_before_compact` | drain in-flight captures (bounded; never cancels compaction) | none |
+| `session_before_compact` | bounded drain and fresh `compaction_recall`; enrich native summary inputs (D13) | none |
+| `session_compact` | lead-only summary `save` through existing scoped/redacted path (D13) | none |
 | `session_shutdown` | flush buffer, drain, `shutdown_flush` | none |
 
-- **Ephemeral rather than persisted** (P1): `message` injection accumulates in the session and is replayed by `--continue`, which would duplicate memory. Ephemeral system-prompt injection is reapplied on every agent start, so compaction cannot strip it. No special re-recall after compaction is needed.
+- **Ephemeral rather than persisted** (P1): `message` injection accumulates in the session and is replayed by `--continue`, which would duplicate memory. Ephemeral system-prompt injection is reapplied on every agent start, so compaction cannot strip it. No special re-recall after compaction is needed. D13 adds a scoped exception for native summary inputs: advisory-derived information may persist in compaction summaries, without adding recalled session messages.
 - **Prompt capture** uses `before_agent_start.prompt` instead of `input`, because `input` also carries `source: "extension"` text and the old handler shape was wrong. Deck no longer handles `input` for memory.
 - Recall does not depend on MCP tool presence at `before_agent_start` (P1 timing).
 - Children never capture. The stale `validateSupermemoryPiMcpConfig` gate in `apps/cli/src/pi-launch-command.ts:412-423` is removed, and Pi availability comes from Deck provider config plus host start, through the `runner-launch-command.ts` env overlay.
@@ -256,3 +257,35 @@ Recorded during apply (Phases 1-3). Each entry is the smallest safe adjustment t
 48. **Codex role identity (finding).** Codex starts one MCP server per session and the `env_vars` mechanism forwards only the parent's variables, so the server cannot tell which custom agent (`deck-*.toml`) is calling; no per-agent identity reaches it in the contract Deck relies on (not exercised end to end here: a real Codex needs a model). Decision: authorize every call as `lead` and put the read-only rule in the instruction text, stated as not host-enforced. Per-role entries in the agent TOMLs were not pursued because they would add Deck-owned content to every agent file on an unverified Codex behavior.
 49. **Codex launch.** The official-plugin route previously never started the loopback. It now does, only when the reviewed install registered the `deck-memory` entry (so existing hermetic launches and users without the entry are unchanged): the host is created with the credential the launch already resolved, the token goes to `runtime/codex-memory-*` (0600 in 0700, swept after 24 h, removed on exit), and only `DECK_RUNNER_MEMORY_ENDPOINT` and `DECK_RUNNER_MEMORY_TOKEN_FILE` are added to the Codex env (no `DECK_CODEX_BRIDGE_*`, no bearer). A host that cannot start (credential, health, scope) leaves the launch untouched and adds a `codex-memory-tools-unavailable` warning. `assertCodexSupermemoryReady` ignores the Deck-owned `deck-memory` block when scanning for foreign Supermemory registrations, because a Deck binary path (for example a worktree named `...supermemory...`) must not trip the double-integration check.
 50. **"assignments are global" verdict.** `packages/adapter-codex/src/runner-adapter.tools.test.ts` ("Codex global ownership and migration > assignments are global") fails identically on a clean `main` worktree (`withModels.blocked` is `true`), so it is a pre-existing baseline failure (blocked Codex plan), not a regression of this branch, and it is left untouched.
+
+### D13. Native Pi compaction memory enrichment and summary capture (2026-10-03)
+
+User-approved extension of D5/D12. Installed `@earendil-works/pi-coding-agent` 1.0.0 types and implementation were inspected: `session_before_compact` returns only cancellation or a replacement result. Changing `event.customInstructions` is ignored by the native caller. Instead, native manual and automatic paths consume the same preparation object after the hook.
+
+- Drain pending captures, then request fresh profile plus focused search through additive Pi-only `compaction_recall`. The host retains query validation, role limits, immutable project scope and all provider credentials. Existing recall/search/save semantics are unchanged.
+- Append bounded, explicitly untrusted context to a copied `messagesToSummarize` array. Preserve `previousSummary`, turn-prefix inputs, persisted session messages, and native summary generation/result handling. Do not cancel compaction or return a custom result. A timeout/abort race encloses the entire pre-hook; late work cannot mutate preparation.
+- This deliberately narrows D5's ephemeral-only statement: ordinary turn injection remains ephemeral, while relevant memory information can persist in a native compaction summary. No synthetic session message is appended. An empty split history adds one native history-summary request.
+- On successful `session_compact`, non-child leads attempt a `save` with kind `note` through D12's existing eligibility/redaction and canonical-tag path (16 KiB bound). Manual and automatic reasons are included. Existing explicit-tool role permissions stay unchanged; rejection or timeout does not undo compaction.
+- Each completed occurrence gets a distinct event ID, stable across transport retries. Pi 1.0 can return an earlier compaction entry for identical summary text, so entry ID alone is not safe for host replay deduplication. Independent Quality found this and the implementation owner repaired it with RED/GREEN replay-aware coverage.
+
+```mermaid
+sequenceDiagram
+  participant Pi
+  participant Extension
+  participant Host
+  participant Provider as Supermemory
+  Pi->>Extension: session_before_compact(preparation, signal)
+  Extension->>Extension: bounded capture drain
+  Extension->>Host: compaction_recall(query)
+  Host->>Provider: scoped profile + search
+  Provider-->>Host: advisory data
+  Host-->>Extension: bounded advisory
+  Extension->>Extension: copy summary inputs + untrusted context
+  Extension-->>Pi: undefined (native compaction)
+  Pi->>Pi: generate and persist native summary
+  Pi->>Extension: session_compact(entry)
+  Extension->>Host: save(summary), non-child lead only
+  Host->>Provider: eligible/redacted canonical-scope capture
+```
+
+Validation uses isolated HOME/PI_CODING_AGENT_DIR, real Pi SDK and fake provider/loopback. Native manual normal/split compaction is exercised; native automatic threshold/overflow execution and real Supermemory ingestion remain manual evidence gaps. The preparation mutation is version-sensitive and protected by real-runtime contract tests. No Pi dependency patch, API-key handoff, or native compaction replacement is introduced.

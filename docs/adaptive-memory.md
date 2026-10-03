@@ -68,10 +68,13 @@ Pi memory runs only in a Deck-managed `deck pi developer` session (the Deck-sess
 | Later `before_agent_start` | `recall` for the new user prompt and the same ephemeral injection; the user prompt is recorded for capture. |
 | `turn_end` | Buffers the assistant text of the turn. |
 | `agent_end` | Captures the user prompt and the buffered assistant text (stable event ids, 64 KiB cap, one retry). Capture is still subject to the host's high-signal eligibility rules. |
-| `session_before_compact` | Bounded drain of pending captures; never cancels compaction. The next turn recalls again. |
+| `session_before_compact` | Drains pending captures, then fetches fresh project profile and relevant memories through `compaction_recall`. Adds bounded, explicitly untrusted context to native summary inputs only; never cancels or replaces Pi compaction. Failure, abort or timeout leaves native inputs unchanged (7-second default total wait). The next turn recalls again. |
+| `session_compact` | Non-child lead only: attempts to save the completed summary through the existing `save` path, for manual and automatic compactions. Uses host-side eligibility, secret redaction and canonical project scope; retries are idempotent per occurrence. |
 | `session_shutdown` | Flushes, drains, and sends `shutdown_flush` (a `reload` drains only because the session continues). |
 
 Subagent children can also call `memory_search` (read-only roles) or both tools (write roles) as described under [Explicit memory tools](#explicit-memory-tools-on-demand-search-and-save). Subagent children recall once at role start with the same ephemeral injection, never capture, and send `shutdown_flush` for their role session. MCP servers started by Pi never see the token: it is not in the environment, and Deck's `mcp.json` entries blank `DECK_RUNNER_MEMORY_*`. The non-secret endpoint remains visible to Pi's own process.
+
+Compaction context is not appended as a session message, but relevant information can become part of Pi's persisted summary and the subsequent memory save. Pi 1.0 consumes the shared `preparation.messagesToSummarize`; Deck copies that array and leaves `previousSummary`, turn-prefix messages and native result handling intact. For a split turn with no prior history, enrichment adds one native history-summary request. Saves are bounded to 16 KiB and can be refused by existing eligibility rules; a failed save never undoes compaction. Native manual compaction is tested offline with the real Pi runtime; real-provider and native threshold/overflow runs remain manual verification.
 
 ## Supermemory setup and scoping
 

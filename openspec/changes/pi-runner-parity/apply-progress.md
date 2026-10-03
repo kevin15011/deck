@@ -27,3 +27,14 @@
 - Codex: `deck internal memory-mcp`, marker-owned `deck-memory` MCP entry, loopback hosted for the Codex launch when the entry is installed (token file, cleanup, fail-open); lead-level authorization because Codex gives the MCP server no agent identity.
 - Triage: Codex "assignments are global" fails on clean `main` (pre-existing); see design deviation 50.
 - Gates and counts: see the final report of this batch.
+
+## Pi compaction memory extension (2026-10-03)
+
+- Ownership: Investigate checked installed Pi 1.0 event types and native call paths; Apply Fast owned the complete implementation and RED/GREEN tests; Quality independently reviewed security, persistence and native behavior; Lead owns documentation, final gates and commits.
+- Fresh profile/search context enriches native compaction without a replacement result; lead-only completion saves use the existing host redaction/eligibility and canonical tag. D13 records preparation-array semantics and the scoped persistence exception.
+- TDD evidence: initial implementation 2 failing tests; native split test 1 failing test; Quality replay regression 2 failing tests before repair. Final focused command `bun test packages/adapter-pi/src/pi-extensions/memory apps/cli/src/supermemory-runtime-host.test.ts scripts/generate-pi-extension-assets.test.ts`: 95 passed. Neutralization: 2 passed. Test-only TypeScript fixture fix: 29 extension tests passed; `bunx tsc --noEmit` passed.
+- Quality found native repeated-summary entry-ID reuse colliding with host replay protection. Repaired with distinct per-occurrence event IDs and replay-aware regression tests; scoped independent re-review found no remaining blocker.
+- Assets regenerated with `bun run scripts/generate-pi-extension-assets.ts`. Tests isolate HOME and PI_CODING_AGENT_DIR and use fake provider/loopback effects, not live Supermemory.
+- Limits: native SDK manual normal/split compaction exercised; threshold/overflow are synthetic-event/source evidence, not native automatic end-to-end runs. Live Supermemory ingestion is not verified. Summary eligibility and the 16-KiB cap remain in force; successful compaction does not guarantee accepted ingestion. Empty split history adds one native summary request.
+- Final requested gates: `bun test packages/adapter-pi apps/cli` passed (2,156 tests, 157 files, 8,928 assertions, 516.71 seconds); `bunx tsc --noEmit` passed. The first broad run exceeded the command transport duration and had no terminal result; the complete rerun above is the authoritative evidence. `git diff --check` passed.
+- Source commits: `fe90f7d` (host additive recall), `9802bc4` (Pi enrichment, summary save, timeout/replay contracts and regenerated assets). User-owned `.serena/project.yml` and `.bun-cache` were excluded. No push.

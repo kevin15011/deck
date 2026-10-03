@@ -96,7 +96,7 @@ The extension MUST capture each trusted user prompt (`before_agent_start.prompt`
 
 ### Requirement: Pre-Compaction Preservation
 
-Before Pi compacts a lead session the extension MUST drain pending captures to the host within a bounded timeout and MUST NOT cancel or alter the compaction. Because recall injection is ephemeral and reapplied on each agent start, recalled context MUST be present again on the first agent start after compaction.
+Before Pi compacts a lead session the extension MUST drain pending captures to the host within a bounded timeout and MUST NOT cancel or replace native compaction. It SHALL request fresh project profile and relevant memories through the additive Pi-only `compaction_recall` bridge event, using the existing query validation, role policy and immutable host-derived scope. It SHALL add at most 6,000 bytes of advisory context, explicitly labeled untrusted, to a copied `preparation.messagesToSummarize` array. It MUST NOT mutate persisted session entries, `previousSummary`, or turn-prefix messages. The complete hook SHALL have a bounded wait (7 seconds by default); errors, timeout or abort SHALL leave native inputs unchanged, including after late responses. Ordinary turn recall remains ephemeral and is reapplied after compaction. This compaction-specific exception permits advisory-derived information in the persisted native summary, never a separate recalled session message.
 
 #### Scenario: Compaction does not lose captures
 
@@ -109,6 +109,48 @@ Before Pi compacts a lead session the extension MUST drain pending captures to t
 - GIVEN compaction removed earlier injected context
 - WHEN the next agent run starts
 - THEN recall context is injected again
+
+#### Scenario: Fresh project memory enriches native summarization
+
+- GIVEN the host can return profile and relevant search results
+- WHEN Pi prepares native compaction
+- THEN both fresh sources reach the native summarizer as untrusted context
+- AND no cancellation, replacement summary or synthetic session entry is returned or persisted
+
+#### Scenario: Bridge unavailable or late
+
+- GIVEN recall fails, stalls, or compaction is aborted
+- WHEN the bounded hook completes
+- THEN Pi retains its original summary inputs and late results cannot mutate them
+
+#### Scenario: Split turn without prior history
+
+- GIVEN Pi prepares a split turn with empty history
+- WHEN memory context is added
+- THEN native Pi may make an additional history-summary request while preserving the turn-prefix summary path
+
+### Requirement: Completed Compaction Summary Save
+
+After every successful `session_compact`, including manual, threshold and overflow reasons, a non-child lead SHALL attempt to save `compactionEntry.summary` through the existing `save` bridge path with kind `note`. Content SHALL respect its 16-KiB limit and host-side eligibility, secret redaction and canonical project scope. Children and non-lead roles MUST NOT automatically save summaries. Existing explicit-tool role permissions MUST remain unchanged. Failure or rejection MUST NOT undo or block native compaction indefinitely. Event IDs MUST distinguish successful occurrences even if Pi reports identical summary text and entry IDs, while remaining stable across transport retries.
+
+#### Scenario: Lead saves a successful native summary
+
+- GIVEN native Pi has persisted a completed compaction
+- WHEN the lead receives `session_compact`
+- THEN it attempts a scoped, eligible, redacted save through the same path as `memory_save`
+
+#### Scenario: Repeated summaries and retries
+
+- GIVEN two successful compactions expose identical summaries and entry IDs
+- WHEN both completion events are processed
+- THEN each occurrence has a distinct save event ID
+- AND retries of either occurrence cannot write twice
+
+#### Scenario: Children and failures do not save
+
+- GIVEN a child or non-lead session, or a compaction that never completes successfully
+- WHEN compaction hooks execute
+- THEN no automatic summary save is sent
 
 ### Requirement: Shutdown Flush
 

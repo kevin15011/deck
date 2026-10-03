@@ -101,3 +101,14 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - 9.3 R3: real `pi-mcp-adapter` upgrade path (old Deck install, then new) restores built-in MCP.
 - 9.4 R4: child tool turn; confirm the JSONL tool events the subagent tool relies on (or confirm it relies on `message_end` only).
 - 9.5 R5: interactive TUI and `--resume` picker with the Deck extensions loaded.
+
+## Phase 8c — Pi compaction memory (2026-10-03)
+
+- [x] 8c.1 Investigate installed Pi 1.0 types and native manual/automatic compaction flow; record D13.
+- [x] 8c.2 TDD fresh profile/recall bridge and bounded native summary-input enrichment, without persisted synthetic messages or native replacement.
+- [x] 8c.3 TDD lead-only successful-summary save via existing scoped/redacted save path; preserve explicit tool permissions.
+- [x] 8c.4 Hermetic real-Pi normal/split contracts, failure/abort/timeouts, replay-aware identical-summary regression; regenerate extension assets.
+- [x] 8c.5 Independent Quality review and repair/re-review of repeated native entry-ID collision.
+- [x] 8c.6 Update memory spec, design decision and docs event table.
+- [ ] 8c.7 Run requested broad adapter/CLI tests and TypeScript check; record results, separate conventional commits and rebuild/install canary without push.
+- [ ] 8c.8 Manual evidence: native threshold/overflow and live Supermemory summary ingestion (not claimed by offline tests).

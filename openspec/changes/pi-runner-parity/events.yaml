@@ -114,3 +114,11 @@ events:
     actor: deck-apply-deep
     notes:
       - "In-branch extension: explicit memory_search/memory_save for Pi and Codex over the loopback host (D12, deviations 44-50, spec codex-memory-tools and pi-adaptive-memory delta). Codex 'assignments are global' test fails on clean main (baseline)."
+  - phase: verify
+    status: ready_for_verify
+    event: verify.compaction_memory
+    artifact: apply-progress.md
+    timestamp: "2026-10-03T23:30:00Z"
+    actor: deck-lead
+    notes:
+      - "D13 compaction enrichment and lead-only summary save: strict RED/GREEN, independent Quality replay-collision fix and scoped re-review, 2156 adapter/CLI tests passed, TypeScript passed. Native automatic/live-provider evidence remains pending."

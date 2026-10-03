@@ -56,3 +56,9 @@ provenance:
     note: "In-branch extension approved by the user: explicit memory tools for Pi and Codex without exposing the Supermemory API key to the runner. Added design D12 and deviations 44-50, spec codex-memory-tools, pi-adaptive-memory delta and tasks 8b."
     artifact: design.md
 
+  - phase: verify
+    agent: deck-lead
+    timestamp: "2026-10-03"
+    registryWrite: non-deferred
+    note: "D13: native Pi compaction enrichment and lead-only summary saves implemented with RED/GREEN and independent Quality review. 2156 requested adapter/CLI tests and TypeScript passed. Native automatic/live-provider verification remains manual."
+    artifact: apply-progress.md
