@@ -3,7 +3,7 @@ import { isAbsolute, join } from "node:path";
 import { piAgentPaths, type PiAgentDirResolution } from "./agent-dir";
 import { detectPiLegacy, PI_LEGACY_STALE_MEMORY_MS } from "./pi-legacy";
 import type { PiFileIO } from "./pi-global-install";
-import { hashContent, normalizePackageSource, parsePiManifest } from "./pi-manifest";
+import { hashContent, matchesOwnedHash, normalizePackageSource, parsePiManifest } from "./pi-manifest";
 import { PI_MIN_VERSION, evaluatePiVersion } from "./pi-version";
 
 /**
@@ -122,7 +122,7 @@ export function inspectPiDeckInstall(input: InspectPiDeckInstallInput): PiDoctor
       let disk: string | undefined;
       try { disk = io.readText(join(agentDir, ...relPath.split("/"))); } catch { disk = undefined; }
       if (disk === undefined) missing.push(relPath);
-      else if (hashContent(disk) !== expected) modified.push(relPath);
+      else if (!matchesOwnedHash(relPath, expected, disk)) modified.push(relPath);
     }
     if (missing.length > 0) installItems.push({ status: "error", message: `Deck files are missing: ${truncated(missing)}.`, suggestion: REINSTALL });
     if (modified.length > 0) installItems.push({ status: "warning", message: `Deck files were modified after install: ${truncated(modified)}.`, suggestion: "Restore or remove the modified files; install will not overwrite them." });

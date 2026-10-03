@@ -47,6 +47,7 @@ import {
 import { getTeamsForEnvironment } from "./team-catalog";
 import { buildPiTeamLaunchPlan } from "./pi-team-launch";
 import {
+  readDeveloperTeamModelConfigAssignments,
   readDeveloperTeamModelAssignments,
   readDeveloperTeamThinkingAssignments,
   type DeveloperTeamInstallOptions,
@@ -1324,6 +1325,32 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     return cleanupPiLegacy({ io: this.#fileIO, agentDir, projectRoot, report, backupRoot });
   }
 
+  /**
+   * Role model/thinking assignments exist only as frontmatter in the installed agent files, so a re-render of the
+   * package must carry them over. Precedence (lowest first): project `.pi/agents`, pre-package `<agent dir>/agents`,
+   * the installed package agents, then explicit assignments from the caller (per agent).
+   */
+  #mergeInstalledAssignments(input: DeveloperTeamAdapterInstallInput, agentDir: string): { modelAssignments: DeveloperTeamModelAssignments; thinkingAssignments: DeveloperTeamThinkingAssignments } {
+    const modelAssignments: DeveloperTeamModelAssignments = {};
+    const thinkingAssignments: DeveloperTeamThinkingAssignments = {};
+    const sources = [
+      join(input.projectRoot, ".pi", "agents"),
+      join(agentDir, "agents"),
+      join(piAgentPaths(agentDir).packageRoot, "agents"),
+    ];
+    for (const agentsDir of sources) {
+      try {
+        const read = readDeveloperTeamModelConfigAssignments(input.projectRoot, { agentsDir, exists: existsSync, readFile: readFileSync });
+        Object.assign(modelAssignments, read.modelAssignments);
+        Object.assign(thinkingAssignments, read.thinkingAssignments);
+      } catch { /* an unreadable legacy source never blocks the install */ }
+    }
+    return {
+      modelAssignments: { ...modelAssignments, ...(input.modelAssignments ?? {}) },
+      thinkingAssignments: { ...thinkingAssignments, ...(input.thinkingAssignments ?? {}) },
+    };
+  }
+
   /** Capability instructions and install options shared by the plan and the legacy template check. */
   #resolveInstallOptions(input: DeveloperTeamAdapterInstallInput, agentDir: string): { capabilityInstructions: ReturnType<typeof bindAdaptiveMemoryInstructionBundle>; installOptions: DeveloperTeamInstallOptions } {
     const derivedSupermemoryProjectScope = (() => {
@@ -1351,11 +1378,12 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       configuredSupermemoryProjectScope,
     });
 
+    const preserved = this.#mergeInstalledAssignments(input, agentDir);
     return {
       capabilityInstructions,
       installOptions: {
-        modelAssignments: input.modelAssignments,
-        thinkingAssignments: input.thinkingAssignments,
+        modelAssignments: preserved.modelAssignments,
+        thinkingAssignments: preserved.thinkingAssignments,
         memoryProvider: input.memoryProvider,
         capabilityInstructions,
         orchestratorPersonality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,

@@ -5,7 +5,9 @@ import { piAgentPaths } from "./agent-dir";
 import {
   canonicalJson,
   createEmptyPiManifest,
+  fileOwnershipHash,
   hashContent,
+  matchesOwnedHash,
   hashJsonValue,
   normalizePackageSource,
   parsePiManifest,
@@ -236,7 +238,7 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
   for (const file of desired.files) {
     const absolute = resolveInside(agentDir, file.relPath);
     const postimage = hashContent(file.content);
-    nextFiles[file.relPath] = postimage;
+    nextFiles[file.relPath] = fileOwnershipHash(file.relPath, file.content);
     let disk: string | undefined;
     try { disk = io.readText(absolute); } catch (error) {
       conflict({ relPath: file.relPath, reason: "invalid", message: `Unable to read ${absolute}: ${error instanceof Error ? error.message : String(error)}` }, "PI_FILE_UNREADABLE");
@@ -253,7 +255,7 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
       conflict({ relPath: file.relPath, reason: "foreign", message: `A file Deck does not own already exists at ${absolute}; Deck will not overwrite it.` }, "PI_FILE_FOREIGN");
       continue;
     }
-    if (owned !== diskHash) {
+    if (!matchesOwnedHash(file.relPath, owned, disk)) {
       conflict({ relPath: file.relPath, reason: "modified", message: `${absolute} was modified after Deck wrote it; Deck will not overwrite it. Restore or remove the file to continue.` }, "PI_FILE_MODIFIED");
       continue;
     }
@@ -267,7 +269,7 @@ export function planPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileIO,
     try { disk = io.readText(absolute); } catch { disk = undefined; }
     if (disk === undefined) continue;
     const diskHash = hashContent(disk);
-    if (diskHash !== owned) {
+    if (!matchesOwnedHash(relPath, owned, disk)) {
       plan.kept.push({ relPath, reason: "modified by the user; no longer managed by Deck" });
       continue;
     }
@@ -564,8 +566,8 @@ export function verifyPiGlobalInstall(desired: PiGlobalDesiredState, io: PiFileI
       diagnostics.push(`Missing Deck file: ${file.relPath}.`);
       continue;
     }
-    if (hashContent(disk) !== hashContent(file.content)) diagnostics.push(`Deck file differs from the planned content: ${file.relPath}.`);
-    else if (manifest.files[file.relPath] !== hashContent(file.content)) diagnostics.push(`Deck manifest does not record ${file.relPath}.`);
+    if (fileOwnershipHash(file.relPath, disk) !== fileOwnershipHash(file.relPath, file.content)) diagnostics.push(`Deck file differs from the planned content: ${file.relPath}.`);
+    else if (!matchesOwnedHash(file.relPath, manifest.files[file.relPath], file.content)) diagnostics.push(`Deck manifest does not record ${file.relPath}.`);
   }
 
   if (desired.packageEntry) {

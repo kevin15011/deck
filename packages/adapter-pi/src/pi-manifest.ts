@@ -30,6 +30,32 @@ export function hashContent(content: string | Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+const PACKAGE_AGENT_FILE = /^deck\/package\/agents\/[^/]+\.md$/;
+
+/**
+ * Removes the user-owned `model:` / `thinking:` lines from the frontmatter of a package agent file. Role model
+ * assignments live only there, so an edit of those lines is a user choice and never drift or a conflict.
+ */
+export function stripUserOwnedAgentLines(content: string): string {
+  const match = /^---\n([\s\S]*?)\n---/.exec(content);
+  if (!match) return content;
+  const kept = match[1]!.split("\n").filter((line) => !/^(model|thinking):/.test(line.trim()));
+  return `---\n${kept.join("\n")}\n---${content.slice(match[0].length)}`;
+}
+
+/**
+ * Hash recorded in the manifest. Package agent files hash with the user-owned lines removed; every other file
+ * hashes its full content.
+ */
+export function fileOwnershipHash(relPath: string, content: string): string {
+  return hashContent(PACKAGE_AGENT_FILE.test(relPath) ? stripUserOwnedAgentLines(content) : content);
+}
+
+/** True when the manifest hash matches the file on disk (full-content hashes written by older builds still match). */
+export function matchesOwnedHash(relPath: string, owned: string | undefined, disk: string): boolean {
+  return owned !== undefined && (owned === hashContent(disk) || owned === fileOwnershipHash(relPath, disk));
+}
+
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value));
 }
