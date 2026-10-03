@@ -39,6 +39,8 @@ A user on Pi >= 1.0.0 (`@earendil-works/pi-coding-agent`) can complete Review & 
 | `pi-version-and-migration` | `>= 1.0.0` preflight and doctor; detection and transactional cleanup of legacy project-local `.pi` artifacts and of Deck-written `pi-subagents` / `pi-mcp-adapter` entries. |
 | `pi-runner-documentation` | `docs/runners.md`, `docs/runner-support.md`, `docs/reference/support-matrix.md` (add Claude column), `docs/adaptive-memory.md`. |
 
+**In-branch extension (2026-10-03):** OpenCode also scans `~/.agents/skills`; the change measured that OpenCode keeps its own Deck skills (design.md deviation 42) and adds per-runner package-instruction translation and a cross-runner text guard that cover OpenCode, Codex and Claude as well as Pi.
+
 ## Non-goals
 
 - No change to the Supermemory loopback wire protocol (`deck-runner-memory-loopback-v1`) or to canonical project scope derivation; Pi consumes them as-is.

@@ -77,6 +77,10 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 
 - [x] 8.4 Real-machine fix: Deck package skills win collisions in Deck-launched Pi sessions (`--extension <package>`), `--cleanup-legacy` also removes demonstrably Deck-authored stale global `deck-*` files, doctor/plan flag shadowing, troubleshooting section (design.md deviations 36-38).
 
+- [x] 8.5 Per-runner package instruction translation, Pi `name:` frontmatter and cross-runner text guard (design.md deviations 40-41).
+- [x] 8.6 OpenCode external-skill precedence measured; no fix needed (deviation 42).
+- [x] 8.7 Preserve Pi developer-team model/thinking assignments across reinstalls (deviation 43).
+
 ## Phase 9 — Residual-risk verification (manual canary; evidence, not test gates)
 
 - 9.1 R1: full compaction cycle in a long canary session; recall reappears and no captures are lost.
