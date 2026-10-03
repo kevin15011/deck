@@ -40,10 +40,29 @@ Codex CLI 0.146 does not provide an OpenCode-style root custom-agent selector or
 | RTK | Shared | Deck-owned pinned binary plus a marker-owned `PreToolUse` rewrite hook (Node.js 18+); MCP is not required. |
 | No memory provider | Supported | No provider MCP entry. |
 | Supermemory | Supported with route limits | Pinned official `codex-supermemory` recall and flush hooks plus a shared profile credential injected into the started process only. No raw Supermemory MCP entry is written. |
-| Web Search | Supported on OpenCode, Pi, and Codex | Optional native stdio MCP materialization; readiness separately reports disabled, provider/credential/executable gaps, missing MCP materialization, conflicts, or ready. Unsupported runners report an explicit gap. |
+| Web Search | Supported on OpenCode, Pi, and Codex | Optional native stdio MCP materialization (Pi: global `mcp.json`, credential only in the launched process environment); readiness separately reports disabled, provider/credential/executable gaps, missing MCP materialization, conflicts, or ready. Unsupported runners report an explicit gap. |
 | `pi-mermaid` | Pi internal | Not applicable to Codex. |
 | `opencode-mermaid-renderer`, `deck-model-variants` | OpenCode internal | Not applicable to Codex. |
 | `pi-hud` | Pi user-facing optional | Not applicable to Codex. |
+
+## Pi quick path
+
+1. Install Pi **1.0.0 or newer** (`npm install -g @earendil-works/pi-coding-agent@latest`); older or unparseable versions block install and launch.
+2. Run `deck pi developer`. Deck plans the global install, shows the paths under the Pi agent directory (`$PI_CODING_AGENT_DIR`, default `~/.pi/agent`), applies it transactionally, and starts Pi's normal interactive TUI as the Deck lead session. Nothing is written into the project.
+3. If an earlier Deck version left project-local files, run `deck pi developer --cleanup-legacy` once; only unmodified Deck files and Deck-added package entries are removed, after a backup.
+4. Run `deck doctor` to check registration, manifest drift, extensions, MCP entries, memory and legacy artifacts.
+
+| Capability | Pi | Readiness rule |
+|---|---|---|
+| Developer Team | Supported | One manifest-owned package (agents, skills, prompts, extensions) registered once in `settings.json`; lead prompt through `--system-prompt`. |
+| Subagents with per-role model and thinking | Supported | Deck `subagent` extension (single, parallel, chain); Investigate and Quality are read-only and have no shell. |
+| MCP (Context7, context-mode, codebase-memory, Serena, Web Search) | Supported | Built-in MCP; Deck servers in `mcp.json` with absolute commands and direct exposure. Deck-added `pi-mcp-adapter` is removed on install; a user-added one blocks MCP. |
+| RTK | Shared | Deck-owned pinned binary; `bash` commands rewritten in `tool_call`. |
+| Grep/Glob graph guidance | Advisory | One concise Codebase Memory note per session on the first code-structure search; searches never block. |
+| Supermemory | Supported with route limits | Deck loopback through `deck-memory`; token via a `0600` file; Deck-managed sessions only. |
+| Web Search | Supported | Tavily credential reaches only the launched Pi process. |
+
+Pi limits: Pi >= 1.0.0 only; subagent children use `--append-system-prompt`, which replaces your `APPEND_SYSTEM.md` for them; MCP servers inherit Pi's non-memory environment secrets; read-only roles cannot run tests; delegation to `deck-setup` is fail-closed until `developer-team-execution-convergence`. See [Runners](runners.md#pi) for details.
 
 ## Optional Web Search
 

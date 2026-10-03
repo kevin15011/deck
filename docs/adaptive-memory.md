@@ -28,14 +28,30 @@ Current automatic-capture route truth:
 |---|---:|---:|---:|
 | Codex (all routes) with Supermemory selected | Official plugin `UserPromptSubmit` hook, not Deck loopback | Official plugin `Stop` flush | Owned by the plugin; Deck does not capture Codex output |
 | Codex without Supermemory | Deck loopback hooks fail open when no memory provider is active | None | None |
-| Pi interactive under Deck supervision | Yes, through Deck loopback | Hook-exposed input events only | Unsupported unless Pi exposes a final assistant event |
+| Pi interactive under Deck supervision | Yes, through Deck loopback (`deck-memory` extension) | Yes, from `before_agent_start` | Yes, the assistant text of each completed turn, flushed on `agent_end` |
 | OpenCode interactive under Deck supervision | Yes, through Deck loopback | Hook-exposed chat events only | Hook-exposed assistant chat events only |
 
 `stderr`, logs, tool output, test output, diffs, stack traces, source, OpenSpec files, web content, and provider responses are never conversation capture inputs.
 
-Native context injection uses each runner's supported model-visible field. Codex memory injection with Supermemory selected is performed by the official plugin's hooks. OpenCode injection uses `experimental.chat.system.transform` to add bounded advisory text to the model-visible system context for each normal request in the active logical user turn. OpenCode keeps `experimental.chat.messages.transform` as a no-op. Because OpenCode compaction also reaches `experimental.chat.system.transform`, Deck suppresses system injection while the latest native assistant request marker is the compaction summary; compaction retries do not consume or delete the active turn snapshot, and a later normal request marker or trusted user turn restores injection. Pi returns bounded advisory text through its extension return contract. Runner hooks receive only Deck's ephemeral loopback endpoint/token; they never receive `containerTag` or provider credentials.
+Native context injection uses each runner's supported model-visible field. Codex memory injection with Supermemory selected is performed by the official plugin's hooks. OpenCode injection uses `experimental.chat.system.transform` to add bounded advisory text to the model-visible system context for each normal request in the active logical user turn. OpenCode keeps `experimental.chat.messages.transform` as a no-op. Because OpenCode compaction also reaches `experimental.chat.system.transform`, Deck suppresses system injection while the latest native assistant request marker is the compaction summary; compaction retries do not consume or delete the active turn snapshot, and a later normal request marker or trusted user turn restores injection. Pi's `deck-memory` extension appends bounded advisory text to the system prompt of the current turn only (an ephemeral `before_agent_start` return, never a persisted message, so it cannot accumulate across turns or sessions). Runner hooks receive only Deck's ephemeral loopback endpoint/token; they never receive `containerTag` or provider credentials.
 
 Deck stores a small owner-local project/session map so a new Deck-supervised top-level session can be reused by `resume-latest`. Explicit resume-by-id remains deterministic from the native runner session id. Specialist/delegation session propagation is available where a runner exposes a trusted host/delegation bridge; direct routes without Deck's loopback endpoint/token are diagnosed as unsupported rather than treated as parity.
+
+## Pi event flow
+
+Pi memory runs only in a Deck-managed `deck pi developer` session (the Deck-session activation guard keeps the extension inert in a plain `pi`). Deck starts its loopback host, writes the per-session bearer token to a `0600` file in a `0700` directory under the Deck state home (`runtime/pi-memory-*`, swept after 24 hours and deleted when the host closes), and launches Pi with `DECK_RUNNER_MEMORY_ENDPOINT` and `DECK_RUNNER_MEMORY_TOKEN_FILE`. When memory is disabled Deck sets `DECK_PI_MEMORY=disabled` and the extension stays silent.
+
+| Pi event | `deck-memory` action |
+|---|---|
+| Extension load | Reads the token file into memory and removes `DECK_RUNNER_MEMORY_TOKEN*` from the Pi process environment before Pi starts MCP servers. |
+| First `before_agent_start` | `session_start` recall, then an ephemeral system-prompt append and an `injection_ack` for the exact injected text. |
+| Later `before_agent_start` | `recall` for the new user prompt and the same ephemeral injection; the user prompt is recorded for capture. |
+| `turn_end` | Buffers the assistant text of the turn. |
+| `agent_end` | Captures the user prompt and the buffered assistant text (stable event ids, 64 KiB cap, one retry). Capture is still subject to the host's high-signal eligibility rules. |
+| `session_before_compact` | Bounded drain of pending captures; never cancels compaction. The next turn recalls again. |
+| `session_shutdown` | Flushes, drains, and sends `shutdown_flush` (a `reload` drains only because the session continues). |
+
+Subagent children recall once at role start with the same ephemeral injection, never capture, and send `shutdown_flush` for their role session. MCP servers started by Pi never see the token: it is not in the environment, and Deck's `mcp.json` entries blank `DECK_RUNNER_MEMORY_*`. The non-secret endpoint remains visible to Pi's own process.
 
 ## Supermemory setup and scoping
 
@@ -45,7 +61,7 @@ Deck's automatic runtime uses a minimal abortable HTTP transport to Supermemory 
 
 | Runner | Authentication/setup | Project and credential storage |
 |---|---|---|
-| Pi | The TUI validates the token and stores the runtime bearer credential in Deck's owner-only secret store. Optional MCP config is written without persisting that token. | User input is not stored in Deck config or runner MCP config. |
+| Pi | The TUI validates the token and stores the runtime credential in Deck's owner-only secret store. Pi receives only the loopback endpoint and a path to a `0600` token file; no Supermemory credential or MCP entry is written into Pi configuration. | User input is not stored in Deck config or Pi configuration. |
 | OpenCode/Codex | Deck runtime requires a Supermemory API token that is read-only validated and stored in Deck's owner-only secret store. Separately, Deck writes the remote endpoint and project scope to runner MCP config; the runner may perform native OAuth through `/connect`, `opencode mcp auth supermemory`, or `codex mcp login supermemory`. | `x-sm-project` is written to runner MCP config. OAuth credentials stay outside project configuration, do not replace the Deck runtime bearer credential, and no `Authorization` header is persisted. |
 
 Project scoping is explicit at runtime and, where supported, in MCP configuration:

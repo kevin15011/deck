@@ -48,7 +48,7 @@ Nested skill directories and legacy SDD files are reported as cleanup warnings. 
 
 Choose `none` to continue without adaptive memory, or complete the selected provider's runner setup. For Supermemory, follow the active runner's path:
 
-- **Pi:** re-run setup so Deck validates the token and stores it in the Deck secret store; Pi MCP config must contain only non-secret endpoint/scope data and must not contain the bearer credential.
+- **Pi:** re-run setup so Deck validates the token and stores it in the Deck secret store; Pi configuration must not contain the bearer credential (Deck hands Pi only the loopback endpoint and a token-file path). Run `deck doctor` to check the Pi install, `pi-mcp-adapter` conflicts, stale `pi-memory-*` directories and legacy files; `deck pi developer --cleanup-legacy` removes unmodified legacy Deck files.
 - **OpenCode/Codex:** provide the Deck runtime API token so Deck can validate it and store it in the Deck secret store. Separately, Deck can write the remote endpoint and `x-sm-project` scope; authenticate that optional MCP path with `/connect`, `opencode mcp auth supermemory`, or `codex mcp login supermemory` as appropriate. Runner OAuth credentials do not replace the Deck runtime bearer credential.
 
 Expect degraded/unknown health until the selected runner's authenticated runtime validation succeeds. Project scope is represented by the runner's `x-sm-project` configuration; user identity for runtime calls comes from the Deck secret-store token, while optional MCP identity comes from the runner OAuth session where used.

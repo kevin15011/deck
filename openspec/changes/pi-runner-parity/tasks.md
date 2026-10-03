@@ -71,8 +71,8 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 
 ## Phase 8 — Documentation and closure
 
-- [ ] 8.1 Update `docs/reference/support-matrix.md` (add Claude column, Pi cells) after rebasing on `deck-product-documentation`.
-- [ ] 8.2 Update `docs/runners.md`, `docs/runner-support.md`, `docs/adaptive-memory.md`. Document that `--append-system-prompt` in subagent children replaces the user's `APPEND_SYSTEM.md`, and that MCP servers inherit non-memory env secrets.
+- [x] 8.1 Update `docs/reference/support-matrix.md` (add Claude column, Pi cells) after rebasing on `deck-product-documentation`.
+- [x] 8.2 Update `docs/runners.md`, `docs/runner-support.md`, `docs/adaptive-memory.md`. Document that `--append-system-prompt` in subagent children replaces the user's `APPEND_SYSTEM.md`, and that MCP servers inherit non-memory env secrets.
 - [ ] 8.3 Run the gates: `bun test packages/adapter-pi`, the config strict TDD gates, `tsc --noEmit`, baseline ledger comparison; record results in `apply-progress.md`.
 
 ## Phase 9 — Residual-risk verification (manual canary; evidence, not test gates)
