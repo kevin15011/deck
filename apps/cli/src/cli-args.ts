@@ -30,6 +30,7 @@ export type ParsedArgs =
   | { command: "internal-serena-mcp"; probe: boolean }
   | { command: "internal-supermemory-runtime-smoke" }
   | { command: "internal-codex-memory-hook" }
+  | { command: "internal-memory-mcp" }
   | {
       command: "upgrade";
       flags: {
@@ -218,6 +219,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (rest.length === 1 && rest[0] === "serena-mcp") return { command: "internal-serena-mcp", probe: false };
     if (rest.length === 1 && rest[0] === "supermemory-runtime-smoke") return { command: "internal-supermemory-runtime-smoke" };
     if (rest.length === 1 && rest[0] === "codex-memory-hook") return { command: "internal-codex-memory-hook" };
+    if (rest.length === 1 && rest[0] === "memory-mcp") return { command: "internal-memory-mcp" };
     return { command: "error", message: "Usage: deck internal serena-mcp" };
   }
 

@@ -344,6 +344,21 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(plan.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(expect.arrayContaining(["context-mode-not-ready", "codebase-memory-not-ready"]));
   });
 
+  test("official Supermemory plugin route also registers the Deck memory MCP server with names-only env forwarding", () => {
+    const hooks = { nodeCommand: "/usr/bin/node", recallScript: "/deck/sm/recall.js", flushScript: "/deck/sm/flush.js" };
+    const input = { projectRoot: "/work/project", existingFiles: new Map(), memoryProvider: "supermemory" as const, supermemoryProjectScope: "sm_project_v1_kevin15011_deck", supermemoryHooks: hooks };
+    const plan = buildCodexDeveloperTeamInstallPlan({ ...input, deckMemoryCommand: ["/opt/deck/deck", "internal", "memory-mcp"] });
+    expect(plan.blocked).toBe(false);
+    const config = plan.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content;
+    expect(config).toContain("# deck-codex-mcp:deck-memory");
+    expect(config).toContain('args = ["internal", "memory-mcp"]');
+    expect(config).toContain('env_vars = ["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN_FILE"]');
+    expect(config).not.toContain("mcp_servers.supermemory");
+    expect(config).not.toMatch(/SUPERMEMORY_[A-Z_]*KEY|DECK_RUNNER_MEMORY_TOKEN"/);
+    const without = buildCodexDeveloperTeamInstallPlan(input);
+    expect(without.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content).not.toContain("deck-memory");
+  });
+
   test("official Supermemory plugin replaces the memory bridge, registers recall and flush only and never an MCP server", () => {
     const hooks = { nodeCommand: "/usr/bin/node", recallScript: "/deck/sm/recall.js", flushScript: "/deck/sm/flush.js" };
     const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map(), memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_v1_kevin15011_deck", supermemoryHooks: hooks });

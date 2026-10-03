@@ -31,7 +31,7 @@ function temp(prefix: string): string {
   return path;
 }
 
-function fixture(options: { userHooks?: string; userConfig?: string; projectHooksJson?: string; webSearch?: boolean } = {}) {
+function fixture(options: { userHooks?: string; userConfig?: string; projectHooksJson?: string; webSearch?: boolean; memoryTools?: boolean } = {}) {
   const projectRoot = temp("deck-codex-sm-launch-project-");
   execFileSync("git", ["init", "-q"], { cwd: projectRoot });
   execFileSync("git", ["remote", "add", "origin", "git@github.com:kevin15011/deck.git"], { cwd: projectRoot });
@@ -63,6 +63,7 @@ function fixture(options: { userHooks?: string; userConfig?: string; projectHook
       readProject: async (root) => ({ config: await Bun.file(join(root, ".codex", "config.toml")).text().catch(() => null), roles: [], skills: [], agentsInstructions: false }),
     },
     codebaseIndexReadiness: () => true,
+    ...(options.memoryTools ? { deckMemoryMcpCommand: ["/opt/deck/deck", "internal", "memory-mcp"] } : {}),
     ...(options.webSearch ? { webSearchProvider: TAVILY_PROVIDER_DESCRIPTOR, webSearchCredential: () => "tvly-test-credential-value" } : {}),
   });
   return { projectRoot, effects, adapter, store, stateHome: temp("deck-codex-sm-launch-state-") };
@@ -75,7 +76,7 @@ const memoryConfig = (): DeckCfg => {
   return { ...config, adaptiveMemory: { enabled: true, activeProvider: "supermemory" } };
 };
 
-async function launch(f: ReturnType<typeof fixture>, extra: { env?: Record<string, string>; deckConfig?: DeckCfg } = {}) {
+async function launch(f: ReturnType<typeof fixture>, extra: { env?: Record<string, string>; deckConfig?: DeckCfg; transport?: SupermemoryRuntimeTransport; onSpawn?: (env: Record<string, string>) => Promise<void> } = {}) {
   let childEnv: Record<string, string> | undefined;
   let childArgs: readonly string[] = [];
   const previews: string[] = [];
@@ -89,10 +90,10 @@ async function launch(f: ReturnType<typeof fixture>, extra: { env?: Record<strin
     yes: true,
     presentPreview: async (preview) => { previews.push(preview); },
     codexSupermemoryLaunchEffects: f.effects,
-    supermemoryRuntime: { transport: fakeTransport, stateHome: f.stateHome },
+    supermemoryRuntime: { transport: extra.transport ?? fakeTransport, stateHome: f.stateHome },
     processEffects: {
       inheritedEnv: { PATH: "/bin", ...extra.env },
-      spawn: async (_command, args, options) => { childEnv = options.env; childArgs = args; return { exitCode: 0, stdout: "", stderr: "" }; },
+      spawn: async (_command, args, options) => { childEnv = options.env; childArgs = args; await extra.onSpawn?.(options.env); return { exitCode: 0, stdout: "", stderr: "" }; },
     },
   });
   return { result, childEnv, childArgs, previews };
@@ -123,6 +124,72 @@ describe("official Codex Supermemory plugin launch", () => {
     expect(config).not.toContain(TOKEN);
     expect(config).not.toContain("mcp_servers.supermemory");
     for (const file of ["hooks.json", "config.toml"]) expect(await Bun.file(join(f.effects.codexHome, file)).text().catch(() => "")).not.toContain(TOKEN);
+  });
+
+  test("with the Deck memory MCP entry installed the launch also serves explicit memory tools through a token-file loopback bound to the plugin's tag", async () => {
+    const f = fixture({ memoryTools: true });
+    const searches: string[] = [];
+    const adds: string[] = [];
+    const transport: SupermemoryRuntimeTransport = {
+      async health() {},
+      async profile() { return { profile: {} }; },
+      async search(payload) { searches.push(payload.containerTag); return { results: [{ content: "Convention: Codex memory tools share the plugin tag." }] }; },
+      async add(payload) { adds.push(payload.containerTag); },
+    };
+    let tokenFile = "";
+    let endpoint = "";
+    let seenEnv: Record<string, string> = {};
+    let searchResult: any;
+    let readOnlySave: any;
+    let leadSave: any;
+    const { result, childEnv } = await launch(f, {
+      transport,
+      onSpawn: async (env) => {
+        seenEnv = env;
+        tokenFile = env.DECK_RUNNER_MEMORY_TOKEN_FILE!;
+        endpoint = env.DECK_RUNNER_MEMORY_ENDPOINT!;
+        const token = (await Bun.file(tokenFile).text()).trim();
+        const post = async (body: Record<string, unknown>) => (await fetch(endpoint, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ schema: "deck-runner-memory-loopback-v1", runnerId: "codex", timestamp: Date.now(), sessionId: "codex-mcp-test", ...body }) })).json();
+        searchResult = await post({ eventId: "s1", event: "search", role: "lead", query: "what is the convention" });
+        readOnlySave = await post({ eventId: "s2", event: "save", role: "quality", content: "Decision: a read-only role must not be able to save into project memory." });
+        leadSave = await post({ eventId: "s3", event: "save", role: "lead", content: "Decision: the Codex memory tools persist through the shared loopback host." });
+      },
+    });
+    expect(result.status, JSON.stringify(result).slice(0, 1500)).toBe("launched");
+    expect(seenEnv.SUPERMEMORY_CODEX_API_KEY).toBe(TOKEN);
+    expect(seenEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_TOKEN");
+    expect(seenEnv).not.toHaveProperty("DECK_CODEX_BRIDGE_TOKEN");
+    expect(JSON.stringify(seenEnv)).not.toContain("deck-loopback-");
+    expect(searchResult.ok).toBe(true);
+    expect(searchResult.advisoryText).toContain("share the plugin tag");
+    expect(readOnlySave).toMatchObject({ ok: false, diagnostics: ["role-not-permitted"] });
+    expect(leadSave.ok).toBe(true);
+    expect(searches).toEqual([seenEnv.SUPERMEMORY_REPO_TAG!]);
+    expect(adds).toEqual([seenEnv.SUPERMEMORY_REPO_TAG!]);
+    // Cleanup: no bearer left on disk and the host is gone once Codex exits.
+    expect(existsSync(tokenFile)).toBe(false);
+    await expect(fetch(endpoint, { method: "POST", body: "{}" })).rejects.toThrow();
+    expect(JSON.stringify(result)).not.toContain(TOKEN);
+    expect(childEnv).toBeDefined();
+    const config = await Bun.file(join(f.effects.codexHome, "config.toml")).text();
+    expect(config).toContain("# deck-codex-mcp:deck-memory");
+    expect(config).not.toMatch(/deck-loopback-/);
+  });
+
+  test("the memory tools do not start a host when the entry is not installed", async () => {
+    const f = fixture();
+    const { childEnv } = await launch(f);
+    expect(childEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_ENDPOINT");
+    expect(childEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_TOKEN_FILE");
+  });
+
+  test("an unreachable provider leaves the launch and the plugin hooks untouched, without loopback variables", async () => {
+    const g = fixture({ memoryTools: true });
+    const down: SupermemoryRuntimeTransport = { async health() { throw new Error("offline"); }, async profile() { throw new Error("offline"); }, async search() { throw new Error("offline"); }, async add() { throw new Error("offline"); } };
+    const unreachable = await launch(g, { transport: down });
+    expect(unreachable.result.status, JSON.stringify(unreachable.result).slice(0, 1200)).toBe("launched");
+    expect(unreachable.childEnv?.SUPERMEMORY_CODEX_API_KEY).toBe(TOKEN);
+    expect(unreachable.childEnv).not.toHaveProperty("DECK_RUNNER_MEMORY_ENDPOINT");
   });
 
   test("a launch without Supermemory carries no plugin credential and keeps Deck's bridge", async () => {

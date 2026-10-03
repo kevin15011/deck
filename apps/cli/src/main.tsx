@@ -71,6 +71,13 @@ if (parsed.command === "internal-codex-memory-hook") {
   process.exit(result.exitCode);
 }
 
+if (parsed.command === "internal-memory-mcp") {
+  // Deck-owned stdio MCP server for Codex explicit memory tools; stdout carries only JSON-RPC frames.
+  const { runCodexMemoryMcpStdio } = await import("@deck/adapter-codex");
+  await runCodexMemoryMcpStdio({ input: process.stdin, write: (line) => { process.stdout.write(`${line}\n`); } });
+  process.exit(0);
+}
+
 if (parsed.command === "doctor") {
   try {
     const { runDoctorDiagnostics, renderDoctorReport, shouldExitWithError } = await import("./doctor-command");

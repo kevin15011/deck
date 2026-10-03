@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildCodexMcpServers,
+import { buildCodexMcpServers, isCodexDeckMemoryMcpConfigured,
   isCodexSerenaMcpConfigured, inspectCodexMcpServerCommand, inspectCodexSupermemoryMcpState, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
 
 describe("Codex MCP semantic configuration", () => {
@@ -166,4 +166,37 @@ url = "https://mcp.supermemory.ai/mcp"
   expect(mergeCodexMcpServers(old, desired.servers)).toMatchObject({ status: "updated", content: merged.content });
   const unmanaged = old.replace("# deck-codex-mcp:serena\n", "");
   expect(mergeCodexMcpServers(unmanaged, desired.servers)).toMatchObject({ status: "blocked", content: unmanaged });
+
+});
+
+describe("Codex Deck memory MCP entry", () => {
+  test("registers the Deck-owned memory MCP server only for Supermemory with names-only env forwarding", () => {
+    const command = ["/opt/deck/bin/deck", "internal", "memory-mcp"];
+    const desired = buildCodexMcpServers({ packageIds: [], memoryProvider: "supermemory", deckMemoryCommand: command });
+    expect(desired.gaps).toEqual(["supermemory-raw-mcp-disabled"]);
+    const merged = mergeCodexMcpServers("[mcp_servers.user]\ncommand = \"user-mcp\"\n", desired.servers);
+    expect(merged.content).toContain("# deck-codex-mcp:deck-memory\n[mcp_servers.deck-memory]");
+    expect(merged.content).toContain('command = "/opt/deck/bin/deck"');
+    expect(merged.content).toContain('args = ["internal", "memory-mcp"]');
+    expect(merged.content).toContain('env_vars = ["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN_FILE"]');
+    expect(merged.content).not.toMatch(/DECK_RUNNER_MEMORY_TOKEN"|bearer|sk-|supermemory/i);
+    expect(merged.content).toContain("[mcp_servers.user]");
+    expect(isCodexDeckMemoryMcpConfigured(merged.content, command)).toBe(true);
+    expect(isCodexDeckMemoryMcpConfigured(merged.content, ["/other/deck", "internal", "memory-mcp"])).toBe(false);
+    expect(mergeCodexMcpServers(merged.content, desired.servers).status).toBe("unchanged");
+
+    for (const input of [{ memoryProvider: "none" as const, deckMemoryCommand: command }, { memoryProvider: "supermemory" as const }]) {
+      expect(buildCodexMcpServers({ packageIds: [], ...input }).servers.map((server) => server.id)).not.toContain("deck-memory");
+    }
+  });
+
+  test("retires the marker-owned memory entry when memory is switched off and preserves a user entry of the same name", () => {
+    const withMemory = mergeCodexMcpServers("", buildCodexMcpServers({ packageIds: [], memoryProvider: "supermemory", deckMemoryCommand: ["/opt/deck/bin/deck", "internal", "memory-mcp"] }).servers);
+    const retired = mergeCodexMcpServers(withMemory.content, buildCodexMcpServers({ packageIds: [], memoryProvider: "none" }).servers);
+    expect(retired.content).not.toContain("deck-memory");
+
+    const user = '[mcp_servers.deck-memory]\ncommand = "mine"\n';
+    const collision = mergeCodexMcpServers(user, buildCodexMcpServers({ packageIds: [], memoryProvider: "supermemory", deckMemoryCommand: ["/opt/deck/bin/deck", "internal", "memory-mcp"] }).servers);
+    expect(collision.status).toBe("blocked");
+  });
 });

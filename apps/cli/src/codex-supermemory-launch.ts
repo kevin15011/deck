@@ -6,6 +6,8 @@ import {
   CODEX_SUPERMEMORY_ENV_KEY,
   createCodexTools,
   inspectCodexOwnedHookIds,
+  isDeckManagedCodexMcpServer,
+  CODEX_MEMORY_MCP_SERVER_ID,
   type CodexToolOptions,
 } from "@deck/adapter-codex";
 import { discoverLiteralSshHostAliasesFromHome, resolveOpenCodeSupermemoryCredential } from "@deck/adapter-opencode";
@@ -57,7 +59,37 @@ function readBounded(path: string): string | undefined {
 
 /** Removes the Deck-owned marker blocks so any remaining Supermemory text is a foreign registration. */
 function withoutDeckHookBlocks(source: string): string {
-  return source.replace(/^# deck-codex-hook:[a-z0-9-]+:start$[\s\S]*?^# deck-codex-hook:[a-z0-9-]+:end$/gm, "");
+  return withoutDeckMemoryMcpBlock(source.replace(/^# deck-codex-hook:[a-z0-9-]+:start$[\s\S]*?^# deck-codex-hook:[a-z0-9-]+:end$/gm, ""));
+}
+
+/** The Deck memory MCP entry points at a Deck binary whose path may legitimately contain "supermemory"; it is Deck-owned. */
+function withoutDeckMemoryMcpBlock(source: string): string {
+  const lines = source.split("\n");
+  const kept: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (lines[index]!.trimEnd() !== `# deck-codex-mcp:${CODEX_MEMORY_MCP_SERVER_ID}`) { kept.push(lines[index]!); continue; }
+    index += 1;
+    while (index < lines.length) {
+      const trimmed = lines[index]!.trim();
+      if (trimmed === "" || trimmed.startsWith("# deck-codex-") || (trimmed.startsWith("[") && !trimmed.startsWith(`[mcp_servers.${CODEX_MEMORY_MCP_SERVER_ID}`))) break;
+      index += 1;
+    }
+    index -= 1;
+  }
+  return kept.join("\n");
+}
+
+function resolveCodexHome(effects: CodexSupermemoryLaunchEffects): string {
+  return effects.codexHome ?? (process.env.CODEX_HOME && isAbsolute(process.env.CODEX_HOME) ? process.env.CODEX_HOME : join(effects.home ?? process.env.HOME ?? homedir(), ".codex"));
+}
+
+/** True when the reviewed install registered the Deck-owned memory MCP entry (the signal to host the loopback for it). */
+export function isCodexMemoryToolsRegistered(effects: CodexSupermemoryLaunchEffects = {}): boolean {
+  try {
+    return isDeckManagedCodexMcpServer(readBounded(join(resolveCodexHome(effects), "config.toml")) ?? "", CODEX_MEMORY_MCP_SERVER_ID);
+  } catch {
+    return false;
+  }
 }
 
 /** Resolves only a Deck-selected child-process token/tag. No secret enters config files, argv or diagnostics. */
@@ -82,7 +114,7 @@ export function assertCodexSupermemoryReady(projectRoot: string, effects: CodexS
   const tools = createCodexTools({ homeDir: effects.home, ...(effects.tools ?? {}) });
   if (tools.supermemory.state() !== "ready") throw new Error("Codex Supermemory launch blocked: the pinned official plugin hooks are not installed and verified (run Review & Install).");
   if (tools.node.command() === undefined) throw new Error("Codex Supermemory launch blocked: a Node.js 18+ runtime is required by the official plugin hooks.");
-  const codexHome = effects.codexHome ?? (process.env.CODEX_HOME && isAbsolute(process.env.CODEX_HOME) ? process.env.CODEX_HOME : join(effects.home ?? process.env.HOME ?? homedir(), ".codex"));
+  const codexHome = resolveCodexHome(effects);
   const globalConfig = readBounded(join(codexHome, "config.toml")) ?? "";
   if (!inspectCodexOwnedHookIds(globalConfig).includes("supermemory")) throw new Error("Codex Supermemory launch blocked: the global Codex config has no Deck-owned Supermemory plugin hooks (run Review & Install).");
   // Deck's own blocks are excluded from the user-level scan; anything else, in user files or in the project, would double-integrate.

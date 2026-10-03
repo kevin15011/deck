@@ -50,6 +50,8 @@ export type BuildCodexInstallPlanInput = {
   /** The effective `deck` executable has confirmed portable Serena proxy support. */
   serenaProxyAvailable?: boolean;
   serenaProxyCommand?: readonly string[];
+  /** Self-referencing `<deck> internal memory-mcp` command; written only with the Supermemory provider. */
+  deckMemoryCommand?: readonly string[];
   webSearchProviderSupported?: boolean;
   webSearchProviderConfigured?: boolean;
   webSearchProvider?: WebSearchProviderDescriptorV1;
@@ -361,6 +363,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
         serenaLauncherAvailable: input.serenaLauncherAvailable,
         serenaProxyAvailable: input.serenaProxyAvailable,
         serenaProxyCommand: input.serenaProxyCommand,
+        deckMemoryCommand: input.deckMemoryCommand,
         contextModeCommand: input.contextModeCommand,
         codebaseMemoryCommand: input.codebaseMemoryCommand,
         webSearchProviderSupported: input.webSearchProviderSupported,
