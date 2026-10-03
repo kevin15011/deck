@@ -491,7 +491,7 @@ describe("legacy detection and opt-in cleanup through the adapter", () => {
 
   test("without a Deck config nothing is provably unmodified, so nothing is removed", async () => {
     await writeLegacyFromTemplates();
-    const result = await adapter({ legacyBackupRoot: () => join(root, "b") }).cleanupLegacyInstall!(projectRoot);
+    const result = await adapter({ legacyBackupRoot: () => join(root, "b") }).cleanupLegacyInstall!(projectRoot, {} as never);
     expect(result.removed).toEqual([]);
     expect(existsSync(join(projectRoot, ".pi", "agents", "deck-lead.md"))).toBe(true);
   });

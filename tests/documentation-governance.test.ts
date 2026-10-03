@@ -204,7 +204,13 @@ function isDocumentedDeckCommandShape(args: string[]): boolean {
     let continueSeen = false;
     let resumeSeen = false;
     let memorySeen = false;
+    let cleanupSeen = false;
     for (const flag of rest.slice(1)) {
+      if (flag === "--cleanup-legacy") {
+        if (cleanupSeen) return false;
+        cleanupSeen = true;
+        continue;
+      }
       if (flag === "--continue") {
         if (continueSeen) return false;
         continueSeen = true;
@@ -290,6 +296,7 @@ const directCommandExpectations = [
   ["deck update --yes", true],
   ["deck rollback --backup backup-id", true],
   ["deck openspec validate --json --root .", true],
+  ["deck pi developer --cleanup-legacy", true],
   ["deck skill-registry validate --runner pi", true],
   ["deck pi developer --memory=supermemory", true],
   ["deck --help", false],

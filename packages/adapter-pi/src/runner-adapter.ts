@@ -1285,7 +1285,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
    * Opt-in cleanup of legacy Deck artifacts (project `.pi/agents|skills`, `.deck/pi/profiles`, loose files in the Pi
    * agent directory, Deck-added project package entries). Backed up first, rolled back on failure; modified files stay.
    */
-  async cleanupLegacyInstall(projectRoot: string, context?: { readonly deckConfig?: NormalizedDeckConfig }): Promise<{ removed: readonly string[]; preserved: readonly string[]; diagnostics: readonly string[] }> {
+  async cleanupLegacyInstall(projectRoot: string, context?: { readonly deckConfig: NormalizedDeckConfig }): Promise<{ removed: readonly string[]; preserved: readonly string[]; diagnostics: readonly string[] }> {
     if (!this.#agentDirResolution.ok) return { removed: [], preserved: [], diagnostics: [this.#agentDirResolution.message] };
     const agentDir = this.#agentDirResolution.dir;
     const quick = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot });

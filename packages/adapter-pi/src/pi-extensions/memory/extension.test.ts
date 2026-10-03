@@ -19,6 +19,8 @@ let behavior: { advisory?: string; recallOk?: boolean; delayMs?: number; delayEv
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "deck-memory-ext-"));
   received = [];
+  // Each server records into its own bucket so a request still in flight from a previous test can never leak in.
+  const bucket = received;
   behavior = { advisory: ADVISORY };
   server = Bun.serve({
     hostname: "127.0.0.1",
@@ -26,7 +28,7 @@ beforeEach(() => {
     async fetch(request) {
       const body = JSON.parse(await request.text());
       if (behavior.delayMs && (!behavior.delayEvents || behavior.delayEvents.includes(body.event))) await Bun.sleep(behavior.delayMs);
-      received.push({ auth: request.headers.get("authorization"), body });
+      bucket.push({ auth: request.headers.get("authorization"), body });
       const recall = ["session_start", "recall", "role_start"].includes(body.event);
       if (recall && behavior.recallOk === false) return Response.json({ ok: false, diagnostics: ["provider_error"] });
       return Response.json(recall ? { ok: true, advisoryText: behavior.advisory, diagnostics: [] } : { ok: true, diagnostics: [] });
