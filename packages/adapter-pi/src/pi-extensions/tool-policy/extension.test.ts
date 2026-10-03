@@ -98,44 +98,71 @@ describe("RTK rewrite", () => {
   });
 });
 
-describe("graph redirection", () => {
-  test("the first code-structure search is guided to the graph tools; repeating the same call runs it", async () => {
-    const { call } = load({ config: { graphRedirect: true } });
-    const first = await call("bash", { command: "grep -rn createUser src/" });
-    expect(first.result?.block).toBe(true);
-    expect(first.result?.reason).toContain("mcp__codebase_memory__search_graph");
-    expect(first.result?.reason).toMatch(/repeat the same call/i);
-    expect((await call("bash", { command: "grep -rn createUser src/" })).result).toBeUndefined();
-    expect((await call("bash", { command: "grep -rn deleteUser src/" })).result?.block).toBe(true);
+describe("graph guidance (advisory)", () => {
+  const result = async (handlers: Record<string, Handler[]>, id: string, content: unknown[], isError = false) => {
+    let out: unknown;
+    for (const handler of handlers.tool_result ?? []) out = (await handler({ type: "tool_result", toolCallId: id, input: {}, content, isError }, {})) ?? out;
+    return out as { content?: Array<{ type: string; text: string }> } | undefined;
+  };
+  const callWithId = async (h: ReturnType<typeof load>, id: string, toolName: string, input: Record<string, unknown>) => {
+    const event = { type: "tool_call", toolCallId: id, toolName, input };
+    let blocked: unknown;
+    for (const handler of h.handlers.tool_call ?? []) blocked = (await handler(event, {})) ?? blocked;
+    return blocked;
+  };
+
+  test("a code-structure search is never blocked; its result gains one concise advisory", async () => {
+    const h = load({ config: { graphRedirect: true } });
+    expect(await callWithId(h, "c1", "bash", { command: "grep -rn createUser src/" })).toBeUndefined();
+    const out = await result(h.handlers, "c1", [{ type: "text", text: "src/a.ts:1: createUser" }]);
+    expect(out?.content).toHaveLength(2);
+    expect(out?.content?.[0]?.text).toContain("createUser");
+    expect(out?.content?.[1]?.text).toContain("mcp__codebase_memory__search_graph");
+    expect(out?.content?.[1]?.text).not.toMatch(/repeat the same call/i);
   });
 
-  test("the grep and find built-ins are redirected the same way", async () => {
-    const { call } = load({ config: { graphRedirect: true } });
-    expect((await call("grep", { pattern: "createUser", path: "src" })).result?.block).toBe(true);
-    expect((await call("find", { pattern: "*.ts" })).result?.block).toBe(true);
+  test("the advisory is added at most once per session", async () => {
+    const h = load({ config: { graphRedirect: true } });
+    await callWithId(h, "c1", "bash", { command: "grep -rn createUser src/" });
+    expect(await result(h.handlers, "c1", [])).toBeDefined();
+    await callWithId(h, "c2", "bash", { command: "grep -rn deleteUser src/" });
+    expect(await result(h.handlers, "c2", [])).toBeUndefined();
   });
 
-  test("non-code and literal searches are never blocked", async () => {
-    const { call } = load({ config: { graphRedirect: true } });
-    expect((await call("bash", { command: "grep -n timeout config/settings.yaml" })).result).toBeUndefined();
-    expect((await call("bash", { command: "grep -rn 'connection refused' logs/" })).result).toBeUndefined();
-    expect((await call("grep", { pattern: "retries", glob: "*.json" })).result).toBeUndefined();
+  test("the grep and find built-ins get the same advisory without being blocked", async () => {
+    const h = load({ config: { graphRedirect: true } });
+    expect(await callWithId(h, "c1", "grep", { pattern: "createUser", path: "src" })).toBeUndefined();
+    expect(await result(h.handlers, "c1", [{ type: "text", text: "x" }])).toBeDefined();
   });
 
-  test("without the redirect option searches are untouched", async () => {
-    const { call } = load({ config: { graphRedirect: false, rtkBinary: "/owned/rtk" }, rewriter: spyRewriter("unchanged").rewriter });
-    expect((await call("bash", { command: "grep -rn createUser src/" })).result).toBeUndefined();
+  test("failed searches and unrelated calls get no advisory", async () => {
+    const h = load({ config: { graphRedirect: true } });
+    await callWithId(h, "c1", "bash", { command: "grep -rn createUser src/" });
+    expect(await result(h.handlers, "c1", [], true)).toBeUndefined();
+    expect(await result(h.handlers, "other", [])).toBeUndefined();
+  });
+
+  test("non-code and literal searches are untouched", async () => {
+    const h = load({ config: { graphRedirect: true } });
+    for (const [id, tool, input] of [["a", "bash", { command: "grep -n timeout config/settings.yaml" }], ["b", "bash", { command: "grep -rn 'connection refused' logs/" }], ["c", "grep", { pattern: "retries", glob: "*.json" }]] as const) {
+      expect(await callWithId(h, id, tool, input as Record<string, unknown>)).toBeUndefined();
+      expect(await result(h.handlers, id, [])).toBeUndefined();
+    }
+  });
+
+  test("without the option no tool_result handler is registered", () => {
+    expect(load({ config: { graphRedirect: false, rtkBinary: "/owned/rtk" }, rewriter: spyRewriter("unchanged").rewriter }).handlers.tool_result).toBeUndefined();
   });
 });
 
 describe("handler order: policy, then RTK, then graph", () => {
-  test("RTK has already rewritten the command when the graph decision is made, and graph classification uses the original command", async () => {
+  test("RTK rewrites the command, graph classification uses the original command, and the call is never blocked", async () => {
     const spy = spyRewriter("rewritten");
     const { call } = load({ config: { rtkBinary: "/owned/rtk", graphRedirect: true }, rewriter: spy.rewriter });
     const { result, event } = await call("bash", { command: "grep -rn createUser src/" });
     expect(spy.seen).toEqual(["grep -rn createUser src/"]);
     expect(event.input.command).toBe("'/owned/rtk' grep -rn createUser src/");
-    expect(result?.block).toBe(true);
+    expect(result).toBeUndefined();
   });
 
   test("policy short-circuits before RTK and graph", async () => {

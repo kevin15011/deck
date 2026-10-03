@@ -21,9 +21,9 @@ function graphGuidance(): string {
   const snippet = piMcpToolName("codebase-memory", "get_code_snippet");
   const text = piMcpToolName("codebase-memory", "search_code");
   return [
-    "Deck code-discovery guidance: this looks like a code-structure search.",
+    "Deck code-discovery note: the search above looks like a code-structure search.",
     `Prefer the codebase graph: ${search} (find symbols), ${trace} (callers and callees), ${snippet} (read a symbol), ${text} (graph-aware text search).`,
-    "If the graph does not cover what you need, repeat the same call and it will run unchanged.",
+    "This search already ran; use the graph when it covers what you need.",
   ].join(" ");
 }
 
@@ -37,7 +37,8 @@ function readConfig(): ToolPolicyConfig {
 
 /**
  * One `tool_call` handler with a deterministic pipeline: role policy -> RTK rewrite -> graph redirection.
- * Blocking uses Pi's `{ block, reason }` (the model receives an error result; `tool_result` is not emitted).
+ * Only role policy blocks (Pi's `{ block, reason }`: the model receives an error result; `tool_result` is not emitted).
+ * Graph guidance is advisory and appended to the search result through `tool_result`.
  */
 export function createDeckToolPolicyExtension(options: DeckToolPolicyOptions = {}) {
   return function deckToolPolicyExtension(pi: ExtensionAPI): void {
@@ -49,7 +50,8 @@ export function createDeckToolPolicyExtension(options: DeckToolPolicyOptions = {
     if (!readOnly && !rewriter && !config.graphRedirect) return;
 
     let rtkDiagnosed = false;
-    const guidedSearches = new Set<string>();
+    let guided = false;
+    const pendingAdvisories = new Set<string>();
     const guidance = graphGuidance();
 
     pi.on("tool_call", async (event, ctx) => {
@@ -77,15 +79,23 @@ export function createDeckToolPolicyExtension(options: DeckToolPolicyOptions = {
         }
       }
 
-      // 3. Graph redirection (advisory: the same search is allowed on repeat; non-code searches are untouched).
-      if (config.graphRedirect) {
+      // 3. Graph guidance (advisory, never blocks: the search runs and a concise note is appended to its result,
+      //    at most once per session; non-code searches are untouched).
+      if (config.graphRedirect && !guided) {
         const classification = classifyCodeSearch(toolName, originalCommand !== undefined ? { command: originalCommand } : input);
-        if (classification?.code && !guidedSearches.has(classification.key)) {
-          guidedSearches.add(classification.key);
-          return { block: true, reason: guidance };
+        if (classification?.code) {
+          guided = true;
+          pendingAdvisories.add(event.toolCallId);
         }
       }
       return undefined;
     });
+
+    if (config.graphRedirect) {
+      pi.on("tool_result", (event) => {
+        if (!pendingAdvisories.delete(event.toolCallId) || event.isError) return undefined;
+        return { content: [...event.content, { type: "text" as const, text: guidance }] };
+      });
+    }
   };
 }

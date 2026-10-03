@@ -30,13 +30,13 @@ When RTK is selected and the owned RTK binary is usable, the Deck extension MUST
 
 ### Requirement: Graph Redirection for Grep and Glob
 
-When Codebase Memory is selected, the Deck extension SHOULD redirect code-structure searches, meaning `bash` commands invoking `grep`, `rg` or `find` over source paths and the `grep`/`find` built-ins when enabled, toward codebase-memory graph tools by either supplying graph results alongside the call or returning guidance, matching the Claude Code hook behavior. Searches over non-code files or literal strings MUST NOT be blocked.
+When Codebase Memory is selected, the Deck extension SHOULD advise on code-structure searches, meaning `bash` commands invoking `grep`, `rg` or `find` over source paths and the `grep`/`find` built-ins when enabled, toward codebase-memory graph tools by running the search and appending concise graph guidance to its result (at most once per session), matching the advisory Claude Code hook behavior. Graph guidance MUST NOT block a search. Searches over non-code files or literal strings MUST NOT be touched.
 
 #### Scenario: Symbol search guided to graph
 
 - GIVEN Codebase Memory is selected and indexed
 - WHEN the model issues a grep for a function name in source files
-- THEN the model receives graph-search results or guidance to use the graph tool
+- THEN the search runs and its result carries guidance to use the graph tool
 
 #### Scenario: Config file search untouched
 
@@ -62,7 +62,7 @@ The `tool_call` handler MUST block tool calls that violate the active role's too
 
 ### Requirement: Interception Coexistence
 
-Interception MUST compose with the developer-team execution extension owned by `developer-team-execution-convergence` without changing its execution-evidence events. Handlers MUST be deterministic in order: policy, then RTK rewrite, then graph redirection.
+Interception MUST compose with the developer-team execution extension owned by `developer-team-execution-convergence` without changing its execution-evidence events. Handlers MUST be deterministic in order: policy, then RTK rewrite, then graph guidance.
 
 #### Scenario: Execution evidence preserved
 

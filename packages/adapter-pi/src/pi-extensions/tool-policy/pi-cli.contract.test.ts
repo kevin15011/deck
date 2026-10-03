@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,11 +81,14 @@ describe("deck-tool-policy in the real Pi 1.0 runtime (faux provider)", () => {
     expect(run.stderr.split("owned RTK binary is unavailable").length - 1).toBe(1);
   }, 120_000);
 
-  realTest("6.3 a code-structure search is guided to the graph once; a config-file search runs untouched", async () => {
+  realTest("6.3 a code-structure search runs and gains a graph advisory (never blocked); a config-file search runs untouched", async () => {
     harness = createPiHarness({ mcpServers: { "codebase-memory": { command: node!, args: [ECHO_SERVER], env: {}, exposure: "direct" } } });
+    mkdirSync(join(harness.project, "src"), { recursive: true });
+    writeFileSync(join(harness.project, "src", "user.ts"), "export function createUser() {}\n");
     const guided = await harness.run(["go"], { ...lead, ...toolEnv("bash", { command: "grep -rn createUser src/" }) });
     const end = endOf(guided.events, "bash");
-    expect(end?.isError).toBe(true);
+    expect(end?.isError).toBe(false);
+    expect(resultText(end)).toContain("createUser");
     expect(resultText(end)).toContain("mcp__codebase_memory__search_graph");
 
     writeFileSync(join(harness.project, "settings.yaml"), "timeout: 30\n");
