@@ -69,11 +69,11 @@ Rules: strict TDD (failing test first, then implementation, then refactor). Test
 - [x] 7.2 Opt-in transactional cleanup of project-local legacy artifacts with backup and hash matching (`--cleanup-legacy` parity).
 - [x] 7.3 `deck doctor` Pi coverage: version, agent dir, package registration (cross-check via `pi list` at runtime only), manifest drift, MCP absolute commands and direct exposure, `/mcp` conflict, memory extension, legacy artifacts.
 
-## Phase 8 — Documentation and closure
+## Phase 8 — Documentation and closure [done]
 
 - [x] 8.1 Update `docs/reference/support-matrix.md` (add Claude column, Pi cells) after rebasing on `deck-product-documentation`.
 - [x] 8.2 Update `docs/runners.md`, `docs/runner-support.md`, `docs/adaptive-memory.md`. Document that `--append-system-prompt` in subagent children replaces the user's `APPEND_SYSTEM.md`, and that MCP servers inherit non-memory env secrets.
-- [ ] 8.3 Run the gates: `bun test packages/adapter-pi`, the config strict TDD gates, `tsc --noEmit`, baseline ledger comparison; record results in `apply-progress.md`.
+- [x] 8.3 Run the gates: `bun test packages/adapter-pi`, the config strict TDD gates, `tsc --noEmit`, baseline ledger comparison; record results in `apply-progress.md`.
 
 ## Phase 9 — Residual-risk verification (manual canary; evidence, not test gates)
 

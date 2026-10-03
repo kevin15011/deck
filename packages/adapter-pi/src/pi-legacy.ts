@@ -154,7 +154,10 @@ export function describePiLegacy(report: PiLegacyReport): string[] {
     lines.push(`${file.path} (${file.state === "unmodified" ? "unmodified Deck file" : file.state === "modified" ? "differs from the Deck template: kept on cleanup" : "Deck-named file"})`);
   }
   for (const entry of report.packages) {
-    lines.push(`${entry.settingsPath}: npm:${entry.source} (${entry.deckAdded ? "added by an earlier Deck version" : "not recorded as Deck-added: kept"})`);
+    const note = !entry.deckAdded
+      ? "not recorded as Deck-added: kept"
+      : entry.scope === "global" ? "added by an earlier Deck version: removed by the install itself" : "added by an earlier Deck version: removed by the cleanup";
+    lines.push(`${entry.settingsPath}: npm:${entry.source} (${note})`);
   }
   return lines;
 }

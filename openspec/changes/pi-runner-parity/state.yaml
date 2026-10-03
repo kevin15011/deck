@@ -1,8 +1,8 @@
 schema: spec-registry-v1
 changeId: pi-runner-parity
 name: Pi Runner Parity
-currentPhase: tasks
-status: in_progress
+currentPhase: verify
+status: ready_for_verify
 artifacts:
   proposal: proposal.md
   specs:
@@ -40,3 +40,10 @@ provenance:
     timestamp: "2026-10-02"
     registryWrite: non-deferred
     note: "Tasks expanded to Phases 0-9; Phase 0 marked done; PI_SESSION_DIR fix (1.3), mandatory adapter removal (3.3), token isolation (5.2, 5.8) added."
+  - phase: apply
+    agent: deck-apply-deep
+    model: claude-sonnet-5-5
+    timestamp: "2026-10-02"
+    registryWrite: non-deferred
+    note: "Phases 0-8 complete: graph guidance made advisory, legacy detection/cleanup/doctor, documentation and gates. Ready for verify; Phase 9 residual-risk checks remain manual canary evidence."
+    artifact: apply-progress.md

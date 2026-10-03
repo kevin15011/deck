@@ -24,7 +24,7 @@ Deck supports **Pi 1.0.0 or newer** (`@earendil-works/pi-coding-agent`). Preflig
 
 ### Where Deck installs
 
-Everything is global and manifest-owned; running Deck in a project creates or changes no project files (`<project>/.pi` and `<project>/.deck` are never written).
+Everything Deck installs is global and manifest-owned; the install writes no project files (`<project>/.pi` is never written, and no Deck package, agent, skill or profile goes into `<project>/.deck`). The only project-side artifact is Pi's own session store for `--continue` and `--resume`, `<project>/.deck/pi/sessions/developer-team`, created at launch.
 
 | What | Location |
 |---|---|
@@ -39,7 +39,7 @@ Deck replaces or removes only files whose hashes match its manifest; a Deck file
 
 ### Deck-session activation guard
 
-The Deck extensions do nothing unless a Deck launch sets `DECK_PI_SESSION=1` (and `DECK_PI_ROLE`, plus `DECK_PI_CHILD=1` in subagent children). A plain `pi` in the same agent directory loads the package but evaluates none of its extension code, so Deck never changes how Pi behaves outside `deck pi developer`.
+The Deck extensions do nothing unless a Deck launch sets `DECK_PI_SESSION=1` (and `DECK_PI_ROLE`, plus `DECK_PI_CHILD=1` in subagent children). A plain `pi` in the same agent directory still loads the package, so it lists the Deck skills and the extension names, but it evaluates none of the extension code and does not load the Deck system prompt, delegation tool, tool interception or memory. Deck therefore never changes how Pi behaves outside `deck pi developer`; Deck skills and agent definitions remain discoverable, which the design allows.
 
 ### What the Deck session adds
 

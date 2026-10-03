@@ -43,8 +43,8 @@ Project-local discovery is always scoped to the active runner. Pi and OpenCode c
 
 ### Pi in detail
 
-- **Global install.** `Review & Install` and `deck pi developer` write one manifest-owned package under `<agent dir>/deck/package` (agents, skills, prompts, and the `deck-*` extensions), a lead profile under `<agent dir>/deck/profiles`, one `packages` entry in `settings.json`, and the Deck servers in `mcp.json`. Nothing is written into `<project>/.pi` or `<project>/.deck`.
-- **Deck-session activation guard.** Deck extensions are inert unless `DECK_PI_SESSION`, `DECK_PI_ROLE` or `DECK_PI_CHILD` is set by a Deck launch; a plain `pi` loads nothing from Deck.
+- **Global install.** `Review & Install` and `deck pi developer` write one manifest-owned package under `<agent dir>/deck/package` (agents, skills, prompts, and the `deck-*` extensions), a lead profile under `<agent dir>/deck/profiles`, one `packages` entry in `settings.json`, and the Deck servers in `mcp.json`. Nothing is written into `<project>/.pi`, and the install writes no Deck files into `<project>/.deck` (only Pi's session store for `--continue`/`--resume` lives under `<project>/.deck/pi/sessions`).
+- **Deck-session activation guard.** Deck extensions are inert unless `DECK_PI_SESSION`, `DECK_PI_ROLE` or `DECK_PI_CHILD` is set by a Deck launch; a plain `pi` lists the Deck skills and extension names but runs none of the extension code.
 - **Memory.** In a Deck-managed session the `deck-memory` extension recalls through the Deck loopback host (an ephemeral system-prompt append, never a stored message) and captures the user prompt and each completed assistant turn. The bearer token travels through a `0600` file, never the environment. Child roles recall once at start and never capture.
 - **MCP.** Pi's built-in MCP is used. Deck removes the `pi-mcp-adapter` entry it added in earlier versions (it disables built-in MCP); a user-added entry is reported as a blocking diagnostic.
 

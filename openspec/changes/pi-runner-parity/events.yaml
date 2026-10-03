@@ -82,4 +82,12 @@ events:
     actor: deck-apply-deep
     notes:
       - "Phase 6 complete: deck-tool-policy extension (read-only role enforcement, owned-RTK rewrite, graph redirection) with installer-written config, verified in the real Pi 1.0.0 runtime and alongside the execution extension. See design.md deviations 27-30."
+  - phase: apply
+    status: ready_for_verify
+    event: apply.completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phases 7 and 8 complete: advisory graph guidance, legacy detection, opt-in transactional cleanup (--cleanup-legacy), Doctor coverage, documentation. Gates recorded in apply-progress.md; hermetic canary smoke against Pi 1.0.0 passed. Ready for verify; Phase 9 is manual canary evidence."
 
