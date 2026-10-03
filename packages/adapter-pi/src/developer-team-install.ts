@@ -11,6 +11,7 @@ import {
   composeCapabilityInstructions,
   getEnabledPackageInstructionIds,
 } from "@deck/core/teams/developer/instruction-bundles";
+import { translatePiCapabilityInstructions } from "./instruction-translation";
 import { materializeTeamProfile } from "./pi-team-profile";
 import { buildTeamProfileDir } from "./pi-team-launch";
 // import { verifyInvariantPresence, type OrchestratorInvariantSurface } from "@deck/core/teams/developer/orchestrator-invariants";
@@ -563,9 +564,9 @@ export function buildDeveloperTeamInstallPlan(
     const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
     return resolved.ok ? resolved.scope : undefined;
   })();
-  const capabilityInstructions = bindAdaptiveMemoryInstructionBundle(options?.capabilityInstructions, {
+  const capabilityInstructions = translatePiCapabilityInstructions(bindAdaptiveMemoryInstructionBundle(options?.capabilityInstructions, {
     supermemoryProjectScope: derivedSupermemoryProjectScope,
-  });
+  }));
 
   const personality = options?.orchestratorPersonality ?? DEFAULT_ORCHESTRATOR_PERSONALITY;
   const promptProfile = "compact" as const;
@@ -1167,6 +1168,7 @@ function buildSkillFileContent(
 
   return [
     "---",
+    `name: ${toYamlScalar(agent.skillId)}`,
     `description: ${toYamlScalar(agent.description)}`,
     "---",
     "",

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getTeamSessionInstructions } from "@deck/core/teams/developer/content-registry";
+import { translatePiCapabilityInstructions } from "./instruction-translation";
 import { composeCapabilityInstructions, type CapabilityInstructionBundle } from "@deck/core/teams/developer/instruction-bundles";
 import {
   composeAdaptiveMemory,
@@ -124,7 +125,7 @@ export function buildTeamSystemPrompt(
     "You are operating within a Deck team session.",
     "",
   ].join("\n");
-  const baseWithCapabilityInstructions = composeCapabilityInstructions(base, options?.capabilityInstructions, {
+  const baseWithCapabilityInstructions = composeCapabilityInstructions(base, translatePiCapabilityInstructions(options?.capabilityInstructions), {
     surface: "session",
     teamId,
   });
