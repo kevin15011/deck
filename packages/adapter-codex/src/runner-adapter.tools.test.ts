@@ -4,9 +4,11 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import { getDefaultDeckConfig, validateDeckConfig } from "@deck/core";
+import { getDefaultDeckConfig, prepareAndBuildDeveloperTeamInstallPlan, validateDeckConfig } from "@deck/core";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
 import { createCodexRunnerAdapter } from "./runner-adapter";
+import { CURRENT_CODEX_MODELS_FIXTURE } from "./__fixtures__/codex/models";
+import { parseCodexModels } from "./codex-model-discovery";
 import { layout, readyTestTools, testTools } from "./test-tools";
 import type { CodexPreflightEffects } from "./preflight";
 
@@ -499,17 +501,28 @@ describe("Codex global ownership and migration", () => {
 
   test("assignments are global: read from and written to the Codex home agents whatever project is open", async () => {
     await withProject(async (root, journalRoot) => {
-      const { cwd, g, adapter } = await globalAdapter(root, journalRoot);
-      const modelAssignments = { "deck-lead": "openai-codex/gpt-5.6-sol" };
-      const thinkingAssignments = { "deck-lead": "high" };
-      const withModels = plan(adapter, cwd, { modelAssignments, thinkingAssignments });
+      const catalog = parseCodexModels(CURRENT_CODEX_MODELS_FIXTURE);
+      if (!catalog.ok) throw new Error("expected Codex fixture to parse");
+      const { cwd, g, adapter } = await globalAdapter(root, journalRoot, {
+        inventoryDiscovery: async () => ({ state: "ready", source: "live", discoveredAt: 1, fingerprint: "current-codex", inventory: catalog.inventory }),
+      });
+      const modelAssignments = { "deck-lead": "openai-codex/gpt-5.6-terra" };
+      const thinkingAssignments = { "deck-lead": "ultra" };
+      const { plan: withModels } = await prepareAndBuildDeveloperTeamInstallPlan(adapter, {
+        projectRoot: cwd,
+        environmentId: "codex-development",
+        deckConfig: deckConfig(),
+        modelAssignments,
+        thinkingAssignments,
+      });
       expect(withModels.blocked).toBe(false);
       await adapter.applyDeveloperTeamInstall({ projectRoot: cwd, environmentId: "codex-development", plan: withModels });
-      expect(adapter.readModelAssignments(cwd)).toEqual({});
+      expect(adapter.readModelAssignments(cwd)).toEqual(modelAssignments);
       const toml = await readFile(join(g, ".codex", "agents", "deck-lead.toml"), "utf8");
-      await writeFile(join(g, ".codex", "agents", "deck-lead.toml"), `${toml}`.replace("developer_instructions", 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "high"\ndeveloper_instructions'));
-      expect(adapter.readModelAssignments(join(root, "some-other-project"))).toEqual({ "deck-lead": "openai-codex/gpt-5.6-sol" });
-      expect(adapter.readThinkingAssignments(cwd)).toEqual({ "deck-lead": "high" });
+      expect(toml).toContain('model = "gpt-5.6-terra"');
+      expect(toml).toContain('model_reasoning_effort = "ultra"');
+      expect(adapter.readModelAssignments(join(root, "some-other-project"))).toEqual(modelAssignments);
+      expect(adapter.readThinkingAssignments(cwd)).toEqual(thinkingAssignments);
     });
   }, 120_000);
 });
