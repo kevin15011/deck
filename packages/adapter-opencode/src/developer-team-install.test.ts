@@ -25,6 +25,17 @@ import type {
 // Runner Isolation Verification
 // ---------------------------------------------------------------------------
 
+test("generated OpenCode Lead skill and prompt inherit Core skill ownership, not Pi orchestration", () => {
+  const plan = buildOpenCodeDeveloperTeamInstallPlan("/tmp/deck-skill-context-plan-only");
+  const skill = plan.skills.find(file => file.relativePath.endsWith("/deck-lead/SKILL.md"));
+  const prompt = plan.promptGenerationPlan.find(file => file.content.includes("# Lead (deck-lead)"));
+  for (const content of [skill?.content, prompt?.content]) {
+    expect(content).toContain("Do not load full specialist execution skills merely to select, brief, or monitor a delegate");
+    expect(content).toContain("When implementing directly");
+    expect(content).not.toContain("Pi background delegation and conversational availability");
+  }
+});
+
 const FORBIDDEN_PATTERNS = [
   // Named imports from @deck/core or @deck/sdd-runtime
   /import\s+.*\s+from\s+["']@deck\/core["']/,

@@ -25,6 +25,16 @@ import type { DeveloperTeamModelAssignments, DeveloperTeamThinkingAssignments } 
 // Runner Isolation Verification
 // ---------------------------------------------------------------------------
 
+test("generated Pi Lead agent and skill inherit Core skill ownership", () => {
+  const plan = buildDeveloperTeamInstallPlan("/tmp/deck-skill-context-plan-only");
+  const skill = plan.skills.find(file => file.relativePath.endsWith("/deck-lead/SKILL.md"));
+  const agent = plan.agents.find(file => file.content.includes("# Lead (deck-lead)"));
+  for (const content of [skill?.content, agent?.content]) {
+    expect(content).toContain("Do not load full specialist execution skills merely to select, brief, or monitor a delegate");
+    expect(content).toContain("When implementing directly");
+  }
+});
+
 const FORBIDDEN_PATTERNS = [
   // Named imports from @deck/core or @deck/sdd-runtime
   /import\s+.*\s+from\s+["']@deck\/core["']/,

@@ -10,6 +10,9 @@ describe("adaptive Developer Team installed content", () => {
       expect(content).toBeDefined();
       expect(content!.agentBody).toContain(agent.displayName);
       expect(content!.agentBody).not.toContain("Placeholder:");
+      expect(content!.agentBody).toContain("specialists load the applicable execution skills themselves");
+      expect(content!.agentBody).toContain("do not reread content already supplied in their instructions");
+      expect(content!.skillBody).toContain("The agent-level Adaptive Developer Team Contract remains binding for this skill");
       expect(content!.agentBody.length).toBeLessThan(agent.id === "deck-setup" ? 24_000 : 12_000);
     }
   });
@@ -24,6 +27,20 @@ describe("adaptive Developer Team installed content", () => {
     expect(session).toContain("centralized writer");
     expect(session).not.toContain("all 14");
     expect(session).not.toContain("one agent per task");
+  });
+
+  test("shared Lead surfaces route without preloading specialist execution skills", () => {
+    const lead = getAgentContent("deck-lead")!;
+    const surfaces = [lead.agentBody, lead.skillBody, getTeamSessionInstructions("developer-team")!];
+    for (const body of surfaces) {
+      expect(body).toContain("## Skill loading and context ownership");
+      expect(body).toContain("Do not load full specialist execution skills merely to select, brief, or monitor a delegate");
+      expect(body).toContain("When implementing directly, load the execution skills relevant to your own work");
+      expect(body).toContain("Reading a skill in Lead does not load it for the child");
+      expect(body).toContain("This does not bypass mandatory safety checks");
+      expect(body).not.toContain("Pi background delegation");
+    }
+    expect(getTeamSessionInstructions("developer-team")).toContain("specialists load the applicable execution skills themselves");
   });
 
   test("Apply owns proportional TDD and vertical implementation", () => {

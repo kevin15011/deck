@@ -7,6 +7,16 @@ import { buildCodexDeveloperTeamInstallPlan } from "./developer-team-install";
 import { parseSkillDescriptor } from "../../core/src/skill-discovery/discovery";
 
 describe("buildCodexDeveloperTeamInstallPlan", () => {
+  test("inherits Core skill ownership in generated Lead surfaces without Pi orchestration", () => {
+    const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map() });
+    for (const path of [".codex/agents/deck-lead.toml", ".agents/skills/deck-lead/SKILL.md"]) {
+      const content = plan.expectedFiles.find(file => file.relativePath === path)?.content;
+      expect(content).toContain("Do not load full specialist execution skills merely to select, brief, or monitor a delegate");
+      expect(content).toContain("When implementing directly");
+      expect(content).not.toContain("Pi background delegation and conversational availability");
+    }
+  });
+
   test("plans native roles, agent-bound skills, all external bundles, bootstrap skills, config, and instructions", () => {
     const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map() });
     const paths = plan.mutations.map((mutation) => mutation.relativePath);
