@@ -20,11 +20,18 @@ export function clearPublishedMemoryHandoff(): void {
   delete (globalThis as Store)[KEY];
 }
 
-/** Published handoff first; otherwise the (unscrubbed) environment, for sessions where `deck-memory` is absent. */
+/** Explicit launch coordinates first; reuse a scrubbed handoff only for its surviving matching endpoint. */
 export function resolveMemoryHandoff(env: Readonly<Record<string, string | undefined>>): MemoryHandoff | undefined {
-  const published = readPublishedMemoryHandoff();
-  if (published?.endpoint && published.tokenFile) return published;
+  if (env.DECK_PI_MEMORY === "disabled") return undefined;
   const endpoint = env.DECK_RUNNER_MEMORY_ENDPOINT?.trim();
   const tokenFile = env.DECK_RUNNER_MEMORY_TOKEN_FILE?.trim();
-  return endpoint && tokenFile ? { endpoint, tokenFile } : undefined;
+  // An explicit token-file field, even empty/undefined, is a new launch handoff.
+  // Never complete partial replacement coordinates with a previous bridge.
+  if (Object.prototype.hasOwnProperty.call(env, "DECK_RUNNER_MEMORY_TOKEN_FILE")) {
+    return endpoint && tokenFile ? { endpoint, tokenFile } : undefined;
+  }
+  // Memory scrubs the file coordinate but leaves the endpoint. Only that exact
+  // surviving endpoint can reuse the process-local file path on resource reload.
+  const published = readPublishedMemoryHandoff();
+  return endpoint && endpoint === published?.endpoint && published.tokenFile ? published : undefined;
 }

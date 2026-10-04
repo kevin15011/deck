@@ -388,6 +388,15 @@ describe("subagent child", () => {
     expect(eventsOf("recall")).toHaveLength(0);
   });
 
+  test("a child resource reload drains without retiring its role session", async () => {
+    const { fire } = load(child);
+    await fire("before_agent_start", start("Task: reload"));
+    await fire("session_shutdown", { reason: "reload" });
+    expect(eventsOf("shutdown_flush")).toHaveLength(0);
+    await fire("session_shutdown", { reason: "quit" });
+    expect(eventsOf("shutdown_flush")).toHaveLength(1);
+  });
+
   test("a later agent start in the same child re-applies the cached recall without another request", async () => {
     const { fire } = load(child);
     await fire("before_agent_start", start("Task: a"));
@@ -395,4 +404,27 @@ describe("subagent child", () => {
     expect(again.systemPrompt).toBe(`NEXT\n\n${ADVISORY}`);
     expect(eventsOf("role_start")).toHaveLength(1);
   });
+});
+test("native custom continuations retain only the exact parent's ephemeral advisory, without duplicate recall/capture", async () => {
+  const h = load();
+  const first = await h.fire("before_agent_start", start("authorized user prompt"));
+  const handler = h.handlers.context![0]!;
+  let id = "sess-1", prompt = first.systemPrompt;
+  const ctx = { sessionManager: { getSessionId: () => id }, getSystemPrompt: () => prompt };
+  const original = [{ role: "user", content: "authorized user prompt" }];
+  expect(await handler({ messages: original }, ctx)).toBeUndefined();
+  prompt = "BASE"; // Native sendCustomMessage starts a turn without before_agent_start.
+  const continued = await handler({ messages: original }, ctx) as any;
+  expect(original).toHaveLength(1); expect(continued.messages).toHaveLength(2);
+  expect(continued.messages[1]).toMatchObject({ customType: "deck-memory-continuation", content: ADVISORY, display: false });
+  const repeated = await handler({ messages: continued.messages }, ctx) as any;
+  expect(repeated.messages.filter((m: any) => m.customType === "deck-memory-continuation")).toHaveLength(1);
+  id = "different-parent";
+  expect((await handler({ messages: continued.messages }, ctx) as any).messages).toEqual(original);
+  id = "sess-1"; behavior.recallOk = false;
+  await h.fire("before_agent_start", start("new user prompt with unavailable recall"));
+  expect(await handler({ messages: original }, ctx)).toBeUndefined();
+  await h.fire("session_shutdown", { reason: "quit" });
+  expect(eventsOf("session_start")).toHaveLength(1); expect(eventsOf("recall")).toHaveLength(1);
+  expect(eventsOf("capture").every(event => event.source === "trusted-user-prompt" && !event.content.includes("ADAPTIVE_CONTEXT"))).toBe(true);
 });

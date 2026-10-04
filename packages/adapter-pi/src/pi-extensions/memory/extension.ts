@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { publishMemoryHandoff } from "../shared/memory-handoff";
+import { clearPublishedMemoryHandoff, publishMemoryHandoff, resolveMemoryHandoff } from "../shared/memory-handoff";
 import type { ExtensionAPI } from "../shared/pi-api";
 import { LEAD_ROLE, normalizeRole } from "../shared/roles";
 import { registerMemoryTools } from "./tools";
@@ -42,11 +42,13 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
     const read = options.readFile ?? ((path: string) => readFileSync(path, "utf-8"));
     // The launcher sets this when adaptive memory is disabled by configuration: stay silent (not a failure).
     if (env.DECK_PI_MEMORY === "disabled") {
+      clearPublishedMemoryHandoff();
       for (const key of Object.keys(env)) if (key.startsWith("DECK_RUNNER_MEMORY_TOKEN")) delete env[key];
       return;
     }
-    const endpoint = env.DECK_RUNNER_MEMORY_ENDPOINT?.trim();
-    const tokenFile = env.DECK_RUNNER_MEMORY_TOKEN_FILE?.trim();
+    const handoff = resolveMemoryHandoff(env);
+    const endpoint = handoff?.endpoint;
+    const tokenFile = handoff?.tokenFile;
 
     // Read the token into memory, then scrub every token variable so nothing inherits it (MCP servers, tools).
     let token: string | undefined;
@@ -62,6 +64,7 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
       }
     }
     if (endpoint && tokenFile && token && !problem) publishMemoryHandoff({ endpoint, tokenFile });
+    else clearPublishedMemoryHandoff();
     for (const key of Object.keys(env)) if (key.startsWith("DECK_RUNNER_MEMORY_TOKEN")) delete env[key];
 
     const report = (message: string, ctx?: Notifier) => {
@@ -121,6 +124,22 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
       report(message, ctx);
     };
 
+    let continuationAdvisory: { sessionId: string; text: string } | undefined;
+    if (!isChild) {
+      pi.on("session_start", () => { continuationAdvisory = undefined; });
+      pi.on("context", (event, ctx) => {
+        const messages = event.messages.filter(message => message.role !== "custom" || message.customType !== "deck-memory-continuation");
+        // Native custom-message turns bypass before_agent_start and may reset its prompt override.
+        // Reuse only this parent's last authorized recall, ephemerally; never query/capture child text.
+        const advisory = continuationAdvisory?.sessionId === sessionIdOf(ctx) ? continuationAdvisory.text : undefined;
+        if (advisory && !ctx.getSystemPrompt?.().includes(advisory)) {
+          messages.push({ role: "custom", customType: "deck-memory-continuation", content: advisory, display: false, timestamp: Date.now() });
+          return { messages };
+        }
+        return messages.length !== event.messages.length ? { messages } : undefined;
+      });
+    }
+
     const capture = (sessionId: string, source: "trusted-user-prompt" | "trusted-final-assistant", content: string, turnNumber: number) => {
       const bounded = truncateForCapture(content);
       const kind = source === "trusted-user-prompt" ? "u" : "a";
@@ -155,6 +174,7 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
         return childAdvisory ? { systemPrompt: `${event.systemPrompt}\n\n${childAdvisory}` } : undefined;
       }
 
+      continuationAdvisory = undefined;
       turn += 1;
       const turnNumber = turn;
       const logicalTurnId = `t${turnNumber}`;
@@ -165,6 +185,7 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
       if (!result.ok) { warnOnce(`recall failed (${result.diagnostics.join(", ") || "unavailable"}); continuing without it.`, ctx); return undefined; }
       const advisory = result.advisoryText;
       if (!advisory) return undefined;
+      continuationAdvisory = { sessionId, text: advisory };
       void track(client.send({ eventId: `${idPart(sessionId)}:${nonce}:ack:${turnNumber}`, event: "injection_ack", sessionId, role: LEAD_ROLE, logicalTurnId, snapshotGeneration: turnNumber, injectedByteCount: Buffer.byteLength(advisory, "utf8"), injectedSha256: sha256Hex(advisory) }));
       // Ephemeral: applied to this agent run only, so it never accumulates in the session or across --continue.
       return { systemPrompt: `${event.systemPrompt}\n\n${advisory}` };
@@ -172,9 +193,10 @@ export function createDeckMemoryExtension(options: DeckMemoryOptions = {}) {
 
     if (isChild) {
       // Children never capture; they only flush their role session on exit.
-      pi.on("session_shutdown", async (_event, ctx) => {
+      pi.on("session_shutdown", async (event, ctx) => {
         const sessionId = sessionIdOf(ctx);
         await drain();
+        if (event.reason === "reload") return;
         await client.send({ eventId: `${idPart(sessionId)}:${nonce}:shutdown_flush`, event: "shutdown_flush", sessionId, role: roleEnv }, { timeoutMs: drainTimeoutMs });
       });
       return;
