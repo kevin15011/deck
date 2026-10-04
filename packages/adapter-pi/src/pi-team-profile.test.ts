@@ -37,6 +37,32 @@ describe("buildTeamSystemPrompt", () => {
     expect(content).toContain("## Conversational deltas");
   });
 
+  test("materializes role-owned skill loading and Pi conversational yielding on disk", () => {
+    const root = createTempDir("deck-pi-delegation-policy-");
+    try {
+      materializeTeamProfile({ teamId: "developer-team", projectRoot: root });
+      const content = readFileSync(join(root, ".deck/pi/profiles/developer-team/system-prompt.md"), "utf8");
+      expect(content).toContain("Do not load full specialist execution skills merely to select, brief, or monitor a delegate");
+      expect(content).toContain("specialists load the applicable execution skills themselves");
+      expect(content).toContain("After background acceptance, finish the current turn promptly");
+      expect(content).toContain("Do not wait for the child, poll task status");
+      expect(content).toContain("without waiting for a user reminder");
+      expect(content).toContain("necessary safety/authority checks");
+      expect(content).toContain("Make the user-facing answer the last action of the current turn");
+      expect(content).toContain("OpenSpec/working-brief updates and task review/resolution before giving the substantive answer");
+      expect(content).toContain("after the final answer, yield immediately");
+      expect(content).toContain("do not wait for running children to finish before returning control");
+      expect(content).toContain("actual new background outcome");
+      expect(content).toContain("genuine new user input");
+      expect(content).toContain("not additional authority");
+      expect(content).toContain("Never create a wake, timer, turn or provider call solely for a recap");
+      expect(content).not.toContain("Do not repeat earlier answers or introduce read receipts");
+      expect(countOccurrences(content, "## Pi background delegation and conversational availability")).toBe(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("materializes the Pi runtime context before adaptive memory", () => {
     const supermemoryProvider: import("@deck/core/memory/adaptive-memory").AdaptiveMemoryProvider = {
       id: "fixture-memory",

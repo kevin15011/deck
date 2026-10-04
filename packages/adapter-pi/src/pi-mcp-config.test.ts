@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import * as adapterPi from "./index";
@@ -1035,5 +1035,19 @@ describe("writeCodebaseMemoryMcpConfig (production path - gated)", () => {
     } finally {
       cleanup(home);
     }
+  });
+});
+
+describe("defaultPiMcpConfigPath", () => {
+  test("follows PI_CODING_AGENT_DIR when no home is given", () => {
+    expect(defaultPiMcpConfigPath(undefined, { PI_CODING_AGENT_DIR: "/opt/pi-home" })).toBe("/opt/pi-home/mcp.json");
+  });
+
+  test("an explicit home keeps the conventional location", () => {
+    expect(defaultPiMcpConfigPath("/home/tester", { PI_CODING_AGENT_DIR: "/opt/pi-home" })).toBe("/home/tester/.pi/agent/mcp.json");
+  });
+
+  test("an invalid override falls back to the default location", () => {
+    expect(defaultPiMcpConfigPath(undefined, { PI_CODING_AGENT_DIR: "relative" })).toBe(`${homedir()}/.pi/agent/mcp.json`);
   });
 });

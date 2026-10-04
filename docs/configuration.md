@@ -69,7 +69,7 @@ Adaptive Memory is a boolean product setting: **Disabled** or **Enabled**. Legac
 
 | Runner | Setup input and effect | Persisted configuration boundary |
 |---|---|---|
-| Pi | The TUI validates a token and stores the runtime credential in Deck's owner-only secret store. Optional MCP config is written without persisting that token. | Deck config stores only Adaptive Memory enablement and non-secret options; the token is not written to `.deck/config.json` or runner MCP config. |
+| Pi | The TUI validates a token and stores the runtime credential in Deck's owner-only secret store. Pi receives only the Deck loopback endpoint and a `0600` token-file path; no credential or Supermemory MCP entry is written to Pi configuration. | Deck config stores only Adaptive Memory enablement and non-secret options; the token is not written to `.deck/config.json` or Pi configuration. |
 | OpenCode/Codex | Deck runtime still requires a Supermemory API token, which is read-only validated and stored in Deck's owner-only secret store. Separately, Deck can write the remote Supermemory endpoint and `x-sm-project` scope to the runner MCP config. Authenticate optional MCP with native OAuth through `/connect`, `opencode mcp auth supermemory`, or `codex mcp login supermemory`. | Runner MCP config contains endpoint and project scope only. OAuth credentials live outside project configuration, do not replace the Deck runtime bearer credential, and Deck does not persist an `Authorization` header. |
 
 See [Adaptive memory](adaptive-memory.md) for provider behavior and governance.

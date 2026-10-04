@@ -30,6 +30,7 @@ export type ParsedArgs =
   | { command: "internal-serena-mcp"; probe: boolean }
   | { command: "internal-supermemory-runtime-smoke" }
   | { command: "internal-codex-memory-hook" }
+  | { command: "internal-memory-mcp" }
   | {
       command: "upgrade";
       flags: {
@@ -75,6 +76,8 @@ export type ParsedArgs =
         continue?: boolean;
         resume?: boolean;
       };
+      /** Opt-in removal of legacy Deck artifacts left by earlier versions (backed up first). */
+      cleanupLegacy?: boolean;
       /** Legacy CLI memory override. Undefined means no memory; Supermemory is the only supported backend. */
       memoryProvider?: string;
     }
@@ -216,6 +219,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (rest.length === 1 && rest[0] === "serena-mcp") return { command: "internal-serena-mcp", probe: false };
     if (rest.length === 1 && rest[0] === "supermemory-runtime-smoke") return { command: "internal-supermemory-runtime-smoke" };
     if (rest.length === 1 && rest[0] === "codex-memory-hook") return { command: "internal-codex-memory-hook" };
+    if (rest.length === 1 && rest[0] === "memory-mcp") return { command: "internal-memory-mcp" };
     return { command: "error", message: "Usage: deck internal serena-mcp" };
   }
 
@@ -464,7 +468,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (rest.length === 0) {
     return {
       command: "error",
-      message: "Usage: deck pi <team> [--continue | --resume] [--memory=supermemory|none]\nAvailable teams: developer",
+      message: "Usage: deck pi <team> [--continue | --resume] [--memory=supermemory|none] [--cleanup-legacy]\nAvailable teams: developer",
     };
   }
 
@@ -483,9 +487,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let shouldContinue = false;
   let shouldResume = false;
   let memoryProvider: string | undefined;
+  let cleanupLegacy = false;
 
   for (const flag of flags) {
-    if (flag === "--continue") {
+    if (flag === "--cleanup-legacy") {
+      cleanupLegacy = true;
+    } else if (flag === "--continue") {
       shouldContinue = true;
     } else if (flag.startsWith("--continue=")) {
       const value = parseBooleanFlag(flag.slice("--continue=".length));
@@ -532,6 +539,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ...(shouldContinue ? { continue: true } : {}),
       ...(shouldResume ? { resume: true } : {}),
     },
+    ...(cleanupLegacy ? { cleanupLegacy: true } : {}),
     ...(memoryProvider ? { memoryProvider } : {}),
   };
 }

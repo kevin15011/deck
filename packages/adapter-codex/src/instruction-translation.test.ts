@@ -45,4 +45,17 @@ describe("Codex package-instruction translation", () => {
     expect(installed).toContain("Codex Tool Routing");
     expect(installed).toContain("no runner-specific RTK installer flag is assumed");
   });
+
+  test("tells Codex about the explicit memory tools, their limits and the conservative role policy", () => {
+    const translated = translateCodexCapabilityInstructions(buildCapabilityInstructionBundle(["adaptive-memory"]))!;
+    for (const fragment of translated.instructions) {
+      expect(fragment.markdown).toContain("### Explicit memory tools (Codex)");
+      for (const expected of ["`memory_search`", "`memory_save`", "`deck-memory`", "Read-only roles", "advisory"]) expect(fragment.markdown).toContain(expected);
+      expect(fragment.markdown).toMatch(/only exist|only available/i);
+    }
+    expect(validateCodexInstructionTranslation(translated)).toEqual([]);
+    // Packages other than adaptive-memory are untouched.
+    const rtk = translateCodexCapabilityInstructions(buildCapabilityInstructionBundle(["rtk"]))!;
+    expect(rtk.instructions.every((fragment) => !fragment.markdown.includes("memory_search"))).toBe(true);
+  });
 });

@@ -7,6 +7,7 @@ import { CLAUDE_CAPABILITY_IDS, claudeContentPluginName, claudeModelMetadata, cl
 import { discoverClaudeModels, parseClaudeModelInfo, type ClaudeModelInfo } from "./model-discovery";
 import type { RunnerModelInventoryResult, RunnerModelAssignmentIssue } from "../../core/src/index";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { translateClaudeCapabilityInstructions } from "./instruction-translation";
 import { bootstrapSerena, buildCapabilityInstructionBundle, createDefaultSerenaBootstrapEffects, createSerenaReadinessRevalidator, getAgentContent, getDeveloperTeamCatalog, resolveCanonicalSupermemoryProjectScope, resolveExistingSerenaReadiness, resolveSerenaOwnedRoot, resolveWebSearchReadiness, validateSerenaBootstrapResult, validateSerenaOperationAuthorization, validateSerenaReadinessEvidence, DEVELOPER_TEAM, resolveDefaultDeckDataRoot, type RunnerAdapter, type RunnerDeveloperTeamInstallPlan, type SerenaBootstrapEffects, type SerenaBootstrapRequest, type SerenaBootstrapResult, type SerenaExistingReadinessResult, type SerenaReadinessEvidence } from "../../core/src/index";
 import { claudeCapabilityFiles, verifyClaudeExecutable, verifyClaudeRtkHookRuntime, type ClaudeCapabilityOptions } from "./capabilities";
 import { spawn } from "node:child_process";
@@ -56,7 +57,7 @@ function expectedFiles(root: string, assignments: ClaudeAssignments = {}, capabi
   for (const agent of getDeveloperTeamCatalog()) {
     if (!/^[a-z][a-z0-9-]*$/.test(agent.id) || !/^[a-z][a-z0-9-]*$/.test(agent.skillId)) throw new Error("Invalid canonical Claude role ID.");
     const instructionIds = capabilities.filter((id) => id !== "context7") as Exclude<ClaudeCapabilityId, "context7">[];
-    const canonical = getAgentContent(agent.id, { promptProfile: "legacy", ...(instructionIds.length ? { capabilityInstructions: buildCapabilityInstructionBundle(instructionIds) } : {}) });
+    const canonical = getAgentContent(agent.id, { promptProfile: "legacy", ...(instructionIds.length ? { capabilityInstructions: translateClaudeCapabilityInstructions(buildCapabilityInstructionBundle(instructionIds)) } : {}) });
     if (!canonical?.agentBody || !canonical.skillBody || /<!-- Placeholder:/.test(canonical.agentBody + canonical.skillBody)) throw new Error("Incomplete canonical Claude role.");
     const readOnlyTools = [
       "Read", "Grep", "Glob", "Skill",

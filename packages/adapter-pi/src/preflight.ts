@@ -10,9 +10,17 @@ import {
   createEmptyPreflightSummary,
   computePreflightSummary,
 } from "@deck/core";
+import { resolvePiAgentDir } from "./agent-dir";
+import { evaluatePiVersion, PI_UPGRADE_HINT, PI_MIN_VERSION, type PiVersionEvaluation } from "./pi-version";
 
 export type PiPreflightResult = {
   version: string;
+  /** Minimum-version evaluation of `pi --version` (Pi >= 1.0.0). */
+  versionStatus?: PiVersionEvaluation;
+  /** Resolved Pi agent directory (PI_CODING_AGENT_DIR or ~/.pi/agent) when valid. */
+  agentDir?: string;
+  /** Blocking diagnostic when PI_CODING_AGENT_DIR is empty or relative. */
+  agentDirDiagnostic?: string;
   configDirectory?: string;
   existingConfiguration: boolean;
   checks?: RunnerInstallPreflightCheck[];
@@ -28,6 +36,8 @@ type CommandResult = {
 type InspectPiEnvironmentOptions = {
   command: string;
   homeDirectory?: string;
+  /** Environment used to resolve PI_CODING_AGENT_DIR; defaults to process.env. */
+  env?: Readonly<Record<string, string | undefined>>;
   runCommand?: (command: string, args: string[]) => CommandResult;
   pathExists?: (path: string) => boolean;
   readDir?: (path: string) => string[];
@@ -39,7 +49,8 @@ type InspectPiEnvironmentOptions = {
 };
 
 export function inspectPiEnvironment(options: InspectPiEnvironmentOptions): PiPreflightResult {
-  const homeDirectory = options.homeDirectory ?? homedir();
+  const env = options.env ?? process.env;
+  const homeDirectory = options.homeDirectory ?? env.HOME ?? homedir();
   const runCommand = options.runCommand ?? runDefaultCommandSync;
   const pathExists = options.pathExists ?? existsSync;
   const readDir = options.readDir ?? readdirSync;
@@ -56,13 +67,22 @@ export function inspectPiEnvironment(options: InspectPiEnvironmentOptions): PiPr
   const versionResult = runCommand(options.command, ["--version"]);
   const versionOutput = versionResult.stdout.trim() || versionResult.stderr?.trim();
   const version = versionResult.exitCode === 0 && versionOutput ? versionOutput : "unknown";
+  const versionStatus = evaluatePiVersion(versionResult.exitCode === 0 && versionOutput ? versionOutput : undefined);
 
-  const configDirectory = getPiConfigCandidates(homeDirectory).find((candidate) => pathExists(candidate));
+  const agentDirResolution = resolvePiAgentDir(env, homeDirectory);
+  const agentDir = agentDirResolution.ok ? agentDirResolution.dir : undefined;
+  const agentDirDiagnostic = agentDirResolution.ok ? undefined : agentDirResolution.message;
+  const configDirectory = agentDirResolution.ok
+    ? getPiConfigCandidates(homeDirectory, agentDirResolution).find((candidate) => pathExists(candidate))
+    : undefined;
 
   // Run structured preflight checks if enabled
   const checks = options.includeChecks
     ? runPiPreflightChecks({
         homeDirectory,
+        agentDir,
+        agentDirDiagnostic,
+        versionStatus,
         configDirectory,
         version,
         pathExists,
@@ -76,6 +96,9 @@ export function inspectPiEnvironment(options: InspectPiEnvironmentOptions): PiPr
 
   return {
     version,
+    versionStatus,
+    ...(agentDir ? { agentDir } : {}),
+    ...(agentDirDiagnostic ? { agentDirDiagnostic } : {}),
     configDirectory,
     existingConfiguration: Boolean(configDirectory),
     checks,
@@ -83,8 +106,10 @@ export function inspectPiEnvironment(options: InspectPiEnvironmentOptions): PiPr
   };
 }
 
-function getPiConfigCandidates(homeDirectory: string): string[] {
-  return [join(homeDirectory, ".pi", "agent"), join(homeDirectory, ".config", "pi"), join(homeDirectory, ".pi")];
+function getPiConfigCandidates(homeDirectory: string, resolution: Extract<ReturnType<typeof resolvePiAgentDir>, { ok: true }>): string[] {
+  // An explicit PI_CODING_AGENT_DIR is the only candidate; legacy home locations are never consulted then.
+  if (resolution.source === "env") return [resolution.dir];
+  return [resolution.dir, join(homeDirectory, ".config", "pi"), join(homeDirectory, ".pi")];
 }
 
 function runDefaultCommandSync(command: string, args: string[]): CommandResult {
@@ -97,6 +122,9 @@ function runDefaultCommandSync(command: string, args: string[]): CommandResult {
  */
 function runPiPreflightChecks(params: {
   homeDirectory: string;
+  agentDir?: string;
+  agentDirDiagnostic?: string;
+  versionStatus: PiVersionEvaluation;
   configDirectory?: string;
   version: string;
   pathExists: (path: string) => boolean;
@@ -105,10 +133,30 @@ function runPiPreflightChecks(params: {
   getStat: (path: string) => { isDirectory: () => boolean; isFile: () => boolean };
 }): RunnerInstallPreflightCheck[] {
   const checks: RunnerInstallPreflightCheck[] = [];
-  const { homeDirectory, configDirectory, version, pathExists, readDir, readFile, getStat } = params;
+  const { homeDirectory, agentDir, agentDirDiagnostic, versionStatus, configDirectory, version, pathExists, readDir, readFile, getStat } = params;
+
+  // 0. Agent directory and minimum Pi version (blocking)
+  checks.push({
+    id: "runner-config-dir",
+    runner: "pi",
+    status: agentDir ? "pass" : "fail",
+    severity: agentDir ? "info" : "error",
+    message: agentDir ? `Pi agent directory: ${agentDir}.` : (agentDirDiagnostic ?? "Pi agent directory could not be resolved."),
+    path: agentDir,
+    remediation: agentDir ? undefined : "Set PI_CODING_AGENT_DIR to an absolute directory or unset it.",
+  });
+  checks.push({
+    id: "runner-min-version",
+    runner: "pi",
+    status: versionStatus.supported ? "pass" : "fail",
+    severity: versionStatus.supported ? "info" : "error",
+    message: versionStatus.supported
+      ? `Pi ${versionStatus.version} satisfies the minimum version (>= ${PI_MIN_VERSION}).`
+      : (versionStatus.diagnostic ?? `Pi >= ${PI_MIN_VERSION} is required.`),
+    remediation: versionStatus.supported ? undefined : PI_UPGRADE_HINT,
+  });
 
   // 1. MCP config persistence check
-  const mcpConfigPath = join(homeDirectory, ".pi", "mcp.json");
   const mcpConfigExists = configDirectory ? pathExists(join(configDirectory, "mcp.json")) : false;
   checks.push({
     id: "mcp-config-persistence",
@@ -154,9 +202,11 @@ function runPiPreflightChecks(params: {
     diagnostics: staleDiagnostics,
   });
 
-  // 3. Nested skills cleanup check
-  const skillsDir = join(homeDirectory, ".pi", "skills");
-  const nestedSkillsFound = checkNestedSkillsDirectory(skillsDir, pathExists, readDir, getStat);
+  // 3. Nested skills cleanup check (agent-dir skills; the pre-1.0 `~/.pi/skills` only for the default location)
+  const effectiveAgentDir = agentDir ?? join(homeDirectory, ".pi", "agent");
+  const skillsDirs = [join(effectiveAgentDir, "skills"), ...(agentDir && agentDir !== join(homeDirectory, ".pi", "agent") ? [] : [join(homeDirectory, ".pi", "skills")])];
+  const nestedSkillsDir = skillsDirs.find((dir) => checkNestedSkillsDirectory(dir, pathExists, readDir, getStat));
+  const nestedSkillsFound = nestedSkillsDir !== undefined;
   checks.push({
     id: "nested-skills-cleanup",
     runner: "pi",
@@ -165,14 +215,14 @@ function runPiPreflightChecks(params: {
     message: nestedSkillsFound
       ? "Nested skills directory detected."
       : "No nested skills directories found.",
-    path: nestedSkillsFound ? skillsDir : undefined,
+    path: nestedSkillsDir,
     remediation: nestedSkillsFound
       ? "Remove nested SKILL.md directories in skills folder."
       : undefined,
   });
 
   // 4. Legacy SDD cleanup check
-  const legacyFilesFound = checkLegacySddFiles(homeDirectory, pathExists, readDir);
+  const legacyFilesFound = checkLegacySddFiles(agentDir ?? join(homeDirectory, ".pi", "agent"), pathExists, readDir);
   checks.push({
     id: "legacy-sdd-cleanup",
     runner: "pi",
@@ -199,7 +249,7 @@ function runPiPreflightChecks(params: {
       : "Pi binary not found or not executable.",
     remediation: binaryUsable
       ? undefined
-      : "Install Pi: npm install -g @dreki-gg/pi-agent",
+      : PI_UPGRADE_HINT,
   });
 
   return checks;
@@ -235,14 +285,11 @@ function checkNestedSkillsDirectory(
  * Check for legacy SDD agent files (sdd-*.md).
  */
 function checkLegacySddFiles(
-  homeDirectory: string,
+  agentDir: string,
   pathExists: (path: string) => boolean,
   readDir: (path: string) => string[],
 ): boolean {
-  const searchDirs = [
-    join(homeDirectory, ".pi", "agent"),
-    join(homeDirectory, ".pi", "skills"),
-  ];
+  const searchDirs = [agentDir, join(agentDir, "skills")];
 
   for (const dir of searchDirs) {
     if (!pathExists(dir)) continue;

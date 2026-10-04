@@ -472,7 +472,7 @@ describe("Codex global ownership and migration", () => {
       expect(legacy).toContain("--cleanup-legacy");
       expect(await readFile(join(cwd, ".codex", "agents", "deck-lead.toml"), "utf8")).toBe(files[".codex/agents/deck-lead.toml"]);
 
-      const result = await adapter.cleanupLegacyInstall!(cwd);
+      const result = await adapter.cleanupLegacyInstall!(cwd, { deckConfig: deckConfig() });
       expect(result.removed).toEqual(expect.arrayContaining([".codex/agents/deck-lead.toml", ".agents/skills/deck-lead/SKILL.md", ".codex/deck-manifest.json"]));
       expect(result.preserved).toEqual([".agents/skills/deck-modified/SKILL.md"]);
       await expect(stat(join(cwd, ".codex", "agents", "deck-lead.toml"))).rejects.toThrow();
@@ -482,7 +482,7 @@ describe("Codex global ownership and migration", () => {
       expect(config).toContain("[profiles.mine]");
       expect(config).not.toContain("mcp_servers.context7");
       expect(await readFile(join(cwd, "unrelated.txt"), "utf8")).toBe("keep");
-      expect((await adapter.cleanupLegacyInstall!(cwd)).diagnostics).toEqual(["No legacy per-project Deck install was found."]);
+      expect((await adapter.cleanupLegacyInstall!(cwd, { deckConfig: deckConfig() })).diagnostics).toEqual(["No legacy per-project Deck install was found."]);
     });
   });
 

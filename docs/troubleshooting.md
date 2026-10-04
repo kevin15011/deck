@@ -48,7 +48,7 @@ Nested skill directories and legacy SDD files are reported as cleanup warnings. 
 
 Choose `none` to continue without adaptive memory, or complete the selected provider's runner setup. For Supermemory, follow the active runner's path:
 
-- **Pi:** re-run setup so Deck validates the token and stores it in the Deck secret store; Pi MCP config must contain only non-secret endpoint/scope data and must not contain the bearer credential.
+- **Pi:** re-run setup so Deck validates the token and stores it in the Deck secret store; Pi configuration must not contain the bearer credential (Deck hands Pi only the loopback endpoint and a token-file path). Run `deck doctor` to check the Pi install, `pi-mcp-adapter` conflicts, stale `pi-memory-*` directories and legacy files; `deck pi developer --cleanup-legacy` removes unmodified legacy Deck files.
 - **OpenCode/Codex:** provide the Deck runtime API token so Deck can validate it and store it in the Deck secret store. Separately, Deck can write the remote endpoint and `x-sm-project` scope; authenticate that optional MCP path with `/connect`, `opencode mcp auth supermemory`, or `codex mcp login supermemory` as appropriate. Runner OAuth credentials do not replace the Deck runtime bearer credential.
 
 Expect degraded/unknown health until the selected runner's authenticated runtime validation succeeds. Project scope is represented by the runner's `x-sm-project` configuration; user identity for runtime calls comes from the Deck secret-store token, while optional MCP identity comes from the runner OAuth session where used.
@@ -102,3 +102,11 @@ Capture:
 4. whether the failure happened during review, install, verification, update, or rollback.
 
 Then compare the result with [Support matrix](reference/support-matrix.md) and [Operations](operations.md). Do not assume a detected runner or a package declaration implies operational support.
+
+## Pi shows a `[Skill conflicts]` block at startup
+
+Pi keeps the first skill it finds for a name and lists the others as conflicts. Pi searches `~/.pi/agent/skills` and `~/.agents/skills` (the Codex install writes there) in addition to the Deck package.
+
+- **Deck sessions** (`deck pi developer`) pass the Deck package to Pi as a launch-time source (`--extension <agent dir>/deck/package`), which Pi merges before auto-discovered skills, so the package skills always win. Your other skills still load. Plain `pi` does not get this priority.
+- **Legacy copies** in `~/.pi/agent/skills/deck-*` and `~/.pi/agent/agents/deck-*.md` come from older Deck versions. Run `deck pi developer --cleanup-legacy` once: it removes them even when they differ from the current templates, as long as they are demonstrably Deck-authored, and backs them up under `$XDG_STATE_HOME/deck/backups/pi-legacy/` first. `deck doctor` and the install plan flag them.
+- **Codex copies** in `~/.agents/skills/deck-*` are never removed by the Pi flow. Instead the global Pi install adds a Deck-owned exclusion (`"!deck-lead"`, `"!deck-archive"`, ... one per skill the Deck package ships) to the `skills` array of `<agent dir>/settings.json`, so Pi stops listing those copies as conflicts. The entries are tracked in the Deck manifest, sit beside your own `skills` entries, never match a `deck-*` skill of your own that Deck does not ship, and are removed when Deck removes its Pi package. If `deck doctor` reports missing skill exclusions, re-run `deck pi developer`.

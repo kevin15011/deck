@@ -19,8 +19,10 @@ import type { DeckSecretStore } from "@deck/core";
 import type { SupermemoryRuntimeTransport } from "@deck/adapter-supermemory/runtime";
 import { formatSessionRuntimeReadiness, resolveSessionRuntimeReadiness } from "./session-runtime-readiness";
 import { authorizeOpenCodeSupermemoryLaunch, VERIFIED_OPENCODE_SUPERMEMORY_BINDING, type OpenCodeSupermemoryLaunchEffects } from "./opencode-supermemory-launch";
+import { createPiMemoryTokenHandoff, withCodexMemoryToolsLoopback, withPiMemoryLoopback, type PiMemoryTokenHandoff } from "./pi-memory-token-handoff";
+import { getDeckStateDir } from "./runtime/paths";
 import { isQuietDiagnostic } from "./launch-diagnostic-format";
-import { authorizeCodexSupermemoryLaunch, resolveCodexSupermemoryLaunchCredential, VERIFIED_CODEX_SUPERMEMORY_BINDING, type CodexSupermemoryLaunchEffects } from "./codex-supermemory-launch";
+import { isCodexMemoryToolsRegistered, authorizeCodexSupermemoryLaunch, resolveCodexSupermemoryLaunchCredential, VERIFIED_CODEX_SUPERMEMORY_BINDING, type CodexSupermemoryLaunchEffects } from "./codex-supermemory-launch";
 
 export type SpawnedRunnerResult = {
   exitCode: number;
@@ -95,6 +97,8 @@ export async function executeRunnerLaunchPlan(
     ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === VERIFIED_CODEX_SUPERMEMORY_BINDING
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "SUPERMEMORY_CODEX_API_KEY" || key === "TAVILY_API_KEY"))
+    : plan.sensitiveEnvAuthorization?.binding === "deck-pi-web-search-v1"
+      ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY"))
     : plan.sensitiveEnvAuthorization?.binding === "deck-claude-web-search-v1" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1"
       ? new Set(plan.sensitiveEnvAuthorization.keys.filter((key) => key === "TAVILY_API_KEY" || plan.sensitiveEnvAuthorization?.binding === "deck-claude-official-memory-v1" && key === "SUPERMEMORY_CC_API_KEY"))
       : new Set<string>();
@@ -489,11 +493,11 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     if (input.dryRun) {
       await input.presentPreview("Legacy cleanup requested: a dry run removes nothing. Rerun without --dry-run to remove the unmodified Deck-owned per-project files.");
     } else {
-      if (!input.yes && (!input.interactive || !input.confirm || !(await input.confirm("Remove the previous per-project Deck install (unmodified Deck-owned files only)? [y/N]")))) {
+      if (!input.yes && (!input.interactive || !input.confirm || !(await input.confirm("Remove the previous Deck install artifacts (unmodified Deck-owned files only; a backup is kept)? [y/N]")))) {
         return { status: "blocked", message: "Legacy cleanup needs --yes or an interactive confirmation; nothing was removed." };
       }
       try {
-        const cleaned = await input.adapter.cleanupLegacyInstall(input.launch.projectRoot);
+        const cleaned = await input.adapter.cleanupLegacyInstall(input.launch.projectRoot, { deckConfig: input.launch.deckConfig });
         await input.presentPreview([`Legacy cleanup removed ${cleaned.removed.length} file(s).`, ...cleaned.diagnostics.map((message) => `! ${message}`)].join("\n"));
       } catch (error) {
         return { status: "blocked", message: `Legacy cleanup failed and was rolled back: ${error instanceof Error ? error.message : "unknown error"}` };
@@ -628,15 +632,33 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     if (launch.status === "blocked") return { status: "blocked", message: launch.diagnostics.map((diagnostic) => diagnostic.message).join("; "), diagnostics: launch.diagnostics };
     let executablePlan: RunnerLaunchPlan;
     let profile: string;
+    let toolsCredentialToken: string | undefined;
     try {
       const credential = input.codexSupermemoryCredential?.(baseLaunch.projectRoot) ?? resolveCodexSupermemoryLaunchCredential(baseLaunch.projectRoot, input.codexSupermemoryLaunchEffects);
       profile = credential.profile;
+      toolsCredentialToken = credential.token;
       executablePlan = authorizeCodexSupermemoryLaunch(launch.plan, { token: credential.token, projectRoot: baseLaunch.projectRoot, canonicalRepoTag: credential.canonicalRepoTag }, input.codexSupermemoryLaunchEffects);
     } catch (error) {
       return { status: "blocked", message: error instanceof Error ? error.message : "Codex Supermemory launch verification failed." };
     }
+    // Explicit memory tools: when the reviewed install registered the Deck memory MCP entry, host the loopback for it.
+    // The official plugin keeps automatic recall/capture; the host is fail-open and never holds anything in Codex's env.
+    const memoryTools = isCodexMemoryToolsRegistered(input.codexSupermemoryLaunchEffects)
+      ? await startCodexMemoryToolsLoopback({
+        projectRoot: baseLaunch.projectRoot,
+        teamId: baseLaunch.teamId,
+        deckConfig,
+        sessionId: sessionResolution.sessionId,
+        launchMode: baseLaunch.mode,
+        apiKey: toolsCredentialToken,
+        supermemoryRuntime: input.supermemoryRuntime,
+        plan: executablePlan,
+      })
+      : { plan: executablePlan, close: async () => [] as readonly { code: string; severity: "warning"; message: string }[] };
+    executablePlan = memoryTools.plan;
     try {
       const outcome = await executeRunnerLaunchPlan(executablePlan, input.processEffects);
+      const memoryToolsDiagnostics = await memoryTools.close();
       return {
         status: "launched",
         outcome,
@@ -645,12 +667,14 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
           plan: redactSensitiveLaunchPlan(executablePlan),
           diagnostics: [
             ...launch.diagnostics,
+            ...memoryToolsDiagnostics,
             { code: "codex-supermemory-profile", severity: "warning" as const, message: `Official Supermemory plugin will use the ${profile} profile for this Deck-managed Codex process; co-loaded plugins or hooks can access the selected process credential.` },
             ...inspectionDiagnostics.map((message) => ({ code: "runner-inspection", severity: "warning" as const, message })),
           ],
         },
       };
     } catch (error) {
+      await memoryTools.close();
       return { status: "blocked", message: error instanceof Error ? `Runner spawn failed: ${error.message}` : "Runner spawn failed." };
     }
   }
@@ -730,6 +754,8 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
   let closeDiagnostics: readonly import("./supermemory-runtime-host").SupermemoryRuntimeHostDiagnostic[] = [];
   let result: RunRunnerLaunchResult | undefined;
   let startedMemoryHost: Awaited<ReturnType<typeof createSupermemoryRuntimeHost>> | undefined;
+  // Pi receives the loopback bearer token by 0600 file (its MCP servers inherit the Pi environment); removed on close.
+  let piTokenHandoff: PiMemoryTokenHandoff | undefined;
   try {
     const { host: memoryHost } = await lease.start();
     startedMemoryHost = memoryHost;
@@ -781,8 +807,11 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
       if (codexMemoryUnavailable) {
         launch = { ...launch, plan: { ...launch.plan, args: ["-c", "features.hooks=false", ...launch.plan.args] } };
       }
+      if (loopbackBridge && input.adapter.runnerId === "pi") {
+        piTokenHandoff = createPiMemoryTokenHandoff({ token: loopbackBridge.token, baseDirectory: join(input.supermemoryRuntime?.stateHome ?? getDeckStateDir(), "runtime") });
+      }
       const executableLaunch = loopbackBridge
-        ? { ...launch, plan: withSupermemoryLoopback(launch.plan, loopbackBridge, baseLaunch.mode) }
+        ? { ...launch, plan: piTokenHandoff ? withPiMemoryLoopback(launch.plan, loopbackBridge, baseLaunch.mode, piTokenHandoff.tokenFile) : withSupermemoryLoopback(launch.plan, loopbackBridge, baseLaunch.mode) }
         : launch;
       const memoryInputCapture = explicitIntent.kind === "remember" || loopbackBridge
         ? { diagnostics: [], metrics: [] }
@@ -827,7 +856,12 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     const prefix = reasonForMessage === "spawn-failed" ? "Runner spawn failed" : "Runner launch failed";
     result = { status: "blocked", message: error instanceof Error ? `${prefix}: ${error.message}` : `${prefix}.`, diagnostics: [readinessDiagnostic] };
   } finally {
-    const closed = await lease.close(closeReason);
+    let closed: Awaited<ReturnType<typeof lease.close>>;
+    try {
+      closed = await lease.close(closeReason);
+    } finally {
+      piTokenHandoff?.remove();
+    }
     closeDiagnostics = closed.diagnostics;
   }
 
@@ -855,6 +889,55 @@ export async function runRunnerLaunch(input: RunRunnerLaunchInput): Promise<RunR
     return { ...result, diagnostics: withSingleFinalReadinessDiagnostic(diagnostics, finalReadinessFor(diagnostics)) };
   }
   return result;
+}
+
+type CodexMemoryToolsLoopback = Readonly<{
+  plan: RunnerLaunchPlan;
+  close(): Promise<readonly { code: string; severity: "warning"; message: string }[]>;
+}>;
+
+/** Hosts the loopback for the Deck memory MCP server beside the official plugin. Never throws: memory stays fail-open. */
+async function startCodexMemoryToolsLoopback(args: {
+  projectRoot: string;
+  teamId: string;
+  deckConfig: RunnerLaunchInput["deckConfig"];
+  sessionId: string;
+  launchMode: RunnerLaunchInput["mode"];
+  apiKey: string | undefined;
+  supermemoryRuntime: RunRunnerLaunchInput["supermemoryRuntime"];
+  plan: RunnerLaunchPlan;
+}): Promise<CodexMemoryToolsLoopback> {
+  const unavailable: CodexMemoryToolsLoopback = { plan: args.plan, close: async () => [] };
+  let handoff: PiMemoryTokenHandoff | undefined;
+  const lease = createManagedSessionRuntimeLease({
+    projectRoot: args.projectRoot,
+    teamId: args.teamId,
+    deckConfig: args.deckConfig,
+    runnerId: "codex",
+    sessionId: args.sessionId,
+    launchMode: args.launchMode,
+    supermemoryRuntime: { ...(args.supermemoryRuntime ?? {}), apiKey: args.supermemoryRuntime?.apiKey ?? args.apiKey },
+  });
+  try {
+    const bridge = await lease.startLoopbackBridge(args.launchMode);
+    if (!bridge) {
+      await lease.close("normal");
+      return { plan: args.plan, close: async () => [{ code: "codex-memory-tools-unavailable", severity: "warning", message: "Codex explicit memory tools are unavailable for this launch (the Supermemory runtime could not start); the official plugin hooks are unaffected." }] };
+    }
+    handoff = createPiMemoryTokenHandoff({ token: bridge.token, baseDirectory: join(args.supermemoryRuntime?.stateHome ?? getDeckStateDir(), "runtime"), runner: "codex" });
+    const tokenHandoff = handoff;
+    return {
+      plan: withCodexMemoryToolsLoopback(args.plan, bridge, tokenHandoff.tokenFile),
+      close: async () => {
+        try { await lease.close("normal"); } finally { tokenHandoff.remove(); }
+        return [];
+      },
+    };
+  } catch {
+    handoff?.remove();
+    await lease.close("exception").catch(() => undefined);
+    return unavailable;
+  }
 }
 
 function applyExplicitRecallAdvisory(launch: RunnerLaunchInput, advisoryText?: string): RunnerLaunchInput {

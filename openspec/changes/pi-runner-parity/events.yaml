@@ -1,0 +1,124 @@
+schema: spec-registry-events-v1
+events:
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: specs/
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect
+  - phase: design
+    status: in_progress
+    event: design.in_progress
+    artifact: design.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect
+    notes:
+      - "P1-P8 pending Phase 0 spike verification (pi-spike-report.md not yet available)."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect
+    notes:
+      - "P1-P8 resolved from the Phase 0 spike report; residual risks R1-R8 recorded with verification tasks."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-architect
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 1 foundations: 0.7, 1.1, 1.4, 1.5 complete (pi-version, agent-dir, pi-manifest, pi-global-install, activation guard, launch plan --session-dir, sanitizer PI_CODING_AGENT_SESSION_DIR). 1.2 and 1.3 adapter threading completes with the Phase 2 adapter wiring."
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 2 complete: global package layout, manifest-owned settings.json packages entry, global lead profile, activation guard, adapter plan/apply/verify/rollback/launch on the global layout; 1.2 and 1.3 closed. See design.md 'Implementation deviations' (Node-loadable execution bundle, guarded extension entries)."
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 3 complete: Deck-owned RTK/Codebase Memory tools, global mcp.json servers (absolute commands, direct exposure, memory env blanks), community pi-subagents/pi-mcp-adapter removed from required tools and removed transactionally when Deck-added, Web Search installable tool with env-only credential, direct-exposure tool names in role prompts and read-only allowlists. Verified end to end against Pi 1.0.0 (faux provider)."
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 4 complete: Deck-owned deck-subagents extension (single/parallel/chain, per-role model/thinking/read-only tools, child isolation env, SIGTERM/SIGKILL abort), TS sources bundled for Node by scripts/generate-pi-extension-assets.ts, verified against the real Pi 1.0.0 runtime with the faux provider. See design.md deviations 19-21."
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 5 complete: deck-memory extension (lead recall/capture, child role recall, compaction drain, shutdown flush), 0600 token-file handoff in the production launch path, DECK_PI_MEMORY switch, execution-extension memory path neutralized (generated bundle untouched), R6 resolved. Verified with SDK and real Pi 1.0.0 contract tests and an end-to-end runRunnerLaunch test. See design.md deviations 22-26."
+  - phase: apply
+    status: in_progress
+    event: apply.batch_completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phase 6 complete: deck-tool-policy extension (read-only role enforcement, owned-RTK rewrite, graph redirection) with installer-written config, verified in the real Pi 1.0.0 runtime and alongside the execution extension. See design.md deviations 27-30."
+  - phase: apply
+    status: ready_for_verify
+    event: apply.completed
+    artifact: tasks.md
+    timestamp: "2026-10-02T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Phases 7 and 8 complete: advisory graph guidance, legacy detection, opt-in transactional cleanup (--cleanup-legacy), Doctor coverage, documentation. Gates recorded in apply-progress.md; hermetic canary smoke against Pi 1.0.0 passed. Ready for verify; Phase 9 is manual canary evidence."
+  - phase: apply
+    status: ready_for_verify
+    event: apply.fix
+    artifact: design.md
+    timestamp: "2026-10-03T00:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Skill-collision fix: package passed as a first-priority CLI source in Deck sessions; stale Deck-authored global legacy files removed by --cleanup-legacy; docs and deviations 36-38."
+  - phase: apply
+    status: ready_for_verify
+    event: apply.fix
+    artifact: design.md
+    timestamp: "2026-10-03T12:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "Pi-specific package instructions and name frontmatter, cross-runner text guard, OpenCode external skill precedence measured (no fix), Pi model/thinking assignments preserved across reinstalls; deviations 40-43."
+  - phase: apply
+    status: ready_for_verify
+    event: apply.fix
+    artifact: design.md
+    timestamp: "2026-10-03T18:00:00Z"
+    actor: deck-apply-deep
+    notes:
+      - "In-branch extension: explicit memory_search/memory_save for Pi and Codex over the loopback host (D12, deviations 44-50, spec codex-memory-tools and pi-adaptive-memory delta). Codex 'assignments are global' test fails on clean main (baseline)."
+  - phase: verify
+    status: ready_for_verify
+    event: verify.compaction_memory
+    artifact: apply-progress.md
+    timestamp: "2026-10-03T23:30:00Z"
+    actor: deck-lead
+    notes:
+      - "D13 compaction enrichment and lead-only summary save: strict RED/GREEN, independent Quality replay-collision fix and scoped re-review, 2156 adapter/CLI tests passed, TypeScript passed. Native automatic/live-provider evidence remains pending."

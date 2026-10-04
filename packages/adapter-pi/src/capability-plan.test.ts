@@ -244,17 +244,15 @@ describe("buildPiRunnerReviewPlan", () => {
     );
   });
 
-  test("plan includes prerequisite automatic installs when sub-agents and MCP packages are missing", () => {
+  test("plan never installs the community pi-subagents or pi-mcp-adapter packages as prerequisites", () => {
     const toolsReview = review([]);
     const inventory = buildPiRunnerCapabilityInventory(toolsReview, undefined, { runnerScope: "pi" });
     const plan = buildPiRunnerReviewPlan(baseState({ runtime: { toolsReview } }), inventory);
 
-    expect(plan.groups.automaticInstalls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ toolId: "sub-agents", source: "npm:pi-subagents" }),
-        expect.objectContaining({ toolId: "mcp-packages", source: "npm:pi-mcp-adapter" }),
-      ]),
-    );
+    const sources = plan.groups.automaticInstalls.map((action) => action.source);
+    expect(sources).not.toContain("npm:pi-subagents");
+    expect(sources).not.toContain("npm:pi-mcp-adapter");
+    expect(plan.groups.automaticInstalls.some((action) => action.id.startsWith("prerequisite."))).toBe(false);
   });
 
   test("dashboard plan excludes rpiv todo and ask-user-question regressions (not context7)", () => {

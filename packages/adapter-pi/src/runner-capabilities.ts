@@ -183,7 +183,8 @@ async function inspectEnvironment(input: RunnerEnvironmentInspectInput): Promise
 function buildInstallationPlan(input: RunnerInstallationInput) {
   const { buildCapabilityInstallationPlan } = require("./capability-plan");
   const requiredTools = getRequiredToolStatuses();
-  const selectedOptionalToolIds: Array<"sub-agents" | "mcp-packages" | "context-mode" | "codebase-memory" | "rtk" | "context7"> = ["sub-agents", "mcp-packages"];
+  // Deck owns subagents and MCP configuration, so no community Pi package is planned here.
+  const selectedOptionalToolIds: Array<"context-mode" | "codebase-memory" | "rtk" | "context7"> = [];
 
   return buildCapabilityInstallationPlan({ requiredTools, selectedOptionalToolIds });
 }
@@ -201,7 +202,7 @@ async function installTools(input: RunnerToolInstallInput): Promise<RunnerToolIn
   const installableTools: InstallablePiTool[] = plan.steps
     .filter((step: { action: string }) => step.action === "install")
     .map((step: { tool: string }) => ({
-      id: step.tool as "sub-agents" | "mcp-packages" | "context-mode" | "codebase-memory" | "rtk" | "context7",
+      id: step.tool as "context-mode" | "codebase-memory" | "rtk" | "context7",
       name: step.tool,
       source: step.tool,
       required: true,

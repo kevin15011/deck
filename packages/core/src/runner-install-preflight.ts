@@ -15,7 +15,9 @@ export type RunnerInstallPreflightCheckId =
   | "nested-skills-cleanup" // No nested skill directories
   | "legacy-sdd-cleanup" // No legacy SDD agent files
   | "shared-binary-usability" // Required binaries are executable
-  | "config-manifest-presence"; // Config/manifest files present (OpenCode)
+  | "config-manifest-presence" // Config/manifest files present (OpenCode)
+  | "runner-min-version" // Runner CLI meets its minimum supported version
+  | "runner-config-dir"; // Runner config directory override resolved to a valid absolute directory
 
 // Status of an individual preflight check
 export type RunnerInstallPreflightStatus =

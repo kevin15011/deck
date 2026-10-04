@@ -11,7 +11,7 @@ Deck is runner-aware rather than runner-agnostic. The CLI registers operational 
 
 | Runtime | Status | Deck behavior |
 |---|---|---|
-| Pi | **Supported** | Detects the binary, runs preflight, reviews packages and MCP, configures capabilities, materializes the Developer Team, and can launch `deck pi developer`. |
+| Pi | **Supported** (Pi >= 1.0.0) | Detects the binary, enforces the minimum version, reviews tools and MCP, configures capabilities, materializes the Developer Team globally under the Pi agent directory, and launches `deck pi developer` with Pi's normal interactive TUI. |
 | OpenCode | **Supported** | Detects the binary, reads runner configuration and package evidence, configures capabilities, and materializes the Developer Team through the TUI. |
 | Claude | **Supported with route limits** | A Deck-owned global plugin carries the Developer Team files, pinned shared tools, and the official Supermemory plugin; the Deck CLI starts limited sessions. Protected execution controls and Deck's memory runtime are not part of this route. |
 | Codex | **Supported with route limits** | Deck can configure and launch the Developer Team for Codex through the TUI and the Deck CLI: native roles and skills, shared tools pinned to verified executables, an RTK `PreToolUse` hook, and the official Supermemory plugin hooks. Protected execution controls remain static-compatible. |
@@ -20,18 +20,46 @@ Detection is not parity. A detected binary does not imply that Deck can install 
 
 ## Pi
 
-Pi preflight reads the Pi version and searches the supported configuration candidates under the home directory. It can report whether configuration exists, whether the MCP configuration is present, stale package references are visible, nested skill directories exist, legacy SDD files remain, and whether the Pi binary is usable.
+Deck supports **Pi 1.0.0 or newer** (`@earendil-works/pi-coding-agent`). Preflight and `deck doctor` parse `pi --version`; an older, unparseable or missing Pi blocks install and launch with an upgrade hint (`npm install -g @earendil-works/pi-coding-agent@latest`). The older `@mariozechner/*` distributions and Pi < 1.0.0 are not supported.
+
+### Where Deck installs
+
+Everything Deck installs is global and manifest-owned; the install writes no project files (`<project>/.pi` is never written, and no Deck package, agent, skill or profile goes into `<project>/.deck`). The only project-side artifact is Pi's own session store for `--continue` and `--resume`, `<project>/.deck/pi/sessions/developer-team`, created at launch.
+
+| What | Location |
+|---|---|
+| Pi agent directory | `$PI_CODING_AGENT_DIR` when set (must be an absolute path), otherwise `~/.pi/agent` |
+| Deck package (agents, skills, prompts, extensions) | `<agent dir>/deck/package`, registered once in `<agent dir>/settings.json` `packages` as `deck/package` |
+| Extensions | `<agent dir>/deck/package/extensions/<name>/{index.js,impl.js}`: `developer-team-execution` (lead only); `deck-subagents` (lead delegation/UI and child shell containment); `deck-memory` and `deck-tool-policy` (lead and children) |
+| Lead system prompt | `<agent dir>/deck/profiles/developer-team/system-prompt.md`, passed with `--system-prompt`; `SYSTEM.md` and `APPEND_SYSTEM.md` are never written |
+| Deck MCP servers | `<agent dir>/mcp.json`, absolute commands, `"exposure": "direct"` (tool names look like `mcp__codebase_memory__search_graph`) |
+| Ownership manifest | `<agent dir>/deck/manifest.json` (content hashes; Deck replaces or removes only what it recorded) |
+
+Deck replaces or removes only files whose hashes match its manifest; a Deck file you edited blocks the plan with a clear message instead of being overwritten. Your own `settings.json` values and `mcp.json` servers are preserved.
+
+### Deck-session activation guard
+
+The Deck extensions do nothing unless a Deck launch sets `DECK_PI_SESSION=1` (and `DECK_PI_ROLE`, plus `DECK_PI_CHILD=1` in subagent children). A plain `pi` in the same agent directory still loads the package, so it lists the Deck skills and the extension names, but it evaluates none of the extension code and does not load the Deck system prompt, delegation tool, tool interception or memory. Deck therefore never changes how Pi behaves outside `deck pi developer`; Deck skills and agent definitions remain discoverable, which the design allows.
+
+### What the Deck session adds
+
+- **Background subagents.** The lead's `subagent` tool accepts single, parallel (up to 8 tasks), and sequential chain delegations immediately and returns exact task IDs. Four child slots are shared across the parent session, with at most 32 inspectable records. Lead remains conversational and must avoid edits overlapping active delegates. Children run `pi --mode json -p --session <exact private child file>` with the role's model/thinking/tool policies and memory handoff; children never get the delegation tool. Actual tool events and untrusted agent reports populate bounded progress/history. Progress stays in the panel/history and never creates chat turns. A Pi-only ephemeral task board supplies current results to Lead; hidden, coalesced wakes run only while idle or at the native settled boundary. Busy tool loops can integrate results without a redundant queued follow-up.
+- **Subagent display and controls.** Fullscreen Pi shows a non-modal floating right panel that stays anchored while conversation history scrolls. Regular mode, narrow/short terminals, and large editors use compact status plus `/subagents details`. `/subagents toggle` minimizes/restores the panel; minimization stays sticky through updates. `/subagents list`, `/subagents inspect <task ID>`, `/subagents cancel <task ID>`, and `/subagents resume <task ID>` are also available as tool actions. The floating panel shows human role names, short titles, meaningful activity and HH:MM:SS clocks; IDs and command hints stay in details. Completion freezes only that task's clock. It distinguishes waiting for Lead, reviewing, integrated and blocked states. Tool cards are compact until expanded. Preview rows are cell-safe ASCII; details retain Unicode reports. No TUI settings/mode are changed.
+- **Lead integration, not just completion.** Pi's `subagent` tool has `review` and `resolve` actions. Lead inspects untrusted evidence, validates/integrates authorized work, then resolves the exact current `outcomeId` as `integrated` or `blocked` with a concrete summary. Integrated resolution requires review. Admission is not integration; failed admission gets bounded retries and unresolved admitted work gets one reminder, not endless model turns. Pending delivery/storage failures remain visible. The board does not authorize new delegation, retry or effects, and respects user pauses. These controls/guidance belong only to the Pi adapter; core policy and other runners are unchanged.
+- **Recovery without replay.** Session switches and normal shutdown cancel the Pi child and settle its owned POSIX process group, not every possible tool effect. A new parent never adopts another parent's jobs. Use native `/resume` to select an old parent: its records become inspectable, but children do not auto-start. When execution ownership is proven settled, explicit `/subagents resume <task ID>` reopens that child's exact history and directs it to inspect ambiguous effects before continuing, rather than blindly replaying mutations. Navigation/branch summarization must finish before acceptance or continuation reopens, including cancelled, vetoed, and failed navigation. Missing history, changed role policy, and duplicate continuation fail closed. A resumed execution gets a new attempt identity; obsolete reports/callbacks cannot mutate it or resolve its new outcome. Private child files live beside the parent session under `.deck-subagents/`; snapshots exclude environment credentials and model context.
+- **Owned child shell and conservative recovery.** On Linux, the packaged child extension replaces only the delegated Bash backend through Pi's native `createBashToolDefinition`/`BashOperations` API. Commands use the delegated Pi process group (`detached: false`); native schemas, output/results, shell settings and role policy remain in place. Lead tools are unchanged. A nonce/PID-bound startup handshake over dedicated JSON IPC clears the pre-spawn uncertain lease. Parent cleanup terminates the owned group on child completion, cancellation, timeout, navigation and shutdown, then verifies settlement before allowing explicit same-history continuation. Shell-specific abort/timeout ends the entire delegated job rather than leaving uncertain tool descendants running. The child's Bash description states this explicitly; diagnostics record a failure kind, exit/signal and bounded timeout reason instead of substituting the last progress report. Read-only roles gain no shell; delegated PowerShell is explicitly blocked. Windows/non-Linux, custom shells other than the system `/bin/bash`, missing extensions/custom runtimes without startup proof, legacy uncertain leases and unproven live/orphan ownership remain fail-closed. No cleanup signals use persisted PIDs. Birth identity and the exclusive lease gate remain recovery fences; a crash in the gate can refuse recovery permanently. There is no parent-death supervisor or daemon: after an abrupt parent crash an orphan may finish naturally, but it is never automatically resumed. This is local process-group ownership, not a sandbox or rollback: deliberately daemonizing/re-grouping commands, subprocesses started by other extensions/MCP servers, remote work and already-written files are outside the shell containment guarantee. Inspect effects before continuing; do not delegate work that escapes job ownership.
+- **Tool interception** (one `tool_call` handler in `deck-tool-policy`): role policy first, then RTK, then graph guidance. Read-only roles (Investigate and Quality) are blocked from mutating tools and have no shell; `bash` commands of the other roles are rewritten to the Deck-owned RTK binary when RTK is selected; and the first code-structure `grep`/`rg`/`find` search of a session runs normally and gains one concise note pointing at the Codebase Memory graph tools. Graph guidance never blocks a search, and non-code files and literal strings are untouched.
+- **Adaptive memory** (`deck-memory`): see [Adaptive memory](adaptive-memory.md#pi-event-flow). The extension also registers the explicit tools `memory_search` and `memory_save` (see [Explicit memory tools](adaptive-memory.md#explicit-memory-tools-on-demand-search-and-save)); read-only roles get only `memory_search`. Native reload rereads private credentials through a matching process-local coordinate handoff without restoring token environment variables. Internal continuation turns reuse only the exact parent's last authorized advisory ephemerally when its prompt override is absent, without extra recall/capture or persistence.
+- **Web Search**: the Tavily credential reaches only the launched Pi process environment, bound to that launch; it is never written to `mcp.json`, settings or agent files.
+
+### Setup and launch
 
 Pi-specific setup can include:
 
-- required package review, including sub-agents and MCP packages;
-- shared `context-mode`, Codebase Memory, RTK, Context7, and Supermemory evidence;
-- MCP configuration for shared services;
+- tool review and the shared `context-mode`, Codebase Memory, RTK, Context7, Serena and Web Search capabilities (Deck-owned pinned binaries where applicable);
 - model/provider discovery from Pi settings, `pi --list-models`, and configured environment variables;
 - per-agent model and thinking assignments;
-- global Developer Team materialization.
-
-Pi's standalone launch path is explicit:
+- global Developer Team materialization (the review plan lists every path under the agent directory).
 
 ```sh
 deck pi developer
@@ -39,7 +67,30 @@ deck pi developer --continue
 deck pi developer --resume
 deck pi developer --memory=supermemory
 deck pi developer --memory=none
+deck pi developer --cleanup-legacy
 ```
+
+`deck pi developer` plans and applies the global install when needed and then starts Pi's normal interactive TUI as the Deck lead session; Deck sessions are stored through `--session-dir`, so `--continue` and `--resume` use Pi's own session handling.
+
+### Migrating from earlier Pi installs
+
+Earlier Deck versions wrote `.pi/agents`, `.pi/skills` and `.deck/pi/profiles` into projects, loose Deck agents and skills into `<agent dir>/agents` and `<agent dir>/skills`, and required the community `pi-subagents` and `pi-mcp-adapter` packages.
+
+- **Mandatory, on install:** a `pi-mcp-adapter` or `pi-subagents` entry that Deck added is removed transactionally with a backup, because `pi-mcp-adapter` disables Pi's built-in MCP and `pi-subagents` would register a second `subagent` tool. An entry you added yourself is never removed: a `pi-mcp-adapter` entry produces a blocking MCP diagnostic, a `pi-subagents` entry a warning.
+- **Detected on every plan:** the legacy project and loose global files above are listed with their state and a cleanup hint; nothing is deleted automatically.
+- **Opt-in cleanup:** run `deck pi developer --cleanup-legacy` once from the project (an interactive run asks for confirmation first, and the launch continues afterwards). Files that still match the current Deck templates (ignoring your `model`, `thinking` and `tools` frontmatter lines), global `deck-*` agent/skill files in the Pi agent directory that are demonstrably Deck-authored by an older version (a `deck-*` name, the Deck contract marker and a matching frontmatter name), and package entries Deck added are removed; each removed item is backed up first under `$XDG_STATE_HOME/deck/backups/pi-legacy/` (default `~/.local/state/deck/backups/pi-legacy/`), and any failure restores everything. Other files that differ from the templates (no Deck marker, a mismatching name, or project-local copies) are kept and listed: delete them yourself if unwanted. `~/.agents/skills` belongs to the Codex install and is never touched.
+
+`deck doctor` reports the Pi version and minimum, the resolved agent directory, package registration (cross-checked with `pi list`), manifest drift, extension files and their `source-sha256` header, the pinned RTK binary, the MCP entries (absolute command, direct exposure, blanked memory variables), the `pi-mcp-adapter` conflict, stale `pi-memory-*` token directories, and legacy artifacts.
+
+### Known limits (Pi)
+
+- Pi >= 1.0.0 only.
+- Subagent children are started with `--append-system-prompt`, which **replaces** your `APPEND_SYSTEM.md` for those children (the lead keeps it).
+- MCP servers started by Pi inherit Pi's environment, including non-memory secrets such as the Web Search key; the memory bearer token is withheld (file handoff plus blanked `DECK_RUNNER_MEMORY_*` entries).
+- Investigate and Quality have no shell, so Quality cannot run test suites.
+- Delegating to `deck-setup` through the Deck `subagent` tool fails closed (`modification-not-authorized`) until `developer-team-execution-convergence` wires its authorization provider.
+- The graph guidance classification is a conservative heuristic; it may miss a code search or add its note to a borderline one.
+- Legacy cleanup matches the current Deck templates only.
 
 ## OpenCode
 
@@ -69,6 +120,7 @@ Review & Install for Codex can include:
 - **Codebase Memory**: an existing shared executable is reused (the per-user daemon must match the client version); otherwise the pinned native release is installed into the Deck data root. The MCP entry always stores the resolved absolute path.
 - **Context Mode**: a usable shared executable is reused; otherwise the pinned npm release is installed into the Deck data root. The MCP entry stores the resolved absolute path. Context Mode's own Codex hooks are not installed: they would compete with the RTK `PreToolUse` rewrite and are not part of the Claude or OpenCode routes.
 - **Serena**: Deck's owned launcher through Deck's hidden Serena MCP proxy, after explicit selection.
+- **Explicit memory tools**: a Deck-owned stdio MCP server `deck-memory` (the hidden `memory-mcp` internal subcommand, pinned to the running Deck binary) exposes `memory_search` and `memory_save` through the Deck loopback host when Supermemory is selected. It holds no Supermemory credential, receives only the loopback endpoint and a token-file path, and lists no tools outside a Deck launch. See [Adaptive memory](adaptive-memory.md#explicit-memory-tools-on-demand-search-and-save).
 - **Supermemory**: only the official `supermemoryai/codex-supermemory` plugin, pinned to one npm release and limited to its two documented lifecycle hooks (`UserPromptSubmit` recall and `Stop` flush). The profile credential entered in the TUI is stored in Deck's protected profile store and injected into the Codex process Deck starts, and nowhere else (`SUPERMEMORY_CODEX_API_KEY`); it is never written to Codex configuration. Deck does not register the Supermemory MCP server or its own memory loopback beside the plugin, and a launch is blocked if another Supermemory plugin or MCP registration exists in your Codex configuration.
 
 Deck adds and removes only its own marker-delimited hook blocks (`# deck-codex-hook:<id>:start` … `:end`) in the global `config.toml`, so your inline hooks and `hooks.json` entries keep working beside them. Codex requires review of non-managed hooks; the Deck CLI launch passes `--dangerously-bypass-hook-trust` when Deck-owned hooks are present, so they run without per-hook review for that process. When you start `codex` directly instead, open `/hooks` and trust Deck's entries. The launch continues to pass `--dangerously-bypass-approvals-and-sandbox`.
@@ -97,10 +149,10 @@ The capability registry uses scoped statuses such as `supported`, `shared`, `run
 
 | Capability | Pi | OpenCode | Codex | Interpretation |
 |---|---|---|---|---|
-| RTK | Shared binary | Shared binary through the OpenCode hook | Deck-owned pinned binary plus a `PreToolUse` rewrite hook | Reuse is checked instead of blindly reinstalling a usable binary. |
-| Context Mode / Codebase Memory | Shared binary and MCP | Shared binary and MCP | Shared binary reused, otherwise a Deck-owned pinned install; MCP pinned to the absolute path | A bare `PATH` name is never persisted for Codex. |
+| RTK | Deck-owned pinned binary through a `tool_call` rewrite | Shared binary through the OpenCode hook | Deck-owned pinned binary plus a `PreToolUse` rewrite hook | Reuse is checked instead of blindly reinstalling a usable binary. |
+| Context Mode / Codebase Memory | Shared binary or Deck-owned pinned install; built-in MCP with direct exposure | Shared binary and MCP | Shared binary reused, otherwise a Deck-owned pinned install; MCP pinned to the absolute path | A bare `PATH` name is never persisted for Codex. |
 | Serena | Shared MCP capability with manual-verification fallback | Configured MCP capability | Deck-owned launcher through the Deck proxy | The adapter owns the runner-specific configuration and readiness evidence. |
-| Supermemory | Pi MCP handoff | Official plugin | Official plugin hooks | One memory integration per runner; no raw MCP beside a plugin. |
+| Supermemory | Deck loopback memory through the `deck-memory` extension | Official plugin | Official plugin hooks | One memory integration per runner; no raw MCP beside a plugin. |
 | Context7 | Shared MCP capability | Configured MCP capability | Configured MCP capability | The server entry is validated in the active runner's configuration. |
 | Mermaid package | Pi-specific | OpenCode-specific | These are internal runner packages, not a universal product package. |
 | Developer Team | Runner-native materialization | Runner-native materialization | The canonical seven-role inventory is shared; file/config effects are not. |

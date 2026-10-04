@@ -67,6 +67,7 @@ import {
   type MemoryInjectionBundle,
 } from "@deck/core/memory/adaptive-memory";
 import { type ModificationAuthorization } from "../../core/src/teams/developer/orchestrator-invariants";
+import { translateOpenCodeCapabilityInstructions } from "./instruction-translation";
 import { getAgentContent, type DeveloperTeamPromptProfileV1 } from "@deck/core/teams/developer/content-registry";
 import type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
 import { DEFAULT_ORCHESTRATOR_PERSONALITY, type OrchestratorPersonality } from "@deck/core/config/deck-config";
@@ -477,7 +478,7 @@ export function buildOpenCodeDeveloperTeamInstallPlan(
   const { bundle: memoryBundle, diagnostics: memoryDiagnostics } = resolveOpenCodeMemoryInjection(options, configDir, projectRoot);
 
   const capabilityInstructions = options?.capabilityInstructions
-    ? { instructions: Object.freeze(options.capabilityInstructions.instructions.filter((fragment) => fragment.packageId !== "adaptive-memory")) }
+    ? translateOpenCodeCapabilityInstructions({ instructions: Object.freeze(options.capabilityInstructions.instructions.filter((fragment) => fragment.packageId !== "adaptive-memory")) })
     : undefined;
 
   // Build tool policies from capability instructions for dynamic tool resolution

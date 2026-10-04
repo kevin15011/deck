@@ -9,6 +9,31 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-04
+
+### Added
+
+- Native Pi 1.0+ integration: a manifest-owned global Developer Team package, built-in MCP with direct tool exposure, Deck-owned tool provisioning, version preflight and expanded Doctor diagnostics. Deck sessions no longer depend on community MCP/subagent packages.
+- Session-owned Pi background subagents with bounded parallel scheduling, live clarifications, inspect/cancel/resume controls, explicit review and integration, cumulative completion recaps, and a floating task panel with compact fallback counters. Recovery reopens exact child history only after execution ownership is settled; navigation and shutdown cancel owned jobs.
+- Explicit `memory_search` and `memory_save` tools for supervised Pi and Codex sessions through Deck's authenticated loopback runtime. Project scope stays runtime-bound; Pi read-only roles receive search only, and the Codex bridge holds no provider credential.
+- Pi compaction recall and enriched native summaries, including bounded Lead-summary capture. Memory survives native reload and authorized internal continuations without duplicate recall/capture or restoring bearer tokens to the environment.
+
+### Changed
+
+- Pi installs globally under its agent directory with ownership hashes, conflict-preserving settings/MCP updates, Deck skill precedence in Deck sessions, legacy detection and opt-in backed-up transactional cleanup. User-owned configuration and modified files are preserved; install does not write project files.
+- Pi tool policy enforces the supported read-only role boundary, rewrites eligible Bash commands through Deck-owned RTK, and adds advisory graph-navigation guidance without blocking searches.
+- Execution skills stay in the executing role's context. Materialized skills, agents and package instructions use runner-specific wording across Pi, OpenCode, Codex and Claude.
+
+### Fixed
+
+- Preserve configured Pi model/thinking assignments across installation and refresh, and Codex global model assignments on fresh launches instead of replacing them with defaults.
+- Pi subagent children load the Deck package consistently; Serena ownership checks are composed lazily and memory token handoff avoids leaking bearer tokens into MCP environments.
+
+### Compatibility and limits
+
+- Pi requires `@earendil-works/pi-coding-agent` 1.0.0 or newer. Reapply the managed Developer Team installation after upgrading; legacy cleanup is explicit and preserves unmatched files.
+- Pi child Bash containment is Linux process-group ownership, not a full sandbox, rollback, or guarantee over daemonized, remote or MCP effects. Model assignments and role instructions do not establish arbitrary model compliance; other runners retain their documented authorization limits.
+
 ## [0.9.0] - 2026-10-02
 
 ### Added
@@ -244,7 +269,8 @@ All notable release changes to Deck are recorded here. Current release procedure
 - OpenCode model selection now uses the model inventory resolved by the active runner.
 - Streamlined project documentation and strengthened contributor, architecture, release, and documentation-governance guidance.
 
-[Unreleased]: https://github.com/kevin15011/deck/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/kevin15011/deck/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/kevin15011/deck/compare/v0.9.0...v0.10.0
 [0.5.0]: https://github.com/kevin15011/deck/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/kevin15011/deck/releases/tag/v0.4.3
 [0.4.2]: https://github.com/kevin15011/deck/releases/tag/v0.4.2

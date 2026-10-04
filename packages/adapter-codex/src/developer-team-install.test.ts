@@ -7,6 +7,16 @@ import { buildCodexDeveloperTeamInstallPlan } from "./developer-team-install";
 import { parseSkillDescriptor } from "../../core/src/skill-discovery/discovery";
 
 describe("buildCodexDeveloperTeamInstallPlan", () => {
+  test("inherits Core skill ownership in generated Lead surfaces without Pi orchestration", () => {
+    const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map() });
+    for (const path of [".codex/agents/deck-lead.toml", ".agents/skills/deck-lead/SKILL.md"]) {
+      const content = plan.expectedFiles.find(file => file.relativePath === path)?.content;
+      expect(content).toContain("Do not load full specialist execution skills merely to select, brief, or monitor a delegate");
+      expect(content).toContain("When implementing directly");
+      expect(content).not.toContain("Pi background delegation and conversational availability");
+    }
+  });
+
   test("plans native roles, agent-bound skills, all external bundles, bootstrap skills, config, and instructions", () => {
     const plan = buildCodexDeveloperTeamInstallPlan({ projectRoot: "/work/project", existingFiles: new Map() });
     const paths = plan.mutations.map((mutation) => mutation.relativePath);
@@ -342,6 +352,21 @@ describe("buildCodexDeveloperTeamInstallPlan", () => {
     expect(config).not.toContain("deck-codex-hook:rtk");
     expect(plan.expectedFiles.some((file) => file.relativePath === ".codex/deck/hooks/deck-rtk-hook.cjs")).toBe(false);
     expect(plan.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(expect.arrayContaining(["context-mode-not-ready", "codebase-memory-not-ready"]));
+  });
+
+  test("official Supermemory plugin route also registers the Deck memory MCP server with names-only env forwarding", () => {
+    const hooks = { nodeCommand: "/usr/bin/node", recallScript: "/deck/sm/recall.js", flushScript: "/deck/sm/flush.js" };
+    const input = { projectRoot: "/work/project", existingFiles: new Map(), memoryProvider: "supermemory" as const, supermemoryProjectScope: "sm_project_v1_kevin15011_deck", supermemoryHooks: hooks };
+    const plan = buildCodexDeveloperTeamInstallPlan({ ...input, deckMemoryCommand: ["/opt/deck/deck", "internal", "memory-mcp"] });
+    expect(plan.blocked).toBe(false);
+    const config = plan.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content;
+    expect(config).toContain("# deck-codex-mcp:deck-memory");
+    expect(config).toContain('args = ["internal", "memory-mcp"]');
+    expect(config).toContain('env_vars = ["DECK_RUNNER_MEMORY_ENDPOINT", "DECK_RUNNER_MEMORY_TOKEN_FILE"]');
+    expect(config).not.toContain("mcp_servers.supermemory");
+    expect(config).not.toMatch(/SUPERMEMORY_[A-Z_]*KEY|DECK_RUNNER_MEMORY_TOKEN"/);
+    const without = buildCodexDeveloperTeamInstallPlan(input);
+    expect(without.expectedFiles.find((file) => file.relativePath === ".codex/config.toml")!.content).not.toContain("deck-memory");
   });
 
   test("official Supermemory plugin replaces the memory bridge, registers recall and flush only and never an MCP server", () => {

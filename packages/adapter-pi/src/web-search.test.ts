@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PI_RUNNER_CAPABILITY_CONTRIBUTION, getPiRunnerCapability } from "./capability-catalog";
-import { resolvePiWebSearchReadiness, writePiWebSearchMcpConfig } from "./web-search";
+import { inspectPiWebSearchMcpConfig, resolvePiWebSearchReadiness, writePiWebSearchMcpConfig } from "./web-search";
+import { buildDeckPiMcpEntry } from "./pi-deck-mcp";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "@deck/provider-tavily";
 import { createPiRunnerAdapter } from "./runner-adapter";
 
@@ -102,6 +103,23 @@ describe("Pi web-search adapter", () => {
       });
       expect(result.status).toBe("failed");
       expect(existsSync(join(root, ".pi", "agent", "mcp.json"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("inspection recognizes the Deck-owned global entry (absolute command, direct exposure, no credential)", () => {
+    const root = mkdtempSync(join(tmpdir(), "deck-pi-web-search-inspect-"));
+    const path = join(root, "mcp.json");
+    try {
+      writeFileSync(path, JSON.stringify({ mcpServers: { "web-search": buildDeckPiMcpEntry({ command: "/usr/bin/npx", args: ["-y", "tavily-mcp@0.2.22"] }) } }));
+      expect(inspectPiWebSearchMcpConfig(path, TAVILY_PROVIDER_DESCRIPTOR)).toEqual({ configured: true, conflict: false });
+
+      writeFileSync(path, JSON.stringify({ mcpServers: { "web-search": buildDeckPiMcpEntry({ command: "/usr/bin/npx", args: ["-y", "other-server"] }) } }));
+      expect(inspectPiWebSearchMcpConfig(path, TAVILY_PROVIDER_DESCRIPTOR)).toEqual({ configured: false, conflict: true });
+
+      writeFileSync(path, JSON.stringify({ mcpServers: { "web-search": { ...buildDeckPiMcpEntry({ command: "/usr/bin/npx", args: ["-y", "tavily-mcp@0.2.22"]}), env: { TAVILY_API_KEY: "tvly-inline" } } } }));
+      expect(inspectPiWebSearchMcpConfig(path, TAVILY_PROVIDER_DESCRIPTOR)).toEqual({ configured: false, conflict: true });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

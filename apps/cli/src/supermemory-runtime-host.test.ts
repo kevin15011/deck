@@ -67,6 +67,52 @@ describe("Supermemory runner loopback bridge", () => {
     return root;
   }
 
+  test("Pi compaction recall loads fresh profile and relevant memory in canonical scope; saves retain redaction", async () => {
+    const projectRoot = await gitProject();
+    const stateHome = await mkdtemp(join(tmpdir(), "deck-sm-compaction-"));
+    const adds: SupermemoryAddPayload[] = [];
+    const calls: Array<{ containerTag: string; q?: string }> = [];
+    let generation = 0;
+    let searchMatches = true;
+    const host = await createSupermemoryRuntimeHost({ projectRoot, stateHome, deckConfig: { ...getDefaultDeckConfig(), adaptiveMemory: { enabled: true, activeProvider: "supermemory" } }, runnerId: "pi", role: "lead", launchMode: "interactive", observabilitySink: testObservabilitySink(), transport: {
+      ...transport(adds),
+      async profile(payload) { calls.push(payload); return { profile: { static: [`FRESH_PROFILE_${++generation}`] } }; },
+      async search(payload) { calls.push(payload); return { results: searchMatches ? [{ content: `RELEVANT_${payload.q}` }] : [] }; },
+    } });
+    const bridge = (await host.startLoopbackBridge())!;
+    const send = (fields: Record<string, unknown>) => fetch(bridge.endpoint, { method: "POST", headers: { authorization: `Bearer ${bridge.token}` }, body: event({ schema: "deck-runner-memory-loopback-v1", runnerId: "pi", sessionId: "native", role: "lead", ...fields }) }).then(r => r.json());
+    try {
+      const initialGeneration = generation;
+      for (let i = 1; i <= 2; i++) {
+        const result = await send({ event: "compaction_recall", query: "current work" });
+        expect(result.ok).toBe(true);
+        expect(result.advisoryText).toContain(`FRESH_PROFILE_${initialGeneration + i}`);
+        expect(result.advisoryText).toContain("RELEVANT_current work");
+      }
+      searchMatches = false;
+      const profileOnly = await send({ event: "compaction_recall", query: "no hit" });
+      expect(profileOnly.ok).toBe(true);
+      expect(profileOnly.advisoryText).toContain(`FRESH_PROFILE_${generation}`);
+      expect(new Set(calls.map(c => c.containerTag)).size).toBe(1);
+      expect(calls[0]!.containerTag).not.toBe("attacker");
+      const escaped = await send({ event: "compaction_recall", query: "work", containerTag: "attacker" });
+      expect(escaped.diagnostics).toContain("scope-input-rejected");
+      const saved = await send({ event: "save", content: "Decision: preserve native compaction. api_key=sk-test-secret-compaction" });
+      expect(saved.ok).toBe(false);
+      expect(JSON.stringify(saved)).not.toContain("sk-test-secret-compaction");
+      const clean = await send({ event: "save", content: "Decision: preserve native compaction and keep project memory advisory only." });
+      expect(clean.ok).toBe(true);
+      const callCount = calls.length;
+      const secretQuery = await send({ event: "compaction_recall", query: "api_key=sk-test-secret-compaction" });
+      expect(secretQuery.diagnostics).toContain("invalid-query");
+      expect(calls).toHaveLength(callCount);
+      await bridge.close();
+      expect(adds.length).toBeGreaterThan(0);
+      expect(JSON.stringify(adds)).not.toContain("sk-test-secret-compaction");
+      expect(adds.every(a => a.containerTag === calls[0]!.containerTag)).toBe(true);
+    } finally { await bridge.close(); await rm(projectRoot, { recursive: true, force: true }); await rm(stateHome, { recursive: true, force: true }); }
+  });
+
   test("hosts an authenticated scoped protocol without accepting runner-supplied provider scope", async () => {
     const adds: SupermemoryAddPayload[] = [];
     const projectRoot = await gitProject();

@@ -7,15 +7,83 @@ describe("inspectPiEnvironment", () => {
     const result = inspectPiEnvironment({
       command: "pi",
       homeDirectory: "/home/tester",
+      env: {},
       runCommand: () => ({ exitCode: 0, stdout: "", stderr: "0.74.0\n" }),
       pathExists: (path) => path === "/home/tester/.pi/agent",
     });
 
     expect(result).toEqual({
       version: "0.74.0",
+      versionStatus: expect.objectContaining({ supported: false, reason: "below-minimum" }),
+      agentDir: "/home/tester/.pi/agent",
       configDirectory: "/home/tester/.pi/agent",
       existingConfiguration: true,
     });
+  });
+});
+
+describe("inspectPiEnvironment minimum version (Pi >= 1.0.0)", () => {
+  const base = { command: "pi", homeDirectory: "/home/tester", env: {}, pathExists: () => false, readDir: () => [], readFile: () => "", getStat: () => ({ isDirectory: () => false, isFile: () => true }), includeChecks: true } as const;
+
+  test("supported version passes the version check", () => {
+    const result = inspectPiEnvironment({ ...base, runCommand: () => ({ exitCode: 0, stdout: "1.0.0\n" }) });
+    expect(result.versionStatus?.supported).toBe(true);
+    const check = result.checks!.find((c) => c.id === "runner-min-version");
+    expect(check?.status).toBe("pass");
+  });
+
+  test("old version fails with an upgrade hint", () => {
+    const result = inspectPiEnvironment({ ...base, runCommand: () => ({ exitCode: 0, stdout: "0.99.3\n" }) });
+    const check = result.checks!.find((c) => c.id === "runner-min-version");
+    expect(check?.status).toBe("fail");
+    expect(check?.severity).toBe("error");
+    expect(check?.remediation).toContain("@earendil-works/pi-coding-agent");
+    expect(result.summary?.ready).toBe(false);
+  });
+
+  test("unparseable output fails", () => {
+    const result = inspectPiEnvironment({ ...base, runCommand: () => ({ exitCode: 0, stdout: "banana\n" }) });
+    expect(result.versionStatus?.reason).toBe("unparseable");
+    expect(result.checks!.find((c) => c.id === "runner-min-version")?.status).toBe("fail");
+  });
+
+  test("a binary that cannot run is unavailable", () => {
+    const result = inspectPiEnvironment({ ...base, runCommand: () => ({ exitCode: 1, stdout: "", stderr: "spawn pi ENOENT" }) });
+    expect(result.versionStatus?.reason).toBe("unavailable");
+    expect(result.checks!.find((c) => c.id === "runner-min-version")?.status).toBe("fail");
+  });
+});
+
+describe("inspectPiEnvironment agent directory resolution", () => {
+  test("PI_CODING_AGENT_DIR overrides the default and is the only config candidate", () => {
+    const seen: string[] = [];
+    const result = inspectPiEnvironment({
+      command: "pi",
+      homeDirectory: "/home/tester",
+      env: { PI_CODING_AGENT_DIR: "/opt/pi-home" },
+      runCommand: () => ({ exitCode: 0, stdout: "1.0.0" }),
+      pathExists: (path) => { seen.push(path); return path === "/opt/pi-home"; },
+    });
+    expect(result.configDirectory).toBe("/opt/pi-home");
+    expect(result.agentDir).toBe("/opt/pi-home");
+    expect(seen.some((path) => path.startsWith("/home/tester"))).toBe(false);
+  });
+
+  test("a relative override is a blocking diagnostic and nothing is probed", () => {
+    const result = inspectPiEnvironment({
+      command: "pi",
+      homeDirectory: "/home/tester",
+      env: { PI_CODING_AGENT_DIR: "relative/dir" },
+      runCommand: () => ({ exitCode: 0, stdout: "1.0.0" }),
+      pathExists: () => true,
+      includeChecks: true,
+      readDir: () => [],
+      readFile: () => "",
+      getStat: () => ({ isDirectory: () => false, isFile: () => true }),
+    });
+    expect(result.agentDirDiagnostic).toContain("PI_CODING_AGENT_DIR");
+    expect(result.configDirectory).toBeUndefined();
+    expect(result.checks!.find((c) => c.id === "runner-config-dir")?.status).toBe("fail");
   });
 });
 
@@ -25,6 +93,7 @@ describe("inspectPiEnvironment with structured checks", () => {
     const result = inspectPiEnvironment({
       command: "pi",
       homeDirectory: "/home/tester",
+      env: {},
       runCommand: () => ({ exitCode: 0, stdout: "", stderr: "0.74.0\n" }),
       pathExists: (path) => path === "/home/tester/.pi/agent/mcp.json",
       readDir: () => [],
@@ -42,6 +111,7 @@ describe("inspectPiEnvironment with structured checks", () => {
     const result = inspectPiEnvironment({
       command: "pi",
       homeDirectory: "/home/tester",
+      env: {},
       runCommand: () => ({ exitCode: 0, stdout: "", stderr: "0.74.0\n" }),
       pathExists: () => false,
       readDir: () => [],
@@ -59,6 +129,7 @@ describe("inspectPiEnvironment with structured checks", () => {
     const result = inspectPiEnvironment({
       command: "pi",
       homeDirectory: "/home/tester",
+      env: {},
       runCommand: () => ({ exitCode: 0, stdout: "", stderr: "0.74.0\n" }),
       pathExists: (path) =>
         path === "/home/tester/.pi/agent" ||
@@ -83,6 +154,7 @@ describe("inspectPiEnvironment with structured checks", () => {
     const result = inspectPiEnvironment({
       command: "pi",
       homeDirectory: "/home/tester",
+      env: {},
       runCommand: () => ({ exitCode: 0, stdout: "", stderr: "0.74.0\n" }),
       pathExists: (path) =>
         path === "/home/tester/.pi/skills" ||
@@ -101,6 +173,7 @@ describe("inspectPiEnvironment with structured checks", () => {
     const result = inspectPiEnvironment({
       command: "pi",
       homeDirectory: "/home/tester",
+      env: {},
       runCommand: () => ({ exitCode: 0, stdout: "", stderr: "0.74.0\n" }),
       pathExists: (path) => path === "/home/tester/.pi/agent" || path === "/home/tester/.pi/skills",
       readDir: (path) =>
@@ -118,6 +191,7 @@ describe("inspectPiEnvironment with structured checks", () => {
     const result = inspectPiEnvironment({
       command: "pi",
       homeDirectory: "/home/tester",
+      env: {},
       runCommand: () => ({ exitCode: 1, stdout: "", stderr: "command not found" }),
       pathExists: () => false,
       readDir: () => [],
@@ -135,6 +209,7 @@ describe("inspectPiEnvironment with structured checks", () => {
     const result = inspectPiEnvironment({
       command: "pi",
       homeDirectory: "/home/tester",
+      env: {},
       runCommand: () => ({ exitCode: 1, stdout: "", stderr: "not found" }),
       pathExists: () => false,
       readDir: () => [],

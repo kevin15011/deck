@@ -15,11 +15,24 @@
  * - Summary with counts by severity
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 
-import { inspectPiEnvironment, redact, redactDiagnostic, reviewPiRequiredTools, validateSupermemoryPiMcpConfig } from "@deck/adapter-pi";
+import {
+  createNodePiFileIO,
+  inspectPiDeckInstall,
+  inspectPiEnvironment,
+  readDeckPiExtensionBundle,
+  redact,
+  redactDiagnostic,
+  resolvePiAgentDir,
+  reviewPiRequiredTools,
+  sourceDigestHeader,
+  validateSupermemoryPiMcpConfig,
+  type PiDoctorCategory,
+} from "@deck/adapter-pi";
 import { inspectOpenCodeEnvironment, reviewOpenCodeTools, validateSupermemoryOpenCodeMcpConfig } from "@deck/adapter-opencode";
 import { inspectCodexSupermemoryMcpState } from "@deck/adapter-codex";
 
@@ -112,9 +125,33 @@ function readOpenCodeMcpSection(): Record<string, unknown> | null {
 // Runtime checks
 // ---------------------------------------------------------------------------
 
+/** Real-machine Pi install inspection: reads the Pi agent dir, runs `pi --version` and `pi list` (stdin ignored). */
+function inspectPiDeckInstallOnMachine(input: { command: string; projectRoot?: string }): PiDoctorCategory[] {
+  const home = process.env.HOME ?? homedir();
+  const run = (args: string[]) => {
+    const result = spawnSync(input.command, args, { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] });
+    return result.status === 0 && !result.error ? result.stdout : undefined;
+  };
+  const stateDir = getDeckXdgPaths().stateDir;
+  return inspectPiDeckInstall({
+    io: createNodePiFileIO(),
+    agentDir: resolvePiAgentDir(process.env, home),
+    projectRoot: input.projectRoot,
+    piVersionOutput: run(["--version"]),
+    piListOutput: run(["list"]),
+    isExecutable: (path) => { try { accessSync(path, fsConstants.X_OK); return statSync(path).isFile(); } catch { return false; } },
+    runtimeDirectory: join(stateDir, "runtime"),
+    listDirectory: (path) => { try { return readdirSync(path).map((name) => ({ name, mtimeMs: statSync(join(path, name)).mtimeMs })); } catch { return undefined; } },
+    expectedBundleDigests: Object.fromEntries((["deck-memory", "deck-subagents", "deck-tool-policy"] as const).map((name) => {
+      try { return [name, sourceDigestHeader(readDeckPiExtensionBundle(name))]; } catch { return [name, undefined]; }
+    })),
+  });
+}
+
 function checkPiRuntime(
   command: string,
-  dependencies: Pick<DoctorDiagnosticsDependencies, "inspectPiEnvironment" | "reviewPiRequiredTools">,
+  dependencies: Pick<DoctorDiagnosticsDependencies, "inspectPiEnvironment" | "reviewPiRequiredTools" | "inspectPiDeckInstall">,
+  projectRoot?: string,
 ): DoctorRuntimeResult {
   const result: DoctorRuntimeResult = {
     runtimeId: "pi",
@@ -145,6 +182,23 @@ function checkPiRuntime(
       category: "Runtime",
       status: "error",
       items: [{ status: "error", message: `Unable to inspect Pi runtime: ${redact(String(err))}` }],
+    });
+  }
+
+  // Global Deck package: registration, manifest drift, extensions, MCP, memory, legacy and conflicts
+  try {
+    for (const entry of dependencies.inspectPiDeckInstall({ command, projectRoot })) {
+      result.checks.push({
+        category: entry.category,
+        status: entry.status,
+        items: entry.items.map((item) => ({ status: item.status, message: redact(item.message), ...(item.suggestion ? { suggestion: redact(item.suggestion) } : {}) })),
+      });
+    }
+  } catch (err) {
+    result.checks.push({
+      category: "Pi Deck package",
+      status: "error",
+      items: [{ status: "error", message: `Pi Deck package inspection failed: ${redact(String(err))}` }],
     });
   }
 
@@ -442,11 +496,11 @@ function supermemoryRouteMatrixItems(runtimeStatuses: Awaited<ReturnType<typeof 
     },
     {
       status: "ok",
-      message: "Native context injection uses runner hook contracts: OpenCode model-message transform, Pi extension advisory return, and Codex hookSpecificOutput.additionalContext through the installed Deck binary. No Supermemory CLI package is required.",
+      message: "Native context injection uses runner hook contracts: OpenCode model-message transform, the Pi deck-memory extension (ephemeral system-prompt append over the loopback), and Codex hookSpecificOutput.additionalContext through the installed Deck binary. No Supermemory CLI package is required.",
     },
     {
       status: "ok",
-      message: "Final-assistant capture remains runner-limited: OpenCode uses hook-exposed assistant chat events, Codex uses hook-exposed final events or its trusted bounded exec final-message file when available, and Pi remains unsupported unless Pi exposes a trusted final-assistant event.",
+      message: "Final-assistant capture remains runner-limited: OpenCode uses hook-exposed assistant chat events, Codex uses hook-exposed final events or its trusted bounded exec final-message file when available, and Pi captures the user prompt and the assistant text of each completed turn through the deck-memory extension in Deck-managed sessions.",
     },
   ];
 }
@@ -644,6 +698,7 @@ type DoctorDiagnosticsDependencies = Readonly<{
   detectSelectedRuntimes: typeof detectSelectedRuntimes;
   inspectPiEnvironment: typeof inspectPiEnvironment;
   reviewPiRequiredTools: typeof reviewPiRequiredTools;
+  inspectPiDeckInstall: (input: { command: string; projectRoot?: string }) => PiDoctorCategory[];
   validateSupermemoryPiMcpConfig: typeof validateSupermemoryPiMcpConfig;
   inspectOpenCodeEnvironment: typeof inspectOpenCodeEnvironment;
   reviewOpenCodeTools: typeof reviewOpenCodeTools;
@@ -663,6 +718,7 @@ const defaultDoctorDiagnosticsDependencies: DoctorDiagnosticsDependencies = {
   detectSelectedRuntimes,
   inspectPiEnvironment,
   reviewPiRequiredTools,
+  inspectPiDeckInstall: inspectPiDeckInstallOnMachine,
   validateSupermemoryPiMcpConfig,
   inspectOpenCodeEnvironment,
   reviewOpenCodeTools,
@@ -869,6 +925,7 @@ export async function runDoctorDiagnostics(
     detectSelectedRuntimes: overrides.detectSelectedRuntimes ?? defaultDoctorDiagnosticsDependencies.detectSelectedRuntimes,
     inspectPiEnvironment: overrides.inspectPiEnvironment ?? defaultDoctorDiagnosticsDependencies.inspectPiEnvironment,
     reviewPiRequiredTools: overrides.reviewPiRequiredTools ?? defaultDoctorDiagnosticsDependencies.reviewPiRequiredTools,
+    inspectPiDeckInstall: overrides.inspectPiDeckInstall ?? defaultDoctorDiagnosticsDependencies.inspectPiDeckInstall,
     validateSupermemoryPiMcpConfig: overrides.validateSupermemoryPiMcpConfig ?? defaultDoctorDiagnosticsDependencies.validateSupermemoryPiMcpConfig,
     inspectOpenCodeEnvironment: overrides.inspectOpenCodeEnvironment ?? defaultDoctorDiagnosticsDependencies.inspectOpenCodeEnvironment,
     reviewOpenCodeTools: overrides.reviewOpenCodeTools ?? defaultDoctorDiagnosticsDependencies.reviewOpenCodeTools,
@@ -922,7 +979,7 @@ export async function runDoctorDiagnostics(
     }
 
     if (status.runtime === "pi") {
-      runtimes.push(checkPiRuntime(status.command!, dependencies));
+      runtimes.push(checkPiRuntime(status.command!, dependencies, projectRoot));
     } else if (status.runtime === "opencode") {
       runtimes.push(checkOpenCodeRuntime(status.command!, dependencies));
     } else if (status.runtime === "codex") {

@@ -18,7 +18,8 @@ import { createClaudeRunnerAdapter } from "../../../packages/adapter-claude/src/
 import { getWebSearchProviderDescriptor } from "./web-search-provider";
 import { readOwnedTavilyCredential } from "./web-search-shell-profile";
 import { resolveClaudeSupermemoryLaunchCredential } from "./claude-supermemory-launch";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { getDeckStateDir } from "./runtime/paths";
 
 /**
  * Singleton registry instance for use by getAdapter() and listAdapters().
@@ -45,10 +46,17 @@ export type DefaultAdapterRegistryOptions = {
   claude?: Parameters<typeof createClaudeRunnerAdapter>[0];
 };
 
+/** Self-referencing `deck internal <name>` argv: the running binary, or the dev runtime plus `main.*` (the canary points at itself). */
+function deckInternalCommand(name: string): string[] {
+  return [process.execPath, ...(process.argv[1] && /(?:^|[/\\])main\.[cm]?[jt]sx?$/.test(process.argv[1]) ? [resolve(process.argv[1])] : []), "internal", name];
+}
+
 export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOptions = {}): AdapterRegistry {
   const registry = createAdapterRegistry();
   registry.register("pi", createPiRunnerAdapter({
+    legacyBackupRoot: () => join(getDeckStateDir(), "backups", "pi-legacy"),
     webSearchProviderResolver: getWebSearchProviderDescriptor,
+    webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     ...options.pi,
   }));
   registry.register("opencode", createOpenCodeRunnerAdapter({
@@ -58,14 +66,15 @@ export function createDefaultAdapterRegistry(options: DefaultAdapterRegistryOpti
   registry.register("codex", createCodexRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
-    serenaProxyCommand: [process.execPath, ...(process.argv[1] && /(?:^|[/\\])main\.[cm]?[jt]sx?$/.test(process.argv[1]) ? [resolve(process.argv[1])] : []), "internal", "serena-mcp"],
+    serenaProxyCommand: deckInternalCommand("serena-mcp"),
+    deckMemoryMcpCommand: deckInternalCommand("memory-mcp"),
     ...options.codex,
   }));
   registry.register("claude", createClaudeRunnerAdapter({
     webSearchProviderResolver: getWebSearchProviderDescriptor,
     webSearchCredential: () => process.env.TAVILY_API_KEY?.trim() || readOwnedTavilyCredential(),
     resolveMemoryCredential: resolveClaudeSupermemoryLaunchCredential,
-    serenaProxyCommand: [process.execPath, ...(process.argv[1] && /(?:^|[/\\])main\.[cm]?[jt]sx?$/.test(process.argv[1]) ? [resolve(process.argv[1])] : []), "internal", "serena-mcp"],
+    serenaProxyCommand: deckInternalCommand("serena-mcp"),
     ...options.claude,
   }));
   return registry;

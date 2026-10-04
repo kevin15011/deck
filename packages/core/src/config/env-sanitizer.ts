@@ -14,9 +14,17 @@ export const RUNNER_ENV_ALLOWLIST = new Set([
   "XDG_CACHE_HOME",
   "XDG_STATE_HOME",
   "XDG_DATA_HOME",
-  "PI_SESSION_DIR",
+  // Pi 1.0 reads PI_CODING_AGENT_DIR / PI_CODING_AGENT_SESSION_DIR (PI_SESSION_DIR is ignored by Pi).
+  "PI_CODING_AGENT_DIR",
+  "PI_CODING_AGENT_SESSION_DIR",
+  // Deck Pi session markers (inert flags; their names match the session-key secret heuristic).
+  "DECK_PI_SESSION",
+  "DECK_PI_ROLE",
+  "DECK_PI_CHILD",
   "DECK_RUNNER_MEMORY_ENDPOINT",
   "DECK_RUNNER_MEMORY_TOKEN",
+  // Pi receives the bearer token through a 0600 file; only the path is exported.
+  "DECK_RUNNER_MEMORY_TOKEN_FILE",
   "DECK_CODEX_BRIDGE_ENDPOINT",
   "DECK_CODEX_BRIDGE_TOKEN",
 ]);

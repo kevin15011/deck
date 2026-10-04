@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { sanitizeRunnerEnv } from "@deck/core";
+import { piAgentPaths } from "./agent-dir";
+import { deckPiSessionEnv } from "./pi-activation-guard";
 import { getDeveloperTeamCatalog } from "./developer-team-catalog";
 import { readDeveloperTeamModelConfigAssignments } from "./developer-team-install";
 import { resolveThinkingForModel, supportsDeveloperTeamModel, type PiThinkingLevel } from "./model-config";
@@ -45,6 +47,13 @@ export type BuildPiTeamLaunchPlanOptions = {
   flags?: PiTeamLaunchFlags;
   /** Pi command binary name/path (default: "pi") */
   piCommand?: string;
+  /**
+   * Resolved Pi agent directory. When set, the plan uses the Deck-managed GLOBAL layout: the lead profile lives
+   * under `<agentDir>/deck/profiles`, the registered Deck package is also passed as `--extension <package>` so its skills win name collisions,
+   * and no project-local `.pi` / `.deck/pi/profiles` path is referenced. Without it, the deprecated
+   * project-local layout is used (kept only for the legacy launch module and its tests).
+   */
+  agentDir?: string;
 };
 
 const DEVELOPER_ORCHESTRATOR_AGENT_ID = "deck-lead";
@@ -117,8 +126,11 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
   const isResume = flags?.resume === true;
 
   const sessionDir = buildTeamSessionDir(projectRoot, teamId);
-  const profileDir = buildTeamProfileDir(projectRoot, teamId);
-  const extensionPath = join(profileDir, "extensions", "developer-team-execution.js");
+  const globalPaths = options.agentDir ? piAgentPaths(options.agentDir) : undefined;
+  const profileDir = globalPaths ? join(globalPaths.profilesRoot, teamId) : buildTeamProfileDir(projectRoot, teamId);
+  const extensionPath = globalPaths
+    ? join(globalPaths.packageRoot, "extensions", "developer-team-execution", "index.js")
+    : join(profileDir, "extensions", "developer-team-execution.js");
 
   // Get canonical agent IDs from the team catalog
   const catalog = getDeveloperTeamCatalog();
@@ -128,10 +140,16 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
   const args: string[] = [
     "--session-dir", sessionDir,
     "--system-prompt", join(profileDir, "system-prompt.md"),
-    "--extension", extensionPath,
+    // Global layout: the Deck package is registered in settings.json, and is ALSO passed as a temporary CLI source.
+    // Pi merges CLI package sources before auto-discovered `<agentDir>/skills` and `~/.agents/skills`, and the first
+    // skill with a name wins, so the package skills beat stale legacy or other-runner copies in Deck sessions only.
+    // Pi dedupes the same package path against the settings entry (extensions load once).
+    ...(globalPaths ? ["--extension", globalPaths.packageRoot] : ["--extension", extensionPath]),
   ];
 
-  const assignments = readDeveloperTeamModelConfigAssignments(projectRoot);
+  const assignments = globalPaths
+    ? readDeveloperTeamModelConfigAssignments(projectRoot, { agentsDir: join(globalPaths.packageRoot, "agents") })
+    : readDeveloperTeamModelConfigAssignments(projectRoot);
   const orchestratorModel = assignments.modelAssignments[DEVELOPER_ORCHESTRATOR_AGENT_ID];
   if (orchestratorModel && supportsDeveloperTeamModel(orchestratorModel)) {
     args.push("--model", orchestratorModel);
@@ -148,11 +166,13 @@ export function buildPiTeamLaunchPlan(options: BuildPiTeamLaunchPlanOptions): Pi
     args.push("--resume");
   }
 
-  // Forward essential env vars + add PI_SESSION_DIR
+  // Pi 1.0 ignores PI_SESSION_DIR; the session directory is passed only through --session-dir above.
   const env: Record<string, string> = {
     ...sanitizeRunnerEnv(process.env),
-    PI_SESSION_DIR: sessionDir,
+    ...(globalPaths ? deckPiSessionEnv("lead") : {}),
   };
+  // A lead launch must never inherit a subagent-child marker from an outer Deck session.
+  if (globalPaths) delete env.DECK_PI_CHILD;
 
   return {
     command: piCommand,

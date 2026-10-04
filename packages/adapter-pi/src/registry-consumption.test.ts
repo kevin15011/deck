@@ -32,10 +32,16 @@ describe("Pi adapter consumes the canonical core registry", () => {
     expect(lead.content).toContain("Implement clear low-risk changes directly");
   });
 
-  test("builds the Pi system prompt from core session instructions", () => {
+  test("preserves canonical core instructions before adding Pi-only continuation guidance", () => {
     const { content } = buildTeamSystemPrompt("developer-team");
-    expect(content).toBe(getTeamSessionInstructions("developer-team", {
+    const core = getTeamSessionInstructions("developer-team", {
       skillDiscoveryRuntimeContext: { activeRunnerId: "pi" },
-    })!);
+    })!;
+    const heading = "## Pi background delegation and conversational availability";
+    expect(content.slice(0, core.length)).toBe(core);
+    expect(content.slice(core.length).startsWith(`\n\n${heading}`)).toBe(true);
+    expect(content.split(heading)).toHaveLength(2);
+    expect(content).toContain("Make the user-facing answer the last action of the current turn");
+    expect(core).not.toContain(heading);
   });
 });

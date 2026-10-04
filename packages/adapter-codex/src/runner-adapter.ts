@@ -106,6 +106,8 @@ export type CodexRunnerAdapterOptions = {
   serenaBootstrapEffects?: SerenaBootstrapEffects;
   /** Checks whether the effective `deck` command can serve the portable Serena proxy. */
   serenaProxyCommand?: readonly string[];
+  /** Absolute self-referencing command for the Deck memory MCP server (opt-in; supplied by the CLI composition root). */
+  deckMemoryMcpCommand?: readonly string[];
   serenaProxyProbe?: () => Promise<DeckSerenaProxyReadiness>;
   /** Provider descriptor selected by the CLI composition root. */
   webSearchProvider?: WebSearchProviderDescriptorV1;
@@ -631,6 +633,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly #serenaBootstrap: NonNullable<CodexRunnerAdapterOptions["serenaBootstrap"]>;
   readonly #serenaBootstrapEffects?: SerenaBootstrapEffects;
   readonly #serenaProxyCommand: readonly string[];
+  readonly #deckMemoryMcpCommand: readonly string[] | undefined;
   readonly #serenaProxyProbe: NonNullable<CodexRunnerAdapterOptions["serenaProxyProbe"]>;
   readonly #webSearchProvider?: WebSearchProviderDescriptorV1;
   readonly #webSearchProviderResolver?: CodexRunnerAdapterOptions["webSearchProviderResolver"];
@@ -657,6 +660,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
     this.#codexHome = options.codexHome;
     this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
     this.#serenaProxyCommand = [...(options.serenaProxyCommand ?? ["deck", "internal", "serena-mcp"])];
+    this.#deckMemoryMcpCommand = options.deckMemoryMcpCommand ? [...options.deckMemoryMcpCommand] : undefined;
     this.#serenaProxyProbe = options.serenaProxyProbe ?? createDeckSerenaProxyProbe({ command: this.#serenaProxyCommand });
     this.#serenaReadinessResolver = options.serenaReadinessResolver
       ?? ((signal) => resolveExistingSerenaReadiness(this.#serenaBootstrapEffects, signal));
@@ -752,6 +756,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       supermemoryProjectScope: input.derivedSupermemoryProjectScope,
       serenaLauncherAvailable: input.serenaPreparation?.readiness.state === "ready",
       serenaProxyCommand: this.#serenaProxyCommand,
+      deckMemoryCommand: this.#deckMemoryMcpCommand,
       serenaProxyAvailable: input.serenaPreparation?.readiness.state === "ready" && input.serenaPreparation.proxy.state === "ready",
       webSearchProviderSupported: webSearchProvider !== undefined,
       webSearchProviderConfigured: input.deckConfig.webSearch.provider !== undefined,
@@ -1473,6 +1478,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
       materializationScope,
       serenaLauncherAvailable: serenaPreparation?.readiness.state === "ready",
       serenaProxyCommand: this.#serenaProxyCommand,
+      deckMemoryCommand: this.#deckMemoryMcpCommand,
       serenaProxyAvailable: serenaPreparation?.readiness.state === "ready" && serenaPreparation.proxy.state === "ready",
       // No ready inventory is not evidence of absence: persisted assignments stay mapped (fail safe) and changes
       // to them are refused below (fail closed) instead of silently dropping the configured model.

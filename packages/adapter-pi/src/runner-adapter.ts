@@ -10,6 +10,26 @@
  */
 
 import { inspectPiEnvironment, type PiPreflightResult } from "./preflight";
+import { piAgentPaths, resolvePiAgentDir, type PiAgentDirResolution } from "./agent-dir";
+import { buildPiGlobalMaterialization, type PiGlobalMaterialization } from "./global-materialization";
+import { createPiTools } from "./pi-owned-tools";
+import { resolveDeckPiMcpServers, selectDeckPiMcpServerIds, type DeckPiMcpToolResolver } from "./pi-deck-mcp";
+import { mcpServerForCapability } from "./pi-mcp-catalog";
+import {
+  applyPiGlobalPlan,
+  createNodePiFileIO,
+  planPiGlobalInstall,
+  readPiManifest,
+  readPiMcpServers,
+  restorePiSnapshot,
+  snapshotPiPlanTargets,
+  verifyPiGlobalInstall,
+  type PiFileIO,
+  type PiGlobalPlan,
+  type PiSnapshot,
+} from "./pi-global-install";
+import { evaluatePiVersion, PI_UPGRADE_HINT, type PiVersionEvaluation } from "./pi-version";
+import { spawnSync as nodeSpawnSync } from "node:child_process";
 import { accessSync, constants as fsConstants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
@@ -18,41 +38,33 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { buildPiRunnerCapabilityInventory, type PiRunnerCapabilityInventory, type PiRunnerFullCapabilityInventory } from "./capability-inventory";
 import { buildPiRunnerReviewPlan, type PiRunnerReviewPlan } from "./capability-plan";
 import { buildPiInstallationPlan, getPiInstallableTool, type InstallablePiToolId, type InstallablePiTool } from "./installation-plan";
-import { installPiTools, installInternalRunnerPackages } from "./install-tools";
+import { installPiTools, installInternalRunnerPackages, type PiOwnedToolInstaller } from "./install-tools";
 import { reviewPiRequiredTools, type PiRequiredToolsReview } from "./required-tools";
 import {
   inspectPiWebSearchMcpConfig,
   resolvePiWebSearchReadiness,
-  writePiWebSearchMcpConfig,
 } from "./web-search";
 import { getTeamsForEnvironment } from "./team-catalog";
 import { buildPiTeamLaunchPlan } from "./pi-team-launch";
 import {
+  readDeveloperTeamModelConfigAssignments,
   readDeveloperTeamModelAssignments,
   readDeveloperTeamThinkingAssignments,
-  buildDeveloperTeamInstallPlan as buildPiDeveloperTeamInstallPlan,
-  applyDeveloperTeamInstall as applyPiDeveloperTeamInstall,
-  backupDeveloperTeamFiles,
-  rollbackDeveloperTeamFiles,
-  verifyDeveloperTeamInstall,
-  type DeveloperTeamInstallPlan as PiDeveloperTeamInstallPlan,
+  type DeveloperTeamInstallOptions,
 } from "./developer-team-install";
+import { cleanupPiLegacy, describePiLegacy, detectPiLegacy, type PiLegacyReport } from "./pi-legacy";
+import { buildPiLegacyTemplates } from "./pi-legacy-templates";
 import { PI_THINKING_LEVELS, supportsThinkingForModel, getDefaultThinkingForModel, resolveThinkingForModel } from "./model-config";
 import { getPiRunnerCapability, getUserFacingCapability, PI_RUNNER_CAPABILITY_CONTRIBUTION, PI_RUNNER_CAPABILITY_IDS, type CapabilityId } from "./capability-catalog";
 import { getOptionalPiTools } from "./installation-plan";
 import {
   writeSupermemoryPiMcpConfig,
-  writeContextModeMcpConfig,
-  writeCodebaseMemoryMcpConfig,
   writeSerenaMcpConfig,
-  writeContext7McpConfig,
-  defaultPiMcpConfigPath,
   validateSupermemoryPiMcpConfig,
   type PiMcpConfigFileSystem,
   type PiMcpConfigWriteResult,
   type WriteSerenaMcpConfigOptions,
 } from "./pi-mcp-config";
-import { mergeSettingsPackages } from "./settings-merge";
 import type { InternalRunnerPackageInstallAction } from "./internal-runner-packages";
 import type { RequiredToolStatus } from "./required-tools";
 import type {
@@ -107,6 +119,8 @@ import {
   getEnabledCapabilityInstructionIds,
   getConfigurablePackageInstructionMetadata,
   runEvidenceGatedSerenaWriter,
+  createSerenaReadinessRevalidator,
+  resolveSerenaOwnedRoot,
   SERENA_MCP_ARGS,
   resolveCanonicalSupermemoryProjectScope,
   validateSerenaOperationAuthorization,
@@ -132,6 +146,20 @@ const PI_ENVIRONMENT_IDS = ["pi-development"] as const;
 export type PiRunnerAdapterOptions = {
   /** Runtime-only home override used by hermetic callers and tests. */
   readonly homeDirectory?: string;
+  /** Environment used to resolve PI_CODING_AGENT_DIR (defaults to process.env). */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Seam for `pi --version` (defaults to spawning the `pi` command with stdin ignored). */
+  readonly piVersionProbe?: () => { exitCode: number; stdout: string; stderr?: string };
+  /** Pi command used for the default version probe and the launch plan (default `pi`). */
+  readonly piCommand?: string;
+  /** File effects for the global install engine (hermetic tests inject failures here). */
+  readonly piFileIO?: PiFileIO;
+  /** Directory (under the Deck state home) that receives the backup of an opt-in legacy cleanup. */
+  readonly legacyBackupRoot?: () => string;
+  /** Deck-owned tool resolution (RTK, Codebase Memory, shared commands). Defaults to the production resolver. */
+  readonly piTools?: PiToolResolution;
+  /** Shared Web Search credential resolver (composition root); the value only ever reaches the launched process env. */
+  readonly webSearchCredential?: () => string | undefined;
   /** Optional runner-exposed inventory supplied by Pi itself. */
   readonly opaqueInventory?: () => Promise<OpaqueSkillInventoryResultV1>;
   /** Deterministic Serena installer projection seam. */
@@ -154,6 +182,9 @@ export type PiRunnerAdapterOptions = {
   readonly webSearchProviderResolver?: (provider: string | undefined) => WebSearchProviderDescriptorV1 | undefined;
 };
 
+/** The subset of `PiTools` the adapter consumes (tests inject a fake). */
+export type PiToolResolution = DeckPiMcpToolResolver & PiOwnedToolInstaller & { rtk: { command(): string | undefined } };
+
 type PiSerenaActionContextExtensions = {
   readonly serenaRevalidator?: SerenaReadinessRevalidator;
   readonly serenaOwnedRoot?: string;
@@ -169,7 +200,7 @@ type PiFilesystemSourceDefinition = {
   readonly scope: "project" | "user";
   readonly locatorStrategy: "project_relative" | "runner_relative";
   readonly safeLocatorBase: string;
-  readonly getRoot: (projectRoot: string, homeDirectory: string) => string;
+  readonly getRoot: (projectRoot: string, homeDirectory: string, agentDir: string) => string;
 };
 
 const PI_FILESYSTEM_SOURCE_DEFINITIONS: readonly PiFilesystemSourceDefinition[] = [
@@ -187,7 +218,16 @@ const PI_FILESYSTEM_SOURCE_DEFINITIONS: readonly PiFilesystemSourceDefinition[] 
     scope: "user",
     locatorStrategy: "runner_relative",
     safeLocatorBase: "pi-user-agent-skills",
-    getRoot: (_projectRoot, homeDirectory) => join(homeDirectory, ".pi", "agent", "skills"),
+    getRoot: (_projectRoot, _homeDirectory, agentDir) => join(agentDir, "skills"),
+  },
+  {
+    // Skills shipped inside the Deck-managed global Pi package (agent dir `deck/package/skills`).
+    sourceId: "pi-deck-package-skills",
+    sourceCategory: "user_runner",
+    scope: "user",
+    locatorStrategy: "runner_relative",
+    safeLocatorBase: "pi-deck-package-skills",
+    getRoot: (_projectRoot, _homeDirectory, agentDir) => join(piAgentPaths(agentDir).packageRoot, "skills"),
   },
   {
     sourceId: "pi-user-skills",
@@ -209,6 +249,8 @@ export function createPiSkillDiscoveryProvider(
   options: PiRunnerAdapterOptions = {},
 ): SkillDiscoverySourceProviderV1 {
   const homeDirectory = normalizeRuntimeDirectory(options.homeDirectory ?? process.env.HOME ?? homedir());
+  const agentDirResolution = resolvePiAgentDir(options.env ?? process.env, homeDirectory);
+  const agentDir = agentDirResolution.ok ? agentDirResolution.dir : join(homeDirectory, ".pi", "agent");
 
   return {
     schema: SKILL_DISCOVERY_SOURCE_PROVIDER_SCHEMA,
@@ -228,7 +270,7 @@ export function createPiSkillDiscoveryProvider(
         };
       }
 
-      const sources = buildPiFilesystemSources(projectRoot, homeDirectory);
+      const sources = buildPiFilesystemSources(projectRoot, homeDirectory, agentDir);
       const diagnostics = sources
         .filter((source): source is Extract<SkillDiscoverySourceBindingV1, { readonly kind: "filesystem" }> => source.kind === "filesystem")
         .filter((source) => !isDeclaredRootReadable(source.absoluteRoot))
@@ -256,7 +298,7 @@ export function createPiSkillDiscoveryProvider(
         return { status: "rejected", diagnostic: piDiagnostic("invalid_locator") };
       }
 
-      const sources = buildPiFilesystemSources(projectRoot, homeDirectory);
+      const sources = buildPiFilesystemSources(projectRoot, homeDirectory, agentDir);
       if (options.opaqueInventory) sources.push(buildPiOpaqueSource(options.opaqueInventory));
 
       if (input.locator.startsWith("project:")) {
@@ -289,7 +331,7 @@ export function createPiSkillDiscoveryProvider(
   };
 }
 
-function buildPiFilesystemSources(projectRoot: string, homeDirectory: string): SkillDiscoverySourceBindingV1[] {
+function buildPiFilesystemSources(projectRoot: string, homeDirectory: string, agentDir: string): SkillDiscoverySourceBindingV1[] {
   return PI_FILESYSTEM_SOURCE_DEFINITIONS.map((definition) => {
     const declaration: SkillDiscoverySourceDeclarationV1 = {
       schema: SKILL_DISCOVERY_SOURCE_SCHEMA,
@@ -304,7 +346,7 @@ function buildPiFilesystemSources(projectRoot: string, homeDirectory: string): S
     return {
       kind: "filesystem",
       declaration,
-      absoluteRoot: definition.getRoot(projectRoot, homeDirectory),
+      absoluteRoot: definition.getRoot(projectRoot, homeDirectory, agentDir),
       descriptorBasename: "SKILL.md",
     };
   });
@@ -542,13 +584,12 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     adaptiveMemory: {
       supermemory: {
         requiresExternalToken: true,
-        selectionStatus: "Supermemory selected; provide an API key for the Pi MCP handoff.",
+        selectionStatus: "Supermemory selected; the API key stays in Deck's secret store and reaches Pi only through the Deck loopback during Deck-managed sessions.",
       },
     },
   } as const;
 
   // Store last native plan for backup/restore/verify operations
-  #lastNativePlan: PiDeveloperTeamInstallPlan | null = null;
   #installTools: typeof installPiTools;
   #requiredToolsReview: () => PiRequiredToolsReview;
   #serenaBootstrapEffects?: import("@deck/core").SerenaBootstrapEffects;
@@ -567,18 +608,49 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   readonly skillDiscovery: SkillDiscoverySourceProviderV1;
 
   #homeDirectory: string;
+  #env: Readonly<Record<string, string | undefined>>;
+  #agentDirResolution: PiAgentDirResolution;
+  #piVersionProbe: () => { exitCode: number; stdout: string; stderr?: string };
+  #piCommand: string;
+  #fileIO: PiFileIO;
+  #lastMaterialization: { materialization: PiGlobalMaterialization; enginePlan: PiGlobalPlan } | null = null;
+  #piTools?: PiToolResolution;
+  #webSearchCredential?: () => string | undefined;
+  #legacyBackupRoot?: () => string;
   constructor(options: PiRunnerAdapterOptions = {}) {
+    this.#legacyBackupRoot = options.legacyBackupRoot;
     this.#homeDirectory = options.homeDirectory ?? process.env.HOME ?? homedir();
+    this.#env = options.env ?? process.env;
+    this.#agentDirResolution = resolvePiAgentDir(this.#env, this.#homeDirectory);
+    this.#piCommand = options.piCommand ?? "pi";
+    this.#piVersionProbe = options.piVersionProbe ?? (() => runPiVersionProbe(this.#piCommand));
+    this.#fileIO = options.piFileIO ?? createNodePiFileIO();
+    this.#piTools = options.piTools;
+    this.#webSearchCredential = options.webSearchCredential;
     this.skillDiscovery = createPiSkillDiscoveryProvider(options);
     this.#installTools = options.installTools ?? installPiTools;
-    this.#requiredToolsReview = options.requiredToolsReview ?? (() => reviewPiRequiredTools({ command: "pi" }));
+    this.#requiredToolsReview = options.requiredToolsReview ?? (() => reviewPiRequiredTools({ command: this.#piCommand, piTools: this.#tools() }));
     this.#serenaBootstrapEffects = options.serenaBootstrapEffects;
     this.#serenaRevalidator = options.serenaRevalidator;
     this.#serenaOwnedRoot = options.serenaOwnedRoot;
     this.#writeSerenaMcpConfig = options.writeSerenaMcpConfig ?? writeSerenaMcpConfig;
-    this.#writeNamedMcpConfig = options.writeNamedMcpConfig ?? writeNamedPiMcpConfig;
+    this.#writeNamedMcpConfig = options.writeNamedMcpConfig ?? ((capabilityId, context) => this.#checkNamedMcpReadiness(capabilityId, context));
     this.#webSearchProvider = options.webSearchProvider;
     this.#webSearchProviderResolver = options.webSearchProviderResolver;
+  }
+
+  async #ensureSerenaRuntime(explicitRoot: string | undefined, signal?: AbortSignal): Promise<void> {
+    let root = explicitRoot ?? this.#serenaOwnedRoot;
+    if (!root) {
+      try {
+        root = await resolveSerenaOwnedRoot(this.#serenaBootstrapEffects, signal ?? new AbortController().signal);
+      } catch {
+        root = undefined;
+      }
+      if (!root) return;
+      this.#serenaOwnedRoot = root;
+    }
+    this.#serenaRevalidator ??= createSerenaReadinessRevalidator(root, this.#serenaBootstrapEffects);
   }
 
   private resolveWebSearchProvider(provider: string | undefined): WebSearchProviderDescriptorV1 | undefined {
@@ -588,9 +660,83 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     return this.#webSearchProviderResolver?.(selected);
   }
 
+  /** The resolved Pi agent dir for read-only consumers (falls back to the default location when the override is invalid). */
+  #readAgentDir(): string {
+    return this.#agentDirResolution.ok ? this.#agentDirResolution.dir : join(this.#homeDirectory, ".pi", "agent");
+  }
+
+  /**
+   * `write-pi-mcp-config` for Pi no longer writes `mcp.json` on its own: every Deck server is materialized
+   * atomically with the Deck package (one manifest-owned transaction). This action verifies that the server
+   * can actually be configured so the review plan reports failures early.
+   */
+  async #checkNamedMcpReadiness(capabilityId: string, context: RunnerActionContext): Promise<PiMcpConfigWriteResult> {
+    const configPath = (context as RunnerActionContext & PiSerenaActionContextExtensions).piMcpConfigPath ?? piAgentPaths(this.#readAgentDir()).mcp;
+    const server = mcpServerForCapability(capabilityId);
+    const fail = (message: string): PiMcpConfigWriteResult => ({
+      ok: false,
+      action: "failed",
+      path: configPath,
+      serverName: server ?? capabilityId,
+      diagnostics: [{ code: "PI_MCP_PROVIDER_UNAVAILABLE", severity: "error", message, path: configPath, serverName: server ?? capabilityId }],
+    });
+    const ok = (): PiMcpConfigWriteResult => ({
+      ok: true,
+      action: "unchanged",
+      path: configPath,
+      serverName: server ?? capabilityId,
+      diagnostics: [{ code: "PI_MCP_CONFIG_UNCHANGED", severity: "info", message: `${server ?? capabilityId} MCP server is ready; it is ${PI_MCP_DEFERRED_MARK}.`, path: configPath, serverName: server ?? capabilityId }],
+    });
+    if (!server) return { ok: false, action: "failed", path: configPath, serverName: capabilityId, diagnostics: [] };
+    if (capabilityId === "supermemory") return { ok: false, action: "failed", path: configPath, serverName: capabilityId, diagnostics: [] };
+    let resolved: ReturnType<typeof resolveDeckPiMcpServers>;
+    try {
+      resolved = resolveDeckPiMcpServers({
+        selected: [server],
+        tools: this.#tools(),
+        existingServers: readPiMcpServers(this.#fileIO, this.#readAgentDir()),
+        ownedServerNames: Object.keys(readPiManifest(this.#fileIO, this.#readAgentDir())?.mcp.servers ?? {}),
+        webSearchProvider: context.webSearchProvider ?? this.#webSearchProvider,
+      });
+    } catch (error) {
+      return fail(`Unable to resolve the ${server} MCP server: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (Object.keys(resolved.servers).length === 0) return fail(resolved.diagnostics[0]?.message ?? `The ${server} MCP server cannot be configured.`);
+    if (server === "web-search") {
+      const provider = context.webSearchProvider ?? this.#webSearchProvider;
+      if (!isWebSearchProviderDescriptor(provider)) return fail("Web Search provider selection is unavailable.");
+      const credential = (() => { try { return (this.#webSearchCredential?.() ?? this.#env[provider.credentialEnvVar])?.trim(); } catch { return undefined; } })();
+      if (!credential) return fail(`${provider.credentialEnvVar} is not available; Web Search cannot start. No credential was persisted.`);
+    }
+    return ok();
+  }
+
+  #tools(): PiToolResolution {
+    this.#piTools ??= createPiTools({ homeDir: this.#homeDirectory, env: this.#env });
+    return this.#piTools;
+  }
+
+  #agentDirDiagnostic(): string | undefined {
+    return this.#agentDirResolution.ok ? undefined : this.#agentDirResolution.message;
+  }
+
+  #evaluatePiVersion(): PiVersionEvaluation {
+    let output: string | undefined;
+    try {
+      const result = this.#piVersionProbe();
+      const text = result.stdout.trim() || result.stderr?.trim() || "";
+      output = result.exitCode === 0 && text ? text : undefined;
+    } catch {
+      output = undefined;
+    }
+    return evaluatePiVersion(output);
+  }
+
   async detectRuntimes(input?: RuntimeDetectionInput): Promise<readonly RuntimeStatus[]> {
     const preflight = inspectPiEnvironment({
-      command: "pi",
+      command: this.#piCommand,
+      homeDirectory: this.#homeDirectory,
+      env: this.#env,
       pathExists: (path) => {
         try {
           const { existsSync } = require("node:fs");
@@ -613,7 +759,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     const runnerScope = input.runnerId as "pi" | "opencode" | "all";
     const deckConfig = requireDeckConfig(input.deckConfig, "capability inventory");
     const webSearchProvider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
-    const webSearchMcp = inspectPiWebSearchMcpConfig(join(this.#homeDirectory, ".pi", "agent", "mcp.json"), webSearchProvider);
+    const webSearchMcp = inspectPiWebSearchMcpConfig(piAgentPaths(this.#readAgentDir()).mcp, webSearchProvider);
     const webSearchEvidence = {
       enabled: deckConfig.webSearch.enabled,
       runnerSupported: true,
@@ -673,7 +819,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       } as any;
     }
 
-    const review = reviewPiRequiredTools({ command: "pi" });
+    const review = this.#requiredToolsReview();
 
     const piPlan: PiRunnerReviewPlan = buildPiRunnerReviewPlan(
       {
@@ -708,7 +854,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   }
 
   buildInstallationPlan(state: DashboardState): InstallationPlan {
-    const review = reviewPiRequiredTools({ command: "pi" });
+    const review = this.#requiredToolsReview();
     const requiredTools: RequiredToolStatus[] = review.requiredTools;
 
     // Collect selected optional tool IDs from state.selectedCapabilities
@@ -769,7 +915,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       const catalogTool = toolId ? getPiInstallableTool(toolId) : undefined;
 
       const installableTool: InstallablePiTool = {
-        id: toolId ?? "sub-agents",
+        id: toolId ?? "context-mode",
         name: action.title,
         source: action.source ?? catalogTool?.source ?? "",
         required: action.required ?? false,
@@ -797,7 +943,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
               serenaBootstrapEffects: this.#serenaBootstrapEffects,
               serenaSignal: context.signal,
             }
-          : undefined,
+          : { piTools: this.#tools() },
       );
       const result = results[0];
       if (!result) {
@@ -813,32 +959,8 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         this.#serenaReadinessByOperation.set(operation.operationId, result.serenaReadiness);
       }
 
-      // Serena is Core-managed and does not participate in Pi package settings
-      // migration. Preserve the existing merge behavior for every other tool.
+      // Pi package settings are owned exclusively by the Deck manifest transaction (global install plan).
       const mergeDiagnostics: string[] = [];
-      if (!isSerena) {
-        const homeDir = process.env.HOME ?? "/home/kevinlb";
-        const settingsPath = `${homeDir}/.pi/agent/settings.json`;
-        const fs = require("node:fs");
-
-        let currentPackages: string[] = [];
-        try {
-          if (fs.existsSync(settingsPath)) {
-            const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-            currentPackages = settings.packages || [];
-          }
-        } catch {
-          // Ignore read errors
-        }
-
-        const mergeResult = mergeSettingsPackages({
-          settingsPath: fs.existsSync(settingsPath) ? settingsPath : undefined,
-          existingPackages: currentPackages,
-          readFile: (path) => fs.readFileSync(path, "utf-8"),
-          writeFile: (path, content) => fs.writeFileSync(path, content),
-        });
-        mergeDiagnostics.push(...mergeResult.diagnostics);
-      }
 
       const allDiagnostics = [
         ...(["failed", "blocked", "cancelled", "partial"].includes(result.status) ? [result.message ?? "Install failed."] : []),
@@ -918,6 +1040,11 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         }
         const readiness = context.serenaReadiness
           ?? (operationId ? this.#serenaReadinessByOperation.get(operationId) : undefined);
+        // Mirror OpenCode: compose the Deck-owned root and the revalidator lazily
+        // when production options do not inject them. Evidence is still required.
+        if (!actionContext.serenaRevalidator && !this.#serenaRevalidator) {
+          await this.#ensureSerenaRuntime(actionContext.serenaOwnedRoot, context.signal);
+        }
         const revalidate = actionContext.serenaRevalidator ?? this.#serenaRevalidator;
         if (!readiness || !revalidate || !operation || !context.serenaAuthorization) {
           return blockedSerenaActionResult(action, "Serena readiness evidence is required before MCP configuration.");
@@ -949,7 +1076,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
                 command: validatedInput.command,
                 args: validatedInput.args,
                 ownedRoot,
-                configPath: actionContext.piMcpConfigPath,
+                configPath: actionContext.piMcpConfigPath ?? piAgentPaths(this.#readAgentDir()).mcp,
                 homeDir: actionContext.homeDirectory,
                 fileSystem: actionContext.piMcpFileSystem,
               });
@@ -988,11 +1115,13 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       }
 
       const result = await this.#writeNamedMcpConfig(capabilityId, context);
+      const deferred = result.ok ? result.diagnostics.find((diagnostic) => diagnostic.message.includes(PI_MCP_DEFERRED_MARK)) : undefined;
+      const failure = result.ok ? undefined : result.diagnostics.find((diagnostic) => diagnostic.severity === "error")?.message;
       return {
         actionId: action.id,
         status: result.ok ? "executed" : "failed",
-        message: result.ok ? `MCP configuration ${result.action} for ${capabilityId}.` : "MCP configuration was not changed.",
-        diagnostics: result.ok ? [] : ["MCP configuration was not changed."],
+        message: result.ok ? (deferred?.message ?? `MCP configuration ${result.action} for ${capabilityId}.`) : (failure ?? "MCP configuration was not changed."),
+        diagnostics: result.ok ? [] : [failure ?? "MCP configuration was not changed."],
       };
     }
 
@@ -1029,16 +1158,43 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       code: `pi-${input.mode}-unsupported`,
       diagnostics: [{ code: "unsupported-launch-mode", severity: "error", message: "Pi generic compatibility launch currently supports interactive mode only." }],
     };
+    if (!this.#agentDirResolution.ok) {
+      return { status: "blocked", code: "pi-agent-dir-invalid", diagnostics: [{ code: "pi-agent-dir-invalid", severity: "error", message: this.#agentDirResolution.message }] };
+    }
+    const version = this.#evaluatePiVersion();
+    if (!version.supported && version.reason !== "unavailable") {
+      return { status: "blocked", code: "pi-version-unsupported", diagnostics: [{ code: "pi-version-unsupported", severity: "error", message: version.diagnostic ?? PI_UPGRADE_HINT }] };
+    }
     const nativeHints = input.runnerNative ?? {};
     const native = buildPiTeamLaunchPlan({
       teamId: input.teamId,
       projectRoot: input.projectRoot,
+      agentDir: this.#agentDirResolution.dir,
       flags: {
         ...(nativeHints.continue === true ? { continue: true } : {}),
         ...(nativeHints.resume === true ? { resume: true } : {}),
       },
-      ...(typeof nativeHints.piCommand === "string" && nativeHints.piCommand.trim() ? { piCommand: nativeHints.piCommand } : {}),
+      piCommand: typeof nativeHints.piCommand === "string" && nativeHints.piCommand.trim() ? nativeHints.piCommand : this.#piCommand,
     });
+    const overlay: Record<string, { value: string; sensitive?: boolean }> = {
+      DECK_PI_SESSION: { value: "1" },
+      DECK_PI_ROLE: { value: "lead" },
+      // With memory off the Deck memory extension stays silent instead of reporting "unavailable" on every launch.
+      ...(input.deckConfig.adaptiveMemory.enabled === true && input.deckConfig.adaptiveMemory.activeProvider === "supermemory" ? {} : { DECK_PI_MEMORY: { value: "disabled" } }),
+      // A non-default agent directory must reach Pi itself, not only the Deck process.
+      ...(this.#agentDirResolution.source === "env" ? { PI_CODING_AGENT_DIR: { value: this.#agentDirResolution.dir } } : {}),
+    };
+    const diagnostics: { code: string; severity: "info" | "warning" | "error"; message: string }[] = version.reason === "unavailable" && version.diagnostic
+      ? [{ code: "pi-version-unavailable", severity: "warning", message: version.diagnostic }]
+      : [];
+    const sensitiveKeys: string[] = [];
+    const webSearch = this.#webSearchLaunchCredential(input);
+    if (webSearch.kind === "ready") {
+      overlay[webSearch.envVar] = { value: webSearch.value, sensitive: true };
+      sensitiveKeys.push(webSearch.envVar);
+    } else if (webSearch.kind === "missing-credential") {
+      diagnostics.push({ code: "pi-web-search-credential-missing", severity: "warning", message: "Web search is unavailable for this session: the shared Tavily credential was not found. Deck did not write a credential anywhere." });
+    }
     return {
       status: "ready",
       plan: {
@@ -1048,9 +1204,10 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
         stdio: "inherit",
         stdin: "inherit",
         executionClass: "static-compatible",
-        envOverlay: native.env.PI_SESSION_DIR ? { PI_SESSION_DIR: { value: native.env.PI_SESSION_DIR } } : undefined,
+        envOverlay: overlay,
+        ...(sensitiveKeys.length > 0 ? { sensitiveEnvAuthorization: { binding: PI_WEB_SEARCH_BINDING, keys: sensitiveKeys } } : {}),
       },
-      diagnostics: [],
+      diagnostics,
     };
   }
 
@@ -1062,32 +1219,55 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     return getCoreModelCatalog();
   }
 
+  /**
+   * Hands the shared Web Search credential to the launched Pi process only: Web Search is enabled, its Deck MCP
+   * entry is configured, and a credential resolves. The value never reaches `mcp.json`, settings or agent files
+   * (MCP stdio servers inherit the Pi environment, so the Tavily server receives it from there).
+   */
+  #webSearchLaunchCredential(input: import("@deck/core").RunnerLaunchInput):
+    | { kind: "disabled" }
+    | { kind: "missing-credential" }
+    | { kind: "ready"; envVar: string; value: string } {
+    const deckConfig = input.deckConfig;
+    if (!deckConfig || deckConfig.webSearch?.enabled !== true) return { kind: "disabled" };
+    const provider = this.resolveWebSearchProvider(deckConfig.webSearch.provider);
+    if (!isWebSearchProviderDescriptor(provider)) return { kind: "disabled" };
+    const agentDir = this.#readAgentDir();
+    if (!(provider.semanticServerId in readPiMcpServers(this.#fileIO, agentDir))) return { kind: "disabled" };
+    let token: string | undefined;
+    try { token = (this.#webSearchCredential?.() ?? this.#env[provider.credentialEnvVar])?.trim(); } catch { token = undefined; }
+    if (!token || /[\0\r\n]/.test(token)) return { kind: "missing-credential" };
+    return { kind: "ready", envVar: provider.credentialEnvVar, value: token };
+  }
+
   readModelAssignments(projectRoot?: string): DeveloperTeamModelAssignments {
-    // For Pi, read from the user's installed Pi agents directory (~/.pi/agent/agents)
-    // For OpenCode, read from project root (.pi/agents)
-    // This ensures model config persists correctly after applyDeveloperTeamInstall writes to ~/.pi/agent/agents
-    const homeDir = process.env.HOME ?? "/home/user";
-    const piAgentsDir = `${homeDir}/.pi/agent/agents`;
-    const modelAssignments = readDeveloperTeamModelAssignments(piAgentsDir, { exists: require("node:fs").existsSync, readFile: require("node:fs").readFileSync, agentsDir: piAgentsDir });
-    // If Pi agents dir is empty, fall back to project root (for migration/edge cases)
-    if (Object.keys(modelAssignments).length === 0 && projectRoot) {
-      return readDeveloperTeamModelAssignments(projectRoot, { agentsDir: undefined });
+    for (const agentsDir of this.#assignmentSources(projectRoot)) {
+      const assignments = readDeveloperTeamModelAssignments(agentsDir, { exists: existsSync, readFile: readFileSync, agentsDir });
+      if (Object.keys(assignments).length > 0) return assignments;
     }
-    return modelAssignments;
+    return {};
   }
 
   readThinkingAssignments(projectRoot?: string): DeveloperTeamThinkingAssignments {
-    // For Pi, read from the user's installed Pi agents directory (~/.pi/agent/agents)
-    // For OpenCode, read from project root (.pi/agents)
-    // This ensures thinking config persists correctly after applyDeveloperTeamInstall writes to ~/.pi/agent/agents
-    const homeDir = process.env.HOME ?? "/home/user";
-    const piAgentsDir = `${homeDir}/.pi/agent/agents`;
-    const thinkingAssignments = readDeveloperTeamThinkingAssignments(piAgentsDir, { exists: require("node:fs").existsSync, readFile: require("node:fs").readFileSync, agentsDir: piAgentsDir });
-    // If Pi agents dir is empty, fall back to project root (for migration/edge cases)
-    if (Object.keys(thinkingAssignments).length === 0 && projectRoot) {
-      return readDeveloperTeamThinkingAssignments(projectRoot, { agentsDir: undefined });
+    for (const agentsDir of this.#assignmentSources(projectRoot)) {
+      const assignments = readDeveloperTeamThinkingAssignments(agentsDir, { exists: existsSync, readFile: readFileSync, agentsDir });
+      if (Object.keys(assignments).length > 0) return assignments;
     }
-    return thinkingAssignments;
+    return {};
+  }
+
+  /**
+   * Where persisted model/thinking assignments live, in precedence order: the Deck package agents (current),
+   * then the pre-package global `<agent dir>/agents` and project `.pi/agents` locations so assignments survive
+   * the upgrade to the global package layout.
+   */
+  #assignmentSources(projectRoot?: string): string[] {
+    const agentDir = this.#readAgentDir();
+    return [
+      join(piAgentPaths(agentDir).packageRoot, "agents"),
+      join(agentDir, "agents"),
+      ...(projectRoot ? [join(projectRoot, ".pi", "agents")] : []),
+    ];
   }
 
   getThinkingLevels(_modelId?: string): readonly RunnerThinkingLevel[] {
@@ -1102,14 +1282,84 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // Developer Team installation
   // -------------------------------------------------------------------------
 
-  buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
+  /** Owned RTK path, or null when the tool root is unavailable (a missing home must not break planning). */
+  #ownedRtkCommand(): string | null {
+    try {
+      return this.#tools().rtk.command() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Read-only legacy detection; the Deck-template check runs only when a Deck-named path actually exists. */
+  #detectLegacy(projectRoot: string, agentDir: string, installOptions: DeveloperTeamInstallOptions): PiLegacyReport {
+    const quick = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot });
+    if (quick.files.length === 0) return quick;
+    try {
+      const templates = buildPiLegacyTemplates({ projectRoot, packageRoot: piAgentPaths(agentDir).packageRoot, installOptions });
+      return detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates });
+    } catch {
+      return quick;
+    }
+  }
+
+  /**
+   * Opt-in cleanup of legacy Deck artifacts (project `.pi/agents|skills`, `.deck/pi/profiles`, loose files in the Pi
+   * agent directory, Deck-added project package entries). Backed up first, rolled back on failure; modified files stay.
+   */
+  async cleanupLegacyInstall(projectRoot: string, context?: { readonly deckConfig: NormalizedDeckConfig }): Promise<{ removed: readonly string[]; preserved: readonly string[]; diagnostics: readonly string[] }> {
+    if (!this.#agentDirResolution.ok) return { removed: [], preserved: [], diagnostics: [this.#agentDirResolution.message] };
+    const agentDir = this.#agentDirResolution.dir;
+    const quick = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot });
+    if (quick.files.length === 0 && quick.packages.length === 0) return { removed: [], preserved: [], diagnostics: ["No legacy Pi artifacts were found."] };
+    const backupRoot = this.#legacyBackupRoot?.();
+    if (!backupRoot) return { removed: [], preserved: [], diagnostics: ["Legacy cleanup needs a Deck state directory for its backup; nothing was changed."] };
+    let report = quick;
+    if (context?.deckConfig) {
+      const { installOptions } = this.#resolveInstallOptions({ projectRoot, environmentId: PI_ENVIRONMENT_IDS[0]!, deckConfig: context.deckConfig } as DeveloperTeamAdapterInstallInput, agentDir);
+      report = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates: buildPiLegacyTemplates({ projectRoot, packageRoot: piAgentPaths(agentDir).packageRoot, installOptions }) });
+    } else {
+      // Without a Deck config the templates cannot be reproduced: nothing is provably unmodified, so nothing is removed.
+      report = detectPiLegacy({ io: this.#fileIO, agentDir, projectRoot, templates: new Map() });
+    }
+    return cleanupPiLegacy({ io: this.#fileIO, agentDir, projectRoot, report, backupRoot });
+  }
+
+  /**
+   * Role model/thinking assignments exist only as frontmatter in the installed agent files, so a re-render of the
+   * package must carry them over. Precedence (lowest first): project `.pi/agents`, pre-package `<agent dir>/agents`,
+   * the installed package agents, then explicit assignments from the caller (per agent).
+   */
+  #mergeInstalledAssignments(input: DeveloperTeamAdapterInstallInput, agentDir: string): { modelAssignments: DeveloperTeamModelAssignments; thinkingAssignments: DeveloperTeamThinkingAssignments } {
+    const modelAssignments: DeveloperTeamModelAssignments = {};
+    const thinkingAssignments: DeveloperTeamThinkingAssignments = {};
+    const sources = [
+      join(input.projectRoot, ".pi", "agents"),
+      join(agentDir, "agents"),
+      join(piAgentPaths(agentDir).packageRoot, "agents"),
+    ];
+    for (const agentsDir of sources) {
+      try {
+        const read = readDeveloperTeamModelConfigAssignments(input.projectRoot, { agentsDir, exists: existsSync, readFile: readFileSync });
+        Object.assign(modelAssignments, read.modelAssignments);
+        Object.assign(thinkingAssignments, read.thinkingAssignments);
+      } catch { /* an unreadable legacy source never blocks the install */ }
+    }
+    return {
+      modelAssignments: { ...modelAssignments, ...(input.modelAssignments ?? {}) },
+      thinkingAssignments: { ...thinkingAssignments, ...(input.thinkingAssignments ?? {}) },
+    };
+  }
+
+  /** Capability instructions and install options shared by the plan and the legacy template check. */
+  #resolveInstallOptions(input: DeveloperTeamAdapterInstallInput, agentDir: string): { capabilityInstructions: ReturnType<typeof bindAdaptiveMemoryInstructionBundle>; installOptions: DeveloperTeamInstallOptions } {
     const derivedSupermemoryProjectScope = (() => {
       const resolved = resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] });
       return resolved.ok ? resolved.scope : undefined;
     })();
     const configuredSupermemoryProjectScope = (() => {
       const validation = validateSupermemoryPiMcpConfig({
-        configPath: defaultPiMcpConfigPath(this.#homeDirectory),
+        configPath: piAgentPaths(agentDir).mcp,
         homeDir: this.#homeDirectory,
       });
       return validation.ok ? validation.projectScope : undefined;
@@ -1127,55 +1377,121 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       supermemoryProjectScope: derivedSupermemoryProjectScope,
       configuredSupermemoryProjectScope,
     });
-    const nativePlan = buildPiDeveloperTeamInstallPlan(input.projectRoot, {
-      modelAssignments: input.modelAssignments,
-      thinkingAssignments: input.thinkingAssignments,
-      memoryProvider: input.memoryProvider,
-      capabilityInstructions,
-      orchestratorPersonality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,
-      standaloneSkills: input.standaloneSkills,
-      piMcpConfigPath: defaultPiMcpConfigPath(this.#homeDirectory),
-      piMcpHomeDir: this.#homeDirectory,
-    });
-    this.#lastNativePlan = nativePlan;
-    const configDir = join(this.#homeDirectory, ".pi", "agent");
-    const planned = [
-      ...nativePlan.agents.map((file) => ({ path: file.relativePath, absolutePath: join(configDir, "agents", file.relativePath.split("/").pop()!), content: file.content, kind: "agent" as const })),
-      ...nativePlan.skills.map((file) => ({ path: file.relativePath, absolutePath: join(configDir, "skills", file.agent.skillId, "SKILL.md"), content: file.content, kind: "skill" as const, skillId: file.agent.skillId, packagePath: "SKILL.md" })),
-      ...nativePlan.standaloneSkills.map((file) => ({ path: file.relativePath, absolutePath: join(configDir, "skills", file.skillId, file.packagePath), content: file.content, kind: "standalone-skill" as const, skillId: file.skillId, packagePath: file.packagePath })),
-      ...nativePlan.sddSkillFiles.map((file) => ({ path: file.relativePath, absolutePath: join(configDir, "skills", file.skillId, "SKILL.md"), content: file.content, kind: "skill" as const, skillId: file.skillId, packagePath: "SKILL.md" })),
-    ];
-    const digest = (content: string) => createHash("sha256").update(content).digest("hex");
+
+    const preserved = this.#mergeInstalledAssignments(input, agentDir);
     return {
-      files: planned.map(({ absolutePath: _absolutePath, ...file }) => file),
-      mutationPreview: planned.filter((file) => !existsSync(file.absolutePath) || readFileSync(file.absolutePath, "utf8") !== file.content).map((file) => ({
-        action: existsSync(file.absolutePath) ? "update" as const : "create" as const,
-        path: file.absolutePath,
-        preimage: existsSync(file.absolutePath) ? digest(readFileSync(file.absolutePath, "utf8")) : "absent",
-        postimage: digest(file.content),
-        ownership: "pi-native-plan",
-      })),
+      capabilityInstructions,
+      installOptions: {
+        modelAssignments: preserved.modelAssignments,
+        thinkingAssignments: preserved.thinkingAssignments,
+        memoryProvider: input.memoryProvider,
+        capabilityInstructions,
+        orchestratorPersonality: requireDeckConfig(input.deckConfig, "developer team install").orchestratorPersonality,
+        standaloneSkills: input.standaloneSkills,
+        piMcpConfigPath: piAgentPaths(agentDir).mcp,
+        piMcpHomeDir: this.#homeDirectory,
+      },
+    };
+  }
+
+  buildDeveloperTeamInstallPlan(input: DeveloperTeamAdapterInstallInput): RunnerDeveloperTeamInstallPlan {
+    // Blocking prerequisites: a valid agent dir and a supported Pi. Nothing is planned (or written) otherwise.
+    const diagnosticEntries: { code: string; severity: "info" | "warning" | "error"; message: string }[] = [];
+    if (!this.#agentDirResolution.ok) {
+      this.#lastMaterialization = null;
+      diagnosticEntries.push({ code: "PI_AGENT_DIR_INVALID", severity: "error", message: this.#agentDirResolution.message });
+      return { files: [], mutationPreview: [], blocked: true, diagnostics: diagnosticEntries.map((entry) => entry.message), diagnosticEntries };
+    }
+    const agentDir = this.#agentDirResolution.dir;
+    const version = this.#evaluatePiVersion();
+    if (!version.supported && version.diagnostic) {
+      diagnosticEntries.push({ code: `PI_VERSION_${(version.reason ?? "unsupported").toUpperCase().replace(/-/g, "_")}`, severity: version.reason === "unavailable" ? "warning" : "error", message: version.diagnostic });
+    }
+    const versionBlocked = !version.supported && version.reason !== "unavailable";
+
+    const { capabilityInstructions, installOptions } = this.#resolveInstallOptions(input, agentDir);
+
+    const deckConfig = requireDeckConfig(input.deckConfig, "developer team install");
+    const ownedMcp = Object.keys(readPiManifest(this.#fileIO, agentDir)?.mcp.servers ?? {});
+    let mcpServers: Record<string, Record<string, unknown>> = {};
+    try {
+      const resolved = resolveDeckPiMcpServers({
+        selected: selectDeckPiMcpServerIds({
+          capabilityIds: input.capabilityIds,
+          instructionPackageIds: capabilityInstructions?.instructions.map((fragment) => fragment.packageId) ?? [],
+          webSearchEnabled: deckConfig.webSearch.enabled === true,
+          ownedServers: ownedMcp,
+        }),
+        tools: this.#tools(),
+        existingServers: readPiMcpServers(this.#fileIO, agentDir),
+        ownedServerNames: ownedMcp,
+        webSearchProvider: this.resolveWebSearchProvider(deckConfig.webSearch.provider),
+      });
+      mcpServers = resolved.servers;
+      for (const diagnostic of resolved.diagnostics) diagnosticEntries.push(diagnostic);
+    } catch (error) {
+      diagnosticEntries.push({ code: "PI_MCP_RESOLUTION_FAILED", severity: "warning", message: `Deck MCP servers could not be resolved: ${error instanceof Error ? error.message : String(error)}` });
+    }
+
+    const materialization = buildPiGlobalMaterialization({
+      agentDir,
+      projectRoot: input.projectRoot,
+      mcpServers,
+      legacyDeckEvidence: hasLegacyDeckInstallEvidence(this.#fileIO, agentDir),
+      // RTK rewrite is pinned to the Deck-owned binary: an explicit selection must include RTK; a launch-time plan
+      // (no explicit selection) keeps using the owned binary when it is usable.
+      rtkBinary: input.capabilityIds === undefined || input.capabilityIds.includes("rtk") ? this.#ownedRtkCommand() : null,
+      installOptions,
+    });
+    const enginePlan = planPiGlobalInstall(materialization.desired, this.#fileIO);
+    this.#lastMaterialization = { materialization, enginePlan };
+
+    for (const diagnostic of enginePlan.diagnostics) diagnosticEntries.push({ code: diagnostic.code, severity: diagnostic.severity, message: diagnostic.message });
+    const legacy = this.#detectLegacy(input.projectRoot, agentDir, installOptions);
+    if (legacy.files.length > 0 || legacy.packages.length > 0) {
+      const lines = describePiLegacy(legacy);
+      diagnosticEntries.push({
+        code: "PI_LEGACY_ARTIFACTS",
+        severity: "warning",
+        message: `Earlier Deck versions left ${lines.length} legacy Pi item(s) that can duplicate the global Deck package: ${lines.slice(0, 8).join("; ")}${lines.length > 8 ? `; and ${lines.length - 8} more` : ""}. ${lines.some((line) => line.includes("/skills/")) ? " Legacy skills in the Pi skills directory shadow the package skills outside Deck sessions and cause a '[Skill conflicts]' startup block (Deck sessions already prefer the package); copies in ~/.agents/skills belong to other runners and are never touched." : ""} Run 'deck pi developer --cleanup-legacy' to remove unmodified Deck files and global deck-* files that are demonstrably Deck-authored but older than the current templates (a backup is kept; user-modified files are never touched).`,
+      });
+    }
+    for (const kept of enginePlan.kept) diagnosticEntries.push({ code: "PI_FILE_KEPT", severity: "info", message: `${kept.relPath} ${kept.reason}.` });
+    const standalone = new Set(materialization.nativePlan.standaloneSkills.map((file) => file.skillId));
+    const files = materialization.desired.files.map((file) => {
+      const absolute = join(agentDir, ...file.relPath.split("/"));
+      const skill = /^deck\/package\/skills\/([^/]+)\/(.+)$/.exec(file.relPath);
+      const kind = file.relPath.startsWith("deck/package/agents/") ? "agent" as const
+        : skill ? (standalone.has(skill[1]!) ? "standalone-skill" as const : "skill" as const)
+        : "other" as const;
+      return { path: absolute, content: file.content, kind, ...(skill ? { skillId: skill[1]!, packagePath: skill[2]! } : {}) };
+    });
+    return {
+      files,
+      mutationPreview: versionBlocked ? [] : enginePlan.mutationPreview.map((mutation) => ({ ...mutation })),
+      blocked: enginePlan.blocked || versionBlocked,
+      diagnostics: diagnosticEntries.map((entry) => entry.message),
+      diagnosticEntries,
     };
   }
 
   async applyDeveloperTeamInstall(input: DeveloperTeamApplyInput): Promise<DeveloperTeamApplyResult> {
-    if (!this.#lastNativePlan) throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
-    const piConfigDir = `${this.#homeDirectory}/.pi/agent`;
-    const piAgentsDir = `${piConfigDir}/agents`;
-    const piSkillsDir = `${piConfigDir}/skills`;
-    const plan: PiDeveloperTeamInstallPlan = {
-      ...this.#lastNativePlan,
-      projectRoot: input.projectRoot,
-      agentsDir: piAgentsDir,
-      skillsDir: piSkillsDir,
-      agents: this.#lastNativePlan.agents.map((file) => ({ ...file, absolutePath: `${piAgentsDir}/${file.relativePath.split("/").pop()}` })),
-      skills: this.#lastNativePlan.skills.map((file) => ({ ...file, absolutePath: `${piSkillsDir}/${file.agent.skillId}/SKILL.md` })),
-      standaloneSkills: this.#lastNativePlan.standaloneSkills.map((file) => ({ ...file, absolutePath: `${piSkillsDir}/${file.skillId}/${file.packagePath}` })),
-      sddSkillFiles: this.#lastNativePlan.sddSkillFiles.map((file) => ({ ...file, absolutePath: `${piSkillsDir}/${file.skillId}/SKILL.md` })),
+    if (!this.#agentDirResolution.ok) throw new Error(this.#agentDirResolution.message);
+    if (!this.#lastMaterialization) throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
+    if (input.plan?.blocked) throw new Error(`Pi global install is blocked: ${(input.plan.diagnostics ?? []).join("; ") || "unresolved prerequisites"}`);
+    const { materialization, enginePlan } = this.#lastMaterialization;
+    const applied = applyPiGlobalPlan(enginePlan, this.#fileIO);
+    const changed = new Set(applied.changes.map((change) => change.relPath));
+    const results = materialization.desired.files.map((file) => ({
+      agentId: file.relPath,
+      kind: file.relPath.startsWith("deck/package/agents/") ? "agent" : file.relPath.includes("/skills/") ? "skill" : "other",
+      status: (changed.has(file.relPath) ? (enginePlan.changes.find((change) => change.relPath === file.relPath)?.action === "create" ? "created" : "updated") : "unchanged") as "created" | "updated" | "unchanged",
+    }));
+    return {
+      results,
+      changedCount: applied.changedCount,
+      unchangedCount: results.filter((result) => result.status === "unchanged").length,
     };
-    const result = applyPiDeveloperTeamInstall(plan);
-    this.#lastNativePlan = plan;
-    return { results: result.results, changedCount: result.changedCount, unchangedCount: result.unchangedCount };
   }
 
   // -------------------------------------------------------------------------
@@ -1246,7 +1562,9 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
 
   async inspectEnvironment(): Promise<unknown> {
     return inspectPiEnvironment({
-      command: "pi",
+      command: this.#piCommand,
+      homeDirectory: this.#homeDirectory,
+      env: this.#env,
       pathExists: (path) => {
         try {
           const { existsSync } = require("node:fs");
@@ -1271,14 +1589,19 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   backupDeveloperTeamFiles(plan: unknown): import("@deck/core").RunnerBackupResult {
-    if (!this.#lastNativePlan) throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
-    return { payload: backupDeveloperTeamFiles(this.#lastNativePlan), diagnostics: [] };
+    if (!this.#lastMaterialization) throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
+    return { payload: { kind: PI_GLOBAL_SNAPSHOT_KIND, snapshot: snapshotPiPlanTargets(this.#lastMaterialization.enginePlan, this.#fileIO) }, diagnostics: [] };
   }
 
   async rollbackDeveloperTeamFiles(backup: unknown): Promise<import("@deck/core").RunnerRollbackResult> {
-    const payload = (backup as import("@deck/core").RunnerBackupResult).payload;
-    rollbackDeveloperTeamFiles(payload as Parameters<typeof rollbackDeveloperTeamFiles>[0]);
-    return { status: "rolled-back", conflicts: [], diagnostics: [] };
+    const payload = (backup as import("@deck/core").RunnerBackupResult).payload as { kind?: string; snapshot?: PiSnapshot } | undefined;
+    if (payload?.kind !== PI_GLOBAL_SNAPSHOT_KIND || !payload.snapshot) {
+      return { status: "conflict", conflicts: [], diagnostics: ["Unrecognized Pi backup payload; nothing was restored."] };
+    }
+    const restored = restorePiSnapshot(payload.snapshot, this.#fileIO);
+    return restored.restored
+      ? { status: "rolled-back", conflicts: [], diagnostics: [] }
+      : { status: "conflict", conflicts: restored.conflicts, diagnostics: restored.conflicts.map((path) => `${path} changed after apply; it was left untouched.`) };
   }
 
   // -------------------------------------------------------------------------
@@ -1286,16 +1609,11 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   // -------------------------------------------------------------------------
 
   verifyDeveloperTeamInstall(plan: unknown): { valid: boolean; diagnostics: readonly string[] } {
-    if (!this.#lastNativePlan) {
+    if (!this.#lastMaterialization) {
       throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
     }
-    const result = verifyDeveloperTeamInstall(this.#lastNativePlan);
-    // Flatten issues from agentResults and skillResults into diagnostics
-    const diagnostics = [
-      ...result.agentResults.flatMap((r) => r.issues),
-      ...result.skillResults.flatMap((r) => r.issues),
-    ];
-    return { valid: result.valid, diagnostics };
+    const result = verifyPiGlobalInstall(this.#lastMaterialization.materialization.desired, this.#fileIO);
+    return { valid: result.valid, diagnostics: result.diagnostics };
   }
 
   // -------------------------------------------------------------------------
@@ -1348,6 +1666,34 @@ export function getPiRunnerAdapter(): RunnerAdapter {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+const PI_GLOBAL_SNAPSHOT_KIND = "deck-pi-global-snapshot-v1";
+const PI_MCP_DEFERRED_MARK = "applied with the Deck package install";
+/** Binding recognized by the CLI launcher to forward exactly the Web Search credential variable. */
+export const PI_WEB_SEARCH_BINDING = "deck-pi-web-search-v1";
+
+/** `pi --version` with stdin ignored (a bare `pi` waits on a non-TTY stdin) and a bounded runtime. */
+function runPiVersionProbe(command: string): { exitCode: number; stdout: string; stderr?: string } {
+  try {
+    const result = nodeSpawnSync(command, ["--version"], { stdio: ["ignore", "pipe", "pipe"], timeout: 10_000, windowsHide: true });
+    return { exitCode: result.status ?? 1, stdout: result.stdout?.toString() ?? "", stderr: result.stderr?.toString() ?? "" };
+  } catch (error) {
+    return { exitCode: 1, stdout: "", stderr: error instanceof Error ? error.message : "Unable to run pi." };
+  }
+}
+
+/**
+ * Earlier Deck versions installed Deck agents loose in `<agent dir>/agents` and required the community
+ * `pi-subagents` / `pi-mcp-adapter` packages without recording a manifest. A leftover Deck agent file is the
+ * evidence that those package entries were added by Deck.
+ */
+function hasLegacyDeckInstallEvidence(io: PiFileIO, agentDir: string): boolean {
+  try {
+    return io.exists(join(agentDir, "agents", "deck-lead.md")) || io.exists(join(agentDir, "skills", "deck-lead", "SKILL.md"));
+  } catch {
+    return false;
+  }
+}
+
 function blockedSerenaActionResult(action: RunnerAction, message: string): RunnerActionRunResult {
   return {
     actionId: action.id,
@@ -1374,42 +1720,6 @@ function resolvePiSupermemoryProjectScope(projectRoot: string): string | undefin
     return resolved.ok ? resolved.scope : undefined;
   } catch {
     return undefined;
-  }
-}
-
-async function writeNamedPiMcpConfig(
-  capabilityId: string,
-  context: RunnerActionContext,
-): Promise<PiMcpConfigWriteResult> {
-  const actionContext = context as RunnerActionContext & PiSerenaActionContextExtensions;
-  const homeDir = actionContext.homeDirectory ?? process.env.HOME ?? "/home/kevinlb";
-  const configPath = actionContext.piMcpConfigPath ?? defaultPiMcpConfigPath(homeDir);
-
-  switch (capabilityId) {
-    case "context-mode":
-      return writeContextModeMcpConfig({ configPath, homeDir });
-    case "codebase-memory-mcp":
-      return writeCodebaseMemoryMcpConfig({ configPath, homeDir });
-    case "context7":
-      return writeContext7McpConfig({ configPath, homeDir });
-    case "web-search":
-      return writePiWebSearchMcpConfig({
-        configPath,
-        homeDir,
-        provider: context.webSearchProvider,
-        credentialEnvironment: process.env,
-      });
-    case "supermemory": {
-      return writeSupermemoryPiMcpConfig({ configPath, homeDir, projectScope: resolvePiSupermemoryProjectScope(context.projectRoot) ?? "" });
-    }
-    default:
-      return {
-        ok: false,
-        action: "failed",
-        path: configPath,
-        serverName: capabilityId,
-        diagnostics: [],
-      };
   }
 }
 

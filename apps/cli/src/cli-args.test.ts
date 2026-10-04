@@ -35,6 +35,8 @@ describe("parseArgs", () => {
     expect(parseArgs(["internal", "serena-mcp"])).toEqual({ command: "internal-serena-mcp", probe: false });
     expect(parseArgs(["internal", "serena-mcp", "--probe"])).toEqual({ command: "internal-serena-mcp", probe: true });
     expect(parseArgs(["internal", "codex-memory-hook"])).toEqual({ command: "internal-codex-memory-hook" });
+    expect(parseArgs(["internal", "memory-mcp"])).toEqual({ command: "internal-memory-mcp" });
+    expect(parseArgs(["internal", "memory-mcp", "--x"])).toMatchObject({ command: "error" });
     expect(parseArgs(["internal", "serena-mcp", "--anything"])).toMatchObject({ command: "error" });
   });
 
@@ -79,6 +81,15 @@ describe("parseArgs", () => {
       command: "pi-launch",
       teamId: "developer-team",
       flags: {},
+    });
+  });
+
+  test("parses 'deck pi developer --cleanup-legacy' as the opt-in legacy cleanup", () => {
+    expect(parseArgs(["pi", "developer", "--cleanup-legacy"])).toEqual<ParsedArgs>({
+      command: "pi-launch",
+      teamId: "developer-team",
+      flags: {},
+      cleanupLegacy: true,
     });
   });
 

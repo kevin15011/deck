@@ -5,7 +5,9 @@ import {
   type WebSearchProviderDescriptorV1,
 } from "@deck/core";
 
-export const CODEX_MCP_SERVER_IDS = ["context7", "context-mode", "codebase-memory", "serena", "supermemory", WEB_SEARCH_CAPABILITY_ID] as const;
+import { CODEX_MEMORY_MCP_ENV_VARS, CODEX_MEMORY_MCP_SERVER_ID } from "./memory-mcp-server";
+
+export const CODEX_MCP_SERVER_IDS = ["context7", "context-mode", "codebase-memory", "serena", "supermemory", CODEX_MEMORY_MCP_SERVER_ID, WEB_SEARCH_CAPABILITY_ID] as const;
 export const CODEX_SUPERMEMORY_MCP_URL = "https://mcp.supermemory.ai/mcp";
 
 
@@ -180,6 +182,17 @@ export function isCodexWebSearchMcpConfigured(
   }
 }
 
+/** Confirms the exact Deck memory MCP entry: the pinned Deck command plus the two variable NAMES (never a bearer). */
+export function isCodexDeckMemoryMcpConfigured(source: string, command: readonly string[]): boolean {
+  try {
+    const server = existingServers(source).get(CODEX_MEMORY_MCP_SERVER_ID);
+    const expected = normalized({ id: CODEX_MEMORY_MCP_SERVER_ID, transport: "stdio", command: command[0]!, args: command.slice(1), envVars: [...CODEX_MEMORY_MCP_ENV_VARS] });
+    return server !== undefined && isDeckManagedCodexMcpServer(source, CODEX_MEMORY_MCP_SERVER_ID) && JSON.stringify(canonical(server)) === JSON.stringify(canonical(expected));
+  } catch {
+    return false;
+  }
+}
+
 function validate(server: CodexMcpServer): void {
   if (!CODEX_MCP_SERVER_IDS.includes(server.id)) throw new Error(`Unsupported Codex MCP server: ${server.id}`);
   if (server.transport === "stdio") {
@@ -300,6 +313,8 @@ export function buildCodexMcpServers(input: {
   /** The effective `deck` command has confirmed the hidden Serena proxy route. */
   serenaProxyAvailable?: boolean;
   serenaProxyCommand?: readonly string[];
+  /** Self-referencing Deck command (`<deck> internal memory-mcp`); omitted when the running Deck cannot be pinned. */
+  deckMemoryCommand?: readonly string[];
   /** Absolute, verified Context Mode executable; a bare PATH name is never written. */
   contextModeCommand?: string;
   /** Absolute, verified Codebase Memory executable (shared install or Deck-owned pinned release). */
@@ -346,6 +361,10 @@ export function buildCodexMcpServers(input: {
   if (selected.has("context7")) servers.push({ id: "context7", transport: "streamable-http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } });
   // The official plugin owns memory and derives its repository tag per launch, so a global install needs no project scope.
   if (input.memoryProvider === "supermemory") gaps.push("supermemory-raw-mcp-disabled");
+  // Explicit memory tools ride the Deck loopback host; the entry is inert without the loopback variables.
+  if (input.memoryProvider === "supermemory" && input.deckMemoryCommand && input.deckMemoryCommand.length > 0) {
+    servers.push({ id: CODEX_MEMORY_MCP_SERVER_ID, transport: "stdio", command: input.deckMemoryCommand[0]!, args: input.deckMemoryCommand.slice(1), envVars: [...CODEX_MEMORY_MCP_ENV_VARS] });
+  }
   if (selected.has(WEB_SEARCH_CAPABILITY_ID)) {
     if (input.webSearchProviderConfigured !== true) {
       gaps.push("web-search-provider-unconfigured");
