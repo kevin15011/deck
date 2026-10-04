@@ -1,0 +1,28 @@
+schema: spec-registry-v1
+changeId: pi-background-subagents
+name: Pi Background Subagents
+currentPhase: review
+status: completed
+artifacts:
+  proposal: proposal.md
+  spec: specs/pi-background-subagents/spec.md
+  design: design.md
+  tasks: tasks.md
+  verify_report: verification.md
+  apply_progress: apply-progress.md
+  review_report: review.md
+  repair_incident: completion-follow-through.md
+next_action: "Post-install visual delta integrated: colored role/time/state row, active-only cards and aggregate history counts; native UI and distribution checks pass. Skill ownership and Pi conversational policy are separately tracked in role-owned-skill-context. Build and normal TUI installation remain separate; no personal installation performed."
+provenance:
+  - phase: apply
+    agent: deck-lead
+    model: gpt-5.4
+    timestamp: "2026-10-04T00:23:53Z"
+    registryWrite: non-deferred
+    note: "User authorized repository-only implementation and TUI distribution; approved Pi-native session isolation and right floating panel with scroll anchoring."
+  - phase: review
+    agent: deck-lead
+    model: gpt-5.4
+    timestamp: "2026-10-04T02:28:59Z"
+    registryWrite: non-deferred
+    note: "Final independent boundary GO; Lead verified 1019 affected tests, TypeScript and diff hygiene. Native renderer and Linux Bash evidence only; no personal installation or release."

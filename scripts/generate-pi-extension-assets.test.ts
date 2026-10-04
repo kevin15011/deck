@@ -7,6 +7,17 @@ import { computePiExtensionSourceDigest, piExtensionAssetPath, PI_EXTENSION_BUND
 const nodePath = Bun.which("node");
 
 describe("generated Pi extension bundles", () => {
+  test("child shell uses the supported external native module, not a bundled Pi runtime", () => {
+    const bundle = readFileSync(piExtensionAssetPath("deck-subagents"), "utf8");
+    expect(bundle).toContain('import("@earendil-works/pi-coding-agent")');
+    expect(bundle).not.toContain("node_modules/@earendil-works/pi-coding-agent");
+  });
+  test.skipIf(!nodePath)("generated factory preserves parent tools and child recursion guard under Node", async () => {
+    const path = piExtensionAssetPath("deck-subagents");
+    const child = Bun.spawn([nodePath!, "--input-type=module", "-e", `const {default: factory} = await import(${JSON.stringify(pathToFileURL(path).href)}); const names=[]; const pi={registerTool:t=>names.push(t.name),registerCommand(){},on(){}}; await factory(pi); process.env.DECK_PI_CHILD="1"; await factory(pi); console.log(JSON.stringify(names));`], { stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { PATH: process.env.PATH ?? "" } });
+    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    expect({ code: await child.exited, stdout: stdout.trim(), stderr }).toEqual({ code: 0, stdout: '["subagent"]', stderr: "" });
+  });
   for (const name of PI_EXTENSION_BUNDLES) {
     const path = piExtensionAssetPath(name);
     const present = existsSync(path);

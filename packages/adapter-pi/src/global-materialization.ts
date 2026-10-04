@@ -112,10 +112,11 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
       scope: "any",
       extraFiles: [{ name: "config.json", content: renderToolPolicyConfig({ rtkBinary: input.rtkBinary ?? null, graphRedirect: selectedServers.includes("codebase-memory") }) }],
     }, {
-      // Delegation tool: registered in the lead only; children are marked DECK_PI_CHILD=1 and never get it.
+      // Lead delegation plus child-only native shell containment; children never register subagent/UI.
       name: PI_SUBAGENTS_EXTENSION_NAME,
       implementation: readDeckPiExtensionBundle("deck-subagents"),
-      scope: "lead",
+      scope: "any",
+      nativeShell: true,
     }],
     profile: { teamId, content: toolNamesSection ? `${profile.content.trimEnd()}\n\n${toolNamesSection}` : profile.content },
   });

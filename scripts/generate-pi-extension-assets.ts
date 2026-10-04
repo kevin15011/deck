@@ -60,7 +60,7 @@ export async function generatePiExtensionAssets(options: { root?: string; names?
   const results: PiExtensionAssetResult[] = [];
   for (const name of options.names ?? PI_EXTENSION_BUNDLES) {
     const entry = resolve(projectRoot, SOURCE_DIR, "entries", `${name}.ts`);
-    const build = await Bun.build({ entrypoints: [entry], target: "node", format: "esm", minify: false, sourcemap: "none" });
+    const build = await Bun.build({ entrypoints: [entry], target: "node", format: "esm", external: ["@earendil-works/pi-coding-agent"], minify: false, sourcemap: "none" });
     if (!build.success || build.outputs.length !== 1) {
       throw new Error(`Bundling ${name} failed: ${build.logs.map((log) => log.message).join("; ")}`);
     }

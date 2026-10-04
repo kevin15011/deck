@@ -80,7 +80,7 @@ describe("deck-memory in the real Pi 1.0 runtime (faux provider, fake loopback h
     harness = createPiHarness();
     host = startFakeLoopbackHost({ dir: harness.root, advisory: ADVISORY });
     const fauxLog = join(harness.root, "faux.jsonl");
-    await harness.run(["delegate"], { ...leadEnv(), FAUX_LOG: fauxLog, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: JSON.stringify({ agent: "deck-investigate", task: "look around" }), DECK_RUNNER_MEMORY_TOKEN: "must-not-leak" });
+    await harness.run(["delegate"], { ...leadEnv(), FAUX_LOG: fauxLog, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: JSON.stringify({ agent: "deck-investigate", task: "look around" }), DECK_RUNNER_MEMORY_TOKEN: "must-not-leak", FAUX_PARENT_DELAY_MS: "1500" }, { persistSession: true });
     const roleStarts = host.named("role_start");
     expect(roleStarts).toHaveLength(1);
     expect(roleStarts[0]).toMatchObject({ role: "investigate", query: "Task: look around" });
@@ -117,13 +117,13 @@ describe("deck-memory in the real Pi 1.0 runtime (faux provider, fake loopback h
     host = startFakeLoopbackHost({ dir: harness.root, advisory: ADVISORY });
     const fauxLog = join(harness.root, "faux.jsonl");
     const delegate = JSON.stringify({ agent: "deck-investigate", task: "look around" });
-    await harness.run(["delegate"], { ...leadEnv(), FAUX_LOG: fauxLog, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: delegate, FAUX_CHILD_TOOL: "memory_search", FAUX_CHILD_TOOL_INPUT: JSON.stringify({ query: "child question" }) });
+    await harness.run(["delegate"], { ...leadEnv(), FAUX_LOG: fauxLog, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: delegate, FAUX_CHILD_TOOL: "memory_search", FAUX_CHILD_TOOL_INPUT: JSON.stringify({ query: "child question" }), FAUX_PARENT_DELAY_MS: "1500" }, { persistSession: true });
     expect(host.named("search").map((event) => [event.role, event.query])).toEqual([["investigate", "child question"]]);
     expect(readLog(fauxLog).filter((entry) => entry.child).at(-1)!.text).toContain("SEARCH_HIT_7");
 
     host.events.length = 0;
     const blocked = join(harness.root, "faux-blocked.jsonl");
-    await harness.run(["delegate"], { ...leadEnv(), FAUX_LOG: blocked, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: delegate, FAUX_CHILD_TOOL: "memory_save", FAUX_CHILD_TOOL_INPUT: JSON.stringify({ content: "Decision: a read-only child must not write memory." }) });
+    await harness.run(["delegate"], { ...leadEnv(), FAUX_LOG: blocked, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: delegate, FAUX_CHILD_TOOL: "memory_save", FAUX_CHILD_TOOL_INPUT: JSON.stringify({ content: "Decision: a read-only child must not write memory." }), FAUX_PARENT_DELAY_MS: "1500" }, { persistSession: true });
     expect(host.named("save")).toHaveLength(0);
     expect(readLog(blocked).filter((entry) => entry.child).at(-1)!.text).toContain("Tool memory_save not found");
   }, 180_000);

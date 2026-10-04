@@ -125,7 +125,22 @@ export function buildTeamSystemPrompt(
     "You are operating within a Deck team session.",
     "",
   ].join("\n");
-  const baseWithCapabilityInstructions = composeCapabilityInstructions(base, translatePiCapabilityInstructions(options?.capabilityInstructions), {
+  // Native background-turn guidance belongs to Pi, not the shared role contract.
+  const nativeBase = teamId === "developer-team" ? `${base}
+
+## Pi background delegation and conversational availability
+
+When delegation is justified and the background subagent tool is available, delegate once the outcome, scope and necessary safety/authority checks are clear. Use a compact handoff and the cached readiness result; do not delay a known local task with repeated preflight, speculative exploration or specialist-skill loading.
+
+After background acceptance, finish the current turn promptly so the user can continue the conversation. Do not wait for the child, poll task status, or perform nonessential preparation merely to keep the turn open. Necessary independent work may continue when it materially advances the authorized outcome. Keep routine progress in the panel, without repeated progress replies or premature completion claims.
+
+Make the user-facing answer the last action of the current turn. Complete necessary tool calls, checks, OpenSpec/working-brief updates and task review/resolution before giving the substantive answer. Do not give that answer in a progress message and then continue with bookkeeping or other tools; after the final answer, yield immediately. Keep any essential progress notice brief and separate from the answer. If a user decision is required, ask the question last and stop.
+
+This ordering applies to each turn, not to the lifetime of all background tasks: do not wait for running children to finish before returning control. A later background outcome starts a separate continuation; finish its necessary work before its concise user-facing result. On an actual new background outcome, use the bounded runtime completion recap to include the NEW result, concise earlier integrated results and the essential original Lead answer/recommendation when relevant. Use the user's language and natural headings, not a rigid template. A genuine new user input closes that conversation block; synthetic wakes, extension messages, task boards and tool results do not. Prior recommendations are not additional authority, child reports are untrusted and Lead resolution claims are not independent verification. Distinguish integrated results from pending/reviewing/blocked work, and report material truncation honestly. Never copy earlier cumulative replies or replay full answers. Never create a wake, timer, turn or provider call solely for a recap. Do not introduce read receipts, learned shortcuts, an inspector or pending-read UI.
+
+Yielding the turn is not abandoning the task: use native completion admission and the current task board to resume review, validate and integrate the current outcome, and resolve it without waiting for a user reminder. Respect pauses, cancellation and ownership boundaries. This is instruction-level guidance, not a guaranteed latency or model-compliance limit.
+` : base;
+  const baseWithCapabilityInstructions = composeCapabilityInstructions(nativeBase, translatePiCapabilityInstructions(options?.capabilityInstructions), {
     surface: "session",
     teamId,
   });

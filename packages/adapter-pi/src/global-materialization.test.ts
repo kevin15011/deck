@@ -72,7 +72,10 @@ describe("buildPiGlobalMaterialization", () => {
     expect(paths).toContain("deck/package/extensions/deck-subagents/impl.js");
     expect(paths).toContain("deck/package/extensions/deck-memory/impl.js");
     expect(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-memory/index.js")!.content).toContain('const scope = "any"');
-    expect(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-subagents/index.js")!.content).toContain('const scope = "lead"');
+    expect(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-subagents/index.js")!.content).toContain('const scope = "any"');
+    expect(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-subagents/index.js")!.content).toContain('import * as nativeShell from "@earendil-works/pi-coding-agent"');
+    expect(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-subagents/index.js")!.content).toContain("factory(pi, nativeShell)");
+    expect(desired.files.find((file) => file.relPath === "deck/package/extensions/deck-subagents/impl.js")!.content).toContain("installChildShell");
     expect(desired.packageEntry).toBe("deck/package");
     expect(paths.every((path) => path.startsWith("deck/"))).toBe(true);
   });

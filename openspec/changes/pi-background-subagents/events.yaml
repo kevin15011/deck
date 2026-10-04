@@ -1,0 +1,66 @@
+schema: spec-registry-events-v1
+events:
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: design.md
+    timestamp: "2026-10-04T00:23:53Z"
+    actor: deck-lead
+    notes:
+      - "Proceed with complete Pi-only feature; no personal installation/config edits or installation runs."
+      - "New sessions cannot inherit abandoned tasks; native /resume owns parent-session selection."
+      - "Right overlay must stay visible during conversation scroll and be user-minimizable."
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: design.md
+    timestamp: "2026-10-04T00:36:33Z"
+    actor: deck-lead
+    notes:
+      - "User approved fullscreen-only anchored overlay with compact regular-mode fallback; resume implementation without altering personal configuration."
+  - phase: review
+    status: passed_with_warnings
+    event: review.passed_with_warnings
+    artifact: verification.md
+    timestamp: "2026-10-04T02:28:59Z"
+    actor: deck-lead
+    notes:
+      - "Complete repository candidate; final affected suite 1019 passed / 0 failed, TypeScript and diff check passed."
+      - "Independent delta review GO after process/session/native-shell repairs."
+      - "Linux Bash and native renderer evidence; unsupported ownership fails closed, no full PTY/live-provider exercise or personal install."
+  - phase: apply
+    status: parked
+    event: apply.parked
+    artifact: multitasking-incident-report.md
+    timestamp: "2026-10-04T03:32:30.865Z"
+    actor: deck-lead
+    notes:
+      - "User requested stopping subagent work and a complete incident report/proposal. All tasks are terminal; no new code work authorized."
+      - "Candidate preserved; six combined pinned-run failures and unverified completion repair remain blockers."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: lead-only-recovery.md
+    timestamp: "2026-10-04T05:15:20.009Z"
+    actor: deck-lead
+    notes:
+      - "User authorized direct Lead-only recovery after the incident pause: no implementation or review subagents; Pi-only scope."
+      - "Implemented structured task integration, quiet safe-boundary delivery, attempt fencing, JSON IPC diagnostics, compact UI and continuation memory."
+  - phase: verify
+    status: completed
+    event: verify.completed
+    artifact: verification.md
+    timestamp: "2026-10-04T05:15:20.009Z"
+    actor: deck-lead
+    notes:
+      - "Pinned Bun 1.3.12: 1141 passed, 0 failed, 5055 assertions across 88 files; root TypeScript, generated freshness and diff checks pass."
+      - "Real offline interactive Pi PTY probes pass fullscreen/regular: automatic integration before a second user message, preserved editor and minimization."
+  - phase: review
+    status: completed
+    event: review.completed
+    artifact: review.md
+    timestamp: "2026-10-04T05:15:20.009Z"
+    actor: deck-lead
+    notes:
+      - "Lead-owned boundary review, not a new independent Quality verdict. Earlier independent review remains historical."
+      - "Core and other runner adapters unchanged. No personal installation, live-provider trial, commit or release performed."

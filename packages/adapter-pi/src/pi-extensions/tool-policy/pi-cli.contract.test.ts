@@ -99,9 +99,10 @@ describe("deck-tool-policy in the real Pi 1.0 runtime (faux provider)", () => {
 
   realTest("6.4 coexists with the execution extension: delegation to an apply role is not blocked and evidence hooks stay inert", async () => {
     harness = createPiHarness();
-    const run = await harness.run(["go"], { ...lead, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: JSON.stringify({ agent: "deck-apply-fast", task: "do the change" }) });
+    const run = await harness.run(["go"], { ...lead, FAUX_SCRIPT: "delegate", FAUX_DELEGATE: JSON.stringify({ agent: "deck-apply-fast", task: "do the change" }), FAUX_PARENT_DELAY_MS: "1500" }, { persistSession: true });
     const end = endOf(run.events, "subagent");
     expect(end?.isError).toBe(false);
-    expect(resultText(end)).toBe("CHILD_OK apply-fast");
+    expect(resultText(end)).toContain("Background delegation accepted");
+    expect(JSON.stringify(run.events)).toContain("CHILD_OK apply-fast");
   }, 120_000);
 });
