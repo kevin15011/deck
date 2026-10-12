@@ -1,5 +1,13 @@
 # Handoff: cross-runner-session-core (read this first)
 
+## Start prompt for any agent (copy/paste; tool-agnostic)
+> You are continuing the OpenSpec change `cross-runner-session-core` in `/Users/kevinlondono/Proyects/deck` on branch `fix/claude-model-config-blocked-plan`. Read `AGENTS.md`, then `openspec/changes/cross-runner-session-core/HANDOFF.md` fully, then `apply-progress.md`, `tasks.md`, `design.md`, `spec.md`. First verify the real state (`git status --short`, `git log --oneline 6970400..HEAD`, `bunx tsc --noEmit`, `TMPDIR=$(realpath /tmp) bun test packages/session-host packages/core/src/session`). Another agent may have left uncommitted work in the worktree: inspect it (`git diff`, untracked files) and finish or fix it before starting new tasks; do not discard it (follow `packages/core/src/teams/developer/git-safety.ts` before any discard). Continue with the next unfinished task in `tasks.md` stage order, using TDD, small conventional commits, and updating `apply-progress.md` with evidence. Ask the user only for unresolved design decisions or actions blocked by permissions. Do not push, do not run `canary:install`, do not run bare `bun install`.
+
+## Snapshot at the time of the last update
+- Committed through S1b partial: `8457578` Claude session driver (adapter-claude), `5c2b50c` single-member Lead SessionManager with durable command receipts.
+- A delegated implementation agent was still working on S1b CLI tasks (1.15-1.19) when this was written. Uncommitted files were present: `apps/cli/src/session-cli.ts`, `session-commands*.ts`, `session-self-test*.ts`, `session-service*.ts`, edits to `cli-args*`, `main.tsx`, `packages/core/package.json`. If that agent is no longer running, treat those files as unfinished work: run `tsc` and the tests, complete tasks 1.15-1.19 (ToS acknowledgement gate, CLI commands, self-test manifest, S1 BIN gate), then commit.
+- Pending S1b items per `tasks.md`: 1.13 live isolation check result recorded, 1.15 ToS gate, 1.16 verify, 1.17 CLI commands, 1.18 self-test manifest, 1.19 BIN gate.
+
 Last updated: 2026-10-12. Repo `/Users/kevinlondono/Proyects/deck`, branch `fix/claude-model-config-blocked-plan` (created from an up-to-date `main`). Nothing has been pushed. The user wants everything to ship from this branch when they launch.
 
 ## What this is
