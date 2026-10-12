@@ -56,7 +56,8 @@ export const SESSION_EVENT_SCHEMA = {
         "diagnostic",
         "runner.unmapped",
         "client.attached",
-        "client.detached"
+        "client.detached",
+        "command.accepted"
       ]
     },
     "source": {
@@ -247,6 +248,51 @@ export const SESSION_EVENT_SCHEMA = {
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "command.accepted"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "commandId",
+              "type",
+              "outcome"
+            ],
+            "properties": {
+              "commandId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outcome": {
+                "type": "object",
+                "required": [
+                  "ok"
+                ],
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 } as const;
@@ -427,6 +473,7 @@ export const SESSION_COMMAND_SCHEMA = {
           "decision": {
             "enum": [
               "allow",
+              "allow-once",
               "deny"
             ]
           }
@@ -474,4 +521,4 @@ export const SESSION_COMMAND_SCHEMA = {
     }
   ]
 } as const;
-export const SESSION_SCHEMA_DIGEST = "0448f23fb3cb4d6888957a20d10ae89ce98b5b887a655978c7d2329587ad586d";
+export const SESSION_SCHEMA_DIGEST = "60d26636e3e7459050f3c6a61b8bdedda4af7aae2f710e2883e5f05b2d202177";

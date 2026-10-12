@@ -42,6 +42,7 @@ export function buildSessionEventSchema(): Json {
       dataRule("approval.resolved", requireId("approvalId")),
       dataRule("task.created", requireId("taskId")),
       dataRule("diagnostic", requireId("code")),
+      dataRule("command.accepted", { type: "object", required: ["commandId", "type", "outcome"], properties: { commandId: nonEmptyString, type: nonEmptyString, outcome: { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } } } }),
     ],
   };
 }
@@ -52,7 +53,7 @@ const COMMAND_VARIANTS: ReadonlyArray<[string, Json, string[]]> = [
   ["session.bindChange", { changeId: nonEmptyString }, ["changeId"]],
   ["prompt.send", { text: nonEmptyString, target: { const: "lead" } }, ["text"]],
   ["turn.interrupt", { taskId: nonEmptyString }, ["taskId"]],
-  ["approval.respond", { approvalId: nonEmptyString, decision: { enum: ["allow", "deny"] } }, ["approvalId", "decision"]],
+  ["approval.respond", { approvalId: nonEmptyString, decision: { enum: ["allow", "allow-once", "deny"] } }, ["approvalId", "decision"]],
   ["task.cancel", { taskId: nonEmptyString }, ["taskId"]],
   ["session.stop", {}, []],
 ];

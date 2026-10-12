@@ -7,7 +7,7 @@ export type SessionCommandBody =
   | { type: "session.bindChange"; changeId: string }
   | { type: "prompt.send"; text: string; target?: "lead" }
   | { type: "turn.interrupt"; taskId: string }
-  | { type: "approval.respond"; approvalId: string; decision: "allow" | "deny" }
+  | { type: "approval.respond"; approvalId: string; decision: "allow" | "allow-once" | "deny" }
   | { type: "task.cancel"; taskId: string }
   | { type: "session.stop" };
 export type SessionCommand = { v: 1; commandId: string } & SessionCommandBody;
@@ -24,7 +24,7 @@ const FIELD_RULES: Record<string, (c: Record<string, unknown>) => string | null>
   "session.bindChange": (c) => str(c.changeId) ? null : "changeId required",
   "prompt.send": (c) => !str(c.text) ? "text required" : c.target !== undefined && c.target !== "lead" ? "target invalid" : null,
   "turn.interrupt": (c) => str(c.taskId) ? null : "taskId required",
-  "approval.respond": (c) => !str(c.approvalId) ? "approvalId required" : c.decision !== "allow" && c.decision !== "deny" ? "decision must be allow|deny" : null,
+  "approval.respond": (c) => !str(c.approvalId) ? "approvalId required" : c.decision !== "allow" && c.decision !== "allow-once" && c.decision !== "deny" ? "decision must be allow|allow-once|deny" : null,
   "task.cancel": (c) => str(c.taskId) ? null : "taskId required",
   "session.stop": () => null,
 };

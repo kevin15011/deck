@@ -14,6 +14,8 @@ export const SESSION_EVENT_KINDS = [
   "message.delta", "message.completed", "reasoning.delta", "tool.started", "tool.completed",
   "approval.requested", "approval.resolved", "memory.recalled", "memory.proposed", "memory.written",
   "usage", "rate-limit", "diagnostic", "runner.unmapped", "client.attached", "client.detached",
+  /** Durable idempotency receipt: a command was accepted and its outcome is recorded (XR-1.5, survives daemon restart). */
+  "command.accepted",
 ] as const;
 export type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
 
@@ -42,6 +44,7 @@ const DATA_RULES: Partial<Record<SessionEventKind, (d: Record<string, unknown>) 
   "approval.resolved": (d) => isStr(d.approvalId) ? null : "data.approvalId required",
   "task.created": (d) => isStr(d.taskId) ? null : "data.taskId required",
   "diagnostic": (d) => isStr(d.code) ? null : "data.code required",
+  "command.accepted": (d) => !isStr(d.commandId) ? "data.commandId required" : !isStr(d.type) ? "data.type required" : !isObj(d.outcome) || typeof d.outcome.ok !== "boolean" ? "data.outcome required" : null,
 };
 
 export function validateSessionEvent(input: unknown): SessionValidation<SessionEvent> {

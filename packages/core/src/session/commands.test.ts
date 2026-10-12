@@ -12,6 +12,8 @@ describe("validateSessionCommand", () => {
       { type: "prompt.send", text: "hi" },
       { type: "turn.interrupt", taskId: "t" },
       { type: "approval.respond", approvalId: "a", decision: "allow" },
+      { type: "approval.respond", approvalId: "a", decision: "allow-once" },
+      { type: "approval.respond", approvalId: "a", decision: "deny" },
       { type: "task.cancel", taskId: "t" },
       { type: "session.stop" },
     ];

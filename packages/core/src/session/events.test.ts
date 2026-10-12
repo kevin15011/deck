@@ -44,9 +44,16 @@ describe("validateSessionEvent", () => {
     expect(validateSessionEvent({ ...base(), kind: "approval.requested", data: {} }).ok).toBe(false);
     expect(validateSessionEvent({ ...base(), kind: "approval.requested", data: { approvalId: "a" } }).ok).toBe(true);
   });
+  test("per-kind data: command.accepted needs commandId, type and an outcome", () => {
+    const data = { commandId: "c", type: "prompt.send", outcome: { ok: true } };
+    expect(validateSessionEvent({ ...base(), kind: "command.accepted", data }).ok).toBe(true);
+    expect(validateSessionEvent({ ...base(), kind: "command.accepted", data: { type: "prompt.send", outcome: { ok: true } } }).ok).toBe(false);
+    expect(validateSessionEvent({ ...base(), kind: "command.accepted", data: { commandId: "c", type: "prompt.send" } }).ok).toBe(false);
+  });
   test("kind union covers all design kinds", () => {
     expect(SESSION_EVENT_KINDS).toContain("runner.unmapped");
-    expect(SESSION_EVENT_KINDS.length).toBe(27);
+    expect(SESSION_EVENT_KINDS).toContain("command.accepted");
+    expect(SESSION_EVENT_KINDS.length).toBe(28);
   });
 });
 
