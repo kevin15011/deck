@@ -46,3 +46,24 @@ export class FakeClock {
     this.current = target;
   }
 }
+
+export function isAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+}
+
+export async function waitFor(condition: () => boolean | Promise<boolean>, timeoutMs = 5000, label = "condition"): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
+
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Process-group id of a live pid via ps (test-only; never signals). */
+export function pgidOf(pid: number): number | undefined {
+  const out = Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]).stdout.toString().trim();
+  return out ? Number(out) : undefined;
+}
