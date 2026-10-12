@@ -102,6 +102,13 @@
         "@deck/core": "workspace:*",
       },
     },
+    "packages/session-host": {
+      "name": "@deck/session-host",
+      "version": "0.0.0",
+      "dependencies": {
+        "@deck/core": "workspace:*",
+      },
+    },
   },
   "packages": {
     "@alcalzone/ansi-tokenize": ["@alcalzone/ansi-tokenize@0.3.0", "", { "dependencies": { "ansi-styles": "^6.2.1", "is-fullwidth-code-point": "^5.0.0" } }, "sha512-p+CMKJ93HFmLkjXKlXiVGlMQEuRb6H0MokBSwUsX+S6BRX8eV5naFZpQJFfJHjRZY0Hmnqy1/r6UWl3x+19zYA=="],
@@ -165,6 +172,8 @@
     "@deck/provider-tavily": ["@deck/provider-tavily@workspace:packages/provider-tavily"],
 
     "@deck/sdd-runtime": ["@deck/sdd-runtime@workspace:packages/sdd-runtime"],
+
+    "@deck/session-host": ["@deck/session-host@workspace:packages/session-host"],
 
     "@earendil-works/chord": ["@earendil-works/chord@1.0.0", "", { "dependencies": { "esbuild": "0.28.2" } }, "sha512-BIfWfrByM0pKq6tfKYXuwx0ed2CvaqIM3EDA7Dps+fP+d3CiPWdlHi1cDsJC05llqKJoRz5//G0hz0yQwwjISQ=="],
 
