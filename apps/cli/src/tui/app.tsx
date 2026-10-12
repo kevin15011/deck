@@ -74,7 +74,7 @@ import { DEVELOPER_TEAM_AGENTS } from "@deck/core/teams/developer/catalog";
 import { getStandaloneSkills, getStandaloneSkillBody } from "@deck/core/skills/external";
 
 import { createSupermemoryMemoryProvider } from "@deck/adapter-supermemory";
-import { createSupermemoryRuntime, createSupermemoryHttpTransport } from "@deck/adapter-supermemory/runtime";
+import { validateSupermemoryAccountCredential } from "@deck/adapter-supermemory";
 import type { AdaptiveMemoryProvider } from "@deck/core/memory/adaptive-memory";
 import {
   getConfigurablePackageInstructionMetadata,
@@ -306,6 +306,25 @@ function redactSecret(value: string): string {
   return value.length > 0 ? "[redacted]" : "";
 }
 
+/** Only public adapter messages and known filesystem codes may cross the error boundary. */
+export function modelConfigurationFailureMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  const publicMessages = [
+    "Claude runtime model selection changed or is unavailable; plugin was not modified.",
+    "Claude Serena readiness is stale; plugin was not modified.",
+    "Claude global plugin plan is blocked or stale.",
+    "Claude global plugin plan is stale or untrusted.",
+    "Claude plugin destination already exists with unknown content.",
+    "Claude plugin staging verification failed.",
+    "Claude plugin destination appeared during staging.",
+    "Claude plugin publication is indeterminate; inspect global Deck plugin manually.",
+    "Claude plugin selection is indeterminate; inspect global Deck metadata manually.",
+  ];
+  if (publicMessages.includes(message)) return `Model configuration failed. ${message}`;
+  const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+  return `Model configuration failed. Apply error: ${typeof code === "string" && ["EACCES", "EPERM", "EEXIST", "ENOENT", "ENOSPC", "EROFS"].includes(code) ? code : "unknown"}.`;
+}
+
 export function buildSupermemoryDeckConfig(values: SupermemorySetupValues) {
   // Token-only config: no userId/teamId/orgId stored
   // User identity is token-derived. Deck binds one canonical project scope to
@@ -356,18 +375,14 @@ export function createMemoryProviderForSelection(choice: MemoryProviderChoice, v
 }
 
 
-type SupermemoryPiMcpWriter = (options: { token?: string; serverName?: string; configPath?: string; homeDir?: string; projectScope: string }) => PiMcpConfigWriteResult;
+type SupermemoryPiMcpWriter = (options: { token?: string; serverName?: string; configPath?: string; homeDir?: string; projectScope?: string }) => PiMcpConfigWriteResult;
 
 export function handOffSupermemoryCredentialToPiMcp(
   values: SupermemorySetupValues,
   options?: { writer?: SupermemoryPiMcpWriter; configPath?: string; homeDir?: string; projectScope?: string },
 ): { success: boolean; message: string; path?: string } {
-  if (!options?.projectScope) {
-    return { success: false, message: "Canonical x-sm-project scope is required to configure Supermemory in Pi MCP config." };
-  }
-
   const writer = options?.writer ?? writeSupermemoryPiMcpConfig;
-  const result = writer({ serverName: "supermemory", configPath: options?.configPath, homeDir: options?.homeDir, projectScope: options.projectScope });
+  const result = writer({ serverName: "supermemory", configPath: options?.configPath, homeDir: options?.homeDir });
   const diagnosticText = redactPiMcpConfigDiagnosticText(result.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
 
   if (!result.ok) {
@@ -381,27 +396,13 @@ export function handOffSupermemoryCredentialToPiMcp(
   return {
     success: true,
     path: result.path,
-    message: `Supermemory MCP server '${result.serverName}' configured in Pi MCP config at ${result.path}; bearer credentials remain only in Deck's secret store or runner-native auth.`,
+    message: `Legacy Deck Supermemory Pi MCP config retirement checked at ${result.path}; credentials remain only in Deck's secret store or runner-native auth. Project binding is deferred to runtime.`,
   };
 }
 
 async function validateSupermemoryRuntimeCredentialReadOnly(options: { apiKey: string; projectRoot?: string }): Promise<{ ok: boolean; diagnostics?: string[] }> {
-  if (!options.projectRoot) return { ok: false, diagnostics: ["Project root is required for canonical Supermemory scope validation."] };
-  const scope = resolveCanonicalSupermemoryProjectScope({ projectRoot: options.projectRoot, remotes: [] });
-  if (!scope.ok) return { ok: false, diagnostics: scope.diagnostics.map((diagnostic) => diagnostic.message) };
-  const runtime = createSupermemoryRuntime({
-    canonicalScope: scope.scope,
-    sessionId: "deck-tui-supermemory-validation",
-    runnerId: "tui-setup",
-    transport: createSupermemoryHttpTransport({ apiKey: options.apiKey, timeoutMs: 3_000 }),
-  });
-  const health = await runtime.health({ dependency: "explicit-recall" });
-  if (!health.ok) return { ok: false, diagnostics: [...health.diagnostics] };
-  const profile = await runtime.profile({ role: "setup", dependency: "explicit-recall" });
-  if (!profile.ok && profile.reason !== "role_policy_skip") return { ok: false, diagnostics: [...profile.diagnostics] };
-  const search = await runtime.search({ role: "setup", query: "Deck TUI Supermemory read-only validation", dependency: "explicit-recall" });
-  if (!search.ok && search.reason !== "empty_query") return { ok: false, diagnostics: [...search.diagnostics] };
-  return { ok: true };
+  // Installation is account-scoped; repository binding happens only at runtime.
+  return validateSupermemoryAccountCredential({ apiKey: options.apiKey });
 }
 
 export function buildDashboardSupermemorySetupUpdate(values: SupermemorySetupValues, runtime: RunnerId = "pi"):
@@ -1653,7 +1654,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
             deckConfig: effectiveDeckConfig,
           });
 
+          if (plan.blocked) {
+            const diagnostics = plan.diagnosticEntries?.filter(entry => entry.severity === "error").map(entry => entry.message) ?? plan.diagnostics ?? [];
+            throw new Error(`Runner installation is blocked. ${redactPiMcpConfigDiagnosticText(diagnostics.slice(0, 3).join("; ")).slice(0, 1200)} No changes were applied.`);
+          }
           const backup = adapter.backupDeveloperTeamFiles(plan);
+          let verificationFailure: string | undefined;
 
           try {
             const applyResult = await adapter.applyDeveloperTeamInstall({
@@ -1664,14 +1670,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
             const verifyResult = await adapter.verifyDeveloperTeamInstall(plan);
             if (!verifyResult.valid) {
-              await rollbackOrThrow(adapter, backup);
-              const diagnosticsMsg =
-                verifyResult.diagnostics.length > 0
-                  ? `\nDetails: ${verifyResult.diagnostics.slice(0, 3).join("; ")}${verifyResult.diagnostics.length > 3 ? ` (+${verifyResult.diagnostics.length - 3} more)` : ""}`
-                  : "";
-              const failMsg = `Verification failed. Changes rolled back.${diagnosticsMsg}`;
-              log(`[runDashboardInstall] verifyResult.valid=false diagnostics=${JSON.stringify(verifyResult.diagnostics)}`);
-              throw new Error(failMsg);
+              const diagnosticsMsg = redactPiMcpConfigDiagnosticText(verifyResult.diagnostics.slice(0, 3).join("; ")).slice(0, 1200);
+              verificationFailure = `Verification failed.${diagnosticsMsg ? ` Details: ${diagnosticsMsg}` : ""}`;
+              log("[runDashboardInstall] verification failed");
+              throw new Error(verificationFailure);
             }
 
             return {
@@ -1680,8 +1682,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
               postInstallFollowUps: verifyResult.postInstallFollowUps ?? [],
             };
           } catch (error) {
-            await rollbackOrThrow(adapter, backup);
-            throw error instanceof Error ? error : new Error(String(error));
+            const primary = verificationFailure ?? modelConfigurationFailureMessage(error);
+            let recovery = "Changes rolled back.";
+            try { await rollbackOrThrow(adapter, backup); }
+            catch { recovery = "Rollback could not be completed. Review the runner files before retrying."; }
+            throw new Error(`${primary} ${recovery}`);
           }
         },
         onActionResult: (result: RunnerActionRunResult) => {
@@ -1921,19 +1926,6 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const standaloneSkills = getStandaloneSkills().map((s: { skillId: string }) => ({ skillId: s.skillId, body: getStandaloneSkillBody(s.skillId)! }));
 
       if (deckConfig.adaptiveMemory.activeProvider === "supermemory") {
-        const resolved = openCodeExclusive ? undefined : resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
-        if (resolved && !resolved.ok) {
-          if (!cancelled) {
-            const message = "Unable to resolve canonical x-sm-project scope from the verified project root; Supermemory runtime credential was not stored and Developer Team installation was not applied.";
-            requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));
-            setMemoryProvider(undefined);
-            setSupermemorySetup((current) => ({ ...current, token: "" }));
-            setInstallResults((current) => [...current, { tool: "Developer Team", success: false, message }]);
-            resetCursor(getNextScreenAfterDeveloperTeamInstall({ selectedEnvironments, nextEnvironment: openCodeExclusive ? null : (selectedEnvironments.find((e) => e !== "pi-development") ?? null) }));
-          }
-          return;
-        }
-
         const runtimeCredential = await validateAndStoreSupermemoryRuntimeCredential({
           token: supermemorySetup.token,
           projectRoot,
@@ -2623,8 +2615,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         setModelConfigSaving(true);
         setModelConfigError(null);
         try {
-          // Codex dashboard stages assignments for Review; other paths apply now.
-          const stageOnly = modelConfigSource === "dashboard" && modelConfigRuntime === "codex";
+          // Versioned-plugin dashboards stage assignments; Review owns publication and tool selection.
+          const stageOnly = modelConfigSource === "dashboard" && (modelConfigRuntime === "codex" || modelConfigRuntime === "claude");
           if (!stageOnly && !(await applyDeveloperTeamModelConfig())) return;
           if (modelConfigSource === "install") {
             resetCursor("memory-provider-selection");
@@ -2972,6 +2964,11 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         debug(`open-developer-team-model-config: after setModelConfigRuntime`);
         try {
           hydrateDeveloperTeamModelConfig(runtime !== "all" ? runtime : undefined);
+          const staged = dashboardState.teams["developer-team"];
+          if (runtime === "claude" && staged?.modelAssignments) {
+            setModelAssignments({ ...staged.modelAssignments });
+            setThinkingAssignments({ ...staged.thinkingAssignments });
+          }
           debug(`open-developer-team-model-config: after hydrateDeveloperTeamModelConfig`);
         } catch (e) {
           debug(`open-developer-team-model-config: hydrate ERROR: ${e}`);
@@ -3159,26 +3156,12 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   async function validateAndStoreSubmittedSupermemoryToken(values: SupermemorySetupValues): Promise<boolean> {
     const projectRoot = projectRootFor({ require: true }) ?? localResolvedProjectRoot;
     const runnerId = dashboardState.runnerScope === "all" ? modelConfigRuntime : dashboardState.runnerScope;
-    if (!projectRoot) {
-      requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));
-      setMemoryProvider(undefined);
-      setSupermemoryError("Unable to resolve verified project root; Supermemory runtime credential was not stored.");
-      return false;
-    }
     const profileBacked = isProfileBackedMemoryRunner(runnerId);
-    const resolved = profileBacked ? undefined : resolveCanonicalSupermemoryProjectScope({ projectRoot, remotes: [] });
-    if (resolved && !resolved.ok) {
-      requiredConfigStore.patch((existing) => ({ ...existing, adaptiveMemory: { enabled: false, activeProvider: "none" as const } }));
-      setMemoryProvider(undefined);
-      setSupermemoryError("Unable to resolve canonical x-sm-project scope from the verified project root; Supermemory runtime credential was not stored.");
-      return false;
-    }
 
     const openCodeProfileKind = resolveOpenCodeSupermemoryProfileKind(values);
     const result = await validateAndStoreSupermemoryRuntimeCredential({
       token: values.token,
-      projectRoot,
-      ...(resolved?.ok ? { projectScope: resolved.scope } : {}),
+      projectRoot: projectRoot ?? undefined,
       runnerId,
       ...(profileBacked && openCodeProfileKind === "ssh-alias" ? { alias: values.profile } : {}),
       makeDefault: profileBacked && openCodeProfileKind === "fallback-default",
@@ -3511,7 +3494,10 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       }
 
       const deckConfig = requiredConfigStore.readRequired();
-      const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, modelConfigRuntime);
+      // A menu-only model edit preserves the installed Claude capability selection.
+      const selectedCapabilities = modelConfigRuntime === "claude" ? adapter.readSelectedCapabilityIds?.(projectRoot) ?? [] : undefined;
+      const enabledIds = getEnabledCapabilityInstructionIds(deckConfig, modelConfigRuntime)
+        .filter(id => selectedCapabilities === undefined || id === "code-economy" || selectedCapabilities.includes(id));
       const capabilityInstructions = enabledIds.length > 0 ? buildCapabilityInstructionBundle(enabledIds) : undefined;
       const standaloneSkills = modelConfigRuntime === "opencode"
         ? getStandaloneSkills().map((skill: { skillId: string }) => ({ skillId: skill.skillId, body: getStandaloneSkillBody(skill.skillId)! }))
@@ -3526,11 +3512,17 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         thinkingAssignments,
         changedAgentIds,
         validatedInventoryFingerprint,
-        memoryProvider,
+        // Claude uses its official memory plugin, not the legacy injected provider.
+        memoryProvider: modelConfigRuntime === "claude" ? undefined : memoryProvider,
         capabilityInstructions,
         standaloneSkills,
         deckConfig,
       });
+      if (plan.blocked) {
+        const diagnostics = plan.diagnosticEntries?.filter(entry => entry.severity === "error").map(entry => entry.message) ?? plan.diagnostics ?? [];
+        setModelConfigError(`Model configuration is blocked. ${redactPiMcpConfigDiagnosticText(diagnostics.slice(0, 3).join("; ")).slice(0, 1200)} Review the runner installation; no changes were applied.`);
+        return false;
+      }
       const backup = adapter.backupDeveloperTeamFiles(plan);
       let failureMessage = "Model configuration failed.";
 
@@ -3548,7 +3540,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         setDeveloperTeamResults(applyResult.results as any);
         if (requiresDynamicValidation) setChangedOpenCodeAgentIds(new Set());
         return true;
-      } catch {
+      } catch (error) {
+        if (failureMessage === "Model configuration failed.") failureMessage = modelConfigurationFailureMessage(error);
         setDeveloperTeamResults([]);
         try {
           await rollbackOrThrow(adapter, backup);

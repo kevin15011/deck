@@ -356,7 +356,7 @@ describe("Developer Team TUI screens", () => {
       expect(provider).toBeDefined();
     });
 
-    test("writes credential-free Supermemory Pi MCP config without leaking token in status", () => {
+    test("checks legacy MCP retirement outside a repository without writing config or leaking tokens", () => {
       const tempDir = mkdtempSync(join(tmpdir(), "deck-supermemory-tui-"));
       const token = "sentinel-supermemory-token";
       const configPath = join(tempDir, ".pi", "agent", "mcp.json");
@@ -364,20 +364,16 @@ describe("Developer Team TUI screens", () => {
       try {
         const result = handOffSupermemoryCredentialToPiMcp(
           { token },
-          { configPath, projectScope: "sm_project_v1_kevin15011_deck" },
+          { configPath },
         );
 
         expect(result.success).toBe(true);
         expect(result.message).toContain("Pi MCP config");
-        expect(result.message).toContain("bearer credentials remain only");
+        expect(result.message).toContain("credentials remain only");
+        expect(result.message).toContain("Project binding is deferred");
         expect(result.message).not.toContain(token);
 
-        if (existsSync(configPath)) {
-          const externalConfig = JSON.parse(readFileSync(configPath, "utf-8"));
-          expect(externalConfig.mcpServers.supermemory.url).toBe("https://mcp.supermemory.ai/mcp");
-          expect(externalConfig.mcpServers.supermemory.headers["x-sm-project"]).toBe("sm_project_v1_kevin15011_deck");
-          expect(JSON.stringify(externalConfig)).not.toContain("x-supermemory-api-key");
-        }
+        expect(existsSync(configPath)).toBe(false);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }

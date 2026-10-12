@@ -1,11 +1,11 @@
 import { CLAUDE_ATTRIBUTION_SETTINGS_ARGS } from "./launch-settings";
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, readdir, rm, lstat, mkdir, writeFile, symlink, rename, chmod } from "node:fs/promises";
+import { mkdtemp, realpath, readFile, readdir, rm, lstat, mkdir, writeFile, symlink, rename, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { getDefaultDeckConfig, getAgentContent } from "../../core/src/index";
-import { buildCapabilityInstructionBundle, validateSerenaOperationAuthorization, type SerenaBootstrapRequest, type SerenaReadinessEvidence } from "../../core/src/index";
+import { prepareAndBuildDeveloperTeamInstallPlan, buildCapabilityInstructionBundle, validateSerenaOperationAuthorization, type SerenaBootstrapRequest, type SerenaReadinessEvidence } from "../../core/src/index";
 import { createClaudeRunnerAdapter } from "./runner-adapter";
 import { TAVILY_PROVIDER_DESCRIPTOR } from "../../provider-tavily/src/index";
 import { createHash } from "node:crypto";
@@ -18,7 +18,7 @@ const standaloneFileCount = () => getStandaloneSkills().reduce((total, { skillId
 
 describe("Claude Deck-owned global plugin adapter", () => {
   test("installs every standalone bundle intact as passive private plugin skills", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-standalone-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-standalone-")));
     try {
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck") });
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: getDefaultDeckConfig(), capabilityIds: ["claude-team-files"] });
@@ -49,7 +49,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   });
 
   test("late discovery results cannot replace or clear a newer ready snapshot across roots", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-model-generation-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-model-generation-")));
     try {
       for (const scope of ["same-root", "other-root"] as const) for (const late of ["success", "failure", "cancel"] as const) {
         let resolveOld!: (models: { value: string; displayName: string; description: string }[]) => void;
@@ -71,7 +71,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("model frontmatter roundtrips boolean, null and numeric-looking IDs as exact strings", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-model-yaml-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-model-yaml-")));
     try {
       const ids = ["true", "false", "null", "123", "1.25"];
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), modelDiscovery: async () => ids.map((value) => ({ value, displayName: value, description: "fixture" })) });
@@ -85,7 +85,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("lost selected executable can be deselected or republished at a new immutable content version", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-capability-repair-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-capability-repair-")));
     try {
       const first = join(home, "first-context-mode");
       const replacement = join(home, "replacement-context-mode");
@@ -121,7 +121,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   });
 
   test("Claude review treats packageInstructions as authoritative over stale selectedCapabilities", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-authoritative-package-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-authoritative-package-")));
     try {
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: (name) => name === "context-mode" ? process.execPath : undefined });
       const deckConfig = getDefaultDeckConfig();
@@ -136,7 +136,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   });
 
   test("legacy v1 receipt remains readable and a stale owned plugin is superseded without rewriting it", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-v1-upgrade-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-v1-upgrade-")));
     try {
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck") });
       const input = { projectRoot: home, environmentId: "claude-development", deckConfig: getDefaultDeckConfig() };
@@ -164,7 +164,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   });
 
   test("codebase-memory reuses an existing shared install instead of scheduling an owned install", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-shared-codebase-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-shared-codebase-")));
     try {
       await mkdir(join(home, ".local", "bin"), { recursive: true });
       const shared = join(home, ".local", "bin", "codebase-memory-mcp");
@@ -180,7 +180,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   });
 
   test("read-only roles expose only selected MCP lookups and Skill, never editing tools", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-readonly-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-readonly-")));
     try {
       const commands = new Map(["context7-mcp", "codebase-memory-mcp", "context-mode"].map((name) => [name, process.execPath]));
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: (name) => commands.get(name) });
@@ -202,7 +202,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("runner detection distinguishes verified Claude CLI version from documented model aliases", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-version-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-version-")));
     try {
       const ready = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), detectClaudeVersion: () => ({ available: true, version: "2.1.284" }) });
       expect(await ready.detectRuntimes({ projectRoot: home, environmentId: "claude-development" })).toMatchObject([{ isAvailable: true, version: "2.1.284" }]);
@@ -212,7 +212,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("runtime-reported effort is selectable only for compatible models and persists native exact model/effort frontmatter", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-runtime-effort-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-runtime-effort-")));
     try {
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), modelDiscovery: async () => [{ value: "custom-runtime-id", resolvedModel: "wire-v3", displayName: "Custom", description: "fixture", supportsEffort: true, supportedEffortLevels: ["medium", "max"] }, { value: "light-model", displayName: "Light", description: "fixture", supportsEffort: false }] });
       expect(adapter.getThinkingLevels("custom-runtime-id")).toEqual([]);
@@ -237,7 +237,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("Claude Serena requires current-operation authorization and revalidated Deck-owned proxy before MCP publication", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-serena-authorization-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-serena-authorization-")));
     try {
       const dataRoot = join(home, "data", "deck");
       const ownedRoot = join(dataRoot, "tools", "serena");
@@ -283,6 +283,10 @@ describe("Claude Deck-owned global plugin adapter", () => {
       expect((await adapter.verifyDeveloperTeamInstall(plan)).valid).toBe(true);
       expect(await adapter.detectDeckInstall?.({ projectRoot: home })).toMatchObject({ installed: true, managedPaths: expect.arrayContaining([plan.files[0]!.path]) });
       const resumed = createClaudeRunnerAdapter({ homeDir: home, dataRoot, serenaOwnedRoot: ownedRoot, serenaProxyCommand: [deckCli, "internal", "serena-mcp"], serenaReadiness: async () => ({ state: "ready", evidence, revalidate: async () => ({ valid: true, evidence }) }), serenaRevalidate: async () => true });
+      expect(resumed.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: config }).blocked).toBe(true);
+      const prepared = await prepareAndBuildDeveloperTeamInstallPlan(resumed, { projectRoot: home, environmentId: "claude-development", deckConfig: config });
+      expect(prepared.plan.blocked).toBe(false);
+      await resumed.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan: prepared.plan });
       expect((await resumed.getCapabilityInventory({ projectRoot: home, runnerId: "claude", environmentId: "claude-development", deckConfig: config })).capabilities.find((entry) => entry.capabilityId === "serena")?.isInstalled).toBe(true);
       expect((await resumed.buildLaunchPlan!({ projectRoot: home, teamId: "developer-team", mode: "interactive", deckConfig: config })).status).toBe("ready");
       fresh = false;
@@ -290,7 +294,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("reviewed pinned RTK acquisition installs only a Deck-owned binary and native Claude hook", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-rtk-review-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-rtk-review-")));
     const binary = Buffer.from("fixture RTK binary, never executed");
     const header = Buffer.alloc(512);
     header.write("rtk");
@@ -317,7 +321,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("an executable ambient RTK lacking an approved version or Claude hook cannot bypass pinned acquisition", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-rtk-ambient-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-rtk-ambient-")));
     try {
       const fake = join(home, "rtk");
       await writeFile(fake, "#!/bin/sh\necho 'rtk 0.45.0'\n", { mode: 0o700 });
@@ -330,7 +334,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("reviewed official plugin receipt gates an independent supervised memory launch", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-memory-install-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-memory-install-")));
     const pluginManifest = Buffer.from('{"name":"supermemory"}\n');
     const checksum = createHash("sha256").update(pluginManifest).digest("hex");
     const manifest = [[".claude-plugin/plugin.json", checksum, pluginManifest.length]] as const;
@@ -370,7 +374,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("unresolved shared profile or project override blocks memory review before official download", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-memory-preflight-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-memory-preflight-")));
     let fetched = false;
     try {
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), supermemoryArtifactEffects: { fetchFile: async () => { fetched = true; return new Uint8Array(); } }, resolveMemoryCredential: () => { throw new Error("fixture-private-token project override"); } });
@@ -384,7 +388,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   test("locally validates the composed plugin with Claude when its CLI is available, without a model call", async () => {
     const claude = Bun.which("claude");
     if (!claude) return;
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-plugin-validate-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-plugin-validate-")));
     try {
       const rtk = join(home, "rtk");
       await writeFile(rtk, "fixture", { mode: 0o700 });
@@ -406,7 +410,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("materializes selected global MCP and RTK hook from shared tools and Tavily provider without persisting a token", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-capabilities-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-capabilities-")));
     try {
       await mkdir(join(home, "bin"));
       for (const binary of ["context-mode", "codebase-memory-mcp", "rtk", "context7-mcp", "tavily-mcp"]) await writeFile(join(home, "bin", binary), "fixture executable", { mode: 0o700 });
@@ -449,7 +453,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("missing Serena proxy/bootstrap and missing shared Tavily credential block reviewed native files", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-claude-capability-block-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-capability-block-")));
     try {
       const tavily = join(root, "tavily-mcp");
       await writeFile(tavily, "fixture", { mode: 0o700 });
@@ -464,7 +468,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
   test("failed reviewed shared-tool install never creates a plugin or claims executable readiness", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-tool-failure-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-tool-failure-")));
     try {
       const attempted: string[] = [];
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), resolveCommand: () => undefined, installSharedTool: async (id) => { attempted.push(id); return false; } });
@@ -478,7 +482,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("discovers runtime models without claiming entitlement, and persists exact per-role identifiers globally", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-model-alias-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-model-alias-")));
     try {
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), modelDiscovery: async () => ["sonnet", "opus", "haiku", "custom-vendor/model-2030"].map((value) => ({ value, displayName: value, description: "runtime fixture" })) });
       const discovered = await adapter.getModelInventory!({ projectRoot: home });
@@ -537,7 +541,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("caller mutation of planned content, path or membership cannot modify trusted expected files", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-claude-plan-isolation-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-plan-isolation-")));
     try {
       const adapter = createClaudeRunnerAdapter({ homeDir: root, dataRoot: join(root, "data", "deck") });
       const deckConfig = getDefaultDeckConfig();
@@ -577,7 +581,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   });
 
   test("rejects a valid plugin under a symlinked ancestor before plan/apply/launch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-claude-ancestor-symlink-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-ancestor-symlink-")));
     try {
       const dataRoot = join(root, "data", "deck");
       const adapter = createClaudeRunnerAdapter({ homeDir: root, dataRoot });
@@ -595,7 +599,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   });
 
   test("rejects foreign-writable ancestors for absent plugin and after a previously valid install", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-claude-ancestor-mode-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-ancestor-mode-")));
     try {
       const data = join(root, "data");
       await mkdir(data);
@@ -617,7 +621,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   });
 
   test("canonicalizes a caller-approved HOME alias but still rejects symlinks inside it", async () => {
-    const parent = await mkdtemp(join(tmpdir(), "deck-claude-home-alias-"));
+    const parent = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-home-alias-")));
     try {
       const actualHome = join(parent, "real-home");
       const alias = join(parent, "home-alias");
@@ -640,7 +644,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     expect(() => createClaudeRunnerAdapter({ homeDir: "/tmp", dataRoot: "/tmp" })).toThrow("dedicated Deck data root");
   });
   test("unknown global model metadata fails closed without replacing it or selecting a plugin", async () => {
-    const home = await mkdtemp(join(tmpdir(), "deck-claude-model-conflict-"));
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-model-conflict-")));
     try {
       const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck") });
       const deckConfig = getDefaultDeckConfig();
@@ -654,7 +658,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
   test("TUI adapter plans, applies and verifies canonical user-global plugin without writing to the project", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-claude-adapter-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-adapter-")));
     const projectRoot = join(root, "project");
     const dataRoot = join(root, "data", "deck");
     try {
@@ -698,7 +702,7 @@ describe("Claude Deck-owned global plugin adapter", () => {
   });
 
   test("rejects memory and conflicting global content before mutation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "deck-claude-adapter-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-adapter-")));
     try {
       const adapter = createClaudeRunnerAdapter({ homeDir: root, dataRoot: join(root, "data", "deck") });
       const config = getDefaultDeckConfig();

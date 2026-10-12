@@ -664,6 +664,13 @@ export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter 
       } catch { return undefined; }
     },
     getThinkingLevels(modelId) { return modelSnapshot?.inventory.modelsByProvider.claude?.find((model) => model.id === modelId)?.variants ?? []; }, supportsThinking(modelId) { return adapter.getThinkingLevels(modelId).length > 0; },
+    async prepareDeveloperTeamInstall(input) {
+      // Model editing may enter without inventory/launch discovery. Probe only existing
+      // selected tooling; bootstrap remains exclusively a reviewed install action.
+      const capabilities = input.capabilityIds ?? readSelection().capabilities;
+      if (capabilities.includes("serena") && !await probeSerena()) return [{ code: "claude-serena-readiness-stale", severity: "error", message: "Claude Serena readiness is stale; review the existing Deck-owned installation." }];
+      return [];
+    },
     buildDeveloperTeamInstallPlan: plan,
     async applyDeveloperTeamInstall(input) {
       const candidate = input.plan as RunnerDeveloperTeamInstallPlan & { modelAssignments?: Record<string, string>; thinkingAssignments?: Record<string, string>; capabilityIds?: string[]; providerId?: string; pluginName?: string; contentHash?: string };
