@@ -62,7 +62,7 @@ A Deck-owned headless **local session daemon** owns the session; **thin clients*
 
 Each stage is additive and independently revertible:
 
-1. **S0** adds optional types and an optional `crossRunner` config key. Revert removes them; pre-change binaries ignore or drop the key on next write (verified by a task); per-runner assignments are untouched.
+1. **S0** adds optional types and an optional `crossRunner` config key. Revert removes them; pre-change binaries REJECT a config containing `crossRunner` with `DECK_CONFIG_UNKNOWN_FIELD` (verified in S0 task 0.8: unknown top-level keys are neither preserved nor dropped), so a downgrade requires removing the `crossRunner` key from `config.json` first; per-runner assignments are untouched.
 2. **S1–S3** add new commands, a new package and optional adapter methods. Reverting removes `deck session`/`deck cross`; existing launches never call the daemon. Session data lives only in `$XDG_STATE_HOME/deck/sessions/` and can be deleted.
 3. **S4** web listener binds only `127.0.0.1`; rollback = `deck session web disable` + revoke devices. The optional expose helper (late task) only prints/runs a user-confirmed reverse-proxy command and can be removed independently.
 4. **S5** TUI entry is a separate screen path; reverting hides it without touching runner install flows.

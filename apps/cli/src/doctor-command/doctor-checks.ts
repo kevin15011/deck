@@ -356,7 +356,9 @@ export function checkDeckConfig(deps: DoctorCheckDeps = defaultDoctorCheckDeps):
               items.push({
                 status: diagnostic.severity,
                 message: diagnostic.message,
-                suggestion: `Remove ${diagnostic.fieldPath}; Supermemory no longer uses semantic memory quotas.`,
+                suggestion: diagnostic.code === "CROSS_ASSIGNMENT_LEGACY_SHAPE"
+                  ? `Re-save ${diagnostic.fieldPath} as {runnerId, modelId}.`
+                  : `Remove ${diagnostic.fieldPath}; Supermemory no longer uses semantic memory quotas.`,
               });
             }
           } catch {

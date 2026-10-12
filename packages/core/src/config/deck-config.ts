@@ -3,6 +3,7 @@ import { chmodSync, closeSync, existsSync, fsyncSync, fstatSync, lstatSync, mkdi
 import { dirname, isAbsolute, join, parse, relative, resolve } from "node:path";
 
 import type { AdapterRegistry } from "../adapter-registry";
+import type { CrossTeamAssignments } from "../session/assignments";
 
 export const DECK_CONFIG_VERSION = 1;
 export const DECK_CONFIG_RELATIVE_PATH = join(".deck", "config.json");
@@ -191,6 +192,7 @@ export type DeckConfig = {
   };
   profiles?: Profile[];
   activeProfile?: string;
+  crossRunner?: unknown;
 };
 
 export type NormalizedDeckConfig = {
@@ -209,10 +211,23 @@ export type NormalizedDeckConfig = {
   developerTeamExecution: DeveloperTeamExecutionConfigV1;
   profiles: Profile[];
   activeProfile: string;
+  /** Optional cross-runner session section; absence means "not configured" (XR-2.1). */
+  crossRunner?: CrossRunnerConfig;
+};
+
+export type CrossRunnerApprovalMode = "relay" | "runner-default";
+export type CrossRunnerConfig = {
+  enabled: boolean;
+  defaultRunner?: string;
+  members: CrossTeamAssignments;
+  approvals: Record<string, CrossRunnerApprovalMode>;
+  maxConcurrentTasks: number;
+  web: { port: number; trustedProxy: string | null; allowedOrigins: string[]; allowFunnel: boolean };
+  claudeTosAcknowledgedAt: string | null;
 };
 
 export type DeckConfigDiagnostic = Readonly<{
-  code: "SUPERMEMORY_CONFIG_DEPRECATED";
+  code: "SUPERMEMORY_CONFIG_DEPRECATED" | "CROSS_ASSIGNMENT_LEGACY_SHAPE";
   severity: "warning";
   message: string;
   fieldPath: string;
@@ -229,7 +244,8 @@ export type DeckConfigErrorCode =
   | "SUPERMEMORY_CONFIG_INVALID"
   | "WEB_SEARCH_CONFIG_INVALID"
   | "DECK_CONFIG_UNSAFE_PATH"
-  | "DECK_CONFIG_CONCURRENT_MODIFICATION";
+  | "DECK_CONFIG_CONCURRENT_MODIFICATION"
+  | "CROSS_RUNNER_CONFIG_INVALID";
 
 export class DeckConfigError extends Error {
   readonly code: DeckConfigErrorCode;
@@ -261,7 +277,7 @@ export type ActiveMemoryProviderResolution = {
 const SECRET_FIELD_PATTERN =
   /(?:token|secret|credential|credentials|api[-_]?key|password|private[-_]?key|access[-_]?key|auth(?:orization)?)/i;
 
-const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "webSearch", "packageInstructions", "orchestratorPersonality", "developerTeamExecution", "profiles", "activeProfile"]);
+const TOP_LEVEL_FIELDS = new Set(["version", "adaptiveMemory", "webSearch", "packageInstructions", "orchestratorPersonality", "developerTeamExecution", "profiles", "activeProfile", "crossRunner"]);
 const ADAPTIVE_MEMORY_FIELDS = new Set(["enabled", "activeProvider", "supermemory"]);
 const WEB_SEARCH_FIELDS = new Set(["enabled", "provider"]);
 const SUPERMEMORY_FIELDS = new Set([
@@ -884,6 +900,8 @@ export function validateDeckConfig(
 
   assertValidActiveProfile(activeProfile, profiles, options?.configPath);
 
+  const crossRunner = normalizeCrossRunnerConfig(config.crossRunner, options?.configPath);
+
   return {
     version: DECK_CONFIG_VERSION,
     adaptiveMemory,
@@ -893,12 +911,26 @@ export function validateDeckConfig(
     developerTeamExecution,
     profiles,
     activeProfile,
+    ...(crossRunner === undefined ? {} : { crossRunner }),
   };
 }
 
 export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckConfigDiagnostic[] {
   if (!config || typeof config !== "object" || Array.isArray(config)) return [];
   const diagnostics: DeckConfigDiagnostic[] = [];
+  const legacyMembers = ((config as Record<string, unknown>).crossRunner as Record<string, unknown> | undefined)?.members;
+  if (legacyMembers && typeof legacyMembers === "object" && !Array.isArray(legacyMembers)) {
+    for (const [memberId, value] of Object.entries(legacyMembers)) {
+      if (typeof value === "string") {
+        diagnostics.push({
+          code: "CROSS_ASSIGNMENT_LEGACY_SHAPE",
+          severity: "warning",
+          fieldPath: `crossRunner.members.${memberId}`,
+          message: "Bare-string cross-runner member assignment is deprecated; it is normalized to {runnerId, modelId} and persisted in the qualified shape on next write.",
+        });
+      }
+    }
+  }
   const adaptiveMemory = (config as Record<string, unknown>).adaptiveMemory;
   if (!adaptiveMemory || typeof adaptiveMemory !== "object" || Array.isArray(adaptiveMemory)) return diagnostics;
   if ((adaptiveMemory as Record<string, unknown>).activeProvider === "engram") {
@@ -919,6 +951,101 @@ export function diagnoseDeckConfigDeprecations(config: unknown): readonly DeckCo
     });
   }
   return diagnostics;
+}
+
+const CROSS_RUNNER_FIELDS = new Set(["enabled", "defaultRunner", "members", "approvals", "maxConcurrentTasks", "web", "claudeTosAcknowledgedAt"]);
+const CROSS_MEMBER_FIELDS = new Set(["runnerId", "modelId", "thinking"]);
+const CROSS_WEB_FIELDS = new Set(["port", "trustedProxy", "allowedOrigins", "allowFunnel"]);
+const CROSS_APPROVAL_DEFAULTS: Record<string, CrossRunnerApprovalMode> = { claude: "relay", opencode: "relay", codex: "runner-default" };
+
+function crossInvalid(message: string, fieldPath: string, configPath?: string): DeckConfigError {
+  return new DeckConfigError("CROSS_RUNNER_CONFIG_INVALID", message, { configPath, fieldPath });
+}
+
+function normalizeCrossRunnerConfig(value: unknown, configPath?: string): CrossRunnerConfig | undefined {
+  if (value === undefined || value === null) return undefined;
+  assertPlainObject(value, "crossRunner", configPath);
+  assertKnownFields(value, CROSS_RUNNER_FIELDS, "crossRunner", configPath);
+
+  if (value.enabled !== undefined && typeof value.enabled !== "boolean") throw crossInvalid("crossRunner.enabled must be a boolean.", "crossRunner.enabled", configPath);
+  const nonEmpty = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
+  if (value.defaultRunner !== undefined && !nonEmpty(value.defaultRunner)) throw crossInvalid("crossRunner.defaultRunner must be a non-empty string.", "crossRunner.defaultRunner", configPath);
+  const defaultRunner = value.defaultRunner === undefined ? undefined : (value.defaultRunner as string).trim();
+
+  const members: CrossTeamAssignments = {};
+  if (value.members !== undefined) {
+    assertPlainObject(value.members, "crossRunner.members", configPath);
+    for (const [memberId, raw] of Object.entries(value.members)) {
+      const path = `crossRunner.members.${memberId}`;
+      if (typeof raw === "string") {
+        if (!nonEmpty(raw)) throw crossInvalid(`${path} must be a non-empty model id.`, path, configPath);
+        members[memberId] = { runnerId: defaultRunner ?? "claude", modelId: raw.trim() };
+        continue;
+      }
+      assertPlainObject(raw, path, configPath);
+      assertKnownFields(raw, CROSS_MEMBER_FIELDS, path, configPath);
+      if (!nonEmpty(raw.runnerId)) throw crossInvalid(`${path}.runnerId must be a non-empty string.`, `${path}.runnerId`, configPath);
+      if (!nonEmpty(raw.modelId)) throw crossInvalid(`${path}.modelId must be a non-empty string.`, `${path}.modelId`, configPath);
+      if (raw.thinking !== undefined && !nonEmpty(raw.thinking)) throw crossInvalid(`${path}.thinking must be a non-empty string.`, `${path}.thinking`, configPath);
+      members[memberId] = {
+        runnerId: (raw.runnerId as string).trim(),
+        modelId: (raw.modelId as string).trim(),
+        ...(raw.thinking === undefined ? {} : { thinking: (raw.thinking as string).trim() }),
+      };
+    }
+  }
+
+  const approvals: Record<string, CrossRunnerApprovalMode> = { ...CROSS_APPROVAL_DEFAULTS };
+  if (value.approvals !== undefined) {
+    assertPlainObject(value.approvals, "crossRunner.approvals", configPath);
+    for (const [runnerId, mode] of Object.entries(value.approvals)) {
+      if (mode !== "relay" && mode !== "runner-default") throw crossInvalid(`crossRunner.approvals.${runnerId} must be "relay" or "runner-default".`, `crossRunner.approvals.${runnerId}`, configPath);
+      approvals[runnerId] = mode;
+    }
+  }
+
+  const max = value.maxConcurrentTasks ?? 4;
+  if (typeof max !== "number" || !Number.isInteger(max) || max < 1 || max > 64) throw crossInvalid("crossRunner.maxConcurrentTasks must be an integer between 1 and 64.", "crossRunner.maxConcurrentTasks", configPath);
+
+  const web = { port: 7421, trustedProxy: null as string | null, allowedOrigins: [] as string[], allowFunnel: false };
+  if (value.web !== undefined) {
+    assertPlainObject(value.web, "crossRunner.web", configPath);
+    assertKnownFields(value.web, CROSS_WEB_FIELDS, "crossRunner.web", configPath);
+    const w = value.web;
+    if (w.port !== undefined) {
+      if (typeof w.port !== "number" || !Number.isInteger(w.port) || w.port < 1 || w.port > 65535) throw crossInvalid("crossRunner.web.port must be an integer between 1 and 65535.", "crossRunner.web.port", configPath);
+      web.port = w.port;
+    }
+    if (w.trustedProxy !== undefined && w.trustedProxy !== null) {
+      if (!nonEmpty(w.trustedProxy)) throw crossInvalid("crossRunner.web.trustedProxy must be a non-empty string or null.", "crossRunner.web.trustedProxy", configPath);
+      web.trustedProxy = w.trustedProxy.trim();
+    }
+    if (w.allowedOrigins !== undefined) {
+      if (!Array.isArray(w.allowedOrigins) || !w.allowedOrigins.every(nonEmpty)) throw crossInvalid("crossRunner.web.allowedOrigins must be an array of non-empty strings.", "crossRunner.web.allowedOrigins", configPath);
+      web.allowedOrigins = w.allowedOrigins.map((o: string) => o.trim());
+    }
+    if (w.allowFunnel !== undefined) {
+      if (typeof w.allowFunnel !== "boolean") throw crossInvalid("crossRunner.web.allowFunnel must be a boolean.", "crossRunner.web.allowFunnel", configPath);
+      web.allowFunnel = w.allowFunnel;
+    }
+  }
+
+  let ack: string | null = null;
+  if (value.claudeTosAcknowledgedAt !== undefined && value.claudeTosAcknowledgedAt !== null) {
+    const t = value.claudeTosAcknowledgedAt;
+    if (typeof t !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(t) || Number.isNaN(Date.parse(t))) throw crossInvalid("crossRunner.claudeTosAcknowledgedAt must be an ISO 8601 timestamp or null.", "crossRunner.claudeTosAcknowledgedAt", configPath);
+    ack = t;
+  }
+
+  return {
+    enabled: value.enabled ?? false,
+    ...(defaultRunner === undefined ? {} : { defaultRunner }),
+    members,
+    approvals,
+    maxConcurrentTasks: max,
+    web,
+    claudeTosAcknowledgedAt: ack,
+  };
 }
 
 function normalizeWebSearchConfig(
