@@ -5,6 +5,7 @@ import { isCanonicalSupermemoryProjectScope } from "@deck/core";
 import { createSupermemoryRuntime, createSupermemoryHttpTransport, type SupermemoryRuntimeTransport } from "./runtime";
 
 export * from "./conversation";
+export { validateSupermemoryAccountCredential } from "./account-validation";
 
 export const SUPERMEMORY_MCP_SERVER_URL = "https://mcp.supermemory.ai/mcp";
 export const SUPERMEMORY_MCP_TOOLS = [
