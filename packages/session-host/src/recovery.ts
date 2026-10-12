@@ -2,7 +2,8 @@
  * Startup recovery (XR-3.7, design 6.1).
  *
  * A task that was running when the previous daemon died is `interrupted` ONLY when its
- * containment is proven settled. Anything else (alive, reused, other boot, unreadable,
+ * containment is proven settled (processes provably absent within the same boot, or a changed
+ * boot session, which proves they are dead). Anything else (alive, reused, unreadable,
  * missing lease) is `ownership-unsettled` and continuation is refused. Recovery observes
  * with signal-0 probes only; it never signals a PID read from disk.
  */
@@ -15,7 +16,7 @@ import type { Presence, ProcessIdentity, ProcessProbe } from "./process-probe";
 
 export type UnsettledReason =
   | "lease-missing" | "lease-claiming" | "lease-incomplete" | "lease-invalid"
-  | "boot-unknown" | "boot-changed" | "platform-mismatch" | "platform-unsupported"
+  | "boot-unknown" | "platform-mismatch" | "platform-unsupported"
   | "pid-alive" | "pid-reused" | "group-alive" | "probe-unknown";
 export type SettleVerdict = { settled: true } | { settled: false; reason: UnsettledReason };
 const no = (reason: UnsettledReason): SettleVerdict => ({ settled: false, reason });
@@ -42,7 +43,9 @@ export function verifyLeaseSettled(lease: Lease | undefined, probe: ProcessProbe
   if (identities.some((i) => i.platform !== probe.platform)) return no("platform-mismatch");
   const boot = probe.bootId();
   if (!boot) return no("boot-unknown");
-  if (identities.some((i) => i.boot !== boot)) return no("boot-changed");
+  // A different boot session proves every recorded process is dead (processes do not survive a reboot),
+  // so ownership is settled without consulting PIDs, which may have been reused by unrelated processes.
+  if (identities.some((i) => i.boot !== boot)) return { settled: true };
   for (const identity of identities) {
     const reason = identityGone(identity, probe);
     if (reason) return no(reason);

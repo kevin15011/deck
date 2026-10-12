@@ -185,7 +185,7 @@ sequenceDiagram
 - reports `exit` only after stdout/stderr reach EOF or a 1 s drain timeout (never promote partial output to success);
 - never exits before the daemon acknowledges terminal cleanup (prevents PID reuse races).
 
-Recovery **never signals a PID read from disk**. On Linux it verifies `(pid, starttime, boot_id)`; on Darwin it accepts only proven absence (`kill(pid, 0)` → `ESRCH`) within the same `kern.bootsessionuuid`; anything else is `ownership-unsettled` (XR-3.7). Interrupt sends `SIGINT` to the CLI pid only (Claude needs a clean `result`), escalation targets the group.
+Recovery **never signals a PID read from disk**. A changed boot session (`boot_id` / `kern.bootsessionuuid`) settles ownership outright: a reboot proves the recorded processes are dead, and PIDs are not consulted because they may have been reused. Within the same boot, Linux verifies `(pid, starttime)` and Darwin accepts only proven absence (`kill(pid, 0)` → `ESRCH`); anything else (alive, reused, unreadable lease, unknown boot) is `ownership-unsettled` (XR-3.7). Interrupt sends `SIGINT` to the CLI pid only (Claude needs a clean `result`), escalation targets the group.
 
 **D-14 Children die with the daemon; continuity comes from native resume.** Stdio-piped children cannot be re-adopted by a new daemon. Rejected: surviving children with re-attach (requires named pipes/PTYs per runner, high complexity, orphan risk).
 

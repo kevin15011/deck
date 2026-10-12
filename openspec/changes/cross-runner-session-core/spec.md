@@ -120,7 +120,7 @@
 
 ## XR-5 Approvals and interrupt
 
-**XR-5.1** Approval requests from any runner MUST become `approval.requested {approvalId, taskId, tool, summary, input}` events and be answerable with `approval.respond {approvalId, decision}` where `decision ∈ {allow-once, deny}` (drivers MAY add `allow-session`).
+**XR-5.1** Approval requests from any runner MUST become `approval.requested {approvalId, taskId, tool, summary, input}` events and be answerable with `approval.respond {approvalId, decision}` where `decision ∈ {allow, allow-once, deny}` (`allow` is accepted as an alias of `allow-once`; events and drivers always carry the normalized `allow-once | deny`; drivers MAY add `allow-session`).
 
 | Runner | Native path |
 |---|---|

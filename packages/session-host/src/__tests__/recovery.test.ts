@@ -79,9 +79,20 @@ describe("verifyLeaseSettled (design 6.1, XR-3.7)", () => {
     expect(verifyLeaseSettled(lease("t"), os.probe)).toEqual({ settled: false, reason: "group-alive" });
   });
 
-  test("a different boot session is not provable (design: same boot only)", () => {
+  test("a different boot session settles: a reboot proves the processes are dead (PIDs are not consulted)", () => {
     const os = fakeOs("linux", OTHER_BOOT);
-    expect(verifyLeaseSettled(lease("t"), os.probe)).toEqual({ settled: false, reason: "boot-changed" });
+    expect(verifyLeaseSettled(lease("t"), os.probe)).toEqual({ settled: true });
+    // even a live process that reuses the same pid and group in the new boot is irrelevant
+    os.groups.add(500);
+    expect(verifyLeaseSettled(lease("t"), os.probe)).toEqual({ settled: true });
+    const darwin = fakeOs("darwin", OTHER_BOOT);
+    expect(verifyLeaseSettled(lease("t", {}, "darwin"), darwin.probe)).toEqual({ settled: true });
+  });
+
+  test("an unknown current boot is still unprovable", () => {
+    const os = fakeOs("linux");
+    const probe = { ...os.probe, bootId: () => undefined };
+    expect(verifyLeaseSettled(lease("t"), probe as never)).toEqual({ settled: false, reason: "boot-unknown" });
   });
 
   test("Darwin: only proven absence (ESRCH) within the same boot settles; alive and EPERM do not", () => {
