@@ -56,3 +56,44 @@ Environment: macOS; `TMPDIR` pointed at a non-symlinked path because `/var/folde
 - The build regenerated the tracked Pi and OpenCode developer-team-execution bundles (they were stale versus source); committed as a regeneration.
 - Still not run: 4-target build, Docker linux smoke, canary install (per stage rules).
 - D-5 in design.md reworded: older binaries reject unknown `crossRunner` (DECK_CONFIG_UNKNOWN_FIELD).
+
+## Stage S1a — Host core, no drivers (2026-10-12)
+
+New package `@deck/session-host` (`packages/session-host`), plus hidden CLI routes `deck internal child-anchor|session-daemon|session-mcp`. Only a test-only stub service is used where a SessionManager/driver would be (`src/testing/stub-service.ts`, not exported). S1b (Claude driver, SessionManager, `deck cross`/`deck session`) is untouched.
+
+| Task | Status | Evidence |
+|---|---|---|
+| 1.1 scaffold + import boundary | done | `import-boundary.test.ts` (RED shown with a planted adapter import) |
+| 1.2 paths and permissions | done | `paths.ts`; 0700/0600, strict tmp-fallback dir, Darwin 104-byte `sun_path` fallback to `$TMPDIR/deck-<uid>/daemon.sock` (unit tests + a real daemon process on a too-long state path) |
+| 1.3 EventLog | done | `event-log.ts`; ordering, crash-truncated/NUL tail repaired with diagnostic, mid-file corruption and gaps fatal, rotation boundary reads, batched fsync (fake clock), failed-write rollback |
+| 1.4 ledger + snapshot | done | `ledger.ts`; replay, legal task transitions, D-12 recorded-runner continuation, digest-verified snapshot with rebuild on corrupt/ahead/mismatch |
+| 1.5 child anchor | done | `anchor.ts`, `supervisor.ts`, real fake-child (`bun` child + grandchild) integration tests: own process group, IPC loss and daemon SIGKILL kill the whole group, SIGINT reaches the CLI only, group TERM then KILL, drain timeout = failure (never success), no early exit before cleanup ack, nonce not leaked |
+| 1.6 recovery | done | `recovery.ts`, `process-probe.ts`, `lease.ts`; synthetic Linux/Darwin leases, kill() typed to signal 0 and spy-asserted, static check that recovery sources contain no signalling; real daemon-crash integration test |
+| 1.7 daemon + single instance | done | `daemon.ts`, `daemon-lock.ts`, `daemon-client.ts`, `daemon-main.ts`, `idle-monitor.ts`; second start exits "already running", racing starters/reclaimers, idle timer (fake clock), auto-start waits <=5 s, version-skew restart (never when busy), SIGTERM cleanup |
+| 1.8 control server | done | `control-server.ts`, `control-client.ts`, `protocol.ts`; idempotent commandId (incl. in-flight), attach backlog-to-live gap-free under concurrent appends across rotation, overflow -> `resync` -> reattach |
+| 1.9 session MCP bridge | done | `mcp-bridge.ts`, `bridge-service.ts`, `credentials.ts`, `bridge-config.ts`; real subprocess driven over stdio, revoked credential -> tool error, token never in argv/env/ps |
+| 1.10 ApprovalBroker | done | `approval-broker.ts`; fake-clock timeout deny, first response wins, cancel on disconnect/task end/shutdown |
+
+TDD note: for 1.5 the anchor and fixtures were drafted before their tests; I then wrote the tests and validated them by mutation (removing the disconnect handler, honouring early cleanup, promoting drain timeout to success, routing SIGINT to the group each made a test fail). The control-server concurrency test was strengthened after mutants (late subscribe, no dedupe) initially survived.
+
+### Verification evidence
+- `bunx tsc --noEmit`: 0 errors.
+- `TMPDIR=$(realpath /tmp) bun test --timeout 60000 packages/session-host`: 224 tests, 0 fail (repeated 6x, stable; real-process tests ~11 s).
+- `apps/cli/src/cli-args.test.ts` (+ new cases) and `apps/cli/src/internal-session-commands.test.ts` (main.tsx routes: daemon start/refuse/SIGTERM, anchor behind IPC, MCP stdio, no repo path in state dir): pass.
+- Full `bun test --timeout 30000`: 6051 pass, 4 fail = the 3 known failures (skill bundle idempotency, Pi supervisor preference audit, OpenCode SSH alias) plus `codex-supermemory-launch.test.ts` "Web Search and Supermemory credentials..." which timed out at 120 s inside the full run but passes alone (11/11); treated as a pre-existing load/flake, not related to this change.
+- `npx -y bun@1.3.12 run scripts/build-binaries.ts --dry-run`: darwin-arm64 build OK. Compiled binary smoke in a temp HOME/XDG: `internal session-daemon` auto-started and answered status (0.10.0), `internal child-anchor` reported ready, and `disconnect()` of IPC killed the worker; daemon SIGTERM cleaned the daemon dir; no repository path found in the state dir. (`dist/` is gitignored; nothing committed from the build.)
+- `deck openspec validate --change cross-runner-session-core`: 1 change, 0 errors, 0 warnings.
+
+### Deviations and decisions needed
+1. **Approve vocabulary:** core's `approval.respond` uses `allow|deny` (S0) while XR-5.1/spec scenario uses `allow-once`. Broker accepts both and emits `allow-once|deny` in events.
+2. **Different boot session = `ownership-unsettled` forever** (design 6.1 read strictly). After a reboot every previously running task stays unsettled and cannot be continued. A reboot is actually proof of death; recommend allowing `boot-changed` to settle (one line in `verifyLeaseSettled`). Not changed without a decision.
+3. **Idempotency cache is in memory** (1000 per session): a duplicate `commandId` after a daemon restart can re-execute. SessionManager (S1b) should persist accepted commandIds if that matters.
+4. **D-3 compaction** is not implemented (task 1.3 covers rotation only). `client.attached/detached` events are not emitted (SessionManager concern).
+5. Added beyond the task list because needed for a usable daemon: daemon JSONL logger (XR-11.1 subset, day-rotated), `daemon.restart` frame for version skew, `DECK_SESSION_DAEMON_IDLE_MS` env knob (test/ops), startup `recoverAllSessions`, approval denial on bridge disconnect.
+6. `SessionService` is the port S1b implements (`execute`, `openLog`, `hasRunningWork`, optional `taskStatus`/`close`); `UnavailableSessionService` ships in the daemon until then (every command returns `session-manager-unavailable`).
+7. **Bun pitfalls found:** Bun pipe stdout is async, so a child that calls `process.exit` right after writing can truncate its own output under load (affects fixtures; real CLIs are unaffected, the anchor flushes before reporting). `net.connect` to a missing socket path emits 'error' before a post-hoc listener exists; `ControlClient` creates the socket first.
+8. **`bun install` hazard:** `apps/cli` depends on `ink`/`react` at `latest`; a bare `bun install` after editing its package.json bumped ink 7->8 and react 19.2->19.3 and broke `tsc`. I reverted and hand-added the single `@deck/session-host` line to `bun.lock`; use `--frozen-lockfile`.
+
+### Not run
+- Real Linux execution (Linux `/proc` identity path is tested only with synthetic stat data; Docker sandbox not run). Windows is unsupported (the supervisor throws).
+- 4-target build, Docker Linux smoke, `canary:install`, S1 BIN gate items for fake `claude` (1.19), live provider calls.
