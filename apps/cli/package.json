@@ -14,6 +14,7 @@
     "@deck/adapter-supermemory": "workspace:*",
     "@deck/core": "workspace:*",
     "@deck/provider-tavily": "workspace:*",
+    "@deck/session-host": "workspace:*",
     "ink": "latest",
     "picocolors": "latest",
     "react": "latest",

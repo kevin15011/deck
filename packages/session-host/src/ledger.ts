@@ -32,12 +32,12 @@ export type TaskAttempt = {
   state: TaskState; reason?: string; continuity?: "native" | "reseeded"; startedSeq: number; endedSeq?: number; result?: string;
 };
 export type LedgerTask = { taskId: string; memberId: string; attempts: TaskAttempt[] };
-export type PendingApproval = { approvalId: string; taskId?: string; seq: number };
+export type LedgerPendingApproval = { approvalId: string; taskId?: string; seq: number };
 export type LedgerAnomaly = { code: string; seq: number; detail?: string };
 export type LedgerSession = { projectRoot?: string; changeId?: string; state: SessionLifecycleState };
 export type LedgerState = {
   sessionId: string; seq: number; session: LedgerSession;
-  tasks: Record<string, LedgerTask>; approvals: Record<string, PendingApproval>; anomalies: LedgerAnomaly[];
+  tasks: Record<string, LedgerTask>; approvals: Record<string, LedgerPendingApproval>; anomalies: LedgerAnomaly[];
 };
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.length > 0 ? v : undefined);
@@ -62,7 +62,7 @@ export class Ledger {
   tasks(): LedgerTask[] { return Object.values(this.state.tasks); }
   task(taskId: string): LedgerTask | undefined { return this.state.tasks[taskId]; }
   latest(taskId: string): TaskAttempt | undefined { return this.state.tasks[taskId]?.attempts.at(-1); }
-  pendingApprovals(): PendingApproval[] { return Object.values(this.state.approvals); }
+  pendingApprovals(): LedgerPendingApproval[] { return Object.values(this.state.approvals); }
   toState(): LedgerState { return structuredClone(this.state); }
 
   private anomaly(code: string, seq: number, detail?: string): void {

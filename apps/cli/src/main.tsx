@@ -5,7 +5,7 @@ import { render, renderToString } from "ink";
 import { parseArgs } from "./cli-args";
 import { getBuildInfo } from "./runtime/build-info";
 import { resolveProjectRoot } from "./project-root";
-import { createDefaultAdapterRegistry } from "./runner-adapters";
+import { createDefaultAdapterRegistry, deckInternalCommand } from "./runner-adapters";
 import { createNodeRunnerProcessEffects, executeRunnerLaunchPlan, runRunnerLaunch } from "./runner-launch-command";
 import { buildClaudeLaunchPlan } from "./claude-launch-plan";
 import { INTERNAL_SERENA_MCP_PROBE_TOKEN, runInternalSerenaMcp } from "./internal-serena-mcp";
@@ -76,6 +76,24 @@ if (parsed.command === "internal-memory-mcp") {
   const { runCodexMemoryMcpStdio } = await import("@deck/adapter-codex");
   await runCodexMemoryMcpStdio({ input: process.stdin, write: (line) => { process.stdout.write(`${line}\n`); } });
   process.exit(0);
+}
+
+// Cross-runner session plumbing (hidden): process-group anchor, session daemon, MCP bridge. These never
+// touch runner adapters or credential files; see @deck/session-host.
+if (parsed.command === "internal-child-anchor") {
+  const { runChildAnchor } = await import("@deck/session-host");
+  await runChildAnchor(parsed.argv); // never resolves: the anchor ends through group cleanup
+}
+
+if (parsed.command === "internal-session-mcp") {
+  const { runSessionMcpBridge } = await import("@deck/session-host");
+  await runSessionMcpBridge({ input: process.stdin, write: (line) => { process.stdout.write(line); }, env: process.env, version: getBuildInfo().version });
+  process.exit(0);
+}
+
+if (parsed.command === "internal-session-daemon") {
+  const { runSessionDaemon } = await import("@deck/session-host");
+  process.exit(await runSessionDaemon({ version: getBuildInfo().version, anchorCommand: deckInternalCommand("child-anchor") }));
 }
 
 if (parsed.command === "doctor") {

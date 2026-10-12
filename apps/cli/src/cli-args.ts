@@ -31,6 +31,9 @@ export type ParsedArgs =
   | { command: "internal-supermemory-runtime-smoke" }
   | { command: "internal-codex-memory-hook" }
   | { command: "internal-memory-mcp" }
+  | { command: "internal-session-daemon" }
+  | { command: "internal-session-mcp" }
+  | { command: "internal-child-anchor"; argv: string[] }
   | {
       command: "upgrade";
       flags: {
@@ -220,6 +223,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (rest.length === 1 && rest[0] === "supermemory-runtime-smoke") return { command: "internal-supermemory-runtime-smoke" };
     if (rest.length === 1 && rest[0] === "codex-memory-hook") return { command: "internal-codex-memory-hook" };
     if (rest.length === 1 && rest[0] === "memory-mcp") return { command: "internal-memory-mcp" };
+    if (rest.length === 1 && rest[0] === "session-daemon") return { command: "internal-session-daemon" };
+    if (rest.length === 1 && rest[0] === "session-mcp") return { command: "internal-session-mcp" };
+    if (rest[0] === "child-anchor") {
+      const argv = rest[1] === "--" ? rest.slice(2) : rest.slice(1);
+      return argv.length > 0 ? { command: "internal-child-anchor", argv } : { command: "error", message: "Usage: deck internal child-anchor -- <command> [args...]" };
+    }
     return { command: "error", message: "Usage: deck internal serena-mcp" };
   }
 

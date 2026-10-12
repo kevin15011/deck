@@ -47,7 +47,7 @@ export type DefaultAdapterRegistryOptions = {
 };
 
 /** Self-referencing `deck internal <name>` argv: the running binary, or the dev runtime plus `main.*` (the canary points at itself). */
-function deckInternalCommand(name: string): string[] {
+export function deckInternalCommand(name: string): string[] {
   return [process.execPath, ...(process.argv[1] && /(?:^|[/\\])main\.[cm]?[jt]sx?$/.test(process.argv[1]) ? [resolve(process.argv[1])] : []), "internal", name];
 }
 

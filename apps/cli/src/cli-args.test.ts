@@ -40,6 +40,17 @@ describe("parseArgs", () => {
     expect(parseArgs(["internal", "serena-mcp", "--anything"])).toMatchObject({ command: "error" });
   });
 
+  test("parses the hidden cross-runner session routes (daemon, MCP bridge, child anchor)", () => {
+    expect(parseArgs(["internal", "session-daemon"])).toEqual({ command: "internal-session-daemon" });
+    expect(parseArgs(["internal", "session-mcp"])).toEqual({ command: "internal-session-mcp" });
+    expect(parseArgs(["internal", "session-daemon", "--x"])).toMatchObject({ command: "error" });
+    expect(parseArgs(["internal", "session-mcp", "--x"])).toMatchObject({ command: "error" });
+    expect(parseArgs(["internal", "child-anchor", "--", "claude", "-p", "--flag"])).toEqual({ command: "internal-child-anchor", argv: ["claude", "-p", "--flag"] });
+    expect(parseArgs(["internal", "child-anchor", "claude"])).toEqual({ command: "internal-child-anchor", argv: ["claude"] });
+    expect(parseArgs(["internal", "child-anchor"])).toMatchObject({ command: "error" });
+    expect(parseArgs(["internal", "child-anchor", "--"])).toMatchObject({ command: "error" });
+  });
+
   test("rejects malformed Codex grammar instead of guessing", () => {
     expect(parseArgs(["codex", "developer", "exec", "fix it"]).command).toBe("error");
     expect(parseArgs(["codex", "developer", "resume"]).command).toBe("error");
