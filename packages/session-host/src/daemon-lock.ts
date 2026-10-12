@@ -45,6 +45,12 @@ function readHolder(file: string): LockHolder | undefined | "absent" {
   return undefined;
 }
 
+/** Current lock holder, if any (exported for restart coordination). */
+export function readLockHolder(paths: StatePaths): LockHolder | undefined {
+  const h = readHolder(paths.lockFile);
+  return h === "absent" ? undefined : h;
+}
+
 function tryCreate(file: string, holder: LockHolder): boolean {
   const temp = `${file}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   writeFileSync(temp, JSON.stringify(holder), { mode: 0o600, flag: "wx" });

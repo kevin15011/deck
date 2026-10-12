@@ -35,7 +35,7 @@ export class IdleMonitor {
   private isIdle(): boolean { return !this.options.isBusy() && this.options.clientCount() === 0; }
 
   private schedule(): void {
-    this.timer = this.options.clock.setTimeout(() => this.tick(), this.options.pollMs ?? DEFAULT_POLL_MS);
+    this.timer = this.options.clock.setTimeout(() => this.tick(), this.options.pollMs ?? Math.min(DEFAULT_POLL_MS, Math.max(50, Math.floor((this.options.idleMs ?? IDLE_SHUTDOWN_MS) / 3))));
   }
 
   private tick(): void {

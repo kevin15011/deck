@@ -204,10 +204,11 @@ export class ControlServer {
     if (!stat.isSocket()) throw new Error(`Refusing to replace ${path}: not a socket`);
     if (process.getuid && stat.uid !== process.getuid()) throw new Error(`Refusing to replace ${path}: wrong owner`);
     const alive = await new Promise<boolean>((resolve) => {
-      const probe = net.connect(path);
+      const probe = new net.Socket();
       const finish = (v: boolean) => { probe.destroy(); resolve(v); };
+      probe.on("error", () => finish(false));
       probe.once("connect", () => finish(true));
-      probe.once("error", () => finish(false));
+      try { probe.connect(path); } catch { finish(false); }
       setTimeout(() => finish(false), 500).unref();
     });
     if (alive) throw new Error(`Daemon socket ${path} is already in use`);

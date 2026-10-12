@@ -40,6 +40,16 @@ export class CredentialRegistry {
     return true;
   }
 
+  /** Daemon shutdown: delete every credential file. */
+  revokeAll(): number {
+    const count = this.grants.size;
+    for (const [key, entry] of [...this.grants]) {
+      this.grants.delete(key);
+      try { unlinkSync(entry.file); } catch { /* already removed */ }
+    }
+    return count;
+  }
+
   /** Revoke every credential issued for a task (terminal state). Returns how many were revoked. */
   revokeTask(taskId: string): number {
     let count = 0;

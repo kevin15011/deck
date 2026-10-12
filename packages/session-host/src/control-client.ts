@@ -42,10 +42,14 @@ export class ControlClient {
 
   static connect(socketPath: string, options: { timeoutMs?: number } = {}): Promise<ControlClient> {
     return new Promise((resolve, reject) => {
-      const socket = net.connect(socketPath);
+      // Create first, listen for errors, THEN connect: Bun reports a missing socket path by
+      // emitting 'error' (and may throw) from inside connect(), before a post-hoc listener exists.
+      const socket = new net.Socket();
+      socket.on("error", () => {}); // late/duplicate error events must never become uncaught exceptions
       const timer = setTimeout(() => { socket.destroy(); reject(new Error("Timed out connecting to the daemon socket")); }, options.timeoutMs ?? 5000);
       socket.once("connect", () => { clearTimeout(timer); resolve(new ControlClient(socket)); });
       socket.once("error", (error) => { clearTimeout(timer); reject(error); });
+      try { socket.connect(socketPath); } catch (error) { clearTimeout(timer); reject(error); }
     });
   }
 

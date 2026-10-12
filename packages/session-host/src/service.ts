@@ -3,6 +3,7 @@
  * The server owns transport concerns (framing, idempotency, attach); the service owns sessions.
  */
 import type { SessionCommand } from "@deck/core/session/commands";
+import type { CredentialGrant } from "./credentials";
 import type { EventLog } from "./event-log";
 import type { CommandOutcome } from "./protocol";
 
@@ -13,6 +14,10 @@ export interface SessionService {
   openLog(sessionId: string): EventLog | undefined;
   /** True while any task runs: keeps the daemon alive and blocks version-skew restarts. */
   hasRunningWork(): boolean;
+  /** View of a task for the bridge's `deck_status` tool. Optional: the daemon falls back to the grant itself. */
+  taskStatus?(grant: CredentialGrant): unknown;
+  /** Release resources on daemon stop (logs, handles). */
+  close?(): Promise<void> | void;
 }
 
 /** Production placeholder until the SessionManager lands: every command is refused, no sessions exist. */
