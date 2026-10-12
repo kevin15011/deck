@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","cwd":"/tmp/deck-project","session_id":"33333333-3333-4333-8333-333333333333","tools":[],"mcp_servers":[{"name":"deck","status":"connected","source":"dynamic"}],"model":"claude-haiku-5-5","permissionMode":"default","claude_code_version":"2.1.296"}
+{"type":"future_event","payload":{"token":"Bearer abcdefghijklmnop1234567890","note":"a type this driver does not know"},"session_id":"33333333-3333-4333-8333-333333333333"}
+{"type":"system","subtype":"future_subtype","session_id":"33333333-3333-4333-8333-333333333333","data":{"x":1}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"future_block","value":1},{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}},"session_id":"33333333-3333-4333-8333-333333333333"}
+{"type":"result","subtype":"error_max_turns","is_error":true,"duration_ms":10,"num_turns":3,"session_id":"33333333-3333-4333-8333-333333333333","total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1},"permission_denials":[],"errors":["Reached maximum number of turns (3)"]}

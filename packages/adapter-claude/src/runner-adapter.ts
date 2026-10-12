@@ -13,6 +13,7 @@ import { claudeCapabilityFiles, verifyClaudeExecutable, verifyClaudeRtkHookRunti
 import { spawn } from "node:child_process";
 import { CLAUDE_SUPERMEMORY_COMMIT, CLAUDE_SUPERMEMORY_FILES, inspectClaudeSupermemoryArtifact, installClaudeSupermemoryArtifact, type ClaudeSupermemoryArtifactEffects } from "./supermemory-artifact";
 import { inspectOwnedClaudeRtk, installOwnedClaudeRtk, pinnedClaudeRtkRelease, type RtkReleaseArtifact } from "./rtk-artifact";
+import { createClaudeSessionDriver, type ClaudeSessionDriverOptions } from "./session-driver/driver";
 import { inspectOwnedClaudeCodebase, installOwnedClaudeCodebase, pinnedClaudeCodebaseRelease, type CodebaseNativeRelease } from "./codebase-native-artifact";
 
 type Options = ClaudeCapabilityOptions & {
@@ -42,6 +43,8 @@ type Options = ClaudeCapabilityOptions & {
   /** Hermetic override; production uses the canonical shared Deck Serena root. */
   serenaOwnedRoot?: string;
   resolveMemoryCredential?: (projectRoot: string) => { token: string; profile: string; canonicalRepoTag: string };
+  /** Cross-runner session driver options (ToS gate, executable, hermetic probe). */
+  sessionDriver?: ClaudeSessionDriverOptions;
 };
 const ENVIRONMENT = "claude-development";
 const warning = "Claude integration is static-compatible: selected native MCP and pinned official memory files can be verified, but full protected execution and live combined plugin loading are not proven.";
@@ -442,6 +445,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter 
     }
   };
   const adapter: RunnerAdapter = {
+    getSessionDriver: () => createClaudeSessionDriver(options.sessionDriver),
     runnerId: "claude", displayName: "Claude Code", environmentIds: [ENVIRONMENT], packageInstructionIds: ["context-mode", "codebase-memory", "rtk", "serena"],
     ui: { environmentLabels: { [ENVIRONMENT]: "Claude Code" }, dashboard: { defaultSelectedTeamIds: ["developer-team"], defaultSelectedCapabilityIds: ["claude-team-files"], extraSelectableCapabilities: [{ id: "context7", label: "Context7", description: "Use a verified shared Context7 MCP binary in the Claude plugin." }], managedLaunchSupported: false, launchHint: "deck claude developer starts a supervised static-compatible session. Deck supplies the pinned official memory plugin when selected; co-loaded user plugins may also see the process credential. Protected execution remains unsupported.", executionClass: "static-compatible" }, model: { providerSource: "Installed Claude runtime-reported metadata; account entitlement not guaranteed", missingChecks: ["account entitlement", "comparison with authenticated native /model"], remediation: "Retry metadata discovery and check native Claude /model for account-specific availability.", defaultThinkingLevels: [] }, adaptiveMemory: { supermemory: { supported: true, requiresExternalToken: true, selectionStatus: "Official Claude Supermemory uses the existing protected alias/default profile store." } } },
     async inspectProject(projectRoot) {

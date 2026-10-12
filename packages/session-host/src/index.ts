@@ -51,3 +51,4 @@ export {
   type EnsureDaemonOptions, type EnsureDaemonResult,
 } from "./daemon-client";
 export { runSessionDaemon, type RunSessionDaemonOptions } from "./daemon-main";
+export { createDriverSpawn, toSupervisedChild } from "./driver-spawn";
