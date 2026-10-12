@@ -6,10 +6,11 @@
  * missing lease) is `ownership-unsettled` and continuation is refused. Recovery observes
  * with signal-0 probes only; it never signals a PID read from disk.
  */
-import type { EventDraft, EventLog } from "./event-log";
+import { readdirSync } from "node:fs";
+import { EventLog, type EventDraft } from "./event-log";
 import { LeaseInvalidError, readLease, removeLease, type Lease } from "./lease";
-import type { Ledger, TaskAttempt } from "./ledger";
-import { TERMINAL_TASK_STATES } from "./ledger";
+import { loadLedger, saveLedgerSnapshot, TERMINAL_TASK_STATES, type Ledger, type TaskAttempt } from "./ledger";
+import { assertSafeSegment, sessionPaths, type StatePaths } from "./paths";
 import type { Presence, ProcessIdentity, ProcessProbe } from "./process-probe";
 
 export type UnsettledReason =
@@ -130,4 +131,33 @@ export function continuationBlock(ledger: Ledger, taskId: string): ContinuationB
   if (attempt.state === "ownership-unsettled") return { code: "ownership-unsettled" };
   if (!TERMINAL_TASK_STATES.includes(attempt.state)) return { code: "task-running" };
   return undefined;
+}
+
+export type RecoverAllReport = {
+  sessions: Array<{ sessionId: string } & RecoveryReport>;
+  errors: Array<{ sessionId: string; error: string }>;
+};
+
+/** Daemon startup scan: recover every session under the state dir; one broken session never blocks the rest. */
+export function recoverAllSessions(options: { paths: StatePaths; probe: ProcessProbe }): RecoverAllReport {
+  const report: RecoverAllReport = { sessions: [], errors: [] };
+  let names: string[];
+  try { names = readdirSync(options.paths.sessionsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { return report; }
+  for (const name of names.sort()) {
+    try { assertSafeSegment(name, "session id"); } catch { continue; }
+    const sp = sessionPaths(options.paths, name);
+    let log: EventLog | undefined;
+    try {
+      log = EventLog.open({ dir: sp.eventsDir, sessionId: name });
+      const { ledger } = loadLedger(log, sp.ledgerSnapshotFile);
+      const recovered = recoverSession({ log, ledger, probe: options.probe, leaseFileFor: sp.taskLeaseFile });
+      saveLedgerSnapshot(ledger, log, sp.ledgerSnapshotFile);
+      report.sessions.push({ sessionId: name, ...recovered });
+    } catch (error) {
+      report.errors.push({ sessionId: name, error: (error as Error).message });
+    } finally {
+      log?.close();
+    }
+  }
+  return report;
 }
