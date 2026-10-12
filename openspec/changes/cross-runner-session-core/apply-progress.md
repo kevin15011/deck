@@ -78,7 +78,7 @@ TDD note: for 1.5 the anchor and fixtures were drafted before their tests; I the
 
 ### Verification evidence
 - `bunx tsc --noEmit`: 0 errors.
-- `TMPDIR=$(realpath /tmp) bun test --timeout 60000 packages/session-host`: 224 tests, 0 fail (repeated 6x, stable; real-process tests ~11 s).
+- `TMPDIR=$(realpath /tmp) bun test --timeout 60000 packages/session-host`: 222 tests, 0 fail (repeated 6x, stable; real-process tests ~11 s).
 - `apps/cli/src/cli-args.test.ts` (+ new cases) and `apps/cli/src/internal-session-commands.test.ts` (main.tsx routes: daemon start/refuse/SIGTERM, anchor behind IPC, MCP stdio, no repo path in state dir): pass.
 - Full `bun test --timeout 30000`: 6051 pass, 4 fail = the 3 known failures (skill bundle idempotency, Pi supervisor preference audit, OpenCode SSH alias) plus `codex-supermemory-launch.test.ts` "Web Search and Supermemory credentials..." which timed out at 120 s inside the full run but passes alone (11/11); treated as a pre-existing load/flake, not related to this change.
 - `npx -y bun@1.3.12 run scripts/build-binaries.ts --dry-run`: darwin-arm64 build OK. Compiled binary smoke in a temp HOME/XDG: `internal session-daemon` auto-started and answered status (0.10.0), `internal child-anchor` reported ready, and `disconnect()` of IPC killed the worker; daemon SIGTERM cleaned the daemon dir; no repository path found in the state dir. (`dist/` is gitignored; nothing committed from the build.)
