@@ -5,7 +5,7 @@
 ## 1. Summary
 
 ```
- web/PWA ──(Tailscale Serve, HTTPS)──► 127.0.0.1:<web port> ─┐
+ desktop browser ─────────────────► 127.0.0.1:<web port> ─┐   (loopback only; any wider exposure is the user's own proxy)
  deck cross / deck session (CLI) ───► daemon.sock (0700/0600) ─┤
  TUI (config only) ──► config.json                             ▼
                                          ┌──────────── deck session daemon ───────────┐
@@ -29,7 +29,7 @@ One daemon per user hosts many sessions. Each session owns a Lead task and deleg
 | **new** `@deck/session-host` (`packages/session-host`) | Daemon core: SessionManager, EventLog, Ledger projection, Supervisor (anchor), ApprovalBroker, MemoryBroker port, HTTP/WS + Unix-socket servers, session MCP bridge server logic. | Import adapters, TUI, CLI argv parsing. |
 | `packages/adapter-claude`, `adapter-codex`, `adapter-opencode` | `getSessionDriver()` implementations + recorded fixtures. | Spawn outside the host's supervised spawn; touch credentials. |
 | `apps/cli` | Composition: registers drivers, embeds web assets, `deck session`/`deck cross` commands, `deck internal session-daemon|session-mcp|child-anchor`, Doctor, TUI cross flow. | Duplicate host logic. |
-| **new** `apps/web` | PWA source (React, already in stack), built by `Bun.build` into a generated, embedded module. | Load third-party origins at runtime. |
+| **new** `apps/web` | Desktop web client source (React, already in stack), built by `Bun.build` into a generated, embedded module. | Load third-party origins at runtime. |
 | `packages/adapter-pi` | Untouched (uncommitted Pi work is out of bounds). | — |
 
 **D-1 New `@deck/session-host` package.** Rejected: putting the daemon in `@deck/core` (breaks core purity, already repaired once); in `@deck/sdd-runtime` (owns OpenSpec lifecycle, not processes); in `apps/cli` (untestable without CLI composition and tangles with Ink).
@@ -88,7 +88,7 @@ type CrossTeamAssignments = Record<string /* memberId */, RunnerQualifiedAssignm
                "apply-deep": { "runnerId": "codex", "modelId": "gpt-5.6-sol", "thinking": "high" } },
   "approvals": { "claude": "relay", "opencode": "relay", "codex": "runner-default" },
   "maxConcurrentTasks": 4,
-  "web": { "enabled": false, "port": 7421, "identityAllowlist": [] },
+  "web": { "port": 7421, "trustedProxy": null, "allowedOrigins": [], "allowFunnel": false },
   "claudeTosAcknowledgedAt": null
 }
 ```
@@ -248,7 +248,7 @@ sequenceDiagram
 ```
 
 - Timeout (default 15 min) → `deny`, `by: timeout`. Child env sets the runner's MCP tool timeout above the approval timeout where configurable (Claude `MCP_TOOL_TIMEOUT`; verify).
-- **D-16 Approval defaults:** Claude `relay` (headless otherwise denies everything), OpenCode `relay`, Codex `runner-default` because the always-on bypass is an approved requirement; Codex relay is implemented and contract-tested but opt-in (open question 2). Rejected: forcing relay everywhere (contradicts an approved requirement); `allowedTools` lists for Claude (silent power without visibility).
+- **D-16 Approval defaults:** Claude `relay` (headless otherwise denies everything), OpenCode `relay`, Codex `runner-default` because the always-on bypass is an approved requirement; Codex relay with sandbox on is implemented and contract-tested but opt-in (user-confirmed 2026-10-12). Rejected: forcing relay everywhere (contradicts an approved requirement); `allowedTools` lists for Claude (silent power without visibility).
 - Interrupt per runner as in section 4.1; 10 s escalation to group TERM/KILL (`interrupted-forced`).
 
 ## 8. Shared services
@@ -257,20 +257,25 @@ sequenceDiagram
 - **Adaptive memory (D-18):** the MemoryBroker composes the existing `SupermemoryRuntimeHost` (`apps/cli/src/supermemory-runtime-host.ts`) through a port injected by `apps/cli`. Children get `deck_memory_recall` and `deck_memory_propose`; the broker deduplicates per session and is the single writer. Native memory MCPs/plugins are excluded by XR-4.4. Rejected: each child writing via its runner's memory integration (duplicates, cross-runner identity drift, credentials in children).
 - **Web search:** Tavily is stateless; each child gets the configured web-search MCP in its explicit set with the credential resolved by the existing owned-credential path (env overlay, never argv).
 
-## 9. Web client and security model (S4)
+## 9. Desktop web client and local security model (S4)
 
-Threat model: single user; attackers are (a) other tailnet devices/users, (b) the public internet, (c) malicious web pages in the user's browser, (d) untrusted model output rendered in the client. Local processes of the same OS user are trusted (they already hold the user's authority).
+**D-23 Local service, desktop first.** The product is a local daemon plus a desktop browser client on the same machine. Mobile, PWA install, offline, and push are out of scope; Tailscale is neither a dependency nor a stage gate. Rejected: Tailscale-first remote design (adds an external dependency and identity model to the baseline for a use case the user deprioritized); launchd/systemd service (user decision: no OS service; the daemon starts on demand and stays up while sessions are live).
+
+Threat model: single user, single machine. Attackers are (a) other OS users on the machine, (b) malicious web pages in the user's browser (CSRF, DNS rebinding), (c) untrusted model output rendered in the client, and (d) the user's own optional exposure through a reverse proxy. Local processes of the same OS user are trusted (they already hold the user's authority).
 
 | Control | Decision |
 |---|---|
-| Reachability | Web listener off by default; `127.0.0.1` only; user runs `tailscale serve` (Deck prints the exact command; never runs `funnel`). |
-| Authentication | One-time pairing code from `deck session pair` (6–8 words or 128-bit code, single use, ≤5 min, 5 attempts) → device credential (256-bit) in HttpOnly/Secure/SameSite=Strict cookie; stored as SHA-256 hash; `deck session devices revoke`. |
-| Identity | If `Tailscale-User-Login` present → must be in allowlist (default: the login that paired). Reject requests carrying Tailscale's Funnel marker header (verify header name). |
+| Reachability | Web listener always binds `127.0.0.1` (non-loopback bind refused). It starts with the daemon; `deck session web disable` turns it off. |
+| Authentication | One-time pairing (code or single-use link opened by `deck cross developer`; ≤5 min, 5 attempts) → 256-bit device credential in an HttpOnly, SameSite=Strict cookie (`Secure` when served over HTTPS); stored as SHA-256 hash; `deck session devices revoke`. |
+| DNS rebinding | Exact `Host` allowlist (`127.0.0.1:<port>`, `localhost:<port>`, plus explicitly configured external origins). |
 | CSRF/Origin | Exact Origin match for POST and WS upgrade; JSON-only commands. |
+| Proxies | Requests with `Forwarded`/`X-Forwarded-*` or a Funnel marker are rejected unless the user configures `web.trustedProxy` and `web.allowedOrigins` (and `web.allowFunnel` for Funnel). Same device-credential auth applies; no proxy identity header is ever trusted as authentication. |
 | Content | Strict CSP (`default-src 'self'`), all assets embedded, model output rendered as text/sanitized Markdown, no inline HTML from children. |
 | Surface | Only sessions/events/commands/approvals; no bridge, no admin, no file browsing. |
 
-**D-19 Two listeners.** Unix socket for full local authority; loopback TCP for the restricted web API. Rejected: one TCP port for everything (Tailscale Serve would expose the bridge surface); HTTPS in-daemon (Tailscale Serve terminates TLS with a valid `ts.net` cert).
+**D-19 Two listeners.** Unix socket for full local authority; loopback TCP for the restricted web API. Rejected: one TCP port for everything (any reverse proxy the user adds would expose the bridge surface); HTTPS inside the daemon (loopback is a secure context in browsers; a user-added proxy terminates TLS).
+
+**D-24 Exposure is the user's act, with a thin optional helper.** `deck cross expose` (late, optional task) prints the reverse-proxy command for the user's chosen tool (Tailscale Serve first), runs it only after explicit confirmation, and writes `trustedProxy`/`allowedOrigins`. It never enables Funnel by default and changes nothing in authentication. Rejected: trusting Tailscale identity headers as authentication (ties the baseline to one vendor and is forgeable by any local process); auto-exposure (violates the local-only default).
 
 **D-20 Embedded assets.** `apps/web` is bundled by `Bun.build` and emitted to `apps/cli/src/runtime/web-assets.generated.ts` (path → base64 + content-type + digest manifest) by a generator wired into `prepareStandaloneBinaryBuild`, mirroring existing generated modules. JSON Schemas for events/commands are generated into the same pattern. Rejected: `with { type: "file" }` imports (works in Bun compile but no digest manifest; less uniform with existing generators); reading assets from disk (violates "no repo paths").
 
@@ -293,7 +298,7 @@ Threat model: single user; attackers are (a) other tailnet devices/users, (b) th
 
 - Daemon JSONL log: lifecycle, driver probes, spawn/exit (pid, pgid, signal, drain result), approvals (no input bodies), errors; redaction with the Pi `clean()` rules ported into core.
 - Per-session `usage` and `rate-limit` events; turn durations in `turn.completed`.
-- `deck session status [--json]`; Doctor checks: daemon reachable, driver versions/isolation, web listener, Funnel state, stale `ownership-unsettled` tasks, disk usage of sessions.
+- `deck session status [--json]`; Doctor checks: daemon reachable, driver versions/isolation, web listener bind/port, exposure configuration (warn when `trustedProxy`/`allowFunnel` is set), stale `ownership-unsettled` tasks, disk usage of sessions.
 
 ## 13. Failure modes
 
@@ -322,17 +327,15 @@ Deck spawns the **unmodified** native CLIs as the signed-in OS user, on the user
 | **S1** Daemon core + Claude driver + CLI client | `@deck/session-host`, anchor, event log/ledger, socket server, `deck internal session-daemon/session-mcp/child-anchor`, Claude driver (single-member Lead session), approvals relay, interrupt, `deck cross developer` terminal client. | Fixture tests, fake-child integration tests, host binary smoke, manual live run. |
 | **S2** Codex + OpenCode drivers | Two drivers with isolation, approvals, interrupt, fixtures, probes. | Fixture + fake-server tests; live contract script. |
 | **S3** Proxied Lead + delegation + shared services | Delegation tools, wake, owner-contract continuation, reseed, MemoryBroker, web search in child set, change binding. | Integration tests with fake drivers; live 3-runner run. |
-| **S4** Web/PWA + Tailscale | Web listener, pairing, devices, embedded assets, PWA. | HTTP security tests, Playwright against host binary. |
+| **S4** Desktop web client over the local service | Loopback web listener, pairing, devices, Host/Origin/CSP/forwarding checks, embedded assets, desktop UI; optional late `deck cross expose` helper. | HTTP security tests, desktop Playwright against the host binary; no Tailscale needed. |
 | **S5** TUI cross + docs | TUI flow, Doctor, docs/support matrix. | Render-only TUI tests; doc review. |
 
-**D-22 S1 driver = Claude.** Lowest integration risk on the evidence: the caller assigns the native session id (`--session-id`), so the ledger entry exists before spawn; per-turn processes leave no long-lived server state to recover; strict MCP isolation, approval relay through a Deck MCP tool, and clean `SIGINT` are all proven; and the relay path builds the session MCP bridge S3 needs anyway. Rejected: **Codex** first (experimental app-server protocol, fragile install history on this machine); **OpenCode** first (isolation leak unresolved, one long-lived server per task). The ToS posture is identical whichever stage introduces Claude, and S1 gates it behind acknowledgement.
+**D-22 S1 driver = Claude.** Lowest integration risk on the evidence: the caller assigns the native session id (`--session-id`), so the ledger entry exists before spawn; per-turn processes leave no long-lived server state to recover; strict MCP isolation, approval relay through a Deck MCP tool, and clean `SIGINT` are all proven; and the relay path builds the session MCP bridge S3 needs anyway. Rejected: **Codex** first (experimental app-server protocol, fragile install history on this machine); **OpenCode** first (isolation leak unresolved, one long-lived server per task). The ToS posture is identical whichever stage introduces Claude; the user accepted the residual risk for personal use (2026-10-12) and S1 gates it behind the recorded acknowledgement.
 
 ## Open questions
 
-Ranked; each has a default that tasks assume until the user answers.
+None block the plan. User decisions recorded 2026-10-12: Claude ToS residual risk accepted behind the one-time acknowledgement (Claude stays the S1 driver); Codex keeps the always-on bypass in cross sessions with relay opt-in; no OS service; local desktop web client, Tailscale optional and user-initiated only.
 
-1. **Claude ToS residual risk.** Do you accept the documented ambiguity for personal use behind a one-time acknowledgement? *Default:* yes, gated (XR-12.1); if no, swap S1 to OpenCode and ship Claude last.
-2. **Codex approvals in cross sessions.** Keep the approved always-on bypass, or relay approvals with sandbox on (useful when approving from the phone)? *Default:* keep bypass; relay opt-in per config.
-3. **Daemon availability for remote start.** Should the phone be able to start sessions when no terminal is open (requires a launchd/systemd user service)? *Default:* no OS service; the daemon starts from a terminal command and stays up while sessions are live (`deck session daemon --keep-alive` available).
+Remaining items are verification tasks, not user questions: memory path inside delegated children (3.11), Codex decline path (2.3), Codex auth with user config ignored (2.2), OpenCode isolation via a Deck-owned config dir (2.5), Claude `--safe-mode` + explicit MCP compatibility (1.13).
 
 Resolved by default (no user input needed): only the Lead delegates; continuation uses recorded runner; session binding optional but immutable; max 4 concurrent tasks; approval timeout 15 min; idle shutdown 30 min; retention 30 days/50 sessions; Pi excluded from drivers in this change.

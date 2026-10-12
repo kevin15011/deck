@@ -11,7 +11,7 @@
 | **Assignment** | Runner-qualified `{runnerId, modelId, thinking?}` for one member. |
 | **Task** | One delegated unit of work for one member; the Lead conversation is task `lead`. |
 | **Driver** | Adapter-owned `RunnerSessionDriver` that runs a task inside the native CLI. |
-| **Client** | Terminal client, web/PWA, or TUI attached to the daemon. |
+| **Client** | Terminal client, desktop web client, or TUI attached to the daemon. |
 | **Cursor** | The per-session monotonically increasing event sequence number (`seq`). |
 
 ---
@@ -77,8 +77,8 @@
 
 **XR-3.8** The daemon MUST NOT read, write, log, or transmit runner credential files or OAuth tokens.
 
-#### Scenario: Reattach after mobile disconnect
-- **Given** a web client saw events up to `seq` 120 and lost network
+#### Scenario: Reattach after browser disconnect
+- **Given** a web client saw events up to `seq` 120 and its tab was closed
 - **When** it reconnects with `after=120` while the session produced events 121–140
 - **Then** it receives 121–140 in order followed by live events
 
@@ -134,9 +134,9 @@
 
 **XR-5.4** `turn.interrupt` MUST map to Claude `SIGINT` to the CLI process (not the group), Codex `turn/interrupt`, OpenCode `POST /session/{id}/abort`, and MUST produce `turn.completed {status: "interrupted"}`. If no terminal native event arrives within 10 s, the daemon MUST terminate the task's process group (TERM, then KILL after grace) and report `interrupted-forced`.
 
-#### Scenario: Remote approval
+#### Scenario: Approval from the desktop web client
 - **Given** a Claude child calls `Bash` under relay policy
-- **When** the user taps Allow on the web client
+- **When** the user clicks Allow in the web client
 - **Then** `deck_approve` returns `{behavior: "allow", updatedInput}` and `approval.resolved {decision: "allow-once", by: <deviceId>}` is logged
 
 ---
@@ -178,26 +178,38 @@
 
 ---
 
-## XR-8 Clients and web security
+## XR-8 Clients and local web security
 
 **XR-8.1** The daemon MUST expose a local control endpoint as a Unix domain socket (`0600`, parent `0700`) for CLI, TUI, and the session MCP bridge.
 
-**XR-8.2** The web listener MUST be disabled by default, MUST bind only `127.0.0.1`, and MUST refuse any configured non-loopback address.
+**XR-8.2** The web listener MUST bind only `127.0.0.1` and MUST refuse any configured non-loopback bind address. It MUST work without Tailscale or any other network tool installed.
 
-**XR-8.3** Web requests MUST present a valid device credential (HttpOnly, Secure, SameSite=Strict cookie) obtained by one-time pairing (single use, TTL ≤ 5 min, rate-limited). Device credentials MUST be stored hashed and be revocable.
+**XR-8.3** Web requests MUST present a valid device credential (HttpOnly, SameSite=Strict cookie; `Secure` whenever served over HTTPS) obtained by one-time pairing (single use, TTL ≤ 5 min, rate-limited). Device credentials MUST be stored hashed and be revocable.
 
-**XR-8.4** When a `Tailscale-User-Login` header is present it MUST match the configured identity allowlist (default: only the pairing user's login). Requests marked as Funnel traffic MUST be rejected.
+**XR-8.4** The daemon MUST reject requests whose `Host` is not an allowed origin host (default: `127.0.0.1:<port>` and `localhost:<port>`) to defeat DNS rebinding.
 
-**XR-8.5** State-changing web requests and WebSocket upgrades MUST pass an exact Origin check; responses MUST set a strict CSP with no third-party origins.
+**XR-8.5** State-changing web requests and WebSocket upgrades MUST pass an exact Origin check against the allowed origins; responses MUST set a strict CSP with no third-party origins.
 
-**XR-8.6** Deck MUST NOT invoke `tailscale funnel`. Doctor MUST warn if Funnel is enabled for the web port.
+**XR-8.6** By default the daemon MUST reject requests carrying forwarding headers (`Forwarded`, `X-Forwarded-*`) or a Tailscale Funnel marker. They MAY be accepted only when the user explicitly configures `web.trustedProxy` and the external origin in `web.allowedOrigins`; Funnel traffic additionally requires `web.allowFunnel: true`. Exposed access MUST use the same device-credential authentication as local access.
 
 **XR-8.7** The web listener MUST expose only the client API subset (sessions, events, commands, approvals); it MUST NOT expose the session MCP bridge or daemon admin operations.
 
-#### Scenario: Unpaired device
-- **Given** the web listener is enabled behind Tailscale Serve
+**XR-8.8** Deck MUST NOT run any network-exposure command (including `tailscale serve` or `tailscale funnel`) without an explicit user command and confirmation.
+
+#### Scenario: Unpaired browser tab
+- **Given** the web listener runs on `127.0.0.1`
 - **When** a request without a valid device cookie arrives
 - **Then** the daemon serves only the pairing page and every API call returns 401
+
+#### Scenario: DNS rebinding
+- **Given** a malicious page resolves `evil.example` to `127.0.0.1`
+- **When** it sends a request with `Host: evil.example:<port>`
+- **Then** the daemon rejects it with 421/403 before authentication
+
+#### Scenario: Forwarded request without explicit trust
+- **Given** the user has not configured `web.trustedProxy`
+- **When** a request arrives carrying `X-Forwarded-For`
+- **Then** it is rejected and a diagnostic is logged
 
 ---
 
@@ -205,11 +217,13 @@
 
 **XR-9.1** `deck cross developer [--change <id>]` MUST create or attach a session for the current project and attach a line-oriented terminal client (prompts, `/interrupt`, approval y/n, `/tasks`, `/detach`).
 
-**XR-9.2** `deck session list|attach|stop|pair|devices|web` MUST exist.
+**XR-9.2** `deck session list|attach|stop|pair|devices|web` MUST exist. `deck cross developer` SHOULD offer to open the desktop web client with a one-time pairing link.
 
 **XR-9.3** The TUI Start installation MUST list a **cross** entry. Selecting it MUST show members; selecting a member MUST show the runner list first (only installed runners with a session driver), then that runner's models (reusing the runner's model inventory/discovery), then its thinking levels.
 
 **XR-9.4** The cross flow MUST write only `crossRunner` config and MUST NOT run install actions; it MUST show which referenced runners still need their own installation.
+
+**XR-9.5** An optional `deck cross expose` helper MAY print, and only after explicit confirmation run, a user-chosen reverse-proxy command (e.g. `tailscale serve`) and write the matching `web.trustedProxy`/`web.allowedOrigins`. It MUST NOT change the authentication model, MUST NOT enable Funnel by default, and its absence MUST NOT affect any other requirement.
 
 ---
 
@@ -227,7 +241,7 @@
 
 **XR-11.1** The daemon MUST write a structured, redacted, size-rotated log under `$XDG_STATE_HOME/deck/logs/`.
 
-**XR-11.2** `deck session status --json` and Doctor MUST report daemon health, driver probe results (version, range status, isolation status), web listener state, and Funnel state.
+**XR-11.2** `deck session status --json` and Doctor MUST report daemon health, driver probe results (version, range status, isolation status), web listener state, and exposure configuration (trusted proxy/allowed origins).
 
 **XR-11.3** Each driver MUST have recorded-fixture contract tests that run in `bun test` without network; an opt-in live contract script MUST re-record and compare event shapes.
 
@@ -235,6 +249,6 @@
 
 ## XR-12 Personal-use policy
 
-**XR-12.1** Before the Claude driver is first enabled, Deck MUST show the ToS risk notice and record an explicit local acknowledgement; without it the Claude driver MUST be `blocked` (`claude-session-tos-unacknowledged`).
+**XR-12.1** Before the Claude driver is first enabled, Deck MUST show the ToS risk notice and record an explicit local acknowledgement (user accepted the residual risk for personal use, 2026-10-12); without it the Claude driver MUST be `blocked` (`claude-session-tos-unacknowledged`).
 
 **XR-12.2** Deck MUST NOT offer configuration for additional users, shared daemons, or remote runner credentials.

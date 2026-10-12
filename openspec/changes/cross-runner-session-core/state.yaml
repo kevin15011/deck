@@ -1,0 +1,43 @@
+schema: spec-registry-v1
+changeId: cross-runner-session-core
+name: Cross-Runner Session Core
+currentPhase: tasks
+status: completed
+artifacts:
+  exploration: working-brief.md
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+provenance:
+  - phase: explore
+    agent: deck-lead
+    model: anthropic/claude-opus-5-5
+    timestamp: "2026-10-12"
+    registryWrite: deferred-reconciled
+    note: "Working Brief with user-confirmed decisions and two real spike rounds (scripts in spike/) serves as the exploration artifact."
+  - phase: proposal
+    agent: deck-architect
+    model: anthropic/claude-opus-5-5
+    timestamp: "2026-10-12"
+    registryWrite: deferred-reconciled
+    note: "Proposal from working-brief.md and two spike rounds; daemon boundary supersedes the persistent-daemon exclusion only for cross-runner sessions."
+  - phase: spec
+    agent: deck-architect
+    model: anthropic/claude-opus-5-5
+    timestamp: "2026-10-12"
+    registryWrite: deferred-reconciled
+    note: "Normative XR-1..XR-12 requirements with Given/When/Then scenarios."
+  - phase: design
+    agent: deck-architect
+    model: anthropic/claude-opus-5-5
+    timestamp: "2026-10-12"
+    registryWrite: deferred-reconciled
+    note: "Decisions D-1..D-24 with rejected alternatives; user decisions of 2026-10-12 applied (Claude ToS accepted, Codex bypass kept, no OS service, local desktop web client, Tailscale optional)."
+  - phase: tasks
+    agent: deck-architect
+    model: anthropic/claude-opus-5-5
+    timestamp: "2026-10-12"
+    registryWrite: deferred-reconciled
+    note: "Stages S0-S5 with per-task verification and per-stage four-target binary gate; optional expose helper as last S4 task."
+next_action: "Lead reviews the plan and, with user approval, starts Apply at S0 (task 0.10 Codex audit may ship first)."

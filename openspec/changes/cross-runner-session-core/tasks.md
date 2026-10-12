@@ -130,25 +130,29 @@
   *Verify:* apply-progress evidence log.
 - **3.12 S3 BIN gate** — smoke: fake-driver cross session from the compiled binary.
 
-## S4 — Web/PWA over Tailscale
+## S4 — Desktop web client over the local service
 
-- **4.1 `apps/web` scaffold + build** (D-20) — React PWA (manifest, service worker caching only same-origin assets), `Bun.build` output.
+> Nothing in this stage requires Tailscale or any network tool. All verification runs on loopback.
+
+- **4.1 `apps/web` scaffold + build** (D-20, D-23) — React desktop client (no service worker, no PWA manifest), `Bun.build` output.
   *Verify:* build script test; bundle has no external URLs (scan).
 - **4.2 Embedded asset generator** — `apps/cli/src/runtime/web-assets.generated.ts` with digest manifest; wired into `prepareStandaloneBinaryBuild`; `self-test` covers it.
   *Verify:* generator idempotency test; self-test detects a tampered digest.
-- **4.3 Web listener** (XR-8.2, 8.7, D-19) — `127.0.0.1` only, restricted API, WebSocket events with cursor.
-  *Verify:* tests: non-loopback config refused; bridge/admin routes 404.
-- **4.4 Pairing and devices** (XR-8.3) — one-time code, TTL, attempts, hashed device tokens, revoke.
-  *Verify:* tests for expiry, reuse, brute-force lockout, revoke.
-- **4.5 Identity, Funnel, Origin, CSP** (XR-8.4–8.5) — allowlist on `Tailscale-User-Login`, Funnel marker rejection (verify header name against Tailscale docs during the task), exact Origin, CSP headers.
-  *Verify:* header matrix tests.
-- **4.6 Client UI** — session list, event stream with resume, prompt box, interrupt, approval cards, task panel, raw payload viewer; mobile layout; untrusted text rendering.
-  *Verify:* component tests; Playwright run against the host binary (mobile viewport) covering pair → prompt → approve → reconnect.
-- **4.7 `deck session web enable|disable|pair|devices`** — prints the `tailscale serve` command; never runs `funnel`.
-  *Verify:* CLI tests; assert no `funnel` invocation.
-- **4.8 Doctor web checks** (XR-8.6, XR-11.2) — listener state, Funnel state via read-only `tailscale serve status --json` when available.
-  *Verify:* tests with stubbed command output.
-- **4.9 S4 BIN gate** — smoke: enable web on a temp port, fetch `/` from the compiled binary, verify digest-matched assets and 401 on API without device cookie.
+- **4.3 Loopback web listener** (XR-8.2, 8.7, D-19) — `127.0.0.1` only, starts with the daemon, restricted API, WebSocket events with cursor.
+  *Verify:* tests: non-loopback bind config refused; bridge/admin routes 404.
+- **4.4 Pairing and devices** (XR-8.3) — one-time code and single-use pairing link, TTL, attempts, hashed device tokens, revoke; cookie `Secure` only over HTTPS.
+  *Verify:* tests for expiry, reuse, brute-force lockout, revoke, cookie attributes on http loopback.
+- **4.5 Host, Origin, CSP, forwarding checks** (XR-8.4–8.6) — Host allowlist (DNS rebinding), exact Origin, CSP headers, reject `Forwarded`/`X-Forwarded-*`/Funnel marker unless `trustedProxy`/`allowedOrigins`/`allowFunnel` configured.
+  *Verify:* header matrix tests (rebinding Host, foreign Origin, forwarded without trust, forwarded with trust + same auth still required).
+- **4.6 Desktop client UI** — session list, event stream with resume, prompt box, interrupt, approval cards, task panel, raw payload viewer; untrusted text rendering. Narrow-screen layout is a nice-to-have, not a gate.
+  *Verify:* component tests; Playwright (desktop viewport) against the host binary covering pair → prompt → approve → close tab → reopen and resume.
+- **4.7 `deck session web disable|enable|pair|devices` and pairing link from `deck cross developer`** (XR-9.2) — opens the default browser only on user confirmation.
+  *Verify:* CLI tests; assert no network-exposure command is ever spawned.
+- **4.8 Doctor web checks** (XR-11.2) — listener bind/port, exposure configuration warnings; no Tailscale probing.
+  *Verify:* tests with stubbed config.
+- **4.9 S4 BIN gate** — smoke: start the daemon from the compiled binary, fetch `/` on `127.0.0.1`, verify digest-matched assets, 401 on API without device cookie, Host-rebinding rejection.
+- **4.10 (Optional, last) `deck cross expose` helper** (XR-9.5, D-24) — prints the reverse-proxy command for the chosen tool (`tailscale serve` first), runs it only after explicit confirmation, writes `trustedProxy`/`allowedOrigins`; never enables Funnel by default; no auth changes. May be dropped without affecting any other task.
+  *Verify:* tests with a stubbed command runner: print-only by default, run only after confirmation, Funnel never invoked without `--allow-funnel`; auth tests from 4.4–4.5 still pass with exposure configured. Manual check with a real tailnet is optional and not a gate.
 
 ## S5 — TUI cross runner and documentation
 
@@ -162,7 +166,7 @@
   *Verify:* `bun test apps/cli/src/doctor-command` new cases.
 - **5.5 Docs** — `docs/architecture.md` (daemon boundary, D-1), `docs/runners.md` (cross sessions), `docs/reference/support-matrix.md` (driver versions, approvals, isolation status per runner), a security/ToS page with the non-goal list; AGENTS.md architecture bullet for `@deck/session-host`.
   *Verify:* link check; review against spec XR-12.
-- **5.6 Final BIN gate + release-readiness** — full four-target build, host + Linux sandbox smoke covering S1–S4 flows, `bun run release:verify`.
+- **5.6 Final BIN gate + release-readiness** — full four-target build, host + Linux sandbox smoke covering S1–S4 flows (loopback only, 4.10 excluded), `bun run release:verify`.
 
 ---
 

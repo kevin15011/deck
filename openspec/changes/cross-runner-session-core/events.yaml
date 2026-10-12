@@ -1,0 +1,47 @@
+schema: spec-registry-events-v1
+events:
+  - phase: explore
+    status: completed
+    event: explore.completed
+    artifact: working-brief.md
+    timestamp: "2026-10-12"
+    actor: deck-lead
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Working Brief and spike rounds 1-2 recorded as exploration evidence."
+  - phase: proposal
+    status: completed
+    event: proposal.completed
+    artifact: proposal.md
+    timestamp: "2026-10-12"
+    actor: deck-architect
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Built from working-brief.md and spike rounds 1 and 2; adaptive memory not loaded."
+  - phase: spec
+    status: completed
+    event: spec.completed
+    artifact: spec.md
+    timestamp: "2026-10-12"
+    actor: deck-architect
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Defined XR-1..XR-12 normative requirements and acceptance scenarios."
+  - phase: design
+    status: completed
+    event: design.completed
+    artifact: design.md
+    timestamp: "2026-10-12"
+    actor: deck-architect
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Recorded D-1..D-24; applied user decisions of 2026-10-12 (local desktop web client, Tailscale optional, no OS service, Codex bypass kept, Claude ToS accepted)."
+  - phase: tasks
+    status: completed
+    event: tasks.completed
+    artifact: tasks.md
+    timestamp: "2026-10-12"
+    actor: deck-architect
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "Six independently shippable stages with per-task verification and binary gates."
