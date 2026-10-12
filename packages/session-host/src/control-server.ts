@@ -11,7 +11,7 @@ import type { SessionEvent } from "@deck/core/session/events";
 import type { EventLog } from "./event-log";
 import { assertSafeSegment, ensurePrivateDir } from "./paths";
 import {
-  encodeFrame, FrameDecoder, MAX_FRAME_BYTES, parseFrame, PROTOCOL_VERSION, type CommandOutcome, type ServerFrame,
+  encodeFrame, FrameDecoder, MAX_FRAME_BYTES, parseFrame, PROTOCOL_VERSION, type CommandOutcome, type ExecuteOutcome, type ServerFrame,
 } from "./protocol";
 import type { SessionService } from "./service";
 
@@ -176,7 +176,7 @@ class Connection {
 export class ControlServer {
   private server: net.Server | undefined;
   private readonly connections = new Set<Connection>();
-  private readonly idempotency = new Map<string, Map<string, Promise<CommandOutcome>>>();
+  private readonly idempotency = new Map<string, Map<string, Promise<ExecuteOutcome>>>();
   private counter = 0;
 
   constructor(private readonly options: ControlServerOptions) {}
@@ -252,14 +252,27 @@ export class ControlServer {
         if (typeof frame.token !== "string" || typeof frame.tool !== "string") return reply({ t: "bridge.result", id, outcome: { ok: false, code: "invalid-bridge-call" } });
         return reply({ t: "bridge.result", id, outcome: await this.options.bridge.call({ token: frame.token, tool: frame.tool, arguments: frame.arguments }, { signal: conn.abort.signal }) });
       }
+      case "query": {
+        const { service } = this.options;
+        if (!service.query || typeof frame.name !== "string") return reply({ t: "query.result", id, outcome: { ok: false, code: "query-unsupported" } });
+        let outcome: CommandOutcome;
+        try { outcome = await service.query(frame.name, frame.args); } catch (error) {
+          this.diag("query-threw", (error as Error).message);
+          outcome = { ok: false, code: "internal-error", message: "Query failed" };
+        }
+        return reply({ t: "query.result", id, outcome });
+      }
       case "command": return this.handleCommand(conn, id, frame);
       default: return reply({ t: "error", id, code: "unknown-frame", message: `Unknown frame type ${String(frame.t)}` });
     }
   }
 
   private async handleCommand(conn: Connection, id: string | undefined, frame: Record<string, unknown>): Promise<void> {
-    const respond = (outcome: CommandOutcome, extra: { commandId?: string; duplicate?: boolean } = {}) =>
-      conn.send({ t: "command.result", id, ...extra, outcome });
+    const respond = (outcome: ExecuteOutcome, extra: { commandId?: string; duplicate?: boolean } = {}) => {
+      // `duplicate` from a service (receipt found after a restart) is transport metadata, not part of the outcome.
+      const { duplicate, ...rest } = outcome;
+      conn.send({ t: "command.result", id, ...extra, ...(duplicate ? { duplicate: true } : {}), outcome: rest as CommandOutcome });
+    };
     const validated = validateSessionCommand(frame.command);
     if (!validated.ok) return respond({ ok: false, code: "invalid-command", errors: validated.errors });
     const command = validated.value;
@@ -291,7 +304,7 @@ export class ControlServer {
     respond(await execution, { commandId: command.commandId });
   }
 
-  private async execute(conn: Connection, sessionId: string | undefined, command: SessionCommand): Promise<CommandOutcome> {
+  private async execute(conn: Connection, sessionId: string | undefined, command: SessionCommand): Promise<ExecuteOutcome> {
     try {
       return await this.options.service.execute({ sessionId, command, clientId: conn.id });
     } catch (error) {

@@ -24,6 +24,58 @@ function replay(drafts: EventDraft[]): Ledger {
   return ledger;
 }
 
+describe("Ledger command receipts and native confirmation (S1b)", () => {
+  const accepted = (commandId: string, type = "prompt.send", outcome: Record<string, unknown> = { ok: true, data: { taskId: "lead" } }): EventDraft =>
+    ({ kind: "command.accepted", data: { commandId, type, outcome } });
+
+  test("command.accepted records the original outcome by commandId (durable idempotency, XR-1.5)", () => {
+    const l = replay([accepted("c-1"), accepted("c-2", "session.stop", { ok: true })]);
+    expect(l.receipt("c-1")).toEqual({ type: "prompt.send", outcome: { ok: true, data: { taskId: "lead" } } });
+    expect(l.receipt("c-2")?.type).toBe("session.stop");
+    expect(l.receipt("nope")).toBeUndefined();
+  });
+
+  test("receipts are bounded: the oldest are evicted, the newest stay", () => {
+    const drafts = Array.from({ length: 1105 }, (_, i) => accepted(`c-${i}`));
+    const l = replay(drafts);
+    expect(l.receipt("c-0")).toBeUndefined();
+    expect(l.receipt("c-104")).toBeUndefined();
+    expect(l.receipt("c-105")).toBeDefined();
+    expect(l.receipt("c-1104")).toBeDefined();
+  });
+
+  test("receipts survive a snapshot round trip and a rebuild from the log", () => {
+    const dir = tempDir();
+    const log = openLog(dir);
+    log.appendMany([accepted("c-1"), created("t1")]);
+    const ledger = Ledger.empty("s-1");
+    for (const e of log.readAfter(0)) ledger.apply(e);
+    const file = join(dir, "snap.json");
+    saveLedgerSnapshot(ledger, log, file);
+    log.append(accepted("c-2"));
+    const loaded = loadLedger(log, file);
+    expect(loaded.source).toBe("snapshot");
+    expect(loaded.ledger.receipt("c-1")).toBeDefined();
+    expect(loaded.ledger.receipt("c-2")).toBeDefined();
+    writeFileSync(file, "garbage");
+    expect(loadLedger(log, file).ledger.receipt("c-1")).toBeDefined();
+    log.close();
+  });
+
+  test("a snapshot written before receipts existed still loads (missing field defaults to none)", () => {
+    const l = Ledger.fromState({ sessionId: "s-1", seq: 0, session: { state: "created" }, tasks: {}, approvals: {}, anomalies: [] } as never);
+    expect(l.receipt("x")).toBeUndefined();
+  });
+
+  test("turn.started marks the task's native session as confirmed (so a later turn may --resume)", () => {
+    const l = replay([created("t1", { nativeSessionId: "n-0" }), state("t1", "running")]);
+    expect(l.nativeConfirmed("t1")).toBe(false);
+    const l2 = replay([created("t1", { nativeSessionId: "n-0" }), state("t1", "running"), { kind: "turn.started", source: { taskId: "t1" }, data: { nativeSessionId: "n-0" } }, state("t1", "interrupted")]);
+    expect(l2.nativeConfirmed("t1")).toBe(true);
+    expect(l2.nativeConfirmed("unknown")).toBe(false);
+  });
+});
+
 describe("Ledger projection (XR-3.3, D-12, D-15)", () => {
   test("projects session facts", () => {
     const l = replay([

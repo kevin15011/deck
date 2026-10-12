@@ -36,7 +36,7 @@ export {
   type SessionMcpServerSpec,
 } from "./bridge-config";
 export { runSessionMcpBridge, type McpBridgeOptions } from "./mcp-bridge";
-export { PROTOCOL_VERSION, type ClientFrame, type CommandOutcome, type ServerFrame } from "./protocol";
+export { PROTOCOL_VERSION, type ClientFrame, type CommandOutcome, type ExecuteOutcome, type ServerFrame } from "./protocol";
 export { ControlClient, type AttachHandlers } from "./control-client";
 export { ControlServer, DEFAULT_MAX_QUEUED_EVENTS, type BridgePort, type ControlServerOptions, type DaemonControl } from "./control-server";
 export { UnavailableSessionService, type SessionService } from "./service";
@@ -52,3 +52,6 @@ export {
 } from "./daemon-client";
 export { runSessionDaemon, type RunSessionDaemonOptions } from "./daemon-main";
 export { createDriverSpawn, toSupervisedChild } from "./driver-spawn";
+export {
+  LEAD_TASK_ID, SessionManager, type ChildMcpResolver, type DriverLookup, type SessionManagerOptions, type SessionSummary,
+} from "./session-manager";

@@ -31,28 +31,36 @@ export type TaskAttempt = {
   attempt: number; runnerId: string; modelId: string; thinking?: string; nativeSessionId?: string;
   state: TaskState; reason?: string; continuity?: "native" | "reseeded"; startedSeq: number; endedSeq?: number; result?: string;
 };
-export type LedgerTask = { taskId: string; memberId: string; attempts: TaskAttempt[] };
+/** Native session confirmed by the runner (a `turn.started` was seen): only then may a later turn resume it. */
+export type LedgerTask = { taskId: string; memberId: string; attempts: TaskAttempt[]; nativeConfirmed?: boolean };
+/** Durable idempotency receipt (XR-1.5): the command's type and its original outcome. */
+export type LedgerCommandReceipt = { type: string; outcome: { ok: boolean; [key: string]: unknown } };
 export type LedgerPendingApproval = { approvalId: string; taskId?: string; seq: number };
 export type LedgerAnomaly = { code: string; seq: number; detail?: string };
 export type LedgerSession = { projectRoot?: string; changeId?: string; state: SessionLifecycleState };
 export type LedgerState = {
   sessionId: string; seq: number; session: LedgerSession;
   tasks: Record<string, LedgerTask>; approvals: Record<string, LedgerPendingApproval>; anomalies: LedgerAnomaly[];
+  /** Accepted commands by commandId, oldest first, bounded by MAX_RECEIPTS. Absent in snapshots written before receipts existed. */
+  commands?: Record<string, LedgerCommandReceipt>;
 };
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.length > 0 ? v : undefined);
 const isTaskState = (v: unknown): v is TaskState => typeof v === "string" && (TASK_STATES as readonly string[]).includes(v);
 const MAX_ANOMALIES = 100;
+export const MAX_RECEIPTS = 1000;
 
 export class Ledger {
   private constructor(private state: LedgerState) {}
 
   static empty(sessionId: string): Ledger {
-    return new Ledger({ sessionId, seq: 0, session: { state: "created" }, tasks: {}, approvals: {}, anomalies: [] });
+    return new Ledger({ sessionId, seq: 0, session: { state: "created" }, tasks: {}, approvals: {}, anomalies: [], commands: {} });
   }
 
   static fromState(state: LedgerState): Ledger {
-    return new Ledger(structuredClone(state));
+    const copy = structuredClone(state);
+    copy.commands ??= {};
+    return new Ledger(copy);
   }
 
   get seq(): number { return this.state.seq; }
@@ -63,6 +71,8 @@ export class Ledger {
   task(taskId: string): LedgerTask | undefined { return this.state.tasks[taskId]; }
   latest(taskId: string): TaskAttempt | undefined { return this.state.tasks[taskId]?.attempts.at(-1); }
   pendingApprovals(): LedgerPendingApproval[] { return Object.values(this.state.approvals); }
+  receipt(commandId: string): LedgerCommandReceipt | undefined { return this.state.commands?.[commandId]; }
+  nativeConfirmed(taskId: string): boolean { return this.state.tasks[taskId]?.nativeConfirmed === true; }
   toState(): LedgerState { return structuredClone(this.state); }
 
   private anomaly(code: string, seq: number, detail?: string): void {
@@ -93,6 +103,12 @@ export class Ledger {
       }
       case "session.ended": this.state.session.state = "ended"; break;
       case "session.recovered": this.state.session.state = "recovered"; break;
+      case "command.accepted": return this.onCommandAccepted(event);
+      case "turn.started": {
+        const task = (str(d.taskId) ?? event.source.taskId) ? this.state.tasks[(str(d.taskId) ?? event.source.taskId)!] : undefined;
+        if (task) task.nativeConfirmed = true;
+        break;
+      }
       case "task.created": return this.onTaskCreated(event);
       case "task.state": return this.onTaskState(event);
       case "task.continued": return this.onTaskContinued(event);
@@ -109,6 +125,20 @@ export class Ledger {
       }
       default: break;
     }
+  }
+
+  private onCommandAccepted(event: SessionEvent): void {
+    const d = event.data;
+    const commandId = str(d.commandId);
+    const outcome = d.outcome;
+    if (!commandId || typeof d.type !== "string" || typeof outcome !== "object" || outcome === null || typeof (outcome as { ok?: unknown }).ok !== "boolean") {
+      return this.anomaly("command-receipt-invalid", event.seq);
+    }
+    const commands = (this.state.commands ??= {});
+    if (commands[commandId]) return; // first acceptance is the original outcome
+    commands[commandId] = { type: d.type, outcome: outcome as LedgerCommandReceipt["outcome"] };
+    const ids = Object.keys(commands);
+    for (let i = 0; i < ids.length - MAX_RECEIPTS; i++) delete commands[ids[i]!];
   }
 
   private onTaskCreated(event: SessionEvent): void {

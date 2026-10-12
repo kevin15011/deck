@@ -349,3 +349,35 @@ describe("clients and bridge routing", () => {
     expect(await c2.request({ t: "bridge.call", token: "t", tool: "x" })).toMatchObject({ outcome: { ok: false, code: "bridge-unavailable" } });
   });
 });
+
+describe("service-reported duplicates and queries (S1b)", () => {
+  test("an outcome the service flags as a persisted duplicate is reported as duplicate without leaking the flag into the outcome", async () => {
+    const dir = tempDir();
+    const service = new StubSessionService(join(dir, "sessions"));
+    service.execute = async () => ({ ok: true, data: { n: 1 }, duplicate: true });
+    const server = new ControlServer({ socketPath: join(dir, "d.sock"), service, daemon: quietDaemon });
+    await server.listen();
+    cleanups.push(() => server.close(), () => service.close());
+    const c = await ControlClient.connect(join(dir, "d.sock"));
+    cleanups.push(() => c.close());
+    const reply = await c.command({ v: 1, commandId: uuid(), type: "session.create", projectRoot: "/p" });
+    expect(reply.duplicate).toBe(true);
+    expect(reply.outcome).toEqual({ ok: true, data: { n: 1 } });
+  });
+
+  test("query frames reach the service; a service without queries answers query-unsupported", async () => {
+    const dir = tempDir();
+    const service = new StubSessionService(join(dir, "sessions"));
+    (service as { query?: unknown }).query = async (name: string, args: unknown) => ({ ok: true, data: { name, args } });
+    const server = new ControlServer({ socketPath: join(dir, "d.sock"), service, daemon: quietDaemon });
+    await server.listen();
+    cleanups.push(() => server.close(), () => service.close());
+    const c = await ControlClient.connect(join(dir, "d.sock"));
+    cleanups.push(() => c.close());
+    expect(await c.query("sessions.list", { limit: 5 })).toEqual({ ok: true, data: { name: "sessions.list", args: { limit: 5 } } });
+
+    const b = await boot();
+    const c2 = await b.connect();
+    expect(await c2.query("sessions.list")).toMatchObject({ ok: false, code: "query-unsupported" });
+  });
+});

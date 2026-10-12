@@ -12,13 +12,17 @@ export type CommandOutcome =
   | { ok: true; data?: unknown }
   | { ok: false; code: string; message?: string; errors?: string[] };
 
+/** What a service returns: the outcome plus an optional flag for a duplicate recognised from persisted receipts. */
+export type ExecuteOutcome = CommandOutcome & { duplicate?: boolean };
+
 export type ClientFrame =
   | { t: "hello"; id?: string; clientVersion: string }
   | { t: "command"; id?: string; sessionId?: string; command: unknown }
   | { t: "detach"; id?: string; sessionId: string }
   | { t: "daemon.status"; id?: string }
   | { t: "daemon.restart"; id?: string }
-  | { t: "bridge.call"; id?: string; token: string; tool: string; arguments?: unknown };
+  | { t: "bridge.call"; id?: string; token: string; tool: string; arguments?: unknown }
+  | { t: "query"; id?: string; name: string; args?: unknown };
 
 export type ServerFrame =
   | { t: "hello"; id?: string; protocol: number; daemonVersion: string; pid: number; nonce: string }
@@ -30,6 +34,7 @@ export type ServerFrame =
   | { t: "daemon.status"; id?: string; status: unknown }
   | { t: "daemon.restart"; id?: string; outcome: CommandOutcome }
   | { t: "bridge.result"; id?: string; outcome: CommandOutcome }
+  | { t: "query.result"; id?: string; outcome: CommandOutcome }
   | { t: "error"; id?: string; code: string; message: string };
 
 export type ValidatedCommand = SessionCommand;

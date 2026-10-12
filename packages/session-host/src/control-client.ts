@@ -88,6 +88,12 @@ export class ControlClient {
     return reply;
   }
 
+  async query(name: string, args?: unknown): Promise<CommandOutcome> {
+    const reply = await this.request({ t: "query", name, ...(args === undefined ? {} : { args }) });
+    if (reply.t !== "query.result") throw new Error(`Unexpected reply to query: ${reply.t === "error" ? reply.code : reply.t}`);
+    return reply.outcome;
+  }
+
   async attach(sessionId: string, after: number, handlers: AttachHandlers): Promise<CommandOutcome> {
     this.attachments.set(sessionId, handlers);
     const reply = await this.command({ v: 1, commandId: randomUUID(), type: "session.attach", after }, sessionId);

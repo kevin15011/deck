@@ -5,15 +5,17 @@
 import type { SessionCommand } from "@deck/core/session/commands";
 import type { CredentialGrant } from "./credentials";
 import type { EventLog } from "./event-log";
-import type { CommandOutcome } from "./protocol";
+import type { CommandOutcome, ExecuteOutcome } from "./protocol";
 
 export interface SessionService {
   /** Execute an already validated command. `sessionId` is absent only for `session.create`. */
-  execute(input: { sessionId?: string; command: SessionCommand; clientId: string }): Promise<CommandOutcome>;
+  execute(input: { sessionId?: string; command: SessionCommand; clientId: string }): Promise<ExecuteOutcome>;
   /** The event log of a known session, or undefined. */
   openLog(sessionId: string): EventLog | undefined;
   /** True while any task runs: keeps the daemon alive and blocks version-skew restarts. */
   hasRunningWork(): boolean;
+  /** Read-only/admin queries from clients (`sessions.list`, `sessions.prune`, `drivers.status`, ...). Optional. */
+  query?(name: string, args: unknown): Promise<CommandOutcome> | CommandOutcome;
   /** View of a task for the bridge's `deck_status` tool. Optional: the daemon falls back to the grant itself. */
   taskStatus?(grant: CredentialGrant): unknown;
   /** Release resources on daemon stop (logs, handles). */
