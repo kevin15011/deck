@@ -18,6 +18,7 @@
     "./session/redaction": "./src/session/redaction.ts",
     "./session/assignments": "./src/session/assignments.ts",
     "./session/driver": "./src/session/driver.ts",
+    "./session/schema": "./src/session/schema.ts",
     "./session/mcp": "./src/session/mcp.ts",
     "./config/deck-config": "./src/config/deck-config.ts",
     "./config/secret-store": "./src/config/secret-store.ts",

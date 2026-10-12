@@ -142,6 +142,16 @@ export async function generateSkillBundle(): Promise<void> {
   }
 }
 
+export async function generateSessionSchemas(): Promise<void> {
+  const proc = Bun.spawnSync({
+    cmd: ["bun", "run", path.join(ROOT, "scripts/generate-session-schemas.ts")],
+    cwd: ROOT,
+  });
+  if (!proc.success) {
+    throw new Error(`generate-session-schemas failed: ${new TextDecoder().decode(proc.stderr)}`);
+  }
+}
+
 export async function generateRunnerExecutionAssets(): Promise<void> {
   const proc = Bun.spawnSync({
     cmd: ["bun", "run", path.join(ROOT, "scripts/generate-runner-execution-assets.ts")],
@@ -162,6 +172,7 @@ export function getHostBuildTarget(platform: NodeJS.Platform = os.platform(), ar
 
 export async function prepareStandaloneBinaryBuild(target: BuildTarget, version: string): Promise<void> {
   await generateRunnerExecutionAssets();
+  await generateSessionSchemas();
   await generateBuildInfo(`${target[0]}-${target[1]}`, version);
   await generateSkillBundle();
 }
@@ -372,8 +383,9 @@ async function buildBinaries(targets: readonly (readonly [string, string, string
     // Step 1: Generate build info
     await generateBuildInfo(targetName, version, buildInfo.commit);
 
-    // Step 2: Generate skill bundle
+    // Step 2: Generate skill bundle and session schemas
     await generateSkillBundle();
+    await generateSessionSchemas();
 
     // Step 3: Build binary
     const binaryPath = await buildBinary(osName, archName, bunTarget, version, { buildInfo });
