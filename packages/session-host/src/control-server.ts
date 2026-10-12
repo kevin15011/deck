@@ -23,7 +23,7 @@ export type DaemonControl = {
   status(): unknown;
   requestRestart(): CommandOutcome | Promise<CommandOutcome>;
 };
-export type BridgePort = { call(input: { token: string; tool: string; arguments?: unknown }): Promise<CommandOutcome> };
+export type BridgePort = { call(input: { token: string; tool: string; arguments?: unknown }, context?: { signal?: AbortSignal }): Promise<CommandOutcome> };
 
 export type ControlServerOptions = {
   socketPath: string;
@@ -113,6 +113,8 @@ class Connection {
   private readonly decoder: FrameDecoder;
   private readonly attachments = new Map<string, Attachment>();
   closed = false;
+  /** Aborted when the peer disconnects, so blocking bridge calls can release their waiters. */
+  readonly abort = new AbortController();
 
   constructor(readonly id: string, readonly socket: net.Socket, private readonly server: ControlServer, maxFrameBytes: number) {
     this.decoder = new FrameDecoder(maxFrameBytes);
@@ -164,6 +166,7 @@ class Connection {
 
   private onClose(): void {
     this.closed = true;
+    this.abort.abort();
     for (const a of this.attachments.values()) a.dispose();
     this.attachments.clear();
     this.server.connectionClosed(this);
@@ -246,7 +249,7 @@ export class ControlServer {
       case "bridge.call": {
         if (!this.options.bridge) return reply({ t: "bridge.result", id, outcome: { ok: false, code: "bridge-unavailable" } });
         if (typeof frame.token !== "string" || typeof frame.tool !== "string") return reply({ t: "bridge.result", id, outcome: { ok: false, code: "invalid-bridge-call" } });
-        return reply({ t: "bridge.result", id, outcome: await this.options.bridge.call({ token: frame.token, tool: frame.tool, arguments: frame.arguments }) });
+        return reply({ t: "bridge.result", id, outcome: await this.options.bridge.call({ token: frame.token, tool: frame.tool, arguments: frame.arguments }, { signal: conn.abort.signal }) });
       }
       case "command": return this.handleCommand(conn, id, frame);
       default: return reply({ t: "error", id, code: "unknown-frame", message: `Unknown frame type ${String(frame.t)}` });

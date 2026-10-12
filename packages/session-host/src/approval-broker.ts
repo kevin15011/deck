@@ -93,6 +93,11 @@ export class ApprovalBroker {
     return [...this.pendingById.values()].map((e) => ({ approvalId: e.approvalId, sessionId: e.request.sessionId, taskId: e.request.taskId }));
   }
 
+  /** Deny one pending approval (its requester went away). */
+  cancel(approvalId: string, by: string): boolean {
+    return this.settle(approvalId, "deny", by) !== undefined;
+  }
+
   /** Deny every pending approval of a task (task ended, interrupted or cancelled). */
   cancelTask(taskId: string, by = "task-ended"): number {
     const ids = [...this.pendingById.values()].filter((e) => e.request.taskId === taskId).map((e) => e.approvalId);
