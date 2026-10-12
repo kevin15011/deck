@@ -142,7 +142,8 @@ export function writePrivateFile(file: string, data: string | Uint8Array): void 
   const temp = `${file}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
   try {
-    writeSync(fd, data);
+    const buffer = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+    for (let offset = 0; offset < buffer.length;) offset += writeSync(fd, buffer, offset, buffer.length - offset);
     fsyncSync(fd);
   } catch (error) {
     closeSync(fd);
