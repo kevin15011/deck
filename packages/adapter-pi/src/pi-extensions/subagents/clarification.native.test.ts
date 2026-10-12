@@ -7,7 +7,7 @@ import { parseAgentMarkdown } from "./agents";
 import { createDeckSubagentsExtension } from "./extension";
 
 async function until(fn: () => boolean) { const end = Date.now() + 10000; while (!fn()) { if (Date.now() > end) throw new Error("Timed out"); await Bun.sleep(10); } }
-test.skipIf(process.platform !== "linux" || !findRealPi())("native running child queues clarification without interrupting bash or replacing history", async () => {
+test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())("native running child queues clarification without interrupting bash or replacing history", async () => {
   const h = createPiHarness(), started = join(h.root, "started"), ended = join(h.root, "ended"), history = join(h.root, "child.jsonl"), log = join(h.root, "provider.jsonl");
   const runner = createChildRunner({ packageRoot: join(h.agentDir, "deck/package"), piInvocation: args => ({ command: findRealPi()!, args }), killGraceMs: 50,
     env: { PATH: process.env.PATH, HOME: h.home, PI_CODING_AGENT_DIR: h.agentDir, FAUX_LOG: log, FAUX_CHILD_TOOL: "bash", FAUX_CHILD_TOOL_INPUT: JSON.stringify({ command: `touch '${started}'; sleep 1; echo SHELL_FINISHED > '${ended}'` }) } });
@@ -35,7 +35,7 @@ test.skipIf(process.platform !== "linux" || !findRealPi())("native running child
   } finally { runner.killAll(); await pending; h.cleanup(); }
 }, 20000);
 
-test.skipIf(process.platform !== "linux" || !findRealPi())("existing subagent clarify action reaches packaged native child and rejects terminal/foreign targets", async () => {
+test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())("existing subagent clarify action reaches packaged native child and rejects terminal/foreign targets", async () => {
   const h = createPiHarness(), started = join(h.root, "started"), historyLog = join(h.root, "provider.jsonl"), agentsDir = join(h.root, "roles");
   mkdirSync(agentsDir);
   writeFileSync(join(agentsDir, "deck-apply-fast.md"), "---\nname: deck-apply-fast\nmodel: faux/faux-1\n---\nApply");

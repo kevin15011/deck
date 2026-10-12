@@ -71,6 +71,17 @@ describe("deck doctor Pi coverage (7.3)", () => {
     expect(text).toContain("deck-memory");
   });
 
+  test("detects an incomplete standalone catalog even when the manifest is self-consistent", async () => {
+    await installFull();
+    const paths = piAgentPaths(agentDir);
+    const manifest = JSON.parse(readFileSync(paths.manifest, "utf8"));
+    const missing = "deck/package/skills/deck-frontend-design/references/catalog.json";
+    rmSync(join(agentDir, missing));
+    delete manifest.files[missing];
+    writeFileSync(paths.manifest, JSON.stringify(manifest));
+    expect(problems(inspect()).some(item => item.status === "error" && item.message.includes("canonical skill catalog"))).toBe(true);
+  });
+
   test("not installed is a warning with the install hint, never an exception", () => {
     const result = inspect();
     expect(items(result).find((item) => item.message.includes("not installed"))?.suggestion).toContain("deck pi developer");

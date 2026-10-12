@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createPiHarness, findRealPi } from "../../pi-cli-harness";
 
-for (const mode of ["fullscreen", "regular"]) test.skipIf(process.platform !== "linux" || !findRealPi() || !Bun.which("python3"))(`real interactive Pi ${mode}: automatic integration preserves scroll/editor and quiet panel`, async () => {
+for (const mode of ["fullscreen", "regular"]) test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi() || !Bun.which("python3"))(`real interactive Pi ${mode}: automatic integration preserves scroll/editor and quiet panel`, async () => {
   const harness = createPiHarness({ installOptions: { modelAssignments: { "deck-investigate": "faux/faux-1" } } });
   try {
     const settingsPath = join(harness.agentDir, "settings.json");

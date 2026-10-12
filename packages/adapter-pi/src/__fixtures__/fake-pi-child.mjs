@@ -19,7 +19,9 @@ const previousHistory = sessionFile && fs.existsSync(sessionFile) ? fs.readFileS
 if (sessionFile) fs.appendFileSync(sessionFile, JSON.stringify({ type: "message", message: { role: "user", content: task } }) + "\n");
 const promptFile = flag("--append-system-prompt");
 let stdinTarget = "unknown";
-try { stdinTarget = fs.readlinkSync("/proc/self/fd/0"); } catch { /* non-linux */ }
+try { stdinTarget = fs.readlinkSync("/proc/self/fd/0"); } catch {
+  try { const input = fs.fstatSync(0), nil = fs.statSync("/dev/null"); if (input.isCharacterDevice() && input.rdev === nil.rdev) stdinTarget = "/dev/null"; } catch { /* retain unknown */ }
+}
 const record = {
   argv,
   previousHistory,

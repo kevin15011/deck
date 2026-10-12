@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
-import { readFileSync, realpathSync, writeSync } from "node:fs";
+import { realpathSync, writeSync } from "node:fs";
 import { constants } from "node:os";
 import type { BashOperations, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-export type NativeShellAPI = Pick<typeof import("@earendil-works/pi-coding-agent"), "createBashToolDefinition" | "createPowerShellToolDefinition" | "getShellConfig">;
+import { processGroupOf } from "./execution-lease";
+export type NativeShellAPI = Pick<typeof import("@earendil-works/pi-coding-agent"), "createBashToolDefinition" | "getShellConfig">;
 
 /** Child-only supported tool override. The parent owns the live Pi process group. */
 export async function installChildShell(pi: ExtensionAPI, env: Readonly<Record<string, string | undefined>>, supplied?: NativeShellAPI) {
@@ -15,12 +16,14 @@ export async function installChildShell(pi: ExtensionAPI, env: Readonly<Record<s
     });
     return;
   }
-  const { createBashToolDefinition, createPowerShellToolDefinition, getShellConfig } = supplied ?? await import("@earendil-works/pi-coding-agent");
-  const supported = process.platform === "linux" && Number(readFileSync(`/proc/${process.pid}/stat`, "utf8").split(") ").at(-1)!.split(" ")[2]) === process.pid;
+  const { createBashToolDefinition, getShellConfig } = supplied ?? await import("@earendil-works/pi-coding-agent");
+  if (typeof createBashToolDefinition !== "function" || typeof getShellConfig !== "function") throw new Error("Pi runtime lacks the native Bash API required for delegated execution");
+  const group = Number(env.DECK_PI_GROUP_PID);
+  const supported = ["linux", "darwin"].includes(process.platform) && Number.isSafeInteger(group) && group > 0 && processGroupOf(process.pid) === group;
   const supportedShell = () => {
     try { return realpathSync(getShellConfig(pi.getSettings().shellPath).shell) === realpathSync("/bin/bash"); } catch { return false; }
   };
-  const refuse = async () => { throw new Error("Delegated shell unavailable: requires owned Linux Bash job; PowerShell is unsupported"); };
+  const refuse = async () => { throw new Error("Delegated shell unavailable: requires an owned POSIX Bash job; PowerShell is unsupported"); };
   const operations: BashOperations = { exec: supported && !readOnly ? async (command, cwd, options) => {
     if (!supportedShell()) return refuse();
     const endJob = (reason: string): never => {
@@ -60,7 +63,10 @@ export async function installChildShell(pi: ExtensionAPI, env: Readonly<Record<s
   const bash = createBashToolDefinition(process.cwd(), { operations });
   pi.registerTool({ ...bash, description: `${bash.description}\nDeck delegated-job safety: shell timeout or abort ends this entire child job so its parent can settle all descendants. Choose a realistic timeout for builds/tests, not a short diagnostic deadline. Recovery requires inspecting effects before explicit same-history continuation.` });
   // Do not leave a reachable native detached-shell alternative, even if a model calls it directly.
-  pi.registerTool(createPowerShellToolDefinition(process.cwd(), { operations: { exec: refuse } }));
+  // Register a denial tool rather than depending on an optional platform-specific factory.
+  // This also refuses programmatic execution that does not emit tool_call.
+  pi.registerTool({ name: "powershell", label: "PowerShell unavailable", description: "PowerShell is unavailable in delegated jobs.",
+    parameters: { type: "object", properties: { command: { type: "string" } } } as never, execute: refuse });
   pi.on("tool_call", async event => {
     if (event.toolName === "powershell" || (readOnly && event.toolName === "bash") || (!supported && event.toolName === "bash")) return { block: true, reason: "Delegated shell is unsupported for this role/platform" };
   });

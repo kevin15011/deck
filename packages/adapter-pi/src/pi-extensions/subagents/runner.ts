@@ -8,6 +8,7 @@ import { PI_READ_ONLY_BUILTIN_TOOLS, PI_READ_ONLY_MEMORY_TOOLS } from "../../pi-
 import { isThinkingLevel, PI_THINKING_LEVEL_NAMES } from "../shared/thinking";
 import type { DeckAgent } from "./agents";
 import { claimExecution, executionGroupSettled } from "./execution-lease";
+import { CHILD_SUPERVISOR_SOURCE } from "./supervisor";
 import { validateClarification, MAX_CLARIFICATIONS, type Clarify } from "./clarification";
 
 const DEFAULT_KILL_GRACE_MS = 5_000;
@@ -151,8 +152,8 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
     let promptDir: string | undefined;
     let lease: ReturnType<typeof claimExecution> | undefined;
     try {
+      promptDir = mkdtempSync(join(tmpdir(), "deck-pi-subagent-"));
       if (agent.body.trim()) {
-        promptDir = mkdtempSync(join(tmpdir(), "deck-pi-subagent-"));
         const promptFile = join(promptDir, `prompt-${agent.id.replace(/[^\w.-]+/g, "_")}.md`);
         writeFileSync(promptFile, agent.body, { encoding: "utf-8", mode: 0o600 });
         args.push("--append-system-prompt", promptFile);
@@ -162,6 +163,10 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
       const usage = emptyUsage();
       const state = { text: "", stderr: "", stopReason: undefined as string | undefined, errorMessage: undefined as string | undefined, signal: undefined as NodeJS.Signals | undefined, spawnError: false, aborted: false, timedOut: false };
       const invocation = resolvePi(args);
+      const supervised = ["linux", "darwin"].includes(process.platform);
+      const supervisorNonce = randomUUID();
+      const supervisorPath = join(promptDir, "supervisor.mjs");
+      if (supervised) writeFileSync(supervisorPath, CHILD_SUPERVISOR_SOURCE, { mode: 0o600 });
       const needsContainment = !agent.readOnly || Boolean(tools?.some(tool => ["bash", "powershell", "codemode"].includes(tool)));
       const containmentNonce = needsContainment ? randomUUID() : undefined;
       const clarificationNonce = request.sessionFile && request.parentId && request.taskId ? randomUUID() : undefined;
@@ -171,8 +176,11 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
 
       const exitCode = await new Promise<number>((resolve) => {
         let proc: ChildProcess;
+        let ownsLiveGroup = true;
+        let terminal: { code: number | null; signal?: NodeJS.Signals; error?: string } | undefined;
         try {
-          proc = nodeSpawn(invocation.command, [...invocation.args], {
+          const runtime = /^(node|bun)(\.exe)?$/.test(basename(process.execPath)) ? process.execPath : "node";
+          proc = nodeSpawn(supervised ? runtime : invocation.command, supervised ? [supervisorPath, invocation.command, ...invocation.args] : [...invocation.args], {
             cwd: request.cwd,
             shell: false,
             // Own the delegated Pi group, including the child-scoped native shell backend.
@@ -181,7 +189,7 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
             // across Node and Bun; retain the nonce/PID-bound startup proof.
             stdio: ["ignore", "pipe", "pipe", "ipc"],
             serialization: "json",
-            env: { ...childEnv(options.env ?? process.env, agent.role, options.memory?.()), DECK_PI_CONTAINMENT: containmentNonce ?? "", DECK_PI_CLARIFICATION_NONCE: clarificationNonce ?? "", DECK_PI_CHILD_SESSION: request.sessionFile ?? "", DECK_PI_ATTEMPT: String(request.attempt ?? 1), ...(request.parentId ? { DECK_PI_PARENT_SESSION: request.parentId } : {}), ...(request.taskId ? { DECK_PI_TASK_ID: request.taskId } : {}) },
+            env: { ...childEnv(options.env ?? process.env, agent.role, options.memory?.()), DECK_PI_SUPERVISOR_NONCE: supervisorNonce, DECK_PI_CONTAINMENT: containmentNonce ?? "", DECK_PI_CLARIFICATION_NONCE: clarificationNonce ?? "", DECK_PI_CHILD_SESSION: request.sessionFile ?? "", DECK_PI_ATTEMPT: String(request.attempt ?? 1), ...(request.parentId ? { DECK_PI_PARENT_SESSION: request.parentId } : {}), ...(request.taskId ? { DECK_PI_TASK_ID: request.taskId } : {}) },
           });
         } catch (error) {
           state.spawnError = true;
@@ -225,6 +233,13 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
         proc.on("message", (value: unknown) => {
           if (!value || typeof value !== "object") return;
           const control = value as Record<string, unknown>;
+          if (supervised && control.type === "deck_child_exit" && control.nonce === supervisorNonce) {
+            terminal = { code: typeof control.code === "number" ? control.code : null, signal: control.signal as NodeJS.Signals | undefined, error: typeof control.error === "string" ? control.error : undefined };
+            // Hand terminal cleanup to the still-live anchor. Never kill a reaped numeric PGID.
+            ownsLiveGroup = false;
+            proc.send({ type: "deck_cleanup", nonce: supervisorNonce }, () => {});
+            return;
+          }
           if (clarificationNonce && !transportClosed && Object.entries(clarificationIdentity).every(([key, v]) => control[key] === v)) {
             if (control.type === "clarification_ready") request.onClarifyReady?.(deliver);
             if (control.type === "clarification_ack" && typeof control.id === "string" && ["accepted", "rejected"].includes(String(control.delivery))) {
@@ -239,7 +254,7 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
           if (contained) return;
           const message = value as { version?: unknown; nonce?: unknown; pid?: unknown };
           try {
-            if (process.platform !== "linux" || message.version !== 1 || message.nonce !== containmentNonce || message.pid !== proc.pid) return;
+            if (!supervised || message.version !== 1 || message.nonce !== containmentNonce || message.pid !== proc.pid) return;
             lease?.contained(); contained = true;
           } catch { /* Missing/invalid startup proof keeps the lease fenced. */ }
         });
@@ -286,9 +301,8 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
         });
 
         let killTimer: ReturnType<typeof setTimeout> | undefined;
-        let ownsLiveGroup = true;
         const kill = (signal: NodeJS.Signals) => {
-          if (!ownsLiveGroup) return;
+          if (!ownsLiveGroup || proc.exitCode !== null || proc.signalCode !== null) return;
           try {
             if (process.platform !== "win32" && proc.pid) process.kill(-proc.pid, signal);
             else if (proc.exitCode === null && proc.signalCode === null) proc.kill(signal);
@@ -311,9 +325,8 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
         // Leader exit must clean even ignored-stdio descendants (close alone is insufficient).
         proc.once("exit", () => {
           closeTransport();
-          kill("SIGKILL");
-          // The terminal cleanup signal is sent once while this child exit is observed.
-          // Do not signal this numeric group again from timers/cancel after leader reaping.
+          // The supervisor settled the group while alive. Unexpected anchor death
+          // remains fenced if any descendants survive; no post-reap numeric signal.
           ownsLiveGroup = false;
           if (killTimer) clearTimeout(killTimer);
         });
@@ -332,9 +345,10 @@ export function createChildRunner(options: ChildRunnerOptions = {}): ChildRunner
           resolve(code);
         };
         proc.on("close", (code, signal) => {
-          state.signal = signal ?? undefined;
+          state.signal = terminal ? terminal.signal ?? undefined : signal ?? undefined;
+          if (terminal?.error) { state.spawnError = terminal.error.startsWith("Unable to spawn"); state.errorMessage = terminal.error; }
           if (buffer.trim()) processLine(buffer);
-          finish(code ?? (signal ? 1 : 0));
+          finish(terminal ? terminal.code ?? (terminal.signal ? 1 : 0) : code ?? (signal ? 1 : 0));
         });
         proc.on("error", (error) => {
           state.spawnError = true;

@@ -10,6 +10,7 @@
  */
 
 import { inspectPiEnvironment, type PiPreflightResult } from "./preflight";
+import { planPiProjectSkillExclusions, assertPiProjectSkillExclusionTargets } from "./project-skill-exclusions";
 import { piAgentPaths, resolvePiAgentDir, type PiAgentDirResolution } from "./agent-dir";
 import { buildPiGlobalMaterialization, type PiGlobalMaterialization } from "./global-materialization";
 import { createPiTools } from "./pi-owned-tools";
@@ -1444,6 +1445,11 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
       installOptions,
     });
     const enginePlan = planPiGlobalInstall(materialization.desired, this.#fileIO);
+    try { planPiProjectSkillExclusions(enginePlan, input.projectRoot, materialization.desired.files, this.#fileIO); }
+    catch {
+      enginePlan.blocked = true;
+      enginePlan.diagnostics.push({ code: "PI_PROJECT_SKILL_SETTINGS_INVALID", severity: "error", message: "Pi project skill exclusions could not be planned safely; repair malformed or symlinked project settings before installation." });
+    }
     this.#lastMaterialization = { materialization, enginePlan };
 
     for (const diagnostic of enginePlan.diagnostics) diagnosticEntries.push({ code: diagnostic.code, severity: diagnostic.severity, message: diagnostic.message });
@@ -1480,6 +1486,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
     if (!this.#lastMaterialization) throw new Error("No native plan available. Call buildDeveloperTeamInstallPlan first.");
     if (input.plan?.blocked) throw new Error(`Pi global install is blocked: ${(input.plan.diagnostics ?? []).join("; ") || "unresolved prerequisites"}`);
     const { materialization, enginePlan } = this.#lastMaterialization;
+    assertPiProjectSkillExclusionTargets(enginePlan);
     const applied = applyPiGlobalPlan(enginePlan, this.#fileIO);
     const changed = new Set(applied.changes.map((change) => change.relPath));
     const results = materialization.desired.files.map((file) => ({
@@ -1501,9 +1508,7 @@ class PiRunnerAdapterImpl implements RunnerAdapter {
   async writeMcpConfig(input: RunnerMcpConfigInput): Promise<RunnerMcpConfigResult> {
     const result = writeSupermemoryPiMcpConfig({
       serverName: input.serverName,
-      projectScope: resolvePiSupermemoryProjectScope(input.projectRoot ?? "") ?? "",
-      configPath: undefined,
-      homeDir: undefined,
+      configPath: join(this.#readAgentDir(), "mcp.json"),
     });
 
     return {

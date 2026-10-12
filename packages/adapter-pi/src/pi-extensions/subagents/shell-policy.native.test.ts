@@ -5,7 +5,7 @@ import { createPiHarness, findRealPi } from "../../pi-cli-harness";
 import { createChildRunner } from "./runner";
 import { parseAgentMarkdown } from "./agents";
 
-test.skipIf(process.platform !== "linux" || !findRealPi())("custom non-Bash shell cannot acknowledge containment or launch a command", async () => {
+test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())("custom non-Bash shell cannot acknowledge containment or launch a command", async () => {
   const h = createPiHarness(), history = join(h.root, "history.jsonl"), effect = join(h.root, "effect");
   try {
     writeFileSync(join(h.agentDir, "settings.json"), JSON.stringify({ packages: ["./deck/package"], shellPath: "/bin/sh" }));
@@ -18,7 +18,7 @@ test.skipIf(process.platform !== "linux" || !findRealPi())("custom non-Bash shel
   } finally { h.cleanup(); }
 }, 10000);
 
-for (const [role, tool] of [["investigate", "bash"], ["quality", "bash"], ["apply-fast", "powershell"]]) test.skipIf(process.platform !== "linux" || !findRealPi())(`packaged child ${role} cannot escape through ${tool}`, async () => {
+for (const [role, tool] of [["investigate", "bash"], ["quality", "bash"], ["apply-fast", "powershell"]]) test.skipIf(!["linux", "darwin"].includes(process.platform) || !findRealPi())(`packaged child ${role} cannot escape through ${tool}`, async () => {
   const h = createPiHarness(), log = join(h.root, "provider-log"), effect = join(h.root, "effect");
   try {
     const runner = createChildRunner({ packageRoot: join(h.agentDir, "deck/package"), piInvocation: args => ({ command: findRealPi()!, args }), env: { PATH: process.env.PATH, HOME: h.home, PI_CODING_AGENT_DIR: h.agentDir, FAUX_LOG: log, FAUX_CHILD_TOOL: tool, FAUX_CHILD_TOOL_INPUT: JSON.stringify({ command: `echo escape > '${effect}'` }) } });

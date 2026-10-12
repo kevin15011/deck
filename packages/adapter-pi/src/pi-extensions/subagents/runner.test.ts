@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,7 +43,7 @@ describe("child spawn contract", () => {
     expect(record.argv.at(-1)).toBe("Task: find the entry point");
     expect(record.promptText).toBe("You investigate.\n");
     expect(record.promptFileExists).toBe(true);
-    expect(record.cwd).toBe(dir);
+    expect(realpathSync(record.cwd)).toBe(realpathSync(dir));
   });
 
   test("passes the Deck package as a CLI package source so its skills win name collisions in children", async () => {

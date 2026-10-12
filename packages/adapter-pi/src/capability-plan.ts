@@ -436,8 +436,8 @@ function addAdaptiveMemoryActions(
   groups.configWrites.push({
     id: "adaptive-memory.supermemory.pi-mcp-config",
     kind: "write-pi-mcp-config",
-    title: "Configure credential-free Supermemory Pi MCP server",
-    description: "Writes/validates Supermemory Pi MCP server scope only; runtime credentials stay in Deck's secret store after read-only API validation.",
+    title: "Retire legacy Deck Supermemory MCP configuration",
+    description: "Removes only exact stale Deck-managed entries; no new raw MCP configuration or repository identity is required.",
     status: runtimeCredentialReady ? "ready" : "pending",
     required: true,
     diagnostics: ["Credential value must be redacted, read-only validated, and never persisted in Deck config or Pi MCP config."],
@@ -446,7 +446,7 @@ function addAdaptiveMemoryActions(
     id: "adaptive-memory.supermemory.validate",
     kind: "validate",
     title: "Validate Supermemory provider configuration",
-    description: "Validate non-secret config and Pi MCP server before provider injection.",
+    description: "Validate the Supermemory account without project-memory access; bind the project only when a work session starts.",
     status: supermemoryReady ? "ready" : "pending",
     required: true,
   });

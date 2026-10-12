@@ -504,25 +504,24 @@ describe("Pi global MCP config writer", () => {
     }
   });
 
-  test("fails closed without canonical project scope and writes no Supermemory config", () => {
+  test("retirement requires no current project and writes no new Supermemory config", () => {
     const home = tempHome();
     const configPath = join(home, ".pi", "agent", "mcp.json");
 
     const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN } as any);
 
-    expect(result.ok).toBe(false);
-    expect(result.action).toBe("failed");
+    expect(result.ok).toBe(true);
+    expect(result.action).toBe("unchanged");
     expect(existsSync(configPath)).toBe(false);
-    expect(allDiagnosticsText(result)).toContain("Canonical x-sm-project");
     expect(allDiagnosticsText(result)).not.toContain(SENTINEL_TOKEN);
   });
 
-  test("rejects invalid project scope overrides", () => {
+  test("retirement ignores obsolete caller scope because it never creates scoped config", () => {
     const home = tempHome();
     const result = writeSupermemoryPiMcpConfig({ homeDir: home, token: SENTINEL_TOKEN, projectScope: "sm_project_default" });
 
-    expect(result.ok).toBe(false);
-    expect(result.action).toBe("failed");
+    expect(result.ok).toBe(true);
+    expect(result.action).toBe("unchanged");
   });
 
   test("validation rejects legacy non-canonical project scope headers", () => {

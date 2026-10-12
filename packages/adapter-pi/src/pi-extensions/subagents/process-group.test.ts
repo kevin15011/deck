@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createChildRunner } from "./runner";
 import { parseAgentMarkdown } from "./agents";
+import { processIsExecuting } from "./execution-lease";
 
 test.skipIf(process.platform === "win32")("cancellation settles the child AND a SIGTERM-ignoring delegated tool descendant", async () => {
   const dir = mkdtempSync(join(tmpdir(), "deck-subagent-process-group-")); const log = join(dir, "log"); let descendant: number | undefined;
@@ -15,8 +16,6 @@ test.skipIf(process.platform === "win32")("cancellation settles the child AND a 
     expect(descendant).toBeDefined(); ac.abort();
     const outcome = await Promise.race([pending, Bun.sleep(1500).then(() => null)]);
     expect(outcome?.aborted).toBe(true);
-    let executing = false;
-    try { executing = !readFileSync(`/proc/${descendant}/stat`, "utf8").includes(") Z "); } catch { /* exited/reaped */ }
-    expect(executing).toBe(false);
-  } finally { if (descendant) { try { process.kill(descendant, "SIGKILL"); } catch {} } rmSync(dir, { recursive: true, force: true }); }
+    expect(processIsExecuting(descendant!)).toBe(false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }, 5000);

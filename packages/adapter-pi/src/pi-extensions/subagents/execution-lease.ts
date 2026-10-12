@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { closeSync, constants, fstatSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readFileSync, readdirSync, rmdirSync, unlinkSync, writeSync } from "node:fs";
 
-/** Linux birth identity, not a reusable PID. Unknown platforms/identities fail closed on recovery. */
-type Identity = { pid: number; birth: string; boot: string };
+/** Linux verifies birth identity. Darwin recovers only after PID nonexistence, never from a
+ * coarse timestamp or zombie state. A live/reused PID therefore blocks recovery conservatively. */
+type Identity = { pid: number; boot: string } & ({ platform?: "linux"; birth: string } | { platform: "darwin"; recovery: "absent-only" });
 type Lease = { version: 2; effectsUncertain: boolean; nonce: string; file: string; parentId?: string; taskId?: string; parent?: Identity; child?: Identity; group?: number };
 const uncertain = () => new Error("Native detached tool effects ownership is uncertain; exact-history continuation refused");
 const refused = () => new Error("Prior execution is not proven settled; continuation refused");
 function validIdentity(id: unknown): id is Identity {
   const i = id as Identity | undefined;
-  return Boolean(i && Number.isSafeInteger(i.pid) && i.pid > 0 && typeof i.birth === "string" && /^\d+$/.test(i.birth)
+  return Boolean(i && Number.isSafeInteger(i.pid) && i.pid > 0
+    && (i.platform === "darwin" ? i.recovery === "absent-only" : typeof i.birth === "string" && /^\d+$/.test(i.birth))
     && typeof i.boot === "string" && /^[a-f0-9-]{36}$/.test(i.boot));
 }
 function stat(pid: number) {
@@ -18,13 +21,25 @@ function stat(pid: number) {
     return { birth: fields[19], group: Number(fields[2]), state: fields[0] };
   } catch (e: any) { if (["ENOENT", "ESRCH"].includes(e.code)) return undefined; throw refused(); }
 }
+function darwinBoot(): string {
+  const boot = execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], { encoding: "utf8", timeout: 2000, maxBuffer: 1024, env: { PATH: "/usr/bin:/bin", LC_ALL: "C" }, stdio: ["ignore", "pipe", "pipe"] }).trim().toLowerCase();
+  if (!/^[a-f0-9-]{36}$/.test(boot)) throw refused();
+  return boot;
+}
 function identity(pid: number): Identity | undefined {
+  if (process.platform === "darwin") return { pid, boot: darwinBoot(), platform: "darwin", recovery: "absent-only" };
   if (process.platform !== "linux") return undefined;
   const s = stat(pid);
   return s ? { pid, birth: s.birth, boot: readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() } : undefined;
 }
 function gone(id?: Identity) {
-  if (!validIdentity(id) || process.platform !== "linux" || id.boot !== readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()) throw refused();
+  if (!validIdentity(id)) throw refused();
+  if (id.platform === "darwin") {
+    if (process.platform !== "darwin" || id.boot !== darwinBoot()) throw refused();
+    // Probe only: NEVER signal persisted PIDs. EPERM/unknown/live/reused/zombie all refuse.
+    try { process.kill(id.pid, 0); return false; } catch (error: any) { if (error.code === "ESRCH") return true; throw refused(); }
+  }
+  if (process.platform !== "linux" || id.boot !== readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()) throw refused();
   const s = stat(id.pid);
   if (!s) return true;
   // A recycled PID is not evidence about this execution; never signal a persisted PID.
@@ -35,7 +50,36 @@ function groupAbsent(group: number): boolean {
   if (process.platform === "win32") return false;
   try { process.kill(-group, 0); return false; } catch (e: any) { return e.code === "ESRCH"; }
 }
+function darwinProcesses(pid?: number): Array<{ pid: number; group: number; state: string }> {
+  const args = pid === undefined ? ["-axo", "pid=,pgid=,stat="] : ["-p", String(pid), "-o", "pid=,pgid=,stat="];
+  let text: string;
+  try { text = execFileSync("/bin/ps", args, { encoding: "utf8", timeout: 2000, maxBuffer: 4 * 1024 * 1024, env: { PATH: "/usr/bin:/bin", LC_ALL: "C" }, stdio: ["ignore", "pipe", "pipe"] }); }
+  catch (error: any) {
+    if (pid !== undefined && error.status === 1 && !String(error.stdout ?? "").trim() && !String(error.stderr ?? "").trim()) return [];
+    throw refused();
+  }
+  return text.trim().split("\n").filter(Boolean).map(line => {
+    const m = /^\s*(\d+)\s+(\d+)\s+([A-Za-z+<NsEXsWLl-]+)\s*$/.exec(line);
+    if (!m) throw refused();
+    return { pid: Number(m[1]), group: Number(m[2]), state: m[3]! };
+  });
+}
+
+/** Live inspection only. Darwin birth identity is intentionally not inferred from coarse ps timestamps. */
+export function processGroupOf(pid: number): number | undefined {
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw refused();
+  return process.platform === "linux" ? stat(pid)?.group : process.platform === "darwin" ? darwinProcesses(pid)[0]?.group : undefined;
+}
+export function processIsExecuting(pid: number): boolean {
+  const state = process.platform === "linux" ? stat(pid)?.state : process.platform === "darwin" ? darwinProcesses(pid)[0]?.state : undefined;
+  if (!["linux", "darwin"].includes(process.platform)) throw refused();
+  return state !== undefined && !/^[ZX]/.test(state);
+}
 export function executionGroupSettled(group: number): boolean {
+  if (process.platform === "darwin") {
+    try { return !darwinProcesses().some(p => p.group === group && !/^[ZX]/.test(p.state)); }
+    catch { return false; }
+  }
   if (process.platform === "linux") {
     try {
       const entries = readdirSync("/proc").filter(n => /^\d+$/.test(n));

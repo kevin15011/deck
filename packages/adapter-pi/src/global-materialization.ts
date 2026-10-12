@@ -1,3 +1,4 @@
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 import { piAgentPaths } from "./agent-dir";
 import {
   buildDeveloperTeamInstallPlan,
@@ -69,9 +70,19 @@ export function buildPiGlobalMaterialization(input: PiGlobalMaterializationInput
   const teamId = input.teamId ?? PI_DEVELOPER_TEAM_ID;
   const paths = piAgentPaths(input.agentDir);
   const installOptions = input.installOptions ?? {};
+  // A global team install always carries the complete catalog. Launch/model-save callers
+  // may omit it or supply legacy body-only descriptors; neither may prune owned assets.
+  const standaloneSkills = new Map(getStandaloneSkills().map(({ skillId }) => {
+    const bundle = getStandaloneSkill(skillId);
+    return [skillId, { skillId, body: bundle.SKILL, files: bundle.files }] as const;
+  }));
+  for (const skill of installOptions.standaloneSkills ?? []) {
+    standaloneSkills.set(skill.skillId, { ...skill, files: { ...standaloneSkills.get(skill.skillId)?.files, ...skill.files } });
+  }
 
   const nativePlan = buildDeveloperTeamInstallPlan(input.projectRoot, {
     ...installOptions,
+    standaloneSkills: [...standaloneSkills.values()],
     layout: { packageRoot: paths.packageRoot },
   });
 

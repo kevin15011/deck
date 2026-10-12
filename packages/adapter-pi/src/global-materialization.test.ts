@@ -3,6 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
+import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
+import { validateDeckConfig } from "@deck/core";
+import { createPiRunnerAdapter } from "./runner-adapter";
+import { parse as parseYaml } from "yaml";
 import { piAgentPaths } from "./agent-dir";
 import { buildPiGlobalMaterialization } from "./global-materialization";
 import { adaptBunBundleForNode } from "./pi-bundle-compat";
@@ -47,6 +52,108 @@ function snapshot(dir: string): string[] {
 
 describe("buildPiGlobalMaterialization", () => {
   const build = () => buildPiGlobalMaterialization({ agentDir, projectRoot, legacyDeckEvidence: false });
+
+  test("default and partial production inputs retain every canonical skill and companion file on reinstall", () => {
+    const initial = build();
+    const partial = buildPiGlobalMaterialization({ agentDir, projectRoot, legacyDeckEvidence: false,
+      installOptions: { standaloneSkills: [{ skillId: "deck-frontend-design", body: getStandaloneSkill("deck-frontend-design").SKILL }] } });
+    for (const result of [initial, partial]) {
+      const files = new Map(result.desired.files.map(file => [file.relPath, file.content]));
+      for (const { skillId } of getStandaloneSkills()) {
+        const bundle = getStandaloneSkill(skillId);
+        expect(files.has(`deck/package/skills/${skillId}/SKILL.md`)).toBe(true);
+        for (const [path, content] of Object.entries(bundle.files)) {
+          expect(files.get(`deck/package/skills/${skillId}/${path}`)).toBe(content);
+        }
+      }
+    }
+    const io = createNodePiFileIO();
+    applyPiGlobalPlan(planPiGlobalInstall(initial.desired, io), io);
+    expect(planPiGlobalInstall(partial.desired, io).changes).toEqual([]);
+  });
+
+  test("native Pi discovers every canonical skill from an unrelated project", async () => {
+    const io = createNodePiFileIO();
+    applyPiGlobalPlan(planPiGlobalInstall(build().desired, io), io);
+    const marker = process.env.DECK_PI_SESSION;
+    process.env.DECK_PI_SESSION = "0";
+    try {
+      const loader = new DefaultResourceLoader({ cwd: projectRoot, agentDir });
+      await loader.reload();
+      expect(loader.getExtensions().errors).toEqual([]);
+      const loaded = loader.getSkills().skills;
+      for (const { skillId } of getStandaloneSkills()) {
+        const header = getStandaloneSkill(skillId).SKILL.match(/^---\r?\n([\s\S]*?)\r?\n---/)!;
+        const name = parseYaml(header[1]!).name;
+        expect(loaded.find(skill => skill.name === name)?.filePath).toBe(join(agentDir, "deck/package/skills", skillId, "SKILL.md"));
+      }
+      expect(loader.getSkills().diagnostics.filter(d => d.type === "collision")).toEqual([]);
+    } finally {
+      if (marker === undefined) delete process.env.DECK_PI_SESSION; else process.env.DECK_PI_SESSION = marker;
+    }
+  });
+
+  test("global team setup outside Git preserves selected memory and defers runtime binding", async () => {
+    const config = validateDeckConfig({ adaptiveMemory: { enabled: true, activeProvider: "supermemory" } });
+    const adapter = createPiRunnerAdapter({ homeDirectory: home, env: { PI_CODING_AGENT_DIR: agentDir }, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0\n" }) });
+    const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "pi-development", deckConfig: config, capabilityIds: [] });
+    expect(plan.blocked).toBeFalsy();
+    await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan });
+    expect(config.adaptiveMemory).toMatchObject({ enabled: true, activeProvider: "supermemory" });
+    expect(existsSync(join(agentDir, "deck/package/skills/deck-frontend-design/SKILL.md"))).toBe(true);
+    expect(existsSync(join(agentDir, "mcp.json"))).toBe(false);
+  });
+
+  test("production install excludes only actual project and ancestor duplicates", async () => {
+    mkdirSync(join(root, ".git"));
+    const source = "---\nname: deck-lead\ndescription: project duplicate\n---\nkeep source\n";
+    for (const dir of [join(projectRoot, ".agents/skills/deck-lead"), join(root, ".agents/skills/deck-lead"), join(projectRoot, ".pi/skills/deck-lead")]) {
+      mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, "SKILL.md"), source);
+    }
+    const custom = join(projectRoot, ".agents/skills/deck-mine");
+    mkdirSync(custom, { recursive: true }); writeFileSync(join(custom, "SKILL.md"), "---\nname: deck-mine\ndescription: mine\n---\nkeep\n");
+    const originalSettings = JSON.stringify({ theme: "light", skills: ["!unrelated", "!unrelated"] });
+    writeFileSync(join(projectRoot, ".pi/settings.json"), originalSettings);
+    const adapter = createPiRunnerAdapter({ homeDirectory: home, env: { PI_CODING_AGENT_DIR: agentDir }, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0\n" }) });
+    const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot, environmentId: "pi-development", deckConfig: validateDeckConfig({}), capabilityIds: [] });
+    expect(plan.blocked).toBeFalsy();
+    expect(plan.mutationPreview?.some(change => change.path === join(projectRoot, ".pi/settings.json"))).toBe(true);
+    const backup = adapter.backupDeveloperTeamFiles(plan);
+    await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan });
+    const marker = process.env.DECK_PI_SESSION; process.env.DECK_PI_SESSION = "0";
+    try {
+      const loader = new DefaultResourceLoader({ cwd: projectRoot, agentDir }); await loader.reload();
+      expect(loader.getSkills().diagnostics.filter(d => d.type === "collision")).toEqual([]);
+      expect(loader.getSkills().skills.find(s => s.name === "deck-mine")?.filePath).toBe(join(custom, "SKILL.md"));
+      expect(loader.getSkills().skills.find(s => s.name === "deck-lead")?.filePath).toBe(join(agentDir, "deck/package/skills/deck-lead/SKILL.md"));
+      expect(readFileSync(join(projectRoot, ".agents/skills/deck-lead/SKILL.md"), "utf8")).toBe(source);
+      const settings = JSON.parse(readFileSync(join(projectRoot, ".pi/settings.json"), "utf8"));
+      expect(settings.theme).toBe("light"); expect(settings.skills.filter((s: string) => s === "!unrelated")).toHaveLength(2);
+      expect((await adapter.rollbackDeveloperTeamFiles(backup)).status).toBe("rolled-back");
+      expect(readFileSync(join(projectRoot, ".pi/settings.json"), "utf8")).toBe(originalSettings);
+    } finally { if (marker === undefined) delete process.env.DECK_PI_SESSION; else process.env.DECK_PI_SESSION = marker; }
+  });
+
+  test("project-only repair is previewed and malformed settings block before any application", async () => {
+    const adapter = createPiRunnerAdapter({ homeDirectory: home, env: { PI_CODING_AGENT_DIR: agentDir }, piVersionProbe: () => ({ exitCode: 0, stdout: "1.0.0\n" }) });
+    const input = { projectRoot, environmentId: "pi-development", deckConfig: validateDeckConfig({}), capabilityIds: [] };
+    await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: adapter.buildDeveloperTeamInstallPlan(input) });
+    const copy = join(projectRoot, ".agents/skills/deck-lead"); mkdirSync(copy, { recursive: true });
+    writeFileSync(join(copy, "SKILL.md"), "---\nname: deck-lead\ndescription: duplicate\n---\nkeep\n");
+    mkdirSync(join(projectRoot, ".pi"));
+    const path = join(projectRoot, ".pi/settings.json"); writeFileSync(path, "{malformed");
+    const blocked = adapter.buildDeveloperTeamInstallPlan(input);
+    expect(blocked.blocked).toBe(true);
+    await expect(adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan: blocked })).rejects.toThrow("blocked");
+    const before = JSON.stringify({ skills: ["!unrelated", "!unrelated"] }); writeFileSync(path, before);
+    const plan = adapter.buildDeveloperTeamInstallPlan(input);
+    expect(plan.blocked).toBe(false);
+    expect(plan.mutationPreview).toHaveLength(2);
+    expect(plan.mutationPreview!.every(change => change.path.startsWith(join(projectRoot, ".pi")))).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe(before);
+    await adapter.applyDeveloperTeamInstall({ projectRoot, environmentId: "pi-development", plan });
+    expect(JSON.parse(readFileSync(path, "utf8")).skills).toHaveLength(3);
+  });
 
   test("writes the tool-policy extension with its owned-RTK and graph-redirect configuration", () => {
     const configOf = (input: Parameters<typeof buildPiGlobalMaterialization>[0]) => {

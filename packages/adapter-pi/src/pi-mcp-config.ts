@@ -76,8 +76,8 @@ export type WriteSupermemoryPiMcpConfigOptions = {
   configPath?: string;
   /** Override home directory used to resolve the default path. */
   homeDir?: string;
-  /** Canonical non-secret Supermemory project scope for x-sm-project. */
-  projectScope: string;
+  /** @deprecated Retirement is account-level and ignores the caller's project scope. */
+  projectScope?: string;
 };
 
 const CANONICAL_SUPERMEMORY_PROJECT_SCOPE = /^sm_project_v1_[a-z0-9]+_[a-z0-9]+(?:_[a-z0-9]+)*$/;
@@ -105,21 +105,8 @@ export function writeSupermemoryPiMcpConfig(
 ): PiMcpConfigWriteResult {
   const configPath = options.configPath ?? defaultPiMcpConfigPath(options.homeDir);
   const serverName = normalizeServerName(options.serverName);
-  const projectScope = options.projectScope?.trim();
-
-  if (!projectScope || !CANONICAL_SUPERMEMORY_PROJECT_SCOPE.test(projectScope)) {
-    return failedResult(configPath, serverName, [
-      {
-        code: "PI_MCP_CONFIG_CONFLICT",
-        severity: "error",
-        path: configPath,
-        serverName,
-        message: "Canonical x-sm-project scope is required to configure the Supermemory Pi MCP server.",
-      },
-    ]);
-  }
-
-  const merged = readAndMergeConfig(configPath, serverName, projectScope);
+  // Retirement recognizes exact ownership on disk; it never creates a project-scoped entry.
+  const merged = readAndMergeConfig(configPath, serverName, "");
   if (!merged.ok) {
     return failedResult(configPath, serverName, merged.diagnostics);
   }

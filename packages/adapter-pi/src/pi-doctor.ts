@@ -1,4 +1,5 @@
 import { isAbsolute, join } from "node:path";
+import { getStandaloneSkill, getStandaloneSkills } from "@deck/core/skills/external";
 
 import { piAgentPaths, type PiAgentDirResolution } from "./agent-dir";
 import { detectPiLegacy, PI_LEGACY_STALE_MEMORY_MS } from "./pi-legacy";
@@ -124,6 +125,11 @@ export function inspectPiDeckInstall(input: InspectPiDeckInstallInput): PiDoctor
       if (disk === undefined) missing.push(relPath);
       else if (!matchesOwnedHash(relPath, expected, disk)) modified.push(relPath);
     }
+    const missingCatalog = getStandaloneSkills().flatMap(({ skillId }) =>
+      ["SKILL.md", ...Object.keys(getStandaloneSkill(skillId).files)]
+        .map(file => `deck/package/skills/${skillId}/${file}`)
+        .filter(file => manifest.files[file] === undefined || !io.exists(join(agentDir, file))));
+    if (missingCatalog.length > 0) installItems.push({ status: "error", message: `The canonical skill catalog is incomplete: ${truncated(missingCatalog)}.`, suggestion: REINSTALL });
     if (missing.length > 0) installItems.push({ status: "error", message: `Deck files are missing: ${truncated(missing)}.`, suggestion: REINSTALL });
     if (modified.length > 0) installItems.push({ status: "warning", message: `Deck files were modified after install: ${truncated(modified)}.`, suggestion: "Restore or remove the modified files; install will not overwrite them." });
     if (missing.length === 0 && modified.length === 0) installItems.push({ status: "ok", message: `Manifest matches ${Object.keys(manifest.files).length} installed Deck files (no drift).` });
