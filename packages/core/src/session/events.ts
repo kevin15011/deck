@@ -17,7 +17,8 @@ export const SESSION_EVENT_KINDS = [
 ] as const;
 export type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
 
-export type DriverProtocol = "claude-stream-json" | "codex-app-server" | "opencode-serve";
+/** Driver wire protocol id (e.g. "claude-stream-json"); concrete values are declared by drivers, not core. */
+export type DriverProtocol = string;
 export const TURN_COMPLETED_STATUSES = ["completed", "interrupted", "interrupted-forced", "failed"] as const;
 
 export type SessionEventSource = { memberId?: string; taskId?: string; runnerId?: string; nativeSessionId?: string };
