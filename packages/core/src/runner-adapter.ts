@@ -20,6 +20,7 @@ import type {
   DeveloperTeamApplyInput,
   DeveloperTeamApplyResult,
 } from "./runner-capability";
+import type { RunnerSessionDriver } from "./session/driver";
 import type { AdaptiveMemoryProvider } from "./memory/adaptive-memory";
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles";
 import type { RunnerCapabilitySupportStatus } from "./runner-capability-registry";
@@ -821,6 +822,12 @@ export interface RunnerAdapter {
    * If projectRoot is not provided, adapters should resolve it internally.
    */
   readModelAssignments(projectRoot?: string): DeveloperTeamModelAssignments;
+
+  /**
+   * Optional cross-runner session driver (XR-4.1, D-6). Adapters without it are
+   * excluded from cross assignments.
+   */
+  getSessionDriver?(): RunnerSessionDriver;
 
   /**
    * Read current thinking level assignments for the developer team from project config.
