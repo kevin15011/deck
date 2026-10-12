@@ -49,3 +49,10 @@ Environment: macOS; `TMPDIR` pointed at a non-symlinked path because `/var/folde
 - `bun run scripts/build-binaries.ts --dry-run`: **failed before building** in the pre-existing `generate-runner-execution-assets` step (requires Bun 1.3.12 per `.github/workflows/release.yml`, host has 1.3.11). The session-schema generation step runs after it and was verified separately. No binary was built, so compiled-binary smoke (`deck --version`, repo-path-absence, unreadable-repo run) is **not done**.
 - Not run: 4-target build, Docker Linux smoke, `canary:install`.
 - Blocker for completing BIN: a Bun 1.3.12 toolchain on the host.
+
+## S0 BIN gate follow-up (Lead, 2026-10-12)
+- Host Bun is 1.3.11; the release toolchain pins 1.3.12 (`.bun-version`). Ran the build through `npx -y bun@1.3.12 run scripts/build-binaries.ts --dry-run` (npm cache only, no global change): darwin-arm64 build, codesign and tarball succeeded.
+- Host smoke: tarball extracted to a temp dir; the binary started with `env -i`, fresh HOME/XDG and cwd, no repository access.
+- The build regenerated the tracked Pi and OpenCode developer-team-execution bundles (they were stale versus source); committed as a regeneration.
+- Still not run: 4-target build, Docker linux smoke, canary install (per stage rules).
+- D-5 in design.md reworded: older binaries reject unknown `crossRunner` (DECK_CONFIG_UNKNOWN_FIELD).
