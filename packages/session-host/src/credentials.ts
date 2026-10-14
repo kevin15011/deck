@@ -21,7 +21,7 @@ export class CredentialRegistry {
   /** Mint a token, write `{v, token, socketPath}` to `file` (0600) and remember only its hash. */
   issue(grant: CredentialGrant, file: string): { token: string; file: string } {
     const token = randomBytes(32).toString("base64url");
-    writePrivateFile(file, JSON.stringify({ v: 1, token, socketPath: this.options.socketPath }));
+    writePrivateFile(file, JSON.stringify({ v: 1, token, socketPath: this.options.socketPath, allowedTools: [...grant.allowedTools] }));
     this.grants.set(hash(token), { grant, file });
     return { token, file };
   }
@@ -51,10 +51,10 @@ export class CredentialRegistry {
   }
 
   /** Revoke every credential issued for a task (terminal state). Returns how many were revoked. */
-  revokeTask(taskId: string): number {
+  revokeTask(sessionId: string, taskId: string): number {
     let count = 0;
     for (const [key, entry] of [...this.grants]) {
-      if (entry.grant.taskId !== taskId) continue;
+      if (entry.grant.sessionId !== sessionId || entry.grant.taskId !== taskId) continue;
       this.grants.delete(key);
       try { unlinkSync(entry.file); } catch { /* already removed */ }
       count++;

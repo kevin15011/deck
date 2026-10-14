@@ -58,7 +58,7 @@ describe("CredentialRegistry (D-11, XR-4.7)", () => {
     const reg = new CredentialRegistry({ socketPath: "/run/x.sock" });
     const { token } = reg.issue(GRANT, join(dir, "cred"));
     const file = JSON.parse(readFileSync(join(dir, "cred"), "utf8"));
-    expect(file).toEqual({ v: 1, token, socketPath: "/run/x.sock" });
+    expect(file).toEqual({ v: 1, token, socketPath: "/run/x.sock", allowedTools: [...GRANT.allowedTools] });
     expect(token.length).toBeGreaterThanOrEqual(43);
     expect(lstatSync(join(dir, "cred")).mode & 0o777).toBe(0o600);
     expect(reg.lookup(token)).toMatchObject({ sessionId: "s-1", taskId: "lead", memberId: "lead" });
@@ -74,7 +74,7 @@ describe("CredentialRegistry (D-11, XR-4.7)", () => {
     reg.revoke(a.token);
     expect(reg.lookup(a.token)).toBeUndefined();
     expect(existsSync(join(dir, "a"))).toBe(false);
-    expect(reg.revokeTask("t2")).toBe(1);
+    expect(reg.revokeTask(GRANT.sessionId, "t2")).toBe(1);
     expect(reg.lookup(b.token)).toBeUndefined();
     expect(existsSync(join(dir, "b"))).toBe(false);
   });
@@ -149,6 +149,14 @@ describe("BridgeService (daemon side of deck_approve / deck_status)", () => {
 });
 
 describe("MCP stdio bridge (D-11, XR-4.7)", () => {
+  test("role credential lists memory tools while hiding ungranted delegation tools", async () => {
+    const h = await harness({ grantTools: ["deck_memory_recall", "deck_memory_propose", "deck_approve"] });
+    const s = mcpSession({ DECK_SESSION_CREDENTIAL_FILE: h.credFile });
+    s.send({ id: 1, method: "tools/list" });
+    const tools = ((await s.reply(1)).result as { tools: Array<{ name: string }> }).tools;
+    expect(tools.map((tool) => tool.name).sort()).toEqual(["deck_approve", "deck_memory_propose", "deck_memory_recall"]);
+    s.end(); await s.done;
+  });
   test("initialize, ping, tools/list and unknown methods follow JSON-RPC/MCP framing", async () => {
     const h = await harness();
     const s = mcpSession({ DECK_SESSION_CREDENTIAL_FILE: h.credFile });

@@ -371,6 +371,7 @@ function projectGlobalFields(value: unknown, omitProfiles: boolean): DeckConfig 
     "packageInstructions",
     "orchestratorPersonality",
     "developerTeamExecution",
+    "crossRunner",
   ]) {
     if (key in input) output[key] = input[key];
   }

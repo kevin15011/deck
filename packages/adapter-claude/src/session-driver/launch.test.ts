@@ -40,6 +40,7 @@ describe("buildClaudeTurnLaunch (XR-4.3, design 4.1)", () => {
     expect(valueAfter(a, "--input-format")).toBe("stream-json");
     expect(valueAfter(a, "--output-format")).toBe("stream-json");
     expect(a).toContain("--verbose");
+    expect(a).toContain("--include-partial-messages");
     expect(a).toContain("--strict-mcp-config");
     expect(valueAfter(a, "--mcp-config")).toBe("/state/tasks/lead/mcp-config.json");
     expect(valueAfter(a, "--permission-prompt-tool")).toBe(DECK_APPROVE_PROMPT_TOOL);
@@ -119,4 +120,23 @@ describe("encodeUserMessage", () => {
     expect(line.slice(0, -1).includes("\n")).toBe(false);
     expect(JSON.parse(line)).toEqual({ type: "user", message: { role: "user", content: "héllo\nworld" } });
   });
+});
+
+test("HTTP Context7 remains in the strict explicit Claude MCP set", () => {
+  const original = input();
+  const { files } = build({ mcp: { ...original.mcp, servers: [...original.mcp.servers, "context7"] },
+    mcpServerSpecs: { ...original.mcpServerSpecs, context7: { transport: "http", url: "https://mcp.context7.com/mcp" } } });
+  expect(JSON.parse(files.get("mcp-config.json")!).mcpServers.context7).toEqual({ type: "http", url: "https://mcp.context7.com/mcp" });
+});
+
+test("HTTP headers preserve environment references without resolving their values", () => {
+  const original = input();
+  const { launch, files } = build({ mcp: { ...original.mcp, servers: [...original.mcp.servers, "context7"] },
+    mcpServerSpecs: { ...original.mcpServerSpecs, context7: { transport: "http", url: "https://mcp.context7.com/mcp", envHttpHeaders: { "X-Context7-API-Key": "CONTEXT7_API_KEY" } } } });
+  expect(JSON.parse(files.get("mcp-config.json")!).mcpServers.context7.headers).toEqual({ "X-Context7-API-Key": "${CONTEXT7_API_KEY}" });
+  expect(launch.args.join(" ")).not.toContain("CONTEXT7_API_KEY");
+});
+
+test.each<Record<string, string>>([{ "X-Key": "inline-secret-value" }, { "X-Key": "${TOKEN}" }, { "Bad\r\nHeader": "TOKEN" }])("rejects invalid HTTP header environment references %j", envHttpHeaders => {
+  expect(() => build({ mcp: { servers: ["deck"], sessionTools: [] }, mcpServerSpecs: { deck: { transport: "http", url: "https://example.com/mcp", envHttpHeaders } } })).toThrow("HTTP headers require valid");
 });

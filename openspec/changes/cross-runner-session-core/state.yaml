@@ -1,14 +1,18 @@
 schema: spec-registry-v1
 changeId: cross-runner-session-core
 name: Cross-Runner Session Core
-currentPhase: tasks
-status: completed
+currentPhase: review
+status: approved
 artifacts:
   exploration: working-brief.md
   proposal: proposal.md
   spec: spec.md
   design: design.md
   tasks: tasks.md
+  preconditions: preconditions.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
 provenance:
   - phase: explore
     agent: deck-lead
@@ -40,4 +44,76 @@ provenance:
     timestamp: "2026-10-12"
     registryWrite: deferred-reconciled
     note: "Stages S0-S5 with per-task verification and per-stage four-target binary gate; optional expose helper as last S4 task."
-next_action: "Lead reviews the plan and, with user approval, starts Apply at S0 (task 0.10 Codex audit may ship first)."
+  - phase: apply
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-12"
+    registryWrite: deferred-reconciled
+    note: "Resumed existing implementation at the user's request; reconciled committed S0/S1a and partial S1b evidence without changing prior decisions."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T01:09:05Z"
+    registryWrite: non-deferred
+    note: "S0–S5 complete; frozen suite 6373 pass, 3 skip, 0 fail; TypeScript, release verification, four-target builds and host/Linux/browser acceptance passed. Limits recorded in verify-report.md."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T01:09:05Z"
+    registryWrite: non-deferred
+    note: "Centralized independent Deck Quality approval after all confirmed repairs; final approval guard review passed 26 checks with no outstanding blocker."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T08:03:00Z"
+    registryWrite: non-deferred
+    note: "Canary follow-up: 6421 pass, 3 skip, 0 fail; TypeScript, release verification, four-target build, host/Linux/browser and actual managed MCP acceptance passed."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T08:03:00Z"
+    registryWrite: non-deferred
+    note: "Independent Quality approved all confirmed lifecycle and Claude readiness repairs; no outstanding source blocker."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T08:17:04Z"
+    registryWrite: non-deferred
+    note: "Duplicate completion wake repair: 425 affected tests passed, TypeScript clean, four targets rebuilt, extracted host cross smoke passed."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T08:17:04Z"
+    registryWrite: non-deferred
+    note: "Independent Quality approved attempt-scoped completion acknowledgement; 19 independent integration tests passed; no blockers."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T08:43:54Z"
+    registryWrite: non-deferred
+    note: "Public daemon commands: 497 affected tests passed, TypeScript clean, four targets built, Darwin/Linux lifecycle and host cross/web acceptance passed."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T08:43:54Z"
+    registryWrite: non-deferred
+    note: "Independent Quality approved public lifecycle commands, admission fence and strict spawned-PID attribution; no blockers."
+  - phase: apply
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T08:59:59Z"
+    registryWrite: non-deferred
+    note: "User-authorized full web workspace redesign with safe Markdown and session-scoped OpenSpec viewer; prior approval applies only to earlier increment."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T09:18:00Z"
+    registryWrite: non-deferred
+    note: "Web redesign: 442 affected tests passed; TypeScript clean; four targets built; 22 desktop/mobile browser checks, eight compiled browser checks and 16 compiled HTTP checks each on Darwin/Linux arm64 passed."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-13T09:18:00Z"
+    registryWrite: non-deferred
+    note: "Independent Quality approved safe Markdown, session-scoped OpenSpec viewer and responsive workspace after final interaction repairs; no blockers."
+next_action: "Web workspace complete; compact one-to-four-line message input verified on 2026-10-14 with 30 browser checks and regenerated assets. Persistent themes retained. Native binaries not rebuilt for this refinement; installed canary/user daemon unchanged. Preserve uncommitted work."

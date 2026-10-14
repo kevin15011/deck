@@ -108,10 +108,11 @@ export async function ensureDaemon(options: EnsureDaemonOptions): Promise<Ensure
 }
 
 /** Detached, stdio-less daemon launch: it outlives the client and logs to <state>/logs. */
-export function spawnDetachedDaemon(command: readonly string[], env: Record<string, string | undefined> = process.env): void {
+export function spawnDetachedDaemon(command: readonly string[], env: Record<string, string | undefined> = process.env): number | undefined {
   const [bin, ...args] = command;
   if (!bin) throw new Error("daemon command must not be empty");
   const child = spawn(bin, args, { detached: true, stdio: "ignore", env: env as NodeJS.ProcessEnv });
   child.on("error", () => {});
   child.unref();
+  return child.pid;
 }

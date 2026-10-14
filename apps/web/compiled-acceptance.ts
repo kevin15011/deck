@@ -1,0 +1,29 @@
+/** Usage: bun run apps/web/compiled-acceptance.ts --deck /absolute/path/deck */
+import {chromium} from '@playwright/test';
+import {chmodSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
+import {tmpdir,homedir} from 'node:os';
+import {join,resolve} from 'node:path';
+const deck=process.argv[process.argv.indexOf('--deck')+1];if(!deck||!deck.startsWith('/'))throw new Error('--deck requires absolute compiled binary');
+const base=realpathSync(mkdtempSync(join(realpathSync(tmpdir()),'deck-web-bin-'))),home=join(base,'home'),bin=join(base,'bin'),project=join(base,'project');for(const p of[home,bin,project])mkdirSync(p,{recursive:true});
+const artifactDir=join(project,'openspec/changes/browser-check');mkdirSync(artifactDir,{recursive:true});writeFileSync(join(artifactDir,'proposal.md'),'# Compiled OpenSpec document\n\n**Read only** document from the session project.');
+copyFileSync(process.env.DECK_TEST_CLAUDE_FIXTURE??resolve(import.meta.dir,'../../scripts/fixtures/fake-claude.mjs'),join(base,'fake-claude.mjs'));
+writeFileSync(join(bin,'claude'),`#!/bin/sh\nexec "${process.execPath}" "${join(base,'fake-claude.mjs')}" "$@"\n`);chmodSync(join(bin,'claude'),0o755);
+const env={HOME:home,XDG_CONFIG_HOME:join(home,'.config'),XDG_STATE_HOME:join(home,'.local/state'),XDG_DATA_HOME:join(home,'.local/share'),TMPDIR:base,PATH:`${bin}:/usr/bin:/bin`,FAKE_CLAUDE_APPROVAL:'1',DECK_SESSION_DAEMON_IDLE_MS:'600000'};
+const owned=new Set<Bun.Subprocess>();
+const spawn=(args:string[],stdin:'ignore'|'pipe'='ignore')=>{const p=Bun.spawn([deck,...args],{cwd:project,env,stdin,stdout:'pipe',stderr:'pipe'});owned.add(p);void p.exited.then(()=>owned.delete(p));return p};
+const run=async(args:string[])=>{const p=spawn(args);const [out,err,code]=await Promise.all([new Response(p.stdout).text(),new Response(p.stderr).text(),p.exited]);if(code!==0)throw new Error(`${args.join(' ')}: ${err||out}`);return out};
+const until=async(fn:()=>boolean)=>{const deadline=Date.now()+30000;while(!fn()){if(Date.now()>deadline)throw new Error('Timed out waiting for daemon/session');await Bun.sleep(50)}};
+let browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
+try{
+ const portProbe=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response('probe')}),webPort=portProbe.port;portProbe.stop(true);
+ await run(['session','ack-claude-tos','--yes']);const configPath=join(env.XDG_CONFIG_HOME,'deck/config.json'),config=JSON.parse(readFileSync(configPath,'utf8'));config.crossRunner={...config.crossRunner,enabled:true,members:{lead:{runnerId:'claude',modelId:'haiku'}},web:{...config.crossRunner?.web,port:webPort}};writeFileSync(configPath,JSON.stringify(config));
+ const daemon=spawn(['internal','session-daemon']);const daemonOutput=Promise.all([new Response(daemon.stdout).text(),new Response(daemon.stderr).text()]);await until(()=>existsSync(join(env.XDG_STATE_HOME,'deck/daemon/daemon.json')));
+ const cross=spawn(['cross','developer'],'pipe');let text='';void(async()=>{for await(const c of cross.stdout)text+=new TextDecoder().decode(c)})();void new Response(cross.stderr).text();await until(()=>text.includes('Attached to'));cross.stdin!.write('/detach\n');cross.stdin!.end();await cross.exited;
+ const pair=JSON.parse(await run(['session','web','pair','--json']));const pairData=pair.data??pair;
+ browser=await chromium.launch({executablePath:process.env.DECK_TEST_CHROME??join(homedir(),'Library/Caches/ms-playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'),headless:true});
+ const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(new URL('/',pairData.url).href);
+ if(new URL(page.url()).hash)throw new Error('Pairing token retained in history');await page.locator('button.session').first().click();await page.getByLabel('Message the lead').fill('Compiled browser approval check');await page.getByRole('button',{name:'Send prompt'}).click();await page.getByRole('button',{name:'Allow once'}).waitFor();await page.screenshot({path:'/tmp/deck-web-compiled-desktop.png',fullPage:true});await page.close();
+ const reopened=await context.newPage();await reopened.goto(new URL('/',pairData.url).href);await reopened.locator('button.session').first().click();await reopened.getByRole('button',{name:'Allow once'}).waitFor();await reopened.getByRole('button',{name:'Allow once'}).click();await reopened.getByText('No pending approvals').waitFor({ state: 'attached' });await reopened.getByRole('region',{name:'Conversation'}).getByText('echo: Compiled browser approval check',{exact:true}).waitFor();await reopened.getByRole('tab',{name:'OpenSpec',exact:true}).click();await reopened.getByRole('heading',{name:'Compiled OpenSpec document',exact:true}).waitFor();writeFileSync(join(artifactDir,'proposal.md'),'# Compiled OpenSpec document\n\n**Compiled refresh** succeeded.');await reopened.getByRole('button',{name:'Refresh documents',exact:true}).click();await reopened.getByText('Compiled refresh',{exact:true}).waitFor();await reopened.screenshot({path:'/tmp/deck-web-compiled-openspec.png',fullPage:true});if(errors.length)throw new Error(errors.join('\n'));await context.close();
+ console.log(JSON.stringify({ok:true,compiledBinary:deck,checks:['automatic-local-access','prompt','real-session-bridge-approval','tab-close-replay','allow-once','native-fixture-response','session-project-artifact-render','artifact-refresh'],screenshot:'/tmp/deck-web-compiled-desktop.png'}));
+ daemon.kill('SIGTERM');await daemon.exited;await daemonOutput;
+}finally{await browser?.close();for(const p of owned)if(p.exitCode===null)p.kill('SIGTERM');await Promise.all([...owned].map(p=>p.exited));rmSync(base,{recursive:true,force:true})}

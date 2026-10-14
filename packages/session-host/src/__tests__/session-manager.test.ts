@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CrossRunnerConfig } from "@deck/core/config/deck-config";
 import type { SessionCommandBody } from "@deck/core/session/commands";
 import type { SessionEvent } from "@deck/core/session/events";
+import type { DriverHostIo, DriverTaskInput, TurnOutcome } from "@deck/core/session/driver";
 import { ApprovalBroker } from "../approval-broker";
 import { CredentialRegistry } from "../credentials";
 import { ensureStateLayout, resolveStatePaths, sessionPaths } from "../paths";
@@ -68,7 +69,271 @@ function setup(over: { config?: CrossRunnerConfig | undefined; driver?: FakeDriv
 
 const lastTurn = (driver: FakeDriver): FakeTurn => driver.turns.at(-1)!;
 
+describe("read-only session OpenSpec queries", () => {
+  test("uses the stored project and immutable ledger binding without modifying session events", async () => {
+    const t = setup(), sessionId = await t.create();
+    for (const changeId of ["alpha", "beta"]) {
+      const dir = join(t.project, "openspec", "changes", changeId);
+      mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, "proposal.md"), `# ${changeId}`);
+    }
+    const before = t.events(sessionId).length;
+    expect(await t.manager.query("openspec.list", { sessionId, projectRoot: "/ignored" })).toMatchObject({ ok: true, data: { changes: [{ changeId: "alpha" }, { changeId: "beta" }] } });
+    expect(await t.manager.query("openspec.read", { sessionId, changeId: "beta", path: "proposal.md", projectRoot: "/ignored" })).toMatchObject({ ok: true, data: { markdown: "# beta" } });
+    expect(t.events(sessionId)).toHaveLength(before);
+    expect(await t.run({ type: "session.bindChange", changeId: "alpha" }, sessionId)).toMatchObject({ ok: true });
+    expect(await t.manager.query("openspec.list", { sessionId })).toMatchObject({ ok: true, data: { boundChangeId: "alpha", changes: [{ changeId: "alpha" }] } });
+    expect(await t.manager.query("openspec.read", { sessionId, changeId: "beta", path: "proposal.md" })).toMatchObject({ ok: false, code: "openspec-forbidden" });
+  });
+
+  test("rejects missing/invalid sessions and restores the bound scope after reopening", async () => {
+    const t = setup(), sessionId = await t.create({ changeId: "alpha" });
+    expect(await t.manager.query("openspec.list", {})).toMatchObject({ ok: false, code: "openspec-invalid" });
+    expect(await t.manager.query("openspec.read", { sessionId: "unknown", changeId: "alpha", path: "proposal.md" })).toMatchObject({ ok: false, code: "session-unknown" });
+    expect(await t.manager.query("openspec.list", { sessionId: "../outside" })).toMatchObject({ ok: false, code: "session-unknown" });
+    await t.manager.close();
+    const restored = setup({ dir: t.dir });
+    expect(await restored.manager.query("openspec.list", { sessionId })).toMatchObject({ ok: true, data: { boundChangeId: "alpha", changes: [] } });
+    expect(await restored.manager.query("openspec.read", { sessionId, changeId: "beta", path: "proposal.md" })).toMatchObject({ ok: false, code: "openspec-forbidden" });
+  });
+});
+
+/** Native servers remain alive after done; close is the only ownership release. */
+class PersistentFakeDriver extends FakeDriver {
+  closeCalls = 0;
+  active = false;
+  rejectDone = false;
+  releaseClose!: () => void;
+  private readonly drained = new Promise<void>((resolve) => { this.releaseClose = resolve; });
+
+  override async startTask(input: DriverTaskInput, io: DriverHostIo) {
+    const handle = await super.startTask(input, io);
+    this.active = true;
+    return {
+      ...handle,
+      done: this.rejectDone ? handle.done.then(() => { throw new Error("native outcome rejected"); }) : handle.done,
+      close: async () => {
+        this.closeCalls++;
+        lastTurn(this).finish({ status: "interrupted-forced" });
+        await this.drained;
+        await handle.close();
+        this.active = false;
+      },
+    };
+  }
+}
+
+describe("native handle ownership (D-7, D-14)", () => {
+  test("managed MCP leases stay held until native close has drained, including cancellation", async () => {
+    const driver = new PersistentFakeDriver();
+    let releases = 0;
+    const t = setup({ driver, options: { childMcp: async (_runnerId, context) => {
+      expect(context.projectRoot).toBe(t.project);
+      expect(context.taskId).toBe("lead");
+      return { runnerPackages: () => [], resolveServer: () => undefined, release: async () => { releases++; } };
+    } } });
+    const sessionId = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, sessionId);
+    await waitFor(() => driver.turns.length === 1, 250, "native start");
+    await t.run({ type: "task.cancel", taskId: "lead" }, sessionId);
+    try {
+      await waitFor(() => driver.closeCalls === 1, 250, "native close");
+      expect(releases).toBe(0);
+    } finally { driver.releaseClose(); }
+    await t.idle(); expect(releases).toBe(1);
+  });
+
+  test("a rejected native close keeps its managed MCP lease instead of claiming drain", async () => {
+    const driver = new FakeDriver();
+    const start = driver.startTask.bind(driver);
+    driver.startTask = async (input, io) => ({ ...await start(input, io), close: async () => { throw new Error("drain unproven"); } });
+    let releases = 0;
+    const t = setup({ driver, options: { childMcp: async () => ({ runnerPackages: () => [], resolveServer: () => undefined, release: async () => { releases++; } }) } });
+    const sessionId = await t.create(); await t.run({ type: "prompt.send", text: "first" }, sessionId);
+    await waitFor(() => driver.turns.length === 1, 250, "native start");
+    lastTurn(driver).finish(); await t.idle();
+    expect(releases).toBe(0);
+    expect(t.events(sessionId).find((e) => e.kind === "turn.completed")?.data).toMatchObject({ status: "failed", error: "Unable to close the turn: drain unproven" });
+    expect(t.events(sessionId).filter((e) => e.kind === "task.state").at(-1)?.data).toMatchObject({ state: "ownership-unsettled", reason: "native-close-failed" });
+    expect(await t.run({ type: "prompt.send", text: "unsafe continuation" }, sessionId)).toMatchObject({ ok: false, code: "ownership-unsettled" });
+    expect(await t.manager.query("sessions.prune", { keep: 0, maxAgeDays: 0 })).toMatchObject({ ok: true, data: { removed: [] } });
+    await t.manager.close(); expect(releases).toBe(0);
+    recoverAllSessions({ paths: t.paths, probe: createNodeProbe() });
+    const reopened = setup({ dir: t.dir });
+    expect(await reopened.run({ type: "prompt.send", text: "still unsafe after restart" }, sessionId)).toMatchObject({ ok: false, code: "ownership-unsettled" });
+  });
+
+  test("a delegated task whose native close rejects cannot be continued", async () => {
+    const driver = new FakeDriver(), start = driver.startTask.bind(driver);
+    driver.startTask = async (input, io) => {
+      const handle = await start(input, io);
+      return input.memberId === "architect" ? { ...handle, close: async () => { throw new Error("worker drain unproven"); } } : handle;
+    };
+    const t = setup({ driver, config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, architect: { runnerId: "claude", modelId: "opus" } } }) });
+    const sessionId = await t.create(); await t.run({ type: "prompt.send", text: "delegate" }, sessionId);
+    const grant = { sessionId, taskId: "lead", memberId: "lead", runnerId: "claude", allowedTools: ["deck_delegate"] };
+    const delegated = await t.manager.callTaskTool(grant, "deck_delegate", { agent: "architect", task: "inspect" });
+    if (!delegated.ok) throw new Error("expected delegation");
+    const taskId = (delegated.data as { taskId: string }).taskId;
+    await waitFor(() => driver.turns.length === 2, 250, "delegated start");
+    lastTurn(driver).finish();
+    await waitFor(() => t.events(sessionId).some((e) => e.kind === "task.state" && e.source.taskId === taskId && e.data.state === "ownership-unsettled"), 250, "unsettled task");
+    expect(await t.manager.callTaskTool(grant, "deck_delegate", { agent: "architect", task: "unsafe continuation", continueTaskId: taskId })).toMatchObject({ ok: false, code: "ownership-unsettled" });
+    expect(await t.run({ type: "session.stop" }, sessionId)).toMatchObject({ ok: true, data: { state: "stopping" } });
+    await t.idle();
+    expect(t.kinds(sessionId)).not.toContain("session.ended");
+  });
+
+  test.each(["interrupt", "cancel", "stop", "shutdown"])("%s aborts pending managed MCP readiness before native startup", async (action) => {
+    let entered = false, aborted = false;
+    const t = setup({ options: { childMcp: async (_runnerId, context) => {
+      entered = true;
+      await new Promise<void>((_resolve, reject) => context.signal.addEventListener("abort", () => { aborted = true; reject(new Error("readiness cancelled")); }, { once: true }));
+      return { runnerPackages: () => [], resolveServer: () => undefined };
+    } } });
+    const sessionId = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, sessionId);
+    await waitFor(() => entered, 250, "readiness start");
+    if (action === "shutdown") await t.manager.close();
+    else if (action === "stop") await t.run({ type: "session.stop" }, sessionId);
+    else if (action === "cancel") await t.run({ type: "task.cancel", taskId: "lead" }, sessionId);
+    else await t.run({ type: "turn.interrupt", taskId: "lead" }, sessionId);
+    await t.idle();
+    expect(aborted).toBe(true); expect(t.driver.turns).toHaveLength(0);
+  });
+
+  for (const outcome of [{ status: "completed" }, { status: "failed", error: "native failure" }, { status: "interrupted" }] satisfies TurnOutcome[]) {
+    test(`drains and closes a persistent ${outcome.status} handle before terminal events and continuation`, async () => {
+      const driver = new PersistentFakeDriver();
+      cleanups.push(() => driver.releaseClose());
+      const t = setup({ driver });
+      const sessionId = await t.create();
+      await t.run({ type: "prompt.send", text: "first" }, sessionId);
+      lastTurn(driver).finish(outcome);
+      try {
+        await waitFor(() => driver.closeCalls === 1, 250, "native handle close");
+        expect(driver.active).toBe(true);
+        expect(t.manager.hasRunningWork()).toBe(true);
+        expect(t.kinds(sessionId)).not.toContain("turn.completed");
+        expect(await t.run({ type: "prompt.send", text: "too soon" }, sessionId)).toMatchObject({ ok: false, code: "turn-in-progress" });
+      } finally { driver.releaseClose(); }
+      await t.idle();
+      expect(driver.active).toBe(false);
+      expect(lastTurn(driver).closed).toBe(true);
+      expect(t.events(sessionId).filter((e) => e.kind === "turn.completed")).toHaveLength(1);
+      expect(t.events(sessionId).find((e) => e.kind === "turn.completed")?.data.status).toBe(outcome.status);
+    });
+  }
+
+  test("a rejected native outcome still closes its handle before reporting failure", async () => {
+    const driver = new PersistentFakeDriver();
+    driver.rejectDone = true;
+    const t = setup({ driver });
+    const sessionId = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, sessionId);
+    lastTurn(driver).finish();
+    try { await waitFor(() => driver.closeCalls === 1, 250, "rejected handle close"); }
+    finally { driver.releaseClose(); }
+    await t.idle();
+    expect(driver.active).toBe(false);
+    expect(t.events(sessionId).find((e) => e.kind === "turn.completed")?.data).toMatchObject({ status: "failed", error: "native outcome rejected" });
+  });
+
+  test("cancel and daemon shutdown share one pending close without losing ownership", async () => {
+    const driver = new PersistentFakeDriver();
+    const clock = new FakeClock();
+    const t = setup({ driver, options: { clock } });
+    const sessionId = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, sessionId);
+    await t.run({ type: "task.cancel", taskId: "lead" }, sessionId);
+    let closing: Promise<void> | undefined;
+    try {
+      await waitFor(() => driver.closeCalls === 1, 250, "cancelled handle close");
+      closing = t.manager.close();
+      clock.advance(5001);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(t.manager.hasRunningWork()).toBe(true);
+      expect(driver.closeCalls).toBe(1);
+      expect(t.kinds(sessionId)).not.toContain("turn.completed");
+    } finally { driver.releaseClose(); }
+    await closing;
+    expect(driver.active).toBe(false);
+    const reopened = setup({ dir: t.dir });
+    expect(reopened.events(sessionId).filter((e) => e.kind === "turn.completed")).toHaveLength(1);
+  });
+
+  test("shutdown closes an uncooperative native server after the grace period", async () => {
+    const driver = new PersistentFakeDriver();
+    const clock = new FakeClock();
+    const t = setup({ driver, options: { clock } });
+    const sessionId = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, sessionId);
+    lastTurn(driver).onInterrupt = undefined;
+    const closing = t.manager.close();
+    expect(t.manager.close()).toBe(closing);
+    clock.advance(5001);
+    try {
+      await waitFor(() => driver.closeCalls === 1, 250, "shutdown handle close");
+      expect(driver.active).toBe(true);
+      expect(t.manager.hasRunningWork()).toBe(true);
+      expect(t.kinds(sessionId)).not.toContain("turn.completed");
+    } finally { driver.releaseClose(); }
+    await closing;
+    expect(driver.active).toBe(false);
+    const reopened = setup({ dir: t.dir });
+    expect(reopened.events(sessionId).find((e) => e.kind === "turn.completed")?.data.status).toBe("interrupted");
+  });
+
+  test("shutdown keeps ownership of a handle whose startup completes after the grace period", async () => {
+    const driver = new PersistentFakeDriver();
+    const startTask = driver.startTask.bind(driver);
+    let releaseStart!: () => void;
+    const started = new Promise<void>((resolve) => { releaseStart = resolve; });
+    driver.startTask = async (input, io) => { await started; return startTask(input, io); };
+    const clock = new FakeClock();
+    const t = setup({ driver, options: { clock } });
+    const sessionId = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, sessionId);
+    const closing = t.manager.close();
+    clock.advance(5001);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(t.manager.hasRunningWork()).toBe(true);
+    releaseStart();
+    try {
+      await waitFor(() => driver.closeCalls === 1, 250, "late startup handle close");
+      expect(t.kinds(sessionId)).not.toContain("turn.completed");
+    } finally { driver.releaseClose(); }
+    await closing;
+    expect(driver.active).toBe(false);
+    expect(driver.closeCalls).toBe(1);
+  });
+});
+
 describe("session.create (XR-2.4, XR-3.2, XR-12.1)", () => {
+  test("concurrent creates coordinate one commandId and reject a changed payload", async () => {
+    const driver = new FakeDriver(); let release!: () => void;
+    const ready = new Promise<void>((resolve) => { release = resolve; });
+    driver.probe = async () => { await ready; return driver.probeResult; };
+    const t = setup({ driver }); const id = "00000000-0000-4000-8000-000000001001";
+    const first = t.runWithId(id, { type: "session.create", projectRoot: t.project });
+    const duplicate = t.runWithId(id, { type: "session.create", projectRoot: t.project });
+    const mismatch = t.runWithId(id, { type: "session.create", projectRoot: t.project, changeId: "different" });
+    release();
+    const result = await first;
+    expect(await duplicate).toMatchObject({ ...result, duplicate: true });
+    expect(await mismatch).toMatchObject({ ok: false, code: "command-id-reused" });
+    expect(readdirSync(t.paths.sessionsDir)).toHaveLength(1);
+  });
+
+  test("shutdown during a create probe prevents late durable session creation", async () => {
+    const driver = new FakeDriver(); let release!: () => void;
+    const ready = new Promise<void>((resolve) => { release = resolve; });
+    driver.probe = async () => { await ready; return driver.probeResult; };
+    const t = setup({ driver });
+    const create = t.run({ type: "session.create", projectRoot: t.project });
+    await Promise.resolve(); await t.manager.close(); release();
+    expect(await create).toMatchObject({ ok: false, code: "daemon-stopping" });
+    expect(readdirSync(t.paths.sessionsDir)).toHaveLength(0);
+  });
   test("refuses when cross-runner is not configured, disabled, or has no lead", async () => {
     expect(await setup({ config: undefined }).run({ type: "session.create", projectRoot: "/p" })).toMatchObject({ ok: false, code: "cross-runner-not-configured" });
     expect(await setup({ config: baseConfig({ enabled: false }) }).run({ type: "session.create", projectRoot: "/p" })).toMatchObject({ ok: false, code: "cross-runner-not-configured" });
@@ -122,6 +387,48 @@ describe("session.create (XR-2.4, XR-3.2, XR-12.1)", () => {
 });
 
 describe("single-member Lead lifecycle (task 1.16)", () => {
+  test("starting another session's Lead preserves the first session's credential", async () => {
+    const t = setup();
+    const a = await t.create(), b = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, a);
+    const first = lastTurn(t.driver);
+    const { token } = JSON.parse(readFileSync(first.input.credentialFile, "utf8"));
+    await t.run({ type: "prompt.send", text: "second" }, b);
+    expect(t.credentials.lookup(token)).toMatchObject({ sessionId: a, taskId: "lead" });
+    expect(existsSync(first.input.credentialFile)).toBe(true);
+  });
+
+  test("finishing one session preserves another session's Lead credentials and pending approvals", async () => {
+    const t = setup();
+    const a = await t.create(), b = await t.create();
+    await t.run({ type: "prompt.send", text: "first" }, a);
+    const first = lastTurn(t.driver);
+    await t.run({ type: "prompt.send", text: "second" }, b);
+    const second = lastTurn(t.driver);
+    const { token } = JSON.parse(readFileSync(second.input.credentialFile, "utf8"));
+    const approval = t.broker.request({ sessionId: b, taskId: "lead", tool: "Bash" });
+    first.finish();
+    await waitFor(() => t.events(a).some((e) => e.kind === "turn.completed"), 5000, "first turn complete");
+    expect(t.credentials.lookup(token)).toMatchObject({ sessionId: b });
+    expect(t.broker.pending()).toContainEqual({ approvalId: approval.approvalId, sessionId: b, taskId: "lead" });
+    second.finish();
+    await t.idle();
+    expect((await approval.resolution).decision).toBe("deny");
+    expect(t.credentials.lookup(token)).toBeUndefined();
+  });
+
+  test("an approval response in another session cannot resolve the owner's request", async () => {
+    const t = setup();
+    const a = await t.create(), b = await t.create();
+    const approval = t.broker.request({ sessionId: a, taskId: "lead", tool: "Bash" });
+    const before = t.events(a).length;
+    expect(await t.run({ type: "approval.respond", approvalId: approval.approvalId, decision: "allow-once" }, b)).toMatchObject({ ok: false, code: "unknown-approval" });
+    expect(t.broker.pending()).toContainEqual({ approvalId: approval.approvalId, sessionId: a, taskId: "lead" });
+    expect(t.events(a)).toHaveLength(before);
+    expect(await t.run({ type: "approval.respond", approvalId: approval.approvalId, decision: "deny" }, a)).toMatchObject({ ok: true });
+    expect((await approval.resolution).decision).toBe("deny");
+  });
+
   test("prompt.send runs one turn end to end and records the full event sequence", async () => {
     const t = setup();
     t.driver.autoComplete = true;
@@ -164,15 +471,16 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
     const input = turn.input;
     expect(input).toMatchObject({ taskId: "lead", memberId: "lead", cwd: t.project, approvals: "relay", disableNativeDelegation: true, assignment: { runnerId: "claude", modelId: "opus", thinking: "high" } });
     expect(input.mcp.servers).toEqual(["deck"]);
-    expect(input.mcp.sessionTools).toEqual(["deck_approve", "deck_status"]);
+    expect(input.mcp.sessionTools).toEqual(["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel", "deck_memory_recall", "deck_memory_propose", "deck_approve", "deck_status"]);
     const spec = input.mcpServerSpecs.deck!;
+    if (spec.transport === "http") throw new Error("Deck session bridge must use stdio");
     expect(spec.command).toBe("/bin/deck");
     expect(spec.args).toEqual(["internal", "session-mcp"]);
     expect(spec.env.DECK_SESSION_CREDENTIAL_FILE).toBe(input.credentialFile);
     expect(input.credentialFile).toBe(sessionPaths(t.paths, sessionId).taskCredentialFile("lead"));
     expect(lstatSync(input.credentialFile).mode & 0o777).toBe(0o600);
     const { token } = JSON.parse(readFileSync(input.credentialFile, "utf8")) as { token: string };
-    expect(t.credentials.lookup(token)).toMatchObject({ sessionId, taskId: "lead", memberId: "lead", allowedTools: ["deck_approve", "deck_status"] });
+    expect(t.credentials.lookup(token)).toMatchObject({ sessionId, taskId: "lead", memberId: "lead", allowedTools: input.mcp.sessionTools });
     expect(JSON.stringify(input)).not.toContain(token);
     turn.init(); turn.finish();
     await t.idle();

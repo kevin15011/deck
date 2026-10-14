@@ -350,8 +350,10 @@ function ReviewPlanScreen({ state, canRunPlan, runBlockDiagnostics = [] }: { sta
 const DASHBOARD_CAUSE_SCALAR_LIMIT = 240;
 const DASHBOARD_CAUSE_BYTE_LIMIT = 320;
 
-function dashboardActionMessage(result: RunnerActionRunResult): string {
+function dashboardActionMessage(result: RunnerActionRunResult, complete = false): string {
   const sanitized = sanitizeDashboardText(result.message) || "Action completed.";
+  // The final screen must retain remediation text beyond the compact progress summary.
+  if (complete) return truncateDashboardUtf8(truncateDashboardScalars(sanitized, 1600), 6400);
   return truncateDashboardUtf8(truncateDashboardScalars(sanitized, DASHBOARD_CAUSE_SCALAR_LIMIT), DASHBOARD_CAUSE_BYTE_LIMIT);
 }
 
@@ -568,7 +570,7 @@ function DashboardCompleteScreen({ results, completionStatus, runnerLabel, conte
             const cause = dashboardActionCause(r);
             return (
               <React.Fragment key={`${r.actionId}-${i}`}>
-                <Text color="yellow">✗ [{r.actionId}] {dashboardActionMessage(r)}</Text>
+                <Text color="yellow">✗ [{r.actionId}] {dashboardActionMessage(r, true)}</Text>
                 {cause && <Text>  {cause}</Text>}
               </React.Fragment>
             );

@@ -55,11 +55,18 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
   if (!sessionId || !UUID.test(sessionId)) throw new ClaudeLaunchError("claude-invalid-session-id", "Claude native session id must be a UUID");
 
   const diagnostics: ClaudeTurnLaunch["diagnostics"] = [];
-  const specs: Record<string, { command: string; args: readonly string[]; env: Readonly<Record<string, string>> }> = {};
+  const specs: Record<string, { command: string; args: readonly string[]; env: Readonly<Record<string, string>> } | { type: "http"; url: string; headers?: Record<string, string> }> = {};
   for (const id of input.mcp.servers) {
     const spec = input.mcpServerSpecs[id];
     if (!spec) throw new ClaudeLaunchError("claude-mcp-spec-missing", `No launch spec for MCP server "${id}"`);
-    specs[id] = { command: spec.command, args: [...spec.args], env: { ...spec.env } };
+    if (spec.transport === "http") {
+      const headers = Object.fromEntries(Object.entries(spec.envHttpHeaders ?? {}).map(([name, variable]) => {
+        if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(name) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable))
+          throw new ClaudeLaunchError("claude-http-header-reference-invalid", "HTTP headers require valid header and environment variable names");
+        return [name, "${" + variable + "}"];
+      }));
+      specs[id] = { type: "http", url: spec.url, ...(Object.keys(headers).length ? { headers } : {}) };
+    } else specs[id] = { command: spec.command, args: [...spec.args], env: { ...spec.env } };
   }
   if (input.approvals === "relay" && !(DECK_SERVER_ID in specs)) {
     throw new ClaudeLaunchError("claude-session-mcp-missing", "Relay approvals need the Deck session MCP server in the child set");
@@ -72,7 +79,7 @@ export function buildClaudeTurnLaunch(input: DriverTaskInput, files: ClaudeLaunc
     else diagnostics.push({ code: "claude-thinking-ignored", detail: thinking });
   }
   args.push(...(input.resume ? ["--resume", sessionId] : ["--session-id", sessionId]));
-  args.push("--input-format", "stream-json", "--output-format", "stream-json", "--verbose");
+  args.push("--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages");
   args.push("--strict-mcp-config", "--mcp-config", mcpConfigFile);
   args.push("--settings", JSON.stringify({ attribution: { commit: "", pr: "" }, disableAllHooks: true }));
   if (input.approvals === "relay") args.push("--permission-prompt-tool", DECK_APPROVE_PROMPT_TOOL);

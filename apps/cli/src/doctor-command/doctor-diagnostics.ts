@@ -46,6 +46,7 @@ import { resolveCanonicalSupermemoryProjectScope, type NormalizedDeckConfig } fr
 import { createOwnerOnlyFileSecretStore, redactSecretDiagnostic } from "@deck/core";
 import { createSupermemoryRuntime, createSupermemoryHttpTransport } from "@deck/adapter-supermemory/runtime";
 import { checkSupermemoryObservabilitySink } from "../supermemory-observability";
+import { checkSessionWeb } from "../session-web-doctor";
 import { formatSessionRuntimeReadiness, resolveSessionRuntimeReadiness } from "../session-runtime-readiness";
 import type {
   DoctorCategoryResult,
@@ -1088,6 +1089,8 @@ export async function runDoctorDiagnostics(
       },
     ];
   }
+
+  deckResults.push(await checkSessionWeb(globalConfigCheck.config?.crossRunner));
 
   // 6. Binary upgrade availability check (commit-aware)
   let binaryResult: DoctorBinaryResult;

@@ -9,6 +9,7 @@
 
 - `@deck/core` owns canonical capabilities, shared contracts, developer-team content, and provider-neutral policy.
 - `@deck/sdd-runtime` owns OpenSpec lifecycle coordination and artifact-state operations.
+- `@deck/session-host` owns the local cross-runner daemon, task lifecycle, event ledger, approvals and client transports. It imports no runner adapters; `apps/cli` injects native session drivers and shared services.
 - Runner adapters—`packages/adapter-pi`, `packages/adapter-opencode`, and `packages/adapter-codex`—translate those contracts for Pi, OpenCode, and Codex; provider adapters isolate external provider integrations.
 - `apps/cli` composes configuration, adapters, review/install flows, and the CLI/TUI. Canonical capabilities are selected centrally; adapters contribute only their runner-native materialization and evidence.
 - Active/promoted OpenSpec artifacts define requirements and lifecycle; source and tests define runtime behavior. Do not hand-edit generated outputs such as `packages/core/src/skills/external/content.generated.ts` or `apps/cli/src/runtime/build-info.generated.ts`; preserve historical OpenSpec records, and follow [git-safety.ts](packages/core/src/teams/developer/git-safety.ts) before any discard operation.

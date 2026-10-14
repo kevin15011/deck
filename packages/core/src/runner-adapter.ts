@@ -20,7 +20,7 @@ import type {
   DeveloperTeamApplyInput,
   DeveloperTeamApplyResult,
 } from "./runner-capability";
-import type { RunnerSessionDriver } from "./session/driver";
+import type { ChildMcpServerSpec, RunnerSessionDriver } from "./session/driver";
 import type { AdaptiveMemoryProvider } from "./memory/adaptive-memory";
 import type { CapabilityInstructionBundle } from "./teams/developer/instruction-bundles";
 import type { RunnerCapabilitySupportStatus } from "./runner-capability-registry";
@@ -828,6 +828,9 @@ export interface RunnerAdapter {
    * excluded from cross assignments.
    */
   getSessionDriver?(): RunnerSessionDriver;
+
+  /** Resolve ordinary selected MCP packages read-only for an isolated session turn. */
+  readSessionMcpServers?(): Promise<Record<string, ChildMcpServerSpec>>;
 
   /**
    * Read current thinking level assignments for the developer team from project config.

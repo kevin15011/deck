@@ -1,0 +1,383 @@
+{
+  "schema": "deck-session-contract-shapes-v1",
+  "runner": "opencode",
+  "version": "1.18.31",
+  "shapes": {
+    "message.completed.data": [
+      "object"
+    ],
+    "message.completed.data.messageId": [
+      "string"
+    ],
+    "message.completed.data.text": [
+      "string"
+    ],
+    "message.completed.raw": [
+      "object"
+    ],
+    "message.completed.raw.id": [
+      "string"
+    ],
+    "message.completed.raw.messageID": [
+      "string"
+    ],
+    "message.completed.raw.properties": [
+      "object"
+    ],
+    "message.completed.raw.properties.part": [
+      "object"
+    ],
+    "message.completed.raw.properties.part.id": [
+      "string"
+    ],
+    "message.completed.raw.properties.part.messageID": [
+      "string"
+    ],
+    "message.completed.raw.properties.part.sessionID": [
+      "string"
+    ],
+    "message.completed.raw.properties.part.text": [
+      "string"
+    ],
+    "message.completed.raw.properties.part.time": [
+      "object"
+    ],
+    "message.completed.raw.properties.part.time.end": [
+      "number"
+    ],
+    "message.completed.raw.properties.part.time.start": [
+      "number"
+    ],
+    "message.completed.raw.properties.part.type": [
+      "string"
+    ],
+    "message.completed.raw.properties.sessionID": [
+      "string"
+    ],
+    "message.completed.raw.properties.time": [
+      "number"
+    ],
+    "message.completed.raw.sessionID": [
+      "string"
+    ],
+    "message.completed.raw.text": [
+      "string"
+    ],
+    "message.completed.raw.time": [
+      "object"
+    ],
+    "message.completed.raw.time.end": [
+      "number"
+    ],
+    "message.completed.raw.time.start": [
+      "number"
+    ],
+    "message.completed.raw.type": [
+      "string"
+    ],
+    "message.delta.data": [
+      "object"
+    ],
+    "message.delta.data.messageId": [
+      "string"
+    ],
+    "message.delta.data.text": [
+      "string"
+    ],
+    "message.delta.raw": [
+      "object"
+    ],
+    "message.delta.raw.id": [
+      "string"
+    ],
+    "message.delta.raw.properties": [
+      "object"
+    ],
+    "message.delta.raw.properties.delta": [
+      "string"
+    ],
+    "message.delta.raw.properties.field": [
+      "string"
+    ],
+    "message.delta.raw.properties.messageID": [
+      "string"
+    ],
+    "message.delta.raw.properties.partID": [
+      "string"
+    ],
+    "message.delta.raw.properties.sessionID": [
+      "string"
+    ],
+    "message.delta.raw.type": [
+      "string"
+    ],
+    "reasoning.delta.data": [
+      "object"
+    ],
+    "reasoning.delta.data.text": [
+      "string"
+    ],
+    "reasoning.delta.raw": [
+      "object"
+    ],
+    "reasoning.delta.raw.id": [
+      "string"
+    ],
+    "reasoning.delta.raw.properties": [
+      "object"
+    ],
+    "reasoning.delta.raw.properties.part": [
+      "object"
+    ],
+    "reasoning.delta.raw.properties.part.id": [
+      "string"
+    ],
+    "reasoning.delta.raw.properties.part.messageID": [
+      "string"
+    ],
+    "reasoning.delta.raw.properties.part.sessionID": [
+      "string"
+    ],
+    "reasoning.delta.raw.properties.part.text": [
+      "string"
+    ],
+    "reasoning.delta.raw.properties.part.time": [
+      "object"
+    ],
+    "reasoning.delta.raw.properties.part.time.end": [
+      "number"
+    ],
+    "reasoning.delta.raw.properties.part.time.start": [
+      "number"
+    ],
+    "reasoning.delta.raw.properties.part.type": [
+      "string"
+    ],
+    "reasoning.delta.raw.properties.sessionID": [
+      "string"
+    ],
+    "reasoning.delta.raw.properties.time": [
+      "number"
+    ],
+    "reasoning.delta.raw.type": [
+      "string"
+    ],
+    "runner.unmapped.data": [
+      "object"
+    ],
+    "runner.unmapped.data.type": [
+      "string"
+    ],
+    "runner.unmapped.raw": [
+      "object"
+    ],
+    "runner.unmapped.raw.id": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.diff": [
+      "array"
+    ],
+    "runner.unmapped.raw.properties.id": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.info.agent": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.cost": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.directory": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.finish": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.id": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.mode": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.model": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.info.model.id": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.model.modelID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.model.providerID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.model.variant": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.modelID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.parentID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.path": [
+      "object",
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.path.cwd": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.path.root": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.projectID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.providerID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.role": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.sessionID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.slug": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.summary": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.info.summary.additions": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.summary.deletions": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.summary.diffs": [
+      "array"
+    ],
+    "runner.unmapped.raw.properties.info.summary.files": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.system": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.time": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.info.time.completed": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.time.created": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.time.updated": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.title": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.info.tokens": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.info.tokens.cache": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.info.tokens.cache.read": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.tokens.cache.write": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.tokens.input": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.tokens.output": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.tokens.reasoning": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.tokens.total": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.info.version": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.part": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.part.cost": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.part.id": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.part.messageID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.part.reason": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.part.sessionID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.part.tokens": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.part.tokens.cache": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.part.tokens.cache.read": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.part.tokens.cache.write": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.part.tokens.input": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.part.tokens.output": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.part.tokens.reasoning": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.part.tokens.total": [
+      "number"
+    ],
+    "runner.unmapped.raw.properties.part.type": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.sessionID": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.status": [
+      "object"
+    ],
+    "runner.unmapped.raw.properties.status.type": [
+      "string"
+    ],
+    "runner.unmapped.raw.properties.time": [
+      "number"
+    ],
+    "runner.unmapped.raw.type": [
+      "string"
+    ],
+    "turn.started.data": [
+      "object"
+    ],
+    "turn.started.data.model": [
+      "string"
+    ],
+    "turn.started.data.nativeSessionId": [
+      "string"
+    ]
+  }
+}

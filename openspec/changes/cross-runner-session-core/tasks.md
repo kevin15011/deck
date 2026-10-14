@@ -12,6 +12,10 @@
 
 ---
 
+## Final status (2026-10-13 UTC)
+
+S0–S5 are complete within the accepted scope. Final verification and independent review passed; see [verify-report.md](verify-report.md) and [review-report.md](review-report.md). The final four-target/host/Linux gate supersedes intermediate partial stage gates. Task 4.10 is explicitly deferred as optional. The manual canary launch in 0.10 remains excluded by instruction; native Codex contracts and compiled session flows passed instead. Historical checkpoints below remain for traceability.
+
 ## S0 — Contracts and configuration (no runtime behavior change)
 
 - **0.1 Session event types and validator** (XR-1.1–1.4)
@@ -47,6 +51,8 @@
 - **0.11 S0 BIN gate** — smoke: `deck --version`; config with `crossRunner` loads in `deck doctor` without error.
 
 ## S1 — Daemon core, Claude driver, terminal client
+
+Resume status (2026-10-12): implemented and verified with the known broad-suite limitations recorded in [apply-progress.md](apply-progress.md#s1b-resumption--2026-10-12). Host and Linux arm64 compiled smoke passed; other architectures are build-verified. Continue implementation at S2.
 
 - **1.1 Package scaffold `@deck/session-host`** (D-1) — workspace entry, tsconfig, no adapter imports (add an import-boundary test like existing core-purity tests).
   *Verify:* boundary test; `bunx tsc --noEmit`.
@@ -90,8 +96,8 @@
 
 - **2.1 Codex app-server JSON-RPC client** — framing, request ids, server-request handling, notification mapping.
   *Verify:* fixtures from `spike/codex-app-server.mjs`, `codex-approval.mjs`, `codex-interrupt.mjs` at 0.162.1; mapper tests.
-- **2.2 Codex launch + isolation** — own stdin pipe, ignore user config, `-c mcp_servers.*` from the child set (credential file path only), native delegation off, approval policy per `crossRunner.approvals.codex` (default bypass, D-16).
-  *Verify:* argv/config snapshot tests; live probe confirms auth still works with user config ignored and no user MCP/hooks appear.
+- **2.2 Codex launch + isolation** — own stdin pipe, effective-config inventory plus inherited MCP/plugin suppression, `-c mcp_servers.*` from the child set (credential file path only), hooks/native delegation off, approval policy per `crossRunner.approvals.codex` (default bypass, D-16). Follow the verified-version correction in design §4.1; app-server has no `--ignore-user-config`.
+  *Verify:* argv/config snapshot tests; fail closed on unexpected enabled MCPs; live probe confirms native auth still works and no user MCP/hooks appear.
 - **2.3 Codex approvals (accept + decline) and interrupt** — `requestApproval` → broker; `turn/interrupt`.
   *Verify:* fixture tests; live script exercises **decline** (previously unverified) and records fixture.
 - **2.4 OpenCode serve client** — port 0/random on 127.0.0.1, readiness, `POST /session`, message, SSE `/event` parsing, abort, permission list/reply.
@@ -177,3 +183,41 @@ S0 ──► S1 ──► S2 ──► S3 ──► S4 ──► S5
           └─────────────► S4 (web needs only S1 core; can start after S1 if S2/S3 slip)
 S0.10 (Codex audit) is independent and may ship first.
 ```
+
+## Canary feedback follow-up — complete (2026-10-13)
+
+This supersedes historical manual local pairing and Claude acknowledgement tasks above.
+
+- [x] Automatic direct-loopback browser access; preserve forwarded authentication and revocation.
+- [x] Remove Claude subscription notice and acknowledgement gates without fabricating consent.
+- [x] Measure native latency; stream Claude partial text and show failed turns.
+- [x] Implement D-25 managed Codebase Memory compatibility, health, ownership and recovery.
+- [x] Independently review error paths; pass full suite, TypeScript, release/build and compiled acceptance gates.
+
+Evidence and limits: `verify-report.md`, `review-report.md`. Installation/publication remains outside this completed implementation.
+
+## Duplicate completion wake follow-up — complete (2026-10-13)
+
+- [x] Reproduce the single-worker result-delivered-then-wake incident.
+- [x] Acknowledge terminal Lead-tool results by attempt; preserve unseen/aborted/future-attempt notifications.
+- [x] Cover synchronous delivery/enqueue and scheduled-wake races, observer isolation and socket delivery.
+- [x] Pass affected suites, TypeScript, four-target build, extracted host cross smoke and independent review.
+
+## Public daemon commands follow-up — complete (2026-10-13)
+
+- [x] Add daemon start/status/stop/restart grammar, help, JSON and compiled production wiring.
+- [x] Reuse graceful control shutdown with busy refusal, bounded settlement and strict replacement attribution.
+- [x] Fence control/web/bridge admission atomically after accepted shutdown.
+- [x] Verify absent/idempotent/timeout/ownership/concurrent cases and preserved real session history.
+- [x] Pass affected suites, TypeScript, four-target build, macOS/Linux lifecycle, host cross/web and independent review.
+- [x] Document lifecycle, Ctrl+C behavior, restart after installation and unchanged session runner ownership.
+
+## Web workspace redesign follow-up — complete (2026-10-13)
+
+- [x] Diagnose mixed conversation events and research primary AI-chat/responsive/accessibility patterns.
+- [x] Record replacement visual agreement and session-scoped OpenSpec read contract.
+- [x] Implement Lead conversation separation, safe Markdown, collapsible navigation and responsive workspace tabs.
+- [x] Implement bounded authenticated OpenSpec artifact catalog/read and visible refresh.
+- [x] Verify classification/replay, Markdown safety, artifact path/auth boundaries and desktop/mobile interactions.
+- [x] Inspect rendered desktop/mobile output, pass TypeScript/distribution checks and independent review.
+- [x] Update user documentation, verification evidence and handoff; preserve installed user runtime.

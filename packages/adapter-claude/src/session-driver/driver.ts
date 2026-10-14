@@ -33,7 +33,7 @@ export type ClaudeSessionDriverOptions = {
   killGraceMs?: number;
   /** Short `--version` query for the probe. Not a task process; injected so tests never run the real CLI. */
   exec?: ProbeExec;
-  /** XR-12.1: the Claude driver is blocked until the personal-use notice was acknowledged. */
+  /** Legacy compatibility callback; no longer used to gate session readiness. */
   tosAcknowledged?: () => boolean;
 };
 
@@ -139,6 +139,7 @@ class ClaudeTask {
   }
 
   private onLine(line: string, mapper: ClaudeStreamMapper, state: TurnState, launch: ClaudeTurnLaunch, emit: (e: DriverEvent) => void): void {
+    if (state.fatal) return;
     const parsed = parseClaudeLine(line);
     const events = parsed.ok ? undefined : mapper.unparsable(line);
     if (events) { for (const e of events) emit(e); return; }
@@ -155,15 +156,17 @@ class ClaudeTask {
     const actual = init.mcpServers.map((s) => s.name);
     const missing = expected.filter((n) => !actual.includes(n));
     const extra = actual.filter((n) => !expected.includes(n));
-    for (const server of init.mcpServers) {
-      if (server.status && server.status !== "connected" && expected.includes(server.name)) {
-        emit({ kind: "diagnostic", data: { code: "claude-mcp-server-not-connected", server: server.name, status: server.status } });
-      }
-    }
     if (missing.length > 0 || extra.length > 0) {
       emit({ kind: "diagnostic", data: { code: "claude-isolation-violation", expected, actual, missing, extra } });
       this.fail(state, "claude-isolation-violation: the native CLI did not load exactly the Deck-computed MCP set");
       return;
+    }
+    for (const server of init.mcpServers) {
+      if (server.status !== "connected" && expected.includes(server.name)) {
+        emit({ kind: "diagnostic", data: { code: "claude-mcp-server-not-connected", server: server.name, status: server.status ?? "missing" } });
+        this.fail(state, "claude-mcp-server-not-connected: an expected MCP server is not connected");
+        return;
+      }
     }
     if (init.sessionId !== this.nativeId) {
       emit({ kind: "diagnostic", data: { code: "claude-session-id-mismatch", expected: this.nativeId, actual: init.sessionId } });
@@ -180,6 +183,11 @@ class ClaudeTask {
   private outcome(state: TurnState, exit: SupervisedChildExit): TurnOutcome {
     if (state.fatal) return { status: "failed", error: state.fatal };
     if (state.forced || state.closing) return { status: "interrupted-forced" };
+    // Do not retry authentication, transport or execution failures. This pre-init native
+    // diagnostic identifies exactly the requested missing conversation.
+    if (this.input.resume && !state.init && !exit.ok && state.stderr.split(/\r?\n/).some((line) => line.trim() === `No conversation found with session ID: ${this.nativeId}`)) {
+      return { status: "failed", error: "Claude native session was not found", reasonCode: "native-session-not-found" };
+    }
     const result = state.result;
     if (result) {
       if (result.subtype === "success" && !result.isError) {
@@ -248,9 +256,6 @@ export function createClaudeSessionDriver(options: ClaudeSessionDriverOptions = 
     newNativeSessionId: () => randomUUID(),
 
     async probe(ctx: DriverProbeContext): Promise<DriverProbe> {
-      if (options.tosAcknowledged && !options.tosAcknowledged()) {
-        return { status: "blocked", reasonCode: "claude-session-tos-unacknowledged", capabilities: [] };
-      }
       let text: string;
       try { text = (await exec(ctx.executablePath ?? executable, ["--version"], { cwd: ctx.cwd, timeoutMs: PROBE_TIMEOUT_MS })).stdout; } catch {
         return { status: "blocked", reasonCode: "claude-not-installed", capabilities: [] };

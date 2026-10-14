@@ -271,18 +271,63 @@ function stripManagedServerBlocks(source: string, ids: ReadonlySet<string>): str
   return output.join("").replace(/\n{3,}/g, "\n\n");
 }
 
-export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpServer[]): CodexMcpMergeResult {
+/** Repair only standard local tool launch fields explicitly selected for installation. Preserve user ownership and tool policy. */
+function repairSelectedToolServers(source: string, desired: readonly CodexMcpServer[], selected: readonly string[]): string {
+  const ast = parseTOML(source, { tomlVersion: "1.0.0" });
+  const managed = managedServerIds(source);
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+  for (const server of desired) {
+    if (!selected.includes(server.id) || managed.has(server.id) || server.transport !== "stdio" || !isAbsolutePinnedCommand(server.command)) continue;
+    const executable = server.id === "context-mode" ? "context-mode" : server.id === "codebase-memory" ? "codebase-memory-mcp" : undefined;
+    if (!executable) continue;
+    const tables = (ast.body[0]?.body ?? []).filter((node): node is AST.TOMLTable => node.type === "TOMLTable" && node.resolvedKey[0] === "mcp_servers" && node.resolvedKey[1] === server.id);
+    const table = tables.find((node) => node.resolvedKey.length === 2);
+    if (!table || table.kind !== "standard") continue;
+    // Environment, transport, wrappers and custom arguments require an explicit manual review.
+    if (table.body.some((entry) => entry.key.keys.length !== 1 || !["command", "args"].includes(String(entry.key.keys[0]?.type === "TOMLBare" ? entry.key.keys[0].name : entry.key.keys[0]?.value)))) continue;
+    if (tables.some((node) => node.resolvedKey.length > 2 && node.resolvedKey[2] !== "tools")) continue;
+    const entry = (name: string) => table.body.find((item) => item.key.keys[0]?.type === "TOMLBare" ? item.key.keys[0].name === name : item.key.keys[0]?.value === name);
+    const command = entry("command");
+    const args = entry("args");
+    const currentCommand = command && scalar(command.value);
+    if (typeof currentCommand !== "string" || !(currentCommand === executable || currentCommand.startsWith("/") && currentCommand.split("/").at(-1) === executable)) continue;
+    const currentArgs = args ? scalar(args.value) : [];
+    if (!Array.isArray(currentArgs) || !(currentArgs.length === 0 || server.id === "context-mode" && currentArgs.length === 1 && currentArgs[0] === "mcp")) continue;
+    edits.push({ start: command!.value.range[0], end: command!.value.range[1], text: quote(server.command) });
+    if (server.args?.length) {
+      const value = `[${server.args.map(quote).join(", ")}]`;
+      if (args) edits.push({ start: args.value.range[0], end: args.value.range[1], text: value });
+      else {
+        const newline = source.indexOf("\n", table.range[1]);
+        const end = newline < 0 ? source.length : newline;
+        edits.push({ start: end, end, text: `\nargs = ${value}` });
+      }
+    } else if (args) {
+      edits.push({ start: args.range[0], end: args.range[1], text: "" });
+    }
+  }
+  for (const edit of edits.sort((a, b) => b.start - a.start)) source = source.slice(0, edit.start) + edit.text + source.slice(edit.end);
+  return source;
+}
+
+export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpServer[], options: { repairSelectedToolIds?: readonly string[] } = {}): CodexMcpMergeResult {
+  const originalSource = source;
   let existing: Map<string, object>;
-  try { existing = existingServers(source); } catch { return { status: "blocked", content: source, collisions: [], diagnostics: ["Malformed TOML cannot be changed safely."] }; }
+  for (const server of desired) {
+    try { validate(server); } catch (error) {
+      return { status: "blocked", content: originalSource, collisions: [], diagnostics: [redactCodexMcpDiagnostic(error instanceof Error ? error.message : "Invalid MCP configuration.")] };
+    }
+  }
+  try {
+    if (options.repairSelectedToolIds?.length) source = repairSelectedToolServers(source, desired, options.repairSelectedToolIds);
+    existing = existingServers(source);
+  } catch { return { status: "blocked", content: originalSource, collisions: [], diagnostics: ["Malformed TOML cannot be changed safely."] }; }
   const managed = managedServerIds(source);
   const desiredIds = new Set<string>(desired.map((server) => server.id));
   const replaceManaged = new Set<string>([...managed].filter((id) => !desiredIds.has(id)));
   const collisions: CodexMcpServerId[] = [];
   const missing: CodexMcpServer[] = [];
   for (const server of desired) {
-    try { validate(server); } catch (error) {
-      return { status: "blocked", content: source, collisions: [], diagnostics: [redactCodexMcpDiagnostic(error instanceof Error ? error.message : "Invalid MCP configuration.")] };
-    }
     const present = existing.get(server.id);
     if (!present) missing.push(server);
     else if (JSON.stringify(canonical(present)) !== JSON.stringify(canonical(normalized(server)))) {
@@ -292,15 +337,23 @@ export function mergeCodexMcpServers(source: string, desired: readonly CodexMcpS
   }
   if (collisions.length > 0) return {
     status: "blocked",
-    content: source,
+    content: originalSource,
     collisions,
-    diagnostics: collisions.map((id) => `Existing user MCP server '${id}' differs from Deck's reviewed semantic configuration.`),
+    diagnostics: collisions.map((id) => {
+      const present = existing.get(id) as Record<string, unknown>;
+      const expected = normalized(desired.find((server) => server.id === id)!) as Record<string, unknown>;
+      // Report field names only: commands, arguments and environment values may contain credentials.
+      const fields = ["command", "args", "env_vars", "url", "bearer_token_env_var", "env_http_headers", "http_headers"];
+      const differences = fields.filter((key) => JSON.stringify(canonical(present[key])) !== JSON.stringify(canonical(expected[key])));
+      if (Object.keys(present).some((key) => !fields.includes(key))) differences.push("additional settings");
+      return `Existing user MCP server '${id}' conflicts in ${differences.join(", ")}. Back up your Codex config.toml, then align this entry with the selected tool or rename it before retrying. Deck will not overwrite it.`;
+    }),
   };
-  if (missing.length === 0 && replaceManaged.size === 0) return { status: "unchanged", content: source, configured: desired.map((server) => server.id) };
+  if (missing.length === 0 && replaceManaged.size === 0) return { status: source === originalSource ? "unchanged" : "updated", content: source, configured: desired.map((server) => server.id) };
   const base = stripManagedServerBlocks(source, replaceManaged);
   const separator = base.length === 0 || base.endsWith("\n") ? "" : "\n";
   const content = `${base}${separator}${missing.map(render).join("\n")}`;
-  try { existingServers(content); } catch { return { status: "blocked", content: source, collisions: [], diagnostics: ["The MCP TOML edit did not reparse."] }; }
+  try { existingServers(content); } catch { return { status: "blocked", content: originalSource, collisions: [], diagnostics: ["The MCP TOML edit did not reparse."] }; }
   return { status: "updated", content, configured: desired.map((server) => server.id) };
 }
 

@@ -190,6 +190,7 @@ export class Ledger {
     const attemptNo = Number.isInteger(d.attempt) ? (d.attempt as number) : previous.attempt + 1;
     if (attemptNo !== previous.attempt + 1) return this.anomaly("task-attempt-out-of-order", event.seq, String(attemptNo));
     const continuity = d.continuity === "reseeded" ? "reseeded" : "native";
+    if (continuity === "reseeded") task.nativeConfirmed = false;
     // D-12: runner/model/thinking come from the recorded attempt, never from current config.
     task.attempts.push({
       attempt: attemptNo, runnerId: previous.runnerId, modelId: previous.modelId,

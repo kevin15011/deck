@@ -132,3 +132,28 @@ describe("parseClaudeLine / ClaudeLineSplitter", () => {
     expect(String(events[0]!.data.text)).not.toContain("\u001b");
   });
 });
+
+
+describe("Claude partial message stream", () => {
+  test("text deltas arrive before an authoritative final snapshot; tools and thinking stay separate", () => {
+    const mapper = new ClaudeStreamMapper();
+    const partial = (event: unknown) => mapper.map({ type: "stream_event", event }).events;
+    expect(partial({ type: "message_start", message: { id: "msg_partial" } })).toEqual([]);
+    expect(partial({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })).toEqual([]);
+    expect(partial({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello " } })).toMatchObject([{ kind: "message.delta", data: { messageId: "msg_partial", text: "Hello " } }]);
+    expect(partial({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "world" } })).toMatchObject([{ kind: "message.delta", data: { messageId: "msg_partial", text: "world" } }]);
+    expect(partial({ type: "content_block_delta", index: 1, delta: { type: "thinking_delta", thinking: "private reasoning" } })).toEqual([]);
+    expect(partial({ type: "content_block_delta", index: 2, delta: { type: "input_json_delta", partial_json: "{}" } })).toEqual([]);
+    expect(partial({ type: "content_block_stop", index: 0 })).toEqual([]);
+    expect(partial({ type: "message_stop" })).toEqual([]);
+    const final = mapper.map({ type: "assistant", message: { id: "msg_partial", content: [{ type: "text", text: "Hello world" }, { type: "tool_use", id: "tool_1", name: "Bash", input: { command: "pwd" } }] } }).events;
+    expect(final.map(event => event.kind)).toEqual(["message.completed", "tool.started"]);
+    expect(final[0]!.data).toMatchObject({ messageId: "msg_partial", text: "Hello world" });
+    expect(partial({ type: "message_start", message: { id: "msg_next" } })).toEqual([]);
+    expect(partial({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Next" } })[0]!.data.messageId).toBe("msg_next");
+  });
+  test("unknown stream shapes remain inspectable rather than becoming assistant text", () => {
+    const mapper = new ClaudeStreamMapper();
+    expect(mapper.map({ type: "stream_event", event: { type: "future_stream" } }).events).toMatchObject([{ kind: "runner.unmapped", data: { type: "stream_event/future_stream" } }]);
+  });
+});

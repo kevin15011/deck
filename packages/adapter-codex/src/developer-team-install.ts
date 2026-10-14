@@ -65,6 +65,8 @@ export type BuildCodexInstallPlanInput = {
   /** Absolute, verified executables written into MCP tables; bare PATH names are never persisted. */
   contextModeCommand?: string;
   codebaseMemoryCommand?: string;
+  /** Current reviewed install selection; never supplied by implicit launch-time reconciliation. */
+  repairSelectedToolIds?: readonly string[];
   /** Present only when the owned pinned RTK binary and a Node.js runtime are verified. */
   rtkHook?: { nodeCommand: string; rtkBinary: string };
   /** Present only when the pinned official Codex Supermemory hook artifact is verified. */
@@ -431,7 +433,7 @@ export function buildCodexDeveloperTeamInstallPlan(input: BuildCodexInstallPlanI
           diagnostics.push({ code: gap, severity: "warning", message: "Optional provider configuration remains deferred because no verified Codex provider contract is available." });
         }
       }
-      const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers);
+      const mcp = mergeCodexMcpServers(config.content, desiredMcp.servers, { repairSelectedToolIds: input.repairSelectedToolIds });
       if (mcp.status === "blocked") {
         blocked = true;
         diagnostics.push(...mcp.diagnostics.map((message) => ({ code: "mcp-config-collision", severity: "error" as const, message })));

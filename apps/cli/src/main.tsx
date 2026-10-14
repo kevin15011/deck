@@ -2,7 +2,7 @@ import { formatLaunchDiagnostic, formatPlainDiagnostic, isQuietDiagnostic, shoul
 import React from "react";
 import { render, renderToString } from "ink";
 
-import { parseArgs } from "./cli-args";
+import { DAEMON_USAGE, parseArgs } from "./cli-args";
 import { getBuildInfo } from "./runtime/build-info";
 import { resolveProjectRoot } from "./project-root";
 import { createDefaultAdapterRegistry, deckInternalCommand } from "./runner-adapters";
@@ -93,7 +93,30 @@ if (parsed.command === "internal-session-mcp") {
 
 if (parsed.command === "internal-session-daemon") {
   const { runSessionDaemon } = await import("@deck/session-host");
-  process.exit(await runSessionDaemon({ version: getBuildInfo().version, anchorCommand: deckInternalCommand("child-anchor") }));
+  const { createCrossSessionService } = await import("./session-service");
+  const { WEB_ASSETS } = await import("./runtime/web-assets.generated");
+  const crossRunner = configStore.read().crossRunner;
+  process.exit(await runSessionDaemon({
+    version: getBuildInfo().version,
+    anchorCommand: deckInternalCommand("child-anchor"),
+    ...(crossRunner?.enabled ? { web: { config: crossRunner.web, assets: WEB_ASSETS } } : {}),
+    createService: (services) => createCrossSessionService(services, { configStore }),
+  }));
+}
+
+// Cross-runner terminal client and session management (XR-9.1, XR-9.2).
+if (parsed.command === "daemon-help") {
+  console.log(DAEMON_USAGE);
+  process.exit(0);
+}
+if (parsed.command === "daemon") {
+  const { runDaemonCli } = await import("./daemon-commands");
+  process.exit(await runDaemonCli(parsed.sub));
+}
+
+if (parsed.command === "cross-launch" || parsed.command === "session") {
+  const { runSessionCli } = await import("./session-cli");
+  process.exit(await runSessionCli(parsed, { configStore, projectRoot: () => resolveProjectRoot() }));
 }
 
 if (parsed.command === "doctor") {

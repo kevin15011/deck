@@ -1,6 +1,6 @@
 /**
  * Claude Code stream-json mapper (XR-1.4, XR-4.5): one stdout JSON message in, normalized
- * driver events out. Pure and stateless apart from one-shot diagnostics; unknown shapes
+ * driver events out. Tracks the current streamed message id and one-shot diagnostics; unknown shapes
  * become `runner.unmapped` with raw, never an exception.
  *
  * Shapes verified against 2.1.296 recordings in `__fixtures__/2.1.296` (tool_use/tool_result
@@ -82,12 +82,14 @@ function toolText(content: unknown): string {
 
 export class ClaudeStreamMapper {
   private hookReported = false;
+  private streamingMessageId?: string;
 
   map(message: unknown): MapOutput {
     if (!isObj(message)) return { events: [] };
     switch (message.type) {
       case "system": return this.system(message);
       case "assistant": return this.assistant(message);
+      case "stream_event": return this.streamEvent(message);
       case "user": return this.user(message);
       case "rate_limit_event": return this.rateLimit(message);
       case "result": return this.result(message);
@@ -134,6 +136,31 @@ export class ClaudeStreamMapper {
         raw,
       }],
     };
+  }
+
+  private streamEvent(m: Record<string, unknown>): MapOutput {
+    const event = isObj(m.event) ? m.event : {};
+    const type = str(event.type) ?? "unknown";
+    if (type === "message_start") {
+      this.streamingMessageId = isObj(event.message) ? str(event.message.id) : undefined;
+      return { events: [] };
+    }
+    if (type === "content_block_delta") {
+      const delta = isObj(event.delta) ? event.delta : {};
+      if (delta.type === "text_delta" && typeof delta.text === "string") {
+        return { events: delta.text.length ? [{ kind: "message.delta", data: { ...(this.streamingMessageId ? { messageId: this.streamingMessageId } : {}), text: delta.text } }] : [] };
+      }
+      // Thinking and tool input are emitted from the authoritative assistant blocks,
+      // keeping partial JSON and reasoning out of visible assistant text.
+      if (["thinking_delta", "signature_delta", "input_json_delta"].includes(String(delta.type))) return { events: [] };
+      return { events: [this.unmapped(`stream_event/content_block_delta/${str(delta.type) ?? "unknown"}`, m)] };
+    }
+    if (type === "message_stop") {
+      this.streamingMessageId = undefined;
+      return { events: [] };
+    }
+    if (["content_block_start", "content_block_stop", "message_delta"].includes(type)) return { events: [] };
+    return { events: [this.unmapped(`stream_event/${type}`, m)] };
   }
 
   private assistant(m: Record<string, unknown>): MapOutput {

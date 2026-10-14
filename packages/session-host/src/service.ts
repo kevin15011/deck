@@ -18,6 +18,8 @@ export interface SessionService {
   query?(name: string, args: unknown): Promise<CommandOutcome> | CommandOutcome;
   /** View of a task for the bridge's `deck_status` tool. Optional: the daemon falls back to the grant itself. */
   taskStatus?(grant: CredentialGrant): unknown;
+  /** Authenticated task tool effects; bridge owns credential lookup, host validates ownership. */
+  callTaskTool?(grant: CredentialGrant, name: string, args: unknown, context: { signal?: AbortSignal }): Promise<CommandOutcome>;
   /** Release resources on daemon stop (logs, handles). */
   close?(): Promise<void> | void;
 }

@@ -13,7 +13,9 @@ export type DriverProbe = {
 };
 
 /** Launch spec of one MCP server of a child. Secrets are file paths in `env`, never values. */
-export type ChildMcpServerSpec = { command: string; args: readonly string[]; env: Readonly<Record<string, string>> };
+export type ChildMcpServerSpec =
+  | { transport?: "stdio"; command: string; args: readonly string[]; env: Readonly<Record<string, string>> }
+  | { transport: "http"; url: string; /** Header name to environment variable NAME; never a resolved credential. */ envHttpHeaders?: Readonly<Record<string, string>> };
 
 export type DriverTaskInput = {
   taskId: string; memberId: string; cwd: string; assignment: RunnerQualifiedAssignment;
@@ -62,7 +64,7 @@ export type DriverHostIo = {
   writePrivateFile(name: string, content: string): string;
 };
 
-export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-forced" | "failed"; error?: string };
+export type TurnOutcome = { status: "completed" | "interrupted" | "interrupted-forced" | "failed"; error?: string; reasonCode?: "native-session-not-found" };
 
 export type DriverTaskHandle = {
   nativeSessionId: Promise<string>;

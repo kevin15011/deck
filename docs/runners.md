@@ -9,6 +9,8 @@ Deck is runner-aware rather than runner-agnostic. The CLI registers operational 
 
 ## Support status
 
+For a team whose members use different native CLIs, see [cross-runner sessions](cross-runner-sessions.md). That experimental daemon/client surface has its own driver matrix and approval policy; the native workflows below remain available independently.
+
 | Runtime | Status | Deck behavior |
 |---|---|---|
 | Pi | **Supported** (Pi >= 1.0.0) | Detects the binary, enforces the minimum version, reviews tools and MCP, configures capabilities, materializes the Developer Team globally under the Pi agent directory, and launches `deck pi developer` with Pi's normal interactive TUI. |
@@ -112,7 +114,9 @@ Codex preflight requires Codex 0.145.0 or newer, checks the launch routes (`exec
 
 Before the first launch, sign in with `codex login`. Because the configuration is global, project trust is not required for Deck's agents, skills, MCP servers or hooks, and Deck never changes trust.
 
-Ownership is strict: Deck writes only files recorded in its manifest (with their hashes) and its own marker blocks in `config.toml`. Your `hooks.json`, `AGENTS.md`, other agents and skills, and your own MCP servers are never edited; a file or skill that already uses a Deck name blocks the plan with a clear message instead of being overwritten. If you already registered the same executable as one of Deck's MCP servers (for example `codebase-memory-mcp`), Deck leaves yours in place and does not add a second server.
+Ownership is strict: automatic reconciliation writes only files recorded in Deck's manifest (with their hashes) and its own marker blocks in `config.toml`. Your `hooks.json`, `AGENTS.md`, other agents and skills remain untouched; a file or skill that already uses a Deck name blocks the plan with a clear message instead of being overwritten. If you already registered the same executable as one of Deck's MCP servers (for example `codebase-memory-mcp`), Deck leaves yours in place and does not add a second server.
+
+Review & Install can also repair the standard `context-mode` and `codebase-memory` MCP entries when those tools are selected: it replaces an old or bare executable path with the verified path and supplies Context Mode's `mcp` argument. This uses the normal configuration backup and rollback, preserves comments and per-tool approvals, and does not take ownership of the entry. Custom commands, arguments, environment settings, and other same-name MCP conflicts still block the plan. A normal launch without an explicit install selection never performs this repair.
 
 Review & Install for Codex can include:
 

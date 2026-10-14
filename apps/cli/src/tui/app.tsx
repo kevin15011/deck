@@ -115,6 +115,8 @@ import { resolveProjectRoot } from "../project-root";
 import { detectSelectedRuntimes, type EnvironmentId, type RuntimeStatus } from "../runtime-detection";
 import { spawnSync } from "../runtime/process";
 import { MenuList } from "./components/menu-list";
+import { CrossConfigurationFlow } from "./cross-configuration-flow";
+import { pickerRunner, type ModelPickerTarget } from "./cross-config";
 import { ScreenFrame } from "./screen-frame";
 import {
   AgentModelAssignmentScreen,
@@ -178,6 +180,7 @@ import type { BackupManifest } from "../upgrade-command/backup-store";
 
 type Screen =
   | "home"
+  | "cross-configuration"
   | "upgrade-confirm"
   | "upgrade-progress"
   | "rollback-confirm"
@@ -852,6 +855,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     : dependencies.getAdapter ?? getAdapter;
   const runnerOptions = buildRunnerMenuOptions(adapterRegistry);
   const environmentOptions = buildEnvironmentMenuOptions(adapterRegistry, getEnvironmentOptions());
+  const installationOptions = [...environmentOptions, { value: "cross", label: "Cross runner · member configuration", available: true }];
   const projectRootFor = dependencies.resolveProjectRoot ?? resolveProjectRoot;
   const releaseCheckFor = dependencies.runReleaseCheck ?? runReleaseCheckWithTimeout;
   const stageReleaseAssetsFor = dependencies.stageReleaseAssets ?? stageReleaseAssets;
@@ -919,7 +923,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   const [modelConfigSaving, setModelConfigSaving] = useState(false);
   const [modelConfigError, setModelConfigError] = useState<string | null>(null);
   const [modelConfigSource, setModelConfigSource] = useState<"install" | "menu" | "dashboard" | null>(null);
-  const [modelConfigRuntime, setModelConfigRuntime] = useState<RunnerId>("pi");
+  const [modelPickerTarget, setModelPickerTarget] = useState<ModelPickerTarget>({ kind: "runner-native", runnerId: "pi" });
+  const modelConfigRuntime = pickerRunner(modelPickerTarget);
+  const setModelConfigRuntime = (runnerId: RunnerId) => setModelPickerTarget({ kind: "runner-native", runnerId });
   const openCodeProjectRootRef = useRef(localResolvedProjectRoot ?? process.cwd());
   const codexProjectRootRef = useRef(localResolvedProjectRoot ?? process.cwd());
   const openCodeDiscoveryCoordinatorRef = useRef<OpenCodeDiscoveryCoordinator<TuiOpenCodeDiscoveryState> | null>(null);
@@ -1183,6 +1189,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
   }, []);
 
   useInput((input, key) => {
+    if (screen === "cross-configuration") return;
     if (modelConfigSavingRef.current) return;
     try { appendFileSync("/tmp/deck-debug.txt", `useInput TOP: key=${JSON.stringify(key)} screen=${screen}\n`); } catch {}
     try {
@@ -2209,7 +2216,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
       const teams = adapterFor(env).getTeams(env) as any[];
       return Math.max(0, teams.length - 1);
     }
-    if (screen === "environment-selection") return environmentOptions.length - 1;
+    if (screen === "environment-selection") return installationOptions.length - 1;
     if (screen === "optional-tools") return getAdapter("pi").getSelectableTools().length - 1;
     if (screen === "installation-review") return 1;
     if (screen === "team-selection") return Math.max(0, getAdapter("pi").getTeams("pi-development").length - 1);
@@ -2255,7 +2262,8 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 
   function toggleCurrent() {
     if (screen === "environment-selection") {
-      const option = environmentOptions[cursor];
+      const option = installationOptions[cursor];
+      if (option?.value === "cross") { resetCursor("cross-configuration"); return; }
       if (!option || option.available === false) return;
       const id = option.value as EnvironmentId;
       setSelectedEnvironments((current) =>
@@ -2412,6 +2420,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
     }
 
     if (screen === "environment-selection") {
+      if (installationOptions[cursor]?.value === "cross") { resetCursor("cross-configuration"); return; }
       debug(`continueFromCurrent: environment-selection screen, selectedEnvironments.length=${selectedEnvironments.length}`);
       if (selectedEnvironments.length === 0) { debug("continueFromCurrent: no env selected, returning"); return; }
       const nextScreen = getNextScreenAfterEnvironmentSelection({
@@ -3862,8 +3871,9 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
         <ModelTeamSelectionScreen cursor={modelTeamCursor} environment={selectedModelEnvironment} teams={adapterFor(selectedModelEnvironment).getTeams(selectedModelEnvironment) as any[]} />
       ) : null}
       {screen === "environment-selection" ? (
-        <EnvironmentSelectionScreen cursor={cursor} selected={selectedEnvironments} options={environmentOptions} />
+        <EnvironmentSelectionScreen cursor={cursor} selected={selectedEnvironments} options={installationOptions} />
       ) : null}
+      {screen === "cross-configuration" ? <CrossConfigurationFlow registry={adapterRegistry} store={requiredConfigStore} projectRoot={localResolvedProjectRoot ?? process.cwd()} onBack={() => resetCursor("environment-selection")} onSaved={() => { setDashboardCompletionStatus("Cross runner configuration saved. Start a session with deck cross developer."); resetCursor("complete"); }} /> : null}
       {screen === "personality-selection" ? (
         <PersonalitySelectionScreen cursor={cursor} selected={selectedPersonality} />
       ) : null}
@@ -3990,6 +4000,7 @@ export function DeckApp(dependencies: DeckAppDependencies = {}) {
 function screenTitle(screen: Screen, runnerLabel?: string): string {
   const titles: Record<Screen, string> = {
     home: "Deck",
+    "cross-configuration": "Cross runner configuration",
     "upgrade-confirm": "Update Deck",
     "upgrade-progress": "Update Deck",
     "rollback-confirm": "Rollback Deck",

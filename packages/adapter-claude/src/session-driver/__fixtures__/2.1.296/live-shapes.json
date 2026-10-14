@@ -1,0 +1,670 @@
+{
+  "schema": "deck-session-contract-shapes-v1",
+  "runner": "claude",
+  "version": "2.1.296",
+  "source": "existing recorded and synthetic JSONL mapper fixtures",
+  "shapes": {
+    "diagnostic.data": [
+      "object"
+    ],
+    "diagnostic.data.code": [
+      "string"
+    ],
+    "diagnostic.data.hookEvent": [
+      "string"
+    ],
+    "diagnostic.data.hookName": [
+      "string"
+    ],
+    "diagnostic.data.tools": [
+      "array"
+    ],
+    "diagnostic.data.tools[]": [
+      "string"
+    ],
+    "message.completed.data": [
+      "object"
+    ],
+    "message.completed.data.messageId": [
+      "string"
+    ],
+    "message.completed.data.text": [
+      "string"
+    ],
+    "message.completed.raw": [
+      "object"
+    ],
+    "message.completed.raw.aborted": [
+      "boolean"
+    ],
+    "message.completed.raw.message": [
+      "object"
+    ],
+    "message.completed.raw.message.container": [
+      "null"
+    ],
+    "message.completed.raw.message.content": [
+      "array"
+    ],
+    "message.completed.raw.message.content[]": [
+      "object"
+    ],
+    "message.completed.raw.message.content[].id": [
+      "string"
+    ],
+    "message.completed.raw.message.content[].input": [
+      "object"
+    ],
+    "message.completed.raw.message.content[].input.command": [
+      "string"
+    ],
+    "message.completed.raw.message.content[].input.description": [
+      "string"
+    ],
+    "message.completed.raw.message.content[].name": [
+      "string"
+    ],
+    "message.completed.raw.message.content[].text": [
+      "string"
+    ],
+    "message.completed.raw.message.content[].type": [
+      "string"
+    ],
+    "message.completed.raw.message.context_management": [
+      "null"
+    ],
+    "message.completed.raw.message.diagnostics": [
+      "null",
+      "object"
+    ],
+    "message.completed.raw.message.diagnostics.cache_miss_reason": [
+      "object"
+    ],
+    "message.completed.raw.message.diagnostics.cache_miss_reason.cache_missed_input_tokens": [
+      "number"
+    ],
+    "message.completed.raw.message.diagnostics.cache_miss_reason.type": [
+      "string"
+    ],
+    "message.completed.raw.message.id": [
+      "string"
+    ],
+    "message.completed.raw.message.input_transformations": [
+      "array"
+    ],
+    "message.completed.raw.message.model": [
+      "string"
+    ],
+    "message.completed.raw.message.role": [
+      "string"
+    ],
+    "message.completed.raw.message.stop_details": [
+      "null"
+    ],
+    "message.completed.raw.message.stop_reason": [
+      "null",
+      "string"
+    ],
+    "message.completed.raw.message.stop_sequence": [
+      "null"
+    ],
+    "message.completed.raw.message.type": [
+      "string"
+    ],
+    "message.completed.raw.message.usage": [
+      "object"
+    ],
+    "message.completed.raw.message.usage.cache_creation": [
+      "object"
+    ],
+    "message.completed.raw.message.usage.cache_creation_input_tokens": [
+      "number"
+    ],
+    "message.completed.raw.message.usage.cache_creation.ephemeral_1h_input_tokens": [
+      "number"
+    ],
+    "message.completed.raw.message.usage.cache_creation.ephemeral_5m_input_tokens": [
+      "number"
+    ],
+    "message.completed.raw.message.usage.cache_read_input_tokens": [
+      "number"
+    ],
+    "message.completed.raw.message.usage.inference_geo": [
+      "string"
+    ],
+    "message.completed.raw.message.usage.input_tokens": [
+      "number"
+    ],
+    "message.completed.raw.message.usage.output_tokens": [
+      "number"
+    ],
+    "message.completed.raw.message.usage.service_tier": [
+      "string"
+    ],
+    "message.completed.raw.parent_tool_use_id": [
+      "null"
+    ],
+    "message.completed.raw.request_id": [
+      "string"
+    ],
+    "message.completed.raw.session_id": [
+      "string"
+    ],
+    "message.completed.raw.timestamp": [
+      "string"
+    ],
+    "message.completed.raw.type": [
+      "string"
+    ],
+    "message.completed.raw.uuid": [
+      "string"
+    ],
+    "rate-limit.data": [
+      "object"
+    ],
+    "rate-limit.data.rateLimitType": [
+      "string"
+    ],
+    "rate-limit.data.resetsAt": [
+      "number"
+    ],
+    "rate-limit.data.status": [
+      "string"
+    ],
+    "rate-limit.data.utilization": [
+      "number"
+    ],
+    "rate-limit.raw": [
+      "object"
+    ],
+    "rate-limit.raw.rate_limit_info": [
+      "object"
+    ],
+    "rate-limit.raw.rate_limit_info.isUsingOverage": [
+      "boolean"
+    ],
+    "rate-limit.raw.rate_limit_info.overageEnabled": [
+      "boolean"
+    ],
+    "rate-limit.raw.rate_limit_info.overageStatus": [
+      "string"
+    ],
+    "rate-limit.raw.rate_limit_info.rateLimitType": [
+      "string"
+    ],
+    "rate-limit.raw.rate_limit_info.resetsAt": [
+      "number"
+    ],
+    "rate-limit.raw.rate_limit_info.status": [
+      "string"
+    ],
+    "rate-limit.raw.rate_limit_info.unifiedWindows": [
+      "object"
+    ],
+    "rate-limit.raw.rate_limit_info.unifiedWindows.five_hour": [
+      "object"
+    ],
+    "rate-limit.raw.rate_limit_info.unifiedWindows.five_hour.resetsAt": [
+      "number"
+    ],
+    "rate-limit.raw.rate_limit_info.unifiedWindows.five_hour.utilization": [
+      "number"
+    ],
+    "rate-limit.raw.rate_limit_info.unifiedWindows.seven_day": [
+      "object"
+    ],
+    "rate-limit.raw.rate_limit_info.unifiedWindows.seven_day.resetsAt": [
+      "number"
+    ],
+    "rate-limit.raw.rate_limit_info.unifiedWindows.seven_day.utilization": [
+      "number"
+    ],
+    "rate-limit.raw.rate_limit_info.utilization": [
+      "number"
+    ],
+    "rate-limit.raw.session_id": [
+      "string"
+    ],
+    "rate-limit.raw.type": [
+      "string"
+    ],
+    "rate-limit.raw.uuid": [
+      "string"
+    ],
+    "runner.unmapped.data": [
+      "object"
+    ],
+    "runner.unmapped.data.type": [
+      "string"
+    ],
+    "runner.unmapped.raw": [
+      "object"
+    ],
+    "runner.unmapped.raw.data": [
+      "object"
+    ],
+    "runner.unmapped.raw.data.x": [
+      "number"
+    ],
+    "runner.unmapped.raw.payload": [
+      "object"
+    ],
+    "runner.unmapped.raw.payload.note": [
+      "string"
+    ],
+    "runner.unmapped.raw.payload.token": [
+      "string"
+    ],
+    "runner.unmapped.raw.session_id": [
+      "string"
+    ],
+    "runner.unmapped.raw.subtype": [
+      "string"
+    ],
+    "runner.unmapped.raw.type": [
+      "string"
+    ],
+    "runner.unmapped.raw.value": [
+      "number"
+    ],
+    "tool.completed.data": [
+      "object"
+    ],
+    "tool.completed.data.isError": [
+      "boolean"
+    ],
+    "tool.completed.data.output": [
+      "string"
+    ],
+    "tool.completed.data.toolUseId": [
+      "string"
+    ],
+    "tool.started.data": [
+      "object"
+    ],
+    "tool.started.data.input": [
+      "object"
+    ],
+    "tool.started.data.input.command": [
+      "string"
+    ],
+    "tool.started.data.input.description": [
+      "string"
+    ],
+    "tool.started.data.name": [
+      "string"
+    ],
+    "tool.started.data.toolUseId": [
+      "string"
+    ],
+    "turn.started.data": [
+      "object"
+    ],
+    "turn.started.data.claudeCodeVersion": [
+      "string"
+    ],
+    "turn.started.data.mcpServers": [
+      "array"
+    ],
+    "turn.started.data.mcpServers[]": [
+      "string"
+    ],
+    "turn.started.data.model": [
+      "string"
+    ],
+    "turn.started.data.nativeSessionId": [
+      "string"
+    ],
+    "turn.started.raw": [
+      "object"
+    ],
+    "turn.started.raw.apiKeySource": [
+      "string"
+    ],
+    "turn.started.raw.claude_code_version": [
+      "string"
+    ],
+    "turn.started.raw.cwd": [
+      "string"
+    ],
+    "turn.started.raw.mcp_servers": [
+      "array"
+    ],
+    "turn.started.raw.mcp_servers[]": [
+      "object"
+    ],
+    "turn.started.raw.mcp_servers[].name": [
+      "string"
+    ],
+    "turn.started.raw.mcp_servers[].source": [
+      "string"
+    ],
+    "turn.started.raw.mcp_servers[].status": [
+      "string"
+    ],
+    "turn.started.raw.model": [
+      "string"
+    ],
+    "turn.started.raw.permissionMode": [
+      "string"
+    ],
+    "turn.started.raw.session_id": [
+      "string"
+    ],
+    "turn.started.raw.subtype": [
+      "string"
+    ],
+    "turn.started.raw.tools": [
+      "array"
+    ],
+    "turn.started.raw.tools[]": [
+      "string"
+    ],
+    "turn.started.raw.type": [
+      "string"
+    ],
+    "usage.data": [
+      "object"
+    ],
+    "usage.data.cacheCreationTokens": [
+      "number",
+      "undefined"
+    ],
+    "usage.data.cacheReadTokens": [
+      "number",
+      "undefined"
+    ],
+    "usage.data.costUsd": [
+      "number"
+    ],
+    "usage.data.durationMs": [
+      "number"
+    ],
+    "usage.data.inputTokens": [
+      "number"
+    ],
+    "usage.data.numTurns": [
+      "number"
+    ],
+    "usage.data.outputTokens": [
+      "number"
+    ],
+    "usage.raw": [
+      "object"
+    ],
+    "usage.raw.api_error_status": [
+      "null"
+    ],
+    "usage.raw.duration_api_ms": [
+      "number"
+    ],
+    "usage.raw.duration_ms": [
+      "number"
+    ],
+    "usage.raw.errors": [
+      "array"
+    ],
+    "usage.raw.errors[]": [
+      "string"
+    ],
+    "usage.raw.fast_mode_disabled_reason": [
+      "string"
+    ],
+    "usage.raw.fast_mode_state": [
+      "string"
+    ],
+    "usage.raw.first_content_frame_ms": [
+      "number"
+    ],
+    "usage.raw.is_error": [
+      "boolean"
+    ],
+    "usage.raw.modelUsage": [
+      "object"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>": [
+      "object"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.cacheCreationInputTokens": [
+      "number"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.cacheReadInputTokens": [
+      "number"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.canonicalModel": [
+      "string"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.contextWindow": [
+      "number"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.costBasis": [
+      "string"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.costUSD": [
+      "number"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.inputTokens": [
+      "number"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.maxOutputTokens": [
+      "number"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.outputTokens": [
+      "number"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.provider": [
+      "string"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.thinkingTokens": [
+      "number"
+    ],
+    "usage.raw.modelUsage.<dynamic-key>.webSearchRequests": [
+      "number"
+    ],
+    "usage.raw.num_turns": [
+      "number"
+    ],
+    "usage.raw.permission_denials": [
+      "array"
+    ],
+    "usage.raw.permission_denials[]": [
+      "object"
+    ],
+    "usage.raw.permission_denials[].tool_input": [
+      "object"
+    ],
+    "usage.raw.permission_denials[].tool_input.command": [
+      "string"
+    ],
+    "usage.raw.permission_denials[].tool_name": [
+      "string"
+    ],
+    "usage.raw.permission_denials[].tool_use_id": [
+      "string"
+    ],
+    "usage.raw.queued_turn_count": [
+      "number"
+    ],
+    "usage.raw.result": [
+      "string"
+    ],
+    "usage.raw.result_index": [
+      "number"
+    ],
+    "usage.raw.safety_stops": [
+      "number"
+    ],
+    "usage.raw.session_id": [
+      "string"
+    ],
+    "usage.raw.stop_reason": [
+      "null",
+      "string"
+    ],
+    "usage.raw.subagent_stats": [
+      "object"
+    ],
+    "usage.raw.subagent_stats.by_type": [
+      "object"
+    ],
+    "usage.raw.subagent_stats.completed": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.failed": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.killed": [
+      "object"
+    ],
+    "usage.raw.subagent_stats.killed.parent": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.killed.system": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.killed.user": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.max_depth": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.refused": [
+      "object"
+    ],
+    "usage.raw.subagent_stats.refused.budget": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.refused.concurrency_limit": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.refused.depth_limit": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.requested": [
+      "object"
+    ],
+    "usage.raw.subagent_stats.requested.background": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.requested.foreground": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.requested.unset": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.spawned": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.spawned_by_subagents": [
+      "number"
+    ],
+    "usage.raw.subagent_stats.started_in_background": [
+      "number"
+    ],
+    "usage.raw.subtype": [
+      "string"
+    ],
+    "usage.raw.terminal_reason": [
+      "string"
+    ],
+    "usage.raw.time_to_request_ms": [
+      "number"
+    ],
+    "usage.raw.total_cost_usd": [
+      "number"
+    ],
+    "usage.raw.ttft_ms": [
+      "number"
+    ],
+    "usage.raw.ttft_stream_ms": [
+      "number"
+    ],
+    "usage.raw.type": [
+      "string"
+    ],
+    "usage.raw.usage": [
+      "object"
+    ],
+    "usage.raw.usage.cache_creation": [
+      "object"
+    ],
+    "usage.raw.usage.cache_creation_input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.cache_creation.ephemeral_1h_input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.cache_creation.ephemeral_5m_input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.cache_read_input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.fallback_credit": [
+      "null"
+    ],
+    "usage.raw.usage.inference_geo": [
+      "string"
+    ],
+    "usage.raw.usage.input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.iterations": [
+      "array"
+    ],
+    "usage.raw.usage.iterations[]": [
+      "object"
+    ],
+    "usage.raw.usage.iterations[].cache_creation": [
+      "object"
+    ],
+    "usage.raw.usage.iterations[].cache_creation_input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.iterations[].cache_creation.ephemeral_1h_input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.iterations[].cache_creation.ephemeral_5m_input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.iterations[].cache_read_input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.iterations[].input_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.iterations[].output_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.iterations[].type": [
+      "string"
+    ],
+    "usage.raw.usage.output_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.output_tokens_details": [
+      "object"
+    ],
+    "usage.raw.usage.output_tokens_details.thinking_tokens": [
+      "number"
+    ],
+    "usage.raw.usage.server_tool_use": [
+      "object"
+    ],
+    "usage.raw.usage.server_tool_use.web_fetch_requests": [
+      "number"
+    ],
+    "usage.raw.usage.server_tool_use.web_search_requests": [
+      "number"
+    ],
+    "usage.raw.usage.service_tier": [
+      "string"
+    ],
+    "usage.raw.usage.speed": [
+      "string"
+    ],
+    "usage.raw.uuid": [
+      "string"
+    ]
+  }
+}

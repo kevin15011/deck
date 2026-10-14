@@ -19,6 +19,19 @@ Support labels are scoped to a surface. “Supported” for one capability does 
 | **Known gap** | The boundary is recognized and not represented as a complete supported path. |
 | **Not shipped** | The named product surface is not part of the current Deck distribution. |
 
+## Cross-runner session drivers
+
+Cross sessions are an **experimental**, separate execution surface. Native install/launch support below does not imply session-driver support. See [cross-runner sessions](../cross-runner-sessions.md) for configuration, security and recovery.
+
+| Driver | Tested native version | Default approvals | MCP and hook isolation |
+|---|---|---|---|
+| Claude | 2.1.296 | Relay; native CLI login | Explicit strict MCP file; hooks disabled; native delegation excluded |
+| Codex | 0.162.1 | Runner default (unrestricted); relay opt-in | Effective-config inventory, inherited entries disabled, namespaced child MCPs, runtime inventory verified, hooks and native delegation disabled |
+| OpenCode | 1.18.31 | Relay | Private configuration directory; explicit MCP set checked through the native server; native task tool denied |
+| Pi | No driver | — | Native Pi workflow remains separate |
+
+Versions below a driver's minimum block startup; newer untested versions report degraded readiness. Unknown native events remain available as bounded, redacted raw events. Native authentication remains owned by the native CLI. Exact verification and platform limitations are recorded in [apply progress](../../openspec/changes/cross-runner-session-core/apply-progress.md).
+
 ## Operational runner matrix
 
 Pi and OpenCode are operational Deck runners. Codex and Claude have route-limited adapters; Codex adds Deck-owned shared tools, hooks, and the official Supermemory plugin, and Claude carries the Developer Team in a Deck-owned global plugin. The cells use the status vocabulary above; runner-specific details are described below the table.

@@ -1,5 +1,13 @@
 # Apply Progress: Cross-Runner Session Core
 
+## Current follow-up — canary feedback (2026-10-13)
+
+The user requested direct local browser access without code entry, removal of the Claude subscription notice, and investigation of slow responses. This feedback reopens Apply for the same candidate and supersedes the earlier manual local-pairing and Claude acknowledgement decisions. Local browser access will bootstrap a device cookie automatically under exact loopback peer/Host/Origin checks; forwarded/remote access retains device authentication. Claude setup/start will no longer require or synthesize acknowledgement; legacy configuration remains readable. Response latency requires measured evidence before attribution or optimization. Earlier completion/review records below describe the pre-feedback candidate.
+
+### Follow-up completion
+
+Implemented and independently approved on 2026-10-13. Final frozen suite: 6,421 pass, 3 skip, 0 fail (473 files); TypeScript, release verification, four-target build, Darwin/Linux arm64 compiled acceptance and desktop browser acceptance passed. Final native managed MCP acceptance: 9,351 ms cold preparation, 11 ms retained health check, canonical cache preserved and owned namespace removed. Both final review blockers were repaired: rejected native drain now persists ownership-unsettled; Claude initialization rejects failed/pending/missing expected MCP status. Full evidence and limits are in the follow-up verification/review sections. Installed canary and existing user daemons remain untouched; no commit or publication.
+
 ## Stage S0 — Contracts and configuration (2026-10-12)
 
 Branch `fix/claude-model-config-blocked-plan`; commits are conventional and local only (nothing pushed).
@@ -97,3 +105,173 @@ TDD note: for 1.5 the anchor and fixtures were drafted before their tests; I the
 ### Not run
 - Real Linux execution (Linux `/proc` identity path is tested only with synthetic stat data; Docker sandbox not run). Windows is unsupported (the supervisor throws).
 - 4-target build, Docker Linux smoke, `canary:install`, S1 BIN gate items for fake `claude` (1.19), live provider calls.
+
+## S1b resumption — 2026-10-12
+
+The user requested continuation from `HANDOFF.md`. Initial checks confirmed committed Claude driver (`8457578`) and SessionManager (`5c2b50c`), with unfinished CLI/terminal/self-test/smoke files in the worktree. Unrelated Codex MCP repair, dashboard, and runner documentation changes are preserved. Registry state is reconciled to Apply in progress; earlier sections above remain historical evidence.
+
+### Initial and live evidence
+
+- `bunx tsc --noEmit`: clean on resumption.
+- `TMPDIR=$(realpath /tmp) bun test packages/session-host packages/core/src/session`: 322 pass, 0 fail.
+- Claude driver focused suite: 51 pass, 0 fail.
+- **Task 1.13 / 1.14 live check:** `TMPDIR=$(realpath /tmp) bun run scripts/session-contract-live.ts claude --model haiku`, bounded by a 100-second parent timeout, exited 0. All eight checks passed against Claude 2.1.296: version probe; first turn completion; explicit MCP set exactly `deck`; caller-assigned native session id; no marker hooks/hook diagnostic; mapped assistant text; retained context on resume; cooperative SIGINT interruption. The script used two small test exchanges and interrupted the third turn after four seconds. Temporary script artifacts were cleaned up.
+- **Safe-mode decision:** existing recorded `safe-mode-init.jsonl` and its fixture README document that Claude 2.1.296 drops the explicit MCP set under `--safe-mode`. The driver therefore uses strict MCP config and disabled hooks. That historical safe-mode probe was not repeated in this resumption.
+- Docker runtime check failed because the local daemon socket is absent. Linux runtime smoke remains pending, independently of cross-compilation.
+
+### Independent review and repair in progress
+
+- SessionManager reused task id `lead` across sessions while credential revocation and approval cancellation were globally keyed by task id. Scope cleanup to session plus task.
+- Approval responses checked session ownership after mutating the broker. Reject foreign-session approvals before any effect.
+- Terminal reattach replayed only the last 100 events, losing earlier pending approvals/task state; reconstruct state from complete replay while limiting displayed conversation history.
+- Terminal lifecycle and approval retry need explicit coverage for ended sessions, disconnected daemon, and rejected responses.
+- CLI composition supplied only the Deck MCP bridge. Ordinary configured runner packages must be composed explicitly to satisfy XR-4.4; memory/web broker work retains its S3 scope.
+- Smoke helper must copy its fixture outside the repository and own spawned process handles so failures cannot leave terminal/daemon processes behind or signal stale persisted PIDs.
+
+### Completed repairs and focused verification
+
+- Scoped credential revocation and approval cancellation by `(sessionId, taskId)`; denied cross-session approval responses before broker mutation. Regression tests demonstrated the previous failures.
+- Terminal state now replays the complete event history with a bounded display tail. Failed approval responses remain retryable; daemon disconnect and session-end stop further input commands.
+- `ClaudeSessionMcpAdapter.readSessionMcpServers()` reuses authenticated Deck selection, canonical executable verification and read-only Serena readiness. It resolves ordinary MCP packages without installation or credential reads. The shared `RunnerAdapter` interface is unchanged.
+- Production composition resolves MCP packages for each turn through an async factory returning an isolated `ChildMcpResolver`. Missing/untrusted selected tooling fails before driver startup. Concurrent-session tests prove that resolved package snapshots do not mix.
+- Smoke copies its fixture into temporary storage, retains subprocess handles for cleanup, and scans all command/daemon output, fake invocation logs and persisted state for repository paths. It explicitly starts the daemon; auto-start remains covered by the existing daemon tests.
+- Final owner-focused suite: **204 pass, 0 fail, 562 assertions, 11 files**. Independent Quality: **110 pass** for host/terminal repairs, then **59 pass** for final manager/service/Claude MCP composition. No unresolved blocker in the reviewed S1 candidate.
+- Final Lead `bunx tsc --noEmit` and `git diff --check`: clean.
+
+### Binary gate evidence
+
+- `npx -y bun@1.3.12 run scripts/build-binaries.ts`: all four targets built successfully. Archives and `checksums.txt` are in `dist/cli`; no tracked generated-file diff was produced.
+- **Darwin arm64:** extracted binary outside the repository, fresh HOME/XDG/cwd, fake Claude, **19/19 smoke checks passed**. Includes self-test, ToS command, daemon status, prompt/response, detach/list/stop, private state modes, strict MCP flags, credential cleanup and no repository paths.
+- **Linux arm64:** the same **19/19 checks passed** as unprivileged `bun` in a disposable `oven/bun:1.3.12` container, `--network none`, with no repository or credential mounts. Only the compiled binary and smoke harness/fixture were copied in. Container removed after exit. This supplies actual no-repository runtime evidence; the other-architecture Linux and Darwin binaries are build-verified only.
+- Environment deviation: used the minimal Bun container instead of building the repository installation-sandbox image, which was not cached. The smoke uses a fake runner and requires no installation of real runner CLIs.
+- Live configured third-party MCP combinations were not exercised; their composition is verified by focused tests. The live Claude check used the explicit `deck` MCP fixture. S3 remains responsible for shared memory/web integration.
+
+### Broad-suite reconciliation
+
+`TMPDIR=$(realpath /tmp) npx -y bun@1.3.12 test --timeout 30000`: **6230 pass, 3 skip, 3 fail**, 454 files, 329.86 seconds. Failures:
+
+1. OpenCode SSH-alias profile launch expectation: previously recorded in the S0/S1a baseline above; unrelated files preserved.
+2. Pi production preference audit: previously recorded in the S0/S1a baseline above; Pi source untouched.
+3. Obsolete S1a assertion expecting `session-manager-unavailable`; production now correctly returns `cross-runner-not-configured`. Updated assertion/comment without product changes; focused recheck recorded below.
+
+Pinned Bun removed the older skill-bundle toolchain failure; the earlier Codex timeout did not recur. The repository-wide ledger remains stale relative to this branch; the two remaining baseline failures are referenced to the historical evidence above, not relabeled as passes. The full suite was not rerun after the assertion-only correction.
+
+After the broad run finished, `TMPDIR=$(realpath /tmp) bun test apps/cli/src/internal-session-commands.test.ts`: **4 pass, 0 fail, 15 assertions**. No production change was needed, so the compiled-binary evidence remains applicable. OpenSpec validation: 1 change, 0 errors, 0 warnings.
+
+**Checkpoint:** tasks 1.11–1.19 implemented and verified with the documented baseline/platform limitations. Continue at S2 (2.1–2.8). This is not full-feature or release approval: delegation, shared services, web client and cross-runner TUI remain S3–S5 work. Resumption edits remain uncommitted; no push or canary installation occurred.
+
+## S2 — In progress (2026-10-12)
+
+The user explicitly instructed continuation through **all remaining phases**, not a stop after each stage. Codex and OpenCode driver implementations have separate owners; the Lead centralizes contracts, evidence and lifecycle records.
+
+- Codex isolation design correction: `--ignore-user-config` is an `exec` option, unavailable on app-server 0.162.1. Independent synthetic-config probe confirmed that empty MCP/plugin table overrides merge, while hooks/multi-agent boolean overrides take effect. Updated design/spec/task mechanism; readiness remains contingent on fail-closed effective and actual MCP-set checks plus live verification.
+- Shared composition is extending the existing read-only ordinary-MCP resolver to all registered drivers without changing native runner installation behavior.
+- S3 investigation identified the per-task host refactor and existing shared-memory composition seams; implementation follows S2 verification.
+- Additional Codex 0.162.1 synthetic-config evidence: quoting a segment in the dotted CLI override path creates a literal quoted key and does not disable the original plugin. A nonempty inline TOML table override (`plugins={"sentinel@fixture"={enabled=false}}`) correctly disables it, as does an equivalent MCP table. Driver serialization must handle names inside TOML values and verify effective specs, not trust an emitted flag or names alone.
+
+### S2 verification checkpoint
+
+- Codex adapter suite: 212 passed; final driver lifecycle suite: 22 passed. OpenCode final driver suite: 25 passed. Host manager lifecycle suite: 56 passed. Quality independently ran 98 targeted checks and required a final Codex shared drain barrier; its two delayed-drain regressions reproduced failure before the repair and now pass.
+- Native OpenCode 1.18.31 with `opencode/big-pickle`: 9/9 checks passed, including exact MCP/config/tool/schema isolation, native continuation and interruption. The harness had incorrectly queried `/tool/ids` (HTML fallback); the native OpenAPI document identifies `/experimental/tool/ids`, now used without relaxing the assertion.
+- Codex native isolation, continuation and interruption passed; decline coverage and versioned shape comparison are still pending, so S2 is not yet closed.
+- Four targets compiled. Extracted Darwin arm64 and unprivileged, network-disabled Linux arm64 each passed all 19 checks for each of Claude, Codex and OpenCode (57 per platform), with temporary HOME/XDG/project directories and no repository runtime paths. Linux has no repository or credential mounts. This build precedes the final Codex drain delta; the next stage build will include it. Other architectures remain build-only.
+- Evidence logs: `/tmp/deck-s2-four-target-build.log`, `/tmp/deck-s2-host-{claude,codex,opencode}.json`, `/tmp/deck-s2-linux-smoke.log`, `/tmp/deck-s2-opencode-live-fixed.log`. Broad suite is in progress in `/tmp/deck-s2-full-suite.log`.
+
+## S3 — In progress (2026-10-12)
+
+Host implementation and CLI shared-service composition have separate owners. The host owns task scheduling, authenticated delegation, lifecycle/continuity, deduplicated serialized memory writes and normalized events. CLI composition injects role prompts, the existing project-scoped Supermemory runtime and the configured web-search provider. Resume reseeding requires a typed `native-session-not-found` reason; authentication or transport errors do not trigger context replacement. S2's final native/shape checks continue independently.
+
+S2 native verification now passes: Codex **9/9**, including an actual escalated command request declined by the broker, and OpenCode **10/10**. Safe versioned shape manifests contain field paths/types only (Claude 219, Codex 295, OpenCode 125); default comparison rejects added/changed observed shapes while permitting absent optional fields. Three comparator/fixture tests passed. Capture proposals were reviewed and promoted; there was no additional provider call solely to rerun comparison against the just-captured baseline.
+
+The broad S2 run completed with **6297 pass, 3 skip, 4 fail**, 460 files, 340.80 seconds. Two match the previously documented OpenCode SSH-alias and Pi preference-audit failures. Two occurred while the workspace was being edited: the binary smoke detected repository changes in its containment snapshot, and the Codex drain regression ran against the earlier loaded source. The final pinned-Bun Codex focused suite independently passes **22/22**. Final broad verification must run with all source writers paused; these transient failures are not recorded as baseline exceptions.
+
+S4's loopback service is now being implemented in parallel, as allowed by the S1→S4 dependency. Its HTTP/WS boundary is recorded in design.md. Optional task 4.10 is deferred; no exposure command will be added or run for this delivery.
+
+### Existing broad-suite failures repaired without changing runner behavior
+
+- The OpenCode SSH-alias test changed `HOME` but canonical identity intentionally obtains the trusted home from the OS account database. Its generic `work` alias could therefore resolve through the real account configuration. The test now uses a unique untrusted alias while retaining the exact credential-profile and absent-canonical-tag assertions. No account files were read for diagnosis or modified.
+- The preference audit treated the embedded Pi process anchor's child-command forwarding expression as preference-dependent behavior. The audit now excludes only that exact forwarding expression in that exact file; all other argv references remain forbidden. Pi source is unchanged.
+- Both failures were reproduced in the S1/S2 broad runs. After the test-only corrections, the two complete affected files pass: **67 tests, 354 assertions** (`/tmp/deck-baseline-fixture-fixes.log`). No baseline exception or reduced product assertion was introduced.
+
+S3 CLI composition: **25 focused tests** pass, including the actual Supermemory runtime with a fake transport and authenticated production SessionManager memory operations/deduplication. S4 backend initial candidate: **87 focused tests** pass across security, WebSocket behavior, CLI parsing/commands and Doctor. Final integration review and frozen-source verification remain pending.
+
+## S4/S5 integration checkpoint
+
+- Web backend final initial candidate: **88 focused tests** pass. Desktop Playwright passed both the actual WebService/embedded assets flow and the source daemon with real session MCP approval relay. Compiled acceptance scripts are ready; these source-wrapper runs are not reported as compiled evidence.
+- Independent review found and fixed the task rail's `model`/`modelId` mismatch and interrupted partial text merging into the next attempt. A real-shape Playwright assertion failed before the model fix and passes after asset regeneration. Interrupted→continued replay regression failed before the boundary fix; five state tests now pass. Empty-state instructions now name the real `deck cross developer` command.
+- CLI aliases `deck session pair` and `deck session devices` now match XR-9.2; the added alias regression failed before implementation and all **67 parser tests** pass.
+- S5 TUI: **430 tests across 33 files** pass, including native-flow regressions and the interactive cross path. Final **22 cross/store tests** pass. Atomic save preserves current cross settings and native assignments. Migration projection now preserves `crossRunner`; the regression demonstrated the earlier loss before repair. No install effects occur in the cross flow.
+- Dependencies are exact additions for the web workspace (React DOM 19.2.8, its types and Playwright 1.58.2); the lockfile adds entries only and preserves existing versions. No browser download or global install was needed.
+- Reviewer-approved interpretation is explicit in XR-6.8/design: the cap covers delegated tasks, with a separate Lead slot, matching task 3.2's original acceptance. Default execution can include four workers plus the Lead.
+- Remaining integration evidence: final host race/wake repairs, real Codex delegated memory calls, compiled host/Linux cross+web flows, final frozen-source broad suite and release verification.
+
+## Final integration gates
+
+- S3 native three-runner acceptance passed: Claude Lead delegated to Codex and OpenCode; both workers completed and physically called both shared-memory tools. One serialized write remained after deduplication, cursor replay was gap-free, and no unexpected task was created. Memory used a synthetic host port; no provider memory write was performed. Evidence: `/tmp/deck-s3-cross-live-final.log`.
+- Native Codex 0.162.1 uses `mcpServer/elicitation/request` with a `mcp_tool_call` form for MCP permissions, in addition to command/file approval messages. The new exact isolated-form handler relays one-shot accept/decline and rejects unrelated/stale requests. A real gpt-6-luna probe recorded both memory calls without changing MCP aliases. Evidence: `/tmp/deck-codex-memory-repaired.log`; 32 focused tests passed. Independent review subsequently required nonempty active/request turn IDs during pending start and rejection of array-valued schema properties; final verification follows that repair.
+- Host creation now shares in-flight duplicate command results, refuses conflicting create payloads and rechecks shutdown after readiness. Queued cancellation persists its matching receipt and wakes an idle Lead. Regression suites passed. Claude cross configuration filters the native `inherit` sentinel and rejects stale saved drafts without changing the native picker.
+- Four targets built, and preliminary compiled Darwin/Linux arm64 passed all three single-runner smoke flows (57 checks per platform), cross delegation/continuation (6), and web HTTP/security/approval replay (11). Compiled Darwin desktop Playwright passed pairing, prompt, approval through the actual session bridge, tab-close replay, allow-once, and native fixture response. Linux used an unprivileged Bun 1.3.12 container with networking disabled and no repository or credential mounts. These binaries precede the last approval guard repair and will be rebuilt/rechecked before closure.
+
+### Final result — 2026-10-13 UTC
+
+**Required S0–S5 scope complete; verification passed; independent review approved.** Final evidence and limits are consolidated in [verify-report.md](verify-report.md) and [review-report.md](review-report.md). This result supersedes all intermediate pending/failed checkpoints above.
+
+- Final Codex approval repair added three RED/GREEN guards: nonempty active/request native turn IDs, exact turn object identity across broker await, and rejection of array schema properties. Owner suite: 35 passed; independent final review: 26 passed. All four binaries were rebuilt and compiled host/Linux/browser flows repeated successfully after the repair.
+- First frozen broad run: 6,371 pass, 3 skip, 2 fail. Corrected only the two failing fixtures: explicit runtime fields and temporary state for the memory hermeticity audit; empty tool inventory without a session credential. Targeted rechecks: 24 and 4 passed respectively. No production behavior or audit guard was relaxed.
+- Final repeated frozen suite with Bun 1.3.12: **6,373 pass, 3 skip, 0 fail**, 43,389 assertions across 470 files in 340.03 seconds. Required project gates: 64 passed. TypeScript and `release:verify` passed. No baseline exception was added.
+- Final compiled Darwin/Linux arm64: 57 single-runner + 6 cross-runner + 11 web checks passed per platform. Desktop Chromium: all six compiled acceptance steps passed. Both x64 platforms remain build-only. The Linux container had no network/repository/credential mounts and was removed after exit 0.
+- Optional exposure helper 4.10 is deferred. No canary/global installation, native credential-file access, commit, push or publication was performed. Continuation changes and unrelated WIP remain uncommitted.
+
+### Measured latency and prevention scope
+
+The user's two canary Claude turns spent 33.390 s and 31.673 s from prompt to native initialization, versus native reported work of 2.858 s and 2.109 s. Both reported the selected Codebase Memory MCP server failed. An initialize-only probe of the selected Deck-owned 0.11.0 executable reproduced 32.998–33.010 s before JSON-RPC -32001: an existing account daemon endpoint did not answer rendezvous within 30,000 ms. The shared 0.9.0 executable answered the same handshake in 9 ms. Version difference alone does not prove causation; the proven fault is the unresponsive endpoint and repeated per-turn startup. No native credential or prompt content was inspected, and no existing process was stopped.
+
+The user explicitly requested prevention and management within Deck rather than a one-off local restart. Architecture investigation therefore covers actual MCP readiness, compatible runtime selection, bounded/coalesced checks, actionable failed capability state and ownership-safe recovery. Unknown future incompatibilities must fail predictably rather than be claimed universally solved. Existing selected tools must not silently disappear.
+
+The Claude streaming correction is separate: native `--include-partial-messages` is supported by installed help; text deltas now flow before the authoritative final snapshot. A controlled delayed-child regression observed its first delta immediately versus the final message after about 102 ms; this does not claim to repair the measured 30-second MCP startup timeout.
+
+### Supported recovery evidence
+
+A private `CBM_RUNTIME_DIR` using the selected exact 0.11.0 executable and unchanged canonical cache initialized in 8.947 s; tools/list took 28 ms. A second MCP frontend while the first remained connected initialized in 2.964 s; tools/list took 31 ms. Both frontends and their new daemon exited naturally after closing stdin, with the pre-existing unhealthy endpoint untouched. Evidence: `/tmp/deck-cbm-cold-warm-evidence.json`. These are native MCP timings, not an end-to-end model-response claim.
+
+Implementation follows D-25: keep the supervised frontend, use real protocol health checks, scope recovery to its private runtime, and retain task leases so an active native consumer is never killed merely because another turn changes configuration or requests recovery. The documented 15-second cold deadline accommodates the measured healthy initialization; the 2-second deadline applies only to an existing connection's health request.
+
+### Integrated native readiness acceptance
+
+The implemented `SessionCodebaseReadiness` passed a real native acceptance using Deck's actual Supervisor/compiled child anchor and the exact pinned 0.11.0 executable. Cold preparation (including artifact verification and protocol negotiation) took **9,470 ms**; the next retained-connection health check took **12 ms**. Both returned the same private runtime, the canonical cache stayed unchanged, both task leases released, and shutdown removed the owned runtime directory. No model inference or tool operation was requested, and the earlier unhealthy shared daemon was untouched. Evidence: `/tmp/deck-managed-cbm-acceptance.ts` and `/tmp/deck-managed-cbm-acceptance.log`. Final race regressions and frozen-source checks remain in progress.
+
+## Duplicate delegation completion wake — complete
+
+Actual canary events 779/782/785/791 establish worker completion, delivery through `deck_task_wait`, Lead completion, and a redundant daemon-authored prompt 23 ms later. This caused an additional approximately 38-second native turn. The completion queue ignores whether a result was already returned. Repair scope: acknowledge terminal results returned through Lead tools by task attempt; preserve unseen completions, partial-timeout results, future attempts and observer isolation; cover synchronous append/subscriber ordering and scheduled-wake races. No generic transport protocol redesign or installed canary replacement.
+
+Completion evidence: exact incident reproduced RED, then 104 owner tests and 425 broader affected tests passed. TypeScript and four-target build passed; extracted host binary cross smoke passed six checks. Independent Quality approved with 19 independently run cross-runner tests. Production change is localized to session-manager.ts; no bridge contract changed. Installation and live user sessions remain untouched.
+
+## Public daemon lifecycle commands — complete
+
+User requested public lifecycle controls following the canary restart diagnosis. Acceptance is XR-9.6 and design D-26. Implementation owner covers CLI/parser/help/runtime lifecycle and deterministic plus actual-process tests; Lead covers docs/registry. Verification will use temporary HOME/state and compiled binaries, preserving the installed canary and live user daemon. Prior completed verification is unchanged historical evidence.
+
+Completion: public parser/help/main and daemon command handler landed with compatibility via the existing restart shutdown handshake. New-daemon admission is fenced synchronously across control, web and bridge, including asynchronous pending admissions. Strict spawned-PID attribution closes the competing-start race. Owner verification: 134 pass; independent Quality: 110 pass; Root affected suite: 497 pass/0 fail, TypeScript clean. Four targets built; extracted Darwin/Linux arm64 lifecycle acceptance passed 16 checks each; host cross/web acceptance passed 6/11 checks. No installed canary or live user daemon was changed. See final report sections for scope and logs.
+
+## Web workspace redesign — complete
+
+The user's next increment replaces the whole visual direction and introduces safe Markdown, provenance-based conversation separation, responsive panes, collapsible navigation and read-only OpenSpec artifacts. Primary research and its limits are in `web-ux-research.md`; the current visual agreement is the final section of `working-brief.md`. XR-8.9/8.10 and D-27 define acceptance and boundaries.
+
+Frontend owner: `deck_apply_deep_web_workspace` (`apps/web`, targeted Markdown dependencies). Backend owner: `deck_apply_deep_openspec_viewer` (host helper, trusted query dispatch, authenticated routes and tests). Independent review: `deck_quality_web_workspace`. Lead owns documentation, generated assets and compiled acceptance. All work uses temporary browser/daemon fixtures; installed canary and existing sessions remain untouched.
+
+Initial Root backend check: 40 tests passed across artifact reader and web boundary suites. Registry validation: 0 errors/0 warnings. These are intermediate checks, not final candidate approval; browser, TypeScript and compiled verification remain pending.
+
+Completion: source and generated assets are aligned. The light responsive workspace separates Lead prose, operational activity, delegated transcripts/results and live OpenSpec documents. Shared react-markdown/remark-gfm rendering blocks raw HTML, unsafe URLs and remote images. Artifact APIs enforce trusted session scope, bounded Markdown reads and symlink/path checks. Review repairs prevent duplicate Enter submissions, retain mobile drawer labels after desktop collapse and preserve deleted document/change selection with an unavailable state. Visible polling and stale-response guards were exercised in the browser.
+
+Final affected suites passed 442 tests across 31 files (412 host, 12 UI/assets, 18 documentation), TypeScript clean. Independent Quality approved after 104 backend tests, 10 frontend tests and 22 browser checks. All four targets built; extracted Darwin/Linux arm64 HTTP acceptance passed 16 checks each, and compiled browser acceptance passed eight including actual project artifact render/refresh. Root inspected desktop/mobile screenshots. No installed user runtime changes; full repository/native-model checks from earlier increments were not repeated.
+
+## Dark palette and compact header — complete (2026-10-14)
+
+User accepted the composition and components, requesting only dark colors and a smaller header. Lead applied a localized palette/header refinement with existing frontend design and accessibility guidance. Current agreement is in `working-brief.md`; dark screenshots and exact validation are in the latest handoff. Canonical web assets regenerated; 12 UI/asset tests, TypeScript and 22 existing browser checks passed. No new behavior tests, full suite, native rebuild or independent review cycle was needed for this reversible presentation change. Installed canary and user daemon unchanged.
+
+## Persistent theme switch — complete (2026-10-14)
+
+Retained dark as default and restored the exact previous light palette behind a compact header button. Browser-local selection survives reload/new tabs; invalid or inaccessible storage defaults safely and switching remains usable. Expanded production-transport browser acceptance to 27 checks with exact palette, keyboard, persistence and blocked-storage coverage; all passed, alongside 12 UI/asset tests and TypeScript. Lead inspected light desktop and dark mobile screenshots. Canonical assets regenerated; no native rebuild or installed-runtime mutation.
+
+## Compact auto-growing input — complete (2026-10-14)
+
+Implemented a one-line composer with inline accessible send/interrupt controls, automatic growth to four lines and internal scrolling thereafter. Native textarea semantics support multiline paste/IME/Shift+Enter while the manual resize affordance is removed. Height follows text changes and width changes, resets after sending, and Jump to latest follows the actual composer height. Verification: 12 UI/asset tests, TypeScript and 30 browser checks passed; rendered mobile inspected. Generated assets updated; installed runtime untouched.

@@ -269,6 +269,37 @@ describe("Codex materialization pins tools and hooks to verified executables", (
 });
 
 describe("Codex global install", () => {
+  test("reviewed tool selection repairs legacy MCP paths, preserves tool approvals, and can roll back", async () => {
+    await withProject(async (root, journalRoot) => {
+      const tools = readyTestTools();
+      const { codexHome } = layout(root);
+      await mkdir(codexHome, { recursive: true });
+      const source = '[mcp_servers.context-mode]\ncommand = "context-mode"\n[mcp_servers.codebase-memory]\ncommand = "/old/bin/codebase-memory-mcp"\n[mcp_servers.codebase-memory.tools.search_code]\napproval_mode = "approve"\n';
+      const configPath = join(codexHome, "config.toml");
+      await writeFile(configPath, source);
+      const adapter = createCodexRunnerAdapter({ tools, ...layout(root), journalRoot, preflight: preflight(), ...noSerena });
+      const input = { projectRoot: root, environmentId: "codex-development", deckConfig: deckConfig() };
+      expect(adapter.buildDeveloperTeamInstallPlan(input).blocked).toBe(true);
+      // Package instructions also select these tools in Review, even without capability toggles.
+      expect(adapter.buildDeveloperTeamInstallPlan({ ...input, capabilityIds: [] }).blocked).toBe(false);
+      const selected = { ...input, capabilityIds: ["context-mode", "codebase-memory"] };
+      const plan = adapter.buildDeveloperTeamInstallPlan(selected);
+      expect(plan.blocked).toBe(false);
+      expect(await readFile(configPath, "utf8")).toBe(source);
+      const backup = adapter.backupDeveloperTeamFiles(plan);
+      await adapter.applyDeveloperTeamInstall({ ...input, plan });
+      expect(await adapter.verifyDeveloperTeamInstall(plan)).toMatchObject({ valid: true });
+      const installed = await readFile(configPath, "utf8");
+      expect(installed).not.toContain('command = "context-mode"');
+      expect(installed).not.toContain("/old/bin/codebase-memory-mcp");
+      expect(installed).toContain('args = ["mcp"]');
+      expect(installed).toContain('[mcp_servers.codebase-memory.tools.search_code]\napproval_mode = "approve"');
+      expect(adapter.buildDeveloperTeamInstallPlan(selected).mutationPreview).toEqual([]);
+      await adapter.rollbackDeveloperTeamFiles(backup);
+      expect(await readFile(configPath, "utf8")).toBe(source);
+    });
+  }, 120_000);
+
   test("planning and applying from a huge project directory neither scans nor writes anything in the project", async () => {
     await withProject(async (root, journalRoot) => {
       const globalRoot = await mkdtemp(join(tmpdir(), "deck-codex-global-"));

@@ -40,12 +40,12 @@ describe("deck internal session-daemon", () => {
     daemonPids.push(r.daemon.pid);
     expect(r.started).toBe(true);
     expect((await pingDaemon(s.paths.socket.path))?.pid).toBe(r.daemon.pid);
-    // pre-SessionManager build: commands are refused, not crashed
+    // The production SessionManager refuses creation until cross-runner is configured.
     const { ControlClient } = await import("@deck/session-host");
     const c = await ControlClient.connect(s.paths.socket.path);
     const reply = await c.command({ v: 1, commandId: crypto.randomUUID(), type: "session.create", projectRoot: "/p" });
     c.close();
-    expect(reply.outcome).toMatchObject({ ok: false, code: "session-manager-unavailable" });
+    expect(reply.outcome).toMatchObject({ ok: false, code: "cross-runner-not-configured" });
     process.kill(r.daemon.pid, "SIGTERM");
     await waitFor(() => { try { process.kill(r.daemon.pid, 0); return false; } catch { return true; } }, 10000, "daemon exit");
     const repo = resolve(import.meta.dir, "../../..");
@@ -84,7 +84,7 @@ describe("deck internal child-anchor", () => {
 });
 
 describe("deck internal session-mcp", () => {
-  test("speaks MCP on stdio and reports a missing credential as a tool error", async () => {
+  test("speaks MCP on stdio, hides tools without a credential and reports credential-unavailable", async () => {
     const s = sandbox();
     delete s.env.DECK_SESSION_CREDENTIAL_FILE;
     const child = spawn(process.execPath, [MAIN, "internal", "session-mcp"], { env: s.env, stdio: ["pipe", "pipe", "inherit"] });
@@ -99,7 +99,7 @@ describe("deck internal session-mcp", () => {
     const lines = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
     expect(lines.every((l) => l.jsonrpc === "2.0")).toBe(true); // stdout carries only JSON-RPC frames
     expect(lines[0].result.serverInfo.name).toBe("deck");
-    expect(lines[1].result.tools.map((t: { name: string }) => t.name).sort()).toEqual(["deck_approve", "deck_status"]);
+    expect(lines[1].result.tools).toEqual([]);
     expect(lines[2].result).toMatchObject({ isError: true });
     expect(lines[2].result.content[0].text).toContain("credential-unavailable");
     child.stdin!.end();

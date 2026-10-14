@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   OWNED_CODEBASE_VERSION,
+  isSupportedCodebaseVersion,
   OWNED_RTK_VERSION,
   inspectOwnedCodebase,
   inspectOwnedRtk,
@@ -118,10 +119,9 @@ export function createCodexTools(options: CodexToolOptions = {}) {
   const verifyOwnedCodebase = options.verifyCodebaseNative ?? ((executable: string) => runVersion(executable, home).status === 0);
   const verifyExistingCodebase = options.verifyExistingCodebase ?? ((executable: string) => {
     const result = runVersion(executable, home);
-    const match = `${result.stdout}`.trim().match(/^codebase-memory-mcp\s+(\d+)\.(\d+)\.(\d+)/i);
+    const match = `${result.stdout}`.trim().match(/^codebase-memory-mcp\s+(\d+)\.(\d+)\.(\d+)$/i);
     if (result.status !== 0 || !match) return false;
-    const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])];
-    return major > 0 || minor > 10 || minor === 10 && patch >= 8;
+    return isSupportedCodebaseVersion(`${match[1]}.${match[2]}.${match[3]}`);
   });
   const existingCodebase = (): string | undefined => {
     const candidates = options.resolveCommand

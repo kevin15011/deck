@@ -82,8 +82,11 @@ import {
 import { inspectCodexProject, type CodexPreflightEffects } from "./preflight";
 import { applyCodexMutationPlan, NODE_PATH_CAS_RESIDUAL_RISK, rollbackCodexTransaction, type CodexFileEffects } from "./transaction";
 import type { CodexMutation, CodexMutationPlan, CodexPreimage } from "./types";
+import type { ChildMcpServerSpec } from "@deck/core/session/driver";
+import { createCodexSessionDriver, type CodexSessionDriverOptions } from "./session-driver/driver";
 
 export type CodexRunnerAdapterOptions = {
+  sessionDriver?: CodexSessionDriverOptions;
   preflight?: CodexPreflightEffects;
   fileEffects?: CodexFileEffects;
   journalRoot?: string;
@@ -597,6 +600,7 @@ function capabilityLabel(capabilityId: string): string {
 }
 
 class CodexRunnerAdapter implements RunnerAdapter {
+  readonly #sessionDriverOptions: CodexSessionDriverOptions;
   readonly runnerId = "codex";
   readonly displayName = "Codex CLI";
   readonly environmentIds = ["codex-development"] as const;
@@ -645,6 +649,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
   readonly #planOperations = new WeakMap<object, CodexOperationRecord>();
 
   constructor(options: CodexRunnerAdapterOptions = {}) {
+    this.#sessionDriverOptions = options.sessionDriver ?? {};
     this.#preflight = options.preflight ?? {
       probe: defaultProbe,
       inspectTrust: async () => "indeterminate",
@@ -672,6 +677,22 @@ class CodexRunnerAdapter implements RunnerAdapter {
   }
 
   /** Real install roots: CODEX_HOME (default ~/.codex) and the user's home. Nothing is ever written under a project. */
+  getSessionDriver() { return createCodexSessionDriver(this.#sessionDriverOptions); }
+
+  /** Rebuild only Deck-owned ordinary MCPs; memory/search are supplied by the session host. */
+  async readSessionMcpServers(): Promise<Record<string, ChildMcpServerSpec>> {
+    const source = readGlobalConfigSource(this.#roots) ?? "";
+    const ids = ["context-mode", "codebase-memory", "context7", "serena"].filter((id) => isDeckManagedCodexMcpServer(source, id as CodexMcpServerId));
+    let serenaReady = false;
+    if (ids.includes("serena")) {
+      serenaReady = (await this.#serenaReadinessResolver()).state === "ready" && (await this.#serenaProxyProbe()).state === "ready";
+      if (!serenaReady) throw new Error("Codex session Serena readiness is stale.");
+    }
+    const desired = buildCodexMcpServers({ packageIds: ids, memoryProvider: "none", contextModeCommand: this.#tools.contextMode.command(), codebaseMemoryCommand: this.#tools.codebase.command(), serenaLauncherAvailable: serenaReady, serenaProxyAvailable: serenaReady, serenaProxyCommand: this.#serenaProxyCommand });
+    if (desired.gaps.length) throw new Error("Codex session ordinary MCP readiness is stale.");
+    return Object.fromEntries(desired.servers.map((server) => [server.id, server.transport === "stdio" ? { command: server.command, args: server.args ?? [], env: {} } : { transport: "http" as const, url: server.url, ...(server.envHttpHeaders ? { envHttpHeaders: server.envHttpHeaders } : {}) }]));
+  }
+
   get #roots(): CodexInstallRoots {
     const fromEnv = process.env.CODEX_HOME && isAbsolute(process.env.CODEX_HOME) ? process.env.CODEX_HOME : undefined;
     return {
@@ -1171,7 +1192,7 @@ class CodexRunnerAdapter implements RunnerAdapter {
         if (capabilityId === "web-search" && !capability.webSearchProvider) continue;
         const install = this.#toolInstallAction(capabilityId);
         if (install) automaticInstalls.push(install);
-        configWrites.push({ id: `codex-config:${capabilityId}`, kind: "codex-config-preview", title: `Configure ${capability.label} through the reviewed Codex plan`, capabilityId, status: "ready" });
+        configWrites.push({ id: `codex-config:${capabilityId}`, kind: "codex-config-preview", title: `Configure ${capability.label} through the reviewed Codex plan`, capabilityId, status: "ready", ...(["context-mode", "codebase-memory"].includes(capabilityId) ? { diagnostics: ["Repair standard existing MCP command and arguments to use the verified executable; preserve user tool policies. Configuration is backed up before applying."] } : {}) });
       }
     }
     if (state.adaptiveMemory.provider === "supermemory" && !byId.get("supermemory-tool-bindings")?.isInstalled) {
@@ -1466,6 +1487,9 @@ class CodexRunnerAdapter implements RunnerAdapter {
       mcpCapabilityIds,
       contextModeCommand: tools.contextMode.command(),
       codebaseMemoryCommand: tools.codebase.command(),
+      // A reviewed install includes enabled package instructions as well as explicit capability toggles.
+      // Launch-time reconciliation omits capabilityIds and must never repair an unowned entry.
+      repairSelectedToolIds: input.capabilityIds === undefined ? undefined : mcpCapabilityIds,
       foreignMcpCommands: this.#foreignMcpCommands(existingCodexConfig),
       ...(rtkRequested && rtkBinary && nodeCommand ? { rtkHook: { nodeCommand, rtkBinary } } : {}),
       ...(memoryProviderId === "supermemory" && supermemoryScripts && nodeCommand ? { supermemoryHooks: { nodeCommand, recallScript: supermemoryScripts.recall, flushScript: supermemoryScripts.flush } } : {}),

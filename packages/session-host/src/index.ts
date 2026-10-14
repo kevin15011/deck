@@ -30,6 +30,7 @@ export {
   type ApprovalResolution, type PendingApproval, type RespondResult,
 } from "./approval-broker";
 export { CredentialRegistry, type CredentialGrant } from "./credentials";
+export { MemoryBroker, type SessionMemoryPort } from "./memory-broker";
 export { BridgeService, type BridgeServiceOptions } from "./bridge-service";
 export {
   DECK_APPROVE_TOOL, DECK_STATUS_TOOL, DEFAULT_ALLOWED_TOOLS, SESSION_CREDENTIAL_ENV, SESSION_MCP_SERVER_ID, sessionMcpServerSpec,
@@ -40,7 +41,7 @@ export { PROTOCOL_VERSION, type ClientFrame, type CommandOutcome, type ExecuteOu
 export { ControlClient, type AttachHandlers } from "./control-client";
 export { ControlServer, DEFAULT_MAX_QUEUED_EVENTS, type BridgePort, type ControlServerOptions, type DaemonControl } from "./control-server";
 export { UnavailableSessionService, type SessionService } from "./service";
-export { acquireDaemonLock, readDaemonInfo, STARTUP_GRACE_MS, type DaemonInfo, type LockHolder } from "./daemon-lock";
+export { acquireDaemonLock, readDaemonInfo, readLockHolder, STARTUP_GRACE_MS, type DaemonInfo, type LockHolder } from "./daemon-lock";
 export { IDLE_SHUTDOWN_MS, IdleMonitor } from "./idle-monitor";
 export { createDaemonLogger, type DaemonLogger } from "./daemon-logger";
 export {
@@ -53,5 +54,7 @@ export {
 export { runSessionDaemon, type RunSessionDaemonOptions } from "./daemon-main";
 export { createDriverSpawn, toSupervisedChild } from "./driver-spawn";
 export {
-  LEAD_TASK_ID, SessionManager, type ChildMcpResolver, type DriverLookup, type SessionManagerOptions, type SessionSummary,
+  LEAD_TASK_ID, SessionManager, type ChildMcpResolver, type ChildMcpContext, type DriverLookup, type SessionManagerOptions, type SessionSummary,
 } from "./session-manager";
+
+export { WebService, type WebConfig, type WebAssets, type WebAsset, type WebServiceOptions } from "./web-service";

@@ -338,18 +338,21 @@ describe("runRunnerLaunch consent and status", () => {
   });
 
   test("OpenCode uses the exact SSH-alias profile without claiming an unverified canonical GitHub tag or starting the Deck memory runtime", async () => {
+    // Canonical identity trusts the OS account's SSH config, deliberately ignoring HOME.
+    // A generic alias such as "work" can exist there; use a unique untrusted fixture alias.
+    const alias = `deck-unverified-${crypto.randomUUID()}`;
     const projectRoot = await mkdtemp(join(tmpdir(), "deck-opencode-profile-launch-"));
     const configHome = await mkdtemp(join(tmpdir(), "deck-opencode-profile-secrets-"));
     const sshHome = await mkdtemp(join(tmpdir(), "deck-opencode-profile-home-"));
     const secretStore = createOwnerOnlyFileSecretStore({ configHome });
-    initGitRemote(projectRoot, "git@work:org/repo.git");
-    storeOpenCodeSupermemoryCredential({ store: secretStore, alias: "work", token: "sm_work", eligibleAliases: ["work"] });
-    storeOpenCodeSupermemoryCredential({ store: secretStore, token: "sm_default", makeDefault: true, eligibleAliases: ["work"] });
+    initGitRemote(projectRoot, `git@${alias}:org/repo.git`);
+    storeOpenCodeSupermemoryCredential({ store: secretStore, alias, token: "sm_work", eligibleAliases: [alias] });
+    storeOpenCodeSupermemoryCredential({ store: secretStore, token: "sm_default", makeDefault: true, eligibleAliases: [alias] });
     let childEnv: Record<string, string> | undefined;
     const previousHome = process.env.HOME;
     try {
       mkdirSync(join(sshHome, ".ssh"), { mode: 0o700 });
-      writeFileSync(join(sshHome, ".ssh", "config"), "Host=work\n", { mode: 0o600 });
+      writeFileSync(join(sshHome, ".ssh", "config"), `Host=${alias}\n`, { mode: 0o600 });
       process.env.HOME = sshHome;
       const result = await runRunnerLaunch({
         adapter: adapter({ runnerId: "opencode", displayName: "OpenCode", buildDeveloperTeamInstallPlan: () => ({ files: [], mutationPreview: [] }) }),

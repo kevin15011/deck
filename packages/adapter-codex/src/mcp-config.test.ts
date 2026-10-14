@@ -3,6 +3,34 @@ import { buildCodexMcpServers, isCodexDeckMemoryMcpConfigured,
   isCodexSerenaMcpConfigured, inspectCodexMcpServerCommand, inspectCodexSupermemoryMcpState, mergeCodexMcpServers, redactCodexMcpDiagnostic } from "./mcp-config";
 
 describe("Codex MCP semantic configuration", () => {
+  test("repairs selected standard tool entries without taking ownership or changing tool policies", () => {
+    const source = '# personal config\n[mcp_servers.context-mode]\ncommand = "context-mode" # keep comment\n[mcp_servers.codebase-memory]\ncommand = "/home/user/.local/bin/codebase-memory-mcp"\n\n[mcp_servers.codebase-memory.tools.search_code]\napproval_mode = "approve"\n\n[mcp_servers.other]\ncommand = "custom"\n';
+    const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory"], memoryProvider: "none", contextModeCommand: "/opt/bin/context-mode", codebaseMemoryCommand: "/opt/deck/codebase-memory-mcp" }).servers;
+    expect(mergeCodexMcpServers(source, desired)).toMatchObject({ status: "blocked", content: source });
+    const repaired = mergeCodexMcpServers(source, desired, { repairSelectedToolIds: ["context-mode", "codebase-memory"] });
+    expect(repaired.status).toBe("updated");
+    expect(repaired.content).toContain('command = "/opt/bin/context-mode" # keep comment');
+    expect(repaired.content).toContain('args = ["mcp"]');
+    expect(repaired.content).toContain('command = "/opt/deck/codebase-memory-mcp"');
+    expect(repaired.content).toContain('[mcp_servers.codebase-memory.tools.search_code]\napproval_mode = "approve"');
+    expect(repaired.content).toContain('[mcp_servers.other]\ncommand = "custom"');
+    expect(repaired.content).not.toContain("# deck-codex-mcp:");
+    expect(mergeCodexMcpServers(repaired.content, desired)).toMatchObject({ status: "unchanged", content: repaired.content });
+    expect(mergeCodexMcpServers(repaired.content, desired, { repairSelectedToolIds: ["context-mode", "codebase-memory"] })).toMatchObject({ status: "unchanged", content: repaired.content });
+  });
+
+  test("selected repair preserves custom invocations and returns original bytes if any collision remains", () => {
+    const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory"], memoryProvider: "none", contextModeCommand: "/opt/bin/context-mode", codebaseMemoryCommand: "/opt/deck/codebase-memory-mcp" }).servers;
+    for (const custom of ['command = "wrapper"', 'command = "codebase-memory-mcp"\nargs = ["--custom"]', 'command = "codebase-memory-mcp"\nenv = { TOKEN = "sensitive-value" }']) {
+      const source = `[mcp_servers.context-mode]\ncommand = "context-mode"\n[mcp_servers.codebase-memory]\n${custom}\n`;
+      const merged = mergeCodexMcpServers(source, desired, { repairSelectedToolIds: ["context-mode", "codebase-memory"] });
+      expect(merged).toMatchObject({ status: "blocked", content: source, collisions: ["codebase-memory"] });
+      if (merged.status === "blocked") expect(merged.diagnostics.join(" ")).not.toContain("sensitive-value");
+    }
+    const source = '[mcp_servers.context-mode]\ncommand = "context-mode"\n[mcp_servers.codebase-memory]\ncommand = "codebase-memory-mcp"\n';
+    expect(mergeCodexMcpServers(source, desired, { repairSelectedToolIds: ["context-mode"] })).toMatchObject({ status: "blocked", content: source, collisions: ["codebase-memory"] });
+  });
+
   test("does not materialize raw Supermemory MCP because scope would be model-selectable", () => {
     const desired = buildCodexMcpServers({ packageIds: ["context-mode", "codebase-memory", "serena", "context7"], memoryProvider: "supermemory", supermemoryProjectScope: "sm_project_v1_kevin15011_deck", contextModeCommand: "/opt/deck/context-mode", codebaseMemoryCommand: "/opt/deck/codebase-memory-mcp" });
     const merged = mergeCodexMcpServers("[mcp_servers.user]\ncommand = \"user-mcp\"\n", desired.servers);

@@ -100,7 +100,7 @@
 | Runner | Required mechanism (verified by contract test before enablement) |
 |---|---|
 | Claude | `-p --input-format stream-json --output-format stream-json --verbose`, `--strict-mcp-config --mcp-config <0600 file>`, hooks disabled, never `--bare`. |
-| Codex | `codex app-server` over stdio, user config ignored, MCP servers supplied by `-c mcp_servers.*`. |
+| Codex | `codex app-server` over stdio; inherited MCP/plugin endpoints disabled, hooks disabled, explicit child MCP overrides, effective configuration and actual MCP set verified before prompt delivery. Keep native authentication storage untouched. |
 | OpenCode | `opencode serve` on 127.0.0.1, Deck-owned config directory, config content supplied by Deck, user MCP servers absent from the probed tool list. |
 
 **XR-4.4** The explicit MCP set MUST equal: the packages Deck configured for that runner, minus adaptive-memory providers, plus the Deck session MCP server.
@@ -149,7 +149,7 @@
 
 **XR-6.3** Only the Lead MUST receive delegation tools by default; other members MUST receive memory tools and, when applicable, the approval tool.
 
-**XR-6.4** When a delegated task reaches a terminal state while the Lead is idle, the daemon MUST start a Lead turn with a bounded completion notice.
+**XR-6.4** When a delegated task reaches a terminal state while the Lead is idle, the daemon MUST start a Lead turn with a bounded completion notice unless that attempt's terminal result has already been returned through the Lead's `deck_task_wait` or `deck_task_result` call. Delivery acknowledgement MUST be scoped to the task attempt, preserve notices for unseen results and later attempts, and handle completion/wait/wake ordering. Observer reads and aborted waits MUST NOT consume Lead notices. A partial wait response MUST acknowledge only the terminal results it returns.
 
 **XR-6.5** `continueTaskId` MUST resume the same agent on the ledger-recorded runner, model, and native session. A changed assignment MUST apply only to new tasks. Continuation of a running task MUST be refused.
 
@@ -157,7 +157,7 @@
 
 **XR-6.7** Native delegation tools in the Lead's runner (Claude `Task`/agents, OpenCode `task`, Codex multi-agent) MUST be disabled where the runner supports it; otherwise the session MUST report `native-delegation-not-disabled`.
 
-**XR-6.8** A session MUST NOT exceed `maxConcurrentTasks` (default 4); excess delegations MUST queue.
+**XR-6.8** A session MUST NOT exceed `maxConcurrentTasks` concurrent delegated tasks (default 4); excess delegations MUST queue. The Lead has a separate coordinator slot and does not consume a delegated-task slot.
 
 #### Scenario: Owner-contract continuation across runners
 - **Given** task T for `architect` ran on Codex with native thread N and completed
@@ -184,7 +184,7 @@
 
 **XR-8.2** The web listener MUST bind only `127.0.0.1` and MUST refuse any configured non-loopback bind address. It MUST work without Tailscale or any other network tool installed.
 
-**XR-8.3** Web requests MUST present a valid device credential (HttpOnly, SameSite=Strict cookie; `Secure` whenever served over HTTPS) obtained by one-time pairing (single use, TTL ≤ 5 min, rate-limited). Device credentials MUST be stored hashed and be revocable.
+**XR-8.3** Session web requests MUST present a valid device credential (HttpOnly, SameSite=Strict cookie; `Secure` whenever served over HTTPS). Direct local browser access MUST obtain that cookie automatically without a code or pairing confirmation, using a same-origin JSON bootstrap guarded by an exact loopback peer, Host and Origin and the absence of forwarding headers. Remote/forwarded access MUST NOT use local bootstrap and retains one-time pairing (single use, TTL ≤ 5 min, rate-limited). Device credentials MUST be stored hashed and be revocable. This local access behavior supersedes manual local pairing at the user's request on 2026-10-13.
 
 **XR-8.4** The daemon MUST reject requests whose `Host` is not an allowed origin host (default: `127.0.0.1:<port>` and `localhost:<port>`) to defeat DNS rebinding.
 
@@ -192,14 +192,31 @@
 
 **XR-8.6** By default the daemon MUST reject requests carrying forwarding headers (`Forwarded`, `X-Forwarded-*`) or a Tailscale Funnel marker. They MAY be accepted only when the user explicitly configures `web.trustedProxy` and the external origin in `web.allowedOrigins`; Funnel traffic additionally requires `web.allowFunnel: true`. Exposed access MUST use the same device-credential authentication as local access.
 
-**XR-8.7** The web listener MUST expose only the client API subset (sessions, events, commands, approvals); it MUST NOT expose the session MCP bridge or daemon admin operations.
+**XR-8.7** The web listener MUST expose only the client API subset (sessions, events, commands, approvals, read-only session-scoped OpenSpec Markdown artifacts); it MUST NOT expose the session MCP bridge, daemon admin operations or arbitrary repository files.
 
 **XR-8.8** Deck MUST NOT run any network-exposure command (including `tailscale serve` or `tailscale funnel`) without an explicit user command and confirmation.
 
-#### Scenario: Unpaired browser tab
+**XR-8.9** The web client MUST distinguish public Lead conversation from tools, operational notices and delegated task messages using canonical event/task identity. It MUST render safe Markdown in conversation and artifact views without executing raw HTML or unsafe links or fetching external images automatically. Desktop MUST provide collapsible session navigation and side-by-side Chat/workspace panes with Activity, Subagents and OpenSpec tabs. Narrow viewports MUST provide usable single-pane navigation and preserve drafts. Background activity MUST NOT force reading position, focus or tab changes. Pending approvals and actionable failures MUST remain discoverable across views.
+
+**XR-8.10** Authenticated OpenSpec reads MUST derive the project root and optional immutable change binding from the session. Bound sessions MUST expose only that change; unbound sessions MAY select active changes for viewing without modifying the session. Only nested Markdown artifacts under active `openspec/changes/<changeId>` directories are supported. Reads MUST reject unsafe paths and symbolic-link escapes, bound file size/enumeration/depth, and avoid absolute-path disclosure. The viewer MUST support refresh, visible updates and missing/error states. This is a read-only artifact surface, not a file editor or lifecycle command.
+
+#### Scenario: Separate conversation and work evidence
+- **Given** the Lead replies while tools and a child task emit events
+- **When** the user reads Chat
+- **Then** only user and public Lead messages appear as conversation, with tools in Activity and delegated text in Subagents
+- **And** replay preserves the same distinction and pending approvals remain actionable from other views
+
+#### Scenario: OpenSpec artifact updates
+- **Given** a session is bound to an active change with a Markdown artifact
+- **When** the user opens OpenSpec and the artifact changes on disk
+- **Then** the viewer displays safely rendered updated content while preserving the selected document
+- **And** attempts to read other changes, arbitrary files or symlink escapes are rejected
+
+#### Scenario: First local browser visit
 - **Given** the web listener runs on `127.0.0.1`
-- **When** a request without a valid device cookie arrives
-- **Then** the daemon serves only the pairing page and every API call returns 401
+- **When** its same-origin browser opens the local page without a valid device cookie
+- **Then** the client automatically obtains a local device cookie and loads sessions without asking for a code
+- **And** session APIs still reject unauthenticated requests, and foreign-origin, missing-origin or forwarded requests cannot bootstrap local access
 
 #### Scenario: DNS rebinding
 - **Given** a malicious page resolves `evil.example` to `127.0.0.1`
@@ -217,13 +234,15 @@
 
 **XR-9.1** `deck cross developer [--change <id>]` MUST create or attach a session for the current project and attach a line-oriented terminal client (prompts, `/interrupt`, approval y/n, `/tasks`, `/detach`).
 
-**XR-9.2** `deck session list|attach|stop|pair|devices|web` MUST exist. `deck cross developer` SHOULD offer to open the desktop web client with a one-time pairing link.
+**XR-9.2** `deck session list|attach|stop|pair|devices|web` MUST exist. `deck cross developer` SHOULD offer to open the desktop web client at its local URL without requiring a code. Explicit pairing remains available for forwarded access.
 
 **XR-9.3** The TUI Start installation MUST list a **cross** entry. Selecting it MUST show members; selecting a member MUST show the runner list first (only installed runners with a session driver), then that runner's models (reusing the runner's model inventory/discovery), then its thinking levels.
 
 **XR-9.4** The cross flow MUST write only `crossRunner` config and MUST NOT run install actions; it MUST show which referenced runners still need their own installation.
 
 **XR-9.5** An optional `deck cross expose` helper MAY print, and only after explicit confirmation run, a user-chosen reverse-proxy command (e.g. `tailscale serve`) and write the matching `web.trustedProxy`/`web.allowedOrigins`. It MUST NOT change the authentication model, MUST NOT enable Funnel by default, and its absence MUST NOT affect any other requirement.
+
+**XR-9.6** The public CLI MUST expose `deck daemon start|status|stop|restart`, each accepting `--json`. `start` MUST be idempotent for an already running daemon. `status` and `stop` MUST NOT start a daemon; stopping an absent daemon MUST succeed without creating one. `restart` MUST gracefully stop an existing daemon, wait for its ownership to settle, start the invoking Deck executable, and verify readiness; if absent, it MUST start one. Stop and restart MUST refuse while work or approvals are pending, preserve stored sessions and history, and report bounded failures with nonzero exit status. No force option or OS service installation is part of this command contract. Explicit lifecycle commands MUST work without manual PID handling.
 
 ---
 
@@ -245,10 +264,14 @@
 
 **XR-11.3** Each driver MUST have recorded-fixture contract tests that run in `bun test` without network; an opt-in live contract script MUST re-record and compare event shapes.
 
+**XR-11.4** Selected Codebase Memory services MUST use an explicitly reviewed executable/version contract, a Deck-owned private runtime namespace, and protocol-level readiness before native turn admission. Artifact verification MUST NOT substitute for live health checks. Concurrent preparations MUST share bounded startup/recovery without sharing caller cancellation. Recovery MUST preserve the canonical graph cache and MUST NOT signal or delete a foreign daemon endpoint. Repeated failures MUST enter bounded backoff and remain visible; selected tools MUST NOT be silently omitted.
+
+**XR-11.5** Active native consumers MUST retain their managed MCP runtime until native drain succeeds. Unproven drain MUST persist `ownership-unsettled` and block continuation and pruning. Claude initialization MUST fail the turn when an expected MCP server is absent or not explicitly connected, even if preflight succeeded.
+
 ---
 
 ## XR-12 Personal-use policy
 
-**XR-12.1** Before the Claude driver is first enabled, Deck MUST show the ToS risk notice and record an explicit local acknowledgement (user accepted the residual risk for personal use, 2026-10-12); without it the Claude driver MUST be `blocked` (`claude-session-tos-unacknowledged`).
+**XR-12.1** Claude configuration and session start MUST NOT display a subscription notice or require a separate local acknowledgement. Existing acknowledgement fields MAY remain readable for backward compatibility but MUST NOT gate readiness, trigger prompts or be populated as fabricated consent. This supersedes the previous notice/acknowledgement requirement at the user's request on 2026-10-13. Native CLI authentication remains the native CLI's responsibility.
 
 **XR-12.2** Deck MUST NOT offer configuration for additional users, shared daemons, or remote runner credentials.

@@ -21,3 +21,7 @@ export * from "./team-catalog";
 export * from "./tool-status";
 export * from "./web-search";
 export type { PromptProfileActivationV1 } from "@deck/sdd-runtime";
+
+export * from "./session-driver/driver";
+export * from "./session-driver/launch";
+export * from "./session-driver/mcp";

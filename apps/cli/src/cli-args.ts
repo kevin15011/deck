@@ -14,6 +14,21 @@
 
 import { MAX_RUNNER_STDIN_PAYLOAD_BYTES, type RunnerStdinPayload } from "@deck/core";
 
+export type DaemonSubcommand = { action: "start" | "status" | "stop" | "restart"; json: boolean };
+export const DAEMON_USAGE = "Usage: deck daemon <start|status|stop|restart> [--json]\nThe daemon runs in the background. Ctrl+C and /detach close the client, not the daemon.\nStop and restart refuse running work or pending approvals. Restart uses the invoking Deck executable and preserves session history and runner assignments.";
+
+/** `deck session <action>` grammar (XR-9.2, XR-12.1). */
+export type SessionSubcommand =
+  | { action: "web"; operation: "status" | "enable" | "disable" | "pair" | "devices"; json: boolean }
+  | { action: "devices-revoke"; deviceId: string }
+  | { action: "list"; json: boolean }
+  | { action: "attach"; sessionId: string }
+  | { action: "stop"; sessionId: string }
+  | { action: "status"; json: boolean }
+  | { action: "self-test"; json: boolean }
+  | { action: "ack-claude-tos"; yes: boolean }
+  | { action: "prune"; dryRun: boolean; json: boolean; maxAgeDays?: number; keep?: number };
+
 export type ParsedArgs =
   | { command: "tui" }
   | { command: "doctor" }
@@ -34,6 +49,10 @@ export type ParsedArgs =
   | { command: "internal-session-daemon" }
   | { command: "internal-session-mcp" }
   | { command: "internal-child-anchor"; argv: string[] }
+  | { command: "cross-launch"; flags: { changeId?: string } }
+  | { command: "session"; sub: SessionSubcommand }
+  | { command: "daemon"; sub: DaemonSubcommand }
+  | { command: "daemon-help" }
   | {
       command: "upgrade";
       flags: {
@@ -206,6 +225,86 @@ function parseCodexArgs(rest: string[]): ParsedArgs {
   };
 }
 
+const SESSION_USAGE = "Usage: deck session list|attach <id>|stop <id>|status|self-test|prune|ack-claude-tos|pair|devices [revoke <id>]|web <status|enable|disable|pair|devices> [options]";
+const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+function parseCrossArgs(rest: string[]): ParsedArgs {
+  const usage: ParsedArgs = { command: "error", message: "Usage: deck cross developer [--change <id>]" };
+  if (rest[0] !== "developer") return usage;
+  let changeId: string | undefined;
+  for (let i = 1; i < rest.length; i += 1) {
+    const token = rest[i]!;
+    if (token === "--change") {
+      const value = rest[i + 1];
+      if (value === undefined || value.startsWith("-") || value.length === 0) return usage;
+      changeId = value;
+      i += 1;
+    } else if (token.startsWith("--change=") && token.length > "--change=".length) {
+      changeId = token.slice("--change=".length);
+    } else {
+      return usage;
+    }
+  }
+  return { command: "cross-launch", flags: changeId === undefined ? {} : { changeId } };
+}
+
+function parseSessionArgs(rest: string[]): ParsedArgs {
+  const usage: ParsedArgs = { command: "error", message: SESSION_USAGE };
+  const [action, ...tokens] = rest;
+  const onlyJson = (): boolean | undefined => {
+    if (tokens.length === 0) return false;
+    return tokens.length === 1 && tokens[0] === "--json" ? true : undefined;
+  };
+  switch (action) {
+    case "web": {
+      const operation = tokens[0];
+      if (!["status", "enable", "disable", "pair", "devices"].includes(operation ?? "")) return usage;
+      if (tokens.length > 2 || (tokens.length === 2 && tokens[1] !== "--json")) return usage;
+      return { command: "session", sub: { action, operation: operation as "status" | "enable" | "disable" | "pair" | "devices", json: tokens.length === 2 } };
+    }
+    case "pair": case "devices": {
+      if (action === "devices" && tokens.length === 2 && tokens[0] === "revoke" && SAFE_SESSION_ID.test(tokens[1]!)) {
+        return { command: "session", sub: { action: "devices-revoke", deviceId: tokens[1]! } };
+      }
+      const json = onlyJson();
+      return json === undefined ? usage : { command: "session", sub: { action: "web", operation: action, json } };
+    }
+    case "list": case "status": case "self-test": {
+      const json = onlyJson();
+      return json === undefined ? usage : { command: "session", sub: { action, json } };
+    }
+    case "attach": case "stop":
+      return tokens.length === 1 && SAFE_SESSION_ID.test(tokens[0]!) && !tokens[0]!.includes("..") ? { command: "session", sub: { action, sessionId: tokens[0]! } } : usage;
+    case "ack-claude-tos":
+      return tokens.length === 0 || (tokens.length === 1 && tokens[0] === "--yes") ? { command: "session", sub: { action, yes: tokens.length === 1 } } : usage;
+    case "prune": {
+      let dryRun = false;
+      let json = false;
+      let maxAgeDays: number | undefined;
+      let keep: number | undefined;
+      const number = (text: string | undefined): number | undefined => (text !== undefined && /^\d+$/.test(text) ? Number(text) : undefined);
+      for (let i = 0; i < tokens.length; i += 1) {
+        const token = tokens[i]!;
+        if (token === "--dry-run") dryRun = true;
+        else if (token === "--json") json = true;
+        else if (token === "--max-age-days" || token === "--keep") {
+          const value = number(tokens[i + 1]);
+          if (value === undefined) return usage;
+          if (token === "--keep") keep = value; else maxAgeDays = value;
+          i += 1;
+        } else if (token.startsWith("--max-age-days=") || token.startsWith("--keep=")) {
+          const [flag, raw] = token.split("=") as [string, string];
+          const value = number(raw);
+          if (value === undefined) return usage;
+          if (flag === "--keep") keep = value; else maxAgeDays = value;
+        } else return usage;
+      }
+      return { command: "session", sub: { action, dryRun, json, ...(maxAgeDays === undefined ? {} : { maxAgeDays }), ...(keep === undefined ? {} : { keep }) } };
+    }
+    default: return usage;
+  }
+}
+
 export function parseArgs(argv: string[]): ParsedArgs {
   // argv[0] is typically the runtime, argv[1] is the script
   // We skip those — the caller should pass only the user args
@@ -230,6 +329,19 @@ export function parseArgs(argv: string[]): ParsedArgs {
       return argv.length > 0 ? { command: "internal-child-anchor", argv } : { command: "error", message: "Usage: deck internal child-anchor -- <command> [args...]" };
     }
     return { command: "error", message: "Usage: deck internal serena-mcp" };
+  }
+
+  if (first === "cross") return parseCrossArgs(rest);
+  if (first === "session") return parseSessionArgs(rest);
+  if (first === "daemon") {
+    if (rest.length === 1 && (rest[0] === "--help" || rest[0] === "-h")) return { command: "daemon-help" };
+    const [action, ...flags] = rest;
+    if (!["start", "status", "stop", "restart"].includes(action ?? "") || flags.length > 1 || flags.some((f) => f !== "--json")) return { command: "error", message: DAEMON_USAGE };
+    return { command: "daemon", sub: { action: action as DaemonSubcommand["action"], json: flags.includes("--json") } };
+  }
+
+  if (first === "--version" || first === "-v") {
+    return rest.length === 0 ? { command: "version" } : { command: "error", message: "`deck --version` takes no arguments." };
   }
 
   if (first === "doctor") {

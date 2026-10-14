@@ -15,6 +15,12 @@ import { CLAUDE_SUPERMEMORY_COMMIT, CLAUDE_SUPERMEMORY_FILES, inspectClaudeSuper
 import { inspectOwnedClaudeRtk, installOwnedClaudeRtk, pinnedClaudeRtkRelease, type RtkReleaseArtifact } from "./rtk-artifact";
 import { createClaudeSessionDriver, type ClaudeSessionDriverOptions } from "./session-driver/driver";
 import { inspectOwnedClaudeCodebase, installOwnedClaudeCodebase, pinnedClaudeCodebaseRelease, type CodebaseNativeRelease } from "./codebase-native-artifact";
+import type { ChildMcpServerSpec } from "@deck/core/session/driver";
+
+/** Read-only session composition seam; shared runner contracts remain unchanged until S2. */
+export type ClaudeSessionMcpAdapter = RunnerAdapter & {
+  readSessionMcpServers(): Promise<Record<string, ChildMcpServerSpec>>;
+};
 
 type Options = ClaudeCapabilityOptions & {
   homeDir?: string;
@@ -189,7 +195,7 @@ function matchesCanonicalFiles(candidate: unknown, canonical: ReturnType<typeof 
     && plan.files.every((file, index) => file?.path === canonical[index]!.path && file.content === canonical[index]!.content && file.kind === canonical[index]!.kind);
 }
 
-export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter {
+export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionMcpAdapter {
   const homeInput = options.homeDir ?? process.env.HOME;
   if (!homeInput || !isAbsolute(homeInput)) throw new Error("Claude global plugin requires an absolute user HOME.");
   if (options.dataRoot !== undefined && !isAbsolute(options.dataRoot)) throw new Error("Claude Deck data root must be absolute.");
@@ -444,7 +450,7 @@ export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter 
       return { files: [], blocked: true, diagnostics: [warning, "Claude model metadata, alias or global plugin path is untrusted; no files will be written."], mutationPreview: [] };
     }
   };
-  const adapter: RunnerAdapter = {
+  const adapter: ClaudeSessionMcpAdapter = {
     getSessionDriver: () => createClaudeSessionDriver(options.sessionDriver),
     runnerId: "claude", displayName: "Claude Code", environmentIds: [ENVIRONMENT], packageInstructionIds: ["context-mode", "codebase-memory", "rtk", "serena"],
     ui: { environmentLabels: { [ENVIRONMENT]: "Claude Code" }, dashboard: { defaultSelectedTeamIds: ["developer-team"], defaultSelectedCapabilityIds: ["claude-team-files"], extraSelectableCapabilities: [{ id: "context7", label: "Context7", description: "Use a verified shared Context7 MCP binary in the Claude plugin." }], managedLaunchSupported: false, launchHint: "deck claude developer starts a supervised static-compatible session. Deck supplies the pinned official memory plugin when selected; co-loaded user plugins may also see the process credential. Protected execution remains unsupported.", executionClass: "static-compatible" }, model: { providerSource: "Installed Claude runtime-reported metadata; account entitlement not guaranteed", missingChecks: ["account entitlement", "comparison with authenticated native /model"], remediation: "Retry metadata discovery and check native Claude /model for account-specific availability.", defaultThinkingLevels: [] }, adaptiveMemory: { supermemory: { supported: true, requiresExternalToken: true, selectionStatus: "Official Claude Supermemory uses the existing protected alias/default profile store." } } },
@@ -666,6 +672,16 @@ export function createClaudeRunnerAdapter(options: Options = {}): RunnerAdapter 
         if (!stat.isFile() || (stat.mode & 0o077) !== 0 || (typeof process.getuid === "function" && stat.uid !== process.getuid()) || readFileSync(marker, "utf8") !== pluginMarker) return undefined;
         return [...selection.capabilities];
       } catch { return undefined; }
+    },
+    async readSessionMcpServers() {
+      const selection = readSelection(); // Reject corrupt metadata, even when no ordinary package is selected.
+      if (!existsSync(metadataPath)) return {};
+      if (adapter.readSelectedCapabilityIds?.() === undefined) throw new Error("Claude session MCP selection is untrusted.");
+      const ids = selection.capabilities.filter((id) => id === "context-mode" || id === "codebase-memory" || id === "context7" || id === "serena");
+      if (ids.includes("serena") && !await probeSerena()) throw new Error("Claude session Serena readiness is stale; review the existing Deck-owned installation.");
+      const file = claudeCapabilityFiles(parent, ids, toolEffects).find((file) => file.path.endsWith("/.mcp.json"));
+      const servers = file ? (JSON.parse(file.content) as { mcpServers: Record<string, { command: string; args?: string[] }> }).mcpServers : {};
+      return Object.fromEntries(Object.entries(servers).map(([id, server]) => [id, { command: server.command, args: server.args ?? [], env: {} }]));
     },
     getThinkingLevels(modelId) { return modelSnapshot?.inventory.modelsByProvider.claude?.find((model) => model.id === modelId)?.variants ?? []; }, supportsThinking(modelId) { return adapter.getThinkingLevels(modelId).length > 0; },
     async prepareDeveloperTeamInstall(input) {

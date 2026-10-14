@@ -53,6 +53,27 @@ describe("DeckConfigStore", () => {
     expect(existsSync(store.paths.canonicalPath)).toBe(true);
   });
 
+  test("migration imports cross members and the recorded Claude acknowledgement", () => {
+    const home = root();
+    const xdg = join(home, "xdg");
+    const crossRunner = { enabled: true, members: { lead: { runnerId: "claude", modelId: "opus", thinking: "high" } }, claudeTosAcknowledgedAt: "2026-10-12T00:00:00.000Z" };
+    writeJson(join(home, ".deck", "config.json"), { crossRunner });
+    const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
+    expect(store.read().crossRunner).toMatchObject(crossRunner);
+    expect(JSON.parse(readFileSync(store.paths.canonicalPath, "utf8")).crossRunner).toMatchObject(crossRunner);
+  });
+
+  test("distinct cross member projections require the existing explicit migration selection", () => {
+    const home = root();
+    const xdg = join(home, "xdg");
+    const candidate = join(home, ".deck", "config.json");
+    writeJson(join(xdg, ".deck", "config.json"), { crossRunner: { members: { lead: { runnerId: "codex", modelId: "first" } } } });
+    writeJson(candidate, { crossRunner: { members: { lead: { runnerId: "codex", modelId: "selected" } } } });
+    const store = createDeckConfigStore({ homeDir: home, xdgConfigHome: xdg });
+    expect(() => store.read()).toThrow(DeckConfigMigrationConflictError);
+    expect(store.selectMigration({ action: "adopt", candidatePath: candidate }).crossRunner?.members.lead?.modelId).toBe("selected");
+  });
+
   test("deduplicates identical valid projections across legacy candidates", () => {
     const home = root();
     const xdg = join(home, "xdg");

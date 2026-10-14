@@ -28,6 +28,15 @@ function make(timers = new FakeTimers()) {
 }
 
 describe("createClaudeSessionDriver.startTask", () => {
+  test("only a confirmed missing resume context receives the reseed reason", async () => {
+    for (const [message, missing] of [[`No conversation found with session ID: ${SID}`, true], ["API authentication failed", false]] as const) {
+      const { h, driver } = make();
+      const handle = await driver.startTask(input({ nativeSessionId: undefined, resume: { nativeSessionId: SID } }), h.io);
+      const child = await h.nextChild();
+      child.stderr(message); child.exit({ ok: false, code: 1 });
+      expect((await handle.done).reasonCode).toBe(missing ? "native-session-not-found" : undefined);
+    }
+  });
   test("declares the protocol, tested range and caller-assigned session ids", () => {
     const { driver } = make();
     expect(driver.runnerId).toBe("claude");
@@ -110,16 +119,17 @@ describe("createClaudeSessionDriver.startTask", () => {
     expect((await handle.done).status).toBe("failed");
   });
 
-  test("a server listed but not connected is reported without failing the turn", async () => {
+  test.each(["failed", "pending", undefined])("an expected MCP server with status %s fails the turn and ends its process group", async (status) => {
     const { h, driver } = make();
     const handle = await driver.startTask(input(), h.io);
     const child = await h.nextChild();
     const lines = withSession("turn-success.jsonl");
-    lines[0] = lines[0]!.replace('"status":"connected"', '"status":"failed"');
+    lines[0] = status === undefined ? lines[0]!.replace(',"status":"connected"', "") : lines[0]!.replace('"status":"connected"', `"status":"${status}"`);
     child.lines(lines);
     child.exit();
-    expect(await handle.done).toEqual({ status: "completed" });
-    expect(h.events.find((e) => e.data.code === "claude-mcp-server-not-connected")!.data).toMatchObject({ server: "deck", status: "failed" });
+    expect(await handle.done).toMatchObject({ status: "failed", error: expect.stringContaining("claude-mcp-server-not-connected") });
+    expect(child.terminations).toHaveLength(1);
+    expect(h.events.find((e) => e.data.code === "claude-mcp-server-not-connected")!.data).toMatchObject({ server: "deck", status: status ?? "missing" });
   });
 
   test("a native session id different from the assigned one fails the turn (continuity would break)", async () => {
@@ -310,11 +320,49 @@ describe("Claude driver probe (XR-4.6, XR-12.1, task 1.13)", () => {
     expect(await probeWith(new Error("ENOENT"))).toMatchObject({ status: "blocked", reasonCode: "claude-not-installed" });
     expect(await probeWith("garbage")).toMatchObject({ status: "blocked", reasonCode: "claude-version-unparsable" });
   });
-  test("ToS gate (XR-12.1): unacknowledged blocks before anything runs; acknowledged proceeds", async () => {
+  test("legacy acknowledgement callback does not block a supported Claude installation", async () => {
     let ran = false;
     const blocked = await createClaudeSessionDriver({ tosAcknowledged: () => false, exec: async () => { ran = true; return { code: 0, stdout: "2.1.296" }; } }).probe({ cwd: "/tmp" });
-    expect(blocked).toMatchObject({ status: "blocked", reasonCode: "claude-session-tos-unacknowledged" });
-    expect(ran).toBe(false);
+    expect(blocked).toMatchObject({ status: "ready" });
+    expect(ran).toBe(true);
     expect((await probeWith("2.1.296 (Claude Code)", () => true)).status).toBe("ready");
   });
+});
+
+
+test("partial stdout text is visible while the child is still running, including interruption without a final assistant", async () => {
+  const { h, driver } = make();
+  const handle = await driver.startTask(input(), h.io);
+  const child = await h.nextChild();
+  child.lines([withSession("turn-success.jsonl")[0]!, JSON.stringify({ type: "stream_event", event: { type: "message_start", message: { id: "msg_live" } } })]);
+  const started = performance.now();
+  child.lines([JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Early text" } } })]);
+  expect(h.events.find(event => event.kind === "message.delta")).toMatchObject({ data: { text: "Early text", messageId: "msg_live" } });
+  expect(performance.now() - started).toBeLessThan(100);
+  expect(h.events.some(event => event.kind === "message.completed")).toBe(false);
+  await handle.interrupt();
+  child.lines([JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, terminal_reason: "aborted_streaming", session_id: SID })]);
+  child.exit({ ok: false, code: 130 });
+  expect((await handle.done).status).toBe("interrupted");
+  expect(h.events.filter(event => event.kind === "message.delta")).toHaveLength(1);
+});
+
+
+test("delayed full assistant cannot hold back the first partial chunk", async () => {
+  const { h, driver } = make();
+  const handle = await driver.startTask(input(), h.io);
+  const child = await h.nextChild();
+  const started = performance.now();
+  child.lines([withSession("turn-success.jsonl")[0]!, JSON.stringify({ type: "stream_event", event: { type: "message_start", message: { id: "msg_delayed" } } }), JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "pong" } } })]);
+  const firstChunkMs = performance.now() - started;
+  expect(h.events.find(event => event.kind === "message.delta")?.data.text).toBe("pong");
+  await new Promise(resolve => setTimeout(resolve, 100));
+  child.lines(withSession("turn-success.jsonl").slice(1));
+  child.exit();
+  expect((await handle.done).status).toBe("completed");
+  const fullMessageMs = performance.now() - started;
+  expect(fullMessageMs - firstChunkMs).toBeGreaterThanOrEqual(90);
+  expect(h.events.filter(event => event.kind === "message.delta")).toHaveLength(1);
+  expect(h.events.filter(event => event.kind === "message.completed")).toHaveLength(1);
+  console.log(`Claude partial visibility: first chunk ${firstChunkMs.toFixed(2)} ms; final message ${fullMessageMs.toFixed(2)} ms`);
 });

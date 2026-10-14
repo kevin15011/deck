@@ -10,6 +10,7 @@ export type BridgeServiceOptions = {
   broker: ApprovalBroker;
   /** Current view of the calling task for `deck_status`. */
   status: (grant: CredentialGrant) => unknown;
+  callTaskTool?: (grant: CredentialGrant, name: string, args: unknown, context: { signal?: AbortSignal }) => Promise<CommandOutcome>;
 };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -24,7 +25,9 @@ export class BridgeService implements BridgePort {
     switch (input.tool) {
       case DECK_STATUS_TOOL: return { ok: true, data: this.options.status(grant) };
       case DECK_APPROVE_TOOL: return this.approve(grant, input.arguments, context.signal);
-      default: return { ok: false, code: "tool-unknown", message: input.tool };
+      default:
+        if (["deck_delegate", "deck_task_wait", "deck_task_result", "deck_task_cancel"].includes(input.tool) && (grant.taskId !== "lead" || grant.memberId !== "lead")) return { ok: false, code: "tool-not-allowed" };
+        return this.options.callTaskTool?.(grant, input.tool, input.arguments, context) ?? { ok: false, code: "tool-unknown", message: input.tool };
     }
   }
 

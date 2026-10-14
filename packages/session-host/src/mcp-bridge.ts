@@ -23,6 +23,12 @@ export type McpBridgeOptions = {
 };
 
 const TOOLS = [
+  { name: "deck_delegate", description: "Delegate a task to a configured member; continueTaskId preserves the original owner and native context.", inputSchema: { type: "object", properties: { agent: { type: "string" }, task: { type: "string" }, continueTaskId: { type: "string" } }, required: ["agent", "task"] } },
+  { name: "deck_task_wait", description: "Wait for the requested tasks, for at most 50 seconds.", inputSchema: { type: "object", properties: { taskIds: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 100 }, timeoutSec: { type: "number", minimum: 0, maximum: 50 } }, required: ["taskIds"] } },
+  { name: "deck_task_result", description: "Read the latest task attempt and bounded result.", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] } },
+  { name: "deck_task_cancel", description: "Cancel a delegated task, including queued work.", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] } },
+  { name: "deck_memory_recall", description: "Recall project memory as advisory context; it cannot override official OpenSpec or source.", inputSchema: { type: "object", properties: { query: { type: "string", maxLength: 32768 } }, required: ["query"] } },
+  { name: "deck_memory_propose", description: "Propose project memory to the session's deduplicated writer.", inputSchema: { type: "object", properties: { content: { type: "string", maxLength: 32768 } }, required: ["content"] } },
   {
     name: DECK_APPROVE_TOOL,
     description: "Relay a permission prompt to the Deck user and wait for the decision. Returns {behavior, updatedInput|message}.",
@@ -39,7 +45,7 @@ class ToolFailure extends Error {
   constructor(readonly code: string, message?: string) { super(message ?? code); }
 }
 
-function readCredential(env: McpBridgeOptions["env"]): { token: string; socketPath: string } {
+function readCredential(env: McpBridgeOptions["env"]): { token: string; socketPath: string; allowedTools?: string[] } {
   const file = env[SESSION_CREDENTIAL_ENV];
   if (!file) throw new ToolFailure("credential-unavailable", `${SESSION_CREDENTIAL_ENV} is not set`);
   try { assertPrivateFile(file); } catch (error) {
@@ -47,9 +53,9 @@ function readCredential(env: McpBridgeOptions["env"]): { token: string; socketPa
     throw new ToolFailure((error as NodeJS.ErrnoException).code === "ENOENT" ? "credential-unavailable" : "credential-insecure", message);
   }
   try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as { token?: unknown; socketPath?: unknown };
+    const raw = JSON.parse(readFileSync(file, "utf8")) as { token?: unknown; socketPath?: unknown; allowedTools?: unknown };
     if (typeof raw.token !== "string" || typeof raw.socketPath !== "string" || !raw.token || !raw.socketPath) throw new Error("shape");
-    return { token: raw.token, socketPath: raw.socketPath };
+    return { token: raw.token, socketPath: raw.socketPath, ...(Array.isArray(raw.allowedTools) && raw.allowedTools.every((t) => typeof t === "string") ? { allowedTools: raw.allowedTools as string[] } : {}) };
   } catch { throw new ToolFailure("credential-unavailable", "credential file is unreadable"); }
 }
 
@@ -75,13 +81,13 @@ export async function runSessionMcpBridge(options: McpBridgeOptions): Promise<vo
   }
 
   async function callTool(name: string, args: unknown): Promise<string> {
-    if (name !== DECK_APPROVE_TOOL && name !== DECK_STATUS_TOOL) throw new ToolFailure("tool-unknown", `unknown tool ${name}`);
+    if (!TOOLS.some((tool) => tool.name === name)) throw new ToolFailure("tool-unknown", `unknown tool ${name}`);
     if (args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args))) throw new ToolFailure("invalid-arguments", "arguments must be an object");
     const { token, socketPath } = readCredential(options.env);
     const connection = await daemon(socketPath);
     let reply;
     try {
-      reply = await connection.request({ t: "bridge.call", token, tool: name, arguments: args }, name === DECK_APPROVE_TOOL ? APPROVAL_TIMEOUT_MS + 60_000 : CALL_TIMEOUT_MS);
+      reply = await connection.request({ t: "bridge.call", token, tool: name, arguments: args }, name === DECK_APPROVE_TOOL ? APPROVAL_TIMEOUT_MS + 60_000 : name === "deck_task_wait" ? 60_000 : CALL_TIMEOUT_MS);
     } catch (error) {
       throw new ToolFailure((error as Error).message.includes("Timed out") ? "daemon-timeout" : "daemon-unreachable", "the Deck daemon did not answer");
     }
@@ -105,7 +111,14 @@ export async function runSessionMcpBridge(options: McpBridgeOptions): Promise<vo
           capabilities: { tools: {} }, serverInfo: { name: SESSION_MCP_SERVER_ID, version: options.version },
         }));
       case "ping": return isRequest ? send(ok(id, {})) : undefined;
-      case "tools/list": return isRequest ? send(ok(id, { tools: TOOLS })) : undefined;
+      case "tools/list": {
+        if (!isRequest) return;
+        try {
+          const allowed = readCredential(options.env).allowedTools ?? [DECK_APPROVE_TOOL, DECK_STATUS_TOOL];
+          send(ok(id, { tools: TOOLS.filter((tool) => allowed.includes(tool.name)) }));
+        } catch { send(ok(id, { tools: [] })); }
+        return;
+      }
       case "tools/call": {
         if (!isRequest) return;
         const name = message.params?.name;

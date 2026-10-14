@@ -1,0 +1,893 @@
+{
+  "schema": "deck-session-contract-shapes-v1",
+  "runner": "codex",
+  "version": "0.162.1",
+  "shapes": {
+    "diagnostic.data": [
+      "object"
+    ],
+    "diagnostic.data.aliases": [
+      "object"
+    ],
+    "diagnostic.data.aliases.deck": [
+      "string"
+    ],
+    "diagnostic.data.code": [
+      "string"
+    ],
+    "message.completed.data": [
+      "object"
+    ],
+    "message.completed.data.messageId": [
+      "string"
+    ],
+    "message.completed.data.text": [
+      "string"
+    ],
+    "message.completed.raw": [
+      "object"
+    ],
+    "message.completed.raw.emittedAtMs": [
+      "number"
+    ],
+    "message.completed.raw.method": [
+      "string"
+    ],
+    "message.completed.raw.params": [
+      "object"
+    ],
+    "message.completed.raw.params.completedAtMs": [
+      "number"
+    ],
+    "message.completed.raw.params.item": [
+      "object"
+    ],
+    "message.completed.raw.params.item.delivery": [
+      "null"
+    ],
+    "message.completed.raw.params.item.id": [
+      "string"
+    ],
+    "message.completed.raw.params.item.memoryCitation": [
+      "null"
+    ],
+    "message.completed.raw.params.item.phase": [
+      "string"
+    ],
+    "message.completed.raw.params.item.questions": [
+      "null"
+    ],
+    "message.completed.raw.params.item.text": [
+      "string"
+    ],
+    "message.completed.raw.params.item.type": [
+      "string"
+    ],
+    "message.completed.raw.params.threadId": [
+      "string"
+    ],
+    "message.completed.raw.params.turnId": [
+      "string"
+    ],
+    "message.delta.data": [
+      "object"
+    ],
+    "message.delta.data.messageId": [
+      "string"
+    ],
+    "message.delta.data.text": [
+      "string"
+    ],
+    "message.delta.raw": [
+      "object"
+    ],
+    "message.delta.raw.emittedAtMs": [
+      "number"
+    ],
+    "message.delta.raw.method": [
+      "string"
+    ],
+    "message.delta.raw.params": [
+      "object"
+    ],
+    "message.delta.raw.params.delta": [
+      "string"
+    ],
+    "message.delta.raw.params.itemId": [
+      "string"
+    ],
+    "message.delta.raw.params.threadId": [
+      "string"
+    ],
+    "message.delta.raw.params.turnId": [
+      "string"
+    ],
+    "rate-limit.data": [
+      "object"
+    ],
+    "rate-limit.data.credits": [
+      "object"
+    ],
+    "rate-limit.data.credits.balance": [
+      "string"
+    ],
+    "rate-limit.data.credits.hasCredits": [
+      "boolean"
+    ],
+    "rate-limit.data.credits.unlimited": [
+      "boolean"
+    ],
+    "rate-limit.data.individualLimit": [
+      "null"
+    ],
+    "rate-limit.data.limitId": [
+      "string"
+    ],
+    "rate-limit.data.limitName": [
+      "null"
+    ],
+    "rate-limit.data.normalModelSlug": [
+      "null"
+    ],
+    "rate-limit.data.planType": [
+      "string"
+    ],
+    "rate-limit.data.primary": [
+      "object"
+    ],
+    "rate-limit.data.primary.resetsAt": [
+      "number"
+    ],
+    "rate-limit.data.primary.usedPercent": [
+      "number"
+    ],
+    "rate-limit.data.primary.windowDurationMins": [
+      "number"
+    ],
+    "rate-limit.data.rateLimitReachedType": [
+      "null"
+    ],
+    "rate-limit.data.secondary": [
+      "null"
+    ],
+    "rate-limit.data.spendControlReached": [
+      "null"
+    ],
+    "rate-limit.raw": [
+      "object"
+    ],
+    "rate-limit.raw.emittedAtMs": [
+      "number"
+    ],
+    "rate-limit.raw.method": [
+      "string"
+    ],
+    "rate-limit.raw.params": [
+      "object"
+    ],
+    "rate-limit.raw.params.rateLimits": [
+      "object"
+    ],
+    "rate-limit.raw.params.rateLimits.credits": [
+      "object"
+    ],
+    "rate-limit.raw.params.rateLimits.credits.balance": [
+      "string"
+    ],
+    "rate-limit.raw.params.rateLimits.credits.hasCredits": [
+      "boolean"
+    ],
+    "rate-limit.raw.params.rateLimits.credits.unlimited": [
+      "boolean"
+    ],
+    "rate-limit.raw.params.rateLimits.individualLimit": [
+      "null"
+    ],
+    "rate-limit.raw.params.rateLimits.limitId": [
+      "string"
+    ],
+    "rate-limit.raw.params.rateLimits.limitName": [
+      "null"
+    ],
+    "rate-limit.raw.params.rateLimits.normalModelSlug": [
+      "null"
+    ],
+    "rate-limit.raw.params.rateLimits.planType": [
+      "string"
+    ],
+    "rate-limit.raw.params.rateLimits.primary": [
+      "object"
+    ],
+    "rate-limit.raw.params.rateLimits.primary.resetsAt": [
+      "number"
+    ],
+    "rate-limit.raw.params.rateLimits.primary.usedPercent": [
+      "number"
+    ],
+    "rate-limit.raw.params.rateLimits.primary.windowDurationMins": [
+      "number"
+    ],
+    "rate-limit.raw.params.rateLimits.rateLimitReachedType": [
+      "null"
+    ],
+    "rate-limit.raw.params.rateLimits.secondary": [
+      "null"
+    ],
+    "rate-limit.raw.params.rateLimits.spendControlReached": [
+      "null"
+    ],
+    "runner.unmapped.data": [
+      "object"
+    ],
+    "runner.unmapped.data.nativeType": [
+      "string"
+    ],
+    "runner.unmapped.raw": [
+      "object"
+    ],
+    "runner.unmapped.raw.emittedAtMs": [
+      "number"
+    ],
+    "runner.unmapped.raw.method": [
+      "string"
+    ],
+    "runner.unmapped.raw.params": [
+      "object"
+    ],
+    "runner.unmapped.raw.params.authMode": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.completedAtMs": [
+      "number"
+    ],
+    "runner.unmapped.raw.params.environmentId": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.error": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.failureReason": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.installationId": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.item": [
+      "object"
+    ],
+    "runner.unmapped.raw.params.item.clientId": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.item.content": [
+      "array"
+    ],
+    "runner.unmapped.raw.params.item.content[]": [
+      "object"
+    ],
+    "runner.unmapped.raw.params.item.content[].text": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.item.content[].text_elements": [
+      "array"
+    ],
+    "runner.unmapped.raw.params.item.content[].type": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.item.delivery": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.item.id": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.item.memoryCitation": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.item.phase": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.item.questions": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.item.summary": [
+      "array"
+    ],
+    "runner.unmapped.raw.params.item.text": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.item.type": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.name": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.planType": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.requestId": [
+      "number"
+    ],
+    "runner.unmapped.raw.params.serverName": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.startedAtMs": [
+      "number"
+    ],
+    "runner.unmapped.raw.params.status": [
+      "object",
+      "string"
+    ],
+    "runner.unmapped.raw.params.status.activeFlags": [
+      "array"
+    ],
+    "runner.unmapped.raw.params.status.activeFlags[]": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.status.type": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread": [
+      "object"
+    ],
+    "runner.unmapped.raw.params.thread.agentNickname": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.agentRole": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.canAcceptDirectInput": [
+      "boolean"
+    ],
+    "runner.unmapped.raw.params.thread.cliVersion": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.createdAt": [
+      "number"
+    ],
+    "runner.unmapped.raw.params.thread.cwd": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.daybreakEnabled": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.environments": [
+      "array"
+    ],
+    "runner.unmapped.raw.params.thread.environments[]": [
+      "object"
+    ],
+    "runner.unmapped.raw.params.thread.environments[].cwd": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.environments[].environmentId": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.environments[].runtimeWorkspaceRoots": [
+      "array"
+    ],
+    "runner.unmapped.raw.params.thread.environments[].runtimeWorkspaceRoots[]": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.ephemeral": [
+      "boolean"
+    ],
+    "runner.unmapped.raw.params.thread.extra": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.forkedFromId": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.gitInfo": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.historyMode": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.id": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.model": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.modelProvider": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.name": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.originator": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.parentThreadId": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.path": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.preview": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.projectId": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.reasoningEffort": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.recencyAt": [
+      "number"
+    ],
+    "runner.unmapped.raw.params.thread.section": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.sectionEnteredAt": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.sessionId": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.source": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.status": [
+      "object"
+    ],
+    "runner.unmapped.raw.params.thread.status.type": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.thread.threadSource": [
+      "null"
+    ],
+    "runner.unmapped.raw.params.thread.turns": [
+      "array"
+    ],
+    "runner.unmapped.raw.params.thread.updatedAt": [
+      "number"
+    ],
+    "runner.unmapped.raw.params.threadId": [
+      "string"
+    ],
+    "runner.unmapped.raw.params.turnId": [
+      "string"
+    ],
+    "tool.completed.data": [
+      "object"
+    ],
+    "tool.completed.data.exitCode": [
+      "null"
+    ],
+    "tool.completed.data.input": [
+      "object"
+    ],
+    "tool.completed.data.input.command": [
+      "string"
+    ],
+    "tool.completed.data.input.cwd": [
+      "string"
+    ],
+    "tool.completed.data.output": [
+      "null"
+    ],
+    "tool.completed.data.status": [
+      "string"
+    ],
+    "tool.completed.data.tool": [
+      "string"
+    ],
+    "tool.completed.data.toolCallId": [
+      "string"
+    ],
+    "tool.completed.raw": [
+      "object"
+    ],
+    "tool.completed.raw.emittedAtMs": [
+      "number"
+    ],
+    "tool.completed.raw.method": [
+      "string"
+    ],
+    "tool.completed.raw.params": [
+      "object"
+    ],
+    "tool.completed.raw.params.completedAtMs": [
+      "number"
+    ],
+    "tool.completed.raw.params.item": [
+      "object"
+    ],
+    "tool.completed.raw.params.item.aggregatedOutput": [
+      "null"
+    ],
+    "tool.completed.raw.params.item.command": [
+      "string"
+    ],
+    "tool.completed.raw.params.item.commandActions": [
+      "array"
+    ],
+    "tool.completed.raw.params.item.commandActions[]": [
+      "object"
+    ],
+    "tool.completed.raw.params.item.commandActions[].command": [
+      "string"
+    ],
+    "tool.completed.raw.params.item.commandActions[].type": [
+      "string"
+    ],
+    "tool.completed.raw.params.item.cwd": [
+      "string"
+    ],
+    "tool.completed.raw.params.item.durationMs": [
+      "null"
+    ],
+    "tool.completed.raw.params.item.exitCode": [
+      "null"
+    ],
+    "tool.completed.raw.params.item.id": [
+      "string"
+    ],
+    "tool.completed.raw.params.item.pluginId": [
+      "null"
+    ],
+    "tool.completed.raw.params.item.processId": [
+      "null"
+    ],
+    "tool.completed.raw.params.item.scriptPath": [
+      "null"
+    ],
+    "tool.completed.raw.params.item.source": [
+      "string"
+    ],
+    "tool.completed.raw.params.item.status": [
+      "string"
+    ],
+    "tool.completed.raw.params.item.type": [
+      "string"
+    ],
+    "tool.completed.raw.params.threadId": [
+      "string"
+    ],
+    "tool.completed.raw.params.turnId": [
+      "string"
+    ],
+    "tool.started.data": [
+      "object"
+    ],
+    "tool.started.data.exitCode": [
+      "null"
+    ],
+    "tool.started.data.input": [
+      "object"
+    ],
+    "tool.started.data.input.command": [
+      "string"
+    ],
+    "tool.started.data.input.cwd": [
+      "string"
+    ],
+    "tool.started.data.output": [
+      "null"
+    ],
+    "tool.started.data.status": [
+      "string"
+    ],
+    "tool.started.data.tool": [
+      "string"
+    ],
+    "tool.started.data.toolCallId": [
+      "string"
+    ],
+    "tool.started.raw": [
+      "object"
+    ],
+    "tool.started.raw.emittedAtMs": [
+      "number"
+    ],
+    "tool.started.raw.method": [
+      "string"
+    ],
+    "tool.started.raw.params": [
+      "object"
+    ],
+    "tool.started.raw.params.item": [
+      "object"
+    ],
+    "tool.started.raw.params.item.aggregatedOutput": [
+      "null"
+    ],
+    "tool.started.raw.params.item.command": [
+      "string"
+    ],
+    "tool.started.raw.params.item.commandActions": [
+      "array"
+    ],
+    "tool.started.raw.params.item.commandActions[]": [
+      "object"
+    ],
+    "tool.started.raw.params.item.commandActions[].command": [
+      "string"
+    ],
+    "tool.started.raw.params.item.commandActions[].type": [
+      "string"
+    ],
+    "tool.started.raw.params.item.cwd": [
+      "string"
+    ],
+    "tool.started.raw.params.item.durationMs": [
+      "null"
+    ],
+    "tool.started.raw.params.item.exitCode": [
+      "null"
+    ],
+    "tool.started.raw.params.item.id": [
+      "string"
+    ],
+    "tool.started.raw.params.item.pluginId": [
+      "null"
+    ],
+    "tool.started.raw.params.item.processId": [
+      "null"
+    ],
+    "tool.started.raw.params.item.scriptPath": [
+      "null"
+    ],
+    "tool.started.raw.params.item.source": [
+      "string"
+    ],
+    "tool.started.raw.params.item.status": [
+      "string"
+    ],
+    "tool.started.raw.params.item.type": [
+      "string"
+    ],
+    "tool.started.raw.params.startedAtMs": [
+      "number"
+    ],
+    "tool.started.raw.params.threadId": [
+      "string"
+    ],
+    "tool.started.raw.params.turnId": [
+      "string"
+    ],
+    "turn.completed.data": [
+      "object"
+    ],
+    "turn.completed.data.nativeTurnId": [
+      "string"
+    ],
+    "turn.completed.data.status": [
+      "string"
+    ],
+    "turn.completed.raw": [
+      "object"
+    ],
+    "turn.completed.raw.emittedAtMs": [
+      "number"
+    ],
+    "turn.completed.raw.method": [
+      "string"
+    ],
+    "turn.completed.raw.params": [
+      "object"
+    ],
+    "turn.completed.raw.params.threadId": [
+      "string"
+    ],
+    "turn.completed.raw.params.turn": [
+      "object"
+    ],
+    "turn.completed.raw.params.turn.completedAt": [
+      "number"
+    ],
+    "turn.completed.raw.params.turn.durationMs": [
+      "number"
+    ],
+    "turn.completed.raw.params.turn.error": [
+      "null"
+    ],
+    "turn.completed.raw.params.turn.id": [
+      "string"
+    ],
+    "turn.completed.raw.params.turn.items": [
+      "array"
+    ],
+    "turn.completed.raw.params.turn.items[]": [
+      "object"
+    ],
+    "turn.completed.raw.params.turn.items[].delivery": [
+      "null"
+    ],
+    "turn.completed.raw.params.turn.items[].id": [
+      "string"
+    ],
+    "turn.completed.raw.params.turn.items[].memoryCitation": [
+      "null"
+    ],
+    "turn.completed.raw.params.turn.items[].phase": [
+      "string"
+    ],
+    "turn.completed.raw.params.turn.items[].questions": [
+      "null"
+    ],
+    "turn.completed.raw.params.turn.items[].text": [
+      "string"
+    ],
+    "turn.completed.raw.params.turn.items[].type": [
+      "string"
+    ],
+    "turn.completed.raw.params.turn.itemsView": [
+      "string"
+    ],
+    "turn.completed.raw.params.turn.rootTurnId": [
+      "string"
+    ],
+    "turn.completed.raw.params.turn.startedAt": [
+      "number"
+    ],
+    "turn.completed.raw.params.turn.status": [
+      "string"
+    ],
+    "turn.started.data": [
+      "object"
+    ],
+    "turn.started.data.nativeTurnId": [
+      "string"
+    ],
+    "turn.started.raw": [
+      "object"
+    ],
+    "turn.started.raw.emittedAtMs": [
+      "number"
+    ],
+    "turn.started.raw.method": [
+      "string"
+    ],
+    "turn.started.raw.params": [
+      "object"
+    ],
+    "turn.started.raw.params.threadId": [
+      "string"
+    ],
+    "turn.started.raw.params.turn": [
+      "object"
+    ],
+    "turn.started.raw.params.turn.completedAt": [
+      "null"
+    ],
+    "turn.started.raw.params.turn.durationMs": [
+      "null"
+    ],
+    "turn.started.raw.params.turn.error": [
+      "null"
+    ],
+    "turn.started.raw.params.turn.id": [
+      "string"
+    ],
+    "turn.started.raw.params.turn.items": [
+      "array"
+    ],
+    "turn.started.raw.params.turn.itemsView": [
+      "string"
+    ],
+    "turn.started.raw.params.turn.rootTurnId": [
+      "string"
+    ],
+    "turn.started.raw.params.turn.startedAt": [
+      "number"
+    ],
+    "turn.started.raw.params.turn.status": [
+      "string"
+    ],
+    "usage.data": [
+      "object"
+    ],
+    "usage.data.last": [
+      "object"
+    ],
+    "usage.data.last.cachedInputTokens": [
+      "number"
+    ],
+    "usage.data.last.cacheWriteInputTokens": [
+      "number"
+    ],
+    "usage.data.last.inputTokens": [
+      "number"
+    ],
+    "usage.data.last.outputTokens": [
+      "number"
+    ],
+    "usage.data.last.reasoningOutputTokens": [
+      "number"
+    ],
+    "usage.data.last.totalTokens": [
+      "number"
+    ],
+    "usage.data.modelContextWindow": [
+      "number"
+    ],
+    "usage.data.total": [
+      "object"
+    ],
+    "usage.data.total.cachedInputTokens": [
+      "number"
+    ],
+    "usage.data.total.cacheWriteInputTokens": [
+      "number"
+    ],
+    "usage.data.total.inputTokens": [
+      "number"
+    ],
+    "usage.data.total.outputTokens": [
+      "number"
+    ],
+    "usage.data.total.reasoningOutputTokens": [
+      "number"
+    ],
+    "usage.data.total.totalTokens": [
+      "number"
+    ],
+    "usage.raw": [
+      "object"
+    ],
+    "usage.raw.emittedAtMs": [
+      "number"
+    ],
+    "usage.raw.method": [
+      "string"
+    ],
+    "usage.raw.params": [
+      "object"
+    ],
+    "usage.raw.params.threadId": [
+      "string"
+    ],
+    "usage.raw.params.tokenUsage": [
+      "object"
+    ],
+    "usage.raw.params.tokenUsage.last": [
+      "object"
+    ],
+    "usage.raw.params.tokenUsage.last.cachedInputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.last.cacheWriteInputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.last.inputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.last.outputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.last.reasoningOutputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.last.totalTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.modelContextWindow": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.total": [
+      "object"
+    ],
+    "usage.raw.params.tokenUsage.total.cachedInputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.total.cacheWriteInputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.total.inputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.total.outputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.total.reasoningOutputTokens": [
+      "number"
+    ],
+    "usage.raw.params.tokenUsage.total.totalTokens": [
+      "number"
+    ],
+    "usage.raw.params.turnId": [
+      "string"
+    ]
+  }
+}

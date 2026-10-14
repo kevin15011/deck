@@ -14,3 +14,4 @@ export * from "./team-catalog";
 export { createCodexTools, type CodexTools, type CodexToolOptions } from "./tools";
 export { CODEX_SUPERMEMORY_ENV_KEY, CODEX_SUPERMEMORY_VERSION } from "./supermemory-artifact";
 export * from "./memory-mcp-server";
+export { createCodexSessionDriver, CODEX_TESTED_VERSIONS, type CodexSessionDriverOptions } from "./session-driver/driver";

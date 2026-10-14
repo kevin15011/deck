@@ -45,3 +45,185 @@ events:
     registry_write: reconciled-by-orchestrator
     notes:
       - "Six independently shippable stages with per-task verification and binary gates."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-10-12"
+    actor: deck-lead
+    registry_write: reconciled-by-orchestrator
+    notes:
+      - "User requested resumption from the handoff. Existing S0/S1a and partial S1b implementation verified; preserve unrelated dirty Codex/TUI/docs work."
+      - "Initial checks: TypeScript clean; 322 core/session-host tests passed; registry validation clean before reconciliation."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-13T01:09:05Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Completed required S0–S5 scope; optional 4.10 deferred. Preserved unrelated worktree changes and Pi source."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-13T01:09:05Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Final frozen suite: 6373 pass, 3 skip, 0 fail. Required focused gates, TypeScript and release verification passed."
+      - "Four targets built; Darwin/Linux arm64 ran single-runner, cross-runner and web flows. Compiled desktop browser and native three-runner memory acceptance passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-13T01:09:05Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Deck Quality approved after regression-tested repairs; no source blocker remains. No commit, install, push or publication performed."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-10-13"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User canary feedback supersedes manual local pairing and Claude acknowledgement requirements; investigate measured response latency. Prior verification remains historical evidence for the earlier candidate."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-13T08:03:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Completed local access, Claude notice removal, streaming and managed MCP readiness/recovery."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-13T08:03:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Frozen full suite 6421 pass, 3 skip, 0 fail; four-target build, host/Linux/browser acceptance and actual managed MCP acceptance passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-13T08:03:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved after ownership-unsettled and Claude MCP status repairs; installed canary and foreign processes untouched."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-10-13"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Confirmed duplicate daemon completion wake after deck_task_wait delivered the result; user authorized repair."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-13T08:17:04Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Fixed duplicate completion wake with attempt-scoped terminal Lead-result acknowledgement."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-13T08:17:04Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "425 affected tests passed; TypeScript and four-target build clean; extracted host cross smoke passed six checks."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-13T08:17:04Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved; 19 independent integration tests passed; no source blockers."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-10-13"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User authorized public daemon lifecycle commands; scope explicit start/status/stop/restart with busy refusal and preserved history."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-13T08:43:54Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Implemented public daemon lifecycle commands and atomic admission fence with strict spawned-PID attribution."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-13T08:43:54Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "497 affected tests passed, TypeScript clean, four-target build and compiled Darwin/Linux lifecycle plus host cross/web acceptance passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-13T08:43:54Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved; 110 independent tests passed; no blockers or installed user-runtime changes."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: apply-progress.md
+    timestamp: "2026-10-13T08:59:59Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User requested full responsive web redesign, conversation/activity separation, Markdown and OpenSpec artifact tab. Current visual agreement and read-only artifact boundaries recorded."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-13T09:18:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Responsive workspace, safe Markdown and bounded read-only OpenSpec artifact API implemented; generated assets aligned."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-13T09:18:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "442 affected tests, TypeScript, four-target build, desktop/mobile browser and extracted Darwin/Linux HTTP plus compiled browser checks passed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-13T09:18:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved final source and browser candidate; Root verified compiled production composition. No installed-runtime mutation."

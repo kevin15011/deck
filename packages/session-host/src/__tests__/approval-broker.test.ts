@@ -104,7 +104,7 @@ describe("ApprovalBroker (XR-5.1, XR-5.2)", () => {
   test("cancelTask denies that task's approvals only (task ended / interrupted)", async () => {
     const { events, req, broker } = setup();
     const a = req({ taskId: "t-1" }), b = req({ taskId: "t-2" });
-    expect(broker.cancelTask("t-1", "task-ended")).toBe(1);
+    expect(broker.cancelTask("s-1", "t-1", "task-ended")).toBe(1);
     expect(await a.resolution).toEqual({ approvalId: a.approvalId, decision: "deny", by: "task-ended" });
     expect(broker.pending().map((p) => p.approvalId)).toEqual([b.approvalId]);
     expect(events.filter((e) => e.kind === "approval.resolved")).toHaveLength(1);

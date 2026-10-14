@@ -7,6 +7,7 @@ export type RunSessionDaemonOptions = {
   version: string;
   anchorCommand: readonly string[];
   createService?: DaemonOptions["createService"];
+  web?: DaemonOptions["web"];
   stderr?: (text: string) => void;
 };
 
@@ -20,6 +21,7 @@ export async function runSessionDaemon(options: RunSessionDaemonOptions): Promis
     version: options.version,
     anchorCommand: options.anchorCommand,
     createService: options.createService,
+    web: options.web,
     ...(Number.isFinite(idleOverride) && idleOverride > 0 ? { idleMs: idleOverride } : {}),
   });
   if (!started.ok) {

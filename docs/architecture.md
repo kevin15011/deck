@@ -13,6 +13,14 @@ Runner adapters—`packages/adapter-pi`, `packages/adapter-opencode`, and `packa
 
 Deck user and runner preferences have one active source: `$XDG_CONFIG_HOME/deck/config.json`, or `~/.config/deck/config.json` when `XDG_CONFIG_HOME` is unset. Core exposes path-parameterized config read/validate/atomic patch/write primitives only; the CLI owns XDG resolution, migration-only legacy discovery, conflict reporting, and the `DeckConfigStore` composition used by TUI, Doctor, launch, upgrade, and sync paths. Project roots remain execution and materialization targets. A repository `.deck/` directory may still host OpenSpec/runtime/runner-native project artifacts or migration-only legacy inputs, but Deck no longer creates or updates `<project>/.deck/config.json` for user preferences.
 
+## Cross-runner session boundary
+
+`@deck/session-host` owns the on-demand local session daemon, process-group anchors, append-only event logs, task ledger and approval broker. Core supplies pure event/command contracts and runner-qualified assignments. Claude, Codex and OpenCode adapters implement the optional `RunnerSessionDriver`; Pi is not a cross-session driver. `apps/cli` registers these drivers and resolves the selected owned MCP packages without changing native installations.
+
+Each task has its own supervised native process and task-scoped MCP credential. Session state lives under `$XDG_STATE_HOME/deck/sessions`, outside the project, with private file modes. Client disconnects do not cancel work. The daemon owns live process handles; crash recovery inspects recorded process identity but never sends signals to PIDs loaded from disk. OpenSpec remains the authoritative change record, separate from runtime session history.
+
+The cross-runner plan and acceptance requirements are recorded in the [session-core design](../openspec/changes/cross-runner-session-core/design.md) and [specification](../openspec/changes/cross-runner-session-core/spec.md). Native runner workflows retain their existing architecture and policy boundaries.
+
 ## Agent skill discovery boundary
 
 The agent skill registry is a **local, discovery-only index**, not a runtime rules catalog or prompt source. Discovery combines the generic project roots with source declarations from the **active runner** only; exclusive roots belonging to other runners are not aggregated.

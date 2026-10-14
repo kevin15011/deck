@@ -231,4 +231,12 @@ describe("Pi Runner dashboard render", () => {
     expect(output).toContain("Pi Runner setup complete");
     expect(output).toContain("Press Enter to return to the home screen.");
   });
+
+  test("completion retains long MCP conflict remediation and still redacts secrets", () => {
+    const state = createDefaultPiRunnerDashboardState({ screen: "complete" });
+    const message = `Runner installation is blocked. ${"Existing MCP configuration differs. ".repeat(9)} Back up config.toml and align the selected tool. token=private-value`;
+    const output = renderToString(<RunnerDashboardScreens state={state} installResults={[{ actionId: "codex-developer-team", status: "failed", message, diagnostics: [] }]} />);
+    expect(output.replace(/\s+/g, " ")).toContain("Back up config.toml and align the selected tool.");
+    expect(output).not.toContain("private-value");
+  });
 });

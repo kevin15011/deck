@@ -51,6 +51,42 @@ describe("parseArgs", () => {
     expect(parseArgs(["internal", "child-anchor", "--"])).toMatchObject({ command: "error" });
   });
 
+  test("parses `deck cross developer [--change <id>]`", () => {
+    expect(parseArgs(["cross", "developer"])).toEqual({ command: "cross-launch", flags: {} });
+    expect(parseArgs(["cross", "developer", "--change", "my-change"])).toEqual({ command: "cross-launch", flags: { changeId: "my-change" } });
+    expect(parseArgs(["cross", "developer", "--change=my-change"])).toEqual({ command: "cross-launch", flags: { changeId: "my-change" } });
+    for (const bad of [["cross"], ["cross", "pi"], ["cross", "developer", "--change"], ["cross", "developer", "--change", "--x"], ["cross", "developer", "--nope"], ["cross", "developer", "extra"]]) {
+      expect(parseArgs(bad)).toMatchObject({ command: "error" });
+    }
+  });
+
+  test("parses `deck session` subcommands", () => {
+    expect(parseArgs(["session", "list"])).toEqual({ command: "session", sub: { action: "list", json: false } });
+    expect(parseArgs(["session", "list", "--json"])).toEqual({ command: "session", sub: { action: "list", json: true } });
+    expect(parseArgs(["session", "attach", "s-1"])).toEqual({ command: "session", sub: { action: "attach", sessionId: "s-1" } });
+    expect(parseArgs(["session", "stop", "s-1"])).toEqual({ command: "session", sub: { action: "stop", sessionId: "s-1" } });
+    expect(parseArgs(["session", "status"])).toEqual({ command: "session", sub: { action: "status", json: false } });
+    expect(parseArgs(["session", "status", "--json"])).toEqual({ command: "session", sub: { action: "status", json: true } });
+    expect(parseArgs(["session", "self-test", "--json"])).toEqual({ command: "session", sub: { action: "self-test", json: true } });
+    expect(parseArgs(["session", "ack-claude-tos"])).toEqual({ command: "session", sub: { action: "ack-claude-tos", yes: false } });
+    expect(parseArgs(["session", "ack-claude-tos", "--yes"])).toEqual({ command: "session", sub: { action: "ack-claude-tos", yes: true } });
+    expect(parseArgs(["session", "prune"])).toEqual({ command: "session", sub: { action: "prune", dryRun: false, json: false } });
+    expect(parseArgs(["session", "prune", "--dry-run", "--max-age-days", "7", "--keep=10", "--json"])).toEqual({ command: "session", sub: { action: "prune", dryRun: true, maxAgeDays: 7, keep: 10, json: true } });
+  });
+
+  test("rejects malformed `deck session` grammar", () => {
+    for (const bad of [["session"], ["session", "nope"], ["session", "attach"], ["session", "attach", "../x"], ["session", "stop"], ["session", "list", "--x"], ["session", "status", "extra"],
+      ["session", "prune", "--keep", "x"], ["session", "prune", "--max-age-days", "-1"], ["session", "prune", "--keep"], ["session", "ack-claude-tos", "--no"], ["session", "self-test", "extra"]]) {
+      expect(parseArgs(bad)).toMatchObject({ command: "error" });
+    }
+  });
+
+  test("`deck --version` and `-v` are aliases of `deck version`", () => {
+    expect(parseArgs(["--version"])).toEqual({ command: "version" });
+    expect(parseArgs(["-v"])).toEqual({ command: "version" });
+    expect(parseArgs(["--version", "x"])).toMatchObject({ command: "error" });
+  });
+
   test("rejects malformed Codex grammar instead of guessing", () => {
     expect(parseArgs(["codex", "developer", "exec", "fix it"]).command).toBe("error");
     expect(parseArgs(["codex", "developer", "resume"]).command).toBe("error");
@@ -544,4 +580,16 @@ describe("--verbose for runner launches", () => {
     expect(parseArgs(["codex", "developer", "exec", "--", "x"])).not.toHaveProperty("verbose");
     expect(parseArgs(["opencode", "developer", "--verbose", "--yes"])).toMatchObject({ command: "runner-launch", runnerId: "opencode", verbose: true, yes: true });
   });
+});
+
+test("session web grammar admits only local administration operations", () => {
+  expect(parseArgs(["session", "web", "pair", "--json"])).toEqual({command:"session",sub:{action:"web",operation:"pair",json:true}});
+  expect(parseArgs(["session", "devices", "revoke", "abc-123"])).toEqual({command:"session",sub:{action:"devices-revoke",deviceId:"abc-123"}});
+  for (const args of [["session","web"],["session","web","expose"],["session","web","enable","--yes"],["session","devices","revoke","../secret"]]) expect(parseArgs(args).command).toBe("error");
+});
+
+test("session pair and devices expose the documented local aliases", () => {
+  expect(parseArgs(["session", "pair"])).toEqual({ command: "session", sub: { action: "web", operation: "pair", json: false } });
+  expect(parseArgs(["session", "devices", "--json"])).toEqual({ command: "session", sub: { action: "web", operation: "devices", json: true } });
+  expect(parseArgs(["session", "pair", "--expose"]).command).toBe("error");
 });

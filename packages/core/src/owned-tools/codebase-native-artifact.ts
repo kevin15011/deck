@@ -7,6 +7,8 @@ import { Readable } from "node:stream";
 import { createGunzip } from "node:zlib";
 
 export const OWNED_CODEBASE_VERSION = "0.11.0";
+/** Native rendezvous and MCP behavior are verified for this exact release, not future semvers. */
+export const isSupportedCodebaseVersion = (version: string): boolean => version === OWNED_CODEBASE_VERSION;
 export type CodebaseNativeRelease = Readonly<{ asset: string; archiveBytes: number; archiveSha256: string; binaryBytes: number; binarySha256: string }>;
 export const OWNED_CODEBASE_RELEASES = Object.freeze({
   "linux-x64": { asset: "codebase-memory-mcp-linux-amd64-portable.tar.gz", archiveBytes: 40607189, archiveSha256: "1f9e8293eb2bc5c05cfa27a7e8fc033da6d729ffad525ccfcdaa3fd606306683", binaryBytes: 299891744, binarySha256: "ce11c141431aeadd788506c3a7e6942db8fd438dec369d0707a39ec9fd8c6510" },

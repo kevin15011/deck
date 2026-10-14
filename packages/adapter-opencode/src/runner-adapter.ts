@@ -7,6 +7,8 @@
  * Design: runner-decoupling-refactor / design.md § RunnerAdapter Contract
  */
 
+import { createOpenCodeSessionDriver, type OpenCodeSessionDriverOptions } from "./session-driver/driver";
+import { readOpenCodeSessionMcpServers } from "./session-driver/mcp";
 import { homedir } from "node:os";
 import { appendFileSync, writeFileSync, readFileSync, existsSync, mkdirSync, accessSync, constants as fsConstants, promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
@@ -168,6 +170,8 @@ export type OpenCodeRunnerAdapterOptions = {
   productionDiscoveryDependencies?: Partial<OpenCodeProductionDiscoveryDependencies>;
   /** Isolated install root for adapter integration tests; production retains OpenCode's config directory. */
   developerTeamConfigDir?: string;
+  /** Headless session driver effects for hermetic contract tests. */
+  sessionDriver?: OpenCodeSessionDriverOptions;
   /** Optional read-only OpenCode inventory seam for runner-exposed skills. */
   skillInventoryDiscovery?: OpenCodeSkillInventoryDiscovery;
   /** Optional home directory seam used to resolve the legacy OpenCode root. */
@@ -302,6 +306,12 @@ export function createOpenCodeRunnerAdapter(options?: OpenCodeRunnerAdapterOptio
 // ---------------------------------------------------------------------------
 
 class OpenCodeRunnerAdapterImpl {
+  getSessionDriver() { return createOpenCodeSessionDriver(this.#sessionDriver); }
+
+  async readSessionMcpServers() {
+    return readOpenCodeSessionMcpServers(this.#developerTeamConfigDir ?? join(homedir(), ".config", "opencode"));
+  }
+
   readonly runnerId: RunnerId = "opencode";
   readonly displayName: string = "OpenCode";
   readonly environmentIds: readonly RunnerEnvironmentId[] = [...OPENCODE_ENVIRONMENT_IDS];
@@ -342,6 +352,7 @@ class OpenCodeRunnerAdapterImpl {
   #latestReady: Extract<RunnerModelInventoryResult, { state: "ready" }> | null = null;
   #planBindings = new WeakMap<RunnerDeveloperTeamInstallPlan, { nativePlan: OpenCodeDeveloperTeamInstallPlan; validation: { changedAgentIds: readonly string[]; fingerprint?: string; modelAssignments: DeveloperTeamModelAssignments; thinkingAssignments: DeveloperTeamThinkingAssignments } }>();
   #developerTeamConfigDir?: string;
+  #sessionDriver?: OpenCodeSessionDriverOptions;
   #toolsReview?: OpenCodeRunnerAdapterOptions["toolsReview"];
   #installTools: typeof installOpenCodeTools;
   #evidenceContext?: OpenCodeRunnerAdapterOptions["evidenceContext"];
@@ -361,6 +372,7 @@ class OpenCodeRunnerAdapterImpl {
 
   constructor(options?: OpenCodeRunnerAdapterOptions) {
     this.#developerTeamConfigDir = options?.developerTeamConfigDir;
+    this.#sessionDriver = options?.sessionDriver;
     this.#toolsReview = options?.toolsReview;
     this.#installTools = options?.installTools ?? installOpenCodeTools;
     this.#evidenceContext = options?.evidenceContext;

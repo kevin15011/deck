@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { ControlClient } from "../control-client";
 import { startDaemon, type DaemonOptions, type RunningDaemon } from "../daemon";
 import { readDaemonInfo } from "../daemon-lock";
@@ -43,6 +44,60 @@ async function start(paths = stateEnv().paths, over: Partial<DaemonOptions> = {}
 const connect = async (paths: { socket: { path: string } }) => { const c = await ControlClient.connect(paths.socket.path); clients.push(c); return c; };
 
 describe("startDaemon (XR-3.1)", () => {
+  test("accepted restart fences a same-batch command and bridge approval before scheduled cleanup", async () => {
+    let calls = 0, finishClose!: () => void;
+    const closing = new Promise<void>((resolve) => { finishClose = resolve; });
+    const { result, paths } = await start(undefined, { createService: () => ({
+      execute: async () => { calls++; return { ok: true }; }, openLog: () => undefined, hasRunningWork: () => false, close: () => closing,
+    }) });
+    if (!result.ok) throw new Error("expected start");
+    const { token } = result.daemon.services.credentials.issue({ sessionId: "s-1", taskId: "lead", memberId: "lead", allowedTools: ["deck_approve"] }, join(paths.root, "cred"));
+    const c = await connect(paths);
+    try {
+      const restarting = c.request({ t: "daemon.restart" });
+      const creating = c.command({ v: 1, commandId: randomUUID(), type: "session.create", projectRoot: "/tmp/project" });
+      const approving = c.request({ t: "bridge.call", token, tool: "deck_approve", arguments: { tool_name: "Bash", input: {} } }, 100);
+      expect(await restarting).toMatchObject({ outcome: { ok: true } });
+      expect(await creating).toMatchObject({ outcome: { ok: false, code: "daemon-stopping" } });
+      expect(await approving).toMatchObject({ outcome: { ok: false, code: "daemon-stopping" } });
+      expect(calls).toBe(0); expect(result.daemon.services.broker.pending()).toHaveLength(0);
+    } finally { finishClose(); }
+  });
+
+  test("restart refuses an admitted asynchronous command even before the service marks work running", async () => {
+    let finish!: () => void, entered = false;
+    const executing = new Promise<void>((resolve) => { finish = resolve; });
+    const { result, paths } = await start(undefined, { createService: () => ({ execute: async () => { entered = true; await executing; return { ok: true }; }, openLog: () => undefined, hasRunningWork: () => false }) });
+    if (!result.ok) throw new Error("expected start");
+    const c = await connect(paths);
+    const pending = c.command({ v: 1, commandId: randomUUID(), type: "session.create", projectRoot: "/tmp/project" });
+    try {
+      await waitFor(() => entered, 500, "command admission");
+      expect(await c.request({ t: "daemon.restart" })).toMatchObject({ outcome: { ok: false, code: "busy" } });
+    } finally { finish(); await pending; }
+  });
+
+  test("the browser transport shares the restart admission fence", async () => {
+    let calls = 0, finishClose!: () => void;
+    const closing = new Promise<void>((resolve) => { finishClose = resolve; });
+    const { result, paths } = await start(undefined, {
+      web: { config: { port: 0, trustedProxy: null, allowedOrigins: [], allowFunnel: false } },
+      createService: () => ({ execute: async () => { calls++; return { ok: true }; }, openLog: () => undefined, hasRunningWork: () => false, close: () => closing }),
+    });
+    if (!result.ok) throw new Error("expected start");
+    const c = await connect(paths);
+    const status = await c.request({ t: "daemon.status" });
+    const base = (status as { status: { web: { url: string } } }).status.web.url;
+    const access = await fetch(`${base}/api/local-access`, { method: "POST", headers: { Origin: base, "Content-Type": "application/json" }, body: "{}" });
+    const cookie = access.headers.get("set-cookie")!.split(";")[0]!;
+    try {
+      expect(await c.request({ t: "daemon.restart" })).toMatchObject({ outcome: { ok: true } });
+      const response = await fetch(`${base}/api/commands`, { method: "POST", headers: { Origin: base, Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: "s", command: { v: 1, commandId: randomUUID(), type: "prompt.send", text: "after shutdown" } }) });
+      expect(await response.json()).toMatchObject({ ok: false, code: "daemon-stopping" });
+      expect(calls).toBe(0);
+    } finally { finishClose(); }
+  });
+
   test("creates the private state layout, locks, listens and publishes daemon.json", async () => {
     const { result, paths } = await start();
     if (!result.ok) throw new Error("expected start");
@@ -80,6 +135,34 @@ describe("startDaemon (XR-3.1)", () => {
     if (!result.ok) throw new Error("expected start");
     await Promise.all([result.daemon.stop("a"), result.daemon.stop("b")]);
     expect(await result.daemon.stopped).toBe("a");
+  });
+
+  test("stop drains service task leases before supervisor group containment", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const closing = new Promise<void>((resolve) => { release = resolve; });
+    const { result } = await start(undefined, { createService: (services) => {
+      services.supervisor.shutdown = async () => { order.push("supervisor"); };
+      return { execute: async () => ({ ok: true }), openLog: () => undefined, hasRunningWork: () => false, close: async () => { order.push("service-start"); await closing; order.push("service-drained"); } };
+    } });
+    if (!result.ok) throw new Error("expected start");
+    const stopping = result.daemon.stop("test");
+    await waitFor(() => order.length > 0, 250, "service close");
+    try { expect(order).toEqual(["service-start"]); } finally { release(); }
+    await stopping; expect(order).toEqual(["service-start", "service-drained", "supervisor"]);
+  });
+
+  test("a stuck service cannot prevent bounded supervisor shutdown", async () => {
+    const clock = new FakeClock(), order: string[] = [];
+    const { result } = await start(undefined, { clock, createService: (services) => {
+      services.supervisor.shutdown = async () => { order.push("supervisor"); };
+      return { execute: async () => ({ ok: true }), openLog: () => undefined, hasRunningWork: () => false, close: async () => { order.push("service"); await new Promise(() => {}); } };
+    } });
+    if (!result.ok) throw new Error("expected start");
+    const stopping = result.daemon.stop("test");
+    await waitFor(() => order.length > 0, 250, "service close");
+    clock.advance(7501); await stopping;
+    expect(order).toEqual(["service", "supervisor"]);
   });
 
   test("a failure after the lock was taken releases it", async () => {
