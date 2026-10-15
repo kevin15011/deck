@@ -12,6 +12,7 @@
  * Signalling is done here through live handles only: the daemon never signals a PID.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 
 export const ANCHOR_NONCE_ENV = "DECK_ANCHOR_NONCE";
 export const ANCHOR_DRAIN_MS = 1000;
@@ -33,12 +34,34 @@ export function parseAnchorArgv(argv: readonly string[]): { command: string; arg
   return command ? { command, args } : undefined;
 }
 
+/** Relay output while distinguishing genuine EOF from an error or premature close. */
+export function relayAnchorOutput(stream: Readable, sink: Writable): Promise<boolean> {
+  return new Promise(resolve => {
+    stream.once("end", () => resolve(true));
+    stream.once("error", () => resolve(false));
+    stream.once("close", () => resolve(false));
+    stream.pipe(sink, { end: false });
+  });
+}
+
+/** End a relay sink without treating a failed write or premature close as a flush. */
+export function flushAnchorOutput(sink: Writable): Promise<boolean> {
+  return new Promise(resolve => {
+    sink.once("error", () => resolve(false));
+    sink.once("close", () => resolve(sink.writableFinished));
+    try { sink.end((error?: Error | null) => resolve(!error)); }
+    catch { resolve(false); }
+  });
+}
+
 /** Runs forever: the process ends through group cleanup, never by returning. */
 export function runChildAnchor(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): Promise<never> {
   const nonce = env[ANCHOR_NONCE_ENV] ?? "";
   const target = parseAnchorArgv(argv);
   let worker: ChildProcess | undefined;
   let terminal = false;
+  let flushing = false;
+  let drainTimer: ReturnType<typeof setTimeout> | undefined;
 
   const endGroup = (): void => {
     try { process.kill(-process.pid, "SIGKILL"); } catch {
@@ -74,12 +97,23 @@ export function runChildAnchor(argv: readonly string[], env: NodeJS.ProcessEnv =
     }
   });
 
-  const finish = (code: number | null, signal: string | null, drained: boolean, error?: string): void => {
+  const report = (code: number | null, signal: string | null, drained: boolean, error?: string): void => {
     if (terminal) return;
     terminal = true;
-    const flush = () => process.stdout.write("", () => process.stderr.write("", () => send({ type: "child_exit", nonce, code, signal, drained, ...(error ? { error } : {}) })));
-    flush();
+    if (drainTimer) clearTimeout(drainTimer);
+    send({ type: "child_exit", nonce, code, signal, drained, ...(error ? { error } : {}) });
     // Deliberately no exit here: the daemon's `cleanup` (or its death) ends the group.
+  };
+  const finish = (code: number | null, signal: string | null): void => {
+    if (terminal || flushing) return;
+    flushing = true;
+    // Ending the relay streams flushes their queued writes before cleanup can kill
+    // the anchor. Empty writes are not a flush barrier in Bun under backpressure.
+    // Keep the drain deadline active until both sinks finish, including a blocked peer.
+    void Promise.all([flushAnchorOutput(process.stdout), flushAnchorOutput(process.stderr)]).then(results => {
+      const drained = results.every(Boolean);
+      report(code, signal, drained, drained ? undefined : "Anchor output relay failed to flush");
+    });
   };
 
   try {
@@ -88,19 +122,17 @@ export function runChildAnchor(argv: readonly string[], env: NodeJS.ProcessEnv =
     worker = spawn(target.command, target.args, { detached: false, shell: false, stdio: ["pipe", "pipe", "pipe"], env: childEnv });
     const w = worker;
     let exited: { code: number | null; signal: string | null } | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const ended = { out: false, err: false };
     const settle = () => {
       if (!exited || !(ended.out && ended.err)) return;
-      if (timer) clearTimeout(timer);
-      finish(exited.code, exited.signal, true);
+      finish(exited.code, exited.signal);
     };
     for (const [stream, key, sink] of [[w.stdout!, "out", process.stdout], [w.stderr!, "err", process.stderr]] as const) {
-      stream.pipe(sink, { end: false });
-      const done = () => { ended[key] = true; settle(); };
-      stream.once("end", done);
-      stream.once("error", done);
-      stream.once("close", done);
+      void relayAnchorOutput(stream, sink).then(eof => {
+        if (!eof) { report(exited?.code ?? 1, exited?.signal ?? null, false, "Child output stream closed before EOF"); return; }
+        ended[key] = true;
+        settle();
+      });
     }
     w.stdin!.on("error", () => {});
     process.stdin.on("error", () => {});
@@ -108,13 +140,13 @@ export function runChildAnchor(argv: readonly string[], env: NodeJS.ProcessEnv =
     w.once("exit", (code, signal) => {
       exited = { code, signal };
       // Exit is not EOF: descendants can still own the pipes. Never promote partial output to success.
-      timer = setTimeout(() => finish(code ?? 1, signal, false, "Child output streams did not reach EOF before the drain timeout"), ANCHOR_DRAIN_MS);
+      drainTimer = setTimeout(() => report(code ?? 1, signal, false, "Child output streams did not reach EOF and flush before the drain timeout"), ANCHOR_DRAIN_MS);
       settle();
     });
-    w.once("error", () => finish(1, null, false, "Unable to spawn child executable"));
+    w.once("error", () => report(1, null, false, "Unable to spawn child executable"));
     if (w.pid) send({ type: "anchor_ready", nonce, anchorPid: process.pid, workerPid: w.pid });
   } catch {
-    finish(1, null, false, "Unable to spawn child executable");
+    report(1, null, false, "Unable to spawn child executable");
   }
   return new Promise<never>(() => {});
 }

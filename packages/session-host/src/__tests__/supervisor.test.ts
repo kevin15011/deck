@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PassThrough, Writable } from "node:stream";
+import { flushAnchorOutput, relayAnchorOutput } from "../anchor";
 import { readLease } from "../lease";
 import { Supervisor, type SupervisedProcess } from "../supervisor";
 import { cleanupTempDirs, isAlive, sleep, tempDir, waitFor } from "./test-helpers";
@@ -53,6 +55,17 @@ describe("Supervisor (daemon side of the anchor)", () => {
   test("exited resolves only after all output was delivered; failure exit codes are not ok", async () => {
     const proc = run(makeSupervisor(), ["big"]);
     const out = collect(proc);
+    const exit = await proc.exited;
+    expect(out.bytes).toBe(4096 * 1024);
+    expect(out.err).toContain("done-err");
+    expect(exit).toMatchObject({ ok: false, code: 3, drained: true });
+  });
+
+  test("a backpressured output consumer receives every byte before exited resolves", async () => {
+    const proc = run(makeSupervisor(), ["big"]);
+    const out = collect(proc);
+    proc.stdout.pause();
+    try { await sleep(100); } finally { proc.stdout.resume(); }
     const exit = await proc.exited;
     expect(out.bytes).toBe(4096 * 1024);
     expect(out.err).toContain("done-err");
@@ -158,5 +171,52 @@ describe("daemon death (XR-3.6, D-14)", () => {
     await waitFor(() => ![pids.anchor, pids.worker, pids.grandchild].some(isAlive), 6000, "containment after daemon death");
     await sleep(50);
     expect(isAlive(daemon.pid!)).toBe(false);
+  });
+});
+
+
+describe("anchor relay EOF contract", () => {
+  test("genuine EOF preserves the relayed bytes", async () => {
+    const source = new PassThrough(), sink = new PassThrough();
+    const chunks: Buffer[] = []; sink.on("data", chunk => chunks.push(chunk));
+    const drained = relayAnchorOutput(source, sink);
+    source.end("complete output");
+    expect(await drained).toBe(true);
+    expect(Buffer.concat(chunks).toString()).toBe("complete output");
+    sink.destroy();
+  });
+
+  test.each([false, true])("premature close is not EOF (error=%s)", async error => {
+    const source = new PassThrough(), sink = new PassThrough();
+    const drained = relayAnchorOutput(source, sink);
+    source.destroy(error ? new Error("synthetic output failure") : undefined);
+    expect(await drained).toBe(false);
+    sink.destroy();
+  });
+});
+
+
+describe("anchor relay flush contract", () => {
+  test("a sink flush succeeds only after its final callback", async () => {
+    let finish!: () => void;
+    const sink = new Writable({ final(callback) { finish = callback; } });
+    let settled = false;
+    const flushed = flushAnchorOutput(sink).then(value => { settled = true; return value; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish();
+    expect(await flushed).toBe(true);
+  });
+
+  test("a failed final write is not a successful flush", async () => {
+    const sink = new Writable({ final(callback) { callback(new Error("synthetic sink failure")); } });
+    expect(await flushAnchorOutput(sink)).toBe(false);
+  });
+
+  test("a sink destroyed before its final callback is not a successful flush", async () => {
+    const sink = new Writable({ final() {} });
+    const flushed = flushAnchorOutput(sink);
+    sink.destroy();
+    expect(await flushed).toBe(false);
   });
 });
