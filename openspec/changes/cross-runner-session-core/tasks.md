@@ -1,5 +1,12 @@
 # Tasks: Cross-Runner Session Core
 
+## Session release and row actions follow-up (2026-10-15)
+
+- [x] Correct Close to durable resource release and same-ID preparation, including legacy ended sessions and paused inbox/native/image retention.
+- [x] Add persistent session Rename/Remove, cleanup retries and lifecycle/recovery fences.
+- [x] Add compact independent session menus and authoritative green/gray readiness dots; preserve responsive themes, drafts and existing status indicators.
+- [x] Complete focused/integrated/browser/compiled verification, independent review and guarded idle canary activation. Evidence: `session-release-brief.md`.
+
 > Grouped by stage; every task fits one session and names its verification. TDD is mandatory ([config.yaml](../../config.yaml): write the failing test first). Requirement IDs refer to [spec.md](spec.md); decisions (`D-*`) refer to [design.md](design.md).
 >
 > **Standing rules for every task:** no network in `bun test`; no real installs; no writes outside temp dirs in tests; never edit `packages/adapter-pi` or generated files by hand; never read runner credential files.
@@ -221,3 +228,47 @@ Evidence and limits: `verify-report.md`, `review-report.md`. Installation/public
 - [x] Verify classification/replay, Markdown safety, artifact path/auth boundaries and desktop/mobile interactions.
 - [x] Inspect rendered desktop/mobile output, pass TypeScript/distribution checks and independent review.
 - [x] Update user documentation, verification evidence and handoff; preserve installed user runtime.
+
+## Native memory parity and hook Activity follow-up — 2026-10-14
+
+This increment supersedes the memory ownership and hook exclusion portions of historical tasks 1.12, 1.13, 2.2 and 3.8; their prior evidence is retained as history.
+
+- [x] Verify normal developer launches reuse canonical project identity and locate native preparation helpers.
+- [x] Record user-approved native ownership and all observed hook Activity decisions (D-28/D-29).
+- [x] Prepare native memory per execution with canonical scope, protected credentials and explicit readiness; remove competing daemon memory authority.
+- [x] Selectively admit verified Claude, Codex and OpenCode native integrations while preserving unrelated configuration isolation and native session continuation.
+- [x] Normalize observed native hooks with truthful lifecycle, optional trustworthy provider attribution and safe provenance.
+- [x] Render correlated hook entries in Activity and cover replay, incomplete history, execution boundaries and mobile layout.
+- [x] Verify scope, ownership, effective isolation, native protocol contracts, lifecycle limits, affected tests, TypeScript and generated distribution assets.
+- [x] Complete independent review and document exact support limits and update instructions.
+
+## Native no-confirmation and project instructions — 2026-10-14
+
+- [x] Verify the latest local response against native/Deck session evidence.
+- [x] Map no-confirmation defaults to each native runner while preserving explicit relay.
+- [x] Supply bounded root AGENTS.md to fresh/resumed Claude tasks using actual assignment.
+- [x] Clarify intentional native-memory ownership in Lead context.
+- [x] Pass affected tests, TypeScript, host compilation and independent review.
+- [x] Activate the tested canary and current user preferences with graceful daemon restart.
+
+## Activity follow and workspace evolution — 2026-10-15
+
+- [x] Reproduce document overflow and missing Activity following.
+- [x] Preserve per-session reading/follow state across tabs, replay and geometry changes.
+- [x] Verify desktop/mobile bounds, keyboard/wheel/touch/scrollbar interaction and growing details.
+- [x] Independently review the final follower and viewport containment.
+- [x] Verify current session, model, native resume and service semantics; record the proposed workspace phases separately.
+- [x] Activate the verified scroll corrections in canary.
+
+## Global workspace implementation — authorized 2026-10-15
+
+- [x] Record approved workspace requirements, lifecycle decisions and shared API contracts (XR-13, D-32–D-36).
+- [x] Add cwd-independent `deck web`, preserving explicit session-creation enablement and truthful runner catalogs.
+- [x] Persist canonical projects, bounded home-directory suggestions and paginated project session history.
+- [x] Implement explicit preparation, cancellation and stale-completion fencing before the web composer.
+- [x] Implement terminal close and idempotent linked continuation with bounded public context.
+- [x] Persist per-session assignments and revision-checked Lead generations while preserving recorded child ownership.
+- [x] Enforce separate fair global Lead/delegated budgets with cancellation and cleanup ownership.
+- [x] Integrate project navigation, session controls, model controls and responsive layout without scroll regressions.
+- [x] Verify real backend/browser integration, lifecycle races, boundaries, type checking and compiled distribution.
+- [x] Resolve independent review findings, document behavior and activate the verified canary through graceful restart.

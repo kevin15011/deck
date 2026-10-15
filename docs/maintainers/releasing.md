@@ -22,6 +22,8 @@ bunx tsc --noEmit
 
 The release workflow owns the four-platform artifact matrix. A local all-target `bun run build` requires macOS because Darwin signing fails closed; Linux maintainers use the host-only dry run above and rely on the matrix for signed Darwin artifacts.
 
+For compiled-runtime changes, also exercise a copied executable from a temporary directory and HOME with the Deck checkout unavailable. On macOS, a `sandbox-exec` profile can deny checkout reads for the executable and all descendants; verify the denial with a read control before running the copied [compiled session/web smoke](../../scripts/session-web-smoke.ts) and compiled memory checks. Copy test fixtures and the test harness runtime outside the checkout too. Record the tested artifact and platform, and distinguish required installed runner/plugin/MCP dependencies from forbidden source-repository coupling. Changing only the working directory does not prove checkout independence.
+
 3. The current workflow generates `release.json` for both the stable-tag release path and the main-branch pre-release path. Use the source-backed helper only to inspect or prepare descriptor data locally when needed:
 
 ```sh

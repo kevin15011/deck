@@ -1,5 +1,17 @@
 # Cross-runner session core (Working Brief)
 
+## Native memory parity and observed activity — 2026-10-14 (in progress)
+
+The user approved replacing cross's daemon-only Supermemory ownership with the existing native integration for each supported runner, retaining Deck's integration for Pi. The user also identified the normal developer launch's canonical project identity as the reuse point and requested native Supermemory usage in Activity.
+
+- Reuse the existing canonical project scope preparation; verify its propagation in each managed execution mode. Missing or mismatched scope must disable memory effects rather than fall back to a default or another project.
+- Admit only the configured official memory integration while preserving unrelated MCP, plugin, hook and delegation isolation. One memory integration owns each execution; native integration and daemon capture must not both write the same execution.
+- Verify installed/pinned native behavior for recall, capture and continuation. Report unsupported native behavior explicitly rather than silently substituting daemon tools or claiming that installation proves runtime support.
+- Expose truthful provider, integration and capability state to the Lead. The user broadened Activity to all hooks actually reported by the runner, with optional trustworthy Supermemory attribution. Hook completion alone does not prove successful provider recall or storage. Preserve event provenance, bounds, redaction, replay and execution identity; visibility does not enable additional hooks.
+- Keep current themes/layout and all prior uncommitted Activity/progress work. Root centralizes OpenSpec revisions. No installation, user daemon restart, credential output or mutation of existing sessions is required for implementation.
+- Acceptance: focused regression and isolation tests, canonical scope propagation, native/daemon exclusivity, observed-event projection, TypeScript, generated assets/browser checks when affected, and independent review. Native evidence gaps must remain explicit.
+- Status: implemented and independently approved; 658 affected tests, TypeScript, 45 browser groups, four target builds and 22 compiled host checks passed. Native background capture remains explicitly unverified as detailed in `native-memory-evidence.md`; no provider success is fabricated. Earlier daemon ownership is preserved as superseded D-18 history. Installed canary and user daemon were not modified.
+
 ## Intent
 Each developer-team member (lead included) may use a model from a different runner (Claude Code, Codex, OpenCode), each executing in its own native runner CLI, while Deck supervises ONE session: shared OpenSpec change, Supermemory adaptive memory, Tavily, and owner-contract re-delegation to the same agent with its prior context.
 
@@ -69,3 +81,52 @@ The user requested a complete aesthetic replacement, clear separation of Lead co
 - Selected ownership: `frontend-design` owns aesthetics; `frontend-ui-engineering` owns React composition/state; `fixing-accessibility` owns controls/focus/announcements. `deck-frontend-design` coordinates this agreement. Other aesthetic recipes are not active.
 - Acceptance: meaningful classification/Markdown regression tests, authenticated bounded artifact API tests, desktop/mobile browser acceptance (including replay, approval, navigation and scrolling), TypeScript, generated embedded assets, compiled distribution checks and independent review.
 - Status: implemented and independently approved. Research is recorded in `web-ux-research.md`; final browser/compiled evidence is in `verify-report.md`. No canary installation or publication is implied.
+
+## Lead Activity refinement — 2026-10-14
+
+The user rejected the generic Activity feed and requested detailed evidence of the Lead's work, retaining the tab only if real runner information can support it. Investigation confirms that all three drivers already emit tool activity and the canonical contract accepts reasoning events; the frontend currently hides reasoning and presents lifecycle noise.
+
+- Replace the operational event feed with Lead-only tool executions and runner-reported reasoning when available. Hide connections, session/task lifecycle notices, usage and unmapped events. Subagent work remains in its existing tab.
+- Correlate tool start/completion with native call identity and execution boundaries; present actual inputs, results, errors and status. Missing history must not fabricate a start, result or success.
+- Preserve delta versus cumulative-snapshot semantics and native content identity for reasoning. Show only explicitly exposed text; never recover opaque/encrypted payloads or claim access to unreported internal thoughts.
+- Identify a skill invocation only from an explicit native tool call and arguments. Reading a skill document is evidence of reading, not proof of executing the skill.
+- Keep the accepted themes, typography, sidebar, responsive tabs and composer. Use compact readable entries with expandable input/output, safe Markdown and keyboard-accessible native controls; no raw envelope dump or new visual framework.
+- Selected skills: `deck-frontend-design` retains the existing agreement; `frontend-ui-engineering` owns presentation/state and `fixing-accessibility` owns controls. Add bounded/redacted normalized activity fields where adapters currently omit protection, preserving existing event kinds and runner lifecycle.
+- Acceptance: mapper and projection regressions, browser desktop/mobile/replay checks on generated assets, TypeScript and independent review of mapping/projection boundaries. No installed canary or live daemon changes are required.
+- Status: implemented and independently approved; 176 runtime/core tests, 22 web/asset tests, 18 documentation tests, TypeScript and 36 browser checks passed. This delta supersedes the earlier generic Activity presentation only. See the latest verification and review sections for evidence and limitations.
+
+## Immediate Lead feedback and preparation timing — 2026-10-14
+
+The user reported a slow greeting in the same canary session and no visible feedback while waiting. Read-only local evidence for session `20261013T070713-c59247`, ledger sequence 1901–1919: command accepted 20:02:11.783Z, Claude native initialization 20:02:27.166Z, first text 20:02:28.000Z, message complete 20:02:28.827Z, turn complete 20:02:31.543Z. Thus 15.383 seconds preceded native initialization, first text followed 0.834 seconds later, and total completion took 19.760 seconds. The installed canary and daemon executable match; stale daemon is not the cause established here. No transcript, credentials or raw output were copied.
+
+Existing logs cannot split driver probing, managed-tool readiness and native startup. A 15-second readiness timeout exists but would fail the turn; the successful greeting does not establish a timeout. Memory recall is an explicit tool path and was not observed. Claude launches a fresh process per prompt; attributing the whole delay to it without phase measurements would be speculative.
+
+- Add immediate, visible per-session send/Lead feedback near the composer and across mobile workspace views. Distinguish sending, generic waiting, explicitly reported preparation, reasoning, tool use, response streaming, approvals and reconnection. Do not invent thinking or file modification before evidence.
+- Clear stale state on failed sends, terminal events, session changes and replay; prevent child/internal activity from replacing public Lead status. Accessible status changes must not announce every token or fake percentage progress.
+- Add bounded diagnostic timing events around real preparation boundaries using the existing event kind, source identity and injected clock. Preserve launch sequencing, timeouts, cancellation and process-drain ownership. Keep preparation diagnostics out of the detailed Activity feed.
+- Preserve accepted visual direction, themes, layout and prior Activity work. The current implementation owner retains frontend responsibility; Lead retains documentation. No installation, daemon restart or native inference is authorized by this diagnostic increment.
+- Acceptance: deterministic phase/POST-race/state tests, lifecycle regressions, browser feedback across desktop/mobile/replay, TypeScript and independent review. Status: implemented; 503 runtime, 29 UI/asset and 18 documentation tests passed, along with TypeScript and 42 browser checks. This adds observability; no latency reduction is claimed without measurement.
+
+## Native no-confirmation execution and project instructions — 2026-10-14
+
+The user requested cross execution without repeated permission prompts and asked whether the last Lead response was accurate. Read-only evidence from session `20261013T070713-c59247` shows Deck MCP remained connected (seq2094) and native Supermemory succeeded (seq2101/2105). The explanation that Deck memory tools disappeared because their server disconnected was incorrect: their exclusion is intentional native memory ownership. Claude cross composition also omitted explicit project-root AGENTS.md context, a separate existing parity gap. No private transcript or account identity is copied here.
+
+- Default supported runners to native no-confirmation execution; preserve explicit relay opt-in and fixed native delegation/session authorization restrictions. Never implement this by automatically approving broker requests.
+- Update this user's persisted relay preferences under their explicit request, after the tested canary can execute Claude's native bypass. Do not migrate other users' explicit policies.
+- Supply bounded project-root AGENTS.md to Claude using the actual session assignment; preserve plugin isolation and avoid duplicate instruction injection for Codex/OpenCode. Missing optional files are normal; unreadable or unsupported present files must fail transparently.
+- Acceptance: focused config/launch/host/CLI tests, explicit relay regression, instruction-boundary tests, TypeScript, compiled host smoke and independent Quality review. Install the verified canary and gracefully restart only if idle; preserve session history and never force busy work.
+- Status: implemented, verified, independently approved and activated in the local canary. All three configured approvals are runner-default; daemon restart succeeded and the existing session remains available.
+
+## Activity scrolling and project/session workspace — 2026-10-15
+
+The user reported missing Activity auto-follow and empty document overflow, and requested discussion of reconnection, closing sessions, parallel sessions, model/runner changes and a global project-oriented web entry point. The current UI owner is correcting the two concrete scroll defects while investigation and architecture establish actual lifecycle semantics. The accepted visual design is unchanged; `workspace-evolution-brief.md` separates current behavior from proposed phases. No history deletion, native model request or automatic runner migration is implied by this investigation.
+
+## Project/session workspace implementation — authorized 2026-10-15
+
+The user explicitly requested proceeding with all proposed phases. This authorizes implementation, testing and local canary activation of workspace-evolution-brief.md phases 2–4; the earlier proposal-only boundary is superseded. Preserve existing history, native task ownership, accepted UI themes and the completed scroll fixes. No automatic worktrees, OS service registration or speculative native model prewarming is added.
+
+Routes: Architect finalizes additive public contracts and lifecycle decisions; Apply Deep owns core/host persistence, lifecycle, scheduling and session revisions; the existing UI owner implements the full frontend; CLI composition owns cwd-independent entry and model catalog discovery. Lead centralizes all OpenSpec writing. Quality reviews path/authentication, persistence, cancellation/admission and cross-runner continuity independently.
+
+Acceptance includes actual backend/browser project creation and two-session resume, fixture native continuity/generation tests, preparation without provider calls, close/linked continuation, session-only model changes, fair bounded execution without Lead/delegate deadlock, persistence/restart, migration and generated compiled assets. Focused phase checks precede a frozen integrated verification, four-target builds and compiled host/Linux gates where available. User runtime activation occurs only after source checks pass and graceful restart admission permits it.
+
+Result: all phases are complete and active in canary. Independent review approved; affected aggregate867, changed-slice63, new browser17 and regression browser51 passed, along with final TypeScript, four-target builds, compiled macOS/Linux workspace checks and the installed executable gate. The idle user daemon was gracefully restarted and existing history/ownership verified unchanged. Full evidence and explicit native inference/persistence limitations are retained in verify-report.md; no new commit or publication was performed.

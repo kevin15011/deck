@@ -25,12 +25,14 @@ Cross sessions are an **experimental**, separate execution surface. Native insta
 
 | Driver | Tested native version | Default approvals | MCP and hook isolation |
 |---|---|---|---|
-| Claude | 2.1.296 | Relay; native CLI login | Explicit strict MCP file; hooks disabled; native delegation excluded |
-| Codex | 0.162.1 | Runner default (unrestricted); relay opt-in | Effective-config inventory, inherited entries disabled, namespaced child MCPs, runtime inventory verified, hooks and native delegation disabled |
-| OpenCode | 1.18.31 | Relay | Private configuration directory; explicit MCP set checked through the native server; native task tool denied |
+| Claude | 2.1.296 | Runner default (unrestricted); relay opt-in | Explicit strict MCP file; only verified configured memory hooks admitted; native delegation excluded |
+| Codex | 0.162.1 | Runner default (unrestricted); relay opt-in | Effective-config and hook inventory verified; only reviewed configured memory hooks admitted; unrelated inherited entries and native delegation disabled |
+| OpenCode | 1.18.31 | Runner default (unrestricted); relay opt-in | Private configuration directory; verified configured memory loader and explicit MCP set checked through the native server; native task tool denied |
 | Pi | No driver | — | Native Pi workflow remains separate |
 
 Versions below a driver's minimum block startup; newer untested versions report degraded readiness. Unknown native events remain available as bounded, redacted raw events. Native authentication remains owned by the native CLI. Exact verification and platform limitations are recorded in [apply progress](../../openspec/changes/cross-runner-session-core/apply-progress.md).
+
+The browser workspace supports persistent projects and session history, explicit preparation, linked continuation after close, and per-session member assignments. Lead assignment changes preserve Deck history through bounded context transfer into a fresh native generation; this is not native conversation migration between runners. Global Lead and delegated execution pools are separate, and concurrent sessions in one project share its physical files.
 
 ## Operational runner matrix
 
@@ -45,7 +47,7 @@ Pi and OpenCode are operational Deck runners. Codex and Claude have route-limite
 | Subagents and per-role models | Supported; Deck-owned `subagent` extension, one child `pi` process per role with that role's model and thinking level | Supported; native agents | Supported; native custom agents | Supported; plugin agents |
 | Model discovery and per-role assignment | Supported | Supported | Supported | Supported |
 | Adaptive-memory runner configuration | Runner-specific; Deck loopback memory through the `deck-memory` extension (see below) | Runner-specific | Runner-specific; the pinned official plugin hooks receive the stored profile credential in the started process only | Runner-specific; official Supermemory plugin |
-| Explicit memory tools (on-demand search and save) | Supported; `memory_search` and `memory_save` tools registered by `deck-memory` over the Deck loopback host (read-only roles get search only; no Supermemory credential in Pi) | Supported; the official plugin's `supermemory` tool | Supported; Deck-owned stdio MCP server `deck-memory` (`memory_search`, `memory_save`) over the Deck loopback host; calls are authorized as the lead because Codex passes no agent identity, read-only roles are told not to save | Supported; the official plugin's Supermemory MCP tools |
+| Explicit memory tools (on-demand search and save) | Supported; `memory_search` and `memory_save` tools registered by `deck-memory` over the Deck loopback host (read-only roles get search only; no Supermemory credential in Pi) | Supported; the official plugin's `supermemory` tool | Limited to the pinned official plugin's exposed capabilities; Deck does not add a competing memory MCP or loopback beside its recall/flush hooks | Supported; the official plugin's Supermemory MCP tools |
 | Shared tool installs (RTK, Codebase Memory, Context Mode) | Supported; Deck-owned pinned binaries, MCP commands pinned to absolute paths | Supported | Supported; Deck-owned pinned binaries, MCP and hooks pinned to verified absolute paths | Supported; pinned shared tools |
 | Tool interception: RTK command rewrite | Supported in Deck sessions; the `deck-tool-policy` extension rewrites `bash` commands in `tool_call`, pinned to the owned RTK binary | Runner-specific; OpenCode hook | Runner-specific; marker-owned `PreToolUse` hook | Runner-specific; plugin `PreToolUse` hook |
 | Tool interception: Grep/Glob graph guidance | Advisory; the search always runs and one concise Codebase Memory note is appended to its result, at most once per session (code-structure searches only) | Not shipped | Not shipped | Advisory; the Codebase Memory integration adds graph context and the search still runs |

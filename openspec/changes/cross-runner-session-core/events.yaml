@@ -227,3 +227,255 @@ events:
     registry_write: non-deferred
     notes:
       - "Independent Quality approved final source and browser candidate; Root verified compiled production composition. No installed-runtime mutation."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-14T19:49:17Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Lead Activity refinement: correlated tool details, explicit reasoning metadata, per-task OpenCode classification, historical redaction and removal of lifecycle noise."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-14T19:49:17Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "216 affected tests, TypeScript, 36 generated-asset browser checks and scoped OpenSpec validation passed. No installed-runtime mutation."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-14T19:49:17Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved after snapshot, historical redaction, unknown tool outcome and host boundary repairs."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-14T20:13:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Immediate Lead progress and bounded preparation timing diagnostics implemented without lifecycle sequencing changes."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-14T20:13:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "550 affected tests, TypeScript and 42 generated-asset browser checks passed. Historical greeting latency measured; no reduction or installed-runtime verification claimed."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-14T20:13:00Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved receipt scoping, terminal precedence, replay, mobile feedback and truthful preparation boundaries."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: working-brief.md
+    timestamp: "2026-10-14T23:19:23Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User approved native memory ownership parity using existing canonical project preparation, and broadened Activity to all observed native hooks. D-28 supersedes daemon-only D-18; implementation and native contract verification in progress."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-14T23:36:18Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Native memory preparation and ownership parity implemented; all exposed hooks mapped and rendered with safe provenance and truthful outcomes. Native capture limitations remain explicit."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-14T23:36:18Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "658 affected tests, TypeScript, 45 browser checks, four platform builds and 22 compiled host checks passed. Native probes were isolated and made no model/provider calls."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-14T23:36:18Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved after metadata-only guards for malformed, foreign-thread, unsupported-request and future hook events; no remaining source blocker."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: working-brief.md
+    timestamp: "2026-10-14T23:46:45Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User requested native no-confirmation execution; verified incorrect MCP-disconnection explanation and Claude project-root instruction gap. D-30 supersedes D-16; scoped activation is authorized."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-14T23:51:04Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Native no-confirmation, bounded Claude project instructions and intentional memory omission context implemented."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-14T23:51:04Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Affected tests, TypeScript, host build and installed cross smoke passed; canary updated, scoped approvals persisted and daemon restarted idle."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-14T23:51:04Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved permission and instruction boundaries; no blocker and existing session retained."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: working-brief.md
+    timestamp: "2026-10-15T00:04:17Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User reported Activity follow and document overflow defects; parallel read-only investigation defines project/session workspace evolution and truthful lifecycle semantics."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-15T00:17:59Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Activity follower and viewport containment implemented; broader project/session architecture documented as a proposal."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-15T00:17:59Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "33 UI/assets tests, 18 documentation tests, 51 browser groups, TypeScript and 16 installed binary checks passed. Canary and idle daemon updated."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-15T00:17:59Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved final reflow and reader-intent repair with no remaining blocker; lifecycle proposal is not claimed implemented."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: workspace-evolution-brief.md
+    timestamp: "2026-10-15T00:50:33Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User explicitly approved all remaining workspace phases. Implementation covers global projects/sessions, preparation and close/continue, session-scoped assignments and fair global execution budgets."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: apply-progress.md
+    timestamp: "2026-10-15T01:16:15Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "All authorized workspace phases implemented and activated in canary; persistent history and native task owners preserved."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-15T01:16:15Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Aggregate867 and changed-slice63 tests, browser17+51, TypeScript, four-target builds, macOS/Linux workspace31 each and installed canary31 passed. Idle daemon restart preserved user history/ownership."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-15T01:16:15Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved final CLI/host/UI after all confirmed lifecycle, persistence, path identity and client race repairs; no remaining blockers."
+  - phase: apply
+    status: in_progress
+    event: apply.started
+    artifact: session-release-brief.md
+    timestamp: "2026-10-15T18:22:52Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "User clarified Close means resource release followed by same-ID Prepare, and added per-session Rename/Remove plus green/gray readiness indicators. Current implementation and verification are in progress."
+  - phase: apply
+    status: completed
+    event: apply.completed
+    artifact: session-release-brief.md
+    timestamp: "2026-10-15T18:34:48Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Same-ID resource release/reopen, session Rename/Remove and readiness indicators implemented and activated in canary with guarded idle restart."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: verify-report.md
+    timestamp: "2026-10-15T18:34:48Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Affected570/3386, UI/assets/docs80/1079, final owned host201/900, TypeScript, generated contracts, four targets, browser6+6+17 and installed67 pass. Suites overlap; no real provider inference."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: review-report.md
+    timestamp: "2026-10-15T18:34:48Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent Quality approved with40/170 overlapping checks after durable recovery, cleanup retry, lifecycle race and stale-client repairs. No remaining blockers."
+  - phase: verify
+    status: passed
+    event: verify.passed
+    artifact: release-readiness.md
+    timestamp: "2026-10-15T18:47:05Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Full suite6693pass/3optional skip/0fail; canonical release gates, final checkout-denied compiled session67/memory smoke and red removal visual8 pass."
+  - phase: review
+    status: approved
+    event: review.approved
+    artifact: release-readiness.md
+    timestamp: "2026-10-15T18:47:05Z"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - "Independent precommit review approved scope and atomic grouping. Runtime/UI/tests committed6aabf0b; docs/governance separately recorded. Final canary active; no tag/push/publication."

@@ -103,6 +103,8 @@ function isDocumentedDeckCommandShape(args: string[]): boolean {
   const [first, ...rest] = args;
 
   if (first === "doctor" || first === "version") return rest.length === 0;
+  if (first === "web") return new Set(rest).size === rest.length && rest.every(flag => flag === "--json" || flag === "--no-open");
+  if (first === "cross") return rest.length === 1 && rest[0] === "developer";
 
   if (first === "update" || first === "upgrade") {
     return rest.length <= 1 && rest.every((flag) => flag === "--yes" || flag === "-y");
@@ -267,6 +269,8 @@ function isSupportedDirectCommand(command: string): boolean {
     "openspec",
     "skill-registry",
     "pi",
+    "web",
+    "cross",
   ]);
   if (!supportedTopLevelCommands.has(args[0]!)) return false;
   if (!isDocumentedDeckCommandShape(args)) return false;
@@ -293,6 +297,9 @@ const directCommandExpectations = [
   ["deck", true],
   ["deck version", true],
   ["deck doctor", true],
+  ["deck web", true],
+  ["deck web --no-open --json", true],
+  ["deck cross developer", true],
   ["deck update --yes", true],
   ["deck rollback --backup backup-id", true],
   ["deck openspec validate --json --root .", true],
@@ -308,6 +315,9 @@ const directCommandExpectations = [
 
 const malformedDocumentedCommandFixtures = [
   "deck pi developer --bogus",
+  "deck web --bogus",
+  "deck web --json --json",
+  "deck cross unknown",
   "deck pi developer --memory",
   "deck rollback --backup=",
   "deck openspec validate --root=",

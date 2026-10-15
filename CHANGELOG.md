@@ -9,6 +9,29 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+### Added
+
+- Cross-runner developer sessions with Claude, Codex and OpenCode, durable conversations, delegated tasks, session-specific model assignments and bounded execution budgets.
+- A project-independent web workspace with persistent project/session navigation, Markdown conversations, Lead activity, subagent and OpenSpec views, dark/light themes, and connection/work/unread indicators.
+- Queued messages and multiple pasted or selected images, with thumbnails, authenticated previews, zoom and native image delivery to supported runner models.
+- Explicit daemon lifecycle commands and session preparation, resource release, rename and removal actions.
+
+### Changed
+
+- Closing a web session releases its owned resources and returns the same conversation to preparation; its history, images and compatible native context remain available. Pending messages stay paused until explicitly resumed.
+- Project and session removal hide entries without deleting project files or saved history. Remove actions use red text in both themes.
+- Cross sessions use verified native memory integrations and canonical project identity, with runner-reported tool, reasoning and hook activity shown separately from chat responses.
+
+### Fixed
+
+- Session recovery and command retries preserve ownership, prevent duplicate execution, and keep stale preparation or catalog responses from restoring obsolete state.
+- Compact sidebar controls, nested directory completion, latest-message navigation and automatic activity scrolling work across desktop and mobile layouts.
+
+### Compatibility and limits
+
+- The compiled Deck executable includes its web assets, contracts and managed content; supported runner CLIs and configured external tools remain separate runtime prerequisites. Images require a compatible vision model.
+- Session removal is not secure erasure. Existing successor conversations remain separate when an older closed session is reopened.
+
 ## [0.10.0] - 2026-10-04
 
 ### Added

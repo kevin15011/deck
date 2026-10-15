@@ -1,5 +1,43 @@
 # Apply Progress: Cross-Runner Session Core
 
+## Commit and release preparation follow-up (2026-10-15)
+
+Added theme-aware red Remove session/project actions; actual desktop/mobile/dark/light visual8 passed with minimum6.03:1 contrast. Runtime/UI/tests committed atomically at6aabf0b, with docs/OpenSpec/changelog/governance committed separately. Full suite6693pass/3optional skip/0fail, canonical release checks and TypeScript pass. Final canary978127fa90ed5075deb18640bb6f22a46ec9b28b45d97cb78804ce5ffb0c4b90 passed checkout-denied compiled session67 and memory acceptance, then activated via guarded idle restart PID28901→33615. See `release-readiness.md`. No release version/tag/push/publication selected or performed.
+
+## Session resource release and row actions — complete and activated (2026-10-15)
+
+Corrected Close to durable selected-session release and same-ID preparation, including legacy ended sessions. Added persistent Rename/Remove menus and authoritative green/gray connection dots. Preserved history, native identity, images, drafts and paused pending messages. Independent review repaired crash prefixes, stale retries, async assignment and pruning races, cleanup retry/busy guards and cross-client stale catalogs. See `session-release-brief.md` for contract and evidence.
+
+Root host/core/CLI/schema570/3386, web/assets/docs80/1079, TypeScript, generated contracts, four-target builds, browser6+6+17 and installed compiled67 passed. Independent Quality approved; overlapping40/170 is not additive coverage. Canary payload44337a894af17fa639c9aac021056a2ecbeeef4f4655c7124ff8171155bdd531 activated with guarded idle restart PID17681→23702 at2026-10-15T18:34:45.425Z. No provider inference, user configuration change, commit or publication.
+
+## Project menu actions — complete and activated (2026-10-15)
+
+Added compact independent three-dot project actions, persisted rename and reversible interface removal. Hidden projects retain identity/files/history/work and resist implicit legacy re-import; explicit Add restores them. Reviewed fixes cover typed atomic receipt conflicts, active-removal replay cursor reset, stale catalog/selection replies, and directory response geometry during held Add clicks. See `project-actions-brief.md` and XR-13.13 for the exact legacy restore boundary.
+
+Verified integrated432/1553, UI/assets/docs65/1016, TypeScript, browser actions6/directory11/workspace17, four-target builds and installed compiled31. Independent Quality approved; Root inspected desktop/mobile menus. Payload `7cb640e64010d0d470925123503fa4c0c9a5090a01699a8f0bc488c234e014ac` activated via guarded idle restart PID62270→68707 at 2026-10-15T15:57:17.442Z; web7421. No real provider inference, user project/configuration mutation, commit or publication.
+
+## Status indicators and latest-message navigation — complete and activated (2026-10-15)
+
+Added Lead-specific sidebar and task-specific subagent SVG states, subtle work animation/reduced motion, independent unread markers and browser-local exact-response read acknowledgement. Durable host reply cursors and bounded authenticated status refresh keep background loaded rows accurate. Chat entry/switch now waits for replay and follows viewport stabilization to the latest messages, preserving subsequent manual upward reading. Review repaired generation/preparation attribution, accessible descriptions, attempt identity and a generic CSS alert collision. See `status-indicators-brief.md` for contracts, fixture corrections and actual runtime fix evidence.
+
+Verified host/CLI419/1362, UI/assets/docs65/1015, TypeScript, actual-host focused8/workspace17, all four build targets and final installed compiled31; independent Quality approved. Canary payload `7ed4116cfe6f80ca4f70b1d0861bfba1d45a59f034e44cfb9e2a73070d30a08a` activated via guarded idle restart PID46567→57799 at 2026-10-15T15:12:52.309Z, web7421. No real provider inference, user configuration change, commit or publication.
+
+## Explicit directory completion — complete and activated (2026-10-15)
+
+Replaced native datalist with controlled suggestions: Ctrl+Space and an SVG folder button open/refetch, actual keyboard/mouse/touch selection descends into children, and typing, Escape, retries and request cancellation preserve predictable behavior. Browser acceptance found and repaired inline-popup dismissal moving the registration button during a pointer gesture. Actual-host directory11/workspace17, UI/assets41/206, TypeScript and installed compiled31 pass; independent Quality approved the frozen UI delta and Root inspected desktop/mobile captures. Evidence and scope are in `directory-completion-brief.md` and `/tmp/deck-directory-combobox-*.log`.
+
+Canary payload `3acf4eab1b3d7cad18e39573ecb134351c1014225c18236fee290bfff1046c8a` activated via guarded idle restart PID68618→46567 at 2026-10-15T14:28:24.394Z; web7421. No backend contract change, real provider inference, user configuration change, commit or publication. Existing edits preserved.
+
+## Minimal SVG sidebar — complete and activated (2026-10-15)
+
+Same-owner local visual delta implements the user's subtle/minimal direction: thin consistent SVG controls, 32px single-line desktop session rows, regular typography, neutral selected state, no vertical guides/accent strip, compact branding and 40px mobile touch targets. Full titles/status/creation metadata remain accessible. Root inspected populated desktop/mobile/collapsed captures. UI/assets41/206, TypeScript, focused actual-host14 and installed compiled31 pass (`/tmp/deck-minimal-sidebar-*.log`). No cache/lifecycle change or full backend audit. Canary payload `0c2e30d1ee03d7f8296c6eabc607df6cde6b49f90c399d7f874679884d4aff74` activated via guarded idle restart PID61268→68618 at 2026-10-15T03:03:47.770Z; web7421. No real provider inference, user config change, commit or publication.
+
+## Project accordion replacement — complete and activated (2026-10-15)
+
+The user rejected the activated switcher/chooser UI and full-width New session action. The active replacement agreement at the top of `sidebar-navigation-brief.md` is implemented: compact project accordion rows, indented sessions, a separate per-project `+`, and compact global Add project. Disclosure preserves the current conversation and opens no dialog; creation captures the clicked project's identity, including inactive projects. Per-project cache/request fences prevent stale responses hiding newly created sessions. Review repaired stable ARIA target/focus behavior. Root and Quality inspected populated multi-project desktop/mobile states. Root's direct current-user-browser inspection was unavailable because no browser surface/native pipe was accessible; actual-host isolated browser verification is the evidence. No backend contract changed.
+
+Final checks: UI/assets41/204, TypeScript, diff check, actual-host accordion11/workspace17/directory4, legacy51, compiled installed31; independent Quality approved. Canary payload `d3b934026261d4e5569a7f5c0bfec1cac4e7eccb5e2a23e57ad7105918dacaac` activated via guarded idle restart PID57801→61268 at 2026-10-15T02:26:51.629Z, web http://127.0.0.1:7421. No real provider inference, user config change, commit or publication. Existing unrelated edits preserved.
+
 ## Current follow-up — canary feedback (2026-10-13)
 
 The user requested direct local browser access without code entry, removal of the Claude subscription notice, and investigation of slow responses. This feedback reopens Apply for the same candidate and supersedes the earlier manual local-pairing and Claude acknowledgement decisions. Local browser access will bootstrap a device cookie automatically under exact loopback peer/Host/Origin checks; forwarded/remote access retains device authentication. Claude setup/start will no longer require or synthesize acknowledgement; legacy configuration remains readable. Response latency requires measured evidence before attribution or optimization. Earlier completion/review records below describe the pre-feedback candidate.
@@ -275,3 +313,74 @@ Retained dark as default and restored the exact previous light palette behind a 
 ## Compact auto-growing input — complete (2026-10-14)
 
 Implemented a one-line composer with inline accessible send/interrupt controls, automatic growth to four lines and internal scrolling thereafter. Native textarea semantics support multiline paste/IME/Shift+Enter while the manual resize affordance is removed. Height follows text changes and width changes, resets after sending, and Jump to latest follows the actual composer height. Verification: 12 UI/asset tests, TypeScript and 30 browser checks passed; rendered mobile inspected. Generated assets updated; installed runtime untouched.
+
+
+## Detailed Lead Activity — complete (2026-10-14)
+
+Replaced the generic feed with Lead-only correlated tool executions and explicitly reported reasoning. Actual names, inputs, available outputs/errors, status and reported duration are inspectable. Native call identity and execution boundaries prevent unrelated calls from merging; missing completion remains unknown. Only explicit Skill calls receive skill labels. Lifecycle, child and internal notices are omitted.
+
+Claude snapshots retain message/block identity; Codex retains reasoning summary/content identity, actual MCP/dynamic tool names and search queries; OpenCode classifies deltas through a bounded per-task mapper, preventing known reasoning from leaking into chat. Unknown OpenCode parts remain unmapped until identified. New details are bounded/redacted, and UI formatting also protects historical replay and assembled reasoning.
+
+Owners: deck_apply_deep_lead_activity_ui and deck_apply_deep_activity_mapping. Independent review: deck_quality_lead_activity. Root regenerated assets and passed 216 disjoint affected tests, TypeScript and 36 browser checks. Installed runtime unchanged.
+
+
+## Immediate Lead feedback and preparation timing — complete (2026-10-14)
+
+Added per-session receipt/sequence-scoped status for immediate sending, acceptance waiting, explicit preparation, reasoning, tool use, response, approval and reconnection. Terminal events dominate delayed HTTP responses; failed sends preserve drafts and late errors do not leak across session switches. The compact accessible status remains visible above the composer or mobile workspace without token-by-token announcements.
+
+SessionManager adds four bounded preparation diagnostic boundaries with attempt identity and injected-clock elapsed estimates. Guards reject stale, cancelled and duplicate final phases. Driver turn-start semantics vary by runner and do not claim universal model readiness. Launch, timeout and drain sequencing are unchanged. The historical 15.383-second pre-Claude-init gap is measured but not yet split or reduced. Owners reused the prior frontend/backend team; Root integrated generated assets and verification.
+# Native memory parity and observed hooks — 2026-10-14
+
+Implemented D-28/D-29: cross reuses normal developer canonical memory preparation, selectively admits official native integrations, and removes competing daemon memory authority for native-owned executions. Pi remains unchanged. Claude uses isolated optional settings, its verified official plugin and strict explicit MCP; Codex inventories and selectively disables/trusts hooks per process without modifying global files; OpenCode verifies its private configured loader and native tool before prompting. Lead context identifies actual provider, integration, scope and unverified automatic capture.
+
+Activity now displays all reported native hooks, with trusted optional Supermemory attribution, reported status/duration, safe details and attempt-scoped correlation. Pre-init starts, late native IDs, completion-first delivery, terminal unknown outcomes and replay are covered. Both native hook namespaces remain metadata-only for malformed, foreign, unsupported-request and future event shapes. No hook stdout, recalled context, commands or filesystem paths enter these hook records. Canonical schemas and web assets were regenerated with their generators.
+
+Frozen verification: 607 runtime/schema/composition tests and 51 web/asset/documentation tests pass; TypeScript is clean and browser acceptance passes 45 groups. Independent Quality approved source after privacy repairs. All four targets built; isolated compiled host cross/web acceptance passed 22 checks. Native capability evidence and capture limitations are in `native-memory-evidence.md`. No installed canary, user daemon, native configuration or provider data was changed; no commit or publication performed.
+
+## Native no-confirmation and Claude project instructions — 2026-10-14
+
+Implemented D-30/D-31: all supported runners default to native no-confirmation execution; explicit relay remains preserved. Claude now receives bounded project-root AGENTS.md on each fresh/resumed turn using the actual immutable task assignment. The prepared memory prompt explicitly explains intentional Deck memory tool omission and does not imply MCP disconnection. Plugin isolation and fixed native delegation restrictions remain intact.
+
+## Activity follow and document bounds — 2026-10-15
+
+The workspace is viewport-contained and Activity owns its scroll viewport. Following and reading positions are retained per session, across tab changes and completed replay. Dynamic content and viewport resizing preserve following, while explicit detail, keyboard, wheel, touch and scrollbar interaction can pause it. A keyboard-accessible Jump to latest activity action resumes following. The project/session workspace proposal is recorded separately in workspace-evolution-brief.md; its phases 2–4 are not implemented.
+
+## Global workspace — implementation in progress (2026-10-15)
+
+The subsequent user instruction authorized all remaining phases, superseding the proposal-only status above. D-32–D-36 and XR-13 define the shared contracts. CLI implements `deck web` and actual native model inventory; host implements project persistence, preparation, continuation, assignment generations and separate global execution pools; web integrates project/session navigation and controls. Lead remains the sole OpenSpec writer.
+
+Milestone evidence (not final acceptance): CLI parser/catalog focused suite 70 pass; host project registry 4 pass and initial lifecycle 5 pass; Lead-generation UI projections 31 pass/141 assertions. The expanded compiled workspace smoke fails against the prior installed canary at its missing `deck web` entry, confirming the new behavior is absent there. Documentation governance passes 18 tests/784 assertions and OpenSpec registry validation reports zero errors/warnings. Integrated regressions, real browser/backend checks, independent review and canary activation remain pending.
+
+### Final result — complete and activated
+
+All approved workspace phases passed the final gates. The integrated affected suite passes 867 tests/3,630 assertions; changed UI/control/assets slices pass 63/244. New actual-backend browser17 and legacy browser51 pass. TypeScript, four-target builds, macOS/Linux arm64 compiled workspace31 each, macOS three-runner6 and installed canary workspace31 all pass. Independent Quality approved after concrete lifecycle/persistence/identity and UI race repairs. See verify-report.md for evidence paths and overlapping-count limits.
+
+Installed payload `3926bdcb2e958abfd603e1f339d00a525115dd5e6b14ff3366ca80d8476ad35b` is active. The idle user daemon restarted gracefully at 2026-10-15T01:15:57Z; existing history and Lead/task ownership were verified unchanged. No user configuration, provider data, commit or publication was changed. Preparation remains infrastructure validation rather than native model prewarming; session file workspaces remain shared.
+
+## Nested project directory completion — follow-up complete (2026-10-15)
+
+The user reported that autocomplete stops after the first selected directory. The dialog emitted a bare directory path as the native suggestion value; its next lookup split that path into parent and basename prefix, repeating the parent query instead of descending. The existing UI owner fixed option values with a trailing separator, preserving the root slash, native input, registration semantics and authenticated home boundary. Real-host regression failed before the fix (`/tmp/deck-directory-red.log`) and passes afterward (`/tmp/deck-directory-green.log`): three nested levels, a folder containing spaces, canonical leaf registration, keyboard-entered slash/prefix and stale HTTP response cancellation. Native popup selection could not be reliably automated in the available browser surfaces; tests apply the actual option value, and no mouse/keyboard popup acceptance is claimed. The correction was activated together with the sidebar refinement below. No new architectural phase or provider call was required.
+
+## Project/session sidebar organization — follow-up complete (2026-10-15)
+
+The user's desktop/mobile organization feedback is recorded in `sidebar-navigation-brief.md`, including three primary sources and the distinction between their observed patterns and Deck-specific design inference. The same UI owner implemented stable project context, independently scrolling sessions and an inline searchable project-selection view, preserving both themes and existing session lifecycle. Review fixed collapsed empty/chooser states, indistinguishable truncated paths and mobile backdrop dismissal. Final evidence: UI/assets40/193, TypeScript clean, directory4/sidebar11/workspace17/legacy51 browser checks, installed compiled31. Lead installed payload `7ac29118686a9e28211070389516a10cc14cf44006d5831efd2cb5e8beff55b1` and gracefully restarted the idle daemon as PID57050 at 2026-10-15T02:02:45.699Z. Web remains http://127.0.0.1:7421. Both follow-ups are active; reload the page. No real provider inference, user configuration change, commit or publication.
+
+## Queued user messages — complete and activated (2026-10-15)
+
+The web now accepts durable per-session FIFO messages while the Lead works, shows pending previews with cancellation, and preserves active progress. Actual user chat delivery occurs at native admission after preflight. Interruptions/failures pause pending messages; Resume queue continues only after owned native work drains. Closing cancels pending messages; assignment changes require an empty inbox. Recovery preserves never-dispatched items behind ownership barriers and never implicitly retries uncertain dispatched work. Bounds, permanent typed/content identity, explicit fsync fences, prefix-safe stop/resume intents and complete-subset notice accounting are verified. See `prompt-queue-brief.md` and XR-14.
+
+Final evidence: Root integrated host/core/CLI/schema suite 545 tests/3,216 assertions (`/tmp/deck-prompt-queue-integrated.log`), web/assets/documentation 71/1,042 (`/tmp/deck-prompt-queue-web-checks.log`), TypeScript and four-target compilation pass. Final actual-browser queue6 and workspace17 pass (`/tmp/deck-web-prompt-queue-browser-final.log`, `/tmp/deck-web-prompt-queue-workspace-final.log`). Independent Quality approved with 32 tests/169 assertions; these overlap the integrated and UI suites, not additional distinct coverage. Installed isolated compiled smoke passes39 checks (`/tmp/deck-prompt-queue-installed-smoke.log`). Legacy daemon/runner/browser tests were adapted to distinguish queued acknowledgement from real dispatch and explicitly resume after interrupt; runtime pause semantics were preserved. Desktop/mobile queue captures were inspected.
+
+Payload `13466914208e20bbc54e204bca33e72ec6f4cdedfb1d391e890e726a2030638e` is active. A guarded idle restart replaced PID68707 with PID89639 at 2026-10-15T16:55:08.226Z; status confirms no running work/pending approvals and web http://127.0.0.1:7421. The daemon was earlier busy and was not forcibly interrupted. Reload the page for new assets. Verification used temporary isolated state/fake drivers, with no real provider inference or user configuration changes. No commit or publication was performed.
+
+## Clipboard image attachments — complete and activated (2026-10-15)
+
+The composer accepts pasted image files and multi-file selection, with session-local removable thumbnails, upload/error/retry feedback, image-only messages and draft-safe submission. Queued and delivered messages show compact image references opening a keyboard-accessible fitted/zoomable viewer. The host stores immutable session-owned attachments behind authenticated upload/read routes; accepted queue/history references survive cancellation and restart. Claude, Codex and OpenCode receive native structured images. Ordered private file references let the Lead work with/delegate the current images, while public events mask managed paths and image payloads. See `image-attachments-brief.md` and XR-15.
+
+Limits: eight PNG/JPEG/static WebP images, 5 MiB/file, 20 MiB/message, 16,384 pixels/axis and 40 MP. Staging is limited to 32 files/100 MiB/session, with 24-hour lazy expiry only for unreferenced uploads. Eight concurrent upload bodies are admitted with bounded buffers and abort/deadline release. Format checks reject contradictory encoded dimensions and unsupported animated WebP. Referenced history files are retained. Browser clipboard bytes cross HTTP, so Windows client paths and OS clipboard utilities are unnecessary for WSL.
+
+Verification: Root integrated host/core/three adapters/CLI/schema suite722/3,941 (`/tmp/deck-images-integrated.log`); UI/assets/docs75/1,062 (`/tmp/deck-images-web-checks.log`); final TypeScript, canonical schema generation and four-target compilation pass. The final private-context-only delta passes focused1/17 and independent re-review. Actual-browser image6, existing queue6 and workspace17 pass (`/tmp/deck-web-images-{browser,queue,workspace}.log`); desktop dark and mobile320/390 dark/light captures were inspected. Independent Quality approved host/native/UI and the real daemon forwarding correction; its28/165 plus final1/17 overlap owner/root suites and are not additive coverage. Installed compiled smoke51 passes (`/tmp/deck-images-installed-smoke.log`), proving actual authenticated uploads/reads, two Claude native image block digests, queued references, cancellation retention, cross-session rejection and daemon restart persistence.
+
+Installed payload `81f097966a10735694cbe01ed051466ab0fa5cccb3dffe4a575b5ab41f77df18` is active after guarded idle restart PID89639→99820 at2026-10-15T17:20:33.870Z. Status confirms no running work/pending approvals; web http://127.0.0.1:7421. Reload the web for the new controls. No user configuration, commit or publication was changed.
+
+Evidence limits: browser tests use File/ClipboardEvent payloads and real file-picker interaction on this macOS environment, not a manual Windows/WSL OS-clipboard exercise. Native protocols are verified with isolated fake runners, including the compiled supervised Claude boundary, without real provider inference. Selected models must support images; actual OpenCode server body-limit/provider vision behavior was not independently exercised. Native rejection remains a visible failed turn.

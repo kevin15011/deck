@@ -116,4 +116,82 @@ provenance:
     timestamp: "2026-10-13T09:18:00Z"
     registryWrite: non-deferred
     note: "Independent Quality approved safe Markdown, session-scoped OpenSpec viewer and responsive workspace after final interaction repairs; no blockers."
-next_action: "Web workspace complete; compact one-to-four-line message input verified on 2026-10-14 with 30 browser checks and regenerated assets. Persistent themes retained. Native binaries not rebuilt for this refinement; installed canary/user daemon unchanged. Preserve uncommitted work."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-14T23:36:18Z"
+    registryWrite: non-deferred
+    note: "Native memory and hook Activity: 658 affected tests, TypeScript, 45 browser groups, four target builds and 22 compiled host checks passed. Provider capture limits remain explicit."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-14T23:36:18Z"
+    registryWrite: non-deferred
+    note: "Independent Quality approved native scope/ownership/isolation and safe observed hooks after malformed, foreign and future hook privacy repairs; no open blocker."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-14T23:51:04Z"
+    registryWrite: non-deferred
+    note: "Native no-confirmation and project instructions: 310 affected tests, final 105-test context rerun, TypeScript, host build and installed cross smoke passed."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-14T23:51:04Z"
+    registryWrite: non-deferred
+    note: "Independent Quality approved. Canary installed, current user approval preferences updated without unrelated normalized changes, idle daemon restarted and existing session preserved."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-15T00:17:59Z"
+    registryWrite: non-deferred
+    note: "Activity scroll: 33 UI/assets tests, 18 documentation tests, 51 browser groups, TypeScript and 16 installed binary checks passed. Canary activated with idle daemon restart."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-15T00:17:59Z"
+    registryWrite: non-deferred
+    note: "Independent Quality approved reflow and user-intent following, session/tab replay restoration and viewport containment. Project/session workspace phases 2-4 remain a proposal only."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-15T01:16:15Z"
+    registryWrite: non-deferred
+    note: "All workspace phases verified: aggregate867, changed-slice63, browser17+51, TypeScript, four-target builds, macOS/Linux workspace31 each and installed canary31. Graceful activation preserved existing history and ownership."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-15T01:16:15Z"
+    registryWrite: non-deferred
+    note: "Independent deck_quality_cross_workspace approved final CLI/host/UI candidate after lifecycle, identity, persistence and client race repairs; no blocking findings remain."
+  - phase: apply
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-15T18:22:52Z"
+    registryWrite: non-deferred
+    note: "User corrected Close to same-session resource release and requested session Rename/Remove menus and authoritative connection dots. Prior activations remain historical; this increment is not yet active."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-15T18:34:48Z"
+    registryWrite: non-deferred
+    note: "Session release/actions: affected570/3386, UI/assets/docs80/1079, final owned host201/900, TypeScript, canonical schemas, four targets, browser6+6+17 and installed67 passed; overlapping suites are not additive."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-15T18:34:48Z"
+    registryWrite: non-deferred
+    note: "Independent Quality approved after lifecycle/recovery/client race repairs with40/170 overlapping checks. Guarded idle canary restart activated payload44337a894af17fa639c9aac021056a2ecbeeef4f4655c7124ff8171155bdd531, PID17681 to23702."
+  - phase: verify
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-15T18:47:05Z"
+    registryWrite: non-deferred
+    note: "Release preparation:6693pass/3optional skip/0fail; canonical release checks and TypeScript pass. Final artifact passes session67 and memory runtime with checkout reads denied. Red removal visual8 passes."
+  - phase: review
+    agent: deck-lead
+    model: GPT-6
+    timestamp: "2026-10-15T18:47:05Z"
+    registryWrite: non-deferred
+    note: "Independent bounded precommit/portability review approved. Runtime/UI/tests committed6aabf0b; documentation/governance accompanies a separate commit. Canary activated, no version bump/tag/push/publication."
+next_action: "Choose the next product version and prepare main integration through the canonical release process. Current changes are committed, verified and active in canary; preserve retained user histories."

@@ -9,7 +9,7 @@ Deck is runner-aware rather than runner-agnostic. The CLI registers operational 
 
 ## Support status
 
-For a team whose members use different native CLIs, see [cross-runner sessions](cross-runner-sessions.md). That experimental daemon/client surface has its own driver matrix and approval policy; the native workflows below remain available independently.
+For a team whose members use different native CLIs, see [cross-runner sessions](cross-runner-sessions.md). Open its project/session workspace with `deck web` from any directory, or attach from a project with `deck cross developer`. That experimental daemon/client surface has its own driver matrix and approval policy; the native workflows below remain available independently.
 
 | Runtime | Status | Deck behavior |
 |---|---|---|
@@ -124,7 +124,6 @@ Review & Install for Codex can include:
 - **Codebase Memory**: an existing shared executable is reused (the per-user daemon must match the client version); otherwise the pinned native release is installed into the Deck data root. The MCP entry always stores the resolved absolute path.
 - **Context Mode**: a usable shared executable is reused; otherwise the pinned npm release is installed into the Deck data root. The MCP entry stores the resolved absolute path. Context Mode's own Codex hooks are not installed: they would compete with the RTK `PreToolUse` rewrite and are not part of the Claude or OpenCode routes.
 - **Serena**: Deck's owned launcher through Deck's hidden Serena MCP proxy, after explicit selection.
-- **Explicit memory tools**: a Deck-owned stdio MCP server `deck-memory` (the hidden `memory-mcp` internal subcommand, pinned to the running Deck binary) exposes `memory_search` and `memory_save` through the Deck loopback host when Supermemory is selected. It holds no Supermemory credential, receives only the loopback endpoint and a token-file path, and lists no tools outside a Deck launch. See [Adaptive memory](adaptive-memory.md#explicit-memory-tools-on-demand-search-and-save).
 - **Supermemory**: only the official `supermemoryai/codex-supermemory` plugin, pinned to one npm release and limited to its two documented lifecycle hooks (`UserPromptSubmit` recall and `Stop` flush). The profile credential entered in the TUI is stored in Deck's protected profile store and injected into the Codex process Deck starts, and nowhere else (`SUPERMEMORY_CODEX_API_KEY`); it is never written to Codex configuration. Deck does not register the Supermemory MCP server or its own memory loopback beside the plugin, and a launch is blocked if another Supermemory plugin or MCP registration exists in your Codex configuration.
 
 Deck adds and removes only its own marker-delimited hook blocks (`# deck-codex-hook:<id>:start` … `:end`) in the global `config.toml`, so your inline hooks and `hooks.json` entries keep working beside them. Codex requires review of non-managed hooks; the Deck CLI launch passes `--dangerously-bypass-hook-trust` when Deck-owned hooks are present, so they run without per-hook review for that process. When you start `codex` directly instead, open `/hooks` and trust Deck's entries. The launch continues to pass `--dangerously-bypass-approvals-and-sandbox`.

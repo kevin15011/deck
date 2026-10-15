@@ -74,3 +74,9 @@ A kill switch `crossRunner.enabled: false` disables daemon session creation with
 - The whole flow works from a desktop browser on the same machine with no Tailscale installed.
 - The four compiled binaries contain the daemon, web assets and schemas; the host binary passes a smoke run from outside the repository.
 - No runner credential is ever read or stored by Deck (asserted by tests).
+
+## Authorized workspace evolution — 2026-10-15
+
+The user approved all remaining phases in workspace-evolution-brief.md. Extend the existing per-user daemon with a cwd-independent web entry point, persistent project catalog, explicit multiple sessions and history navigation, truthful preflight preparation, final closing and linked continuation, and session-scoped assignment revisions. Keep native context ownership separate from the Deck conversation. Separate global Lead/delegate admission pools bound active native task handles without deadlocking waiting Leads. Preserve existing command compatibility and histories. This additive scope does not introduce multiple users, automatic worktrees, OS services or native prewarming.
+
+Rollback preserves append-only histories and project data; old binaries may reject new config fields/event kinds. Before reverting a deployed candidate, stop it gracefully, retain a state/config backup and use a compatible binary for sessions containing new events. Do not erase events or silently reinterpret new native generations to make an old binary accept them.
