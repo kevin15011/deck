@@ -1,6 +1,6 @@
 # Release correction in progress
 
-The v0.11.0 CI run blocked publication. Its tag remains unchanged. The authorized release continues as v0.11.1 after clean-checkout and Linux fixes; see `release-v0.11.0.md`.
+The v0.11.0 and v0.11.1 stable CI runs blocked publication. Their tags remain unchanged. The authorized release continues as v0.11.2 after clean-checkout, Linux verification and output-relay fixes; see `release-v0.11.0.md`.
 
 # Handoff: cross-runner-session-core (read this first)
 

@@ -9,9 +9,9 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
-## [0.11.1] - 2026-10-15
+## [0.11.2] - 2026-10-15
 
-The v0.11.0 tag was blocked by release verification and did not publish binaries. This release includes the workspace features and clean-checkout/Linux verification fixes.
+The v0.11.0 and v0.11.1 tags were blocked by release verification and did not publish stable binaries. This release includes the workspace features and clean-checkout/Linux verification fixes.
 
 ### Added
 
@@ -29,6 +29,7 @@ The v0.11.0 tag was blocked by release verification and did not publish binaries
 
 ### Fixed
 
+- Supervised runner output is fully flushed before reporting completion; incomplete or failed output draining is reported as a failure.
 - Session recovery and command retries preserve ownership, prevent duplicate execution, and keep stale preparation or catalog responses from restoring obsolete state.
 - Compact sidebar controls, nested directory completion, latest-message navigation and automatic activity scrolling work across desktop and mobile layouts.
 - Pi supervised child cleanup and recovery work on macOS, and global/project skill collisions are handled through reviewed, reversible installation changes.
