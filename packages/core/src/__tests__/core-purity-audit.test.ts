@@ -51,6 +51,7 @@ const ALLOWED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /Supermemory effects are disabled/, reason: "canonical provider scope fail-closed diagnostic" },
   { pattern: /Deprecated Supermemory maxMemoriesPerSession/, reason: "provider config deprecation diagnostic" },
   { pattern: /canonical-supermemory-project/, reason: "provider-neutral canonical scope resolver module path" },
+  { pattern: /^"\.\/memory\/supermemory-session-scope"$/, reason: "provider-neutral session scope resolver module export path" },
   { pattern: /When Supermemory is selected/, reason: "adaptive memory instruction content" },
   { pattern: /Canonical Supermemory Scope/, reason: "adaptive memory instruction content" },
   { pattern: /Supermemory owns extraction/, reason: "adaptive memory instruction content" },

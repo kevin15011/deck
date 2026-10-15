@@ -80,7 +80,7 @@ function invalidScope(): SupermemorySessionScopeResult {
     diagnostics: [{
       code: "SUPERMEMORY_PROJECT_GIT_ROOT_INVALID",
       severity: "error",
-      message: "Git identity could not be safely verified; global Supermemory fallback is disabled for invalid identity metadata.",
+      message: "Git identity could not be safely verified; global memory fallback is disabled for invalid identity metadata.",
     }],
   };
 }

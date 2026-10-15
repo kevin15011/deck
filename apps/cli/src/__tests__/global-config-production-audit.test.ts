@@ -47,8 +47,11 @@ describe("production Deck preference source audit", () => {
   });
 
   test("documents the narrow production environment entrypoint for global config", () => {
+    // The opt-in source proof is a standalone import.meta.main entrypoint.
+    // Its reusable runPiClientProof function receives launch.deckConfig from callers.
+    const entrypoints = ["apps/cli/src/main.tsx", "apps/cli/src/upgrade-command/orchestrator.ts", "apps/cli/src/pi-client-proof.ts"];
     const offenders = files(repoRoot).filter((rel) => {
-      if (["apps/cli/src/main.tsx", "apps/cli/src/upgrade-command/orchestrator.ts", ...Array.from(allowed)].includes(rel) || rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) return false;
+      if ([...entrypoints, ...Array.from(allowed)].includes(rel) || rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) return false;
       const text = readFileSync(join(repoRoot, rel), "utf8");
       return /createDeckConfigStoreFromEnvironment/.test(text);
     });
