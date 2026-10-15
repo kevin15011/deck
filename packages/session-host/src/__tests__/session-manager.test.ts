@@ -17,6 +17,8 @@ import { Supervisor } from "../supervisor";
 import { FakeDriver, type FakeTurn } from "../testing/fake-driver";
 import { cleanupTempDirs, FakeClock, tempDir, tempSubdir, waitFor } from "./test-helpers";
 
+// These waits observe durable lifecycle progress, not a subsecond latency contract.
+const PROGRESS_TIMEOUT_MS = 5000;
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
   for (const fn of cleanups.splice(0).reverse()) { try { await fn(); } catch { /* best effort */ } }
@@ -53,6 +55,8 @@ function setup(over: { config?: CrossRunnerConfig | undefined; driver?: FakeDriv
     ...over.options,
   });
   cleanups.push(() => manager.close());
+  // Synthetic persistent handles must also drain if an assertion fails before release.
+  if (driver instanceof PersistentFakeDriver) cleanups.push(() => { driver.releaseClose(); });
   let n = 0;
   const run = (command: SessionCommandBody, sessionId?: string, clientId = "c-1") =>
     manager.execute({ sessionId, clientId, command: { v: 1, commandId: `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`, ...command } as never });
@@ -77,45 +81,48 @@ describe("persistent workspace sessions", () => {
   test("crashed preflight reservation with no dispatch fence or lease safely restores pending text", async () => {
     const t = setup(); const id = await t.create(); let release!: () => void;
     t.driver.probe = () => new Promise(resolve => { release = () => resolve({ ...t.driver.probeResult, status: "blocked" }); });
-    await t.run({ type: "prompt.send", text: "never reached native" }, id); await waitFor(() => !!release, 200, "held runner check");
+    await t.run({ type: "prompt.send", text: "never reached native" }, id); await waitFor(() => !!release, PROGRESS_TIMEOUT_MS, "held runner check");
     expect(t.events(id).some(e => e.kind === "prompt.dispatched")).toBe(false);
     const dir = tempDir(), paths = resolveStatePaths({ env: { HOME: dir, XDG_STATE_HOME: join(dir, "state") }, tmpdir: dir }); ensureStateLayout(paths); cpSync(t.paths.sessionsDir, paths.sessionsDir, { recursive: true });
     const report = recoverAllSessions({ paths, probe: createNodeProbe() });
     expect(report.sessions[0]?.unsettled).toEqual([]);
     const driver = new FakeDriver(); driver.autoComplete = true; const reopened = setup({ dir, driver });
-    await waitFor(() => driver.turns.length === 1, 300, "restored pending native call"); await reopened.idle();
+    await waitFor(() => driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "restored pending native call"); await reopened.idle();
     expect(driver.turns[0]?.input.prompt).toBe("never reached native");
     release(); await t.idle();
   });
 
   test("an explicit resume during interrupted native close drains once then continues FIFO", async () => {
     const driver = new PersistentFakeDriver(); const t = setup({ driver }); const id = await t.create();
-    await t.run({ type: "prompt.send", text: "first" }, id); await waitFor(() => driver.turns.length === 1, 200, "first");
+    await t.run({ type: "prompt.send", text: "first" }, id); await waitFor(() => driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "first");
     await t.run({ type: "prompt.send", text: "second" }, id); await t.run({ type: "turn.interrupt", taskId: "lead" }, id);
-    await waitFor(() => driver.closeCalls === 1, 200, "held native close");
+    await waitFor(() => driver.closeCalls === 1, PROGRESS_TIMEOUT_MS, "held native close");
     expect((await t.run({ type: "prompt.resume" }, id)).ok).toBe(true); expect(driver.turns).toHaveLength(1);
-    driver.releaseClose(); await waitFor(() => driver.turns.length === 2, 200, "next after drain");
+    driver.releaseClose(); await waitFor(() => driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "next after drain");
     expect(lastTurn(driver).input.prompt).toBe("second"); lastTurn(driver).finish(); await t.idle();
     expect((await t.manager.query("prompts.list", { sessionId: id }) as any).data.paused).toBe(false);
   });
 
   test("failed internal wake pauses accepted users and retains notices until their native delivery", async () => {
-    let release!: (value: any) => void, leadPreparations = 0;
+    const wake = Promise.withResolvers<any>();
+    let wakeReserved = false, leadPreparations = 0;
     const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }), options: { childMcp: async (_runner, context) => {
-      if (context.taskId === "lead" && ++leadPreparations === 2) return new Promise(resolve => { release = resolve; });
+      if (context.taskId === "lead" && ++leadPreparations === 2) { wakeReserved = true; return wake.promise; }
       return { runnerPackages: () => [], resolveServer: () => undefined };
     } } });
-    const id = await t.create(); await t.run({ type: "prompt.send", text: "initial" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    // Release the scripted preflight before manager teardown, including failed assertions.
+    cleanups.push(() => { wake.resolve({ runnerPackages: () => [], resolveServer: () => undefined }); });
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "initial" }, id); await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead");
     const original = lastTurn(t.driver); original.init();
     const childId = (await t.manager.callTaskTool(grantFor(t, id), "deck_delegate", { agent: "investigate", task: "inspect" }) as any).data.taskId;
-    await waitFor(() => t.driver.turns.length === 2, 200, "child"); const child = lastTurn(t.driver); child.finish(); await waitFor(() => child.closed, 200, "child close");
-    original.finish(); await waitFor(() => !!release, 300, "reserved wake preflight");
+    await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "child"); const child = lastTurn(t.driver); child.finish(); await waitFor(() => child.closed, PROGRESS_TIMEOUT_MS, "child close");
+    original.finish(); await waitFor(() => wakeReserved, PROGRESS_TIMEOUT_MS, "reserved wake preflight");
     await t.run({ type: "prompt.send", text: "exact user instruction" }, id);
-    release({ runnerPackages: () => [], resolveServer: () => undefined, nativeMemory: { provider: "supermemory", integration: "runner-plugin", status: "unavailable" } });
+    wake.resolve({ runnerPackages: () => [], resolveServer: () => undefined, nativeMemory: { provider: "supermemory", integration: "runner-plugin", status: "unavailable" } });
     await t.idle();
     expect((await t.manager.query("prompts.list", { sessionId: id }) as any).data).toMatchObject({ paused: true, queued: [{ text: "exact user instruction" }] });
     expect(t.events(id).filter(e => e.data.code === "lead.notices-delivered")).toHaveLength(0);
-    await t.run({ type: "prompt.resume" }, id); await waitFor(() => t.driver.turns.length === 3, 200, "user resumes");
+    await t.run({ type: "prompt.resume" }, id); await waitFor(() => t.driver.turns.length === 3, PROGRESS_TIMEOUT_MS, "user resumes");
     const user = lastTurn(t.driver); expect(user.input.prompt).toBe("exact user instruction"); expect(user.input.rolePrompt).toContain(childId);
     expect(t.events(id).filter(e => e.data.code === "lead.notices-delivered")).toHaveLength(1);
     user.finish(); await t.idle();
@@ -124,14 +131,14 @@ describe("persistent workspace sessions", () => {
   test("large completion batches consume only complete notices actually delivered once", async () => {
     const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }) });
     t.driver.onStart = turn => { if (turn.input.memberId !== "lead") { turn.init(); turn.finish(); } };
-    const id = await t.create(); await t.run({ type: "prompt.send", text: "initial" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead"); const lead = lastTurn(t.driver); lead.init();
+    const id = await t.create(); await t.run({ type: "prompt.send", text: "initial" }, id); await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead"); const lead = lastTurn(t.driver); lead.init();
     for (let i = 0; i < 200; i++) await t.manager.callTaskTool(grantFor(t, id), "deck_delegate", { agent: "investigate", task: `job ${i}` });
-    await waitFor(() => t.events(id).filter(e => e.kind === "task.state" && e.source.taskId !== "lead" && e.data.state === "completed").length === 200, 1000, "all children complete");
-    lead.finish(); await waitFor(() => t.driver.turns.filter(turn => turn.input.memberId === "lead").length === 2, 400, "first notice batch");
+    await waitFor(() => t.events(id).filter(e => e.kind === "task.state" && e.source.taskId !== "lead" && e.data.state === "completed").length === 200, PROGRESS_TIMEOUT_MS, "all children complete");
+    lead.finish(); await waitFor(() => t.driver.turns.filter(turn => turn.input.memberId === "lead").length === 2, PROGRESS_TIMEOUT_MS, "first notice batch");
     const first = lastTurn(t.driver); expect(first.input.prompt.length).toBeLessThanOrEqual(8192); expect(first.input.rolePrompt).not.toContain("Delegated task completion notice:");
     const firstIds = (t.events(id).filter(e => e.data.code === "lead.notices-delivered").at(-1)!.data.notices as any[]).map(n => n.taskId);
     expect(firstIds.length).toBeLessThan(200); first.finish();
-    await waitFor(() => t.driver.turns.filter(turn => turn.input.memberId === "lead").length === 3, 400, "overflow notice batch");
+    await waitFor(() => t.driver.turns.filter(turn => turn.input.memberId === "lead").length === 3, PROGRESS_TIMEOUT_MS, "overflow notice batch");
     const secondIds = (t.events(id).filter(e => e.data.code === "lead.notices-delivered").at(-1)!.data.notices as any[]).map(n => n.taskId);
     expect(firstIds.filter(id => secondIds.includes(id))).toEqual([]); expect(firstIds.length + secondIds.length).toBe(200);
     lastTurn(t.driver).finish(); await t.idle();
@@ -142,7 +149,7 @@ describe("persistent workspace sessions", () => {
     const t = setup({ options: stage === "dispatch" ? { childMcp: async () => new Promise(resolve => { unblock = resolve; }) } : {} });
     const id = await t.create();
     const first = await t.run({ type: "prompt.send", text: "first" }, id);
-    if (stage === "dispatch") await waitFor(() => !!unblock, 200, "held preflight"); else await waitFor(() => t.driver.turns.length === 1, 200, "owned lead");
+    if (stage === "dispatch") await waitFor(() => !!unblock, PROGRESS_TIMEOUT_MS, "held preflight"); else await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "owned lead");
     if (stage !== "enqueue") await t.run({ type: "prompt.send", text: "next must not run" }, id);
     const log = t.manager.openLog(id)!, flush = log.flush.bind(log);
     log.flush = () => { throw new Error("synthetic-fsync-failure"); };
@@ -151,7 +158,7 @@ describe("persistent workspace sessions", () => {
     else if (stage === "pause") await expect(t.run({ type: "turn.interrupt", taskId: "lead" }, id)).rejects.toThrow("synthetic-fsync-failure");
     else if (stage === "dispatch") unblock({ runnerPackages: () => [], resolveServer: () => undefined });
     else lastTurn(t.driver).finish();
-    await waitFor(() => !t.manager.hasRunningWork(), 500, "fault cleanup drained");
+    await waitFor(() => !t.manager.hasRunningWork(), PROGRESS_TIMEOUT_MS, "fault cleanup drained");
     log.flush = flush;
     expect(t.driver.turns).toHaveLength(stage === "dispatch" ? 0 : 1);
     expect((await t.runWithId(stage === "enqueue" ? retryId : (first as any).data.promptId, { type: "prompt.send", text: stage === "enqueue" ? "next must not run" : "first" }, id) as any).code).toBe("log-write-failed");
@@ -164,7 +171,7 @@ describe("persistent workspace sessions", () => {
     t.manager.openLog(id)!.flush(); await t.manager.close();
     const driver = new FakeDriver(); driver.autoComplete = true;
     const reopened = setup({ dir: t.dir, driver });
-    await waitFor(() => driver.turns.length === 1, 300, "recovered queue admission"); await reopened.idle();
+    await waitFor(() => driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "recovered queue admission"); await reopened.idle();
     expect(driver.turns[0]!.input.prompt).toBe(text);
     expect(await reopened.runWithId(commandId, { type: "prompt.send", text }, id)).toMatchObject({ ok: true, duplicate: true });
     expect(driver.turns).toHaveLength(1);
@@ -196,11 +203,11 @@ describe("persistent workspace sessions", () => {
     let release!: (value: any) => void, calls = 0;
     const t = setup({ options: { childMcp: async () => ++calls === 1 ? new Promise(resolve => { release = resolve; }) : { runnerPackages: () => [], resolveServer: () => undefined } } });
     const id = await t.create(); const first = await t.run({ type: "prompt.send", text: "cancel before native" }, id);
-    await waitFor(() => !!release, 200, "held tools");
+    await waitFor(() => !!release, PROGRESS_TIMEOUT_MS, "held tools");
     const second = await t.run({ type: "prompt.send", text: "next item" }, id);
     expect((await t.run({ type: "prompt.cancel", promptId: (first as any).data.promptId }, id)).ok).toBe(true);
     release({ runnerPackages: () => [], resolveServer: () => undefined });
-    await waitFor(() => t.driver.turns.length === 1, 200, "next admitted");
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "next admitted");
     expect(lastTurn(t.driver).input.prompt).toBe("next item");
     expect(t.events(id).find(e => e.kind === "prompt.state" && e.data.promptId === (first as any).data.promptId)?.data.state).toBe("cancelled");
     expect(t.events(id).filter(e => e.kind === "message.completed" && e.data.role === "user").map(e => e.data.text)).toEqual(["next item"]);
@@ -218,12 +225,12 @@ describe("persistent workspace sessions", () => {
     expect(await t.runWithId(commandId, { type: "prompt.send", text: "original" }, id)).toMatchObject({ ...first, duplicate: true });
     expect((await t.runWithId(commandId, { type: "prompt.send", text: "changed" }, id) as any).code).toBe("command-id-reused");
     expect((await t.runWithId(commandId, { type: "prompt.resume" }, id) as any).code).toBe("command-id-reused");
-    await waitFor(() => t.driver.turns.length === 1, 200, "one native turn"); lastTurn(t.driver).finish(); await t.idle();
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "one native turn"); lastTurn(t.driver).finish(); await t.idle();
   });
 
   test("restart with uncertain dispatched owner preserves all never-dispatched messages", async () => {
     const t = setup(); const id = await t.create();
-    await t.run({ type: "prompt.send", text: "native active" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    await t.run({ type: "prompt.send", text: "native active" }, id); await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead");
     const second = await t.run({ type: "prompt.send", text: "second preserved" }, id), third = await t.run({ type: "prompt.send", text: "third preserved" }, id);
     const dir = tempDir(), paths = resolveStatePaths({ env: { HOME: dir, XDG_STATE_HOME: join(dir, "state") }, tmpdir: dir });
     ensureStateLayout(paths); cpSync(t.paths.sessionsDir, paths.sessionsDir, { recursive: true });
@@ -239,11 +246,11 @@ describe("persistent workspace sessions", () => {
 
   test("queue count and UTF-8 aggregate limits reject without clearing accepted messages", async () => {
     const t = setup(); const id = await t.create();
-    await t.run({ type: "prompt.send", text: "active" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    await t.run({ type: "prompt.send", text: "active" }, id); await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead");
     for (let i = 0; i < 32; i++) expect((await t.run({ type: "prompt.send", text: `queued ${i}` }, id)).ok).toBe(true);
     expect((await t.run({ type: "prompt.send", text: "overflow" }, id) as any).code).toBe("prompt-queue-full");
     await t.run({ type: "session.stop" }, id); await t.idle();
-    const next = await t.create(); await t.run({ type: "prompt.send", text: "active" }, next); await waitFor(() => t.driver.turns.length === 2, 200, "next lead");
+    const next = await t.create(); await t.run({ type: "prompt.send", text: "active" }, next); await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "next lead");
     const multibyte = "界".repeat(200_000);
     expect((await t.run({ type: "prompt.send", text: multibyte }, next)).ok).toBe(true);
     expect((await t.run({ type: "prompt.send", text: multibyte }, next) as any).code).toBe("prompt-queue-full");
@@ -255,7 +262,7 @@ describe("persistent workspace sessions", () => {
     const t = setup(); const id = await t.create();
     const first = await t.run({ type: "prompt.send", text: "first" }, id);
     expect(first).toMatchObject({ ok: true, data: { promptId: expect.any(String), state: "queued", position: 1 } });
-    await waitFor(() => t.driver.turns.length === 1, 200, "first lead"); const firstTurn = lastTurn(t.driver); firstTurn.init();
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "first lead"); const firstTurn = lastTurn(t.driver); firstTurn.init();
     const second = await t.run({ type: "prompt.send", text: "second" }, id);
     const third = await t.run({ type: "prompt.send", text: "third" }, id);
     expect(second.ok).toBe(true); expect(third.ok).toBe(true); expect(t.driver.turns).toHaveLength(1);
@@ -263,7 +270,7 @@ describe("persistent workspace sessions", () => {
     expect(queue.queued.map((p: any) => p.text)).toEqual(["second", "third"]);
     expect(t.events(id).filter(e => e.kind === "message.completed" && e.data.role === "user").map(e => e.data.text)).toEqual(["first"]);
     expect((await t.run({ type: "prompt.cancel", promptId: (second as any).data.promptId }, id)).ok).toBe(true);
-    firstTurn.finish(); await waitFor(() => t.driver.turns.length === 2, 200, "third lead");
+    firstTurn.finish(); await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "third lead");
     expect(lastTurn(t.driver).input.prompt).toBe("third");
     expect(lastTurn(t.driver).input.resume?.nativeSessionId).toBe(firstTurn.nativeSessionId);
     expect((await t.run({ type: "prompt.cancel", promptId: (third as any).data.promptId }, id) as any).code).toBe("prompt-already-started");
@@ -273,7 +280,7 @@ describe("persistent workspace sessions", () => {
 
   test("interrupt pauses accepted pending prompts and resume waits until the current handle drains", async () => {
     const t = setup(); const id = await t.create();
-    await t.run({ type: "prompt.send", text: "first" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "first lead");
+    await t.run({ type: "prompt.send", text: "first" }, id); await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "first lead");
     const first = lastTurn(t.driver); first.init();
     await t.run({ type: "prompt.send", text: "second" }, id);
     await t.run({ type: "turn.interrupt", taskId: "lead" }, id); await t.idle();
@@ -281,15 +288,15 @@ describe("persistent workspace sessions", () => {
     expect(t.driver.turns).toHaveLength(1);
     await t.run({ type: "prompt.send", text: "third" }, id);
     expect(t.driver.turns).toHaveLength(1);
-    await t.run({ type: "prompt.resume" }, id); await waitFor(() => t.driver.turns.length === 2, 200, "resume second");
+    await t.run({ type: "prompt.resume" }, id); await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "resume second");
     expect(lastTurn(t.driver).input.prompt).toBe("second"); lastTurn(t.driver).finish();
-    await waitFor(() => t.driver.turns.length === 3, 200, "resume third"); lastTurn(t.driver).finish(); await t.idle();
+    await waitFor(() => t.driver.turns.length === 3, PROGRESS_TIMEOUT_MS, "resume third"); lastTurn(t.driver).finish(); await t.idle();
   });
 
   test("project removal preserves active work, session history and restart visibility until explicit Add", async () => {
     const t = setup(); const id = await t.create();
     const projectId = (await t.manager.query("sessions.list", {}) as any).data.sessions[0].projectId;
-    await t.run({ type: "prompt.send", text: "Continue working" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    await t.run({ type: "prompt.send", text: "Continue working" }, id); await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead");
     const lead = lastTurn(t.driver); lead.init();
     expect((await t.run({ type: "project.rename", projectId, name: "  My project  " }) as any).data.project.name).toBe("My project");
     const removeId = "55555555-5555-4555-8555-555555555555";
@@ -319,10 +326,10 @@ describe("persistent workspace sessions", () => {
     const other = await t.run({ type: "session.create", projectRoot: otherRoot });
     const read = async () => (await t.manager.query("sessions.status", { projectId, sessionIds: [id, (other as any).data.sessionId, "missing"] }) as any).data.sessions;
     expect(await read()).toMatchObject([{ sessionId: id, leadActivity: { state: "idle", lastReplySeq: 0, pendingApprovals: 0 } }]);
-    await t.run({ type: "prompt.send", text: "Start" }, id); await waitFor(() => t.driver.turns.length === 1, 200, "lead");
+    await t.run({ type: "prompt.send", text: "Start" }, id); await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead");
     const lead = lastTurn(t.driver); lead.init();
     const delegated = await t.manager.callTaskTool(grantFor(t, id), "deck_delegate", { agent: "investigate", task: "Child" });
-    await waitFor(() => t.driver.turns.length === 2, 200, "child"); const child = lastTurn(t.driver); child.init(); child.say("child response");
+    await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "child"); const child = lastTurn(t.driver); child.init(); child.say("child response");
     const childApproval = t.broker.request({ sessionId: id, taskId: (delegated as any).data.taskId, memberId: "investigate", tool: "Bash" });
     expect((await read())[0].leadActivity).toMatchObject({ taskId: "lead", state: "running", pendingApprovals: 0, lastReplySeq: 0 });
     const leadApproval = t.broker.request({ sessionId: id, taskId: "lead", memberId: "lead", tool: "Bash" });
@@ -333,7 +340,7 @@ describe("persistent workspace sessions", () => {
     lead.emit("message.delta", { text: "later delta" }); lead.emit("reasoning.delta", { text: "reasoning" }); lead.emit("tool.completed", { tool: "Bash", output: "result" });
     lead.emit("message.completed", { role: "system", text: "helper" }); lead.emit("message.completed", { role: "assistant", text: "internal", internal: true }); lead.emit("message.completed", { role: "assistant", text: "   " });
     expect((await read())[0].leadActivity.lastReplySeq).toBe(replySeq);
-    child.finish(); await waitFor(() => child.closed, 200, "child drain"); await t.manager.callTaskTool(grantFor(t, id), "deck_task_result", { taskId: (delegated as any).data.taskId });
+    child.finish(); await waitFor(() => child.closed, PROGRESS_TIMEOUT_MS, "child drain"); await t.manager.callTaskTool(grantFor(t, id), "deck_task_result", { taskId: (delegated as any).data.taskId });
     lead.finish(); await t.idle();
     await t.run({ type: "session.assignMember", memberId: "lead", expectedRevision: 0, assignment: { runnerId: "claude", modelId: "new" } }, id);
     expect((await read())[0].leadActivity).toMatchObject({ state: "idle", lastReplySeq: replySeq });
@@ -374,15 +381,15 @@ describe("persistent workspace sessions", () => {
     const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } }, executionBudget: { lead: 2, delegated: 1 } }) });
     const one = await t.create(), two = await t.create();
     await t.run({ type: "prompt.send", text: "lead-one" }, one); await t.run({ type: "prompt.send", text: "lead-two" }, two);
-    await waitFor(() => t.driver.turns.length === 2, 200, "two leads");
+    await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "two leads");
     await t.manager.callTaskTool(grantFor(t, one), "deck_delegate", { agent: "investigate", task: "one-first" });
     await t.manager.callTaskTool(grantFor(t, one), "deck_delegate", { agent: "investigate", task: "one-second" });
     await t.manager.callTaskTool(grantFor(t, two), "deck_delegate", { agent: "investigate", task: "two-first" });
-    await waitFor(() => t.driver.turns.length === 3, 200, "first child");
+    await waitFor(() => t.driver.turns.length === 3, PROGRESS_TIMEOUT_MS, "first child");
     expect(lastTurn(t.driver).input.prompt).toBe("one-first"); lastTurn(t.driver).finish();
-    await waitFor(() => t.driver.turns.length === 4, 200, "fair next child");
+    await waitFor(() => t.driver.turns.length === 4, PROGRESS_TIMEOUT_MS, "fair next child");
     expect(lastTurn(t.driver).input.prompt).toBe("two-first"); lastTurn(t.driver).finish();
-    await waitFor(() => t.driver.turns.length === 5, 200, "return to backlog");
+    await waitFor(() => t.driver.turns.length === 5, PROGRESS_TIMEOUT_MS, "return to backlog");
     expect(lastTurn(t.driver).input.prompt).toBe("one-second");
     await t.run({ type: "session.stop" }, one); await t.run({ type: "session.stop" }, two); await t.idle();
   });
@@ -420,7 +427,7 @@ describe("persistent workspace sessions", () => {
     const clock = new FakeClock(); const t = setup({ options: { clock } }); const id = await t.create();
     let probing = false;
     t.driver.probe = () => { probing = true; return new Promise(() => {}); };
-    await t.run({ type: "session.prepare" }, id); await waitFor(() => probing, 200, "probe");
+    await t.run({ type: "session.prepare" }, id); await waitFor(() => probing, PROGRESS_TIMEOUT_MS, "probe");
     clock.advance(30_000); await t.idle();
     expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data).toMatchObject({ status: "failed", reasonCode: "preparation-timeout" });
     expect(t.driver.turns).toHaveLength(0);
@@ -440,7 +447,7 @@ describe("persistent workspace sessions", () => {
     const released = new Promise<void>(resolve => { drain = resolve; });
     const t = setup({ options: { childMcp: async () => ({ runnerPackages: () => [], resolveServer: () => undefined, release: () => released }) } });
     const id = await t.create(); await t.run({ type: "session.prepare" }, id);
-    await waitFor(() => t.events(id).some(e => e.data.phase === "preparing-tools"), 200, "preparation phase");
+    await waitFor(() => t.events(id).some(e => e.data.phase === "preparing-tools"), PROGRESS_TIMEOUT_MS, "preparation phase");
     expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data.status).toBe("preparing");
     expect((await t.manager.query("sessions.list", {}) as any).data.sessions[0].leadActivity).toMatchObject({ state: "preparing", lastReplySeq: 0 });
     expect((await t.run({ type: "prompt.send", text: "too early" }, id) as any).code).toBe("session-preparing");
@@ -467,7 +474,7 @@ describe("persistent workspace sessions", () => {
     const commandId = "22222222-2222-4222-8222-222222222222";
     const command = { type: "session.assignMember" as const, memberId: "lead", expectedRevision: 0, assignment: { runnerId: "claude", modelId: "other" } };
     const first = t.runWithId(commandId, command, id), second = t.runWithId(commandId, command, id);
-    await waitFor(() => !!probe, 200, "probe waits"); probe();
+    await waitFor(() => !!probe, PROGRESS_TIMEOUT_MS, "probe waits"); probe();
     expect(await first).toMatchObject({ ok: true, data: { revision: 1, generation: 1 } });
     expect(await second).toMatchObject({ ok: true, duplicate: true, data: { revision: 1, generation: 1 } });
     expect(t.events(id).filter(e => e.kind === "session.assignment")).toHaveLength(1);
@@ -500,26 +507,26 @@ describe("persistent workspace sessions", () => {
     const t = setup({ config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } } }) });
     (t.manager as any).options.drivers.get = (id: string) => id === "claude" ? t.driver : id === "codex" ? codex : undefined;
     const id = await t.create(); await t.run({ type: "prompt.send", text: "Start" }, id);
-    await waitFor(() => t.driver.turns.length === 1, 200, "first lead"); const original = lastTurn(t.driver); original.init();
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "first lead"); const original = lastTurn(t.driver); original.init();
     const firstGrant = grantFor(t, id);
     const delegated = await t.manager.callTaskTool(firstGrant, "deck_delegate", { agent: "investigate", task: "Inspect" });
-    await waitFor(() => t.driver.turns.length === 2, 200, "child"); const child = lastTurn(t.driver); child.init(); child.finish();
-    await waitFor(() => child.closed, 200, "child drain");
+    await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "child"); const child = lastTurn(t.driver); child.init(); child.finish();
+    await waitFor(() => child.closed, PROGRESS_TIMEOUT_MS, "child drain");
     await t.manager.callTaskTool(firstGrant, "deck_task_result", { taskId: (delegated as any).data.taskId });
     original.finish(); await t.idle();
     await t.run({ type: "session.assignMember", memberId: "lead", expectedRevision: 0, assignment: { runnerId: "codex", modelId: "gpt" } }, id);
-    await t.run({ type: "prompt.send", text: "Follow up" }, id); await waitFor(() => codex.turns.length === 1, 200, "new lead");
+    await t.run({ type: "prompt.send", text: "Follow up" }, id); await waitFor(() => codex.turns.length === 1, PROGRESS_TIMEOUT_MS, "new lead");
     const current = lastTurn(codex); current.init(); const currentGrant = grantFor(t, id, "lead-g1");
     const bridge = new BridgeService({ credentials: t.credentials, broker: t.broker, status: g => t.manager.taskStatus(g), callTaskTool: (g, name, args, context) => t.manager.callTaskTool(g, name, args, context) });
     const token = JSON.parse(readFileSync(sessionPaths(t.paths, id).taskCredentialFile("lead-g1"), "utf8")).token;
     expect((await bridge.call({ token, tool: "deck_delegate", arguments: { agent: "investigate", task: "Continue inspection", continueTaskId: (delegated as any).data.taskId } })).ok).toBe(true);
-    await waitFor(() => t.driver.turns.length === 3, 200, "original child continued");
+    await waitFor(() => t.driver.turns.length === 3, PROGRESS_TIMEOUT_MS, "original child continued");
     const continued = lastTurn(t.driver);
     expect(continued.input.assignment).toEqual({ runnerId: "claude", modelId: "fast" });
     expect(continued.input.resume?.nativeSessionId).toBe(child.nativeSessionId);
     expect((await t.manager.callTaskTool(firstGrant, "deck_delegate", { agent: "investigate", task: "stale" }) as any).code).toBe("credential-revoked");
-    current.finish(); await waitFor(() => current.closed, 200, "current drain"); continued.finish();
-    await waitFor(() => codex.turns.length === 2, 300, "current lead wake");
+    current.finish(); await waitFor(() => current.closed, PROGRESS_TIMEOUT_MS, "current drain"); continued.finish();
+    await waitFor(() => codex.turns.length === 2, PROGRESS_TIMEOUT_MS, "current lead wake");
     expect(lastTurn(codex).input.taskId).toBe("lead-g1");
     expect(lastTurn(codex).input.resume?.nativeSessionId).toBe(current.nativeSessionId);
     expect(t.driver.turns.filter(turn => turn.input.memberId === "lead")).toHaveLength(1);
@@ -533,9 +540,9 @@ describe("persistent workspace sessions", () => {
     const t = setup({ config: baseConfig({ executionBudget: { lead: 1, delegated: 1 } }) });
     const one = await t.create(), two = await t.create(), three = await t.create();
     for (const [id, text] of [[one, "one"], [two, "two"], [three, "three"]]) await t.run({ type: "prompt.send", text: text! }, id);
-    await waitFor(() => t.driver.turns.length === 1, 200, "admitted lead");
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "admitted lead");
     expect((await t.run({ type: "session.stop" }, two) as any).data.state).toBe("ended");
-    lastTurn(t.driver).finish(); await waitFor(() => t.driver.turns.length === 2, 200, "next lead");
+    lastTurn(t.driver).finish(); await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "next lead");
     expect(lastTurn(t.driver).input.prompt).toBe("three");
     expect(t.events(two).find(e => e.kind === "task.state" && e.data.state === "cancelled")).toBeDefined();
     expect(t.driver.turns.some(turn => turn.input.prompt === "two")).toBe(false);
@@ -564,12 +571,12 @@ describe("persistent workspace sessions", () => {
     const id = await t.create();
     const result = await t.run({ type: "session.prepare" }, id);
     expect((result as any).data.preparation.status).toBe("preparing");
-    await waitFor(() => !!resolve, 200, "resolver invoked");
+    await waitFor(() => !!resolve, PROGRESS_TIMEOUT_MS, "resolver invoked");
     expect(t.driver.turns).toHaveLength(0);
     const cancelled = t.run({ type: "session.prepare.cancel", preparationId: (result as any).data.preparation.preparationId }, id);
     resolve({ runnerPackages: () => [], resolveServer: () => undefined, release: async () => { releases++; } });
     await cancelled;
-    await waitFor(() => releases === 1, 200, "resource release");
+    await waitFor(() => releases === 1, PROGRESS_TIMEOUT_MS, "resource release");
     expect((await t.manager.query("session.readiness", { sessionId: id }) as any).data.status).toBe("cancelled");
     expect(t.driver.turns).toHaveLength(0);
   });
@@ -580,13 +587,13 @@ describe("persistent workspace sessions", () => {
     (t.manager as any).options.drivers.get = (id: string) => id === "claude" ? t.driver : id === "codex" ? codex : undefined;
     const id = await t.create();
     await t.run({ type: "prompt.send", text: "Remember the feature" }, id);
-    await waitFor(() => t.driver.turns.length === 1, 200, "turn");
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "turn");
     lastTurn(t.driver).init(); lastTurn(t.driver).say("Feature context"); lastTurn(t.driver).finish(); await t.idle();
     const switched = await t.run({ type: "session.assignMember", memberId: "lead", expectedRevision: 0, assignment: { runnerId: "codex", modelId: "gpt" } }, id);
     expect((switched as any).data.generation).toBe(1);
     expect((await t.run({ type: "session.assignMember", memberId: "lead", expectedRevision: 0, assignment: { runnerId: "codex", modelId: "other" } }, id)).ok).toBe(false);
     await t.run({ type: "prompt.send", text: "Continue" }, id);
-    await waitFor(() => codex.turns.length === 1, 200, "new runner");
+    await waitFor(() => codex.turns.length === 1, PROGRESS_TIMEOUT_MS, "new runner");
     expect(lastTurn(codex).input.taskId).toBe("lead-g1");
     expect(lastTurn(codex).input.resume).toBeUndefined();
     expect(lastTurn(codex).input.rolePrompt).toContain("Feature context");
@@ -612,16 +619,16 @@ describe("persistent workspace sessions", () => {
     const one = await t.create(), two = await t.create();
     await t.run({ type: "prompt.send", text: "one" }, one);
     await t.run({ type: "prompt.send", text: "two" }, two);
-    await waitFor(() => t.driver.turns.length === 1, 200, "one admitted lead");
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "one admitted lead");
     const parent = lastTurn(t.driver); parent.init();
     const grant = t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, one).taskCredentialFile("lead"), "utf8")).token);
     expect(grant).toBeDefined();
     const result = await t.manager.callTaskTool(grant!, "deck_delegate", { agent: "investigate", task: "inspect" });
     expect(result.ok).toBe(true);
-    await waitFor(() => t.driver.turns.length === 2, 200, "delegate independent capacity");
+    await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "delegate independent capacity");
     expect(lastTurn(t.driver).input.memberId).toBe("investigate");
     lastTurn(t.driver).finish(); parent.finish();
-    await waitFor(() => t.driver.turns.some(x => x.input.prompt === "two"), 300, "next admitted lead");
+    await waitFor(() => t.driver.turns.some(x => x.input.prompt === "two"), PROGRESS_TIMEOUT_MS, "next admitted lead");
     for (const turn of t.driver.turns) turn.finish();
     await t.run({ type: "session.stop" }, one); await t.run({ type: "session.stop" }, two);
   });
@@ -641,7 +648,7 @@ describe("turn preparation diagnostics", () => {
     driver.probe = async () => { clock.advance(40); return driver.probeResult; };
     driver.onStart = turn => { clock.advance(100); turn.init(); turn.init(); };
     await t.run({ type: "prompt.send", text: "hello" }, sessionId);
-    await waitFor(() => driver.turns.length === 1, 250, "native start");
+    await waitFor(() => driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "native start");
     expect(preparation(t.events(sessionId)).map(e => e.data)).toEqual([
       { code: "turn.preparation", phase: "checking-runner", attempt: 1, elapsedMs: 0 },
       { code: "turn.preparation", phase: "preparing-tools", attempt: 1, elapsedMs: 40, previousPhase: "checking-runner", previousPhaseDurationMs: 40 },
@@ -676,7 +683,7 @@ describe("turn preparation diagnostics", () => {
   test("cancellation before native init never emits a late turn-started diagnostic", async () => {
     const t = setup(), sessionId = await t.create();
     await t.run({ type: "prompt.send", text: "hello" }, sessionId);
-    await waitFor(() => t.driver.turns.length === 1, 250, "native start");
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "native start");
     await t.run({ type: "task.cancel", taskId: "lead" }, sessionId);
     lastTurn(t.driver).init(); await t.idle(); lastTurn(t.driver).init();
     expect(preparation(t.events(sessionId)).map(e => e.data.phase)).toEqual(["checking-runner", "preparing-tools", "starting-runner"]);
@@ -742,10 +749,10 @@ describe("native handle ownership (D-7, D-14)", () => {
     const t = setup({ driver, config: baseConfig({ executionBudget: { lead: 1, delegated: 1 } }) });
     const one = await t.create(), two = await t.create();
     await t.run({ type: "prompt.send", text: "one" }, one); await t.run({ type: "prompt.send", text: "two" }, two);
-    await waitFor(() => driver.turns.length === 1, 200, "one admitted");
-    lastTurn(driver).finish(); await waitFor(() => driver.closeCalls === 1, 200, "native draining");
+    await waitFor(() => driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "one admitted");
+    lastTurn(driver).finish(); await waitFor(() => driver.closeCalls === 1, PROGRESS_TIMEOUT_MS, "native draining");
     expect(driver.turns).toHaveLength(1);
-    driver.releaseClose(); await waitFor(() => driver.turns.length === 2, 200, "slot transferred");
+    driver.releaseClose(); await waitFor(() => driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "slot transferred");
     expect(lastTurn(driver).input.prompt).toBe("two");
     lastTurn(driver).finish(); await t.idle();
   });
@@ -758,15 +765,15 @@ describe("native handle ownership (D-7, D-14)", () => {
     };
     const t = setup({ driver, config: baseConfig({ members: { lead: { runnerId: "claude", modelId: "opus" }, investigate: { runnerId: "claude", modelId: "fast" } }, maxConcurrentTasks: 1, executionBudget: { lead: 2, delegated: 4 } }) });
     const id = await t.create(); await t.run({ type: "prompt.send", text: "start" }, id);
-    await waitFor(() => driver.turns.length === 1, 200, "lead"); const lead = lastTurn(driver);
+    await waitFor(() => driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "lead"); const lead = lastTurn(driver);
     const grant = t.credentials.lookup(JSON.parse(readFileSync(sessionPaths(t.paths, id).taskCredentialFile("lead"), "utf8")).token)!;
     const first = await t.manager.callTaskTool(grant, "deck_delegate", { agent: "investigate", task: "first" });
     await t.manager.callTaskTool(grant, "deck_delegate", { agent: "investigate", task: "second" });
-    await waitFor(() => driver.turns.length === 2, 200, "first child"); lastTurn(driver).finish();
-    await waitFor(() => t.events(id).some(e => e.kind === "task.state" && e.data.taskId === (first as any).data.taskId && e.data.state === "ownership-unsettled"), 200, "uncertain child");
+    await waitFor(() => driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "first child"); lastTurn(driver).finish();
+    await waitFor(() => t.events(id).some(e => e.kind === "task.state" && e.data.taskId === (first as any).data.taskId && e.data.state === "ownership-unsettled"), PROGRESS_TIMEOUT_MS, "uncertain child");
     expect(driver.turns).toHaveLength(2);
     await t.run({ type: "session.stop" }, id); lead.finish();
-    await waitFor(() => !t.manager.hasRunningWork(), 200, "stop queues");
+    await waitFor(() => !t.manager.hasRunningWork(), PROGRESS_TIMEOUT_MS, "stop queues");
   });
 
   test("managed MCP leases stay held until native close has drained, including cancellation", async () => {
@@ -779,10 +786,10 @@ describe("native handle ownership (D-7, D-14)", () => {
     } } });
     const sessionId = await t.create();
     await t.run({ type: "prompt.send", text: "first" }, sessionId);
-    await waitFor(() => driver.turns.length === 1, 250, "native start");
+    await waitFor(() => driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "native start");
     await t.run({ type: "task.cancel", taskId: "lead" }, sessionId);
     try {
-      await waitFor(() => driver.closeCalls === 1, 250, "native close");
+      await waitFor(() => driver.closeCalls === 1, PROGRESS_TIMEOUT_MS, "native close");
       expect(releases).toBe(0);
     } finally { driver.releaseClose(); }
     await t.idle(); expect(releases).toBe(1);
@@ -795,7 +802,7 @@ describe("native handle ownership (D-7, D-14)", () => {
     let releases = 0;
     const t = setup({ driver, options: { childMcp: async () => ({ runnerPackages: () => [], resolveServer: () => undefined, release: async () => { releases++; } }) } });
     const sessionId = await t.create(); await t.run({ type: "prompt.send", text: "first" }, sessionId);
-    await waitFor(() => driver.turns.length === 1, 250, "native start");
+    await waitFor(() => driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "native start");
     lastTurn(driver).finish(); await t.idle();
     expect(releases).toBe(0);
     expect(t.events(sessionId).find((e) => e.kind === "turn.completed")?.data).toMatchObject({ status: "failed", error: "Unable to close the turn: drain unproven" });
@@ -821,9 +828,9 @@ describe("native handle ownership (D-7, D-14)", () => {
     const delegated = await t.manager.callTaskTool(grant, "deck_delegate", { agent: "architect", task: "inspect" });
     if (!delegated.ok) throw new Error("expected delegation");
     const taskId = (delegated.data as { taskId: string }).taskId;
-    await waitFor(() => driver.turns.length === 2, 250, "delegated start");
+    await waitFor(() => driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "delegated start");
     lastTurn(driver).finish();
-    await waitFor(() => t.events(sessionId).some((e) => e.kind === "task.state" && e.source.taskId === taskId && e.data.state === "ownership-unsettled"), 250, "unsettled task");
+    await waitFor(() => t.events(sessionId).some((e) => e.kind === "task.state" && e.source.taskId === taskId && e.data.state === "ownership-unsettled"), PROGRESS_TIMEOUT_MS, "unsettled task");
     expect(await t.manager.callTaskTool(grant, "deck_delegate", { agent: "architect", task: "unsafe continuation", continueTaskId: taskId })).toMatchObject({ ok: false, code: "ownership-unsettled" });
     expect(await t.run({ type: "session.stop" }, sessionId)).toMatchObject({ ok: true, data: { state: "stopping" } });
     await t.idle();
@@ -839,7 +846,7 @@ describe("native handle ownership (D-7, D-14)", () => {
     } } });
     const sessionId = await t.create();
     await t.run({ type: "prompt.send", text: "first" }, sessionId);
-    await waitFor(() => entered, 250, "readiness start");
+    await waitFor(() => entered, PROGRESS_TIMEOUT_MS, "readiness start");
     if (action === "shutdown") await t.manager.close();
     else if (action === "stop") await t.run({ type: "session.stop" }, sessionId);
     else if (action === "cancel") await t.run({ type: "task.cancel", taskId: "lead" }, sessionId);
@@ -857,7 +864,7 @@ describe("native handle ownership (D-7, D-14)", () => {
       await t.run({ type: "prompt.send", text: "first" }, sessionId);
       lastTurn(driver).finish(outcome);
       try {
-        await waitFor(() => driver.closeCalls === 1, 250, "native handle close");
+        await waitFor(() => driver.closeCalls === 1, PROGRESS_TIMEOUT_MS, "native handle close");
         expect(driver.active).toBe(true);
         expect(t.manager.hasRunningWork()).toBe(true);
         expect(t.kinds(sessionId)).not.toContain("turn.completed");
@@ -878,7 +885,7 @@ describe("native handle ownership (D-7, D-14)", () => {
     const sessionId = await t.create();
     await t.run({ type: "prompt.send", text: "first" }, sessionId);
     lastTurn(driver).finish();
-    try { await waitFor(() => driver.closeCalls === 1, 250, "rejected handle close"); }
+    try { await waitFor(() => driver.closeCalls === 1, PROGRESS_TIMEOUT_MS, "rejected handle close"); }
     finally { driver.releaseClose(); }
     await t.idle();
     expect(driver.active).toBe(false);
@@ -894,7 +901,7 @@ describe("native handle ownership (D-7, D-14)", () => {
     await t.run({ type: "task.cancel", taskId: "lead" }, sessionId);
     let closing: Promise<void> | undefined;
     try {
-      await waitFor(() => driver.closeCalls === 1, 250, "cancelled handle close");
+      await waitFor(() => driver.closeCalls === 1, PROGRESS_TIMEOUT_MS, "cancelled handle close");
       closing = t.manager.close();
       clock.advance(5001);
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -919,7 +926,7 @@ describe("native handle ownership (D-7, D-14)", () => {
     expect(t.manager.close()).toBe(closing);
     clock.advance(5001);
     try {
-      await waitFor(() => driver.closeCalls === 1, 250, "shutdown handle close");
+      await waitFor(() => driver.closeCalls === 1, PROGRESS_TIMEOUT_MS, "shutdown handle close");
       expect(driver.active).toBe(true);
       expect(t.manager.hasRunningWork()).toBe(true);
       expect(t.kinds(sessionId)).not.toContain("turn.completed");
@@ -946,7 +953,7 @@ describe("native handle ownership (D-7, D-14)", () => {
     expect(t.manager.hasRunningWork()).toBe(true);
     releaseStart();
     try {
-      await waitFor(() => driver.closeCalls === 1, 250, "late startup handle close");
+      await waitFor(() => driver.closeCalls === 1, PROGRESS_TIMEOUT_MS, "late startup handle close");
       expect(t.kinds(sessionId)).not.toContain("turn.completed");
     } finally { driver.releaseClose(); }
     await closing;
@@ -1169,7 +1176,7 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
     await t.idle();
     await t.run({ type: "prompt.resume" }, sessionId);
     await t.run({ type: "prompt.send", text: "two" }, sessionId);
-    await waitFor(() => t.driver.turns.length === 2, 250, "second native admission");
+    await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "second native admission");
     expect(lastTurn(t.driver).input.resume).toBeUndefined();
     expect(lastTurn(t.driver).input.nativeSessionId).toBe(id);
     lastTurn(t.driver).finish();
@@ -1179,10 +1186,10 @@ describe("single-member Lead lifecycle (task 1.16)", () => {
   test("a second prompt while a turn runs is durably queued without concurrent native work", async () => {
     const t = setup(); const sessionId = await t.create();
     await t.run({ type: "prompt.send", text: "one" }, sessionId);
-    await waitFor(() => t.driver.turns.length === 1, 250, "first native turn");
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "first native turn");
     expect(await t.run({ type: "prompt.send", text: "two" }, sessionId)).toMatchObject({ ok: true, data: { state: "queued" } });
     expect(t.driver.turns).toHaveLength(1);
-    lastTurn(t.driver).finish(); await waitFor(() => t.driver.turns.length === 2, 250, "second native turn");
+    lastTurn(t.driver).finish(); await waitFor(() => t.driver.turns.length === 2, PROGRESS_TIMEOUT_MS, "second native turn");
     expect(lastTurn(t.driver).input.prompt).toBe("two"); lastTurn(t.driver).finish(); await t.idle();
   });
 
@@ -1592,7 +1599,7 @@ describe("native memory ownership", () => {
     const t = setup({ options: { childMcp: { nativeMemory, runnerPackages: () => [], resolveServer: () => undefined } } });
     const sid = await t.create();
     await t.run({ type: "prompt.send", text: "go" }, sid);
-    await waitFor(() => t.driver.turns.length === 1, 250, "native start");
+    await waitFor(() => t.driver.turns.length === 1, PROGRESS_TIMEOUT_MS, "native start");
     const input = lastTurn(t.driver).input;
     expect(input.nativeMemory).toEqual(nativeMemory);
     expect(input.rolePrompt).toContain("Supermemory");
