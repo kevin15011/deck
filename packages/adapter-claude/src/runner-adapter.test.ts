@@ -179,6 +179,34 @@ describe("Claude Deck-owned global plugin adapter", () => {
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 
+  test("cross sessions prefer the verified owned codebase pin over a shared install", async () => {
+    const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-cross-codebase-")));
+    try {
+      const dataRoot = join(home, "data", "deck");
+      const ownedRoot = join(dataRoot, "claude", "tools", "codebase-native-v0.11.0", `${process.platform}-${process.arch}`);
+      const owned = join(ownedRoot, "codebase-memory-mcp");
+      const shared = join(home, "shared-codebase-memory-mcp");
+      const binary = Buffer.from("fixture pinned native binary");
+      await mkdir(ownedRoot, { recursive: true, mode: 0o700 });
+      await writeFile(owned, binary, { mode: 0o700 });
+      await writeFile(shared, "fixture shared older binary", { mode: 0o700 });
+      const adapter = createClaudeRunnerAdapter({
+        homeDir: home, dataRoot, resolveCommand: (name) => name === "codebase-memory-mcp" ? shared : undefined,
+        verifyCodebaseNative: () => true,
+        codebaseReleaseOverride: { asset: "fixture.tar.gz", archiveBytes: 0, archiveSha256: "unused", binaryBytes: binary.length, binarySha256: createHash("sha256").update(binary).digest("hex") },
+      });
+      const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: getDefaultDeckConfig(), capabilityIds: ["claude-team-files", "codebase-memory"] });
+      expect(plan.blocked).toBe(false);
+      expect(plan.files.find((file) => file.path.endsWith("/.mcp.json"))!.content).toContain(shared);
+      await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan });
+      expect((await adapter.readSessionMcpServers())["codebase-memory"]).toMatchObject({ command: owned });
+      await writeFile(owned, "tampered", { mode: 0o700 });
+      expect((await adapter.readSessionMcpServers())["codebase-memory"]).toMatchObject({ command: shared });
+      await rm(ownedRoot, { recursive: true });
+      expect((await adapter.readSessionMcpServers())["codebase-memory"]).toMatchObject({ command: shared });
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+
   test("read-only roles expose only selected MCP lookups and Skill, never editing tools", async () => {
     const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-readonly-")));
     try {
@@ -351,6 +379,13 @@ describe("Claude Deck-owned global plugin adapter", () => {
       const installed = await adapter.runAction(reviewed.groups.automaticInstalls[0]!, { projectRoot: home, runnerId: "claude", environmentId: "claude-development" });
       expect(installed.status).toBe("executed");
       expect((await adapter.getCapabilityInventory({ projectRoot: home, environmentId: "claude-development", runnerId: "claude", deckConfig: config })).capabilities.find((entry) => entry.capabilityId === "adaptive-memory")?.isInstalled).toBe(true);
+      const outsideProject = join(home, "ordinary-folder");
+      await mkdir(outsideProject);
+      execFileSync("git", ["init", "-q"], { cwd: outsideProject });
+      const globalPlan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: outsideProject, environmentId: "claude-development", deckConfig: config });
+      expect(globalPlan.blocked).toBe(false);
+      expect((await adapter.applyDeveloperTeamInstall({ projectRoot: outsideProject, environmentId: "claude-development", plan: globalPlan })).changedCount).toBeGreaterThan(0);
+      expect((await adapter.buildLaunchPlan!({ ...input, projectRoot: outsideProject })).status).toBe("blocked");
       const plan = adapter.buildDeveloperTeamInstallPlan({ projectRoot: home, environmentId: "claude-development", deckConfig: config });
       expect(plan.blocked).toBe(false);
       await adapter.applyDeveloperTeamInstall({ projectRoot: home, environmentId: "claude-development", plan });
@@ -373,13 +408,21 @@ describe("Claude Deck-owned global plugin adapter", () => {
       }
     } finally { await rm(home, { recursive: true, force: true }); }
   });
-  test("unresolved shared profile or project override blocks memory review before official download", async () => {
+  test("global memory review ignores project identity and credential overrides before official download", async () => {
     const home = await realpath(await mkdtemp(join(tmpdir(), "deck-claude-memory-preflight-")));
     let fetched = false;
+    let resolved = false;
     try {
-      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), supermemoryArtifactEffects: { fetchFile: async () => { fetched = true; return new Uint8Array(); } }, resolveMemoryCredential: () => { throw new Error("fixture-private-token project override"); } });
+      const adapter = createClaudeRunnerAdapter({ homeDir: home, dataRoot: join(home, "data", "deck"), supermemoryArtifactEffects: { fetchFile: async () => { fetched = true; return new Uint8Array(); } }, resolveMemoryCredential: () => { resolved = true; throw new Error("fixture-private-token project override"); } });
       const plan = adapter.buildReviewPlan({ runnerId: "claude", environmentId: "claude-development", selectedCapabilities: { "claude-team-files": true }, packageInstructions: {}, adaptiveMemory: { provider: "supermemory", supermemory: { configured: true } }, runtime: { projectIdentity: "verified", projectRoot: home } } as never, { runnerId: "claude", environmentId: "claude-development", capabilities: [] });
-      expect(plan.ready).toBe(false);
+      expect(plan.ready).toBe(true);
+      expect(resolved).toBe(false);
+      const unverified = adapter.buildReviewPlan({ runnerId: "claude", environmentId: "claude-development", selectedCapabilities: {}, packageInstructions: {}, adaptiveMemory: { provider: "supermemory", supermemory: { configured: true } }, runtime: { projectIdentity: "unverified", projectRoot: home } } as never, { runnerId: "claude", environmentId: "claude-development", capabilities: [] });
+      expect(unverified.ready).toBe(true);
+      expect(resolved).toBe(false);
+      const missingProfile = adapter.buildReviewPlan({ runnerId: "claude", environmentId: "claude-development", selectedCapabilities: {}, packageInstructions: {}, adaptiveMemory: { provider: "supermemory" } } as never, { runnerId: "claude", environmentId: "claude-development", capabilities: [] });
+      expect(missingProfile.ready).toBe(false);
+      expect(missingProfile.diagnostics[0]?.message).toContain("Configure a shared Supermemory profile");
       expect(JSON.stringify(plan)).not.toContain("fixture-private-token");
       expect(fetched).toBe(false);
       await expect(lstat(join(home, "data"))).rejects.toMatchObject({ code: "ENOENT" });

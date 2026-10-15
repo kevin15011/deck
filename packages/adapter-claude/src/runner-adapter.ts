@@ -429,7 +429,8 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       const providerId = capabilities.includes("web-search") ? input.deckConfig.webSearch.enabled ? input.deckConfig.webSearch.provider : undefined : undefined;
       const desired = materialization(assignments, capabilities, providerId, current, efforts);
       const { files: canonical, state, plugin, contentHash } = desired;
-      const blocked = state === "conflict" || input.environmentId !== ENVIRONMENT || input.deckConfig.adaptiveMemory.enabled && (officialState() !== "ready" || !resolveCanonicalSupermemoryProjectScope({ projectRoot: input.projectRoot, remotes: [] }).ok) || !!input.memoryProvider || (capabilities.includes("web-search") && (providerId !== "tavily" || !(options.webSearchCredential?.() ?? process.env.TAVILY_API_KEY)?.trim())) || (input.capabilityInstructions?.instructions ?? []).some((fragment) => fragment.packageId && fragment.packageId !== "code-economy" && !capabilities.includes(fragment.packageId as ClaudeCapabilityId));
+      // Global file installation does not resolve project identity; memory launch verifies it.
+      const blocked = state === "conflict" || input.environmentId !== ENVIRONMENT || input.deckConfig.adaptiveMemory.enabled && officialState() !== "ready" || !!input.memoryProvider || (capabilities.includes("web-search") && (providerId !== "tavily" || !(options.webSearchCredential?.() ?? process.env.TAVILY_API_KEY)?.trim())) || (input.capabilityInstructions?.instructions ?? []).some((fragment) => fragment.packageId && fragment.packageId !== "code-economy" && !capabilities.includes(fragment.packageId as ClaudeCapabilityId));
       const changed = JSON.stringify(current.assignments) !== JSON.stringify(assignments) || JSON.stringify(current.capabilities) !== JSON.stringify(capabilities) || current.providerId !== providerId || current.plugin !== plugin;
       return {
         files: canonical.map((file) => ({ ...file })),
@@ -532,17 +533,14 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       ])];
       const memorySelected = state.adaptiveMemory.provider === "supermemory";
       const memoryState = officialState();
+      // Review shared configuration only; project overrides and scope belong to launch.
       const profileReady = state.adaptiveMemory.supermemory?.configured === true || state.adaptiveMemory.supermemory?.runtimeCredentialStored === true;
-      const scope = (state as typeof state & { runtime?: { projectIdentity?: string; projectRoot?: string } }).runtime;
-      const identityVerified = scope?.projectIdentity === "verified";
-      let selectedProfileReady = !memorySelected;
-      if (memorySelected && scope?.projectRoot) {
-        try {
-          const credential = options.resolveMemoryCredential?.(scope.projectRoot);
-          selectedProfileReady = Boolean(credential?.token && /^sm_project_v1_[a-z0-9_]{3,180}$/.test(credential.canonicalRepoTag));
-        } catch { /* Never surface protected store content in review. */ }
-      }
-      const unsupportedSelected = memorySelected && (!profileReady || !identityVerified || !selectedProfileReady) || memoryState === "conflict" || memoryState === "unusable";
+      const blockedReasons: string[] = [];
+      if (memorySelected && !profileReady) blockedReasons.push("Configure a shared Supermemory profile in Adaptive Memory before installing the selected plugin.");
+      if (memoryState === "conflict") blockedReasons.push("The global official Supermemory plugin differs from its pinned manifest. Review the Deck-owned plugin files before retrying.");
+      if (memoryState === "unusable") blockedReasons.push("The official Supermemory plugin requires an available Node.js 18+ runtime. Install or repair Node.js, then retry.");
+      let selectionFailure = "Claude selection metadata or native capability verification failed. Re-select capabilities and models, then retry.";
+      const rejectSelection = (reason: string): never => { selectionFailure = reason; throw new Error("Claude review selection blocked."); };
       let selected: (ReturnType<typeof active> & { installableMissing?: readonly ("context-mode" | "context7" | "codebase-memory" | "web-search" | "rtk" | "serena")[] }) | undefined;
       let changingModels = false;
       try {
@@ -550,21 +548,21 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
         const team = (state as typeof state & { teams?: Record<string, { modelAssignments?: Record<string, string>; thinkingAssignments?: Record<string, string> }> }).teams?.["developer-team"];
         const assignments = team?.modelAssignments === undefined ? current.assignments : normalizeClaudeAssignments(team.modelAssignments);
         const efforts = normalizeClaudeEfforts(team?.thinkingAssignments ?? current.efforts ?? {});
-        if (Object.entries(assignments).some(([role, model]) => current.assignments[role] !== model && !modelAvailable(model))) throw new Error("Claude model discovery is not ready.");
-        if (Object.entries(efforts).some(([role, level]) => (current.efforts?.[role] !== level || current.assignments[role] !== assignments[role]) && !adapter.getThinkingLevels(assignments[role]).includes(level))) throw new Error("Claude effort discovery is not ready.");
+        if (Object.entries(assignments).some(([role, model]) => current.assignments[role] !== model && !modelAvailable(model))) rejectSelection("Claude model discovery is not ready. Retry after correcting this selection.");
+        if (Object.entries(efforts).some(([role, level]) => (current.efforts?.[role] !== level || current.assignments[role] !== assignments[role]) && !adapter.getThinkingLevels(assignments[role]).includes(level))) rejectSelection("Claude effort discovery is not ready. Retry after correcting this selection.");
         const capabilities = normalizeClaudeCapabilities(selectedCapabilities);
         const providerId = capabilities.includes("web-search") ? state.webSearchProvider : undefined;
-        if (capabilities.includes("web-search") && (providerId !== "tavily" || !(options.webSearchCredential?.() ?? process.env.TAVILY_API_KEY)?.trim() || options.webSearchProviderResolver?.(providerId)?.command.join("\0") !== "npx\0-y\0tavily-mcp@0.2.22")) throw new Error("Claude Web Search provider or shared credential is not ready.");
+        if (capabilities.includes("web-search") && (providerId !== "tavily" || !(options.webSearchCredential?.() ?? process.env.TAVILY_API_KEY)?.trim() || options.webSearchProviderResolver?.(providerId)?.command.join("\0") !== "npx\0-y\0tavily-mcp@0.2.22")) rejectSelection("Claude Web Search provider or shared credential is not ready. Retry after correcting this selection.");
         const installableMissing = capabilities.filter((id): id is "context-mode" | "context7" | "codebase-memory" | "web-search" | "rtk" | "serena" => {
           if (id === "serena") {
             if (serenaEvidence) return false;
-            if (!options.serenaProxyCommand || state.explicitlySelectedCapabilities?.serena !== true) throw new Error("Serena requires current-operation TUI authorization and a verified Deck proxy.");
+            if (!options.serenaProxyCommand || state.explicitlySelectedCapabilities?.serena !== true) rejectSelection("Serena requires current-operation TUI authorization and a verified Deck proxy. Retry after correcting this selection.");
             return true;
           }
           if (id !== "context-mode" && id !== "context7" && id !== "codebase-memory" && id !== "web-search" && id !== "rtk") return false;
-          if (id === "rtk" && (!rtkRelease || ownedRtkState() === "conflict" || ownedRtkState() === "unusable")) throw new Error("RTK pinned release is unavailable or conflicts with owned content.");
+          if (id === "rtk" && (!rtkRelease || ownedRtkState() === "conflict" || ownedRtkState() === "unusable")) rejectSelection("RTK pinned release is unavailable or conflicts with owned content. Retry after correcting this selection.");
           if (id === "rtk") verifyClaudeRtkHookRuntime(toolEffects);
-          if (id === "codebase-memory" && !existingCodebase() && (!codebaseRelease || ownedCodebaseState() === "conflict" || ownedCodebaseState() === "unusable")) throw new Error("Codebase Memory pinned native release is unavailable or conflicts with owned content.");
+          if (id === "codebase-memory" && !existingCodebase() && (!codebaseRelease || ownedCodebaseState() === "conflict" || ownedCodebaseState() === "unusable")) rejectSelection("Codebase Memory pinned native release is unavailable or conflicts with owned content. Retry after correcting this selection.");
           try { verifyClaudeExecutable(id === "context7" ? "context7-mcp" : id === "codebase-memory" ? "codebase-memory-mcp" : id === "web-search" ? "tavily-mcp" : id === "rtk" ? "rtk" : "context-mode", toolEffects); return false; }
           catch { return true; }
         });
@@ -573,16 +571,17 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
         const desired = installableMissing.length === 0 ? materialization(assignments, capabilities, providerId, current, efforts) : undefined;
         selected = { assignments, capabilities, ...(providerId ? { providerId } : {}), ...(Object.keys(efforts).length ? { efforts } : {}), plugin: desired?.plugin ?? claudePluginName(assignments, capabilities), ...(desired?.contentHash ? { contentHash: desired.contentHash } : {}), location: desired?.location ?? join(parent, claudePluginName(assignments, capabilities)), expected: desired?.files ?? [], installableMissing };
         changingModels = JSON.stringify(assignments) !== JSON.stringify(current.assignments) || JSON.stringify(capabilities) !== JSON.stringify(current.capabilities);
-      } catch { /* untrusted metadata or unsupported alias */ }
+      } catch { blockedReasons.push(selectionFailure); }
       const stateAtReview = selected ? selected.installableMissing?.length ? "absent" : inspect(selected.location, selected.expected, home) : "conflict";
-      const blocked = unsupportedSelected || stateAtReview === "conflict";
+      if (selected && stateAtReview === "conflict") blockedReasons.push("The global Claude team plugin files or their parent directories conflict with the reviewed content or private ownership requirements. Review the Deck-owned plugin path before retrying.");
+      const blocked = blockedReasons.length > 0;
       const pendingInstalls = selected?.installableMissing ?? [];
       const installs = [
         ...(memorySelected && memoryState === "absent" ? [{ id: "claude.official-supermemory.install", kind: "install-claude-supermemory", title: "Install and verify pinned official Claude Supermemory plugin", capabilityId: "adaptive-memory", status: "ready" as const, required: true }] : []),
         ...pendingInstalls.map((id) => ({ id: `claude.tool.${id}.install`, kind: id === "rtk" ? "install-claude-rtk" : id === "codebase-memory" ? "install-claude-codebase" : id === "serena" ? "install-serena" : "install-claude-tool", title: `Install and verify ${id} in Deck-owned shared tools`, capabilityId: id, status: "ready" as const, required: true })),
       ];
       const preview = `${stateAtReview === "ready" ? "Verify existing" : `Create ${selected?.expected.length || 15} owner-only files in`} ${selected?.location ?? parent}; ${pendingInstalls.length ? `Install ${pendingInstalls.join(", ")} before materialization; ` : ""}${changingModels ? "Update Deck-owned model selection; " : ""}ownership=${owner}. Deck does not write project or Claude settings; ${memorySelected ? "the official plugin may add its statusLine to user Claude settings on first SessionStart when no statusLine exists; co-loaded user/project/managed plugins can access the selected process credential and Deck does not isolate them. " : ""}${warning}`;
-      return { groups: { automaticInstalls: installs, manualSteps: [], configWrites: [], teamApplications: state.runnerId === "claude" ? [{ id: "claude.team.install", kind: "apply-team-bundle", title: "Install global Claude Developer Team plugin files", status: blocked ? "blocked" as const : "ready" as const, required: true, description: preview, dependencies: installs.map((install) => install.id) }] : [], validations: state.runnerId === "claude" ? [{ id: "adaptive-memory.supermemory.deck-config", kind: "write-deck-config", title: "Persist reviewed Claude capabilities and shared memory selection after verification", status: blocked ? "blocked" as const : "ready" as const, required: true, dependencies: ["claude.team.install"] }] : [] }, diagnostics: [{ code: blocked ? "claude-team-install-blocked" : "claude-files-only", severity: blocked ? "error" as const : "warning" as const, message: blocked ? `${preview} Existing global plugin conflict or unverified selection blocks installation.` : preview }], ready: !blocked };
+      return { groups: { automaticInstalls: installs, manualSteps: [], configWrites: [], teamApplications: state.runnerId === "claude" ? [{ id: "claude.team.install", kind: "apply-team-bundle", title: "Install global Claude Developer Team plugin files", status: blocked ? "blocked" as const : "ready" as const, required: true, description: preview, dependencies: installs.map((install) => install.id) }] : [], validations: state.runnerId === "claude" ? [{ id: "adaptive-memory.supermemory.deck-config", kind: "write-deck-config", title: "Persist reviewed Claude capabilities and shared memory selection after verification", status: blocked ? "blocked" as const : "ready" as const, required: true, dependencies: ["claude.team.install"] }] : [] }, diagnostics: [{ code: blocked ? "claude-team-install-blocked" : "claude-files-only", severity: blocked ? "error" as const : "warning" as const, message: blocked ? blockedReasons.join(" ") : preview }], ready: !blocked };
     },
     buildInstallationPlan() { return { steps: [{ action: "install", tool: "Claude global Developer Team plugin files" }] }; },
     async runAction(action, context) {
@@ -679,7 +678,15 @@ export function createClaudeRunnerAdapter(options: Options = {}): ClaudeSessionM
       if (adapter.readSelectedCapabilityIds?.() === undefined) throw new Error("Claude session MCP selection is untrusted.");
       const ids = selection.capabilities.filter((id) => id === "context-mode" || id === "codebase-memory" || id === "context7" || id === "serena");
       if (ids.includes("serena") && !await probeSerena()) throw new Error("Claude session Serena readiness is stale; review the existing Deck-owned installation.");
-      const file = claudeCapabilityFiles(parent, ids, toolEffects).find((file) => file.path.endsWith("/.mcp.json"));
+      // Cross sessions verify the reviewed native pin during managed readiness.
+      // Static plugin installs retain their shared-daemon command preference.
+      const sessionEffects: ClaudeCapabilityOptions = {
+        ...toolEffects,
+        resolveCommand: (name) => name === "codebase-memory-mcp" && ownedCodebaseState() === "ready"
+          ? join(ownedCodebaseRoot, "codebase-memory-mcp")
+          : toolEffects.resolveCommand?.(name),
+      };
+      const file = claudeCapabilityFiles(parent, ids, sessionEffects).find((file) => file.path.endsWith("/.mcp.json"));
       const servers = file ? (JSON.parse(file.content) as { mcpServers: Record<string, { command: string; args?: string[] }> }).mcpServers : {};
       return Object.fromEntries(Object.entries(servers).map(([id, server]) => [id, { command: server.command, args: server.args ?? [], env: {} }]));
     },
