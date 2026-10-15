@@ -4,6 +4,32 @@ import type {DriverLookup} from "@deck/session-host";
 import {discoverSessionModels} from "./session-model-catalog";
 
 const lookup = {get:()=>({probe:async()=>({status:"ready"})})} as unknown as DriverLookup;
+const degradedLookup = {get:()=>({probe:async()=>({status:"degraded",reasonCode:"version-untested"})})} as unknown as DriverLookup;
+test("keeps degraded Claude and OpenCode selectable when native model discovery is ready",async()=>{
+  const adapters=["claude","opencode"].map(runnerId=>({
+    runnerId,getSessionDriver(){},getThinkingLevels:()=>["high"],
+    getModelInventory:async()=>({state:"ready",inventory:{modelsByProvider:{native:[{id:`${runnerId}/native-model`,displayName:"Native model"}]}}}),
+  })) as unknown as RunnerAdapter[];
+  const result=await discoverSessionModels(adapters,degradedLookup,"/project");
+  expect(result.runners).toEqual(adapters.map(adapter=>({runnerId:adapter.runnerId,label:adapter.runnerId,available:true,models:[{modelId:`${adapter.runnerId}/native-model`,label:"Native model",thinkingLevels:["high"]}]})));
+});
+test("does not discover models for blocked runners or expose raw probe reasons",async()=>{
+  const blockedLookup={get:()=>({probe:async()=>({status:"blocked",reasonCode:"secret-token"})})} as unknown as DriverLookup;
+  let discoveryCalls=0;
+  const adapter={runnerId:"claude",getSessionDriver(){},getModelInventory:async()=>{discoveryCalls++;throw new Error("unexpected discovery");}} as unknown as RunnerAdapter;
+  expect(await discoverSessionModels([adapter],blockedLookup,"/project")).toEqual({runners:[{runnerId:"claude",label:"claude",available:false,reasonCode:"runner-unavailable",models:[]}]});
+  expect(discoveryCalls).toBe(0);
+});
+test("degraded runners still require fresh successful model discovery",async()=>{
+  const adapters=["stale","failed"].map(state=>({runnerId:state,getSessionDriver(){},getThinkingLevels:()=>[],getModelInventory:async()=>{
+    if(state==="failed")throw new Error("secret-token");
+    return {state:"stale",inventory:{modelsByProvider:{native:[{id:"invented"}]}}};
+  }})) as unknown as RunnerAdapter[];
+  expect(await discoverSessionModels(adapters,degradedLookup,"/project")).toEqual({runners:[
+    {runnerId:"stale",label:"stale",available:false,reasonCode:"model-discovery-unavailable",models:[]},
+    {runnerId:"failed",label:"failed",available:false,reasonCode:"model-discovery-failed",models:[]},
+  ]});
+});
 test("discovers exact native models for the selected project with model-specific thinking",async()=>{
   const calls:unknown[]=[];
   const adapter={runnerId:"codex",displayName:"Codex",getSessionDriver(){},getThinkingLevels:(id:string)=>{calls.push(id);return ["high","custom"];},getModelInventory:async(request:unknown)=>{

@@ -11,7 +11,7 @@ export async function discoverSessionModels(adapters: readonly RunnerAdapter[], 
     if (!adapter.getModelInventory) return unavailable("model-discovery-unavailable");
     try {
       const probe = await driver.probe({cwd:projectRoot});
-      if (probe.status !== "ready") return unavailable("runner-unavailable");
+      if (probe.status === "blocked") return unavailable("runner-unavailable");
       const result = await adapter.getModelInventory({projectRoot,mode:"prefer-cache",signal:AbortSignal.timeout(15_000)});
       if (result.state !== "ready") return unavailable("model-discovery-unavailable");
       const models = Object.values(result.inventory.modelsByProvider).flat()
