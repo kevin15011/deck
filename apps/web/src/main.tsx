@@ -12,7 +12,9 @@ import { sessionIdOf, sessionName, type Project, type WorkspaceSession } from '.
 import { attachmentURL, clipboardImages, imageDisplayName, imageMimeType, insertPastedText, ImageDraftStrip, ImagePicker, ImagePreview, ImageReferences, publicImages, useImageDrafts, type ImageAttachment, type PreviewImage } from './image-attachments';
 import { PromptQueue, usePromptInbox } from './prompt-queue';
 import { leadActivityFromEvents, useReadMarkers, VisibleReply } from './status-indicator';
+import { installMotion } from './motion-dom';
 import './style.css';
+installMotion();
 const initialToken = pairingToken(window.location, window.history);
 type Theme = 'dark' | 'light';
 function savedTheme(): Theme {

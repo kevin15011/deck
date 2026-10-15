@@ -121,7 +121,7 @@ small, .muted, .empty-note { color: var(--muted); }
 .session-control-actions button, .predecessor-link { font-size: .7rem; padding: .375rem .5rem; }
 .session-controls > .error { flex-basis: 100%; margin: .25rem 0; }
 .workspace-dialog { width: min(520px, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); margin: auto; padding: 1.5rem; overflow: auto; border: 1px solid var(--border); border-radius: 10px; color: var(--ink); background: var(--surface); }
-.workspace-dialog::backdrop { background: var(--backdrop); }
+.workspace-dialog::backdrop { background: var(--backdrop); opacity: var(--backdrop-o, 1); }
 .workspace-dialog form { display: flex; flex-direction: column; gap: 1rem; }
 .dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
 .dialog-heading h2 { font-size: 1.15rem; }
@@ -282,7 +282,7 @@ details > pre { border: 1px solid var(--border); padding: .75rem; border-radius:
 .pair label { display: block; margin-top: 1.5rem; }
 .pair input { width: 100%; margin: .75rem 0 1rem; padding: .75rem; border: 1px solid var(--border); }
 .session-drawer { border: 0; border-right: 1px solid var(--border); background: var(--canvas); color: var(--ink); margin: 0; width: min(85vw, 340px); max-width: none; height: 100dvh; max-height: none; padding: 1.5rem; }
-.session-drawer::backdrop { background: var(--backdrop); }
+.session-drawer::backdrop { background: var(--backdrop); opacity: var(--backdrop-o, 1); }
 .session-drawer[open] { display: flex; flex-direction: column; overflow: hidden; }
 .session-drawer > nav { display: flex; flex: 1; min-height: 0; min-width: 0; }
 .drawer-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
@@ -347,12 +347,8 @@ details > pre { border: 1px solid var(--border); padding: .75rem; border-radius:
 .agent-indicator .unread-dot{position:absolute;width:7px;height:7px;right:-2px;top:-2px;color:var(--action);background:var(--surface);border-radius:50%}
 .agent-indicator--error{color:var(--error)}
 .agent-indicator--approval{color:var(--warning)}
-.agent-indicator .work-orbit{transform-origin:8px 8px;animation:agent-work 1.7s linear infinite;animation-play-state:paused}
-.agent-indicator[data-animate] .work-orbit{animation-play-state:running}
 .session>.agent-indicator{margin-left:auto}
 .task-heading>.agent-indicator{margin-left:auto}
-@keyframes agent-work{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.agent-indicator .work-orbit{animation:none}}
 
 .conversation-feedback{position:relative;flex:none;height:0;z-index:1}
 .project-actions{display:flex;flex:none}
@@ -397,7 +393,7 @@ details > pre { border: 1px solid var(--border); padding: .75rem; border-radius:
 .prompt-queue .image-reference.quiet{font-size:.65rem;padding:.15rem .25rem}
 .image-preview{width:min(1100px,calc(100vw - 2rem));height:min(850px,calc(100dvh - 2rem));max-width:100%;max-height:100%;margin:auto;padding:.75rem;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink)}
 .image-preview[open]{display:flex;flex-direction:column;gap:.6rem}
-.image-preview::backdrop{background:var(--backdrop)}
+.image-preview::backdrop{background:var(--backdrop);opacity:var(--backdrop-o,1)}
 .image-preview header{display:flex;align-items:center;gap:.5rem;flex:none}
 .image-preview h2{font-size:.85rem;margin:0;flex:1;min-width:0}
 .image-preview h2 span{display:block;color:var(--muted);font-size:.7rem;font-weight:400;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:.2rem}
@@ -410,3 +406,12 @@ details > pre { border: 1px solid var(--border); padding: .75rem; border-radius:
 .image-canvas img{display:block;max-width:none;width:100%;height:100%;object-fit:contain}
 .image-preview-error{margin:auto;padding:1rem;font-size:.85rem}
 @media(max-width:1000px){.image-drafts{margin:0 1rem .5rem}.image-remove.quiet{width:32px;height:32px}.image-retry.quiet,.image-reference.quiet{min-height:40px}.image-preview header button,.image-zoom-controls button{min-width:40px;min-height:40px}.image-preview{width:calc(100vw - 1rem);height:calc(100dvh - 1rem);padding:.5rem}}
+
+/* Manual ordering */
+.drag-handle{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:16px;min-height:24px;padding:0;margin:0;border:0;background:transparent;color:var(--muted);cursor:grab;opacity:0;touch-action:none}
+.drag-handle .navigation-icon{width:12px;height:12px}
+.project-group:hover>.project-row>.drag-handle,.session-row:hover>.drag-handle,.drag-handle:focus-visible,.dragging>.drag-handle,.dragging>.project-row>.drag-handle{opacity:.7}
+.project-row,.session-row{touch-action:manipulation}
+.dragging{cursor:grabbing;background:var(--canvas);border-radius:6px;box-shadow:0 8px 24px color-mix(in srgb,var(--ink) 22%,transparent);will-change:transform}
+.dragging .drag-handle{cursor:grabbing}
+@media (hover:none){.drag-handle{opacity:.5}}
