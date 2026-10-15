@@ -9,7 +9,9 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
-## [0.11.0] - 2026-10-15
+## [0.11.1] - 2026-10-15
+
+The v0.11.0 tag was blocked by release verification and did not publish binaries. This release includes the workspace features and clean-checkout/Linux verification fixes.
 
 ### Added
 

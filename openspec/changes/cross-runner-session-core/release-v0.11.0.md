@@ -1,8 +1,8 @@
 # Deck v0.11.0 release
 
-Status: preparing publication, 2026-10-15. Lead owns this record.
+Status: publication blocked; corrective v0.11.1 preparation in progress, 2026-10-15. Lead owns this record.
 
-The user explicitly authorized the new release/deployment after reviewing the committed candidate and repository-independence evidence. This is the new-message publication confirmation required by the release skill. The latest published stable release is v0.10.0; v0.11.0 is the next minor release for the new cross-runner workspace. Root package metadata and the dated changelog now agree on 0.11.0, retaining an empty Unreleased heading for future work.
+The user explicitly authorized the new release/deployment after reviewing the committed candidate and repository-independence evidence. This is the new-message publication confirmation required by the release skill. The latest published stable release is v0.10.0; v0.11.0 is the next minor release for the new cross-runner workspace. For that initial attempt, root package metadata and the dated changelog agreed on 0.11.0, retaining an empty Unreleased heading for future work.
 
 Source starts from a3fd8bd (runtime/UI 6aabf0b plus release-preparation documentation). The branch contains 41 commits beyond origin/main with no remote-only divergence. Earlier Pi supervision/materialization, account validation and Claude blocked-plan fixes are included and explicitly represented in the changelog. Independent bounded release review found no outstanding blocker in these earlier changes; their prior native/focused evidence supplements the full suite.
 
@@ -11,3 +11,11 @@ Fresh baseline gates already passed: 6,693 tests / 3 optional skips / 0 failures
 Sequence: commit metadata, integrate source on main without rewriting history, verify the remote main ref, then create/push the new v0.11.0 tag. Existing tags remain untouched. The canonical Release workflow builds linux-x64, linux-arm64, darwin-x64 and darwin-arm64, signs Darwin artifacts, emits checksums and release.json, and publishes the stable release. Confirm workflow completion, asset inventory, descriptor/version/checksums and an extracted host binary before announcing completion. No claim of expanded automatic runtime-effect cohorts is part of this release.
 
 Release metadata verification passed: 82 focused tests, 938 assertions, no failures. The versioned Darwin arm64 build and signature verification passed; the executable reports 0.11.0. Publication and final downloaded-artifact evidence are pending.
+
+## CI correction
+
+Commit 6e52b527568978dda256b90540b9ef050dcf208c was fast-forwarded to main and tagged v0.11.0. Release run https://github.com/kevin15011/deck/actions/runs/38791017392 blocked publication: 6,631 passed, 36 platform/optional skips, 10 failures including two import errors. No stable assets were published. The immutable tag remains as evidence; the corrective version is v0.11.1 under the existing release authorization.
+
+Clean-checkout reproduction confirmed that production CLI test imports lacked the generated web-assets module. A test preload now invokes the canonical web generator before test discovery. Linux container reproduction is being used for the Codex executable probe and slow-client backpressure failures. The next main verification will complete before creating the corrective stable tag.
+
+Corrective evidence: clean source archive reproduced the missing module before the preload, then all 25 affected CLI/compiled smoke tests passed (132 assertions) after preparation, without a prior source build. Codex's production probe failed in Linux when Bun resolved from startup PATH; passing the current environment explicitly fixes detection (9 tests/20 assertions passed on both Linux and Darwin). The slow-client test missed an already-emitted socket close on Linux; registering observers before the producer burst fixes the test without changing production transport (26 tests/67 assertions passed on both platforms). Independent review found no blocker. Logs: `/tmp/deck-clean-release-{red,green}.log`, `/tmp/deck-codex-linux-probe.log`, `/tmp/deck-control-server-{linux,darwin}-green.log`.
