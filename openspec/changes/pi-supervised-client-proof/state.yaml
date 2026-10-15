@@ -1,0 +1,26 @@
+schema: spec-registry-v1
+changeId: pi-supervised-client-proof
+name: Optional Pi supervised client proof
+currentPhase: verify
+status: in_progress
+artifacts:
+  proposal: proposal.md
+  spec: spec.md
+  design: design.md
+  tasks: tasks.md
+  apply_progress: apply-progress.md
+  verify_report: verify-report.md
+  review_report: review-report.md
+provenance:
+  - phase: apply
+    agent: deck-lead
+    model: not-recorded
+    timestamp: "2026-10-09"
+    registryWrite: non-deferred
+    note: User authorized the minimum proof and necessary Deck changes; no app authentication.
+  - phase: verify
+    agent: deck-lead
+    model: not-recorded
+    timestamp: "2026-10-10"
+    registryWrite: non-deferred
+    note: Recovered interrupted candidate; 11 tests and client-only typecheck passed; broad/platform checks remain open.

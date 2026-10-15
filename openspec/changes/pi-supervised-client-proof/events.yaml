@@ -1,0 +1,24 @@
+schema: spec-registry-events-v1
+events:
+  - phase: apply
+    status: in_progress
+    event: apply.in_progress
+    artifact: apply-progress.md
+    timestamp: "2026-10-09"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - User approved a bounded cross-repository technical proof, not the full GUI.
+      - The application requires no login, accounts, or authentication credentials.
+      - Existing Deck safety, supervision, and internal runtime security remain intact.
+  - phase: verify
+    status: in_progress
+    event: verify.in_progress
+    artifact: verify-report.md
+    timestamp: "2026-10-10"
+    actor: deck-lead
+    registry_write: non-deferred
+    notes:
+      - Lead recovered the interrupted candidate without restarting the apply task.
+      - Independent review finding repaired and verified with a regression test.
+      - Functional Linux proof passes; broad typecheck, pinned runtime, macOS and additional signal cleanup checks remain open.
