@@ -1,6 +1,8 @@
-# Deck v0.11.0 release
+# Deck v0.11 release history
 
-Status: publication blocked; corrective v0.11.2 preparation in progress, 2026-10-15. Lead owns this record.
+Status: v0.11.2 published and verified, 2026-10-15. Lead owns this record.
+
+Final release: https://github.com/kevin15011/deck/releases/tag/v0.11.2. The entries below preserve the failed attempts and corrective verification in chronological order.
 
 The user explicitly authorized the new release/deployment after reviewing the committed candidate and repository-independence evidence. This is the new-message publication confirmation required by the release skill. The latest published stable release is v0.10.0; v0.11.0 is the next minor release for the new cross-runner workspace. For that initial attempt, root package metadata and the dated changelog agreed on 0.11.0, retaining an empty Unreleased heading for future work.
 
@@ -33,3 +35,15 @@ The v0.11.1 stable-tag workflow subsequently failed one intermittent supervisor 
 Output accounting localized a production relay loss under pressure: the anchor read all 4,194,304 fixture bytes and reported no pending writable bytes, yet the receiving daemon observed 4,097,856, 3,058,048 or 2,212,800 bytes, unchanged 100 ms later. The empty-write callback was insufficient to guarantee relay completion before terminal cleanup on Bun. The fix must close and flush the anchor output pipes before reporting child exit, retaining exact-byte tests and lifecycle ownership. The corrective version is now v0.11.2; neither failed stable tag will be moved.
 
 Final relay correction closes and flushes both anchor output sinks before child_exit, requires genuine source EOF, treats source/sink errors and premature closes as drain failure, and retains the existing deadline across the full drain/flush operation. Exact byte/exit assertions remain; added paused-consumer and EOF/sink-failure contracts exercise the repaired boundary. Final verification: Darwin 17 tests/36 assertions; Linux arm64 full Supervisor suite repeated five times under CPU and concurrent fsync pressure, 85 passes/180 assertions; exact Linux x64 Bun 1.3.12 output/EOF/flush contracts repeated ten times, 80 passes/140 assertions; TypeScript and whitespace checks passed. Logs: `/tmp/deck-supervisor-linux-pressure-final.log`, `/tmp/deck-supervisor-linux-x64-final.log`, `/tmp/deck-supervisor-darwin-green.log`, `/tmp/deck-supervisor-tsc.log`. Temporary accounting diagnostics were removed; production changes are confined to anchor output completion.
+
+## v0.11.2 publication
+
+The corrected main candidate 43d1e8844c3cc0d5bd07854a86a4a3471646af23 passed workflow https://github.com/kevin15011/deck/actions/runs/38797286638 completely: 6,667 tests passed, 36 platform/optional skips, zero failures, 44,739 assertions; TypeScript, OpenSpec, memory benchmark, compiled runtime and all four builds succeeded. A local Darwin arm64 build of this commit also passed all 67 web/session checks and compiled memory checks under checkout-read denial (`/tmp/deck-v0.11.2-repo-denied-{smoke,memory}.log`). The new v0.11.2 tag was created only after this success. Stable run https://github.com/kevin15011/deck/actions/runs/38798406035 and downloaded-asset verification are pending.
+
+## Publication complete
+
+Stable workflow https://github.com/kevin15011/deck/actions/runs/38798406035 completed successfully and GitHub's latest stable release is v0.11.2 (not draft or prerelease). All four archives, checksums.txt and release.json are attached. All six files match the independent SHA-256 asset digests returned by GitHub. The local network rejected GitHub download TLS and direct downloads; final verification used the official GitHub connector's workflow artifacts over valid TLS, then compared the contained archives against the published release digests. Descriptor bytes reconstructed from the publication log and the combined artifact checksum files also match their respective published digests exactly.
+
+The extracted published Darwin arm64 executable passed codesign verification and reports version 0.11.2, commit 43d1e88, stable channel. After copying it outside the checkout, all 67 compiled web/session checks passed with checkout reads denied, followed by compiled memory health/profile/search/capture, invalid-auth safety, credential-free MCP and loopback capture checks. Evidence: `/tmp/deck-v0.11.2-published-smoke.log`, `/tmp/deck-v0.11.2-published-memory.log`, `/private/tmp/deck-published-v0.11.2/`. This proves the covered Darwin arm64 paths do not read the Deck checkout; installed runner/plugin/MCP prerequisites remain unchanged, and other platform runtime paths are not claimed as exhaustively exercised. Existing canary/stable user installation and running services were not replaced by publication.
+
+The failed v0.11.0 and v0.11.1 tags remain unchanged; neither produced a stable release. No publication work remains for v0.11.2.
