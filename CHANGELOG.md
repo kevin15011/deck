@@ -9,6 +9,19 @@ All notable release changes to Deck are recorded here. Current release procedure
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-10-15
+
+### Added
+
+- Pi supervised client proof and an explicit resume target.
+- Global memory mode for cross-runner sessions.
+
+### Fixed
+
+- Keep degraded runners available during model discovery.
+- Install Claude global plugin files independently of project context.
+- Repair cross-session preparation.
+
 ## [0.11.2] - 2026-10-15
 
 The v0.11.0 and v0.11.1 tags were blocked by release verification and did not publish stable binaries. This release includes the workspace features and clean-checkout/Linux verification fixes.
