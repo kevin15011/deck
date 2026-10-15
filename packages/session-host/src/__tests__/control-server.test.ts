@@ -303,20 +303,23 @@ describe("attach: backlog then live (XR-3.4, XR-3.5)", () => {
   test("a slow client overflowing its bounded queue is told to resync and can resume from its cursor", async () => {
     const { connect, service, socketPath } = await boot({ maxQueuedEvents: 20 });
     const log = service.addSession("s-1");
-    // raw socket we deliberately do not read, so the kernel buffer fills and the queue grows
+    // Register observers before producing the burst: Bun may deliver close while reads
+    // are paused on Linux, so installing them afterwards can miss the terminal event.
     const raw = net.connect(socketPath);
     raw.on("error", () => {});
-    await new Promise<void>((r) => raw.once("connect", () => r()));
-    raw.pause();
-    raw.write(JSON.stringify({ t: "command", id: "1", sessionId: "s-1", command: { v: 1, commandId: uuid(), type: "session.attach", after: 0 } }) + "\n");
-    await sleep(50);
-    const blob = "z".repeat(48 * 1024);
-    for (let i = 0; i < 400; i++) log.append({ kind: "message.delta", data: { text: blob } });
-    await sleep(100);
+    cleanups.push(() => { raw.destroy(); });
     const frames: ServerFrame[] = [];
     let buf = "";
     raw.on("data", (d) => { buf += d.toString(); let i; while ((i = buf.indexOf("\n")) !== -1) { frames.push(JSON.parse(buf.slice(0, i))); buf = buf.slice(i + 1); } });
     const closed = new Promise<void>((r) => raw.on("close", () => r()));
+    await new Promise<void>((r) => raw.once("connect", () => r()));
+    raw.write(JSON.stringify({ t: "command", id: "1", sessionId: "s-1", command: { v: 1, commandId: uuid(), type: "session.attach", after: 0 } }) + "\n");
+    await waitFor(() => frames.some((f) => f.t === "caught-up"), 3000, "initial attachment caught up");
+    raw.pause();
+    const blob = "z".repeat(48 * 1024);
+    for (let i = 0; i < 400; i++) log.append({ kind: "message.delta", data: { text: blob } });
+    // A synchronous producer burst fills the bounded queue before the async pump can
+    // drain it. Resume before yielding so the peer can consume resync before EOF.
     raw.resume();
     await closed;
     expect(frames.some((f) => f.t === "resync")).toBe(true);

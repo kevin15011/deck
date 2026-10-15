@@ -78,11 +78,12 @@ describe("Codex 0.162.1 executable detection through the default production prob
       "--version": F.versionOutput, "--help": F.help, "exec --help": F.execHelp, "resume --help": F.resumeHelp,
     };
     const script = ["#!/bin/sh", 'case "$*" in',
-      ...Object.entries(answers).map(([k, v]) => `  '${k}') cat <<'DECK_EOF'\n${v}\nDECK_EOF\n  ;;`),
+      ...Object.entries(answers).map(([k, v]) => `  '${k}') printf '%s\\n' '${v.replaceAll("'", "'\\''")}' ;;`),
       "  *) exit 2 ;;", "esac", ""].join("\n");
     writeFileSync(shim, script);
     chmodSync(shim, 0o755);
-    process.env.PATH = `${dir}:${originalPath}`;
+    // The production probe must use the current PATH, with no installed Codex or external shim helpers.
+    process.env.PATH = dir;
     process.env.CODEX_HOME = join(dir, "codex-home"); // keep the default snapshot reader away from the real ~/.codex
     const adapter = createCodexRunnerAdapter({});
     const inspection = await adapter.inspectProject!(dir);

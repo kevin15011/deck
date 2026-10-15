@@ -1,6 +1,7 @@
 # Standalone skill resources are vendor data, including upstream test helpers.
 # Keep Deck registry and integration tests in the default test suite.
 [test]
+preload = ["./scripts/test-preload.ts"]
 pathIgnorePatterns = [
   "packages/core/src/skills/external/animation-vocabulary/**",
   "packages/core/src/skills/external/api-and-interface-design/**",

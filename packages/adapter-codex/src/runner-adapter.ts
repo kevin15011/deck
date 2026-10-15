@@ -489,11 +489,13 @@ function matchesAgentsPreimage(state: AgentsPlanFile, expected: CodexPreimage): 
 }
 
 function defaultProbe(): ReturnType<CodexPreflightEffects["probe"]> {
-  const version = spawnSync("codex", ["--version"], { encoding: "utf8" });
+  // Bun on Linux otherwise resolves executables against its startup PATH.
+  const options = { encoding: "utf8", env: process.env } as const;
+  const version = spawnSync("codex", ["--version"], options);
   if (version.error || version.status !== 0) return Promise.resolve({ found: false });
-  const help = spawnSync("codex", ["--help"], { encoding: "utf8" });
-  const exec = spawnSync("codex", ["exec", "--help"], { encoding: "utf8" });
-  const resume = spawnSync("codex", ["resume", "--help"], { encoding: "utf8" });
+  const help = spawnSync("codex", ["--help"], options);
+  const exec = spawnSync("codex", ["exec", "--help"], options);
+  const resume = spawnSync("codex", ["resume", "--help"], options);
   const match = `${version.stdout}`.match(/(\d+\.\d+\.\d+)/);
   return Promise.resolve({ found: true, version: match?.[1] ?? "0.0.0", help: `${help.stdout}`, execHelp: `${exec.stdout}`, resumeHelp: `${resume.stdout}` });
 }
